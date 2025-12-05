@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, get_args
 
 from simbi.reader import read_simulation
 from simbi.types.bodies import (
@@ -138,41 +138,68 @@ def _bodies_to_system(
 
 def load_checkpoint_metadata(
     checkpoint_path: Path,
-) -> tuple[Metadata, Optional[BodySystemConfig]]:
+) -> tuple[Metadata, Optional[BodySystemConfig], tuple[int, ...]]:
     """
     load metadata from checkpoint file.
 
     returns:
-        tuple of (metadata, body_system_config)
+        tuple of (metadata, body_system_config, mesh_shape)
     """
     data = read_simulation(str(checkpoint_path), unpad=False)
+
+    # extract system info from body_collection if present
+    system_info = None
+    if data.body_collection:
+        system_info = {
+            "system_name": data.body_collection.system_name,
+            "reference_frame": data.body_collection.reference_frame,
+            "binary_params": data.body_collection.binary_params
+            if hasattr(data.body_collection, "binary_params")
+            else None,
+        }
+
     body_system = _bodies_to_system(
-        data.metadata.system_info, data.body_collection
+        system_info,
+        {
+            f"body_{i}": body
+            for i, body in enumerate(data.body_collection.bodies)
+        }
+        if data.body_collection
+        else None,
     )
-    return data.metadata, body_system
+
+    # also need mesh shape for resolution calculation
+    mesh_shape = data.mesh.shape if hasattr(data, "mesh") else (1, 1, 1)
+
+    return data.metadata, body_system, mesh_shape
 
 
-def metadata_to_config_dict(metadata: Metadata) -> dict[str, Any]:
+def metadata_to_config_dict(
+    metadata: Metadata, mesh_shape: tuple[int, ...]
+) -> dict[str, Any]:
     """
     convert checkpoint metadata to config dictionary format.
 
     these are the fields that define the physics state and must be
     preserved from checkpoint.
-    """
-    halo = metadata.halo_radius
-    resolution = tuple(s - 2 * halo for s in metadata.resolution[::-1])
 
-    return {
+    args:
+        metadata: checkpoint metadata
+        mesh_shape: mesh shape from data.mesh.shape (includes ghost zones)
+    """
+    resolution = tuple(mesh_shape)
+
+    config = {
         "resolution": resolution,
         "start_time": float(metadata.time),
-        "adiabatic_index": float(metadata.adiabatic_index),
+        "adiabatic_index": float(metadata.gamma),
         "coord_system": CoordSystem(metadata.coord_system),
         "regime": Regime(metadata.regime),
         "solver": Solver(metadata.solver),
         "reconstruction": Reconstruction(metadata.reconstruction),
         "timestepping": TimeStepping(metadata.timestepping),
         "plm_theta": float(metadata.plm_theta),
-        "cfl_number": float(metadata.cfl_number),
+        "cfl_number": float(metadata.cfl),
         "checkpoint_index": int(metadata.checkpoint_index),
         "checkpoint_interval": float(metadata.checkpoint_interval),
         "x1_spacing": CellSpacing(metadata.x1_spacing),
@@ -182,6 +209,20 @@ def metadata_to_config_dict(metadata: Metadata) -> dict[str, Any]:
             BoundaryCondition(b) for b in metadata.boundary_conditions
         ],
     }
+
+    # amr fields if present
+    if metadata.level_dts:
+        config["refinement_level_dts"] = list(metadata.level_dts)
+    if metadata.level_substeps:
+        config["refinement_level_substeps"] = list(metadata.level_substeps)
+    if metadata.subcycling_mode and metadata.subcycling_mode != "none":
+        from simbi.types import SubCycleMode
+
+        config["refinement_subcycling_mode"] = SubCycleMode(
+            metadata.subcycling_mode
+        )
+
+    return config
 
 
 def merge_with_checkpoint(
@@ -204,8 +245,10 @@ def merge_with_checkpoint(
     returns:
         new problem instance with merged configuration
     """
-    metadata, body_system = load_checkpoint_metadata(checkpoint_path)
-    checkpoint_config = metadata_to_config_dict(metadata)
+    metadata, body_system, mesh_shape = load_checkpoint_metadata(
+        checkpoint_path
+    )
+    checkpoint_config = metadata_to_config_dict(metadata, mesh_shape)
 
     # get field classifications
     immutable_fields = problem.get_checkpoint_immutable_fields()
@@ -214,15 +257,83 @@ def merge_with_checkpoint(
     # build merged config
     merged_data: dict[str, Any] = {}
 
-    for field_name, field_info in problem.model_fields.items():
-        user_value = getattr(problem, field_name)
+    def normalize_value(val):
+        """normalize value for pydantic validation."""
+        if isinstance(val, Path):
+            return str(val)
+        elif hasattr(val, "value"):  # enum
+            return val
+        elif hasattr(val, "dtype"):  # numpy scalar
+            return val.item()
+        return val
+
+    def coerce_to_field_type(value, field_info):
+        """
+        coerce checkpoint value to match field's expected type.
+        uses pydantic validation to try each union member.
+        """
+        from pydantic import TypeAdapter, ValidationError
+
+        annotation = field_info.annotation
+        args = get_args(annotation)
+
+        # filter out NoneType from optional fields
+        union_members = [a for a in args if a is not type(None)] if args else []
+
+        if len(union_members) > 1:
+            # union type - try each member with pydantic validation
+            for member_type in union_members:
+                try:
+                    adapter = TypeAdapter(member_type)
+                    return adapter.validate_python(value)
+                except (ValidationError, TypeError):
+                    continue
+
+            # failed - if single-element sequence, try unwrapping
+            if isinstance(value, (list, tuple)) and len(value) == 1:
+                for member_type in union_members:
+                    try:
+                        adapter = TypeAdapter(member_type)
+                        return adapter.validate_python(value[0])
+                    except (ValidationError, TypeError):
+                        continue
+
+            return value
+
+        # not a union - try direct validation
+        try:
+            adapter = TypeAdapter(annotation)
+            return adapter.validate_python(value)
+        except (ValidationError, TypeError):
+            # validation failed - try unwrapping sequences
+            if isinstance(value, (list, tuple)):
+                # if all elements are identical, extract first
+                if len(value) > 0 and all(v == value[0] for v in value):
+                    try:
+                        adapter = TypeAdapter(annotation)
+                        return adapter.validate_python(value[0])
+                    except (ValidationError, TypeError):
+                        pass
+                # single-element sequence
+                elif len(value) == 1:
+                    try:
+                        adapter = TypeAdapter(annotation)
+                        return adapter.validate_python(value[0])
+                    except (ValidationError, TypeError):
+                        pass
+            return value
+
+    for field_name, field_info in type(problem).model_fields.items():
+        user_value = normalize_value(getattr(problem, field_name))
 
         if field_name in checkpoint_config:
             checkpoint_value = checkpoint_config[field_name]
 
             if field_name in immutable_fields:
-                # must use checkpoint value
-                merged_data[field_name] = checkpoint_value
+                # must use checkpoint value, but coerce to field's expected type
+                merged_data[field_name] = coerce_to_field_type(
+                    checkpoint_value, field_info
+                )
             else:
                 # user can override
                 merged_data[field_name] = user_value
@@ -235,6 +346,31 @@ def merge_with_checkpoint(
         user_end = getattr(problem, "end_time")
         checkpoint_start = checkpoint_config.get("start_time", 0.0)
         merged_data["end_time"] = max(user_end, checkpoint_start)
+
+    # normalize types for pydantic validation
+    # convert all Path objects to strings
+    for key, value in merged_data.items():
+        if isinstance(value, Path):
+            merged_data[key] = str(value)
+
+    # convert numpy integers to python ints
+    for key, value in merged_data.items():
+        if hasattr(value, "dtype"):  # numpy scalar
+            merged_data[key] = value.item()
+        elif isinstance(value, (list, tuple)):
+            # check if list contains numpy types
+            if value and hasattr(value[0], "dtype"):
+                merged_data[key] = [
+                    v.item() if hasattr(v, "dtype") else v for v in value
+                ]
+
+    # boundary_conditions special handling - convert single string to list
+    # checkpoint has list, but some problem classes may expect single value or vice versa
+    if "boundary_conditions" in merged_data:
+        bcs = merged_data["boundary_conditions"]
+        # if it's already a list of strings, keep it
+        # pydantic will handle Union[BoundaryCondition, Sequence[BoundaryCondition]]
+        pass
 
     # create new instance with merged config
     return type(problem)(**merged_data)
@@ -250,8 +386,8 @@ def validate_checkpoint_compatibility(
     returns list of error messages (empty if compatible).
     """
     errors = []
-    metadata, _ = load_checkpoint_metadata(checkpoint_path)
-    checkpoint_config = metadata_to_config_dict(metadata)
+    metadata, _, mesh_shape = load_checkpoint_metadata(checkpoint_path)
+    checkpoint_config = metadata_to_config_dict(metadata, mesh_shape)
     immutable_fields = problem.get_checkpoint_immutable_fields()
 
     for field_name in immutable_fields:
