@@ -41,8 +41,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
-#include <sstream>
 
 namespace simbi::ecs::creation {
     // -----------------------------------------------------------------------------
@@ -55,7 +53,8 @@ namespace simbi::ecs::creation {
     //   - halo graph construction from block connectivity
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct decomposition_builder_t {
+    struct decomposition_builder_t
+    {
 
         // -------------------------------------------------------------------------
         // build
@@ -67,12 +66,12 @@ namespace simbi::ecs::creation {
         // -------------------------------------------------------------------------
         template <typename Conserved, typename Primitive>
         static level_decomposition_t<Rank> build(
-            const grid::skeleton_t<Rank>& base_skeleton,
+            const grid::skeleton_t<Rank>&          base_skeleton,
             const decomposition_blueprint_t<Rank>& decomp_bp,
-            const mesh_blueprint_t<Rank>& mesh_bp,
-            const physics_blueprint_t& phys_bp,
-            registry_t& registry,
-            het::locality_t base_locality = het::locality_t::host()
+            const mesh_blueprint_t<Rank>&          mesh_bp,
+            const physics_blueprint_t&             phys_bp,
+            registry_t&                            registry,
+            het::locality_t                        base_locality = het::locality_t::host()
         )
         {
             level_decomposition_t<Rank> decomp;
@@ -119,9 +118,9 @@ namespace simbi::ecs::creation {
         static level_decomposition_t<Rank> build_single_device(
             const grid::skeleton_t<Rank>& skeleton,
             const mesh_blueprint_t<Rank>& mesh_bp,
-            const physics_blueprint_t& phys_bp,
-            registry_t& registry,
-            het::locality_t base_locality = het::locality_t::host()
+            const physics_blueprint_t&    phys_bp,
+            registry_t&                   registry,
+            het::locality_t               base_locality = het::locality_t::host()
         )
         {
             decomposition_blueprint_t<Rank> decomp_bp;
@@ -132,15 +131,15 @@ namespace simbi::ecs::creation {
             // ratio=2)
             std::int64_t halo_width = mesh_bp.halo_width;
             if (!skeleton.empty()) {
-                auto first_block    = skeleton.begin()->second;
-                std::uint64_t level = first_block.id.level;
+                auto          first_block = skeleton.begin()->second;
+                std::uint64_t level       = first_block.id.level;
 
                 if (level > 0) {
                     // assume refinement ratio = 2 (could extract from
                     // level_info if needed) round up halo_width to next
                     // multiple of ratio
                     constexpr std::uint64_t ratio = 2;
-                    halo_width = ((halo_width + ratio - 1) / ratio) * ratio;
+                    halo_width                    = ((halo_width + ratio - 1) / ratio) * ratio;
                 }
             }
 
@@ -164,8 +163,8 @@ namespace simbi::ecs::creation {
         // handles neighbor connectivity and periodic boundaries.
         // -------------------------------------------------------------------------
         static void build_partitioned_skeleton(
-            level_decomposition_t<Rank>& decomp,
-            const grid::domain_t<Rank>& global_domain,
+            level_decomposition_t<Rank>&      decomp,
+            const grid::domain_t<Rank>&       global_domain,
             const grid::boundary_set_t<Rank>& boundaries
         )
         {
@@ -190,9 +189,9 @@ namespace simbi::ecs::creation {
         // assigns devices, creates streams, computes owned/allocated domains.
         // -------------------------------------------------------------------------
         static void build_partitions(
-            level_decomposition_t<Rank>& decomp,
+            level_decomposition_t<Rank>&           decomp,
             const decomposition_blueprint_t<Rank>& decomp_bp,
-            het::locality_t base_locality
+            het::locality_t                        base_locality
         )
         {
             std::uint64_t part_idx = 0;
@@ -203,9 +202,7 @@ namespace simbi::ecs::creation {
                 // device assignment
                 // round-robin if fewer device_ids than partitions
                 if (!decomp_bp.device_ids.empty()) {
-                    part.device_id =
-                        decomp_bp
-                            .device_ids[part_idx % decomp_bp.device_ids.size()];
+                    part.device_id = decomp_bp.device_ids[part_idx % decomp_bp.device_ids.size()];
                 }
                 else {
                     part.device_id = base_locality.device_id;
@@ -218,8 +215,7 @@ namespace simbi::ecs::creation {
                 part.owned_domain = block.geometry;
 
                 // allocated domain includes ghost padding
-                part.allocated_domain =
-                    compute_allocated_domain(block, decomp_bp.halo_width);
+                part.allocated_domain = compute_allocated_domain(block, decomp_bp.halo_width);
 
                 // face-centered domains (for mhd ct updates)
                 // each face_domain[d] has one extra cell in dimension d
@@ -262,10 +258,8 @@ namespace simbi::ecs::creation {
         // neighbors (partition boundaries). physical boundaries don't need
         // ghosts (boundary conditions are applied directly).
         // -------------------------------------------------------------------------
-        static grid::domain_t<Rank> compute_allocated_domain(
-            const grid::block_info_t<Rank>& block,
-            std::int64_t halo_width
-        )
+        static grid::domain_t<Rank>
+        compute_allocated_domain(const grid::block_info_t<Rank>& block, std::int64_t halo_width)
         {
             auto domain = block.geometry;
 
@@ -297,23 +291,14 @@ namespace simbi::ecs::creation {
         //   - source: interior boundary region of sender
         //   - dest: ghost region of receiver
         // -------------------------------------------------------------------------
-        static void build_halo_graph(
-            level_decomposition_t<Rank>& decomp,
-            std::int64_t halo_width
-        )
+        static void build_halo_graph(level_decomposition_t<Rank>& decomp, std::int64_t halo_width)
         {
             for (const auto& part : decomp.partitions) {
                 // const auto& block = part.block;
 
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                     // check left face
-                    create_halo_link_if_connected(
-                        decomp,
-                        part,
-                        dd,
-                        grid::side_t::left,
-                        halo_width
-                    );
+                    create_halo_link_if_connected(decomp, part, dd, grid::side_t::left, halo_width);
 
                     // check right face
                     create_halo_link_if_connected(
@@ -335,21 +320,21 @@ namespace simbi::ecs::creation {
         // -------------------------------------------------------------------------
         static void create_halo_link_if_connected(
             level_decomposition_t<Rank>& decomp,
-            const partition_t<Rank>& recv_part,
-            std::uint64_t dim,
-            grid::side_t side,
-            std::int64_t halo_width
+            const partition_t<Rank>&     recv_part,
+            std::uint64_t                dim,
+            grid::side_t                 side,
+            std::int64_t                 halo_width
         )
         {
             const auto& conn = recv_part.block.get_face(dim, side);
 
             if (!conn.is_connected()) {
-                return;   // physical boundary, no halo needed
+                return; // physical boundary, no halo needed
             }
 
             // find the sending partition
-            const auto& sender_id = conn.single_neighbor();
-            auto sender_idx       = decomp.find_partition(sender_id);
+            const auto& sender_id  = conn.single_neighbor();
+            auto        sender_idx = decomp.find_partition(sender_id);
 
             if (sender_idx < 0) {
                 // sender is on a different mpi rank
@@ -357,31 +342,21 @@ namespace simbi::ecs::creation {
                 // sender_idx will be resolved during exchange
             }
 
-            const auto& send_part =
-                (sender_idx >= 0)
-                    ? decomp.partitions[sender_idx]
-                    : recv_part;   // placeholder, will use rank_id lookup
+            const auto& send_part = (sender_idx >= 0)
+                                        ? decomp.partitions[sender_idx]
+                                        : recv_part; // placeholder, will use rank_id lookup
 
             // compute regions
             // receiver's ghost zone
-            grid::domain_t<Rank> recv_region = compute_ghost_region(
-                recv_part.owned_domain,
-                dim,
-                side,
-                halo_width
-            );
+            grid::domain_t<Rank> recv_region =
+                compute_ghost_region(recv_part.owned_domain, dim, side, halo_width);
 
             // sender's interior boundary (the data to copy)
             // this is the opposite side of the sender's domain
-            auto opposite_side               = (side == grid::side_t::left)
-                                                   ? grid::side_t::right
-                                                   : grid::side_t::left;
-            grid::domain_t<Rank> send_region = compute_interior_boundary(
-                send_part.owned_domain,
-                dim,
-                opposite_side,
-                halo_width
-            );
+            auto opposite_side =
+                (side == grid::side_t::left) ? grid::side_t::right : grid::side_t::left;
+            grid::domain_t<Rank> send_region =
+                compute_interior_boundary(send_part.owned_domain, dim, opposite_side, halo_width);
 
             // create link
             halo_link_t<Rank> link;
@@ -408,9 +383,9 @@ namespace simbi::ecs::creation {
         // -------------------------------------------------------------------------
         static grid::domain_t<Rank> compute_ghost_region(
             const grid::domain_t<Rank>& owned,
-            std::uint64_t dim,
-            grid::side_t side,
-            std::int64_t width
+            std::uint64_t               dim,
+            grid::side_t                side,
+            std::int64_t                width
         )
         {
             auto region = owned;
@@ -437,9 +412,9 @@ namespace simbi::ecs::creation {
         // -------------------------------------------------------------------------
         static grid::domain_t<Rank> compute_interior_boundary(
             const grid::domain_t<Rank>& owned,
-            std::uint64_t dim,
-            grid::side_t side,
-            std::int64_t width
+            std::uint64_t               dim,
+            grid::side_t                side,
+            std::int64_t                width
         )
         {
             auto region = owned;
@@ -465,9 +440,9 @@ namespace simbi::ecs::creation {
         template <typename Conserved, typename Primitive>
         static void allocate_partition_fields(
             level_decomposition_t<Rank>& decomp,
-            const physics_blueprint_t& phys_bp,
-            registry_t& registry,
-            het::locality_t base_locality
+            const physics_blueprint_t&   phys_bp,
+            registry_t&                  registry,
+            het::locality_t              base_locality
         )
         {
             using fields_t = partition_fields_t<Conserved, Primitive, Rank>;
@@ -503,12 +478,11 @@ namespace simbi::ecs::creation {
         // allocates a single partition_fields_t on the given domain and device.
         // -------------------------------------------------------------------------
         template <typename Conserved, typename Primitive>
-        static partition_fields_t<Conserved, Primitive, Rank>
-        allocate_partition(
+        static partition_fields_t<Conserved, Primitive, Rank> allocate_partition(
             const grid::domain_t<Rank>& allocated_domain,
             const grid::domain_t<Rank>& active_domain,
-            const physics_blueprint_t& phys_bp,
-            het::locality_t loc
+            const physics_blueprint_t&  phys_bp,
+            het::locality_t             loc
         )
         {
             partition_fields_t<Conserved, Primitive, Rank> fields;
@@ -520,7 +494,7 @@ namespace simbi::ecs::creation {
             // flux fields (face-centered, one extra cell in each direction)
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 auto flux_domain = active_domain;
-                flux_domain.fin[dd] += 1;   // n+1 faces for n cells
+                flux_domain.fin[dd] += 1; // n+1 faces for n cells
                 if constexpr (is_mhd_conserved_c<Conserved>) {
                     // for MHD, extend faces in transverse directions
                     for (std::uint64_t tt = 0; tt < Rank; ++tt) {
@@ -530,8 +504,7 @@ namespace simbi::ecs::creation {
                         }
                     }
                 }
-                fields.flux[dd] =
-                    grid::field_t<Conserved, Rank>(flux_domain, loc);
+                fields.flux[dd] = grid::field_t<Conserved, Rank>(flux_domain, loc);
             }
 
             // magnetic field (face-centered, mhd only)
@@ -539,8 +512,7 @@ namespace simbi::ecs::creation {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                     auto bfield_domain = active_domain;
                     bfield_domain.fin[dd] += 1;
-                    fields.bfield[dd] =
-                        grid::field_t<real, Rank>(bfield_domain, loc);
+                    fields.bfield[dd] = grid::field_t<real, Rank>(bfield_domain, loc);
                 }
 
                 // electric field (edge-centered, for constrained transport)
@@ -552,8 +524,7 @@ namespace simbi::ecs::creation {
                             efield_domain.fin[tt] += 1;
                         }
                     }
-                    fields.efield[dd] =
-                        grid::field_t<real, Rank>(efield_domain, loc);
+                    fields.efield[dd] = grid::field_t<real, Rank>(efield_domain, loc);
                 }
             }
 
@@ -563,8 +534,7 @@ namespace simbi::ecs::creation {
         // -------------------------------------------------------------------------
         // helper: extract boundary_set from mesh blueprint
         // -------------------------------------------------------------------------
-        static grid::boundary_set_t<Rank>
-        extract_boundaries(const mesh_blueprint_t<Rank>& mesh_bp)
+        static grid::boundary_set_t<Rank> extract_boundaries(const mesh_blueprint_t<Rank>& mesh_bp)
         {
             grid::boundary_set_t<Rank> boundaries;
 
@@ -572,11 +542,8 @@ namespace simbi::ecs::creation {
             for (std::uint64_t ii = 0; ii < Rank; ++ii) {
                 std::size_t vec_offset = ii * 2;
                 if (vec_offset + 1 < bc_strs.size()) {
-                    auto left =
-                        deserialize<grid::boundary_type_t>(bc_strs[vec_offset]);
-                    auto right = deserialize<grid::boundary_type_t>(
-                        bc_strs[vec_offset + 1]
-                    );
+                    auto left  = deserialize<grid::boundary_type_t>(bc_strs[vec_offset]);
+                    auto right = deserialize<grid::boundary_type_t>(bc_strs[vec_offset + 1]);
                     boundaries.set_left(ii, left);
                     boundaries.set_right(ii, right);
                 }
@@ -598,6 +565,6 @@ namespace simbi::ecs::creation {
         }
     };
 
-}   // namespace simbi::ecs::creation
+} // namespace simbi::ecs::creation
 
-#endif   // ECS_CREATION_DECOMPOSITION_HPP
+#endif // ECS_CREATION_DECOMPOSITION_HPP

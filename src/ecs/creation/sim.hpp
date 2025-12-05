@@ -25,17 +25,19 @@
 
 #include "compat.hpp"
 #include "containers/vector.hpp"
+#include "dag/express_t.hpp"
 #include "decomposition.hpp"
 #include "ecs/blueprints.hpp"
 #include "ecs/components.hpp"
+#include "ecs/creation/checkpoint_reader.hpp"
 #include "ecs/entity.hpp"
 #include "ecs/simulation.hpp"
 #include "geometry/api.hpp"
 #include "grid/block_info.hpp"
-
 #include "grid/boundary.hpp"
 #include "grid/creation/topology.hpp"
 #include "grid/domain.hpp"
+#include "grid/field.hpp"
 #include "grid/mesh_config.hpp"
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
@@ -43,6 +45,7 @@
 #include "hesi/core/types.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/serialization/all.hpp"
+#include "io/serialization/skeleton_serial.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "physics/ib/factory.hpp"
@@ -58,7 +61,8 @@
 namespace simbi::ecs::builders {
 
     template <regime_t R, std::uint64_t Rank, geometry_t G, typename EoS>
-    struct simulation_builder_t {
+    struct simulation_builder_t
+    {
         using sim_t       = simulation_t<R, Rank, G, EoS>;
         using conserved_t = typename sim_t::conserved_t;
         using primitive_t = typename sim_t::primitive_t;
@@ -68,10 +72,10 @@ namespace simbi::ecs::builders {
         // =========================================================================
 
         mesh_blueprint_t<Rank> mesh_bp_;
-        physics_blueprint_t phys_bp_;
-        execution_blueprint_t exec_bp_;
-        amr_blueprint_t amr_bp_;
-        numerics_blueprint_t num_bp_;
+        physics_blueprint_t    phys_bp_;
+        execution_blueprint_t  exec_bp_;
+        amr_blueprint_t        amr_bp_;
+        numerics_blueprint_t   num_bp_;
 
         // optional decomposition config (defaults to single-device)
         std::optional<decomposition_blueprint_t<Rank>> decomp_bp_;
@@ -81,6 +85,9 @@ namespace simbi::ecs::builders {
 
         // optional bodies config (immersed boundary objects)
         bodies_blueprint_t bodies_bp_;
+
+        // optional gravitational system config (binary, triple, n-body)
+        std::optional<gravitational_system_blueprint_t> grav_sys_bp_;
 
         // optional locality override:
         // default base locality is chosen at runtime based on detected devices.
@@ -176,6 +183,17 @@ namespace simbi::ecs::builders {
         }
 
         // -------------------------------------------------------------------------
+        // configure_gravitational_system
+        //
+        // sets gravitational system configuration (binary, triple, n-body).
+        // -------------------------------------------------------------------------
+        auto& configure_gravitational_system(const gravitational_system_blueprint_t& bp)
+        {
+            grav_sys_bp_ = bp;
+            return *this;
+        }
+
+        // -------------------------------------------------------------------------
         // configure_locality
         //
         // sets the base locality for field allocation.
@@ -194,8 +212,7 @@ namespace simbi::ecs::builders {
         sim_t build()
         {
             // check if we're restarting from a checkpoint
-            if (!exec_bp_.restart_file.empty() &&
-                std::filesystem::exists(exec_bp_.restart_file)) {
+            if (!exec_bp_.restart_file.empty() && std::filesystem::exists(exec_bp_.restart_file)) {
                 return build_from_checkpoint();
             }
 
@@ -218,10 +235,7 @@ namespace simbi::ecs::builders {
 
             // phase 2: topology hierarchy
             auto hierarchy =
-                grid::creation::topology_builder_t<Rank>::build_hierarchy(
-                    mesh_bp_,
-                    amr_bp_
-                );
+                grid::creation::topology_builder_t<Rank>::build_hierarchy(mesh_bp_, amr_bp_);
 
             // phase 3: build levels with decomposition
             for (std::uint64_t lvl = 0; lvl < hierarchy.size(); ++lvl) {
@@ -247,13 +261,15 @@ namespace simbi::ecs::builders {
         {
             H5::H5File file(exec_bp_.restart_file, H5F_ACC_RDONLY);
 
+            // validate checkpoint format version before proceeding
+            creation::validate_checkpoint_version(file);
+
             sim_t sim;
             sim.global = sim.registry.create();
 
             // load metadata from checkpoint, but override some values from
             // blueprints
-            auto meta =
-                io::h5_serializable<simulation_metadata_t<Rank>>::read(file);
+            auto meta = io::h5_serializable<simulation_metadata_t<Rank>>::read(file);
 
             // override execution params from current blueprints
             // (user may want different end time, output dir, etc.)
@@ -266,10 +282,7 @@ namespace simbi::ecs::builders {
 
             // read hierarchy info
             auto hierarchy_group = file.openGroup("hierarchy");
-            auto num_levels      = io::read_attribute<std::uint64_t>(
-                hierarchy_group,
-                "num_levels"
-            );
+            auto num_levels      = io::read_attribute<std::uint64_t>(hierarchy_group, "num_levels");
 
             // build each level from checkpoint
             for (std::uint64_t lvl = 0; lvl < num_levels; ++lvl) {
@@ -279,12 +292,15 @@ namespace simbi::ecs::builders {
             // load bodies if present
             if (io::group_exists(file, "bodies")) {
                 using collection_t = body::body_collection_t<Rank>;
-                auto bodies = io::h5_serializable<collection_t>::read(file);
+                auto bodies        = io::h5_serializable<collection_t>::read(file);
+                sim.registry.add(sim.global, immersed_bodies_t<Rank>{std::move(bodies)});
                 sim.registry.add(
                     sim.global,
-                    immersed_bodies_t<Rank>{std::move(bodies)}
+                    body_info_t<Rank>{.diagnostics = body::create_diagnostics_accumulator<Rank>()}
                 );
             }
+
+            file.close();
 
             // sources are not stored in checkpoint; recompile from blueprints
             build_sources(sim);
@@ -295,14 +311,13 @@ namespace simbi::ecs::builders {
         // -------------------------------------------------------------------------
         // build_level_from_checkpoint
         //
-        // loads a single level's data from checkpoint.
+        // loads a single level's data from checkpoint using production-grade
+        // checkpoint_reader_t for validation and reconstruction.
         // -------------------------------------------------------------------------
-        void build_level_from_checkpoint(
-            sim_t& sim,
-            const H5::H5File& file,
-            std::uint64_t lvl
-        )
+        void build_level_from_checkpoint(sim_t& sim, const H5::H5File& file, std::uint64_t lvl)
         {
+            using reader_t = creation::checkpoint_reader_t<R, conserved_t, primitive_t, Rank>;
+
             auto level_group = file.openGroup("level_" + std::to_string(lvl));
 
             // create level entity
@@ -310,66 +325,38 @@ namespace simbi::ecs::builders {
             sim.levels.push_back(level_entity);
 
             // read mesh config
-            auto mesh_cfg =
-                io::h5_serializable<grid::mesh_config_t<Rank>>::read(
-                    level_group
-                );
+            auto mesh_cfg = io::h5_serializable<grid::mesh_config_t<Rank>>::read(level_group);
+
+            // read skeleton with full boundary metadata
+            auto skeleton = io::h5_serializable<grid::skeleton_t<Rank>>::read(level_group);
 
             // get partition count from hierarchy
             auto hierarchy_group = file.openGroup("hierarchy");
-            auto lg = hierarchy_group.openGroup("level_" + std::to_string(lvl));
-            auto num_partitions =
-                io::read_attribute<std::uint64_t>(lg, "num_partitions");
+            auto lg              = hierarchy_group.openGroup("level_" + std::to_string(lvl));
+            auto num_partitions  = io::read_attribute<std::uint64_t>(lg, "num_partitions");
 
-            // rebuild skeleton from mesh config
-            // for multi-block AMR, skeleton would need to be serialized to
-            // checkpoint and loaded here. for now, single-block is sufficient.
-            grid::skeleton_t<Rank> skeleton;
-            grid::block_info_t<Rank> block;
-            block.id           = grid::patch_id_t{0, {}};
-            block.geometry     = grid::extents(mesh_cfg.global_cells);
-            skeleton[block.id] = block;
+            // get first block for partition reconstruction
+            const auto& block = skeleton.begin()->second;
 
+            // build decomposition using checkpoint reader
             level_decomposition_t<Rank> decomp;
-            if (decomp_bp_) {
-                decomp = creation::decomposition_builder_t<Rank>::
-                    template build<conserved_t, primitive_t>(
-                        skeleton,
-                        *decomp_bp_,
-                        mesh_bp_,
-                        phys_bp_,
-                        sim.registry,
-                        base_locality_
-                    );
-            }
-            else {
-                decomp = creation::decomposition_builder_t<Rank>::
-                    template build_single_device<conserved_t, primitive_t>(
-                        skeleton,
-                        mesh_bp_,
-                        phys_bp_,
-                        sim.registry,
-                        base_locality_
-                    );
-            }
+            decomp.skeleton = skeleton;
+            decomp.topology = grid::topology_t{{1, 1, 1}};
 
-            // load hydro fields from checkpoint into partitions
             for (std::uint64_t pp = 0; pp < num_partitions; ++pp) {
-                if (pp >= decomp.partitions.size()) {
-                    break;
-                }
+                auto part_group = level_group.openGroup("partition_" + std::to_string(pp));
 
-                auto part_group =
-                    level_group.openGroup("partition_" + std::to_string(pp));
+                // use production-grade checkpoint reader for reconstruction
+                auto [part, fields] =
+                    reader_t::read_partition(part_group, block, base_locality_, pp);
 
-                using fields_t =
-                    partition_fields_t<conserved_t, primitive_t, Rank>;
-                auto fields = io::h5_serializable<fields_t>::read(part_group);
+                // create field entity and attach loaded fields
+                entity_t field_entity = sim.registry.create();
+                sim.registry.add(field_entity, std::move(fields));
 
-                // update the partition's field entity with loaded data
-                auto field_entity = decomp.partition_entities[pp];
-                sim.registry.template get<fields_t>(field_entity) =
-                    std::move(fields);
+                // add partition and entity to decomposition
+                decomp.partitions.push_back(std::move(part));
+                decomp.partition_entities.push_back(field_entity);
             }
 
             sim.registry.add(level_entity, std::move(decomp));
@@ -377,8 +364,7 @@ namespace simbi::ecs::builders {
             // level info
             std::uint64_t ratio = 1;
             if (lvl > 0) {
-                ratio =
-                    io::read_attribute<std::uint64_t>(lg, "refinement_ratio");
+                ratio = io::read_attribute<std::uint64_t>(lg, "refinement_ratio");
             }
 
             sim.registry.add(
@@ -388,26 +374,23 @@ namespace simbi::ecs::builders {
 
             // mesh config for geometry queries (use loaded config from
             // checkpoint)
-            sim.registry.add(
-                level_entity,
-                level_mesh_t<Rank>{.config = mesh_cfg}
-            );
+            sim.registry.add(level_entity, level_mesh_t<Rank>{.config = mesh_cfg});
 
             // refinement linkage for child levels
             if (lvl > 0) {
-                entity_t parent_entity = sim.levels[lvl - 1];
+                entity_t             parent_entity = sim.levels[lvl - 1];
                 grid::domain_t<Rank> parent_coverage;
                 // compute parent coverage from mesh bounds
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                     parent_coverage.start[dd] = 0;
-                    parent_coverage.fin[dd] = mesh_cfg.global_cells[dd] / ratio;
+                    parent_coverage.fin[dd]   = mesh_cfg.global_cells[dd] / ratio;
                 }
 
                 sim.registry.add(
                     level_entity,
                     refinement_child_t<Rank>{
-                      .parent          = parent_entity,
-                      .parent_coverage = parent_coverage
+                        .parent          = parent_entity,
+                        .parent_coverage = parent_coverage
                     }
                 );
             }
@@ -447,39 +430,31 @@ namespace simbi::ecs::builders {
             meta.iteration            = 0;
 
             // mesh
-            meta.resolution = to_3d_resolution(mesh_bp_.active_resolution);
-            meta.halo_radius =
-                decomp_bp_ ? decomp_bp_->halo_width : mesh_bp_.halo_width;
+            meta.resolution   = to_3d_resolution(mesh_bp_.active_resolution);
+            meta.halo_radius  = decomp_bp_ ? decomp_bp_->halo_width : mesh_bp_.halo_width;
             meta.coord_system = G;
             meta.dimensions   = Rank;
 
             // cell spacing per dimension
             auto to_spacing = [](const std::string& s) {
-                return (s == "log") ? cellspacing_t::LOG
-                                    : cellspacing_t::LINEAR;
+                return (s == "log") ? cellspacing_t::LOG : cellspacing_t::LINEAR;
             };
             meta.x1_spacing = to_spacing(mesh_bp_.spacing[Rank - 1]);
-            meta.x2_spacing = (Rank > 1)
-                                  ? to_spacing(mesh_bp_.spacing[Rank - 2])
-                                  : cellspacing_t::LINEAR;
-            meta.x3_spacing = (Rank > 2)
-                                  ? to_spacing(mesh_bp_.spacing[Rank - 3])
-                                  : cellspacing_t::LINEAR;
+            meta.x2_spacing =
+                (Rank > 1) ? to_spacing(mesh_bp_.spacing[Rank - 2]) : cellspacing_t::LINEAR;
+            meta.x3_spacing =
+                (Rank > 2) ? to_spacing(mesh_bp_.spacing[Rank - 3]) : cellspacing_t::LINEAR;
 
             // boundary conditions
             for (std::uint64_t ii = 0; ii < 2 * Rank; ++ii) {
                 meta.boundary_conditions[ii] =
-                    deserialize<grid::boundary_type_t>(
-                        mesh_bp_.boundary_conditions[ii]
-                    );
+                    deserialize<grid::boundary_type_t>(mesh_bp_.boundary_conditions[ii]);
             }
 
             // numerics
-            meta.reconstruction =
-                deserialize<reconstruction_t>(phys_bp_.reconstruction);
-            meta.solver = deserialize<solver_t>(phys_bp_.solver);
-            meta.timestepping =
-                deserialize<timestepping_t>(phys_bp_.timestepping);
+            meta.reconstruction = deserialize<reconstruction_t>(phys_bp_.reconstruction);
+            meta.solver         = deserialize<solver_t>(phys_bp_.solver);
+            meta.timestepping   = deserialize<timestepping_t>(phys_bp_.timestepping);
 
             // shock limiters
             if (num_bp_.use_quirk_smoothing) {
@@ -495,8 +470,13 @@ namespace simbi::ecs::builders {
             // subcycling
             if (amr_bp_.enabled) {
                 meta.subcycling_mode = amr_bp_.subcycling_mode;
-                meta.level_substeps  = amr_bp_.manual_substeps;
                 meta.level_dts.resize(amr_bp_.max_levels, 0.0);
+                if (amr_bp_.subcycling_mode == subcycling_mode_t::ADAPTIVE) {
+                    meta.level_substeps.resize(amr_bp_.max_levels, 0);
+                }
+                else { // MANUAL
+                    meta.level_substeps = amr_bp_.manual_substeps;
+                }
             }
             else {
                 meta.level_dts.resize(1, 0.0);
@@ -515,8 +495,7 @@ namespace simbi::ecs::builders {
             sources_t<Rank> sources;
 
             // hydro source (momentum/energy injection)
-            sources.hydro_source =
-                state::expression_t<Rank>::from_config(expr_bp_.hydro_source);
+            sources.hydro_source = state::expression_t<Rank>::from_config(expr_bp_.hydro_source);
 
             // gravity source (acceleration field)
             sources.gravity_source =
@@ -526,14 +505,11 @@ namespace simbi::ecs::builders {
             for (std::uint64_t ii = 0; ii < 2 * Rank; ++ii) {
                 if (ii < expr_bp_.boundary_sources.size()) {
                     sources.bc_sources[ii] =
-                        state::expression_t<Rank>::from_config(
-                            expr_bp_.boundary_sources[ii]
-                        );
+                        state::expression_t<Rank>::from_config(expr_bp_.boundary_sources[ii]);
                 }
                 else {
                     // empty config produces disabled expression
-                    sources.bc_sources[ii] =
-                        state::expression_t<Rank>::from_config({});
+                    sources.bc_sources[ii] = state::expression_t<Rank>::from_config({});
                 }
             }
 
@@ -544,23 +520,17 @@ namespace simbi::ecs::builders {
         // build_bodies
         //
         // creates immersed boundary objects from blueprint.
+        // uses gravitational_system if present, else individual bodies.
         // -------------------------------------------------------------------------
         void build_bodies(sim_t& sim)
         {
-            auto collection =
-                body::factory::create_body_collection<Rank>(bodies_bp_);
+            auto collection = body::factory::create_body_collection<Rank>(bodies_bp_, grav_sys_bp_);
 
             if (collection.has_value()) {
+                sim.registry.add(sim.global, immersed_bodies_t<Rank>{std::move(*collection)});
                 sim.registry.add(
                     sim.global,
-                    immersed_bodies_t<Rank>{std::move(*collection)}
-                );
-                sim.registry.add(
-                    sim.global,
-                    body_info_t<Rank>{
-                      .diagnostics =
-                          body::create_diagnostics_accumulator<Rank>()
-                    }
+                    body_info_t<Rank>{.diagnostics = body::create_diagnostics_accumulator<Rank>()}
                 );
             }
         }
@@ -570,11 +540,7 @@ namespace simbi::ecs::builders {
         //
         // creates a level entity with decomposition, fields, and level_info.
         // -------------------------------------------------------------------------
-        void build_level(
-            sim_t& sim,
-            const grid::skeleton_t<Rank>& skeleton,
-            std::uint64_t lvl
-        )
+        void build_level(sim_t& sim, const grid::skeleton_t<Rank>& skeleton, std::uint64_t lvl)
         {
             // create level entity
             entity_t level_entity = sim.registry.create();
@@ -597,14 +563,9 @@ namespace simbi::ecs::builders {
             }
             else {
                 // single-device path (backward compatible)
-                decomp = creation::decomposition_builder_t<Rank>::
-                    template build_single_device<conserved_t, primitive_t>(
-                        skeleton,
-                        mesh_bp_,
-                        phys_bp_,
-                        sim.registry,
-                        base_locality_
-                    );
+                decomp = creation::decomposition_builder_t<Rank>::template build_single_device<
+                    conserved_t,
+                    primitive_t>(skeleton, mesh_bp_, phys_bp_, sim.registry, base_locality_);
             }
 
             // register decomposition on level entity
@@ -622,15 +583,12 @@ namespace simbi::ecs::builders {
             );
 
             // mesh config for geometry queries
-            sim.registry.add(
-                level_entity,
-                level_mesh_t<Rank>{.config = build_mesh_config(lvl)}
-            );
+            sim.registry.add(level_entity, level_mesh_t<Rank>{.config = build_mesh_config(lvl)});
 
             // refinement linkage
             if (lvl > 0) {
                 entity_t parent_entity = sim.levels[lvl - 1];
-                auto child_domain      = skeleton.begin()->second.geometry;
+                auto     child_domain  = skeleton.begin()->second.geometry;
 
                 // map child domain to parent space
                 grid::domain_t<Rank> parent_coverage;
@@ -642,8 +600,8 @@ namespace simbi::ecs::builders {
                 sim.registry.add(
                     level_entity,
                     refinement_child_t<Rank>{
-                      .parent          = parent_entity,
-                      .parent_coverage = parent_coverage
+                        .parent          = parent_entity,
+                        .parent_coverage = parent_coverage
                     }
                 );
             }
@@ -675,9 +633,8 @@ namespace simbi::ecs::builders {
             // for global coordinate system
             cfg.global_cells = mesh_bp_.active_resolution;
             for (std::uint64_t ll = 0; ll < lvl; ++ll) {
-                std::uint64_t ratio = (ll < amr_bp_.refinement_ratios.size())
-                                          ? amr_bp_.refinement_ratios[ll]
-                                          : 2;
+                std::uint64_t ratio =
+                    (ll < amr_bp_.refinement_ratios.size()) ? amr_bp_.refinement_ratios[ll] : 2;
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                     cfg.global_cells[dd] *= ratio;
                 }
@@ -693,11 +650,8 @@ namespace simbi::ecs::builders {
             for (std::uint64_t ii = 0; ii < Rank; ++ii) {
                 std::size_t vec_offset = ii * 2;
                 if (vec_offset + 1 < bc_strs.size()) {
-                    auto left_type =
-                        deserialize<grid::boundary_type_t>(bc_strs[vec_offset]);
-                    auto right_type = deserialize<grid::boundary_type_t>(
-                        bc_strs[vec_offset + 1]
-                    );
+                    auto left_type  = deserialize<grid::boundary_type_t>(bc_strs[vec_offset]);
+                    auto right_type = deserialize<grid::boundary_type_t>(bc_strs[vec_offset + 1]);
 
                     cfg.boundaries.set_left(ii, left_type);
                     cfg.boundaries.set_right(ii, right_type);
@@ -736,6 +690,6 @@ namespace simbi::ecs::builders {
         }
     };
 
-}   // namespace simbi::ecs::builders
+} // namespace simbi::ecs::builders
 
 #endif

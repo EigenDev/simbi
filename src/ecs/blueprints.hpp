@@ -33,7 +33,8 @@ namespace simbi::ecs {
     // topological and geometric configuration for the computational domain.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct mesh_blueprint_t {
+    struct mesh_blueprint_t
+    {
         // grid resolution (active cells, excluding ghosts)
         iarray<Rank> active_resolution;
 
@@ -66,7 +67,8 @@ namespace simbi::ecs {
     //
     // physics equations and numerical method configuration.
     // -----------------------------------------------------------------------------
-    struct physics_blueprint_t {
+    struct physics_blueprint_t
+    {
         // physics regime
         regime_t regime;
 
@@ -98,7 +100,8 @@ namespace simbi::ecs {
     //
     // numerical stability and limiting options.
     // -----------------------------------------------------------------------------
-    struct numerics_blueprint_t {
+    struct numerics_blueprint_t
+    {
         bool use_quirk_smoothing;
         bool use_fleischmann_limiter;
     };
@@ -108,20 +111,21 @@ namespace simbi::ecs {
     //
     // time integration and output configuration.
     // -----------------------------------------------------------------------------
-    struct execution_blueprint_t {
+    struct execution_blueprint_t
+    {
         // time bounds
         real start_time;
         real end_time;
 
         // checkpointing
-        real checkpoint_interval;
-        real dlogt;   // logarithmic output spacing (0 = linear)
+        real          checkpoint_interval;
+        real          dlogt; // logarithmic output spacing (0 = linear)
         std::uint64_t checkpoint_zones;
 
         // output paths
-        std::string data_directory;
+        std::string   data_directory;
         std::uint64_t start_index;
-        std::string restart_file;
+        std::string   restart_file;
     };
 
     // -----------------------------------------------------------------------------
@@ -129,8 +133,9 @@ namespace simbi::ecs {
     //
     // adaptive/static mesh refinement configuration.
     // -----------------------------------------------------------------------------
-    struct amr_blueprint_t {
-        bool enabled;
+    struct amr_blueprint_t
+    {
+        bool          enabled;
         std::uint64_t max_levels;
 
         // refinement ratio per level transition
@@ -142,7 +147,7 @@ namespace simbi::ecs {
         std::vector<std::vector<real>> static_refinement_regions;
 
         // subcycling configuration
-        subcycling_mode_t subcycling_mode;
+        subcycling_mode_t          subcycling_mode;
         std::vector<std::uint64_t> manual_substeps;
     };
 
@@ -152,7 +157,8 @@ namespace simbi::ecs {
     // user-defined source terms and boundary expressions.
     // stored as raw config_dict_t for deferred compilation.
     // -----------------------------------------------------------------------------
-    struct expressions_blueprint_t {
+    struct expressions_blueprint_t
+    {
         config_dict_t hydro_source;
         config_dict_t gravity_source;
 
@@ -164,10 +170,51 @@ namespace simbi::ecs {
     // -----------------------------------------------------------------------------
     // bodies_blueprint_t
     //
-    // immersed boundary object configuration.
+    // immersed boundary object configuration for individual bodies.
     // -----------------------------------------------------------------------------
-    struct bodies_blueprint_t {
+    struct bodies_blueprint_t
+    {
         std::vector<config_dict_t> body_configs;
+    };
+
+    // -----------------------------------------------------------------------------
+    // binary_system_blueprint_t
+    //
+    // configuration for binary orbital systems.
+    // -----------------------------------------------------------------------------
+    struct binary_system_blueprint_t
+    {
+        // orbital parameters
+        real semi_major;
+        real eccentricity;
+        real mass_ratio;
+        real total_mass;
+        real orbital_period;
+
+        // dynamics control
+        bool        prescribed_motion;
+        bool        is_circular_orbit;
+        std::string reference_frame;
+
+        // component configurations (exactly 2)
+        std::vector<config_dict_t> components;
+    };
+
+    // -----------------------------------------------------------------------------
+    // gravitational_system_blueprint_t
+    //
+    // configuration for gravitational systems (binary, triple, n-body).
+    // separates system-level dynamics from individual body properties.
+    // -----------------------------------------------------------------------------
+    struct gravitational_system_blueprint_t
+    {
+        // system type: "binary", "triple", "nbody"
+        std::string system_type;
+
+        // type-specific configuration
+        std::optional<binary_system_blueprint_t> binary;
+        // future: std::optional<triple_system_blueprint_t> triple;
+        // future: std::optional<nbody_system_blueprint_t> nbody;
     };
 
     // -----------------------------------------------------------------------------
@@ -176,7 +223,8 @@ namespace simbi::ecs {
     // multi-device domain decomposition configuration.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct decomposition_blueprint_t {
+    struct decomposition_blueprint_t
+    {
         // process topology (e.g., {2, 2, 1} for 4 devices)
         iarray<Rank> topology_dims;
 
@@ -197,14 +245,18 @@ namespace simbi::ecs {
     // used to pass configuration through the dispatch chain.
     // =============================================================================
     template <std::uint64_t Rank>
-    struct blueprint_set_t {
-        mesh_blueprint_t<Rank> mesh;
-        physics_blueprint_t physics;
-        execution_blueprint_t execution;
-        amr_blueprint_t amr;
-        numerics_blueprint_t numerics;
+    struct blueprint_set_t
+    {
+        mesh_blueprint_t<Rank>  mesh;
+        physics_blueprint_t     physics;
+        execution_blueprint_t   execution;
+        amr_blueprint_t         amr;
+        numerics_blueprint_t    numerics;
         expressions_blueprint_t expressions;
-        bodies_blueprint_t bodies;
+        bodies_blueprint_t      bodies;
+
+        // optional gravitational system (nullopt = individual bodies only)
+        std::optional<gravitational_system_blueprint_t> gravitational_system;
 
         // optional multi-gpu config (nullopt = single device)
         std::optional<decomposition_blueprint_t<Rank>> decomposition;
@@ -218,6 +270,6 @@ namespace simbi::ecs {
         static blueprint_set_t from_config(const config_dict_t& config);
     };
 
-}   // namespace simbi::ecs
+} // namespace simbi::ecs
 
-#endif   // ECS_BLUEPRINTS_HPP
+#endif // ECS_BLUEPRINTS_HPP
