@@ -8,6 +8,7 @@
 #include "grid/field.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/write_policy.hpp"
+#include "physics/hydro/physics.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -21,17 +22,13 @@ namespace simbi::io {
     // h5_serializable specialization for partition_fields_t
     // =========================================================================
     template <typename Conserved, typename Primitive, std::uint64_t Rank>
-    struct h5_serializable<
-        ecs::partition_fields_t<Conserved, Primitive, Rank>> {
+    struct h5_serializable<ecs::partition_fields_t<Conserved, Primitive, Rank>>
+    {
         using fields_t = ecs::partition_fields_t<Conserved, Primitive, Rank>;
-        static constexpr bool is_mhd = requires(Primitive p) { p.mag; };
+        static constexpr bool             is_mhd     = requires(Primitive p) { p.mag; };
         static constexpr std::string_view group_name = "hydro";
 
-        static void write(
-            H5::Group& parent,
-            const fields_t& fields,
-            const write_policy_t& policy
-        )
+        static void write(H5::Group& parent, const fields_t& fields, const write_policy_t& policy)
         {
             auto g = parent.createGroup(std::string(group_name));
 
@@ -39,7 +36,7 @@ namespace simbi::io {
             write_primitives(g, fields.prim, policy);
 
             // write conserved field with domain
-            // write_conserved(g, fields.cons, policy);
+            write_conserved(g, fields.cons, policy);
 
             // write magnetic fields if present (mhd)
             if constexpr (is_mhd) {
@@ -72,9 +69,9 @@ namespace simbi::io {
         // primitive field serialization
         // ---------------------------------------------------------------------
         static void write_primitives(
-            H5::Group& parent,
+            H5::Group&                            parent,
             const grid::field_t<Primitive, Rank>& prim,
-            const write_policy_t& policy
+            const write_policy_t&                 policy
         )
         {
             write_struct_field(parent, "primitives", prim, policy)
@@ -109,34 +106,18 @@ namespace simbi::io {
             }
         }
 
-        static grid::field_t<Primitive, Rank>
-        read_primitives(const H5::Group& parent)
+        static grid::field_t<Primitive, Rank> read_primitives(const H5::Group& parent)
         {
             return read_struct_field_with<Primitive, Rank>(
                 parent,
                 "primitives",
                 [](const H5::Group& g, grid::field_t<Primitive, Rank>& field) {
-                    read_field_component(
-                        g,
-                        "density",
-                        field,
-                        [](auto& p, real v) { p.rho = v; }
-                    );
-                    read_field_component(
-                        g,
-                        "pressure",
-                        field,
-                        [](auto& p, real v) { p.pre = v; }
-                    );
+                    read_field_component(g, "rho", field, [](auto& p, real v) { p.rho = v; });
+                    read_field_component(g, "pre", field, [](auto& p, real v) { p.pre = v; });
 
                     // chi if present
                     if (group_exists(g, "chi")) {
-                        read_field_component(
-                            g,
-                            "chi",
-                            field,
-                            [](auto& p, real v) { p.chi = v; }
-                        );
+                        read_field_component(g, "chi", field, [](auto& p, real v) { p.chi = v; });
                     }
 
                     // velocity components
@@ -152,16 +133,12 @@ namespace simbi::io {
                     // magnetic field components for mhd primitives
                     if constexpr (requires(Primitive p) { p.mag; }) {
                         for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                            const auto lidx = Rank - 1 - dd;
-                            std::string name =
-                                "b" + std::to_string(dd + 1) + "_mean";
+                            const auto  lidx = Rank - 1 - dd;
+                            std::string name = "b" + std::to_string(dd + 1) + "_mean";
                             if (group_exists(g, name)) {
-                                read_field_component(
-                                    g,
-                                    name,
-                                    field,
-                                    [lidx](auto& p, real v) { p.mag[lidx] = v; }
-                                );
+                                read_field_component(g, name, field, [lidx](auto& p, real v) {
+                                    p.mag[lidx] = v;
+                                });
                             }
                         }
                     }
@@ -173,22 +150,22 @@ namespace simbi::io {
         // conserved field serialization
         // ---------------------------------------------------------------------
         static void write_conserved(
-            H5::Group& parent,
+            H5::Group&                            parent,
             const grid::field_t<Conserved, Rank>& cons,
-            const write_policy_t& policy
+            const write_policy_t&                 policy
         )
         {
             write_struct_field(parent, "conserved", cons, policy)
-                .component("D", [](const auto& u) { return u.den; })
-                .component("tau", [](const auto& u) { return u.nrg; })
-                .component("D_chi", [](const auto& u) { return u.chi; });
+                .component("den", [](const auto& u) { return u.den; })
+                .component("nrg", [](const auto& u) { return u.nrg; })
+                .component("dchi", [](const auto& u) { return u.chi; });
 
             // momentum components
             auto g = parent.openGroup("conserved");
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 write_field_component(
                     g,
-                    "S" + std::to_string(dd + 1),
+                    "m" + std::to_string(dd + 1),
                     cons,
                     [dd](const auto& u) { return u.mom[dd]; },
                     policy
@@ -210,35 +187,25 @@ namespace simbi::io {
             }
         }
 
-        static grid::field_t<Conserved, Rank>
-        read_conserved(const H5::Group& parent)
+        static grid::field_t<Conserved, Rank> read_conserved(const H5::Group& parent)
         {
             return read_struct_field_with<Conserved, Rank>(
                 parent,
                 "conserved",
                 [](const H5::Group& g, grid::field_t<Conserved, Rank>& field) {
-                    read_field_component(g, "D", field, [](auto& u, real v) {
-                        u.den = v;
-                    });
-                    read_field_component(g, "tau", field, [](auto& u, real v) {
-                        u.nrg = v;
-                    });
+                    read_field_component(g, "den", field, [](auto& u, real v) { u.den = v; });
+                    read_field_component(g, "nrg", field, [](auto& u, real v) { u.nrg = v; });
 
                     // chi if present
-                    if (group_exists(g, "D_chi")) {
-                        read_field_component(
-                            g,
-                            "D_chi",
-                            field,
-                            [](auto& u, real v) { u.chi = v; }
-                        );
+                    if (group_exists(g, "dchi")) {
+                        read_field_component(g, "dchi", field, [](auto& u, real v) { u.chi = v; });
                     }
 
                     // momentum components
                     for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                         read_field_component(
                             g,
-                            "S" + std::to_string(dd + 1),
+                            "m" + std::to_string(dd + 1),
                             field,
                             [dd](auto& u, real v) { u.mom[dd] = v; }
                         );
@@ -247,16 +214,12 @@ namespace simbi::io {
                     // magnetic field components for mhd conserved
                     if constexpr (requires(Conserved u) { u.mag; }) {
                         for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                            std::string name =
-                                "B" + std::to_string(dd + 1) + "_mean";
+                            std::string name = "B" + std::to_string(dd + 1) + "_mean";
                             if (group_exists(g, name)) {
                                 const auto lidx = Rank - 1 - dd;
-                                read_field_component(
-                                    g,
-                                    name,
-                                    field,
-                                    [lidx](auto& u, real v) { u.mag[lidx] = v; }
-                                );
+                                read_field_component(g, name, field, [lidx](auto& u, real v) {
+                                    u.mag[lidx] = v;
+                                });
                             }
                         }
                     }
@@ -268,9 +231,9 @@ namespace simbi::io {
         // magnetic field serialization (staggered face-centered fields)
         // ---------------------------------------------------------------------
         static void write_magnetic_fields(
-            H5::Group& parent,
+            H5::Group&                                       parent,
             const vector_t<grid::field_t<real, Rank>, Rank>& bfield,
-            const write_policy_t& policy
+            const write_policy_t&                            policy
         )
         {
             // check if any magnetic field data exists
@@ -294,12 +257,7 @@ namespace simbi::io {
                     continue;
                 }
 
-                write_scalar_field(
-                    g,
-                    "B" + std::to_string(dd + 1),
-                    bfield[lidx],
-                    policy
-                );
+                write_scalar_field(g, "B" + std::to_string(dd + 1), bfield[lidx], policy);
             }
         }
 
@@ -324,6 +282,6 @@ namespace simbi::io {
         }
     };
 
-}   // namespace simbi::io
+} // namespace simbi::io
 
-#endif   // IO_SERIAL_HYDRO_HPP
+#endif // IO_SERIAL_HYDRO_HPP

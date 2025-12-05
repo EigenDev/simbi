@@ -4,8 +4,10 @@
 #include "compat.hpp"
 #include "ecs/components.hpp"
 #include "grid/mesh_config.hpp"
+#include "grid/skeleton.hpp"
 #include "h5_serializable.hpp"
 #include "physics/ib/collection.hpp"
+#include "serialization/skeleton_serial.hpp"
 #include "utility/helpers.hpp"
 #include "write_policy.hpp"
 
@@ -141,6 +143,10 @@ namespace simbi::io {
 
             h5_serializable<grid::mesh_config_t<Sim::rank>>::write(level_group, mesh_cfg, policy);
 
+            // write skeleton (topology with boundary metadata)
+            const auto& skeleton = sim.decomposition(lvl).skeleton;
+            h5_serializable<grid::skeleton_t<Sim::rank>>::write(level_group, skeleton, policy);
+
             // per-partition hydro data
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto part_group = level_group.createGroup("partition_" + std::to_string(pp));
@@ -207,7 +213,12 @@ namespace simbi::io {
                                             body.capabilities
                                         );
                                         accr.total_accreted_mass += delta.mass_delta;
-                                        accr.accretion_rate = delta.mass_delta / dt_checkpoint;
+                                        if (dt_checkpoint > 0) {
+                                            accr.accretion_rate = delta.mass_delta / dt_checkpoint;
+                                        }
+                                        else {
+                                            accr.accretion_rate = 0.0;
+                                        }
                                     }
                                 },
                                 bodies_copy.bodies_[ii]
@@ -297,15 +308,6 @@ namespace simbi::io {
     write_checkpoint(const Sim& sim, const std::string& filename, const write_policy_t& policy = {})
     {
         checkpoint_writer_t<Sim>{sim, policy}.write(filename);
-    }
-
-    template <typename Sim>
-    void write_checkpoint(const Sim& sim, const write_policy_t& policy = {})
-    {
-        const auto& meta = sim.metadata();
-        auto        filename =
-            compute_checkpoint_filename(meta.data_dir, meta.checkpoint_identifier(), meta.dlogt);
-        write_checkpoint(sim, filename, policy);
     }
 
     template <typename Sim>

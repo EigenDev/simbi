@@ -14,23 +14,23 @@ namespace simbi {
         // enhanced enums for beautiful styling
         enum class border_style_t {
             None,
-            Simple,      // ascii safe: + - |
-            Elegant,     // ascii safe but prettier
-            Modern,      // unicode with ascii fallback
-            Cyberpunk,   // futuristic styling
-            Classic,     // traditional double lines
-            Minimal      // clean and minimal
+            Simple,    // ascii safe: + - |
+            Elegant,   // ascii safe but prettier
+            Modern,    // unicode with ascii fallback
+            Cyberpunk, // futuristic styling
+            Classic,   // traditional double lines
+            Minimal    // clean and minimal
         };
 
         enum class table_theme_t {
-            Classic,     // traditional blue/white
-            Cyberpunk,   // neon green/cyan/magenta
-            Modern,      // clean grays and blues
-            Elegant,     // sophisticated gold/white
-            Matrix,      // green matrix style
-            Sunset,      // warm orange/red tones
-            Ocean,       // cool blue/cyan tones
-            Monochrome   // black and white
+            Classic,   // traditional blue/white
+            Cyberpunk, // neon green/cyan/magenta
+            Modern,    // clean grays and blues
+            Elegant,   // sophisticated gold/white
+            Matrix,    // green matrix style
+            Sunset,    // warm orange/red tones
+            Ocean,     // cool blue/cyan tones
+            Monochrome // black and white
         };
 
         enum class Alignment {
@@ -40,8 +40,8 @@ namespace simbi {
         };
 
         enum class display_mode_t {
-            Static,   // prstd::int64_t once at current cursor position
-            Dynamic   // clear screen and update in place
+            Static, // prstd::int64_t once at current cursor position
+            Dynamic // clear screen and update in place
         };
 
         enum class progress_bar_t {
@@ -49,7 +49,7 @@ namespace simbi {
             Disabled,
         };
 
-        enum class color_t {
+        enum class table_color_t {
             Default,
             Black,
             Red,
@@ -97,15 +97,16 @@ namespace simbi {
         };
 
         // enhanced color helper functions
-        std::string get_color_code(color_t color);
-        std::string get_bg_color_code(color_t color);
+        std::string get_color_code(table_color_t color);
+        std::string get_bg_color_code(table_color_t color);
         std::string reset_color();
         std::string bold();
         std::string italic();
         std::string underline();
 
         // sophisticated border character sets
-        struct border_chars_t {
+        struct border_chars_t
+        {
             std::string top_left;
             std::string top_right;
             std::string bottom_left;
@@ -127,31 +128,32 @@ namespace simbi {
         };
 
         // theme configuration structure
-        struct theme_config_t {
+        struct theme_config_t
+        {
             // colors
-            color_t header_color;
-            color_t text_color;
-            color_t border_color;
-            color_t title_color;
-            color_t accent_color;
+            table_color_t header_color;
+            table_color_t text_color;
+            table_color_t border_color;
+            table_color_t title_color;
+            table_color_t accent_color;
 
             // message colors
-            color_t info_color;
-            color_t success_color;
-            color_t warning_color;
-            color_t error_color;
-            color_t debug_color;
+            table_color_t info_color;
+            table_color_t success_color;
+            table_color_t warning_color;
+            table_color_t error_color;
+            table_color_t debug_color;
 
             // progress colors
-            color_t progress_color;
-            color_t progress_bg_color;
+            table_color_t progress_color;
+            table_color_t progress_bg_color;
 
             // styling
             border_style_t border_style;
-            bool use_bold_header;
-            bool use_italic_title;
-            bool use_gradient_progress;
-            bool use_background_colors;
+            bool           use_bold_header;
+            bool           use_italic_title;
+            bool           use_gradient_progress;
+            bool           use_background_colors;
 
             // spacing
             std::int64_t padding;
@@ -160,26 +162,22 @@ namespace simbi {
         };
 
         // message structure for the message board
-        struct Message {
-            MessageType type;
-            std::string text;
+        struct Message
+        {
+            MessageType                           type;
+            std::string                           text;
             std::chrono::system_clock::time_point timestamp;
-            color_t custom_color  = color_t::Default;
-            bool use_custom_color = false;
+            table_color_t                         custom_color     = table_color_t::Default;
+            bool                                  use_custom_color = false;
 
             Message(MessageType t, const std::string& txt)
-                : type(t),
-                  text(txt),
-                  timestamp(std::chrono::system_clock::now())
+                : type(t), text(txt), timestamp(std::chrono::system_clock::now())
             {
             }
 
-            Message(MessageType t, const std::string& txt, color_t color)
-                : type(t),
-                  text(txt),
-                  timestamp(std::chrono::system_clock::now()),
-                  custom_color(color),
-                  use_custom_color(true)
+            Message(MessageType t, const std::string& txt, table_color_t color)
+                : type(t), text(txt), timestamp(std::chrono::system_clock::now()),
+                  custom_color(color), use_custom_color(true)
             {
             }
         };
@@ -192,9 +190,9 @@ namespace simbi {
             static bool unicode_supported;
 
           public:
-            static bool supports_unicode();
-            static bool supports_256_colors();
-            static bool supports_truecolor();
+            static bool         supports_unicode();
+            static bool         supports_256_colors();
+            static bool         supports_truecolor();
             static std::int64_t get_terminal_width();
             static std::int64_t get_terminal_height();
         };
@@ -205,14 +203,14 @@ namespace simbi {
           private:
             // table data
             std::vector<std::vector<std::string>> table_data;
-            std::vector<Alignment> column_alignments;
-            std::vector<std::int64_t> column_widths;
-            std::vector<std::int64_t> min_column_widths;
-            std::vector<std::int64_t> max_column_widths;
-            bool has_header = false;
+            std::vector<Alignment>                column_alignments;
+            std::vector<std::int64_t>             column_widths;
+            std::vector<std::int64_t>             min_column_widths;
+            std::vector<std::int64_t>             max_column_widths;
+            bool                                  has_header = false;
 
             // current theme and styling
-            table_theme_t current_theme = table_theme_t::Modern;
+            table_theme_t  current_theme = table_theme_t::Modern;
             theme_config_t theme_config;
             border_chars_t border_chars;
             display_mode_t display_mode = display_mode_t::Static;
@@ -224,90 +222,78 @@ namespace simbi {
 
             // message board
             std::vector<Message> messages;
-            std::string message_board_title = "Messages";
-            size_t max_messages             = 10;
-            bool show_message_board         = false;
-            bool show_timestamps            = true;
-            bool compact_messages           = false;
+            std::string          message_board_title = "Messages";
+            size_t               max_messages        = 10;
+            bool                 show_message_board  = false;
+            bool                 show_timestamps     = true;
+            bool                 compact_messages    = false;
 
             // progress tracking
-            std::int64_t progress_percent = 0;
-            bool show_progress            = false;
-            ProgressStyle progress_style  = ProgressStyle::Bar;
-            std::string progress_description;
-            std::string progress_units;
-            double progress_speed = 0.0;
+            std::int64_t         progress_percent = 0;
+            bool                 show_progress    = false;
+            ProgressStyle        progress_style   = ProgressStyle::Bar;
+            std::string          progress_description;
+            std::string          progress_units;
+            double               progress_speed = 0.0;
             std::chrono::seconds estimated_time_remaining{0};
 
             // advanced features
-            bool auto_resize_columns_    = true;
-            bool wrap_text               = false;
-            bool zebra_striping          = false;
-            std::int64_t max_table_width = 0;   // 0 = no limit
-            bool center_table_           = false;
+            bool         auto_resize_columns_ = true;
+            bool         wrap_text            = false;
+            bool         zebra_striping       = false;
+            std::int64_t max_table_width      = 0; // 0 = no limit
+            bool         center_table_        = false;
 
             // helper methods
             void apply_theme(table_theme_t theme);
             void update_border_characters();
             void calculate_column_widths();
             void print_horizontal_border(
-                std::ostream& os,
+                std::ostream&      os,
                 const std::string& char_to_use,
-                std::int64_t length
+                std::int64_t       length
             ) const;
             void print_border_line(
                 std::ostream& os,
-                bool is_top,
-                bool is_bottom,
-                bool is_header_separator = false
+                bool          is_top,
+                bool          is_bottom,
+                bool          is_header_separator = false
             ) const;
             void print_row(
-                std::ostream& os,
+                std::ostream&                   os,
                 const std::vector<std::string>& row,
-                bool is_header,
-                size_t row_index = 0
+                bool                            is_header,
+                size_t                          row_index = 0
             ) const;
             void print_title_section(std::ostream& os) const;
             void print_footer_section(std::ostream& os) const;
             // unified rendering methods
             void print_separator(
                 std::ostream& os,
-                bool is_top       = false,
-                bool is_bottom    = false,
-                bool include_t_up = true,
-                bool at_middle    = false
+                bool          is_top       = false,
+                bool          is_bottom    = false,
+                bool          include_t_up = true,
+                bool          at_middle    = false
             ) const;
             void print_table_row(
-                std::ostream& os,
+                std::ostream&                   os,
                 const std::vector<std::string>& row,
-                bool is_header
+                bool                            is_header
             ) const;
             void print_progress_row(std::ostream& os) const;
             void print_message_board_section(std::ostream& os) const;
 
             // utility methods
-            std::string format_timestamp(
-                const std::chrono::system_clock::time_point& tp
-            ) const;
-            std::string align_text(
-                const std::string& text,
-                size_t width,
-                Alignment align
-            ) const;
-            std::string format_timestamp_duration(
-                const std::chrono::seconds& duration
-            ) const;
+            std::string format_timestamp(const std::chrono::system_clock::time_point& tp) const;
+            std::string align_text(const std::string& text, size_t width, Alignment align) const;
+            std::string format_timestamp_duration(const std::chrono::seconds& duration) const;
+            std::string wrap_text_to_width(const std::string& text, size_t width) const;
             std::string
-            wrap_text_to_width(const std::string& text, size_t width) const;
-            std::string apply_zebra_styling(
-                const std::string& text,
-                size_t row_index,
-                bool is_data_row
-            ) const;
+            apply_zebra_styling(const std::string& text, size_t row_index, bool is_data_row) const;
             std::string create_gradient_text(
                 const std::string& text,
-                color_t start_color,
-                color_t end_color
+                table_color_t      start_color,
+                table_color_t      end_color
             ) const;
 
             // theme definitions
@@ -316,10 +302,7 @@ namespace simbi {
           public:
             table_t();
             explicit table_t(table_theme_t theme);
-            table_t(
-                border_style_t style,
-                display_mode_t mode = display_mode_t::Static
-            );
+            table_t(border_style_t style, display_mode_t mode = display_mode_t::Static);
 
             ~table_t();
 
@@ -345,17 +328,9 @@ namespace simbi {
             // data manipulation
             void set_header(const std::vector<std::string>& header_row);
             void add_row(const std::vector<std::string>& row);
-            void update_row(
-                size_t row_index,
-                const std::vector<std::string>& new_data
-            );
-            void update_cell(
-                size_t row_index,
-                size_t col_index,
-                const std::string& new_data
-            );
-            void
-            insert_row(size_t position, const std::vector<std::string>& row);
+            void update_row(size_t row_index, const std::vector<std::string>& new_data);
+            void update_cell(size_t row_index, size_t col_index, const std::string& new_data);
+            void insert_row(size_t position, const std::vector<std::string>& row);
             void remove_row(size_t row_index);
             void clear_rows();
             void sort_by_column(size_t col_index, bool ascending = true);
@@ -384,7 +359,7 @@ namespace simbi {
             void post_warning(const std::string& message);
             void post_error(const std::string& message);
             void post_debug(const std::string& message);
-            void post_custom(const std::string& message, color_t color);
+            void post_custom(const std::string& message, table_color_t color);
             void clear_messages();
 
             // progress bar functionality
@@ -397,18 +372,18 @@ namespace simbi {
             void set_estimated_time_remaining(const std::chrono::seconds& time);
 
             // rendering
-            void print();
-            void refresh();
+            void        print();
+            void        refresh();
             std::string to_string() const;
-            void print_to_file(const std::string& filename) const;
+            void        print_to_file(const std::string& filename) const;
 
             // utility
             size_t calculate_total_width() const;
-            void set_minimum_width(size_t width);
+            void   set_minimum_width(size_t width);
             size_t row_count() const;
             size_t column_count() const;
-            bool is_empty() const;
-            void reserve_rows(size_t count);
+            bool   is_empty() const;
+            void   reserve_rows(size_t count);
         };
 
         // factory class for creating beautifully themed tables
@@ -417,33 +392,33 @@ namespace simbi {
           public:
             // create themed tables with one function call
             static table_t create_cyberpunk_table(
-                const std::string& title    = "",
-                display_mode_t display_mode = display_mode_t::Static
+                const std::string& title        = "",
+                display_mode_t     display_mode = display_mode_t::Static
             );
             static table_t create_elegant_table(
-                const std::string& title    = "",
-                display_mode_t display_mode = display_mode_t::Static,
-                progress_bar_t progress_bar = progress_bar_t::Disabled
+                const std::string& title        = "",
+                display_mode_t     display_mode = display_mode_t::Static,
+                progress_bar_t     progress_bar = progress_bar_t::Disabled
             );
             static table_t create_matrix_table(
-                const std::string& title    = "",
-                display_mode_t display_mode = display_mode_t::Static,
-                progress_bar_t progress_bar = progress_bar_t::Disabled
+                const std::string& title        = "",
+                display_mode_t     display_mode = display_mode_t::Static,
+                progress_bar_t     progress_bar = progress_bar_t::Disabled
             );
             static table_t create_ocean_table(
-                const std::string& title    = "",
-                display_mode_t display_mode = display_mode_t::Static,
-                progress_bar_t progress_bar = progress_bar_t::Disabled
+                const std::string& title        = "",
+                display_mode_t     display_mode = display_mode_t::Static,
+                progress_bar_t     progress_bar = progress_bar_t::Disabled
             );
             static table_t create_sunset_table(
-                const std::string& title    = "",
-                display_mode_t display_mode = display_mode_t::Static,
-                progress_bar_t progress_bar = progress_bar_t::Disabled
+                const std::string& title        = "",
+                display_mode_t     display_mode = display_mode_t::Static,
+                progress_bar_t     progress_bar = progress_bar_t::Disabled
             );
             static table_t create_minimal_table(
-                const std::string& title    = "",
-                display_mode_t display_mode = display_mode_t::Static,
-                progress_bar_t progress_bar = progress_bar_t::Disabled
+                const std::string& title        = "",
+                display_mode_t     display_mode = display_mode_t::Static,
+                progress_bar_t     progress_bar = progress_bar_t::Disabled
             );
 
             // create specialized tables for common use cases
@@ -454,7 +429,7 @@ namespace simbi {
             static table_t create_data_table();
         };
 
-    }   // namespace io
-}   // namespace simbi
+    } // namespace io
+} // namespace simbi
 
-#endif   // MODERN_TABLE_HPP
+#endif // MODERN_TABLE_HPP

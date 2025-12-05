@@ -39,13 +39,14 @@ namespace simbi::io {
     // h5_serializable specialization for simulation_metadata_t
     // =========================================================================
     template <std::uint64_t Rank>
-    struct h5_serializable<ecs::simulation_metadata_t<Rank>> {
+    struct h5_serializable<ecs::simulation_metadata_t<Rank>>
+    {
         static constexpr std::string_view group_name = "metadata";
 
         static void write(
-            H5::Group& parent,
+            H5::Group&                              parent,
             const ecs::simulation_metadata_t<Rank>& meta,
-            const write_policy_t& policy
+            const write_policy_t&                   policy
         )
         {
             auto g = parent.createGroup(std::string(group_name));
@@ -60,39 +61,25 @@ namespace simbi::io {
             write_attribute(g, "dt", meta.global_dt);
             write_attribute(g, "dlogt", meta.dlogt);
             write_attribute(g, "checkpoint_interval", meta.checkpoint_interval);
-            write_attribute(
-                g,
-                "prev_checkpoint_time",
-                meta.prev_checkpoint_time
-            );
+            write_attribute(g, "checkpoint_time", meta.checkpoint_time);
+            write_attribute(g, "prev_checkpoint_time", meta.prev_checkpoint_time);
             write_attribute(g, "ambient_sound_speed", meta.ambient_sound_speed);
 
             // int tracking
             write_attribute(g, "iteration", meta.iteration);
             write_attribute(g, "halo_radius", meta.halo_radius);
             write_attribute(g, "checkpoint_index", meta.checkpoint_index);
+            write_attribute(g, "checkpoint_zones", meta.checkpoint_zones);
             write_attribute(g, "dimensions", meta.dimensions);
 
             // enums (as strings for robustness)
             write_attribute(g, "regime", serialize(meta.regime));
             write_attribute(g, "solver", serialize(meta.solver));
             write_attribute(g, "coord_system", serialize(meta.coord_system));
-            write_attribute(
-                g,
-                "reconstruction",
-                serialize(meta.reconstruction)
-            );
+            write_attribute(g, "reconstruction", serialize(meta.reconstruction));
             write_attribute(g, "timestepping", serialize(meta.timestepping));
-            write_attribute(
-                g,
-                "shock_smoother",
-                serialize(meta.shock_smoother)
-            );
-            write_attribute(
-                g,
-                "subcycling_mode",
-                serialize(meta.subcycling_mode)
-            );
+            write_attribute(g, "shock_smoother", serialize(meta.shock_smoother));
+            write_attribute(g, "subcycling_mode", serialize(meta.subcycling_mode));
 
             // cell spacing enums
             write_attribute(g, "x1_spacing", serialize(meta.x1_spacing));
@@ -110,11 +97,8 @@ namespace simbi::io {
             write_boundary_conditions(g, meta.boundary_conditions, policy);
 
             // resolution
-            std::vector<std::int64_t> res_data(
-                meta.resolution.begin(),
-                meta.resolution.end()
-            );
-            std::vector<hsize_t> res_dims{3};
+            std::vector<std::int64_t> res_data(meta.resolution.begin(), meta.resolution.end());
+            std::vector<hsize_t>      res_dims{3};
             write_dataset(g, "resolution", res_data, res_dims, policy);
 
             // level timesteps if present
@@ -141,65 +125,40 @@ namespace simbi::io {
             ecs::simulation_metadata_t<Rank> meta;
 
             // numerics
-            meta.gamma     = read_attribute<real>(g, "gamma");
-            meta.plm_theta = read_attribute<real>(g, "plm_theta");
-            meta.viscosity = read_attribute<real>(g, "viscosity");
-            meta.cfl       = read_attribute<real>(g, "cfl");
-            meta.time      = read_attribute<real>(g, "time");
-            meta.tend      = read_attribute<real>(g, "tend");
-            meta.global_dt = read_attribute<real>(g, "dt");
-            meta.dlogt     = read_attribute<real>(g, "dlogt");
-            meta.checkpoint_interval =
-                read_attribute<real>(g, "checkpoint_interval");
-
-            // prev_checkpoint_time (may not exist in old files)
-            if (attribute_exists(g, "prev_checkpoint_time")) {
-                meta.prev_checkpoint_time =
-                    read_attribute<real>(g, "prev_checkpoint_time");
-            }
-            else {
-                meta.prev_checkpoint_time = 0.0;
-            }
-
-            meta.ambient_sound_speed =
-                read_attribute<real>(g, "ambient_sound_speed");
+            meta.gamma                = read_attribute<real>(g, "gamma");
+            meta.plm_theta            = read_attribute<real>(g, "plm_theta");
+            meta.viscosity            = read_attribute<real>(g, "viscosity");
+            meta.cfl                  = read_attribute<real>(g, "cfl");
+            meta.time                 = read_attribute<real>(g, "time");
+            meta.tend                 = read_attribute<real>(g, "tend");
+            meta.global_dt            = read_attribute<real>(g, "dt");
+            meta.dlogt                = read_attribute<real>(g, "dlogt");
+            meta.checkpoint_interval  = read_attribute<real>(g, "checkpoint_interval");
+            meta.checkpoint_time      = read_attribute<real>(g, "checkpoint_time");
+            meta.prev_checkpoint_time = read_attribute<real>(g, "prev_checkpoint_time");
+            meta.ambient_sound_speed  = read_attribute<real>(g, "ambient_sound_speed");
 
             // int tracking
-            meta.iteration   = read_attribute<std::uint64_t>(g, "iteration");
-            meta.halo_radius = read_attribute<std::uint64_t>(g, "halo_radius");
-            meta.checkpoint_index =
-                read_attribute<std::uint64_t>(g, "checkpoint_index");
-            meta.dimensions = read_attribute<std::uint64_t>(g, "dimensions");
+            meta.iteration        = read_attribute<std::uint64_t>(g, "iteration");
+            meta.halo_radius      = read_attribute<std::uint64_t>(g, "halo_radius");
+            meta.checkpoint_index = read_attribute<std::uint64_t>(g, "checkpoint_index");
 
-            // enums (with backward compatibility)
-            meta.regime = read_enum_attribute<regime_t>(g, "regime");
-            meta.solver = read_enum_attribute<solver_t>(g, "solver");
-            meta.coord_system =
-                read_enum_attribute<geometry_t>(g, "coord_system");
-            meta.reconstruction =
-                read_enum_attribute<reconstruction_t>(g, "reconstruction");
-            meta.timestepping =
-                read_enum_attribute<timestepping_t>(g, "timestepping");
-            meta.shock_smoother =
-                read_enum_attribute<shockwave_limiter_t>(g, "shock_smoother");
+            meta.checkpoint_zones = read_attribute<std::uint64_t>(g, "checkpoint_zones");
+            meta.dimensions       = read_attribute<std::uint64_t>(g, "dimensions");
 
-            // subcycling mode (may not exist in old files)
-            if (attribute_exists(g, "subcycling_mode")) {
-                meta.subcycling_mode = read_enum_attribute<subcycling_mode_t>(
-                    g,
-                    "subcycling_mode"
-                );
-            }
+            // enums
+            meta.regime          = read_enum_attribute<regime_t>(g, "regime");
+            meta.solver          = read_enum_attribute<solver_t>(g, "solver");
+            meta.coord_system    = read_enum_attribute<geometry_t>(g, "coord_system");
+            meta.reconstruction  = read_enum_attribute<reconstruction_t>(g, "reconstruction");
+            meta.timestepping    = read_enum_attribute<timestepping_t>(g, "timestepping");
+            meta.shock_smoother  = read_enum_attribute<shockwave_limiter_t>(g, "shock_smoother");
+            meta.subcycling_mode = read_enum_attribute<subcycling_mode_t>(g, "subcycling_mode");
 
-            // cell spacing (may not exist in old files)
-            if (attribute_exists(g, "x1_spacing")) {
-                meta.x1_spacing =
-                    read_enum_attribute<cellspacing_t>(g, "x1_spacing");
-                meta.x2_spacing =
-                    read_enum_attribute<cellspacing_t>(g, "x2_spacing");
-                meta.x3_spacing =
-                    read_enum_attribute<cellspacing_t>(g, "x3_spacing");
-            }
+            // cell spacing
+            meta.x1_spacing = read_enum_attribute<cellspacing_t>(g, "x1_spacing");
+            meta.x2_spacing = read_enum_attribute<cellspacing_t>(g, "x2_spacing");
+            meta.x3_spacing = read_enum_attribute<cellspacing_t>(g, "x3_spacing");
 
             // flags
             meta.is_mhd          = read_attribute<bool>(g, "is_mhd");
@@ -224,12 +183,8 @@ namespace simbi::io {
 
             // level substeps
             if (dataset_exists(g, "level_substeps")) {
-                auto substeps =
-                    read_dataset<std::uint64_t>(g, "level_substeps");
-                meta.level_substeps = std::vector<std::uint64_t>(
-                    substeps.begin(),
-                    substeps.end()
-                );
+                auto substeps       = read_dataset<std::uint64_t>(g, "level_substeps");
+                meta.level_substeps = std::vector<std::uint64_t>(substeps.begin(), substeps.end());
             }
 
             return meta;
@@ -237,18 +192,14 @@ namespace simbi::io {
 
       private:
         static void write_boundary_conditions(
-            H5::Group& parent,
+            H5::Group&                                       parent,
             const vector_t<grid::boundary_type_t, 2 * Rank>& bcs,
             const write_policy_t& /*policy*/
         )
         {
             auto g = parent.createGroup("boundary_conditions");
             for (std::size_t ii = 0; ii < 2 * Rank; ++ii) {
-                write_attribute(
-                    g,
-                    "bc_" + std::to_string(ii),
-                    serialize(bcs[ii])
-                );
+                write_attribute(g, "bc_" + std::to_string(ii), serialize(bcs[ii]));
             }
         }
 
@@ -271,8 +222,7 @@ namespace simbi::io {
             else {
                 // backward compatibility: old format with int dataset
                 auto bc_data = read_dataset<int>(parent, "boundary_conditions");
-                for (std::size_t ii = 0; ii < 2 * Rank && ii < bc_data.size();
-                     ++ii) {
+                for (std::size_t ii = 0; ii < 2 * Rank && ii < bc_data.size(); ++ii) {
                     bcs[ii] = static_cast<grid::boundary_type_t>(bc_data[ii]);
                 }
             }
@@ -281,8 +231,7 @@ namespace simbi::io {
         }
 
         // helper to check if an attribute exists
-        static bool
-        attribute_exists(const H5::Group& g, const std::string& name)
+        static bool attribute_exists(const H5::Group& g, const std::string& name)
         {
             return g.attrExists(name);
         }
@@ -294,6 +243,6 @@ namespace simbi::io {
         }
     };
 
-}   // namespace simbi::io
+} // namespace simbi::io
 
-#endif   // IO_SERIAL_METADATA_HPP
+#endif // IO_SERIAL_METADATA_HPP
