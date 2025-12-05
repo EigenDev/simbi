@@ -73,6 +73,7 @@ class Solver(str, ExtendedEnum):
 class SubCycleMode(str, ExtendedEnum):
     STANDARD = "standard"
     ADAPTIVE = "adaptive"
+    MANUAL = "manual"
     NONE = "none"
 
 
@@ -85,35 +86,6 @@ class RefinementCriterion(str, ExtendedEnum):
     GRADIENT = "gradient"
     VALUE = "value"
     CUSTOM = "custom"
-
-
-@dataclass(frozen=True)
-class Metadata:
-    """Structured simulation metadata"""
-
-    time: float
-    dt: float
-    iteration: int
-    dimensions: int
-    regime: str
-    adiabatic_index: float
-    is_mhd: bool
-    coord_system: str
-    boundary_conditions: tuple[str, ...]
-    resolution: tuple[int, ...]
-    cfl_number: float
-    end_time: float
-    reconstruction: str
-    timestepping: str
-    plm_theta: float
-    solver: str
-    checkpoint_index: int
-    checkpoint_interval: float
-    x1_spacing: str
-    x2_spacing: str
-    x3_spacing: str
-    halo_radius: int
-    system_info: dict[str, str | float | int | bool | Array] | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +188,51 @@ class HierarchyData:
     num_levels: int
     levels: list[LevelData]
     ref_ratios: list[int]  # between levels
+
+
+@dataclass(frozen=True)
+class Metadata:
+    """simulation metadata."""
+
+    # time control
+    time: float
+    dt: float
+    tend: float
+    iteration: int
+    checkpoint_index: int
+
+    # physics
+    gamma: float
+    cfl: float
+    plm_theta: float
+    viscosity: float
+
+    # domain
+    dimensions: int
+    coord_system: str
+    halo_radius: int
+
+    # flags
+    is_mhd: bool
+    is_relativistic: bool
+
+    # enums
+    regime: str
+    solver: str
+    reconstruction: str
+    timestepping: str
+
+    # optional fields from checkpoint
+    checkpoint_interval: float = 0.0
+    x1_spacing: str = "linear"
+    x2_spacing: str = "linear"
+    x3_spacing: str = "linear"
+    boundary_conditions: tuple[str, ...] = ()
+
+    # amr fields
+    level_dts: tuple[float, ...] = ()
+    level_substeps: tuple[int, ...] = ()
+    subcycling_mode: str = "none"
 
 
 @dataclass(frozen=True)
