@@ -47,56 +47,45 @@ namespace simbi::body::factory {
             real a2 = semi_major - a1;
 
             if constexpr (Rank == 2) {
-                return {
-                  vector_t<real, Rank>{a1, real{0}},
-                  vector_t<real, Rank>{-a2, real{0}}
-                };
+                return {vector_t<real, Rank>{a1, real{0}}, vector_t<real, Rank>{-a2, real{0}}};
             }
             else if constexpr (Rank == 3) {
                 return {
-                  vector_t<real, Rank>{a1, real{0}, real{0}},
-                  vector_t<real, Rank>{-a2, real{0}, real{0}}
+                    vector_t<real, Rank>{a1, real{0}, real{0}},
+                    vector_t<real, Rank>{-a2, real{0}, real{0}}
                 };
             }
             else {
-                throw std::runtime_error(
-                    "calculate_binary_positions only supports 2D and 3D"
-                );
+                throw std::runtime_error("calculate_binary_positions only supports 2D and 3D");
             }
         }
 
         template <std::uint64_t Rank>
-        auto calculate_binary_velocities(
-            real semi_major,
-            real total_mass,
-            real mass_ratio
-        ) -> std::pair<vector_t<real, Rank>, vector_t<real, Rank>>
+        auto calculate_binary_velocities(real semi_major, real total_mass, real mass_ratio)
+            -> std::pair<vector_t<real, Rank>, vector_t<real, Rank>>
         {
 
-            const real phi_dot =
-                std::sqrt(total_mass / (semi_major * semi_major * semi_major));
-            const real a1 = semi_major / (real{1} + mass_ratio);
-            const real a2 = semi_major - a1;
+            const real phi_dot = std::sqrt(total_mass / (semi_major * semi_major * semi_major));
+            const real a1      = semi_major / (real{1} + mass_ratio);
+            const real a2      = semi_major - a1;
 
             if constexpr (Rank == 2) {
                 return {
-                  vector_t<real, Rank>{real{0}, phi_dot * a2},
-                  vector_t<real, Rank>{real{0}, -phi_dot * a1}
+                    vector_t<real, Rank>{real{0}, phi_dot * a2},
+                    vector_t<real, Rank>{real{0}, -phi_dot * a1}
                 };
             }
             else if constexpr (Rank == 3) {
                 return {
-                  vector_t<real, Rank>{real{0}, phi_dot * a2, real{0}},
-                  vector_t<real, Rank>{real{0}, -phi_dot * a1, real{0}}
+                    vector_t<real, Rank>{real{0}, phi_dot * a2, real{0}},
+                    vector_t<real, Rank>{real{0}, -phi_dot * a1, real{0}}
                 };
             }
             else {
-                throw std::runtime_error(
-                    "calculate_binary_velocities only supports 2D and 3D"
-                );
+                throw std::runtime_error("calculate_binary_velocities only supports 2D and 3D");
             }
         }
-    }   // namespace detail
+    } // namespace detail
 
     // ========================================================================
     // body creation functions - compile-time dispatch
@@ -111,22 +100,19 @@ namespace simbi::body::factory {
         auto velocity = try_read_vec<real, Rank>(props, "velocity").value();
         auto mass     = try_read<real>(props, "mass").value();
         auto radius   = try_read<real>(props, "radius").value();
-        bool two_way =
-            try_read<bool>(props, "two_way_coupling").unwrap_or(false);
+        bool two_way  = try_read<bool>(props, "two_way_coupling").unwrap_or(false);
 
         // determine body type and create appropriate variant
         auto body_type = detail::determine_body_type(props);
 
         if (body_type == "black_hole") {
-            auto grav = props.at("gravitational").template get<config_dict_t>();
-            auto accr = props.at("accretion").template get<config_dict_t>();
-            auto softening  = try_read<real>(grav, "softening_length").value();
-            auto sink_rate  = try_read<real>(accr, "sink_rate").value();
-            auto sink_delta = try_read<real>(accr, "sink_delta").value();
-            auto accr_radius =
-                try_read<real>(accr, "accretion_radius").unwrap_or(radius);
-            auto total_accreted =
-                try_read<real>(accr, "total_accreted_mass").unwrap_or(real{0});
+            auto grav           = props.at("gravitational").template get<config_dict_t>();
+            auto accr           = props.at("accretion").template get<config_dict_t>();
+            auto softening      = try_read<real>(grav, "softening_length").value();
+            auto sink_rate      = try_read<real>(accr, "sink_rate").value();
+            auto sink_delta     = try_read<real>(accr, "sink_delta").value();
+            auto accr_radius    = try_read<real>(accr, "accretion_radius").unwrap_or(radius);
+            auto total_accreted = try_read<real>(accr, "total_accreted_mass").unwrap_or(real{0});
 
             return make_black_hole<Rank>(
                 idx,
@@ -138,7 +124,7 @@ namespace simbi::body::factory {
                 sink_rate,
                 sink_delta,
                 accr_radius,
-                real{0},   // accretion rate
+                real{0}, // accretion rate
                 total_accreted,
                 two_way
             );
@@ -148,50 +134,25 @@ namespace simbi::body::factory {
             // get<config_dict_t>();
             auto rigid   = props.at("rigid").template get<config_dict_t>();
             auto inertia = try_read<real>(rigid, "inertia").value();
-            bool no_slip =
-                try_read<bool>(rigid, "apply_no_slip").unwrap_or(true);
+            bool no_slip = try_read<bool>(rigid, "apply_no_slip").unwrap_or(true);
 
-            return make_planet<Rank>(
-                idx,
-                position,
-                velocity,
-                mass,
-                radius,
-                inertia,
-                no_slip,
-                two_way
-            );
+            return make_planet<
+                Rank>(idx, position, velocity, mass, radius, inertia, no_slip, two_way);
         }
         else if (body_type == "gravitational") {
-            auto grav = props.at("gravitational").template get<config_dict_t>();
+            auto grav      = props.at("gravitational").template get<config_dict_t>();
             auto softening = try_read<real>(grav, "softening_length").value();
 
-            return make_gravitational_body<Rank>(
-                idx,
-                position,
-                velocity,
-                mass,
-                radius,
-                softening,
-                two_way
-            );
+            return make_gravitational_body<
+                Rank>(idx, position, velocity, mass, radius, softening, two_way);
         }
         else if (body_type == "rigid_sphere") {
             auto rigid   = props.at("rigid").template get<config_dict_t>();
             auto inertia = try_read<real>(rigid, "inertia").value();
-            bool no_slip =
-                try_read<bool>(rigid, "apply_no_slip").unwrap_or(true);
+            bool no_slip = try_read<bool>(rigid, "apply_no_slip").unwrap_or(true);
 
-            return make_rigid_sphere<Rank>(
-                idx,
-                position,
-                velocity,
-                mass,
-                radius,
-                inertia,
-                no_slip,
-                two_way
-            );
+            return make_rigid_sphere<
+                Rank>(idx, position, velocity, mass, radius, inertia, no_slip, two_way);
         }
         else {
             throw std::runtime_error("unknown body type: " + body_type);
@@ -203,12 +164,10 @@ namespace simbi::body::factory {
     // ========================================================================
 
     template <std::uint64_t Rank>
-    auto create_collection_from_bodies(
-        const std::vector<config_dict_t>& body_configs
-    )
+    auto create_collection_from_bodies(const std::vector<config_dict_t>& body_configs)
     {
-        auto collection   = make_body_collection<Rank>();
-        std::uint64_t idx = 0;
+        auto          collection = make_body_collection<Rank>();
+        std::uint64_t idx        = 0;
         for (const auto& body_config : body_configs) {
             auto body  = create_body_from_config<Rank>(idx, body_config);
             collection = std::move(collection).add(body);
@@ -219,34 +178,24 @@ namespace simbi::body::factory {
     }
 
     template <std::uint64_t Rank>
-    auto create_binary_system_from_config(const config_dict_t& sys_props)
+    auto create_binary_system_from_blueprint(const ecs::binary_system_blueprint_t& bp)
     {
         using real = real;
 
-        if (!sys_props.contains("binary_config")) {
-            throw std::runtime_error("binary_config section missing");
-        }
+        // create binary_parameters_t from blueprint
+        binary_parameters_t binary_params{
+            .total_mass        = bp.total_mass,
+            .semi_major        = bp.semi_major,
+            .eccentricity      = bp.eccentricity,
+            .mass_ratio        = bp.mass_ratio,
+            .orbital_period    = bp.orbital_period,
+            .is_circular_orbit = bp.is_circular_orbit,
+            .prescribed_motion = bp.prescribed_motion
+        };
 
-        const auto& binary_config =
-            sys_props.at("binary_config").template get<config_dict_t>();
-        const auto reference_frame =
-            sys_props.at("reference_frame").template get<std::string>();
-        auto binary_params = binary_parameters_t::from_config(binary_config);
-
-        // get prescribed motion setting
-        if (sys_props.contains("prescribed_motion")) {
-            binary_params.prescribed_motion =
-                sys_props.at("prescribed_motion").template get<bool>();
-        }
-
-        // get component configurations
-        auto components = binary_config.at("components")
-                              .template get<std::list<config_dict_t>>();
-        if (components.size() != 2) {
-            throw std::runtime_error(
-                "binary system must have exactly 2 components"
-            );
-        }
+        // get components from blueprint
+        const auto& components      = bp.components;
+        const auto& reference_frame = bp.reference_frame;
 
         // calculate orbital positions and velocities
         auto [pos1, pos2] = detail::calculate_binary_positions<Rank>(
@@ -255,10 +204,7 @@ namespace simbi::body::factory {
         );
         auto [vel1, vel2] = [reference_frame, binary_params]() {
             if (reference_frame != "inertial") {
-                return std::make_pair(
-                    vector_t<real, Rank>{},
-                    vector_t<real, Rank>{}
-                );
+                return std::make_pair(vector_t<real, Rank>{}, vector_t<real, Rank>{});
             }
             return detail::calculate_binary_velocities<Rank>(
                 binary_params.semi_major,
@@ -268,49 +214,39 @@ namespace simbi::body::factory {
         }();
 
         // create components with calculated kinematics
-        auto comp_it = components.begin();
-
         // first component
-        auto config1       = *comp_it++;
+        auto config1       = components[0];
         auto pos_override1 = try_read_vec<real, Rank>(config1, "position");
         auto vel_override1 = try_read_vec<real, Rank>(config1, "velocity");
 
         if (!pos_override1.has_value() ||
-            std::all_of(
-                pos_override1->begin(),
-                pos_override1->end(),
-                [](real v) { return v == real{0}; }
-            )) {
+            std::all_of(pos_override1->begin(), pos_override1->end(), [](real v) {
+                return v == real{0};
+            })) {
             config1["position"] = pos1;
         }
         if (!vel_override1.has_value() ||
-            std::all_of(
-                vel_override1->begin(),
-                vel_override1->end(),
-                [](real v) { return v == real{0}; }
-            )) {
+            std::all_of(vel_override1->begin(), vel_override1->end(), [](real v) {
+                return v == real{0};
+            })) {
             config1["velocity"] = vel1;
         }
 
         // second component
-        auto config2       = *comp_it;
+        auto config2       = components[1];
         auto pos_override2 = try_read_vec<real, Rank>(config2, "position");
         auto vel_override2 = try_read_vec<real, Rank>(config2, "velocity");
 
         if (!pos_override2.has_value() ||
-            std::all_of(
-                pos_override2->begin(),
-                pos_override2->end(),
-                [](real v) { return v == real{0}; }
-            )) {
+            std::all_of(pos_override2->begin(), pos_override2->end(), [](real v) {
+                return v == real{0};
+            })) {
             config2["position"] = pos2;
         }
         if (!vel_override2.has_value() ||
-            std::all_of(
-                vel_override2->begin(),
-                vel_override2->end(),
-                [](real v) { return v == real{0}; }
-            )) {
+            std::all_of(vel_override2->begin(), vel_override2->end(), [](real v) {
+                return v == real{0};
+            })) {
             config2["velocity"] = vel2;
         }
 
@@ -327,51 +263,43 @@ namespace simbi::body::factory {
     }
 
     // ========================================================================
-    // main factory function - creates collection from blueprint
+    // main factory function - creates collection from blueprint_set
     // ========================================================================
 
     template <std::uint64_t Rank>
-    auto create_body_collection(const ecs::bodies_blueprint_t& blueprint)
-        -> std::optional<body_collection_t<Rank>>
-    {
-        if (blueprint.body_configs.empty()) {
-            return std::nullopt;
-        }
-
-        return create_collection_from_bodies<Rank>(blueprint.body_configs);
-    }
-
-    // overload taking raw config for binary system support
-    template <std::uint64_t Rank>
     auto create_body_collection(
-        const ecs::bodies_blueprint_t& blueprint,
-        const config_dict_t& full_config
+        const ecs::bodies_blueprint_t&                              bodies_bp,
+        const std::optional<ecs::gravitational_system_blueprint_t>& gravitational_system_bp
     ) -> std::optional<body_collection_t<Rank>>
     {
-        // check for binary system configuration
-        if (full_config.contains("body_system")) {
-            const auto& sys_props =
-                full_config.at("body_system").template get<config_dict_t>();
+        // prioritize gravitational system over individual bodies
+        if (gravitational_system_bp.has_value()) {
+            const auto& grav_sys = *gravitational_system_bp;
 
-            if (sys_props.contains("system_type")) {
-                auto system_type =
-                    sys_props.at("system_type").template get<std::string>();
-
-                if (system_type == "binary") {
-                    return create_binary_system_from_config<Rank>(sys_props);
-                }
-                else {
+            if (grav_sys.system_type == "binary") {
+                if (!grav_sys.binary.has_value()) {
                     throw std::runtime_error(
-                        "unsupported system type: " + system_type
+                        "binary system type specified but binary blueprint "
+                        "missing"
                     );
                 }
+                return create_binary_system_from_blueprint<Rank>(*grav_sys.binary);
+            }
+            else {
+                throw std::runtime_error(
+                    "unsupported gravitational system type: " + grav_sys.system_type
+                );
             }
         }
 
         // fall back to individual bodies
-        return create_body_collection<Rank>(blueprint);
+        if (!bodies_bp.body_configs.empty()) {
+            return create_collection_from_bodies<Rank>(bodies_bp.body_configs);
+        }
+
+        return std::nullopt;
     }
 
-}   // namespace simbi::body::factory
+} // namespace simbi::body::factory
 
 #endif
