@@ -216,6 +216,9 @@ namespace simbi::ecs {
             else if (meta.subcycling_mode == subcycling_mode_t::STANDARD) {
                 subcycle_standard(sim);
             }
+            else if (meta.subcycling_mode == subcycling_mode_t::MANUAL) {
+                subcycle_manual(sim);
+            }
             else if (meta.subcycling_mode == subcycling_mode_t::ADAPTIVE) {
                 subcycle_adaptive(sim);
             }
@@ -242,6 +245,28 @@ namespace simbi::ecs {
             for (std::uint64_t lvl = 1; lvl < nlvls; ++lvl) {
                 const auto ref_ratio = sim.level_info(lvl).refinement_ratio;
                 meta.level_dts[lvl]  = meta.level_dts[lvl - 1] / ref_ratio;
+            }
+        }
+
+        template <typename Sim>
+        void subcycle_manual(Sim& sim) const
+        {
+            auto&      meta  = sim.metadata();
+            const auto nlvls = sim.num_levels();
+
+            // use user-provided manual_substeps
+            // find global dt from most restrictive level
+            real dt_global = meta.level_dts[0];
+            for (std::uint64_t lvl = 1; lvl < nlvls; ++lvl) {
+                const auto nsteps = meta.level_substeps[lvl];
+                dt_global         = std::min(dt_global, meta.level_dts[lvl] * nsteps);
+            }
+
+            // set timesteps based on manual substeps
+            meta.level_dts[0] = dt_global;
+            for (std::uint64_t lvl = 1; lvl < nlvls; ++lvl) {
+                const auto nsteps   = meta.level_substeps[lvl];
+                meta.level_dts[lvl] = dt_global / nsteps;
             }
         }
 
@@ -787,39 +812,6 @@ namespace simbi::ecs {
 
                 // restrict fine owned cells -> coarse owned cells (no ghosts)
                 auto fine_owned_cons = fine_fields.cons[fine_part.owned_domain];
-
-                // util::writeln(
-                //     "Restriction: level {} -> {}, fine domain [{},{},{}] to "
-                //     "[{},{},{}]",
-                //     fine_lvl,
-                //     coarse_lvl,
-                //     fine_part.owned_domain.start[0],
-                //     fine_part.owned_domain.start[1],
-                //     fine_part.owned_domain.start[2],
-                //     fine_part.owned_domain.fin[0],
-                //     fine_part.owned_domain.fin[1],
-                //     fine_part.owned_domain.fin[2]
-                // );
-
-                // util::writeln(
-                //     "  fine_owned_cons.domain: [{},{},{}] to [{},{},{}]",
-                //     fine_owned_cons.domain().start[0],
-                //     fine_owned_cons.domain().start[1],
-                //     fine_owned_cons.domain().start[2],
-                //     fine_owned_cons.domain().fin[0],
-                //     fine_owned_cons.domain().fin[1],
-                //     fine_owned_cons.domain().fin[2]
-                // );
-
-                // util::writeln(
-                //     "  coarse_fields.cons.domain: [{},{},{}] to [{},{},{}]",
-                //     coarse_fields.cons.domain().start[0],
-                //     coarse_fields.cons.domain().start[1],
-                //     coarse_fields.cons.domain().start[2],
-                //     coarse_fields.cons.domain().fin[0],
-                //     coarse_fields.cons.domain().fin[1],
-                //     coarse_fields.cons.domain().fin[2]
-                // );
 
                 grid::amr::restrict_to_coarse(coarse_fields.cons, fine_owned_cons, ratio, exec);
             }
