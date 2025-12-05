@@ -20,15 +20,12 @@ namespace simbi::geometry {
     // computes the non-conservative updates required for curvilinear coords
     // e.g. spherical: adds (rho*v_theta^2 + 2*p)/r to radial momentum
     // -------------------------------------------------------------------------
-    template <
-        is_hydro_primitive_c prim_t,
-        typename metric_t,
-        std::uint64_t Rank>
+    template <is_hydro_primitive_c prim_t, typename metric_t, std::uint64_t Rank>
     DUAL typename prim_t::counterpart_t geometric_source_terms(
-        const prim_t& prim,
-        real gamma,
+        const prim_t&       prim,
+        real                gamma,
         const iarray<Rank>& idx,
-        const metric_t& metric
+        const metric_t&     metric
     )
     {
         using namespace hydro;
@@ -60,13 +57,7 @@ namespace simbi::geometry {
             }
             const auto sin_t = std::sin(theta);
 
-            real cot = (std::abs(sin_t) > global::epsilon)
-                           ? std::cos(theta) / sin_t
-                           : 0.0;
-
-            // std::cout << "idx: " << idx << " r: " << r << " theta: " << theta
-            //           << " cot: " << cot << std::endl;
-            // std::cin.get();
+            real cot = (std::abs(sin_t) > global::epsilon) ? std::cos(theta) / sin_t : 0.0;
 
             // unpack primitives
             const real v1    = proper_velocity(prim, 1);
@@ -87,7 +78,7 @@ namespace simbi::geometry {
             const auto aL = metric.face_area(idx /**/, rank - 1);
             const auto aR = metric.face_area(idx + rs, rank - 1);
             const auto dv = metric.volume(idx);
-            src.mom[0] = pt * (aR - aL) / dv + wgam2 * (v2 * v2 + v3 * v3) / r -
+            src.mom[0]    = pt * (aR - aL) / dv + wgam2 * (v2 * v2 + v3 * v3) / r -
                          (bmu[2] * bmu[2] + bmu[3] * bmu[3]) / r;
 
             // theta momentum
@@ -95,15 +86,14 @@ namespace simbi::geometry {
                 const auto ts = unit_vectors::array_offset<rank>(rank - 2);
                 const auto aL = metric.face_area(idx /**/, rank - 2);
                 const auto aR = metric.face_area(idx + ts, rank - 2);
-                src.mom[1]    = pt * (aR - aL) / dv -
-                             wgam2 * (v2 * v1 - v3 * v3 * cot) / r +
+                src.mom[1]    = pt * (aR - aL) / dv - wgam2 * (v2 * v1 - v3 * v3 * cot) / r +
                              (bmu[2] * bmu[1] - bmu[3] * bmu[3] * cot) / r;
             }
 
             // phi momentum: -(rho*vr*vp)/r - (rho*vt*vp*cot)/r
             if constexpr (Rank > 2) {
-                src.mom[2] = -wgam2 * v3 * (v1 + cot * v2) / r +
-                             bmu[3] * (bmu[1] + cot * bmu[2]) / r;
+                src.mom[2] =
+                    -wgam2 * v3 * (v1 + cot * v2) / r + bmu[3] * (bmu[1] + cot * bmu[2]) / r;
             }
 
             return src;
@@ -149,6 +139,6 @@ namespace simbi::geometry {
         return cons_t{};
     }
 
-}   // namespace simbi::geometry
+} // namespace simbi::geometry
 
 #endif
