@@ -26,6 +26,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from simbi.functional import Err, Ok, Result
+from simbi.types.bodies import Body
+from simbi.types.input import Metadata
 
 # =============================================================================
 # core types
@@ -150,39 +152,6 @@ class LevelData:
     @property
     def num_partitions(self) -> int:
         return len(self.partitions)
-
-
-@dataclass(frozen=True)
-class Metadata:
-    """simulation metadata."""
-
-    # time control
-    time: float
-    dt: float
-    tend: float
-    iteration: int
-    checkpoint_index: int
-
-    # physics
-    gamma: float
-    cfl: float
-    plm_theta: float
-    viscosity: float
-
-    # domain
-    dimensions: int
-    coord_system: str
-    halo_radius: int
-
-    # flags
-    is_mhd: bool
-    is_relativistic: bool
-
-    # enums
-    regime: str
-    solver: str
-    reconstruction: str
-    timestepping: str
 
 
 @dataclass(frozen=True)
@@ -471,6 +440,21 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
     try:
         attrs = meta_group.attrs
 
+        # helper to decode bytes to str
+        def decode_str(val):
+            return val.decode("utf-8") if isinstance(val, bytes) else str(val)
+
+        # read boundary conditions if present
+        bcs = ()
+        if "boundary_conditions" in meta_group:
+            bc_group = meta_group["boundary_conditions"]
+            num_bcs = len(
+                [k for k in bc_group.attrs.keys() if k.startswith("bc_")]
+            )
+            bcs = tuple(
+                decode_str(bc_group.attrs[f"bc_{i}"]) for i in range(num_bcs)
+            )
+
         return Ok(
             Metadata(
                 # time
@@ -486,26 +470,24 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 viscosity=float(attrs.get("viscosity", 0.0)),
                 # domain
                 dimensions=int(attrs["dimensions"]),
-                coord_system=attrs["coord_system"].decode("utf-8")
-                if isinstance(attrs["coord_system"], bytes)
-                else str(attrs["coord_system"]),
+                coord_system=decode_str(attrs["coord_system"]),
                 halo_radius=int(attrs["halo_radius"]),
                 # flags
                 is_mhd=bool(attrs["is_mhd"]),
                 is_relativistic=bool(attrs.get("is_relativistic", False)),
-                # enums (decode bytes to str)
-                regime=attrs["regime"].decode("utf-8")
-                if isinstance(attrs["regime"], bytes)
-                else str(attrs["regime"]),
-                solver=attrs["solver"].decode("utf-8")
-                if isinstance(attrs["solver"], bytes)
-                else str(attrs["solver"]),
-                reconstruction=attrs["reconstruction"].decode("utf-8")
-                if isinstance(attrs["reconstruction"], bytes)
-                else str(attrs["reconstruction"]),
-                timestepping=attrs["timestepping"].decode("utf-8")
-                if isinstance(attrs["timestepping"], bytes)
-                else str(attrs["timestepping"]),
+                # enums
+                regime=decode_str(attrs["regime"]),
+                solver=decode_str(attrs["solver"]),
+                reconstruction=decode_str(attrs["reconstruction"]),
+                timestepping=decode_str(attrs["timestepping"]),
+                # optional
+                checkpoint_interval=float(
+                    attrs.get("checkpoint_interval", 0.0)
+                ),
+                x1_spacing=decode_str(attrs.get("x1_spacing", "linear")),
+                x2_spacing=decode_str(attrs.get("x2_spacing", "linear")),
+                x3_spacing=decode_str(attrs.get("x3_spacing", "linear")),
+                boundary_conditions=bcs,
             )
         )
     except Exception as e:
