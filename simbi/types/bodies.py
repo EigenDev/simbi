@@ -44,6 +44,31 @@ class BinaryComponentConfig:
     force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     total_accreted_mass: float = 0.0
 
+    def to_body_config(self) -> dict:
+        """convert to format expected by c++ factory with nested property dicts."""
+        config = {
+            "mass": self.mass,
+            "radius": self.radius,
+            "position": self.position,
+            "velocity": self.velocity,
+            "force": self.force,
+            "two_way_coupling": self.two_way_coupling,
+        }
+
+        # all binary components have gravitational properties
+        config["gravitational"] = {"softening_length": self.softening_length}
+
+        # add accretion properties if this component is an accretor
+        if self.is_an_accretor:
+            config["accretion"] = {
+                "accretion_radius": self.accretion_radius,
+                "sink_rate": self.sink_rate,
+                "sink_delta": self.sink_delta,
+                "total_accreted_mass": self.total_accreted_mass,
+            }
+
+        return config
+
 
 @dataclass(frozen=True)
 class BinaryConfig:
@@ -71,6 +96,28 @@ class GravitationalSystemConfig(BodySystemConfig):
     system_type: str
     # Only used if system_type="binary"
     binary_config: BinaryConfig
+
+    def to_dict(self) -> dict:
+        """custom serialization for c++ factory with proper nested structure."""
+        result = {
+            "prescribed_motion": self.prescribed_motion,
+            "reference_frame": self.reference_frame,
+            "system_type": self.system_type,
+        }
+
+        if self.binary_config:
+            result["binary_config"] = {
+                "semi_major": self.binary_config.semi_major,
+                "eccentricity": self.binary_config.eccentricity,
+                "mass_ratio": self.binary_config.mass_ratio,
+                "total_mass": self.binary_config.total_mass,
+                "components": [
+                    comp.to_body_config()
+                    for comp in self.binary_config.components
+                ],
+            }
+
+        return result
 
 
 @dataclass(frozen=True)
