@@ -144,7 +144,7 @@ class SimbiProblem(BaseModel):
         ),
     ]
     checkpoint_file: Annotated[
-        Optional[str],
+        Optional[str | Path],
         ProblemParam(
             None,
             cli=True,
@@ -200,7 +200,11 @@ class SimbiProblem(BaseModel):
     ]
     boundary_conditions: Annotated[
         Union[BoundaryCondition, Sequence[BoundaryCondition]],
-        ProblemParam("outflow", cli=True, description="boundary conditions"),
+        ProblemParam(
+            BoundaryCondition.OUTFLOW,
+            cli=True,
+            description="boundary conditions",
+        ),
     ]
 
     # =========================================================================
@@ -619,11 +623,17 @@ class SimbiProblem(BaseModel):
                     f"refinement_region[{ii}] has {len(region)} coords, expected {expected_coords}"
                 )
 
-        if self.refinement_subcycling_mode == SubCycleMode.ADAPTIVE:
+        if self.refinement_subcycling_mode == SubCycleMode.MANUAL:
             if len(self.refinement_substeps) != expected_levels:
                 raise ValueError(
-                    "refinement_substeps must match refinement_max_levels - 1 for adaptive mode"
+                    "refinement_substeps must match refinement_max_levels - 1 for manual mode"
                 )
+            # insert a single substep for the base level
+            object.__setattr__(
+                self,
+                "refinement_substeps",
+                [np.uint64(1)] + self.refinement_substeps,
+            )
 
         if self.refinement_mode == RefinementMode.ADAPTIVE:
             raise NotImplementedError(
