@@ -35,12 +35,12 @@ namespace simbi::timestep {
     // =========================================================================
     template <typename PrimField, typename Geometry, std::uint64_t Rank>
     real compute_partition_timestep(
-        const PrimField& prim,
+        const PrimField&            prim,
         const grid::domain_t<Rank>& domain,
-        const Geometry& geometry,
-        real cfl,
-        real gamma,
-        het::exec::executor_t& exec
+        const Geometry&             geometry,
+        real                        cfl,
+        real                        gamma,
+        het::exec::executor_t&      exec
     )
     {
         if (domain.empty()) {
@@ -64,8 +64,7 @@ namespace simbi::timestep {
                 const auto ws   = hydro::wave_speeds(p, ehat, gamma);
 
                 // max signal speed in this direction
-                const real s_max =
-                    helpers::my_max(std::abs(ws.left), std::abs(ws.right));
+                const real s_max = helpers::my_max(std::abs(ws.left), std::abs(ws.right));
 
                 // physical cell width = scale_factor * coordinate_width
                 const real dx = h[dd] * cell_widths[dd];
@@ -95,11 +94,7 @@ namespace simbi::timestep {
     // uses proper curvilinear geometry from mesh config.
     // =========================================================================
     template <typename Sim>
-    real compute_level_timestep(
-        Sim& sim,
-        std::uint64_t lvl,
-        const geometry::motion_state_t& motion
-    )
+    real compute_level_timestep(Sim& sim, std::uint64_t lvl, const geometry::motion_state_t& motion)
     {
         const auto& meta     = sim.metadata();
         const auto& mesh_cfg = sim.mesh(lvl);
@@ -107,32 +102,28 @@ namespace simbi::timestep {
         real dt_min = std::numeric_limits<real>::max();
 
         // build geometry and compute timestep inside visitor
-        ecs::with_block_geometry<Sim::coord_system>(
-            mesh_cfg,
-            motion,
-            [&](const auto& block_geo) {
-                for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
-                    auto& fields = sim.partition_hydro(lvl, pp);
-                    auto& part   = sim.partition(lvl, pp);
-                    auto exec    = sim.partition_executor(lvl, pp);
+        ecs::with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
+            for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                auto& fields = sim.partition_hydro(lvl, pp);
+                auto& part   = sim.partition(lvl, pp);
+                auto  exec   = sim.partition_executor(lvl, pp);
 
-                    real local_dt = compute_partition_timestep(
-                        fields.prim,
-                        part.owned_domain,
-                        block_geo,
-                        meta.cfl,
-                        meta.gamma,
-                        exec
-                    );
+                real local_dt = compute_partition_timestep(
+                    fields.prim,
+                    part.owned_domain,
+                    block_geo,
+                    meta.cfl,
+                    meta.gamma,
+                    exec
+                );
 
-                    dt_min = std::min(dt_min, local_dt);
-                }
+                dt_min = std::min(dt_min, local_dt);
             }
-        );
+        });
 
         return dt_min;
     }
 
-}   // namespace simbi::timestep
+} // namespace simbi::timestep
 
-#endif   // UPDATE_TIMESTEP_HPP
+#endif // UPDATE_TIMESTEP_HPP

@@ -192,19 +192,18 @@ namespace simbi {
     enum class subcycling_mode_t : uint32_t {
         NONE,
         STANDARD,
+        MANUAL,
         ADAPTIVE,
     };
 
-    constexpr inline body_capability_t
-    operator|(body_capability_t lhs, body_capability_t rhs)
+    constexpr inline body_capability_t operator|(body_capability_t lhs, body_capability_t rhs)
     {
         return static_cast<body_capability_t>(
             static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs)
         );
     }
 
-    constexpr inline body_capability_t&
-    operator|=(body_capability_t& lhs, body_capability_t rhs)
+    constexpr inline body_capability_t& operator|=(body_capability_t& lhs, body_capability_t rhs)
     {
         lhs = lhs | rhs;
         return lhs;
@@ -212,13 +211,13 @@ namespace simbi {
 
     // component identifiers for magnetic field directions
     enum class magnetic_comp_t : std::uint64_t {
-        I = 2,   // B1 component
-        J = 1,   // B2 component
-        K = 0    // B3 component
+        I = 2, // B1 component
+        J = 1, // B2 component
+        K = 0  // B3 component
     };
 
-    constexpr auto comp_wave_speed = wave_speed_estimate_t::MIGNONE_AND_BODO_05;
-    constexpr auto comp_ct_type    = ct_algo_t ::CONTACT;
+    constexpr auto comp_wave_speed    = wave_speed_estimate_t::MIGNONE_AND_BODO_05;
+    constexpr auto comp_ct_type       = ct_algo_t ::CONTACT;
     constexpr auto comp_slope_limiter = LIMITER::MINMOD;
 
     // register BiMaps for enum serialization and deserialization
@@ -274,8 +273,7 @@ namespace simbi {
         wave_speed_estimate_t,
         {wave_speed_estimate_t::SCHNEIDER_ET_AL_93, "schneider_et_al_93"},
         {wave_speed_estimate_t::MIGNONE_AND_BODO_05, "mignone_and_bodo_05"},
-        {wave_speed_estimate_t::HUBER_AND_KISSMANN_2021,
-         "huber_and_kissmann_2021"},
+        {wave_speed_estimate_t::HUBER_AND_KISSMANN_2021, "huber_and_kissmann_2021"},
         {wave_speed_estimate_t::DAVIDSON, "davidson"}
     );
 
@@ -286,11 +284,7 @@ namespace simbi {
         {shockwave_limiter_t::QUIRK, "quirk"}
     );
 
-    REGISTER_ENUM_BIMAP(
-        LIMITER,
-        {LIMITER::MINMOD, "minmod"},
-        {LIMITER::VAN_LEER, "van_leer"}
-    );
+    REGISTER_ENUM_BIMAP(LIMITER, {LIMITER::MINMOD, "minmod"}, {LIMITER::VAN_LEER, "van_leer"});
 
     REGISTER_ENUM_BIMAP(
         ct_algo_t,
@@ -304,7 +298,8 @@ namespace simbi {
         subcycling_mode_t,
         {subcycling_mode_t::NONE, "none"},
         {subcycling_mode_t::STANDARD, "standard"},
+        {subcycling_mode_t::MANUAL, "manual"},
         {subcycling_mode_t::ADAPTIVE, "adaptive"}
     );
-}   // namespace simbi
+} // namespace simbi
 #endif
