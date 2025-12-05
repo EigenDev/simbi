@@ -38,6 +38,16 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
 
     this produces the exact format expected by backend.run_simulation().
     """
+    import warnings
+
+    # silence pydantic serialization warnings for numpy types (needed for pybind11)
+    warnings.filterwarnings(
+        "ignore",
+        message=".*Pydantic serializer warnings.*",
+        category=UserWarning,
+        module="pydantic.main",
+    )
+
     # get all model fields
     model_dict = problem.model_dump()
 
@@ -130,7 +140,11 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     # add body system if present
     body_system = problem.body_system
     if body_system and dataclasses.is_dataclass(body_system):
-        model_dict["body_system"] = dataclasses.asdict(body_system)
+        # use custom serialization if available (for proper c++ factory format)
+        if hasattr(body_system, "to_dict"):
+            model_dict["body_system"] = body_system.to_dict()
+        else:
+            model_dict["body_system"] = dataclasses.asdict(body_system)
     elif not body_system:
         model_dict.pop("body_system", None)
 
