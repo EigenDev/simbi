@@ -8,7 +8,12 @@ import sys
 from argparse import Namespace, _SubParsersAction
 from typing import Optional
 
-from simbi.viz import config_from_args, setup_viz_parser
+from simbi.viz import (
+    config_from_args,
+    handle_generate_config,
+    load_props_from_args,
+    setup_viz_parser,
+)
 
 from ..utils.formatter import HelpFormatter
 
@@ -29,11 +34,19 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
     """Execute plot command using new component-based API"""
     from simbi.viz import api
 
+    # handle --generate-config: print example and exit
+    if handle_generate_config(args):
+        return
+
     if not args.files:
         print("Error: No files specified for 'plot' command.")
         sys.exit(1)
 
     config = config_from_args(args)
+
+    # load component props from --config file and/or --props overrides
+    component_props = load_props_from_args(args)
+
     is_animation = getattr(args, "animate", False) or args.kind == "movie"
     plot_type = config.plot.plot_type
 
@@ -56,6 +69,9 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         "scale",
         "rend",
         "rbeg",
+        "config",
+        "props",
+        "generate_config",
     }
     pass_through_kwargs = {
         k: v for k, v in cli_args.items() if k not in processed_args
@@ -67,19 +83,27 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         "multidim": api.plot,
         "coordinate_bin": api.plot_coordinate_profile,
         "time_series": api.plot_time_series,
-        # "histogram": api.plot_histogram,
     }
 
     if is_animation:
-        api.animate(
-            config=config,
-            files=args.files,
-            fields=args.fields,
-            save_as=args.save_as,
-            setup=args.setup,
-            theme=args.theme,
-            **pass_through_kwargs,
-        )
+        if plot_type == "coordinate_bin":
+            api.animate_coordinate_profile(
+                config=config,
+                files=args.files,
+                fields=args.fields,
+                save_as=args.save_as,
+                component_props=component_props,
+                **pass_through_kwargs,
+            )
+        else:
+            api.animate(
+                config=config,
+                files=args.files,
+                fields=args.fields,
+                save_as=args.save_as,
+                component_props=component_props,
+                **pass_through_kwargs,
+            )
     else:
         plot_func = plot_dispatch.get(plot_type)
         if plot_func is None:
@@ -91,7 +115,6 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
             files=args.files,
             fields=args.fields,
             save_as=args.save_as,
-            setup=args.setup,
-            theme=args.theme,
+            component_props=component_props,
             **pass_through_kwargs,
         )
