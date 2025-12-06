@@ -198,6 +198,7 @@ namespace simbi::evolution {
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 ghost_fill_system_t{}(sim, lvl);
                 c2p_system_t{}(sim, lvl);
+                sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl);
 
@@ -262,6 +263,7 @@ namespace simbi::evolution {
                 // === STAGE 1: u^n -> u* ===
                 ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
                 c2p_system_t{}(sim, lvl);
+                sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u^n)
 
@@ -294,6 +296,7 @@ namespace simbi::evolution {
                 // === STAGE 2: u* -> u^{n+1} ===
                 ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
                 c2p_system_t{}(sim, lvl);
+                sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u*)
 
@@ -365,8 +368,6 @@ namespace simbi::evolution {
             auto& meta = sim.metadata();
 
             timestep_system_t{}(sim);
-
-            sink_cache_system_t{}(sim);
 
             if (meta.timestepping == timestepping_t::RK2) {
                 advance_level_rk2(0);
