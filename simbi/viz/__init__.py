@@ -3,6 +3,8 @@ from .api import (
     animate_coordinate_profile,
     plot,
     plot_coordinate_profile,
+    plot_coordinate_profile_overlay,
+    plot_overlay,
     plot_time_series,
 )
 from .cli import setup_parser as setup_viz_parser
@@ -13,9 +15,11 @@ from .pipeline.conversion import handle_generate_config, load_props_from_args
 __all__ = [
     "setup_viz_parser",
     "plot",
+    "plot_overlay",
     "animate",
     "animate_coordinate_profile",
     "plot_coordinate_profile",
+    "plot_coordinate_profile_overlay",
     "plot_time_series",
     "config_from_args",
     "load_component_props",
