@@ -7,7 +7,7 @@ from matplotlib.lines import Line2D
 
 from simbi.viz.utility import get_field_str
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
@@ -66,7 +66,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         # We would re-render if props change
         pass
 
-    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
+    def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
         """Render the radial profile with guaranteed 1D data and return a RenderResult."""
         if not self._initialized:
             raise RuntimeError("Component not initialized.")
@@ -91,9 +91,16 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
                 r_bins[good_bins], values[good_bins] / norm
             )
 
+        if norm != 1:
+            # if plotting a negative normalized quantity, we need to
+            # account for whether the horizontal line is -1 or 1
+            norm_loc = 1.0 if np.all(values / norm > 0) else -1.0
+            self.ax.axhline(
+                norm_loc, color="gray", linestyle="--", linewidth=0.5
+            )
+
         # --- Apply Special Formatting ---
         self._format_axes(r_bins, values, data.name)
-
         # return a RenderResult so the Figure/Formatter can inspect artists and metadata
         return RenderResult(
             artists={"line": self._main_line, "refs": self._ref_lines},
@@ -106,7 +113,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         self.ax.set_yscale(self.props.y_scale)
         field_base_name, field_str = stripped_field_name(field_name)
 
-        self.ax.set_xlabel("$r/a$")
+        self.ax.set_xlabel("$r$")
         # self.ax.set_ylabel(field_str)
 
         # Add reference lines

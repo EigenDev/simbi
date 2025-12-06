@@ -8,7 +8,7 @@ from pydantic import ValidationInfo, field_validator
 
 from simbi.viz.utility import get_field_str
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
@@ -108,7 +108,7 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
             labels = [f"{base_label}_{i}" for i in range(num_lines)]
         return labels
 
-    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
+    def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
         """Render the time_series plot with 1D or 2D data and return a RenderResult."""
         if not self._initialized:
             raise RuntimeError("Component not initialized.")
@@ -146,6 +146,8 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
                 linewidth=self.props.linewidth,
                 alpha=self.props.alpha,
             )[0]
+            if norm != 1:
+                self.ax.axhline(1.0, color="black", linestyle="--", alpha=0.3)
             all_rendered_lines.append(main_line)
 
             # --- Render Decorators (Moving Avg / Trend) ---

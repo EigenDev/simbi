@@ -254,12 +254,12 @@ def prepare_figure(
         fig, ax = plt.subplots(
             1,
             1,
-            figsize=config.style.fig_size,
+            figsize=config.figure.fig_size,
             subplot_kw={"projection": "polar"},
             layout="constrained",
         )
     else:
-        fig = plt.figure(figsize=config.style.fig_size)
+        fig = plt.figure(figsize=config.figure.fig_size)
         ax = fig.add_subplot(111)
 
     # pass optional formatter into the Figure so it can control layout policy
@@ -437,6 +437,13 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
             }
         )
 
+    # convert refined_regions to level_bounds tuples (xmin, xmax, ymin, ymax)
+    # reverse to get coarsest-to-finest order (level 0, 1, 2, ...)
+    level_bounds: list[tuple[float, float, float, float]] = [
+        (r["xmin"], r["xmax"], r["ymin"], r["ymax"])
+        for r in reversed(refined_regions)
+    ]
+
     axis_names = fields_2d[0].axis_names
     # Return a new 1D FieldData object (the "Polygon Contract")
     return FieldData(
@@ -446,6 +453,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
         axis_names=axis_names,
         coord_system=fields_2d[0].coord_system,
         time=fields_2d[0].time,
+        level_bounds=level_bounds if len(level_bounds) > 1 else None,
     )
 
 
@@ -485,11 +493,14 @@ def compose_fields_for_render(
     nlvls = 1 + sum("_L" in f.name for f in fields)
     is_refined = nlvls > 1
 
-    use_polygons = is_refined or config.refinement.render_mode == "polygons"
-    force_pcolormesh = config.refinement.render_mode == "pcolormesh"
+    # refined data MUST use polygons (pcolormesh can't handle different grids)
+    if is_refined:
+        use_polygons = True
+    else:
+        use_polygons = config.refinement.render_mode == "polygons"
 
     is_2d = fields[0].ndim == 2
-    if is_2d and use_polygons and not force_pcolormesh:
+    if is_2d and use_polygons:
         return [_compose_polygons(list(fields))]
     else:
         return fields

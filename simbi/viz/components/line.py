@@ -1,7 +1,7 @@
 """
 Line plot component for visualization.
 
-This component is a "simple" renderer. It expects to be given
+This component is a simple renderer. It expects to be given
 a single, 1D FieldData object and will render it.
 """
 
@@ -14,7 +14,7 @@ from pydantic import ValidationInfo, field_validator
 
 from simbi.viz.utility import get_field_str
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
@@ -70,7 +70,7 @@ def _update_line_style(
 
 class LinePlotComponent(Component):
     """
-    A "simple" renderer for a single 1D line.
+    A simple renderer for a single 1D line.
     Expects 1D FieldData.
     """
 
@@ -96,7 +96,7 @@ class LinePlotComponent(Component):
             style = _create_line_style(self.props)
             _update_line_style(self._line, style, self.props.label)
 
-    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
+    def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
         """
         Render the line plot with guaranteed 1D data.
         `data` is a *single* FieldData object.

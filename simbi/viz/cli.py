@@ -1,95 +1,54 @@
+# =============================================================================
+# cli.py
+#
+# visualization cli argument parser.
+# orchestration and figure-level args only.
+# component-specific styling handled entirely by --config and --props.
+# =============================================================================
 import argparse
 import warnings
-from itertools import cycle
-from typing import Any, Optional
+from typing import Optional
 
 VALID_PLOT_TYPES = ["line", "multidim", "coordinate_bin", "time_series"]
 
 try:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        import cmasher
+        import cmasher  # noqa: F401
 except ImportError:
     pass
 
 
 class ParseKVAction(argparse.Action):
+    """Parse key=value pairs into a dict."""
+
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values: Any,
+        values,
         option_string: str | None = None,
     ) -> None:
         try:
             the_dict = dict(map(lambda x: x.split("="), values))
         except ValueError as ex:
-            message = "\nTraceback: {}".format(ex)
-            message += "\nError on '{}' || It should be 'key=value'".format(
-                ",".join(values)
+            message = f"\nTraceback: {ex}"
+            message += (
+                f"\nError on '{','.join(values)}' || expected 'key=value'"
             )
             raise argparse.ArgumentError(self, str(message))
         setattr(namespace, self.dest, the_dict)
 
 
-class ParseKVActionToList(argparse.Action):
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: Any,
-        option_string: str | None = None,
-    ) -> None:
-        setattr(namespace, self.dest, dict())
-        for each in values:
-            try:
-                key, value = each.split("=")
-                if "," in value:
-                    value = value.split(",")
-                if isinstance(value, str):
-                    value = [value]
-                getattr(namespace, self.dest)[key] = value
-            except ValueError as ex:
-                message = "\nTraceback: {}".format(ex)
-                message += "\nError on '{}' || It should be 'key=value'".format(
-                    each
-                )
-                raise argparse.ArgumentError(self, str(message))
-
-
-def tuple_arg(param: str) -> tuple[int, ...]:
-    """Parse a tuple of ints from the command line"""
-    try:
-        return tuple(int(arg) for arg in param.split(","))
-    except BaseException:
-        raise argparse.ArgumentTypeError("argument must be tuple of ints")
-
-
-def colorbar_limits(c):
-    """Parse the colorbar limits from the command line"""
-    try:
-        vmin, vmax = map(float, c.split(","))
-        if vmin > vmax:
-            return vmax, vmin
-        return vmin, vmax
-    except BaseException:
-        raise argparse.ArgumentTypeError(
-            "Colorbar limits must be in the format: vmin,vmax"
-        )
-
-
 def nullable_string(val: str) -> Optional[str]:
-    """If a user passes an empty string to this argument, return None"""
-    if not val:
-        return None
-    return val
+    """Return None for empty strings."""
+    return val if val else None
 
 
 def time_scale_converter(val: str) -> Optional[float]:
     """
-    If a user passes a float, return the float. if they pass a float with something
-    like "pi" or "e" in it, evaluate it as a python expression. so if they pass in 4pi,
-    it will return 4 * 3.14159...
+    Parse time scale value, supporting 'pi' and 'e' constants.
+    e.g., '4pi' -> 4 * 3.14159...
     """
     if not val:
         return None
@@ -97,12 +56,6 @@ def time_scale_converter(val: str) -> Optional[float]:
         return float(val)
     except ValueError:
         try:
-            # here we need to split the string into parts that are numbers and parts
-            # that are not numbers. we can do this by iterating through the string and
-            # checking if each character is a number or not. For the parts that are not
-            # numbers we check if they are wither 'pi' or 'e' and replace them
-            # with their numerical values. then we join the parts back together and
-            # evaluate the expression using eval. we then return the new float value.
             import math
             import re
 
@@ -111,380 +64,228 @@ def time_scale_converter(val: str) -> Optional[float]:
                 if part == "pi":
                     parts[i] = math.pi
                 elif part == "e":
-                    parts[i] = math.exp(1)
+                    parts[i] = math.e
                 else:
                     parts[i] = float(part)
             return math.prod(parts)
-
         except Exception as e:
             raise argparse.ArgumentTypeError(
-                f"Could not convert {val} to float: {e}"
+                f"could not convert '{val}' to float: {e}"
             )
 
 
-class PlotStyleAction(argparse.Action):
-    """Custom action to set plot style from flag or direct argument"""
-
-    def __init__(
-        self,
-        option_strings: list[str],
-        dest: str,
-        nargs: Optional[int] = None,
-        **kwargs: Any,
-    ):
-        if nargs is not None:
-            raise ValueError("nargs not allowed")
-        super().__init__(option_strings, dest, nargs=0, **kwargs)
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: Any,
-        option_string: Optional[str] = None,
-    ) -> None:
-        if not option_string:
-            raise ValueError("No option string provided")
-
-        if option_string == "--plot-type":
-            if values not in VALID_PLOT_TYPES:
-                raise ValueError(f"Invalid plot style: {values}")
-            setattr(namespace, self.dest, values)
-        elif option_string.startswith("--"):
-            # Convert flag to style name (e.g. --line -> "line")
-            style = option_string.replace("--", "")
-            setattr(namespace, self.dest, style)
-
-
-def pair_of_floats(values: Any) -> tuple[float, float]:
-    try:
-        a, b = map(float, values.split(","))
-        return (a, b)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            "Values must be comma-separated pair of numeric types, e.g., '1,2'"
-        )
-
-
-class CycleAction(argparse.Action):
-    """Custom action to turn list of items into cycle"""
-
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: Any,
-        option_string: Optional[str] = None,
-    ) -> None:
-        setattr(namespace, self.dest, cycle(values))
-
-
 def setup_parser(parser: argparse.ArgumentParser) -> None:
-    """Setup visualization parser with all plot arguments"""
-    # Common arguments
-    parser.add_argument("files", nargs="+", help="Data files to visualize")
+    """Setup visualization parser."""
+
+    # =========================================================================
+    # required / positional
+    # =========================================================================
+    parser.add_argument("files", nargs="+", help="checkpoint file(s)")
     parser.add_argument(
-        "--fields", nargs="+", default=["rho"], help="Fields to visualize"
+        "--fields", nargs="+", default=["rho"], help="field(s) to visualize"
     )
-    parser.add_argument("--setup", default="Simulation", help="Setup name")
+
+    # =========================================================================
+    # plot type and dispatch
+    # =========================================================================
     parser.add_argument(
         "--plot-type",
-        choices=["line", "multidim", "coordinate_bin", "time_series"],
+        choices=VALID_PLOT_TYPES,
         default=None,
-        help="Type of plot to create",
+        help="type of plot (auto-detected if omitted)",
     )
     parser.add_argument(
-        "--analysis-type",
-        choices=[
-            "angular_momentum",
-            "radial_profile",
-            "quiver",
-            "streamlines",
-            "mass_flux",
-        ],
-        default="angular_momentum",
-        help="Type of analysis for accretion plots",
+        "--setup", default="Simulation", help="setup name for title"
+    )
+
+    # =========================================================================
+    # output control
+    # =========================================================================
+    parser.add_argument("--save-as", help="save output to file")
+    parser.add_argument(
+        "--no-show", action="store_true", help="don't display the plot"
     )
     parser.add_argument(
-        "--theme",
-        default="default",
-        help="Theme to use for visualization",
-        choices=["default", "dark", "scientific"],
+        "--bbox-inches",
+        type=nullable_string,
+        default="tight",
+        help="bounding box for saving",
     )
-    parser.add_argument("--save-as", help="Save output to file")
+
+    # =========================================================================
+    # animation
+    # =========================================================================
     parser.add_argument(
-        "--no-show", action="store_true", help="Don't display the plot"
+        "--animate", action="store_true", help="create animation"
     )
-    parser.add_argument("--ndim", type=int, help="Number of dimensions")
     parser.add_argument(
-        "--log",
+        "--kind",
+        choices=["snapshot", "movie"],
+        default="snapshot",
+        help="visualization kind",
+    )
+    parser.add_argument(
+        "--frame-rate", type=int, default=10, help="animation frame rate"
+    )
+
+    # =========================================================================
+    # data pipeline
+    # =========================================================================
+    parser.add_argument(
+        "--slice",
+        nargs="+",
+        action=ParseKVAction,
+        default=None,
+        help="slice data (e.g., --slice x3=0.0 x2=0.1)",
+    )
+    parser.add_argument(
+        "--active-levels",
+        nargs="+",
+        default=None,
+        help="refinement levels to display (e.g., '0 1' or 'all')",
+    )
+    parser.add_argument(
+        "--composite-view",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Use log scale",
+        help="use composite view for refined data",
     )
     parser.add_argument(
-        "--xscale",
-        default="linear",
-        help="scale for x-axis",
-        choices=["linear", "log", "symlog", "asinh"],
+        "--render-mode",
+        choices=["pcolormesh", "polygons"],
+        default="pcolormesh",
+        help="2d rendering mode",
+    )
+
+    # =========================================================================
+    # vector fields
+    # =========================================================================
+    parser.add_argument(
+        "--vector-fields",
+        nargs="+",
+        default=None,
+        help="vector field components (e.g., v1 v2)",
     )
     parser.add_argument(
-        "--yscale",
-        default="linear",
-        help="scale for y-axis",
-        choices=["linear", "log", "symlog", "asinh"],
+        "--vector-type",
+        choices=["quiver", "stream"],
+        default="quiver",
+        help="vector visualization type",
     )
-    parser.add_argument(
-        "--cmap", nargs="+", help="Colormap(s) to use", default=["viridis"]
-    )
+
+    # =========================================================================
+    # figure layout (FigureConfig)
+    # =========================================================================
     parser.add_argument(
         "--fig-size",
         nargs=2,
         type=float,
-        help="Figure dimensions (width height)",
+        help="figure dimensions (width height)",
     )
-    parser.add_argument("--dpi", type=int, default=300, help="Output DPI")
-    parser.add_argument(
-        "--no-legend", dest="legend", action="store_false", help="Hide legend"
-    )
-    parser.add_argument("--legend-loc", help="Location of legend")
-    parser.add_argument(
-        "--labels", nargs="+", help="Labels for plots", default=[]
-    )
+    parser.add_argument("--dpi", type=int, default=300, help="output dpi")
     parser.add_argument(
         "--xlims",
         nargs=2,
         type=float,
         default=[None, None],
-        help="X axis limits",
+        help="x axis limits",
     )
     parser.add_argument(
         "--ylims",
         nargs=2,
         type=float,
         default=[None, None],
-        help="Y axis limits",
+        help="y axis limits",
     )
-    parser.add_argument("--xlabel", default=None, help="X axis label")
-    parser.add_argument("--ylabel", default=None, help="Y axis label")
+    parser.add_argument("--xlabel", default=None, help="x axis label")
+    parser.add_argument("--ylabel", default=None, help="y axis label")
     parser.add_argument(
-        "--nplots", type=int, default=1, help="Number of subplots"
+        "--xscale",
+        choices=["linear", "log", "symlog", "asinh"],
+        default="linear",
+        help="x axis scale",
     )
     parser.add_argument(
-        "--kind",
-        choices=["snapshot", "movie"],
-        default="snapshot",
-        help="Kind of visualization",
+        "--yscale",
+        choices=["linear", "log", "symlog", "asinh"],
+        default="linear",
+        help="y axis scale",
     )
 
-    # Animation
+    # =========================================================================
+    # theme and global style
+    # =========================================================================
     parser.add_argument(
-        "--animate", action="store_true", help="Create animation"
+        "--theme",
+        choices=["default", "dark", "scientific"],
+        default="default",
+        help="visualization theme",
     )
     parser.add_argument(
-        "--frame-rate", type=int, default=10, help="Animation frame rate"
+        "--transparent", action="store_true", help="transparent background"
     )
     parser.add_argument(
-        "--pan-speed", type=float, help="Speed of camera pan for animations"
-    )
-    parser.add_argument(
-        "--extension", type=float, help="Maximum extent for animation span"
+        "--use-tex", action="store_true", help="use latex for text"
     )
 
-    # Multidim options
+    # =========================================================================
+    # time display
+    # =========================================================================
     parser.add_argument(
-        "--slice",
-        nargs="+",
-        help="Slice data at axes. e.g., --slice x3=0.0 x2=0.1",
-        action=ParseKVAction,
-        default=None,
+        "--time-scale",
+        type=time_scale_converter,
+        help="characteristic time scale (supports 'pi', 'e')",
     )
     parser.add_argument(
-        "--bipolar", action="store_true", help="Use bipolar plotting"
+        "--time-units", type=str, default="", help="time units string"
     )
-    parser.add_argument(
-        "--vector-fields",
-        nargs="+",
-        help="Vector field components for quiver/streamline plots",
-        default=None,
-    )
-    parser.add_argument(
-        "--vector-type",
-        choices=["quiver", "stream"],
-        default="quiver",
-        help="Type of vector field plot",
-    )
-    parser.add_argument(
-        "--bbox-inches",
-        type=nullable_string,
-        default="tight",
-        help="Bounding box in inches",
-    )
+
+    # =========================================================================
+    # special features
+    # =========================================================================
     parser.add_argument(
         "--draw-bodies",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Toggle the drawing of immersed bodies",
-    )
-    parser.add_argument(
-        "--color-range",
-        nargs="+",
-        help="Color range(s) (min,max format)",
-        type=colorbar_limits,
-        default=[(None, None)],
+        help="draw immersed bodies",
     )
 
-    # Style options
+    # =========================================================================
+    # coordinate binning options
+    # =========================================================================
     parser.add_argument(
-        "--transparent", action="store_true", help="Transparent background"
-    )
-    parser.add_argument("--dbg", action="store_true", help="Dark background")
-    parser.add_argument(
-        "--use-tex", action="store_true", help="Use LaTeX for text"
-    )
-    parser.add_argument(
-        "--print", action="store_true", help="Publication-quality style"
-    )
-    parser.add_argument(
-        "--pictorial", action="store_true", help="Pictorial style"
-    )
-    parser.add_argument(
-        "--scale-values-by",
-        nargs="+",
-        type=float,
-        help="Scale factors for plotted fields",
-    )
-    parser.add_argument(
-        "--time-scale",
-        type=time_scale_converter,
-        help="Characteristics time scale",
-    )
-    parser.add_argument(
-        "--time-units", type=str, default="", help="Time units string"
-    )
-    parser.add_argument(
-        "--norm",
-        nargs="+",
-        type=float,
-        help="Normalization values for fields",
-        default=[1.0],
-    )
-    parser.add_argument("--nbins", type=int, default=100, help="Number of bins")
-    parser.add_argument(
-        "--cbar", action="store_true", default=True, help="Show colorbar"
-    )
-    parser.add_argument(
-        "--rev-cmap", dest="rcmap", action="store_true", help="Reverse colormap"
-    )
-    parser.add_argument(
-        "--cbar-orient",
-        dest="colorbar_orientation",
-        choices=["horizontal", "vertical"],
-        default="vertical",
-        help="Colorbar orientation",
-    )
-    parser.add_argument(
-        "--annot-loc",
-        choices=[
-            "lower left",
-            "lower right",
-            "upper left",
-            "upper right",
-            "upper center",
-            "lower center",
-            "center",
-            "center right",
-            "center left",
-        ],
-        help="Annotation location",
-    )
-    parser.add_argument("--annot-text", nargs="+", help="Annotation text")
-    parser.add_argument(
-        "--power", type=float, default=1.0, help="Power norm exponent"
-    )
-    parser.add_argument(
-        "--nlinestyles",
+        "--n-bins",
         type=int,
-        help="Number of line styles to use for line plots",
-    )
-    parser.add_argument(
-        "--bbox-kind",
-        choices=["tight", "standard", "full"],
-        default="tight",
-        help="Bounding box kind for saving figures",
-    )
-    parser.add_argument(
-        "--annotation-anchor",
-        nargs=2,
-        type=float,
-        default=(1.0, 1.0),
-        help="Annotation anchor point (x, y)",
-    )
-    parser.add_argument(
-        "--annotation-text",
-        type=str,
-        default="",
-        help="Text to display in the annotation",
-    )
-    parser.add_argument(
-        "--xmax",
-        type=float,
-        help="Maximum x value for plots (overrides xlims)",
+        default=64,
+        help="number of bins for coordinate profiles",
     )
 
-    # Histogram options
+    # =========================================================================
+    # time series options
+    # =========================================================================
     parser.add_argument(
-        "--hist-type",
-        choices=["kinetic", "enthalpy", "mass", "energy"],
-        help="Histogram type",
-        default="kinetic",
+        "--weight", default=None, help="weight field for time series averaging"
     )
-    parser.add_argument("--powerfit", action="store_true", help="Fit power law")
 
-    # time_series options
-    parser.add_argument("--weight", help="Weight field for time_series average")
+    # =========================================================================
+    # config file and props overrides (ALL component styling goes here)
+    # =========================================================================
     parser.add_argument(
-        "--orbital-params",
-        nargs="+",
-        help="Orbital parameters (key=value format)",
-        action=ParseKVAction,
-    )
-    parser.add_argument(
-        "--inset",
-        action=ParseKVAction,
-        help="Inset plot parameters (key=value format)",
-        default=None,
-        metavar="KEY=VALUE",
-    )
-    # refinement-specific
-    parser.add_argument(
-        "--active-levels",
-        nargs="+",
-        help="Active refinement levels to display (e.g., '0 1' or 'all')",
-        default=None,
-    )
-    parser.add_argument(
-        "--composite-view",
-        action=argparse.BooleanOptionalAction,
-        help="Use composite view for refined data",
-        default=False,
-    )
-    parser.add_argument(
-        "--show-refinement-bounds",
-        action=argparse.BooleanOptionalAction,
-        help="Show refinement bounds in multidim plots",
-        default=False,
-    )
-    parser.add_argument(
-        "--show-grid",
-        action=argparse.BooleanOptionalAction,
-        help="Show refinment cells",
-        default=False,
-    )
-    parser.add_argument(
-        "--render-mode",
-        help="Show refinment cells",
+        "--config",
         type=str,
-        default="pcolormesh",
-        choices=["pcolormesh", "polygons"],
+        default=None,
+        metavar="PATH",
+        help="yaml/json config file for component props",
+    )
+    parser.add_argument(
+        "--props",
+        nargs="+",
+        default=[],
+        metavar="COMPONENT.FIELD=VALUE",
+        help="override component props (e.g., polygon.cmap=inferno)",
+    )
+    parser.add_argument(
+        "--generate-config",
+        action="store_true",
+        help="print example config and exit",
     )

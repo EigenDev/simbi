@@ -126,7 +126,7 @@ class Figure:
         Args:
             config: VisualizationConfig for the figure
             formatter: Optional FigureFormatter. If omitted, a default is constructed
-                       from `config.style`.
+                       from `config.figure`.
         """
         self.config = config
         self.fig: Optional[MplFigure] = None
@@ -140,7 +140,7 @@ class Figure:
         if formatter is not None:
             self.formatter = formatter
         else:
-            self.formatter = formatting.FigureFormatter(self.config.style)
+            self.formatter = formatting.FigureFormatter(self.config.figure)
 
     def add_component(self, component: Component, data: Any = None):
         """Adds a component and its associated data payload."""
@@ -162,17 +162,18 @@ class Figure:
         main_ax = self.axes["main"]
 
         # --- PRE-RENDER FORMATTING ---
-        formatting.apply_scaling(main_ax, self.config.style)
+        formatting.apply_scaling(main_ax, self.config.figure)
 
         # --- RENDER DATA ---
         rendered_artists = []
+        has_mesh_collection = False
         for component, data in self._components:
             if not component.initialized:
                 raise RuntimeError("Component not initialized before render.")
 
             # The component renders its artist (components should return RenderResult,
             # but legacy dict/list returns are tolerated)
-            result = component.render(data, self.config.style)
+            result = component.render(data, self.config.figure)
             artist_dict, metadata = _normalize_render_output(result)
 
             # store normalized tuple (artists_dict, metadata) for the formatter
@@ -180,16 +181,24 @@ class Figure:
 
             # set axis limits for quad/polygon plots since relim() doesn't work on mesh collections
             if isinstance(component, (QuadPlotComponent, PolygonPlotComponent)):
+                has_mesh_collection = True
                 if isinstance(data, FieldData) and len(data.domain) > 0:
                     try:
                         # for polygon data, domain contains patches (vertices)
-                        # extract x,y limits from all vertices
+                        # shape: (n_patches, 4, 2) where 4 is vertices per patch, 2 is (x, y)
                         if isinstance(component, PolygonPlotComponent):
-                            patches = data.domain
-                            all_x = [v[0] for patch in patches for v in patch]
-                            all_y = [v[1] for patch in patches for v in patch]
-                            main_ax.set_xlim(min(all_x), max(all_x))
-                            main_ax.set_ylim(min(all_y), max(all_y))
+                            import numpy as np
+
+                            patches = np.asarray(data.domain)
+                            # extract all x and y coordinates using numpy
+                            all_x = patches[:, :, 0].flatten()
+                            all_y = patches[:, :, 1].flatten()
+                            main_ax.set_xlim(
+                                float(all_x.min()), float(all_x.max())
+                            )
+                            main_ax.set_ylim(
+                                float(all_y.min()), float(all_y.max())
+                            )
                         else:
                             # quadmesh: domain contains coordinate arrays
                             x_data = (
@@ -203,16 +212,31 @@ class Figure:
                             main_ax.set_xlim(x_data.min(), x_data.max())
                             if y_data is not None:
                                 main_ax.set_ylim(y_data.min(), y_data.max())
-                    except Exception:
-                        # don't let domain issues break rendering
-                        pass
+                    except Exception as e:
+                        # log but don't break rendering
+                        import logging
 
-        try:
-            main_ax.relim()
-            main_ax.autoscale_view()
-        except Exception:
-            # some axes (polar, specialized) may not support relim/autoscale_view
-            pass
+                        logging.getLogger(__name__).debug(
+                            f"failed to set axis limits from domain: {e}"
+                        )
+
+        # only use relim/autoscale for non-mesh collections (lines, scatter, etc.)
+        if not has_mesh_collection:
+            try:
+                main_ax.relim()
+                main_ax.autoscale_view()
+            except Exception:
+                # some axes (polar, specialized) may not support relim/autoscale_view
+                pass
+
+        # apply user-specified limits from style config (overrides auto limits)
+        style = self.config.figure
+        if style.xlims is not None:
+            if style.xlims.min is not None or style.xlims.max is not None:
+                main_ax.set_xlim(style.xlims.min, style.xlims.max)
+        if style.ylims is not None:
+            if style.ylims.min is not None or style.ylims.max is not None:
+                main_ax.set_ylim(style.ylims.min, style.ylims.max)
 
         # Get context from the *first* component
         first_component, first_data = (
@@ -244,59 +268,81 @@ class Figure:
         return
 
     def save(self, path: str):
+        """
+        Save figure with smart extension based on plot type:
+          - line/time_series/coordinate_profile → .pdf (vector)
+          - quad/polygon (2d) → .png (hi-res raster)
+          - animation → .mp4
+        """
         from simbi.reader import logger
         from simbi.reader.progress import create_progress_bar
 
         if not self.fig:
-            raise RuntimeError("Figure has not been prepared.")
+            raise RuntimeError("figure has not been prepared")
 
-        clean_path = (
-            path.lower()
-            .strip()
-            .split(".")[0]
-            .replace(" ", "_")
-            .replace("-", "_")
-        )
+        # strip extension if provided, normalize path
+        import os
+
+        base, ext = os.path.splitext(path)
+        base = base.strip().replace(" ", "_")
+
         if self._anim is not None:
-            if not clean_path.endswith((".mp4", ".avi", ".mov", ".gif")):
-                clean_path += ".mp4"  # default to mp4 if no extension
+            # animation: default to mp4
+            if ext not in (".mp4", ".avi", ".mov", ".gif"):
+                ext = ".mp4"
+            save_path = base + ext
 
             prog_bar = create_progress_bar()
             with prog_bar:
                 task = prog_bar.add_task(
-                    f"[green]Saving animation to path {clean_path}...",
+                    f"[green]saving animation to {save_path}...",
                     total=self.config.animation.total_frames,
                 )
 
-                # beautiful progress callback for animation saving using
-                # the rich library if available
                 def prog_callback(current: int, total: int) -> None:
                     prog_bar.update(task, advance=1)
 
                 self._anim.save(
-                    clean_path,
-                    dpi=self.config.style.dpi,
+                    save_path,
+                    dpi=self.config.figure.dpi,
                     progress_callback=prog_callback,
                 )
+            logger.info(f"animation saved: {save_path}")
         else:
-            if any(
+            # determine extension from component types
+            is_line_like = any(
                 isinstance(
-                    x,
+                    comp,
                     (
                         LinePlotComponent,
                         CoordinateProfileComponent,
                         TimeSeriesPlotComponent,
                     ),
                 )
-                for x, d in self._components
-            ):
-                if not clean_path.endswith(".pdf"):
-                    # save line plots as vector graphics by default
-                    path += ".pdf"
+                for comp, _ in self._components
+            )
+            is_2d = any(
+                isinstance(comp, (QuadPlotComponent, PolygonPlotComponent))
+                for comp, _ in self._components
+            )
+
+            if ext:
+                # user specified extension, respect it
+                save_path = base + ext
+            elif is_line_like and not is_2d:
+                # line plots → pdf (vector graphics)
+                save_path = base + ".pdf"
             else:
-                clean_path += ".png"
-            self.fig.savefig(clean_path, dpi=self.config.style.dpi)
-            logger.info(f"Figure saved to path: {clean_path}!")
+                # 2d plots → png (hi-res raster)
+                save_path = base + ".png"
+
+            self.fig.savefig(
+                save_path,
+                dpi=self.config.figure.dpi,
+                bbox_inches="tight",
+                transparent=self.config.figure.transparent,
+            )
+            logger.info(f"figure saved: {save_path}")
 
     def show(self):
         if self.fig:
@@ -411,13 +457,14 @@ class Figure:
                         new_field = _find_field(frame_plot_data, name)
                         if new_field is not None:
                             artist = component.render(
-                                new_field, self.config.style
+                                new_field, self.config.figure
                             )
                         else:
                             # fallback: try rendering first available field
                             if frame_plot_data.fields:
                                 artist = component.render(
-                                    frame_plot_data.fields[0], self.config.style
+                                    frame_plot_data.fields[0],
+                                    self.config.figure,
                                 )
                     elif isinstance(signature, (list, tuple)):
                         # vector or multi-field payload: map by element names
@@ -429,17 +476,17 @@ class Figure:
                                     new_payload.append(found)
                         if new_payload:
                             artist = component.render(
-                                new_payload, self.config.style
+                                new_payload, self.config.figure
                             )
                         else:
                             # fallback: render all available fields
                             artist = component.render(
-                                frame_plot_data.fields, self.config.style
+                                frame_plot_data.fields, self.config.figure
                             )
                     else:
                         # unknown payload type: give the component the full PlotData
                         artist = component.render(
-                            frame_plot_data, self.config.style
+                            frame_plot_data, self.config.figure
                         )
 
                     if artist is not None:
@@ -460,7 +507,7 @@ class Figure:
                 try:
                     assert self.fig is not None
                     time = getattr(frame_plot_data.fields[0], "time", None)
-                    set_title(main_ax, self.fig, self.config.style, time)
+                    set_title(main_ax, self.fig, self.config.figure, time)
                 except Exception:
                     pass
 
@@ -511,11 +558,11 @@ class Figure:
                         new_field = _find_field(frame_plot_data, name)
                         if new_field is not None:
                             artist = component.render(
-                                new_field, self.config.style
+                                new_field, self.config.figure
                             )
                         elif frame_plot_data.fields:
                             artist = component.render(
-                                frame_plot_data.fields[0], self.config.style
+                                frame_plot_data.fields[0], self.config.figure
                             )
                     elif isinstance(signature, (list, tuple)):
                         new_payload = []
@@ -526,15 +573,237 @@ class Figure:
                                     new_payload.append(found)
                         if new_payload:
                             artist = component.render(
-                                new_payload, self.config.style
+                                new_payload, self.config.figure
                             )
                         else:
                             artist = component.render(
-                                frame_plot_data.fields, self.config.style
+                                frame_plot_data.fields, self.config.figure
                             )
                     else:
                         artist = component.render(
-                            frame_plot_data, self.config.style
+                            frame_plot_data, self.config.figure
+                        )
+
+                    if artist is not None:
+                        artists_dict, metadata = _normalize_render_output(
+                            artist
+                        )
+                        rendered_artists_frame.append((artists_dict, metadata))
+                except Exception:
+                    continue
+
+            # apply full formatting once for first frame
+            main_ax = self.axes.get("main") if hasattr(self, "axes") else None
+            if main_ax is not None and frame_plot_data.fields:
+                try:
+                    assert self.fig is not None
+                    self.formatter.apply_figure_formatting(
+                        self.fig,
+                        main_ax,
+                        rendered_artists_frame,
+                        frame_plot_data.fields[0],
+                        coord_system=self.coord_system,
+                        xlabel=None,
+                        ylabel=None,
+                        show_legend=True,
+                    )
+                except Exception:
+                    pass
+
+            if self.fig is not None:
+                try:
+                    self.fig.canvas.draw_idle()
+                except Exception:
+                    self.fig.canvas.draw()
+        except Exception:
+            pass
+
+        # construct the animation
+        self._anim = FuncAnimation(
+            self.fig,
+            _update,
+            frames=nframes,
+            init_func=_init,
+            blit=False,
+            interval=int(1000 / fps),
+        )
+
+    def animate_coordinate_profile(
+        self,
+        files: Sequence[str],
+        fields: Sequence[str],
+        config: "VisualizationConfig",
+        output_path: str | None = None,
+        fps: int = 30,
+        save_all_frames: bool = False,
+    ):
+        """
+        create an animation of coordinate-binned profiles from multiple files.
+
+        uses the coordinate profile data pipeline (create_coordinate_profile_data)
+        instead of the standard create_plot_data, enabling spherical averaging
+        and mass flux calculations across frames.
+
+        args:
+          files: ordered list of checkpoint file paths (frames)
+          fields: field names to compute profiles for (e.g., ['mdot', 'rho'])
+          config: visualization configuration
+          output_path: output movie path (e.g., 'out.mp4'). if None, uses './animation.mp4'
+          fps: frames per second for the movie
+          save_all_frames: if True, keep intermediate frame PNGs
+        """
+        from typing import List
+
+        from matplotlib.animation import FuncAnimation
+
+        from simbi.viz.pipeline import load_data
+        from simbi.viz.pipeline.coord_binning import (
+            create_coordinate_profile_data,
+        )
+        from simbi.viz.types import FieldData as PlotFieldData
+
+        if not files:
+            raise ValueError("no input files provided for animation")
+
+        if not self.fig:
+            raise RuntimeError("figure must be prepared before animating")
+
+        output_path = output_path or "animation.mp4"
+        nframes = len(files)
+
+        # build component signatures from initial payloads
+        component_signatures: List[object] = []
+        for _, payload in self._components:
+            component_signatures.append(payload)
+
+        def _find_field(plot_data, name: str):
+            for f in plot_data.fields:
+                if f.name == name:
+                    return f
+            for f in plot_data.fields:
+                if f.name.startswith(name):
+                    return f
+            return None
+
+        def _init():
+            if self.fig is None:
+                return []
+            self.fig.canvas.draw()
+            return []
+
+        def _update(i: int):
+            file_path = files[i]
+            sim_data = load_data(file_path)
+
+            # use coordinate profile pipeline instead of standard plot data
+            frame_plot_data = create_coordinate_profile_data(
+                sim_data, fields, config
+            )
+
+            # dispatch updated payloads to components
+            rendered_artists_frame = []
+            for (component, orig_payload), signature in zip(
+                self._components, component_signatures
+            ):
+                try:
+                    artist = None
+                    if isinstance(signature, PlotFieldData):
+                        name = signature.name
+                        new_field = _find_field(frame_plot_data, name)
+                        if new_field is not None:
+                            artist = component.render(new_field, config.figure)
+                        elif frame_plot_data.fields:
+                            artist = component.render(
+                                frame_plot_data.fields[0], config.figure
+                            )
+                    elif isinstance(signature, (list, tuple)):
+                        new_payload = []
+                        for elt in signature:
+                            if hasattr(elt, "name"):
+                                found = _find_field(frame_plot_data, elt.name)
+                                if found is not None:
+                                    new_payload.append(found)
+                        if new_payload:
+                            artist = component.render(
+                                new_payload, config.figure
+                            )
+                        else:
+                            artist = component.render(
+                                frame_plot_data.fields, config.figure
+                            )
+                    else:
+                        artist = component.render(
+                            frame_plot_data, config.figure
+                        )
+
+                    if artist is not None:
+                        artists_dict, metadata = _normalize_render_output(
+                            artist
+                        )
+                        rendered_artists_frame.append((artists_dict, metadata))
+                except Exception:
+                    continue
+
+            # update title with current time
+            main_ax = self.axes.get("main") if hasattr(self, "axes") else None
+            if main_ax is not None and frame_plot_data.fields:
+                from simbi.viz.formatting import set_title
+
+                try:
+                    assert self.fig is not None
+                    time = getattr(frame_plot_data.fields[0], "time", None)
+                    set_title(main_ax, self.fig, config.figure, time)
+                except Exception:
+                    pass
+
+            if self.fig is not None:
+                try:
+                    self.fig.canvas.draw_idle()
+                except Exception:
+                    self.fig.canvas.draw()
+            return []
+
+        # render first frame with full formatting
+        try:
+            file_path = files[0]
+            sim_data = load_data(file_path)
+            frame_plot_data = create_coordinate_profile_data(
+                sim_data, fields, config
+            )
+
+            rendered_artists_frame = []
+            for (component, orig_payload), signature in zip(
+                self._components, component_signatures
+            ):
+                try:
+                    artist = None
+                    if isinstance(signature, PlotFieldData):
+                        name = signature.name
+                        new_field = _find_field(frame_plot_data, name)
+                        if new_field is not None:
+                            artist = component.render(new_field, config.figure)
+                        elif frame_plot_data.fields:
+                            artist = component.render(
+                                frame_plot_data.fields[0], config.figure
+                            )
+                    elif isinstance(signature, (list, tuple)):
+                        new_payload = []
+                        for elt in signature:
+                            if hasattr(elt, "name"):
+                                found = _find_field(frame_plot_data, elt.name)
+                                if found is not None:
+                                    new_payload.append(found)
+                        if new_payload:
+                            artist = component.render(
+                                new_payload, config.figure
+                            )
+                        else:
+                            artist = component.render(
+                                frame_plot_data.fields, config.figure
+                            )
+                    else:
+                        artist = component.render(
+                            frame_plot_data, config.figure
                         )
 
                     if artist is not None:

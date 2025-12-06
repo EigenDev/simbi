@@ -1,20 +1,20 @@
-"""Convert command line arguments to typed configuration objects."""
-
+# =============================================================================
+# conversion.py
+#
+# converts cli arguments to typed configuration objects.
+# clean separation: figure config is separate from component props.
+# component styling is handled entirely by config_loader, not here.
+# =============================================================================
 from argparse import Namespace
-from itertools import cycle
 from typing import Literal, Optional
 
-from typing_extensions import Any
-
-from simbi.viz.components.coord_binning import CoordinateProfileProps
-from simbi.viz.components.quad import QuadPlotProps
+from simbi.viz.components.interface import ComponentProps
 from simbi.viz.config import (
     AnimationConfig,
-    CoordinateHistConfig,
-    HistogramConfig,
+    CoordinateConfig,
+    FigureConfig,
     PlotConfig,
     RefinementConfig,
-    StyleConfig,
     TimeSeriesConfig,
     VisualizationConfig,
 )
@@ -22,135 +22,81 @@ from simbi.viz.utility import get_dimensionality
 
 from ..styling import ThemeManager
 from ..styling.theme import ThemeConfig
-from ..types import Bounds, ColorRange
+from ..types import Bounds
 
 
-def pair_to_bounds(pair: list[float] | None) -> Optional[Bounds]:
+def _pair_to_bounds(pair: list[float] | None) -> Optional[Bounds]:
     """Convert a [min, max] pair to Bounds object."""
     if not pair or not any(x is not None for x in pair):
         return None
     return Bounds(min=pair[0], max=pair[1])
 
 
-def tuple_to_color_range(
-    pair: list[tuple[float, float]] | None,
-) -> Optional[ColorRange]:
-    """Convert a (min, max) tuple to ColorRange object."""
-    if not pair or pair == (None, None):
-        return None
-
-    return ColorRange(min=pair[0][0], max=pair[0][1])
-
-
-def first_from_cycle(value):
-    """Get first value from a cycle object."""
-    if hasattr(value, "__next__"):
-        return next(value)
-    return value
-
-
-def validate_plot_type(
+def _validate_plot_type(
     plot_type: str | None, files: list[str]
 ) -> Literal["line", "multidim", "time_series", "coordinate_bin"]:
     """Validate and auto-detect plot type if not specified."""
     if plot_type:
         return plot_type  # type: ignore[return-value]
 
-    try:
-        from simbi.viz.utility import get_dimensionality
-
-        ndim = get_dimensionality(files) if files else 1
-        return "line" if ndim == 1 else "multidim"
-    except ImportError:
-        return "multidim"
+    ndim = get_dimensionality(files) if files else 1
+    return "line" if ndim == 1 else "multidim"
 
 
 def plot_config_from_args(args: Namespace) -> PlotConfig:
-    """Build PlotConfig from command line arguments."""
+    """Build PlotConfig from cli arguments."""
     import argparse
 
     files = args.files
-    plot_type = args.plot_type or None
+    plot_type = getattr(args, "plot_type", None)
 
-    # --- NEW SLICE PARSING LOGIC ---
+    # parse slice spec
     raw_slice = getattr(args, "slice", None)
     slice_spec: Optional[dict[str, float]] = None
     if raw_slice:
         try:
-            # Convert string values from argparse to floats
             slice_spec = {key: float(value) for key, value in raw_slice.items()}
         except ValueError as e:
             raise argparse.ArgumentTypeError(
-                f"Invalid slice value: {e}. Slice values must be numbers."
+                f"invalid slice value: {e}. slice values must be numbers."
             )
 
     return PlotConfig(
-        plot_type=validate_plot_type(plot_type, files),
+        plot_type=_validate_plot_type(plot_type, files),
         fields=getattr(args, "fields", ["rho"]),
         ndim=get_dimensionality(files),
-        slice=slice_spec,  # <-- Pass the new spec
+        slice=slice_spec,
     )
 
 
-def coordinate_props_from_args(
-    config: CoordinateHistConfig,
-) -> CoordinateProfileProps:
-    """Create AccretionAnalysisProps from configuration."""
-    return CoordinateProfileProps(
-        n_bins=config.n_bins,
-    )
-
-
-def coordinate_config_from_args(args: Namespace) -> CoordinateHistConfig:
-    """Build AccretionConfig from cli arguments"""
-    return CoordinateHistConfig()
-
-
-def style_config_from_args(args: Namespace) -> StyleConfig:
-    """Build StyleConfig from command line arguments."""
-    xlims = pair_to_bounds(getattr(args, "xlims", None))
-    ylims = pair_to_bounds(getattr(args, "ylims", None))
-    raw_color_range = getattr(args, "color_range", [(None, None)])
-    color_range = cycle(
-        list(map(lambda c: ColorRange(min=c[0], max=c[1]), raw_color_range))
-    )
-    cmap = cycle(getattr(args, "cmap", ["viridis"]))
-
-    return StyleConfig(
-        fig_size=getattr(args, "fig_size") or (5, 4),
+def figure_config_from_args(args: Namespace) -> FigureConfig:
+    """Build FigureConfig from cli arguments."""
+    return FigureConfig(
+        fig_size=getattr(args, "fig_size", None) or (8, 6),
         dpi=getattr(args, "dpi", 300),
-        xlims=xlims,
-        ylims=ylims,
-        color_range=color_range,
-        legend=not getattr(args, "no_legend", False),
-        cmap=cmap,
-        units=getattr(args, "units", False),
-        log=getattr(args, "log", False),
-        setup=getattr(args, "setup", "Unittled Simulation"),
-        legend_loc=getattr(args, "legend_loc", "upper right"),
+        xlims=_pair_to_bounds(getattr(args, "xlims", None)),
+        ylims=_pair_to_bounds(getattr(args, "ylims", None)),
+        xlabel=getattr(args, "xlabel", None),
+        ylabel=getattr(args, "ylabel", None),
         xscale=getattr(args, "xscale", "linear"),
         yscale=getattr(args, "yscale", "linear"),
-        value_scale=getattr(args, "scale_values_by", None),
+        title=getattr(args, "setup", None),
         draw_bodies=getattr(args, "draw_bodies", False),
         time_scale=getattr(args, "time_scale", None),
         time_units=getattr(args, "time_units", ""),
-        y_label=getattr(args, "ylabel", None),
-        x_label=getattr(args, "xlabel", None),
+        transparent=getattr(args, "transparent", False),
     )
 
 
 def refinement_config_from_args(args: Namespace) -> RefinementConfig:
-    """Build RefinementConfig from command line arguments."""
-    raw_levels = args.active_levels
+    """Build RefinementConfig from cli arguments."""
+    raw_levels = getattr(args, "active_levels", None)
 
-    # parse active_levels: handle "all" or specific level numbers
     active_levels: Optional[set[int]] = None
     if raw_levels:
         if len(raw_levels) == 1 and raw_levels[0].lower() == "all":
-            # special marker - will be expanded in prepare_fields when we know num_levels
             active_levels = None  # signals "all levels"
         else:
-            # parse as integers
             try:
                 active_levels = set(int(lvl) for lvl in raw_levels)
             except ValueError:
@@ -159,50 +105,28 @@ def refinement_config_from_args(args: Namespace) -> RefinementConfig:
                 )
 
     return RefinementConfig(
-        composite_view=args.composite_view,
+        composite_view=getattr(args, "composite_view", False),
         active_levels=active_levels,
+        render_mode=getattr(args, "render_mode", "pcolormesh"),
     )
 
 
-def multidim_props_from_args(
-    args: dict[str, Any],
-    field_index: int,
-    cmap: str,
-    color_range: ColorRange,
-    plot_type: Literal["polar", "cartesian"] = "cartesian",
-) -> QuadPlotProps:
-    return QuadPlotProps(
-        color_range=color_range,
-        cmap=cmap,
-        log_scale=args["log"],
-        power=args["power"],
-        shading=args.get("shading", "auto"),
-        alpha=args.get("alpha", 1.0),
-        plot_type=plot_type,
-        show_mesh_grid=args["show_grid"],
-    )
-
-
-def histogram_config_from_args(args: Namespace) -> HistogramConfig:
-    """Build HistogramConfig from command line arguments."""
-    return HistogramConfig(
-        hist_type=getattr(args, "hist_type", "kinetic"),
-        nbins=getattr(args, "nbins", 128),
-        powerfit=getattr(args, "powerfit", False),
+def coordinate_config_from_args(args: Namespace) -> CoordinateConfig:
+    """Build CoordinateConfig from cli arguments."""
+    return CoordinateConfig(
+        n_bins=getattr(args, "n_bins", 64),
     )
 
 
 def time_series_config_from_args(args: Namespace) -> TimeSeriesConfig:
-    """Build TimeSeriesConfig from command line arguments."""
+    """Build TimeSeriesConfig from cli arguments."""
     return TimeSeriesConfig(
         weight=getattr(args, "weight", None),
-        body_id=getattr(args, "body_id", None),
-        single_file_mode=getattr(args, "single_file_mode", False),
     )
 
 
 def animation_config_from_args(args: Namespace) -> AnimationConfig:
-    """Build AnimationConfig from command line arguments."""
+    """Build AnimationConfig from cli arguments."""
     return AnimationConfig(
         total_frames=len(getattr(args, "files", [])),
         frame_rate=getattr(args, "frame_rate", 30),
@@ -211,19 +135,18 @@ def animation_config_from_args(args: Namespace) -> AnimationConfig:
 
 
 def theme_config_from_args(args: Namespace) -> ThemeConfig:
-    """Build ThemeConfig from command line arguments."""
+    """Build ThemeConfig from cli arguments."""
     return ThemeManager.get_theme(getattr(args, "theme", "default"))
 
 
 def config_from_args(args: Namespace) -> VisualizationConfig:
-    """Build complete VisualizationConfig from command line arguments."""
+    """Build complete VisualizationConfig from cli arguments."""
     return VisualizationConfig(
         plot=plot_config_from_args(args),
-        style=style_config_from_args(args),
+        figure=figure_config_from_args(args),
         refinement=refinement_config_from_args(args),
-        histogram=histogram_config_from_args(args),
-        time_series=time_series_config_from_args(args),
         coordinate=coordinate_config_from_args(args),
+        time_series=time_series_config_from_args(args),
         animation=animation_config_from_args(args),
         theme=theme_config_from_args(args),
     )
@@ -245,3 +168,36 @@ def should_show_plot(args: Namespace) -> bool:
 def get_save_path(args: Namespace) -> Optional[str]:
     """Get the save path if specified."""
     return getattr(args, "save_as", None)
+
+
+def load_props_from_args(args: Namespace) -> dict[str, ComponentProps]:
+    """
+    Load component props from config file and/or cli overrides.
+
+    Args:
+        args: parsed cli arguments (expects --config and --props)
+
+    Returns:
+        dict mapping component names to validated props instances
+    """
+    from simbi.viz.config_loader import load_component_props
+
+    config_path = getattr(args, "config", None)
+    overrides = getattr(args, "props", [])
+
+    if not config_path and not overrides:
+        return {}
+
+    return load_component_props(config_path, overrides)
+
+
+def handle_generate_config(args: Namespace) -> bool:
+    """
+    Handle --generate-config flag. Returns True if handled (should exit).
+    """
+    if getattr(args, "generate_config", False):
+        from simbi.viz.config_loader import generate_example_config
+
+        print(generate_example_config())
+        return True
+    return False

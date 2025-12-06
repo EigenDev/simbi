@@ -1,7 +1,7 @@
 """
 Polygon plot component for visualization.
 
-This component is a "simple" renderer. It expects to be given
+This component is a simple renderer. It expects to be given
 a single, 1D FieldData object where the domain is a list of patches
 and the values are a list of corresponding colors.
 """
@@ -16,7 +16,7 @@ from pydantic import ValidationInfo, field_validator
 from simbi.reader.io import BodyCollection
 from simbi.types.bodies import Body
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
 from .quad import _create_color_normalization
@@ -39,6 +39,12 @@ class PolygonPlotProps(ComponentProps):
     mesh_alpha: float = 0.3
     mesh_linewidth: float = 0.1
 
+    # Level bounds visualization (optional)
+    show_level_bounds: bool = False
+    level_color: str = "white"
+    level_linewidth: float = 1.5
+    level_alpha: float = 0.8
+
     @field_validator("power")
     @classmethod
     def validate_power(cls, v: float, _: ValidationInfo) -> float:
@@ -56,7 +62,7 @@ class PolygonPlotProps(ComponentProps):
 
 class PolygonPlotComponent(Component):
     """
-    A "simple" renderer for 2D refined data as polygons.
+    A simple renderer for 2D refined data as polygons.
     Expects 1D FieldData adhering to the "Polygon Contract".
     """
 
@@ -65,6 +71,7 @@ class PolygonPlotComponent(Component):
     ):
         self.props = props
         self._poly_collection: Optional[PolyCollection] = None
+        self._level_artists: list = []
         self._initialized: bool = False
         self._first_render: bool = True
         self.bodies: Optional[dict[str, Body]] = bodies
@@ -94,7 +101,7 @@ class PolygonPlotComponent(Component):
             self._poly_collection.set_edgecolors(edge_color)
             self._poly_collection.set_linewidths(edge_width)
 
-    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
+    def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
         """
         Render the polygons with guaranteed 1D polygon data.
         `data` is a *single* FieldData object.
@@ -170,6 +177,9 @@ class PolygonPlotComponent(Component):
                 axes=data.axis_names if data.axis_names else ["x1", "x2"],
             )
 
+        if self.props.show_level_bounds and data.level_bounds:
+            self._draw_level_bounds(data.level_bounds)
+
         return RenderResult(
             artists={"collection": self._poly_collection},
             metadata={"mappable": self._poly_collection},
@@ -204,7 +214,37 @@ class PolygonPlotComponent(Component):
             )
             self.ax.add_patch(circle)
 
+    def _draw_level_bounds(
+        self, level_bounds: Sequence[tuple[float, float, float, float]]
+    ) -> None:
+        """Draw rectangles around each AMR level's bounding box."""
+        import matplotlib.patches as mpatches
+
+        # clear old level rectangles
+        for artist in self._level_artists:
+            artist.remove()
+        self._level_artists = []
+
+        # skip level 0 (coarsest) - only show refined level boundaries
+        for bounds in level_bounds[1:]:
+            x0, x1, y0, y1 = bounds
+            rect = mpatches.Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                fill=False,
+                edgecolor=self.props.level_color,
+                linewidth=self.props.level_linewidth,
+                alpha=self.props.level_alpha,
+                zorder=5,
+            )
+            self.ax.add_patch(rect)
+            self._level_artists.append(rect)
+
     def cleanup(self) -> None:
         if self._poly_collection:
             self._poly_collection.remove()
         self._poly_collection = None
+        for artist in self._level_artists:
+            artist.remove()
+        self._level_artists = []

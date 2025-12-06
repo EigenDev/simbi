@@ -146,7 +146,8 @@ def _get_stitched_leaf_data(
 def _calculate_momentum_terms(
     stitched_data: dict[str, np.ndarray],
     n_bins: int,
-    gamma: float = 1.0,
+    gamma: float,
+    time: float,
     GM: float = 1.0,
 ) -> list[FieldData]:
     """
@@ -237,7 +238,10 @@ def _calculate_momentum_terms(
 
 
 def _calculate_coordinate_profile(
-    stitched_data: dict[str, Array], field_name: str, n_bins: int
+    stitched_data: dict[str, Array],
+    field_name: str,
+    n_bins: int,
+    time: float,
 ) -> FieldData:
     """Calculates a generic spherically averaged profile."""
     x_flat = stitched_data["x_flat"]
@@ -256,11 +260,13 @@ def _calculate_coordinate_profile(
     bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
     name = field_name + "_vs_r"
-    return FieldData(name=name, values=mean_val, domain=[bin_centers], time=0.0)
+    return FieldData(
+        name=name, values=mean_val, domain=[bin_centers], time=time
+    )
 
 
 def _calculate_mass_flux_profile(
-    stitched_data: dict[str, Array], n_bins: int
+    stitched_data: dict[str, Array], n_bins: int, time: float
 ) -> FieldData:
     """Calculates the M-dot(r) profile with proper volume weighting for AMR."""
     x_flat = stitched_data["x_flat"]
@@ -304,7 +310,7 @@ def _calculate_mass_flux_profile(
         name=label,
         values=mass_flux_profile,
         domain=[bin_centers],
-        time=0.0,
+        time=time,
     )
 
 
@@ -345,14 +351,21 @@ def create_coordinate_profile_data(
 
     for name in field_names:
         if name == "mdot":
-            profile_data = _calculate_mass_flux_profile(stitched_data, n_bins)
+            profile_data = _calculate_mass_flux_profile(
+                stitched_data, n_bins, data.metadata.time
+            )
             final_fields.append(profile_data)
         elif name == "momentum_terms":
-            momentum_terms = _calculate_momentum_terms(stitched_data, n_bins)
+            momentum_terms = _calculate_momentum_terms(
+                stitched_data,
+                n_bins,
+                data.metadata.gamma,
+                data.metadata.time,
+            )
             final_fields.extend(momentum_terms)
         else:
             profile_data = _calculate_coordinate_profile(
-                stitched_data, name, n_bins
+                stitched_data, name, n_bins, data.metadata.time
             )
             final_fields.append(profile_data)
 

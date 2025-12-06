@@ -1,7 +1,7 @@
 """
 Stream plot component for visualization.
 
-This component is a "simple" renderer. It expects to be given
+This component is a simple renderer. It expects to be given
 a list of two 2D FieldData objects (U, V) and will render them
 as a stream plot.
 """
@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 from matplotlib.streamplot import StreamplotSet
 from pydantic import ValidationInfo, field_validator
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
@@ -38,7 +38,7 @@ class StreamPlotProps(ComponentProps):
 
 class StreamPlotComponent(Component):
     """
-    A "simple" renderer for a 2D stream plot.
+    A simple renderer for a 2D stream plot.
     Expects list[FieldData] with [U, V] components.
     """
 
@@ -91,7 +91,9 @@ class StreamPlotComponent(Component):
 
         return x, y, u_values, v_values
 
-    def render(self, data: List[FieldData], style: StyleConfig) -> RenderResult:
+    def render(
+        self, data: List[FieldData], style: FigureConfig
+    ) -> RenderResult:
         """
         Render the stream plot.
         `data` is a *list* of FieldData objects [U, V].

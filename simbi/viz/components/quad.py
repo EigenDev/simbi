@@ -1,7 +1,7 @@
 """
 Quadensional plot component for visualization.
 
-This component is a "simple" renderer. It expects to be given
+This component is a simple renderer. It expects to be given
 a single, 2D FieldData object and will render it as a pcolormesh.
 """
 
@@ -16,7 +16,7 @@ from pydantic import ValidationInfo, field_validator
 
 from simbi.reader.io import BodyCollection
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import Array, ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
@@ -85,7 +85,7 @@ def _create_color_normalization(
 
 class QuadPlotComponent(Component):
     """
-    A "simple" renderer for a single 2D field.
+    A simple renderer for a single 2D field.
     Expects 2D FieldData.
     """
 
@@ -125,7 +125,7 @@ class QuadPlotComponent(Component):
         else:
             self._clear_mesh_grid()
 
-    def render(self, data: FieldData, style: StyleConfig) -> RenderResult:
+    def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
         """
         Render the Quadensional plot with guaranteed 2D data.
         `data` is a *single* FieldData object.

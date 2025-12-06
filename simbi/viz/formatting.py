@@ -1,13 +1,12 @@
 from typing import Any, Optional
 
 from matplotlib.axes import Axes
-from matplotlib.collections import PolyCollection, QuadMesh
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 
 from simbi.viz.utility import get_field_str
 
-from .config import StyleConfig
+from .config import FigureConfig
 
 LABEL_MAP = {
     "x1": "$x$",
@@ -23,10 +22,10 @@ LABEL_MAP = {
 
 
 def set_title(
-    ax: Axes, fig: Figure, config: StyleConfig, time: Optional[float] = None
+    ax: Axes, fig: Figure, config: FigureConfig, time: Optional[float] = None
 ) -> None:
     """Sets the title on the appropriate object (fig or ax)."""
-    title = config.setup
+    title = config.title or "Simulation"
     time_units = config.time_units
     title_time = time
     time_scale = config.time_scale
@@ -45,7 +44,7 @@ def set_title(
         ax.set_title(title_str)
 
 
-def apply_scaling(ax: Axes, config: StyleConfig) -> None:
+def apply_scaling(ax: Axes, config: FigureConfig) -> None:
     """Applies log or semilog scaling."""
     ax.set_xscale(config.xscale)
     ax.set_yscale(config.yscale)
@@ -54,7 +53,7 @@ def apply_scaling(ax: Axes, config: StyleConfig) -> None:
 
 def apply_axis_labels(
     ax: Axes,
-    config: StyleConfig,
+    config: FigureConfig,
     xlabel: Optional[str] = None,
     ylabel: Optional[str] = None,
 ) -> None:
@@ -63,11 +62,11 @@ def apply_axis_labels(
         return
 
     # Use explicit config label if provided
-    ax.set_xlabel(config.x_label or xlabel or "$x$")
-    ax.set_ylabel(config.y_label or ylabel or "$y$")
+    ax.set_xlabel(config.xlabel or xlabel or "$x$")
+    ax.set_ylabel(config.ylabel or ylabel or "$y$")
 
 
-def apply_axis_limits(ax: Axes, config: StyleConfig) -> None:
+def apply_axis_limits(ax: Axes, config: FigureConfig) -> None:
     """Sets axis limits if provided in config."""
     if config.xlims:
         ax.set_xlim(config.xlims.min, config.xlims.max)
@@ -75,10 +74,9 @@ def apply_axis_limits(ax: Axes, config: StyleConfig) -> None:
         ax.set_ylim(config.ylims.min, config.ylims.max)
 
 
-def apply_legend(ax: Axes, config: StyleConfig) -> None:
-    """Adds a legend if configured."""
-    if config.legend:
-        ax.legend(loc=config.legend_loc)
+def apply_legend(ax: Axes) -> None:
+    """Adds a legend to the axes."""
+    ax.legend(loc="best")
 
 
 def add_colorbar(
@@ -90,7 +88,7 @@ def add_colorbar(
 ) -> Colorbar:
     """
     Adds a colorbar to the *provided* cax.
-    This is now a "simple" formatter.
+    This is now a simple formatter.
     """
     cbar = fig.colorbar(artist, cax=cax, orientation=orientation)
     if label:
@@ -138,6 +136,11 @@ class FigureFormatter:
         metadata provided by components. Metadata is used to decide whether
         to show a legend (only line-like artists) and for other display hints.
 
+        Label derivation from metadata:
+          - "label" (str): single label → use as ylabel
+          - "labels" (list): if len == 1 → ylabel, no legend
+                             if len > 1 → legend, no ylabel
+
         Args:
             fig: matplotlib Figure
             main_ax: the main Axes to format
@@ -153,35 +156,7 @@ class FigureFormatter:
         time = getattr(first_data, "time", None)
         set_title(main_ax, fig, self.style, time)
 
-        # Determine axis labels if not provided
-        if xlabel is None or ylabel is None:
-            try:
-                # prefer explicit axis names from data when present
-                axis_names = getattr(first_data, "axis_names", None)
-                if axis_names and isinstance(axis_names, (list, tuple)):
-                    if xlabel is None and len(axis_names) >= 1:
-                        xlabel = LABEL_MAP[axis_names[0]]
-                    if ylabel is None and len(axis_names) >= 2:
-                        ylabel = LABEL_MAP[axis_names[1]]
-                # fallback to field name for y-axis for 1D/line-like data
-                if ylabel is None and hasattr(first_data, "name"):
-                    ylabel = get_field_str(first_data.name)
-            except Exception:
-                pass
-
-        # Axis labels & limits
-        try:
-            apply_axis_labels(main_ax, self.style, xlabel, ylabel)
-        except Exception:
-            # Do not fail formatting on label errors
-            pass
-
-        try:
-            apply_axis_limits(main_ax, self.style)
-        except Exception:
-            pass
-
-        # Normalize rendered_artists entries into a list of (artists_dict, metadata_dict)
+        # Normalize rendered_artists entries first (needed for label extraction)
         normalized: list[tuple[dict, dict | None]] = []
         for entry in rendered_artists:
             if entry is None:
@@ -205,13 +180,75 @@ class FigureFormatter:
             if isinstance(artists, dict):
                 normalized.append((artists, metadata))
             else:
-                # unknown format, try to coerce: if entry has keys-like mapping, attempt cast
                 try:
                     cast_map = dict(entry)
                     normalized.append((cast_map, None))
                 except Exception:
                     normalized.append(({}, None))
 
+        # extract labels from component metadata for smart ylabel/legend handling
+        # "label" (str) → single ylabel
+        # "labels" (list) → if 1 item: ylabel, no legend; if >1: legend, no ylabel
+        metadata_label: Optional[str] = None
+        metadata_labels: list = []
+        use_legend_from_metadata = False
+
+        for _, metadata in normalized:
+            if metadata and isinstance(metadata, dict):
+                if "label" in metadata and metadata["label"]:
+                    metadata_label = metadata["label"]
+                if "labels" in metadata and metadata["labels"]:
+                    metadata_labels = list(metadata["labels"])
+                    if len(metadata_labels) > 1:
+                        use_legend_from_metadata = True
+
+        # determine ylabel from metadata if not explicitly provided
+        derived_ylabel = None
+        if len(metadata_labels) == 1:
+            # single label in list → use as ylabel, suppress legend
+            derived_ylabel = get_field_str(metadata_labels[0])
+            show_legend = False
+        elif len(metadata_labels) > 1:
+            # multiple labels → show legend, no ylabel from metadata
+            use_legend_from_metadata = True
+            derived_ylabel = None
+        elif metadata_label:
+            # single "label" key → use as ylabel
+            derived_ylabel = get_field_str(metadata_label)
+
+        # determine axis labels
+        if xlabel is None or ylabel is None:
+            try:
+                # prefer explicit axis names from data when present
+                axis_names = getattr(first_data, "axis_names", None)
+                if axis_names and isinstance(axis_names, (list, tuple)):
+                    if xlabel is None and len(axis_names) >= 1:
+                        xlabel = LABEL_MAP.get(axis_names[0], axis_names[0])
+                    if ylabel is None and len(axis_names) >= 2:
+                        ylabel = LABEL_MAP.get(axis_names[1], axis_names[1])
+                # use derived ylabel from metadata
+                if ylabel is None and derived_ylabel:
+                    ylabel = derived_ylabel
+                # fallback to field name for y-axis for 1D/line-like data
+                if ylabel is None and hasattr(first_data, "name"):
+                    ylabel = get_field_str(first_data.name)
+            except Exception:
+                pass
+
+        if ylabel and not ylabel.startswith("$"):
+            ylabel = get_field_str(ylabel)
+        # axis labels & limits
+        try:
+            apply_axis_labels(main_ax, self.style, xlabel, ylabel)
+        except Exception:
+            pass
+
+        try:
+            apply_axis_limits(main_ax, self.style)
+        except Exception:
+            pass
+
+        # continue processing normalized list (already built above)
         # Colorbar: find the first mappable among normalized artists
         mappable = None
         for artists, metadata in normalized:
@@ -277,22 +314,40 @@ class FigureFormatter:
                 break
 
         try:
-            # only apply legend when allowed and when line-like artists present
-            if show_legend and has_line_like:
-                apply_legend(main_ax, self.style)
+            # apply legend when:
+            # - explicitly requested via metadata (multiple labels)
+            # - or has line-like artists and show_legend is True
+            should_show_legend = use_legend_from_metadata or (
+                show_legend and has_line_like
+            )
+
+            # some rendered artists may have multiple
+            # labels and lines, so we should search through
+            # the list and verify if multiple labels exist
+            multiple_labels = False
+            for artists, metadata in normalized:
+                if metadata and isinstance(metadata, dict):
+                    labels = metadata.get("labels", [])
+                    if labels and len(labels) > 1:
+                        multiple_labels = True
+                        break
+
+            # but not if we used the single label as ylabel
+            if should_show_legend and multiple_labels:
+                apply_legend(main_ax)
         except Exception:
             pass
 
         # remove top/right spines for cleaner look
         # but not if plotting multidim plots (e.g, polygons, quadplot)
-        if not any(
-            isinstance(x["collection"], (PolyCollection, QuadMesh))
-            for x in rendered_artists
-        ):
-            try:
-                remove_spines(main_ax)
-            except Exception:
-                pass
+        # if any("lines" in x.keys() for x in rendered_artists) and not any(
+        #     isinstance(x["collection"], (PolyCollection, QuadMesh))
+        #     for x in rendered_artists
+        # ):
+        try:
+            remove_spines(main_ax)
+        except Exception:
+            pass
 
     def _format_colorbar(
         self, fig: Figure, ax: Axes, artist: Any, field_data: Any

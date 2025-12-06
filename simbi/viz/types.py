@@ -135,6 +135,8 @@ class FieldData(BaseModel):
     coord_system: Optional[CoordSystem] = None
     axis_names: Optional[Sequence[str]] = None
     body_names: Optional[Sequence[str]] = None
+    # level bounds for AMR visualization: list of (xmin, xmax, ymin, ymax) per level
+    level_bounds: Optional[Sequence[tuple[float, float, float, float]]] = None
     model_config = {
         "arbitrary_types_allowed": True,  # Allow arbitrary types like Array
         "frozen": True,  # Make instances immutable

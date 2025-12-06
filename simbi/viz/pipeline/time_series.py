@@ -130,7 +130,7 @@ def create_time_series_data(
         values_array = np.array(field_values_over_time[name])
 
         field_body_names = body_names if values_array.ndim == 2 else None
-        time_units = config.style.time_units
+        time_units = config.figure.time_units
 
         if time_units:
             time_units = f"[{time_units}]"
@@ -147,12 +147,12 @@ def create_time_series_data(
 
         # Handle special case: orbital averages for mdot
         # This creates a *new* derived field
-        if name in ["mdot", "maccr"] and config.style.time_scale:
+        if name in ["mdot", "maccr"] and config.figure.time_scale:
             if values_array.ndim == 2:
                 ma_times, ma_total_mdot = compute_orbital_averages(
                     time_array,
                     np.sum(values_array, axis=1),
-                    time_scale=config.style.time_scale or 2 * np.pi,
+                    time_scale=config.figure.time_scale or 2 * np.pi,
                 )
                 if ma_times.any():
                     final_fields.append(

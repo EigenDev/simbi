@@ -6,7 +6,7 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from pydantic import BaseModel
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import RenderResult
 
 # --- TypeVars ---
@@ -43,7 +43,7 @@ class Component(Protocol, Generic[P, D]):
         """Update component properties."""
         ...
 
-    def render(self, data: D, style: StyleConfig) -> RenderResult:
+    def render(self, data: D, style: FigureConfig) -> RenderResult:
         """Render the component with the given data and return a RenderResult."""
         ...
 

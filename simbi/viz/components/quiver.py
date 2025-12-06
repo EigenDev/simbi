@@ -1,7 +1,7 @@
 """
 Quiver plot component for visualization.
 
-This component is a "simple" renderer. It expects to be given
+This component is a simple renderer. It expects to be given
 a list of two 2D FieldData objects (U, V) and will render them
 as a quiver plot.
 """
@@ -14,7 +14,7 @@ from matplotlib.figure import Figure
 from matplotlib.quiver import Quiver
 from pydantic import ValidationInfo, field_validator
 
-from ..config import StyleConfig
+from ..config import FigureConfig
 from ..types import Array, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
@@ -45,7 +45,7 @@ class QuiverPlotProps(ComponentProps):
 
 class QuiverPlotComponent(Component):
     """
-    A "simple" renderer for a 2D quiver plot.
+    A simple renderer for a 2D quiver plot.
     Expects list[FieldData] with [U, V] components.
     """
 
@@ -101,7 +101,9 @@ class QuiverPlotComponent(Component):
 
         return X_sparse, Y_sparse, U_sparse, V_sparse
 
-    def render(self, data: List[FieldData], style: StyleConfig) -> RenderResult:
+    def render(
+        self, data: List[FieldData], style: FigureConfig
+    ) -> RenderResult:
         """
         Render the quiver plot and return a RenderResult.
         'data' is a list of FieldData objects [U, V].
