@@ -33,8 +33,8 @@ class CoordinateProfileProps(ComponentProps):
 
     # Analysis-specific formatting
     show_reference_lines: bool = True
-    x_scale: str = "log"
-    y_scale: str = "log"
+    x_scale: str = "linear"
+    y_scale: str = "linear"
 
 
 class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):

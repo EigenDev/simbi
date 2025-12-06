@@ -57,42 +57,61 @@ class ThemeConfig:
         }
     )
 
-    def apply(self, nfiles: int = 1, nfields: int = 1):
-        """Apply theme to matplotlib global settings"""
+    def apply(
+        self, nfiles: int = 1, nfields: int = 1, overlay_mode: bool = False
+    ):
+        """Apply theme to matplotlib global settings.
+
+        Args:
+            nfiles: number of files being plotted
+            nfields: number of fields being plotted
+            overlay_mode: if True, use color-only cycling for same field across files.
+                          linestyles cycle through fields, colors cycle through files.
+        """
         plt.style.use("default")
 
-        # cycle linestyle first, then color, then marker
-        # this ensures overlapping lines differ in linestyle before color
-        nlines = nfields * nfiles
         base_linestyles = ["-", "--", "-.", ":"]
-        base_markers = ["o", "s", "^", "D", "v", "<", ">", "p"]
-
-        # calculate how many colors needed
         colormap = plt.get_cmap(next(cycle(self.color_maps)))
-        n_base_colors = max(
-            4, (nlines + len(base_linestyles) - 1) // len(base_linestyles)
-        )
-        base_colors = [
-            colormap(k) for k in np.linspace(0.1, 0.9, n_base_colors)
-        ]
 
-        # build cycler: all properties advance in lockstep for maximum distinction
-        colors = []
-        linestyles = []
-        markers = []
-        for i in range(nlines):
-            linestyle_idx = i % len(base_linestyles)
-            color_idx = i % len(base_colors)
-            marker_idx = i % len(base_markers)
+        if overlay_mode:
+            # overlay mode: colors cycle through files, linestyles through fields
+            # cycler multiplication gives outer product: linestyle is outer, color is inner
+            n_colors = max(4, nfiles)
+            n_linestyles = min(nfields, len(base_linestyles))
 
-            linestyles.append(base_linestyles[linestyle_idx])
-            colors.append(base_colors[color_idx])
-            markers.append(base_markers[marker_idx])
+            colors = [colormap(k) for k in np.linspace(0.1, 0.9, n_colors)]
+            linestyles = base_linestyles[:n_linestyles]
 
-        default_cycler = (
-            cycler(color=colors) + cycler(linestyle=linestyles)
-            # + cycler(marker=markers)
-        )
+            # linestyle * color means: for each linestyle, cycle through all colors
+            default_cycler = cycler(linestyle=linestyles) * cycler(color=colors)
+        else:
+            # standard mode: all properties advance in lockstep
+            nlines = nfields * nfiles
+            base_markers = ["o", "s", "^", "D", "v", "<", ">", "p"]
+
+            n_base_colors = max(
+                4, (nlines + len(base_linestyles) - 1) // len(base_linestyles)
+            )
+            base_colors = [
+                colormap(k) for k in np.linspace(0.1, 0.9, n_base_colors)
+            ]
+
+            colors = []
+            linestyles = []
+            markers = []
+            for i in range(nlines):
+                linestyle_idx = i % len(base_linestyles)
+                color_idx = i % len(base_colors)
+                marker_idx = i % len(base_markers)
+
+                linestyles.append(base_linestyles[linestyle_idx])
+                colors.append(base_colors[color_idx])
+                markers.append(base_markers[marker_idx])
+
+            default_cycler = (
+                cycler(color=colors) + cycler(linestyle=linestyles)
+                # + cycler(marker=markers)
+            )
 
         plt.rcParams.update(
             {

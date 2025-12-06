@@ -240,6 +240,7 @@ def prepare_figure(
     nlvls: int = 1,
     coord_system: CoordSystem = CoordSystem.CARTESIAN,
     formatter: Optional[object] = None,
+    overlay_mode: bool = False,
 ) -> Figure:
     """Create and prepare a figure based on configuration.
 
@@ -249,7 +250,11 @@ def prepare_figure(
     """
     import matplotlib.pyplot as plt
 
-    config.theme.apply(nfields=len(config.plot.fields) * nlvls)
+    config.theme.apply(
+        nfiles=nfiles,
+        nfields=len(config.plot.fields) * nlvls,
+        overlay_mode=overlay_mode,
+    )
     if projection == "polar":
         fig, ax = plt.subplots(
             1,

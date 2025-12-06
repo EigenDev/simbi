@@ -129,6 +129,15 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
 
     # =========================================================================
+    # overlay (multiple files on same axes)
+    # =========================================================================
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help="overlay multiple files on same axes (line/coordinate_bin only)",
+    )
+
+    # =========================================================================
     # data pipeline
     # =========================================================================
     parser.add_argument(

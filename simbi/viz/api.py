@@ -5,6 +5,7 @@
 # component styling comes entirely from component_props dict.
 # figure-level config (axes, limits, theme) is separate from component props.
 # =============================================================================
+from pathlib import Path
 from typing import Optional, Sequence
 
 import matplotlib.pyplot as plt
@@ -512,6 +513,166 @@ def plot_time_series(
 
         component.initialize(figure.fig, figure.axes["main"])
         figure.add_component(component, field_data)
+
+    figure.render()
+
+    if save_as:
+        figure.save(save_as)
+    if show:
+        plt.show()
+
+    return figure
+
+
+def plot_overlay(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str] = ["rho"],
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    **kwargs,
+) -> Figure:
+    """
+    Overlay multiple files on the same axes (line plots only).
+
+    Args:
+        config: visualization configuration
+        files: checkpoint file paths (each gets its own line)
+        fields: field names to visualize
+        save_as: optional output file path
+        show: whether to display the plot
+        component_props: dict mapping component names to props instances
+    """
+    if len(files) < 2:
+        raise ValueError("overlay requires at least 2 files")
+
+    # load first file to determine figure setup
+    first_data = load_data(files[0])
+    first_plot_data = create_plot_data(first_data, fields, config)
+    first_fields = first_plot_data.fields
+
+    # overlay only works for 1d data
+    for f in first_fields:
+        if f.ndim != 1:
+            raise ValueError(
+                f"overlay only supports 1D data, got ndim={f.ndim} for '{f.name}'. "
+                "use --slice to reduce or try a different plot type."
+            )
+
+    nfiles = len(files)
+    figure = prepare_figure(
+        config,
+        nfiles=nfiles,
+        projection="cartesian",
+        nlvls=nfiles,
+        coord_system=CoordSystem(first_data.metadata.coord_system),
+        overlay_mode=True,
+    )
+
+    if figure.fig is None:
+        raise RuntimeError("figure not initialized")
+
+    # iterate through files and add each as a separate line
+    for file_path in files:
+        sim_data = load_data(file_path)
+        plot_data = create_plot_data(sim_data, fields, config)
+
+        file_label = Path(file_path).stem
+
+        for field_data in plot_data.fields:
+            if field_data.ndim != 1:
+                continue
+
+            # create a new component for each file's data
+            base_props = _get_props(component_props, "line", LinePlotProps)
+            # override label to include file identifier
+            props = LinePlotProps(
+                label=f"{field_data.name} ({file_label})",
+                linewidth=base_props.linewidth,
+                marker=base_props.marker,
+                marker_size=base_props.marker_size,
+                alpha=base_props.alpha,
+            )
+            component = LinePlotComponent(props)
+            component.initialize(figure.fig, figure.axes["main"])
+            figure.add_component(component, field_data)
+
+    figure.render()
+
+    if save_as:
+        figure.save(save_as)
+    if show:
+        plt.show()
+
+    return figure
+
+
+def plot_coordinate_profile_overlay(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str] = ["rho"],
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    **kwargs,
+) -> Figure:
+    """
+    Overlay coordinate profiles from multiple files on the same axes.
+
+    Args:
+        config: visualization configuration
+        files: checkpoint file paths (each gets its own line)
+        fields: field names to visualize
+        save_as: optional output file path
+        show: whether to display the plot
+        component_props: dict mapping component names to props instances
+    """
+    if len(files) < 2:
+        raise ValueError("overlay requires at least 2 files")
+
+    nfiles = len(files)
+    figure = prepare_figure(
+        config,
+        nfiles=nfiles,
+        projection="cartesian",
+        nlvls=nfiles,
+        overlay_mode=True,
+    )
+
+    if figure.fig is None:
+        raise RuntimeError("figure not initialized")
+
+    # iterate through files and add each as a separate profile
+    for file_path in files:
+        sim_data = load_data(file_path)
+        plot_data = create_coordinate_profile_data(sim_data, fields, config)
+
+        if not plot_data.fields:
+            continue
+
+        file_label = Path(file_path).stem
+
+        for field_data in plot_data.fields:
+            base_props = _get_props(
+                component_props, "coordinate_profile", CoordinateProfileProps
+            )
+            # override label to include file identifier
+            props = CoordinateProfileProps(
+                label=f"{field_data.name} ({file_label})",
+                color=base_props.color,
+                linestyle=base_props.linestyle,
+                linewidth=base_props.linewidth,
+                normalization=base_props.normalization,
+                rbeg=base_props.rbeg,
+                rend=base_props.rend,
+                show_reference_lines=base_props.show_reference_lines,
+                x_scale=base_props.x_scale,
+                y_scale=base_props.y_scale,
+            )
+            component = CoordinateProfileComponent(props)
+            component.initialize(figure.fig, figure.axes["main"])
+            figure.add_component(component, field_data)
 
     figure.render()
 
