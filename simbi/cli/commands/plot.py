@@ -48,6 +48,7 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
     component_props = load_props_from_args(args)
 
     is_animation = getattr(args, "animate", False) or args.kind == "movie"
+    is_overlay = getattr(args, "overlay", False)
     plot_type = config.plot.plot_type
 
     cli_args = vars(args).copy()
@@ -64,6 +65,7 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         "frame_rate",
         "kind",
         "animate",
+        "overlay",
         "no_show",
         "vector_field",
         "scale",
@@ -85,7 +87,33 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         "time_series": api.plot_time_series,
     }
 
-    if is_animation:
+    overlay_dispatch = {
+        "line": api.plot_overlay,
+        "coordinate_bin": api.plot_coordinate_profile_overlay,
+    }
+
+    if is_overlay and is_animation:
+        print("Error: --overlay and --animate are mutually exclusive")
+        sys.exit(1)
+
+    if is_overlay:
+        if plot_type not in overlay_dispatch:
+            print(f"Error: overlay not supported for plot type '{plot_type}'")
+            sys.exit(1)
+        if len(args.files) < 2:
+            print("Error: --overlay requires at least 2 files")
+            sys.exit(1)
+
+        overlay_func = overlay_dispatch[plot_type]
+        overlay_func(
+            config=config,
+            files=args.files,
+            fields=args.fields,
+            save_as=args.save_as,
+            component_props=component_props,
+            **pass_through_kwargs,
+        )
+    elif is_animation:
         if plot_type == "coordinate_bin":
             api.animate_coordinate_profile(
                 config=config,
