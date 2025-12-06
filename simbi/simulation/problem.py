@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 from abc import abstractmethod
 from pathlib import Path
 from typing import Annotated, Any, Callable, ClassVar, Optional, Sequence, Union
@@ -594,15 +595,24 @@ class SimbiProblem(BaseModel):
             raise ValueError("plm_theta must be in (0, 2] when using PLM")
         return self
 
-    @model_validator(mode="after")
-    def _validate_refinement(self) -> SimbiProblem:
-        """validate refinement configuration."""
-        if not self.refinement_enabled:
-            return self
+    def validate_refinement_config(self) -> None:
+        """
+        validate refinement configuration.
 
-        if not self.refinement_regions:
+        called automatically by _finalize(). subclasses should not need to
+        call this directly - just override _finalize() and call super().
+        """
+        if not self.refinement_enabled:
+            return
+
+        if self.refinement_regions is None:
             raise ValueError(
                 "refinement_regions required when refinement_enabled=True"
+            )
+
+        if self.refinement_ratios is None:
+            raise ValueError(
+                "refinement_ratios required when refinement_enabled=True"
             )
 
         expected_levels = self.refinement_max_levels - 1
@@ -640,6 +650,42 @@ class SimbiProblem(BaseModel):
                 "adaptive refinement mode not yet supported"
             )
 
+    def setup(self) -> None:
+        """
+        override to compute dynamic fields before validation.
+
+        this hook is called automatically during model construction, before
+        validation runs. use it to compute fields like bounds, resolution,
+        or refinement_regions based on other parameters.
+
+        if you override this method in a subclass, call super().setup() first
+        to ensure the full setup chain executes:
+
+            def setup(self) -> None:
+                super().setup()
+                self.bounds = self._calculate_bounds()
+                self.refinement_regions = self._calculate_regions()
+        """
+        self.__setup_base_reached = True
+
+    @model_validator(mode="after")
+    def _finalize(self) -> SimbiProblem:
+        """
+        internal validator that runs setup hook then validates.
+
+        do not override this method. override setup() instead.
+        """
+        self.__setup_base_reached = False
+        self.setup()
+
+        if not self.__setup_base_reached:
+            warnings.warn(
+                f"{type(self).__name__}.setup() did not call through to base class. "
+                "Did you forget super().setup()?",
+                stacklevel=2,
+            )
+
+        self.validate_refinement_config()
         return self
 
     # =========================================================================
