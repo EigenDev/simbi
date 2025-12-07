@@ -188,9 +188,18 @@ namespace simbi::io {
                     // consolidate diagnostics and merge into bodies
                     auto bodies_copy = sim.bodies();
 
+                    // preserve diagnostic deltas for checkpoint continuity
+                    std::optional<std::vector<body::body_delta_t<Sim::rank>>> saved_deltas;
+
                     if constexpr (requires { sim.diagnostics(); }) {
                         auto& diag   = sim.diagnostics();
                         auto  deltas = diag->consolidate();
+
+                        // save deltas for serialization
+                        saved_deltas = std::vector<body::body_delta_t<Sim::rank>>(
+                            deltas.begin(),
+                            deltas.begin() + bodies_copy.size()
+                        );
 
                         // compute dt since last checkpoint
                         const auto& meta          = sim.metadata();
@@ -228,7 +237,38 @@ namespace simbi::io {
 
                     using collection_t = body::body_collection_t<Sim::rank>;
                     h5_serializable<collection_t>::write(file, bodies_copy, policy);
+
+                    // save diagnostic deltas for restart continuity
+                    if (saved_deltas) {
+                        write_diagnostic_deltas(file, *saved_deltas);
+                    }
                 }
+            }
+        }
+
+        void write_diagnostic_deltas(
+            H5::H5File&                                       file,
+            const std::vector<body::body_delta_t<Sim::rank>>& deltas
+        ) const
+        {
+            auto g = file.createGroup("diagnostic_deltas");
+            write_attribute(g, "count", static_cast<std::uint64_t>(deltas.size()));
+
+            for (std::size_t ii = 0; ii < deltas.size(); ++ii) {
+                const auto& delta = deltas[ii];
+                auto        dg    = g.createGroup("delta_" + std::to_string(ii));
+
+                write_attribute(dg, "idx", delta.idx);
+                write_attribute(dg, "mass_delta", delta.mass_delta);
+
+                std::vector<real> force(delta.force_delta.begin(), delta.force_delta.end());
+                std::vector<real> torque(delta.torque_delta.begin(), delta.torque_delta.end());
+
+                std::vector<hsize_t> dims_rank{Sim::rank};
+                std::vector<hsize_t> dims_3{3};
+
+                write_dataset(dg, "force_delta", force, dims_rank, policy);
+                write_dataset(dg, "torque_delta", torque, dims_3, policy);
             }
         }
     };
@@ -269,12 +309,49 @@ namespace simbi::io {
                 using collection_t = body::body_collection_t<Sim::rank>;
                 auto bodies        = h5_serializable<collection_t>::read(file);
                 sim.set_bodies(std::move(bodies));
+
+                // restore diagnostic deltas for continuity
+                if (group_exists(file, "diagnostic_deltas")) {
+                    auto deltas = read_diagnostic_deltas_helper(file);
+                    if constexpr (requires { sim.diagnostics(); }) {
+                        auto& diag = sim.diagnostics();
+                        diag->restore_deltas(deltas);
+                    }
+                }
             }
 
             return sim;
         }
 
       private:
+        static std::vector<body::body_delta_t<Sim::rank>>
+        read_diagnostic_deltas_helper(const H5::H5File& file)
+        {
+            auto g     = file.openGroup("diagnostic_deltas");
+            auto count = read_attribute<std::uint64_t>(g, "count");
+
+            std::vector<body::body_delta_t<Sim::rank>> deltas(count);
+
+            for (std::size_t ii = 0; ii < count; ++ii) {
+                auto dg = g.openGroup("delta_" + std::to_string(ii));
+
+                deltas[ii].idx        = read_attribute<std::uint64_t>(dg, "idx");
+                deltas[ii].mass_delta = read_attribute<real>(dg, "mass_delta");
+
+                auto force  = read_dataset<real>(dg, "force_delta");
+                auto torque = read_dataset<real>(dg, "torque_delta");
+
+                for (std::size_t dd = 0; dd < Sim::rank; ++dd) {
+                    deltas[ii].force_delta[dd] = force[dd];
+                }
+                for (std::size_t dd = 0; dd < 3; ++dd) {
+                    deltas[ii].torque_delta[dd] = torque[dd];
+                }
+            }
+
+            return deltas;
+        }
+
         static void read_level(const H5::H5File& file, Sim& sim, std::uint64_t lvl)
         {
             auto level_group = file.openGroup("level_" + std::to_string(lvl));
