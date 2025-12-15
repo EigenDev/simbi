@@ -1485,11 +1485,17 @@ namespace simbi {
             }
 
             // apply auto-resize if enabled
-            if (auto_resize_columns_) {
+            if (auto_resize_columns_ && max_table_width > 0) {
                 std::int64_t total_width = calculate_total_width();
-                if (max_table_width > 0 && total_width > max_table_width) {
-                    // scale down columns proportionally
-                    double scale_factor = static_cast<double>(max_table_width) / total_width;
+                // account for borders and padding (vertical bars + spaces)
+                std::int64_t border_overhead = (column_widths.size() + 1) * 3;
+                std::int64_t available_width = max_table_width - border_overhead;
+
+                if (available_width > 0) {
+                    // distribute available width proportionally across columns
+                    std::int64_t current_content_width = total_width - border_overhead;
+                    double       scale_factor =
+                        static_cast<double>(available_width) / current_content_width;
                     for (auto& width : column_widths) {
                         width = static_cast<std::int64_t>(width * scale_factor);
                     }
@@ -1872,24 +1878,28 @@ namespace simbi {
                         break;
                 }
 
-                // split message by newlines and prstd::int64_t each line
-                // separately
+                // split message by newlines and wrap each line if needed
                 std::istringstream stream(msg.text);
                 std::string        line;
                 while (std::getline(stream, line)) {
-                    os << get_color_code(theme_config.border_color) << border_chars.vertical << " ";
-                    os << get_color_code(msg_color);
+                    // wrap long lines to fit within table width
+                    std::string wrapped = wrap_text_to_width(line, total_width - 4);
 
-                    if (line.length() > total_width - 4) {
-                        line = line.substr(0, total_width - 7) + "...";
-                    }
-                    else {
-                        line += std::string(total_width - 4 - line.length(), ' ');
-                    }
+                    // split wrapped text into individual lines
+                    std::istringstream wrapped_stream(wrapped);
+                    std::string        wrapped_line;
+                    while (std::getline(wrapped_stream, wrapped_line)) {
+                        os << get_color_code(theme_config.border_color) << border_chars.vertical
+                           << " ";
+                        os << get_color_code(msg_color);
 
-                    os << line;
-                    os << reset_color() << " " << get_color_code(theme_config.border_color)
-                       << border_chars.vertical << "\n";
+                        // pad to fill width
+                        wrapped_line += std::string(total_width - 4 - wrapped_line.length(), ' ');
+
+                        os << wrapped_line;
+                        os << reset_color() << " " << get_color_code(theme_config.border_color)
+                           << border_chars.vertical << "\n";
+                    }
                 }
                 os << reset_color();
 
@@ -2067,6 +2077,7 @@ namespace simbi {
             table.enable_progress(progress_bar != progress_bar_t::Disabled);
             table.set_message_board_title("Simulation Messages");
             table.set_progress_style(ProgressStyle::Gradient);
+            table.enable_text_wrapping(true);
             return table;
         }
 

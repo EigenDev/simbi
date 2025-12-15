@@ -17,6 +17,7 @@
 #include "compat.hpp"
 #include "ecs/systems.hpp"
 #include "io/console/dprintb.hpp"
+#include "io/diagnostics.hpp"
 #include "io/exceptions.hpp"
 #include "physics/ib/motion.hpp"
 #include "progress.hpp"
@@ -79,12 +80,20 @@ namespace simbi::evolution {
 
         // initial checkpoint
         state.progress.table.refresh();
-        if (meta.time == 0.0 || meta.checkpoint_index == 0) {
-            if (sim.in_failure_state) {
-                throw exception::SimulationFailureException();
+        try {
+            if (meta.time == 0.0 || meta.checkpoint_index == 0) {
+                if (sim.in_failure_state) {
+                    throw exception::SimulationFailureException();
+                }
+                checkpoint::save(sim, state.progress);
             }
-            checkpoint::save(sim, state.progress);
         }
+        catch (exception::SimulationFailureException) {
+            // diagnose and report detailed failure information
+            diagnostics::diagnose_cons2prim_failure(sim, state.progress.table);
+            throw;
+        }
+
         state.schedule.advance(meta.time);
         meta.advance_schedule(state.schedule);
 
@@ -129,7 +138,10 @@ namespace simbi::evolution {
             catch (exception::SimulationFailureException& e) {
                 sim.in_failure_state = true;
                 state.should_stop    = true;
-                state.progress.table.post_error(std::string("Failed: ") + e.what());
+
+                // diagnose and report detailed failure information
+                diagnostics::diagnose_cons2prim_failure(sim, state.progress.table);
+
                 checkpoint::save(sim, state.progress);
             }
         }

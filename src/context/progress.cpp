@@ -1,4 +1,5 @@
 #include "progress.hpp"
+
 #include "compat.hpp"
 #include "io/console/statistics.hpp"
 #include "io/tabulate/table.hpp"
@@ -24,9 +25,12 @@ namespace simbi::progress {
             io::progress_bar_t::Enabled
         );
 
-        table.set_header(
-            {"Iteration", "Time", "dt", "Speed", "Elapsed", "ETA"}
-        );
+        // set table to terminal width
+        io::terminal_capabilities_t term;
+        table.set_max_table_width(term.get_terminal_width());
+        table.auto_resize_columns(true);
+
+        table.set_header({"Iteration", "Time", "dt", "Speed", "Elapsed", "ETA"});
         table.add_row({"0", "0.0", "0.0", "0.0", "00:00:00", "00:00:00"});
         table.print();
         return {.table = std::move(table), .start_time = clock_t::now()};
@@ -40,26 +44,24 @@ namespace simbi::progress {
 
         std::ostringstream oss;
         oss << std::setw(2) << std::setfill('0') << hours << ":" << std::setw(2)
-            << std::setfill('0') << minutes << ":" << std::setw(2)
-            << std::setfill('0') << seconds;
+            << std::setfill('0') << minutes << ":" << std::setw(2) << std::setfill('0') << seconds;
         return oss.str();
     }
 
     void update(
         progress_state_t& state,
-        std::uint64_t iteration,
-        real time,
-        real dt,
-        real tend,
-        double speed
+        std::uint64_t     iteration,
+        real              time,
+        real              dt,
+        real              tend,
+        double            speed
     )
     {
         using namespace std::chrono;
 
         auto elapsed     = clock_t::now() - state.start_time;
         auto elapsed_sec = duration_cast<seconds>(elapsed).count();
-        auto eta_sec =
-            static_cast<std::int64_t>(elapsed_sec * (tend / time - 1));
+        auto eta_sec     = static_cast<std::int64_t>(elapsed_sec * (tend / time - 1));
 
         auto format_sci = [](real value) {
             std::stringstream ss;
@@ -77,9 +79,7 @@ namespace simbi::progress {
              format_time(eta_sec)}
         );
 
-        state.table.set_progress(
-            static_cast<std::int64_t>((time / tend) * 100.0)
-        );
+        state.table.set_progress(static_cast<std::int64_t>((time / tend) * 100.0));
         state.table.refresh();
 
         state.last_emit_iteration = iteration;
@@ -91,4 +91,4 @@ namespace simbi::progress {
         std::cout << "Simulation completed.\n";
     }
 
-}   // namespace simbi::progress
+} // namespace simbi::progress

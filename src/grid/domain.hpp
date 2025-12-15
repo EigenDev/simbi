@@ -112,6 +112,54 @@ namespace simbi::grid {
         {
             return !(*this == other);
         }
+
+        // iterator support for range-based for loops
+        struct iterator_t
+        {
+            const domain_t* domain;
+            coord_t         current;
+
+            constexpr iterator_t(const domain_t* d, coord_t c) : domain(d), current(c) {}
+
+            constexpr coord_t operator*() const
+            {
+                return current;
+            }
+
+            constexpr iterator_t& operator++()
+            {
+                // increment in row-major order
+                for (std::int64_t dim = Rank - 1; dim >= 0; --dim) {
+                    ++current[dim];
+                    if (current[dim] < domain->fin[dim]) {
+                        return *this;
+                    }
+                    if (dim > 0) {
+                        current[dim] = domain->start[dim];
+                    }
+                }
+                return *this;
+            }
+
+            constexpr bool operator!=(const iterator_t& other) const
+            {
+                return current != other.current;
+            }
+        };
+
+        constexpr iterator_t begin() const
+        {
+            return iterator_t{this, start};
+        }
+
+        constexpr iterator_t end() const
+        {
+            coord_t end_coord = start;
+            if (!empty()) {
+                end_coord[0] = fin[0];
+            }
+            return iterator_t{this, end_coord};
+        }
     };
 
     template <std::uint64_t Rank>
