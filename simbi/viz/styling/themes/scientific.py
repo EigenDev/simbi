@@ -11,7 +11,7 @@ scientific_theme = ThemeConfig(
     line_styles=["-", "--", ":", "-."],
     line_width=1.2,
     # Color styling
-    color_maps=["viridis"],
+    color_map="viridis",
     # Axis styling
     hide_spines=["top", "right"],
     grid=False,

@@ -1,3 +1,6 @@
+from dataclasses import asdict
+from typing import Any, Optional
+
 from .theme import ThemeConfig
 from .themes.dark import dark_theme
 from .themes.default import default_theme
@@ -16,33 +19,18 @@ class ThemeManager:
     _current_theme = "default"
 
     @classmethod
-    def get_theme(cls, theme_name=None) -> ThemeConfig:
+    def get_theme(
+        cls, theme_name=None, theme_props: Optional[dict[str, Any]] = {}
+    ) -> ThemeConfig:
         """Get a theme by name or the current theme"""
         if theme_name is None:
             theme_name = cls._current_theme
 
         if theme_name in cls._themes:
-            return cls._themes[theme_name]
+            theme = cls._themes[theme_name]
+            theme_dict = asdict(theme)
+            shared_keys = set(theme_dict).intersection(set(theme_props))
+            theme_dict.update({k: theme_props[k] for k in shared_keys})
+            return ThemeConfig(**theme_dict)
         else:
             return cls._themes["default"]
-
-    @classmethod
-    def set_theme(
-        cls, theme_name: str, nfiles: int = 1, nfields: int = 1
-    ) -> bool:
-        """Set the current theme"""
-        if theme_name in cls._themes:
-            cls._current_theme = theme_name
-            cls._themes[theme_name].apply(nfiles, nfields)
-            return True
-        return False
-
-    @classmethod
-    def register_theme(cls, name, theme):
-        """Register a new theme"""
-        cls._themes[name] = theme
-
-    @classmethod
-    def apply_current_theme(cls):
-        """Apply the current theme"""
-        cls._themes[cls._current_theme].apply()

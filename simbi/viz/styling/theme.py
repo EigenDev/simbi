@@ -1,14 +1,12 @@
-from dataclasses import dataclass, field
-from itertools import cycle
+from dataclasses import dataclass, field, fields
 from typing import Any, Sequence
 
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 from cycler import cycler
 
 
-@dataclass
+@dataclass(frozen=True)
 class ThemeConfig:
     """Central theme configuration for visualization styling"""
 
@@ -27,12 +25,7 @@ class ThemeConfig:
     line_width: float = 1.5
 
     # Color styling
-    color_maps: Sequence[str] = field(default_factory=lambda: ["viridis"])
-    color_cycle: Sequence[str] = field(
-        default_factory=lambda: np.array(
-            mpl.cm.viridis(np.linspace(0, 1, 4))
-        ).tolist()
-    )
+    color_map: str = "viridis"
 
     # Axis styling
     hide_spines: Sequence[str] = field(default_factory=lambda: ["top", "right"])
@@ -57,6 +50,41 @@ class ThemeConfig:
         }
     )
 
+    @classmethod
+    def from_mapping(cls, data: Any) -> "ThemeConfig":
+        """Build a ThemeConfig from a mapping-like object.
+
+        This helper accepts dicts, pydantic models, or other mapping-like objects
+        and constructs a ThemeConfig by filtering only the dataclass fields that
+        ThemeConfig defines. It avoids importing ThemeProps (or other component
+        props types) into styling code paths and therefore helps prevent circular
+        imports when callers pass their props/dicts directly.
+
+        Examples:
+            ThemeConfig.from_mapping({"font_family": "sans-serif", "font_size": 14})
+            ThemeConfig.from_mapping(theme_props_instance)
+        """
+        # normalize to plain dict if possible
+        if not isinstance(data, dict):
+            if hasattr(data, "model_dump"):
+                # pydantic v2
+                data = data.model_dump()
+            elif hasattr(data, "dict"):
+                # pydantic v1 or other mapping-like objects
+                data = data.dict()
+            else:
+                try:
+                    data = dict(data)
+                except Exception:
+                    raise TypeError(
+                        "unsupported data type for ThemeConfig.from_mapping"
+                    )
+
+        # only use keys that match ThemeConfig fields to avoid passing unknown keys
+        allowed = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in allowed}
+        return cls(**filtered)
+
     def apply(
         self, nfiles: int = 1, nfields: int = 1, overlay_mode: bool = False
     ):
@@ -71,7 +99,7 @@ class ThemeConfig:
         plt.style.use("default")
 
         base_linestyles = ["-", "--", "-.", ":"]
-        colormap = plt.get_cmap(next(cycle(self.color_maps)))
+        colormap = plt.get_cmap(self.color_map)
 
         if overlay_mode:
             # overlay mode: colors cycle through files, linestyles through fields

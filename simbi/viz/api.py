@@ -588,7 +588,7 @@ def plot_overlay(
             base_props = _get_props(component_props, "line", LinePlotProps)
             # override label to include file identifier
             props = LinePlotProps(
-                label=f"{field_data.name} ({file_label})",
+                label=f"{field_data.name}",
                 linewidth=base_props.linewidth,
                 marker=base_props.marker,
                 marker_size=base_props.marker_size,

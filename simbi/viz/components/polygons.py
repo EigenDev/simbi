@@ -67,7 +67,7 @@ class PolygonPlotComponent(Component):
     """
 
     def __init__(
-        self, props: PolygonPlotProps, bodies: Optional[dict[str, Body]] = None
+        self, props: PolygonPlotProps, bodies: Optional[BodyCollection] = None
     ):
         self.props = props
         self._poly_collection: Optional[PolyCollection] = None

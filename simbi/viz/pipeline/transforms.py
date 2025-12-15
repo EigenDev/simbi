@@ -219,7 +219,9 @@ def prepare_field_level(
     # problem, but symmetry results in a quasi-2D or quasi-1D dataset.
     # We must carefully select the axis names accordingly.
     axis_names = [INV_AXIS_MAP[i] for i in non_singleton_axes]
-    if effective_dim < 3:
+    if effective_dim == 1:
+        axis_names = ["x1"]
+    if effective_dim == 2:
         axis_names = ["x1", "x2"]
 
     # return dimensionally-reduced data for quasi-1D/2D

@@ -11,19 +11,7 @@ dark_theme = ThemeConfig(
     line_styles=["-", "--", ":", "-."],
     line_width=1.8,
     # Color styling
-    color_maps=["plasma"],
-    color_cycle=[
-        "#ff7f0e",
-        "#2ca02c",
-        "#d62728",
-        "#9467bd",
-        "#8c564b",
-        "#e377c2",
-        "#bcbd22",
-        "#17becf",
-        "#1f77b4",
-        "#7f7f7f",
-    ],
+    color_map="plasma",
     # Axis styling
     hide_spines=[],
     grid=True,

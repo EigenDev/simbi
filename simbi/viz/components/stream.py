@@ -98,6 +98,7 @@ class StreamPlotComponent(Component):
         Render the stream plot.
         `data` is a *list* of FieldData objects [U, V].
         """
+
         if not self._initialized:
             raise RuntimeError(
                 "Component not initialized. Call initialize() first."
@@ -109,6 +110,7 @@ class StreamPlotComponent(Component):
         self.cleanup()
         x = 0.5 * (x[1:] + x[:-1])
         y = 0.5 * (y[1:] + y[:-1])
+
         self._streamplot = self.ax.streamplot(
             x,
             y,
@@ -119,8 +121,8 @@ class StreamPlotComponent(Component):
             density=self.props.density,
             arrowstyle=self.props.arrowstyle,
             arrowsize=self.props.arrowsize,
-            # alpha=self.props.alpha,
         )
+        self._streamplot.lines.set_alpha(self.props.alpha)
 
         return RenderResult(
             artists={"streamplot": self._streamplot},

@@ -61,9 +61,12 @@ def apply_axis_labels(
     if ax.name == "polar":
         return
 
-    # Use explicit config label if provided
-    ax.set_xlabel(config.xlabel or xlabel or "$x$")
-    ax.set_ylabel(config.ylabel or ylabel or "$y$")
+    # use explicit config label if provided
+    if not ax.get_xlabel():
+        ax.set_xlabel(config.xlabel or xlabel or "")
+
+    if not ax.get_ylabel():
+        ax.set_ylabel(config.ylabel or ylabel or "")
 
 
 def apply_axis_limits(ax: Axes, config: FigureConfig) -> None:
@@ -155,6 +158,9 @@ class FigureFormatter:
         # Title and time
         time = getattr(first_data, "time", None)
         set_title(main_ax, fig, self.style, time)
+        ndim = 0
+        if first_data:
+            ndim = first_data.values.ndim
 
         # Normalize rendered_artists entries first (needed for label extraction)
         normalized: list[tuple[dict, dict | None]] = []
@@ -197,18 +203,20 @@ class FigureFormatter:
             if metadata and isinstance(metadata, dict):
                 if "label" in metadata and metadata["label"]:
                     metadata_label = metadata["label"]
+                    metadata_labels.append(metadata_label)
                 if "labels" in metadata and metadata["labels"]:
-                    metadata_labels = list(metadata["labels"])
+                    metadata_labels += list(metadata["labels"])
                     if len(metadata_labels) > 1:
                         use_legend_from_metadata = True
 
         # determine ylabel from metadata if not explicitly provided
         derived_ylabel = None
-        if len(metadata_labels) == 1:
+        label_set = list(set(metadata_labels))
+        if len(label_set) == 1:
             # single label in list → use as ylabel, suppress legend
-            derived_ylabel = get_field_str(metadata_labels[0])
+            derived_ylabel = get_field_str(label_set[0])
             show_legend = False
-        elif len(metadata_labels) > 1:
+        elif len(label_set) > 1:
             # multiple labels → show legend, no ylabel from metadata
             use_legend_from_metadata = True
             derived_ylabel = None
@@ -219,6 +227,8 @@ class FigureFormatter:
         # determine axis labels
         if xlabel is None or ylabel is None:
             try:
+                # no derived lable in 1D plot means we should plot
+                # a legend instead of a y-label
                 # prefer explicit axis names from data when present
                 axis_names = getattr(first_data, "axis_names", None)
                 if axis_names and isinstance(axis_names, (list, tuple)):
@@ -226,17 +236,22 @@ class FigureFormatter:
                         xlabel = LABEL_MAP.get(axis_names[0], axis_names[0])
                     if ylabel is None and len(axis_names) >= 2:
                         ylabel = LABEL_MAP.get(axis_names[1], axis_names[1])
+
                 # use derived ylabel from metadata
                 if ylabel is None and derived_ylabel:
                     ylabel = derived_ylabel
+
                 # fallback to field name for y-axis for 1D/line-like data
-                if ylabel is None and hasattr(first_data, "name"):
+                if (
+                    ylabel is None
+                    and hasattr(first_data, "name")
+                    and len(label_set) == 1
+                ):
                     ylabel = get_field_str(first_data.name)
+
             except Exception:
                 pass
 
-        if ylabel and not ylabel.startswith("$"):
-            ylabel = get_field_str(ylabel)
         # axis labels & limits
         try:
             apply_axis_labels(main_ax, self.style, xlabel, ylabel)
@@ -321,19 +336,8 @@ class FigureFormatter:
                 show_legend and has_line_like
             )
 
-            # some rendered artists may have multiple
-            # labels and lines, so we should search through
-            # the list and verify if multiple labels exist
-            multiple_labels = False
-            for artists, metadata in normalized:
-                if metadata and isinstance(metadata, dict):
-                    labels = metadata.get("labels", [])
-                    if labels and len(labels) > 1:
-                        multiple_labels = True
-                        break
-
             # but not if we used the single label as ylabel
-            if should_show_legend and multiple_labels:
+            if should_show_legend and len(label_set) > 1:
                 apply_legend(main_ax)
         except Exception:
             pass

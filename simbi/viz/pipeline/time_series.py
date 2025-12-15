@@ -140,7 +140,7 @@ def create_time_series_data(
                 name=name,
                 values=values_array,
                 domain=[time_array],
-                axis_names=[f"$t${time_units}", name],
+                axis_names=[f"$t${time_units}"],
                 body_names=field_body_names,
             )
         )

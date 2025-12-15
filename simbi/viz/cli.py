@@ -9,6 +9,8 @@ import argparse
 import warnings
 from typing import Optional
 
+from simbi.viz.checkpoint.checkpoint_utils import glob_checkpoints
+
 VALID_PLOT_TYPES = ["line", "multidim", "coordinate_bin", "time_series"]
 
 try:
@@ -17,6 +19,33 @@ try:
         import cmasher  # noqa: F401
 except ImportError:
     pass
+
+
+class glob_files(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values,
+        option_string: str | None = None,
+    ) -> None:
+        from pathlib import Path
+
+        files: list[list[Path]] = []
+        try:
+            if values:
+                for f in values:
+                    if Path(f).is_dir():
+                        files.append(glob_checkpoints(f, filter_invalid=True))
+                    else:
+                        files.append([Path(f)])
+
+        except ValueError as ex:
+            message = f"\nTraceback: {ex}"
+            raise argparse.ArgumentError(self, str(message))
+
+        flat_files = [x for y in files for x in y]
+        setattr(namespace, self.dest, flat_files)
 
 
 class ParseKVAction(argparse.Action):
@@ -80,7 +109,12 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     # =========================================================================
     # required / positional
     # =========================================================================
-    parser.add_argument("files", nargs="+", help="checkpoint file(s)")
+    parser.add_argument(
+        "files",
+        nargs="+",
+        help="checkpoint file(s) or directory for body diagnostics",
+        action=glob_files,
+    )
     parser.add_argument(
         "--fields", nargs="+", default=["rho"], help="field(s) to visualize"
     )
@@ -256,7 +290,16 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--draw-bodies",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="draw immersed bodies",
+        help="draw immersed bodies on hydro plots",
+    )
+
+    # =========================================================================
+    # body diagnostics mode
+    # =========================================================================
+    parser.add_argument(
+        "--bodies",
+        action="store_true",
+        help="enable body diagnostics mode (use --props body_diagnostics.* for options)",
     )
 
     # =========================================================================

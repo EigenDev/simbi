@@ -135,8 +135,55 @@ def animation_config_from_args(args: Namespace) -> AnimationConfig:
 
 
 def theme_config_from_args(args: Namespace) -> ThemeConfig:
-    """Build ThemeConfig from cli arguments."""
-    return ThemeManager.get_theme(getattr(args, "theme", "default"))
+    """Build ThemeConfig from cli arguments.
+
+    Strategy:
+      - prefer validated theme props loaded via the existing loader (file + overrides)
+      - convert validated ThemeProps -> ThemeConfig using ThemeConfig.from_mapping
+      - if no validated theme props are present, parse the CLI overrides to extract
+        any `theme.*` overrides and pass them to ThemeManager.get_theme
+      - ensure a ThemeConfig is returned in all code paths
+    """
+    # delegate parsing/validation to the config loader when possible to reuse
+    # coercion and pydantic validation, avoiding ad-hoc parsing here.
+    from simbi.viz.config_loader import load_theme_config, parse_overrides
+
+    # try to load validated theme props (from config file and/or --props)
+    theme_props = load_theme_config(
+        getattr(args, "config", None), getattr(args, "props", [])
+    )
+    if theme_props:
+        # theme_props is a pydantic ThemeProps instance (or mapping); convert safely
+        return ThemeConfig.from_mapping(theme_props)
+
+    # no validated ThemeProps provided: extract any theme.* overrides to pass to ThemeManager
+    overrides = parse_overrides(getattr(args, "props", []))
+    theme_override_dict = overrides.get("theme", {})
+
+    theme_candidate = ThemeManager.get_theme(
+        theme_name=getattr(args, "theme", "default"),
+        theme_props=theme_override_dict,
+    )
+
+    # if ThemeManager already returned a ThemeConfig, use it directly
+    if isinstance(theme_candidate, ThemeConfig):
+        return theme_candidate
+
+    # try to convert mapping-like candidate into ThemeConfig
+    if hasattr(ThemeConfig, "from_mapping"):
+        try:
+            return ThemeConfig.from_mapping(theme_candidate)
+        except Exception:
+            pass
+
+    # fallback: if dict-like, filter to dataclass fields
+    if isinstance(theme_candidate, dict):
+        allowed = set(ThemeConfig.__dataclass_fields__.keys())
+        filtered = {k: v for k, v in theme_candidate.items() if k in allowed}
+        return ThemeConfig(**filtered)
+
+    # last resort: default ThemeConfig
+    return ThemeConfig()
 
 
 def config_from_args(args: Namespace) -> VisualizationConfig:
