@@ -1,26 +1,27 @@
-import numpy as np
-from astropy import units, constants
-import matplotlib.pyplot as plt
-import matplotlib.lines as mlines
-import matplotlib.markers as mmarkers
 import argparse
 import os
 import sys
-import h5py
 import time as pytime
-from numpy.typing import NDArray
 from itertools import cycle
+
+import h5py
+import matplotlib.lines as mlines
+import matplotlib.pyplot as plt
+import numpy as np
+from astropy import units
+
+from simbi import find_nearest, py_calc_fnu, py_log_events
+
+from ..detail import get_subparser
+from ..tools import utility as util
 from .helpers import (
-    get_tbin_edges,
-    get_dL,
     generate_pseudo_mesh,
+    get_dL,
+    get_tbin_edges,
     read_afterglow_library_data,
     read_simbi_afterglow,
 )
-from simbi import py_calc_fnu, py_log_events, find_nearest
 from .scales import get_scale_model
-from ..tools import utility as util
-from ..detail import get_subparser
 
 try:
     import cmasher as cmr
@@ -49,10 +50,16 @@ def deg_type(param: str):
 def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
     afterglow_parser = get_subparser(parser, 2)
     afterglow_parser.add_argument(
-        "--files", nargs="+", help="Explicit filenames or directory"
+        "--files",
+        nargs="+",
+        help="Explicit filenames or directory",
+        action=file_glob,
     )
     afterglow_parser.add_argument(
-        "--theta-obs", help="observation angle in degrees", type=deg_type, default=0.0
+        "--theta-obs",
+        help="observation angle in degrees",
+        type=deg_type,
+        default=0.0,
     )
     afterglow_parser.add_argument(
         "--nu", help="Observed frequency", default=[1e9], type=float, nargs="+"
@@ -90,7 +97,10 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
         nargs="+",
     )
     afterglow_parser.add_argument(
-        "--cmap", help="colormap scheme for light curves", default=None, type=str
+        "--cmap",
+        help="colormap scheme for light curves",
+        default=None,
+        type=str,
     )
     afterglow_parser.add_argument(
         "--clims",
@@ -100,7 +110,10 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
         default=[0.25, 0.75],
     )
     afterglow_parser.add_argument(
-        "--output", help="name of file to be saved as", type=str, default="some_lc.h5"
+        "--output",
+        help="name of file to be saved as",
+        type=str,
+        default="some_lc.h5",
     )
     afterglow_parser.add_argument(
         "--example-labels",
@@ -110,13 +123,25 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
         nargs="+",
     )
     afterglow_parser.add_argument(
-        "--xlims", help="x limits in plot", default=[None, None], type=float, nargs="+"
+        "--xlims",
+        help="x limits in plot",
+        default=[None, None],
+        type=float,
+        nargs="+",
     )
     afterglow_parser.add_argument(
-        "--ylims", help="y limits in plot", default=[None, None], type=float, nargs="+"
+        "--ylims",
+        help="y limits in plot",
+        default=[None, None],
+        type=float,
+        nargs="+",
     )
     afterglow_parser.add_argument(
-        "--fig-size", help="figure dimensions", default=(5, 4), type=float, nargs="+"
+        "--fig-size",
+        help="figure dimensions",
+        default=(5, 4),
+        type=float,
+        nargs="+",
     )
     afterglow_parser.add_argument("--title", help="title of plot", default=None)
     afterglow_parser.add_argument(
@@ -137,7 +162,10 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
         "--dL", help="luminosity distance in [cm]", default=1e28, type=float
     )
     afterglow_parser.add_argument(
-        "--eps_e", help="energy density fraction in electrons", default=0.1, type=float
+        "--eps_e",
+        help="energy density fraction in electrons",
+        default=0.1,
+        type=float,
     )
     afterglow_parser.add_argument(
         "--eps_b",
@@ -187,7 +215,10 @@ def parse_args(parser: argparse.ArgumentParser, args: argparse.Namespace):
         ],
     )
     afterglow_parser.add_argument(
-        "--vline", help="location of vertical line in plot", default=None, type=float
+        "--vline",
+        help="location of vertical line in plot",
+        default=None,
+        type=float,
     )
     afterglow_parser.add_argument(
         "--tbins",
@@ -209,7 +240,9 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
 
     scales = get_scale_model(args.scale)
     if args.tex:
-        plt.rcParams.update({"text.usetex": True, "font.family": "Times New Roman"})
+        plt.rcParams.update(
+            {"text.usetex": True, "font.family": "Times New Roman"}
+        )
 
     files = None if not args.files else util.get_file_list(args.files)[0]
     fig, ax = plt.subplots(figsize=args.fig_dims)
@@ -233,7 +266,9 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
         nbins = args.ntbins
         nbin_edges = nbins + 1
         if args.mode == "fnu":
-            tbin_edge = args.tbins or get_tbin_edges(args, files, scales.time_scale)
+            tbin_edge = args.tbins or get_tbin_edges(
+                args, files, scales.time_scale
+            )
             tbin_edges = np.geomspace(
                 tbin_edge[0] * 0.9, tbin_edge[1] * 1.1, nbin_edges
             )
@@ -295,7 +330,10 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
                     sim_info=sim_info,
                     data_dim=dim,
                 )
-            print(f"Processed file {file} in {pytime.time() - t1:.2f} s", flush=True)
+            print(
+                f"Processed file {file} in {pytime.time() - t1:.2f} s",
+                flush=True,
+            )
 
         fnu_contig = fnu_contig.reshape(len(args.nu), nbins) * (1.0 + args.z)
         for idx, key in enumerate(fnu.keys()):
@@ -366,7 +404,9 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
         for dat in args.example_data:
             example_data = read_afterglow_library_data(dat)
             if args.spectra:
-                key = find_nearest(example_data["tday"].value, val)[1] * units.day
+                key = (
+                    find_nearest(example_data["tday"].value, val)[1] * units.day
+                )
                 x = example_data["freq"] * units.Hz
                 y = example_data["spectra"][key]
                 m = 5.0
@@ -442,7 +482,11 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
     for label in args.labels:
         ex_lines += [
             mlines.Line2D(
-                [0, 1], [0, 1], linestyle=next(linecycler), label=label, color="grey"
+                [0, 1],
+                [0, 1],
+                linestyle=next(linecycler),
+                label=label,
+                color="grey",
             )
         ]
 
