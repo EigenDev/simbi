@@ -16,14 +16,18 @@
 namespace simbi::het::exec {
 
     // tag types for execution policy
-    struct default_t {
+    struct default_t
+    {
     };
-    struct cpu_serial_t {
+    struct cpu_serial_t
+    {
     };
-    struct openmp_t {
+    struct openmp_t
+    {
         dim3_t tile_size;
     };
-    struct gpu_t {
+    struct gpu_t
+    {
     };
 
     // helper: make launch policy from domain shape
@@ -43,16 +47,12 @@ namespace simbi::het::exec {
 
     // cpu serial
     template <std::uint64_t Rank, typename F>
-    auto parallel_for(
-        cpu_serial_t /*policy*/,
-        const grid::domain_t<Rank>& domain,
-        F&& f
-    )
+    auto parallel_for(cpu_serial_t /*policy*/, const grid::domain_t<Rank>& domain, F&& f)
     {
         auto policy = make_launch_policy(domain.shape());
         backend::parallel_for(
             backend_type_t::cpu,
-            nullptr,   // no stream for cpu
+            nullptr, // no stream for cpu
             policy,
             domain,
             std::forward<F>(f)
@@ -61,31 +61,20 @@ namespace simbi::het::exec {
 
     // openmp
     template <std::uint64_t Rank, typename F>
-    auto
-    parallel_for(openmp_t policy_tag, const grid::domain_t<Rank>& domain, F&& f)
+    auto parallel_for(openmp_t policy_tag, const grid::domain_t<Rank>& domain, F&& f)
     {
         auto policy = launch_policy_t(
-            {1, 1, 1},   // grid doesn't matter for cpu
+            {1, 1, 1}, // grid doesn't matter for cpu
             policy_tag.tile_size
         );
 
-        backend::parallel_for(
-            backend_type_t::cpu,
-            nullptr,
-            policy,
-            domain,
-            std::forward<F>(f)
-        );
+        backend::parallel_for(backend_type_t::cpu, nullptr, policy, domain, std::forward<F>(f));
     }
 
     // gpu
     template <std::uint64_t Rank, typename F>
-    token_t parallel_for(
-        gpu_t /*policy*/,
-        executor_t& exec,
-        const grid::domain_t<Rank>& domain,
-        F&& f
-    )
+    token_t
+    parallel_for(gpu_t /*policy*/, executor_t& exec, const grid::domain_t<Rank>& domain, F&& f)
     {
         if (domain.empty()) {
             return token_t::immediate(exec.backend());
@@ -110,12 +99,8 @@ namespace simbi::het::exec {
 
     // default (runtime dispatch)
     template <std::uint64_t Rank, typename F>
-    token_t parallel_for(
-        default_t /*policy*/,
-        executor_t& exec,
-        const grid::domain_t<Rank>& domain,
-        F&& f
-    )
+    token_t
+    parallel_for(default_t /*policy*/, executor_t& exec, const grid::domain_t<Rank>& domain, F&& f)
     {
         if (exec.backend() == backend_type_t::cpu) {
             // check if openmp available
@@ -135,6 +120,6 @@ namespace simbi::het::exec {
         }
     }
 
-}   // namespace simbi::het::exec
+} // namespace simbi::het::exec
 
 #endif
