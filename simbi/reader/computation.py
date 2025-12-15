@@ -242,10 +242,20 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     # simple wrapper representing a derived field
     class derived_field_t:
-        def __init__(self, func: Callable[..., Array]):
+        def __init__(
+            self, func: Callable[..., Array], requires_composite: bool = False
+        ):
             self._func = func
+            self._requires_composite = requires_composite
 
         def evaluate(self, level: int) -> Array:
+            # check if this field requires composite/base-level-only computation
+            if level > 0 and self._requires_composite:
+                raise ValueError(
+                    f"field '{self._func.__name__}' requires base level computation. "
+                    f"use level=0 or enable composite view"
+                )
+
             # assemble fields and mesh for the requested level
             from simbi.reader.adapter import MeshAdapter
 
@@ -600,6 +610,197 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         dvx_dy = np.gradient(vx, y, axis=ndim - 2)
         return np.asarray(dvy_dx - dvx_dy)
 
+    def compute_vorticity_magnitude(level_data: dict[str, Array]) -> Array:
+        """
+        vorticity magnitude: |\nabla \times \\mathbf{v}|
+
+        computes all three components:
+        \\omega_x = \\partial v_z / \\partial y - \\partial v_y / \\partial z
+        \\omega_y = \\partial v_x / \\partial z - \\partial v_z / \\partial x
+        \\omega_z = \\partial v_y / \\partial x - \\partial v_x / \\partial y
+
+        returns: sqrt(\\omega_x^2 + \\omega_y^2 + \\omega_z^2)
+        """
+        mesh = getattr(level_data, "mesh")
+        vx, vy, vz = get_velocities(level_data)
+
+        # cell-centered coordinates
+        coords = []
+        if ndim >= 1:
+            x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+            coords.append(x)
+        if ndim >= 2:
+            y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+            coords.append(y)
+        if ndim >= 3:
+            z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
+            coords.append(z)
+
+        # compute vorticity components based on dimensionality
+        omega_x = np.zeros_like(vx)
+        omega_y = np.zeros_like(vx)
+        omega_z = np.zeros_like(vx)
+
+        if ndim == 2:
+            # 2d case: only omega_z is non-zero
+            # omega_z = dv_y/dx - dv_x/dy
+            dvy_dx = np.gradient(vy, coords[0], axis=ndim - 1)
+            dvx_dy = np.gradient(vx, coords[1], axis=ndim - 2)
+            omega_z = dvy_dx - dvx_dy
+
+        elif ndim == 3:
+            # 3d case: all three components
+            # omega_x = dv_z/dy - dv_y/dz
+            dvz_dy = np.gradient(vz, coords[1], axis=ndim - 2)
+            dvy_dz = np.gradient(vy, coords[2], axis=ndim - 3)
+            omega_x = dvz_dy - dvy_dz
+
+            # omega_y = dv_x/dz - dv_z/dx
+            dvx_dz = np.gradient(vx, coords[2], axis=ndim - 3)
+            dvz_dx = np.gradient(vz, coords[0], axis=ndim - 1)
+            omega_y = dvx_dz - dvz_dx
+
+            # omega_z = dv_y/dx - dv_x/dy
+            dvy_dx = np.gradient(vy, coords[0], axis=ndim - 1)
+            dvx_dy = np.gradient(vx, coords[1], axis=ndim - 2)
+            omega_z = dvy_dx - dvx_dy
+
+        # magnitude
+        omega_mag = np.sqrt(omega_x**2 + omega_y**2 + omega_z**2)
+        return np.asarray(omega_mag)
+
+    def compute_q_criterion(level_data: dict[str, Array]) -> Array:
+        """
+        q-criterion for vortex identification.
+
+        q = 0.5 * (||\\Omega||^2 - ||S||^2)
+
+        where:
+        \\Omega = antisymmetric part of \nabla v = (\nabla v - \nabla v^T) / 2
+        S = symmetric part of \nabla v = (\nabla v + \nabla v^T) / 2
+
+        q > 0: rotation-dominated regions (vortex cores)
+        q < 0: strain-dominated regions (shear layers)
+        """
+        mesh = getattr(level_data, "mesh")
+        vx, vy, vz = get_velocities(level_data)
+
+        # cell-centered coordinates
+        coords = []
+        if ndim >= 1:
+            x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+            coords.append(x)
+        if ndim >= 2:
+            y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+            coords.append(y)
+        if ndim >= 3:
+            z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
+            coords.append(z)
+
+        if ndim == 2:
+            # 2d velocity gradient tensor components
+            # note: axis indices are reversed (storage order)
+            dvx_dx = np.gradient(vx, coords[0], axis=1)  # x is axis 1
+            dvx_dy = np.gradient(vx, coords[1], axis=0)  # y is axis 0
+            dvy_dx = np.gradient(vy, coords[0], axis=1)
+            dvy_dy = np.gradient(vy, coords[1], axis=0)
+
+            # symmetric part (strain rate tensor)
+            s11 = dvx_dx
+            s12 = 0.5 * (dvx_dy + dvy_dx)
+            s22 = dvy_dy
+
+            # antisymmetric part (rotation rate tensor)
+            omega12 = 0.5 * (dvy_dx - dvx_dy)
+
+            # frobenius norms
+            s_norm_sq = s11**2 + 2 * s12**2 + s22**2
+            omega_norm_sq = 2 * omega12**2
+
+            q = 0.5 * (omega_norm_sq - s_norm_sq)
+
+        elif ndim == 3:
+            # 3d velocity gradient tensor (all 9 components)
+            dvx_dx = np.gradient(vx, coords[0], axis=2)  # x is axis 2
+            dvx_dy = np.gradient(vx, coords[1], axis=1)  # y is axis 1
+            dvx_dz = np.gradient(vx, coords[2], axis=0)  # z is axis 0
+
+            dvy_dx = np.gradient(vy, coords[0], axis=2)
+            dvy_dy = np.gradient(vy, coords[1], axis=1)
+            dvy_dz = np.gradient(vy, coords[2], axis=0)
+
+            dvz_dx = np.gradient(vz, coords[0], axis=2)
+            dvz_dy = np.gradient(vz, coords[1], axis=1)
+            dvz_dz = np.gradient(vz, coords[2], axis=0)
+
+            # symmetric part (strain rate tensor)
+            s11 = dvx_dx
+            s12 = 0.5 * (dvx_dy + dvy_dx)
+            s13 = 0.5 * (dvx_dz + dvz_dx)
+            s22 = dvy_dy
+            s23 = 0.5 * (dvy_dz + dvz_dy)
+            s33 = dvz_dz
+
+            # antisymmetric part (rotation rate tensor)
+            omega12 = 0.5 * (dvy_dx - dvx_dy)
+            omega13 = 0.5 * (dvz_dx - dvx_dz)
+            omega23 = 0.5 * (dvz_dy - dvy_dz)
+
+            # frobenius norms
+            s_norm_sq = (
+                s11**2 + s22**2 + s33**2 + 2 * (s12**2 + s13**2 + s23**2)
+            )
+            omega_norm_sq = 2 * (omega12**2 + omega13**2 + omega23**2)
+
+            q = 0.5 * (omega_norm_sq - s_norm_sq)
+        else:
+            # 1d: no vorticity or shear
+            q = np.zeros_like(vx)
+
+        return np.asarray(q)
+
+    def compute_okubo_weiss(level_data: dict[str, Array]) -> Array:
+        """
+        okubo-weiss parameter for 2d flow structure identification.
+
+        ow = s_n^2 + s_s^2 - \\omega^2
+
+        where:
+        s_n = \\partial v_x / \\partial x - \\partial v_y / \\partial y  (normal strain)
+        s_s = \\partial v_x / \\partial y + \\partial v_y / \\partial x  (shear strain)
+        \\omega =\\partial v_y /\\partial x -\\partial v_x /\\partial y  (vorticity)
+
+        ow < 0: vortex-dominated (rotation exceeds strain)
+        ow > 0: strain-dominated (hyperbolic/elliptic regions)
+
+        commonly used in 2d turbulence and geophysical flows.
+        for 3d data, computes ow on each z-slice.
+        """
+        mesh = getattr(level_data, "mesh")
+        vx, vy = level_data["v1"], level_data["v2"]
+
+        # cell-centered coordinates
+        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+
+        # velocity gradients (note: axis order reversed for storage)
+        dvx_dx = np.gradient(vx, x, axis=ndim - 1)
+        dvx_dy = np.gradient(vx, y, axis=ndim - 2)
+        dvy_dx = np.gradient(vy, x, axis=ndim - 1)
+        dvy_dy = np.gradient(vy, y, axis=ndim - 2)
+
+        # strain components
+        s_n = dvx_dx - dvy_dy  # normal strain
+        s_s = dvx_dy + dvy_dx  # shear strain
+
+        # vorticity
+        omega_z = dvy_dx - dvx_dy
+
+        # okubo-weiss parameter
+        ow = s_n**2 + s_s**2 - omega_z**2
+
+        return np.asarray(ow)
+
     def compute_schlieren(level_data: dict[str, Array]) -> Array:
         """
         numerical schlieren: gradient magnitude of log(density).
@@ -654,6 +855,9 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "j_spec": specific_angular_momentum,
         "Sigma": surface_density,
         "vorticity": compute_vorticity_z,
+        "vorticity_magnitude": compute_vorticity_magnitude,
+        "q_criterion": compute_q_criterion,
+        "okubo_weiss": compute_okubo_weiss,
         "div_v": compute_divergence,
         "schlieren": compute_schlieren,
     }
@@ -667,9 +871,22 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         for ii in range(1, ndim + 1):
             base_pipeline[f"b{ii}_mean"] = compute_b_mean_component(ii)
 
+    # fields requiring composite/base-level computation
+    # these involve spatial integration or coordinate transformations that are
+    # meaningless when computed on partial refined domains
+    composite_required = {
+        "Sigma",  # surface_density: integrates over z-column
+        "j",  # angular_momentum_density: uses r × v with coordinates
+        "j_spec",  # specific_angular_momentum: same
+        "mass_flux",  # uses coordinate radius
+    }
+
     # wrap functions into derived-field objects exposing evaluate(level)
     pipeline: dict[str, Any] = {
-        name: derived_field_t(func) for name, func in base_pipeline.items()
+        name: derived_field_t(
+            func, requires_composite=(name in composite_required)
+        )
+        for name, func in base_pipeline.items()
     }
 
     return pipeline
