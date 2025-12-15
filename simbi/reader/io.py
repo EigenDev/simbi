@@ -546,6 +546,8 @@ def read_bodies(bodies_group: h5py.Group) -> Result[BodyCollection, str]:
             capabilities = BodyCapability(int(bg.attrs["capabilities"]))
             position = tuple(bg["position"][()])
             velocity = tuple(bg["velocity"][()])
+            force = tuple(bg["force"][()])
+            torque = tuple(bg["torque"][()])
 
             # capability-specific data
             gravitational = None
@@ -581,6 +583,8 @@ def read_bodies(bodies_group: h5py.Group) -> Result[BodyCollection, str]:
                 radius=radius,
                 position=position,
                 velocity=velocity,
+                force=force,
+                torque=torque,
                 capabilities=capabilities,
                 gravitational=gravitational,
                 accretion=accretion,

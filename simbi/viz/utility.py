@@ -103,6 +103,14 @@ FIELD_MAP: dict[str, str] = {
     "term_pressure": r"$-\nabla p$",
     "term_residual": r"$\mathbf{R}$",
     "schlieren": r"$|\nabla \ln \rho|$",
+    "torque x": r"$\tau_x$",
+    "torque y": r"$\tau_y$",
+    "torque z": r"$\tau_z$",
+    "radial force": r"$F_{\rm rad}$",
+    "tangential force": r"$F_{\rm \perp}$",
+    "decay rate": r"\dot{a}",
+    "power": r"$\dot{E}$",
+    "drag force": r"$F_{\rm drag}$",
 }
 
 UNITS: dict[str, str] = {
@@ -169,13 +177,15 @@ class FieldMapper:
 
 # Usage remains the same
 def get_field_str(
-    fields: str,
+    field: str,
     units: bool = False,
     normalized: bool = True,
 ) -> str:
     """Get LaTeX string for field(s)"""
     mapper = FieldMapper()
-    return mapper.get_field_str(fields, units, normalized)
+    if "$" in field:
+        return field  # already formatted
+    return mapper.get_field_str(field, units, normalized)
 
 
 def calc_enthalpy(fields: dict[str, NDArray[np.floating[Any]]]) -> Any:

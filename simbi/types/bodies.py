@@ -186,6 +186,8 @@ class BaseBody(Unionable):
 
 @dataclass(frozen=True)
 class Body(BaseBody):
+    force: tuple[float, ...] = field(default_factory=lambda: (0.0, 0.0, 0.0))
+    torque: tuple[float, ...] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     gravitational: Optional[GravitationalProperties] = None
     accretion: Optional[AccretionProperties] = None
     rigid: Optional[RigidProperties] = None
