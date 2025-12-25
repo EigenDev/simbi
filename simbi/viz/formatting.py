@@ -1,6 +1,7 @@
 from typing import Any, Optional
 
 from matplotlib.axes import Axes
+from matplotlib.collections import PolyCollection, QuadMesh
 from matplotlib.colorbar import Colorbar
 from matplotlib.figure import Figure
 
@@ -344,14 +345,14 @@ class FigureFormatter:
 
         # remove top/right spines for cleaner look
         # but not if plotting multidim plots (e.g, polygons, quadplot)
-        # if any("lines" in x.keys() for x in rendered_artists) and not any(
-        #     isinstance(x["collection"], (PolyCollection, QuadMesh))
-        #     for x in rendered_artists
-        # ):
-        try:
-            remove_spines(main_ax)
-        except Exception:
-            pass
+        if any("lines" in x.keys() for x in rendered_artists) and not any(
+            isinstance(x["collection"], (PolyCollection, QuadMesh))
+            for x in rendered_artists
+        ):
+            try:
+                remove_spines(main_ax)
+            except Exception:
+                pass
 
     def _format_colorbar(
         self, fig: Figure, ax: Axes, artist: Any, field_data: Any
