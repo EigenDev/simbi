@@ -15,7 +15,7 @@
 #include <numbers>
 
 namespace simbi::body {
-    inline auto accretion_coefficient(real gamma) -> real
+    inline real accretion_coefficient(real gamma)
     {
         // approximate lambda(gamma) from Bondi (1952) and Krumholz et al.
         // (2004)
@@ -86,6 +86,73 @@ namespace simbi::body {
         }
     };
 
+    struct weight_reducer_t
+    {
+        template <std::uint64_t Rank>
+        constexpr DEV auto
+        operator()(const weighted_sums_t<Rank>& a, const weighted_sums_t<Rank>& b) const
+            -> weighted_sums_t<Rank>
+        {
+            return a + b;
+        }
+    };
+
+    // functor for sink weight mapping (hoisted for cuda compatibility)
+    template <std::uint64_t Rank, typename BlockGeo, typename PrimAccessor>
+    struct sink_weight_mapper_t
+    {
+        BlockGeo             block_geo;
+        PrimAccessor         prims;
+        vector_t<real, Rank> body_position;
+        real                 r_acc;
+        real                 gamma;
+        bool                 is_binary;
+
+        constexpr DEV auto operator()(auto coord) const -> weighted_sums_t<Rank>
+        {
+            using namespace simbi::hydro;
+
+            const auto cell_pos = block_geo.centroid(coord);
+            const auto r_mag    = (cell_pos - body_position).norm();
+
+            // gaussian weight
+            const auto weight = [&]() {
+                if constexpr (Rank == 2) {
+                    if (is_binary) {
+                        const auto r_norm = r_mag / r_acc;
+                        return std::exp(-0.25 * std::pow(r_norm, 4));
+                    }
+                    const auto r_k    = 0.5 * r_acc;
+                    const auto r_norm = r_mag / r_k;
+                    return std::exp(-r_norm * r_norm);
+                }
+                else {
+                    const auto r_k    = 0.5 * r_acc;
+                    const auto r_norm = r_mag / r_k;
+                    return std::exp(-r_norm * r_norm);
+                }
+            }();
+
+            if (weight < 1e-10) {
+                return weighted_sums_t<Rank>{};
+            }
+
+            const auto prim  = prims(coord);
+            const auto rho   = labframe_density(prim);
+            const auto v_vec = prim.vel;
+            const auto cs    = sound_speed(prim, gamma);
+            const auto mass  = block_geo.volume(coord) * rho;
+
+            return weighted_sums_t<Rank>{
+                .weighted_density = weight * rho,
+                .weighted_cs      = weight * mass * cs,
+                .sum_weight       = weight,
+                .sum_mass         = weight * mass,
+                .weighted_v_vec   = weight * mass * v_vec
+            };
+        }
+    };
+
     template <typename Body, typename SimState, std::uint64_t Rank = SimState::rank>
     auto compute_sink_properties(const Body& body, const SimState& sim, std::uint64_t lvl)
         -> sink_properties_t<Rank>
@@ -120,56 +187,22 @@ namespace simbi::body {
                 mesh_cfg,
                 motion,
                 [&](const auto& block_geo) {
-                    // mapper: compute weighted contribution from each cell
-                    auto mapper = [=, &body, &block_geo](auto coord) -> weighted_sums_t<Rank> {
-                        const auto cell_pos = block_geo.centroid(coord);
-                        const auto r_mag    = (cell_pos - body.position).norm();
 
-                        // gaussian weight
-                        const auto weight = [is_binary, r_mag, r_acc]() {
-                            if constexpr (Rank == 2) {
-                                if (is_binary) {
-                                    const auto r_norm = r_mag / r_acc;
-                                    return std::exp(-0.25 * std::pow(r_norm, 4));
-                                }
-                                const auto r_k    = 0.5 * r_acc;
-                                const auto r_norm = r_mag / r_k;
-                                return std::exp(-r_norm * r_norm);
-                            }
-                            else {
-                                (void) is_binary;
-                                const auto r_k    = 0.5 * r_acc;
-                                const auto r_norm = r_mag / r_k;
-                                return std::exp(-r_norm * r_norm);
-                            }
-                        }();
-
-                        if (weight < 1e-10) {
-                            return weighted_sums_t<Rank>{};
-                        }
-
-                        const auto prim  = prims[domain](coord);
-                        const auto rho   = labframe_density(prim);
-                        const auto v_vec = prim.vel;
-                        const auto cs    = sound_speed(prim, gamma);
-                        const auto mass  = block_geo.volume(coord) * rho;
-
-                        return weighted_sums_t<Rank>{
-                            .weighted_density = weight * rho,
-                            .weighted_cs      = weight * mass * cs,
-                            .sum_weight       = weight,
-                            .sum_mass         = weight * mass,
-                            .weighted_v_vec   = weight * mass * v_vec
-                        };
+                    auto mapper = sink_weight_mapper_t{
+                        .block_geo     = block_geo,
+                        .prims         = prims[domain],
+                        .body_position = body.position,
+                        .r_acc         = r_acc,
+                        .gamma         = gamma,
+                        .is_binary     = is_binary
                     };
 
-                    auto reducer = [](const auto& a, const auto& b) { return a + b; };
                     return het::exec::reduce_sync(
                         exec,
                         domain,
                         weighted_sums_t<Rank>{},
                         mapper,
-                        reducer,
+                        weight_reducer_t{},
                         weighted_sums_t<Rank>{}
                     );
                 }
