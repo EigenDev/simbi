@@ -1,37 +1,24 @@
-# Check for GPU dependencies
-hip = dependency(
-  'HIP',
-  cmake_module_path: '/opt/rocm',
-  modules: ['hip::device', 'hip::host'],
-  required: false,
-)
-cuda = dependency('CUDA', required: false)
+# =============================================================================
+# gpu/meson.build
+#
+# extensible gpu backend compilation supporting cuda, hip, sycl, metal
+# uses custom targets to handle .cpp files with gpu code
+# batched linking to prevent oom
+# =============================================================================
+
 fs = import('fs')
-include_flags = []
-foreach inc : include_dirs
-  include_flags += ['-I' + inc]
-endforeach
 
-gpu_flags = [
-  '-DGPU_ENABLED=1',
-  '-DMANAGED_MEMORY',
-]
+# gpu backend detection
+cuda = dependency('CUDA', required: false)
+hip = dependency('HIP', required: false)
+# sycl = dependency('sycl', required: false)  # future
+# metal = dependency('metal', required: false)  # future
 
-# Get CUDA paths
-cuda_path = run_command('which', 'nvcc', check: false).stdout().strip()
-cuda_root = ''
-if cuda_path != ''
-  cuda_root = fs.parent(fs.parent(cuda_path))
+if not cuda.found() and not hip.found()
+  error('gpu compilation enabled but no gpu runtime found')
 endif
 
-# Get ROCm paths
-rocm_path = ''
-if hip.found()
-  rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
-endif
-
-gpu_arch = get_option('gpu_arch').strip()
-
+# gpu-specific sources only (not cpu sources)
 gpu_sources = files(
   '../src/hesi/cuda/event.cpp',
   '../src/hesi/cuda/stream.cpp',
@@ -39,104 +26,195 @@ gpu_sources = files(
   '../src/hesi/cuda/transfer.cpp',
 )
 
-gpu_settings = {
-  'nvidia': {
-    'compiler': 'nvcc',
-    'arch': gpu_arch,
-    'args': gpu_arch.split(' ')
-    + [
-      '-x', 'cu',
-      '-dc',
-      '-rdc=true',
-      '--extended-lambda',
-      '--expt-relaxed-constexpr',
-      # '-w',
-      '-std=c++20',
-      '--compiler-options',
-      '-fPIC',
-      '--compiler-options',
-      '-fdiagnostics-color=always',
-      '-DCUDA_ENABLED',
-    ],
-    'link_args': [f'-L@cuda_root@/lib64', '-lcudart'],
-    'inter_link_args': ['-dlink', '-rdc=true', '-Xcompiler', '-fPIC'],
-    'extra_link_args': ['-lcudadevrt'],
-    'gpu_dependency': cuda,
-  },
-  'amd': {
-    'compiler': 'hipcc',
-    'arch': gpu_arch,
-    'args': ['-fPIC', '-fdiagnostics-color=always'] + gpu_arch.split(' ') + ['-DHIP_ENABLED'],
-    'link_args': [f'-L@rocm_path@/lib', '-lamdhip64'],
-    'inter_link_args': [],
-    'extra_link_args': [],
-    'gpu_dependency': hip,
-  },
+# common gpu flags
+gpu_common_flags = [
+  '-DGPU_ENABLED=1',
+  '-DMANAGED_MEMORY',
+]
+
+# extract include paths from dependencies
+hdf5_includes = []
+foreach arg : hdf5_dep.get_compile_args()
+  if arg.startswith('-I')
+    hdf5_includes += [arg]
+  endif
+endforeach
+
+pybind11_includes = []
+foreach arg : pybind11_dep.get_compile_args()
+  if arg.startswith('-I')
+    pybind11_includes += [arg]
+  endif
+endforeach
+
+python_includes = []
+foreach arg : py3.dependency().get_compile_args()
+  if arg.startswith('-I')
+    python_includes += [arg]
+  endif
+endforeach
+
+# build common include flags
+include_flags = [
+  '-I' + meson.current_source_dir() / '..' / 'src',
+  '-I' + meson.current_build_dir() / '..',
+] + hdf5_includes + pybind11_includes + python_includes
+
+# =============================================================================
+# backend configurations
+# each backend specifies: compiler, compile args, link args, device link args
+# =============================================================================
+
+cuda_config = {
+  'name': 'cuda',
+  'compiler': 'nvcc',
+  'defines': ['-DCUDA_ENABLED'],
+  'compile_args': [
+    '-x', 'cu',
+    '-dc',
+    '-rdc=true',
+    '--extended-lambda',
+    '--expt-relaxed-constexpr',
+    '-std=c++20',
+    '--compiler-options', '-fPIC',
+    '--compiler-options', '-fdiagnostics-color=always',
+    '-g0',  # no debug symbols to reduce memory usage
+  ],
+  'link_args': ['-lcudart'],
+  'device_link_args': ['-dlink', '-rdc=true', '-Xcompiler', '-fPIC'],
+  'device_link_libs': ['-lcudadevrt'],
 }
 
-settings = {}
-if hip.found() or cuda.found()
-  if hip.found()
-    if run_command('hipconfig', '--platform', check: true).stdout().strip() == 'nvidia'
-      settings = gpu_settings['nvidia']
-    else
-      settings = gpu_settings['amd']
+hip_config = {
+  'name': 'hip',
+  'compiler': 'hipcc',
+  'defines': ['-DHIP_ENABLED'],
+  'compile_args': [
+    '-fPIC',
+    '-fdiagnostics-color=always',
+    '-std=c++20',
+  ],
+  'link_args': ['-lamdhip64'],
+  'device_link_args': [],  # hip doesn't need separate device link
+  'device_link_libs': [],
+}
+
+# future backends
+# sycl_config = { ... }
+# metal_config = { ... }
+
+# select active backend
+if cuda.found()
+  backend = cuda_config
+  gpu_dep = cuda
+elif hip.found()
+  backend = hip_config
+  gpu_dep = hip
+endif
+
+compiler = find_program(backend['compiler'])
+
+# =============================================================================
+# compile gpu sources to object files
+# =============================================================================
+
+gpu_objects = []
+
+foreach src : gpu_sources
+  obj_name = fs.name(fs.parent(src)) + '_' + fs.stem(src) + '.o'
+  
+  gpu_objects += custom_target(
+    obj_name,
+    input: src,
+    output: obj_name,
+    command: [
+      compiler,
+      include_flags,
+      backend['compile_args'],
+      backend['defines'],
+      gpu_common_flags,
+      '-c', '@INPUT@',
+      '-o', '@OUTPUT@',
+    ],
+  )
+endforeach
+
+# =============================================================================
+# device linking (if needed)
+# batch objects to prevent oom - link in chunks, then final link
+# =============================================================================
+
+device_link_objects = []
+
+if backend['device_link_args'].length() > 0
+  # cuda requires device linking
+  # batch size: adjust based on available memory (10-15 objects per batch is safe)
+  batch_size = 10
+  batch_count = (gpu_objects.length() + batch_size - 1) / batch_size
+  
+  # create batched device link objects
+  batch_idx = 0
+  foreach i : range(0, gpu_objects.length(), batch_size)
+    batch_end = i + batch_size
+    if batch_end > gpu_objects.length()
+      batch_end = gpu_objects.length()
     endif
-  elif cuda.found()
-    settings = gpu_settings['nvidia']
-  endif
-  gpu_compiler = find_program(settings['compiler'])
-
-  # Compile GPU sources
-  gpu_objs = []
-  foreach src : sources + gpu_sources + cpu_sources
-    gpu_objs += [
-      custom_target(
-        # include parent directory name so targets are unique (e.g. cuda_event_o vs backend_event_o)
-        fs.name(fs.parent(src)) + '_' + fs.name(src) + '_gpu_obj',
-        input: src,
-        # make produced object filename unique by prefixing with parent dir
-        output: fs.name(fs.parent(src)) + '_@BASENAME@.o',
-        command: [
-          gpu_compiler,
-          include_flags,
-          settings['args'],
-          '-c', '@INPUT@',
-          '-o', '@OUTPUT@',
-          gpu_flags,
-        ],
-        build_by_default: true,
-      ),
-    ]
-  endforeach
-
-  # perform intermediate link step
-  gpu_objs += [
-    custom_target(
-      'gpu_link',
-      input: gpu_objs,
-      output: 'gpu_link.o',
+    
+    batch_objs = []
+    foreach j : range(i, batch_end)
+      batch_objs += gpu_objects[j]
+    endforeach
+    
+    device_link_objects += custom_target(
+      'gpu_dlink_batch_' + batch_idx.to_string(),
+      input: batch_objs,
+      output: 'gpu_dlink_batch_' + batch_idx.to_string() + '.o',
       command: [
-        gpu_compiler,
-        settings['link_args'],
-        settings['inter_link_args'],
+        compiler,
+        backend['device_link_args'],
         '@INPUT@',
         '-o', '@OUTPUT@',
-      ]
-      + settings['extra_link_args']
-      + settings['arch'].split(' '),
-      build_by_default: true,
-    ),
-  ]
-
-  py3.extension_module(
-    'gpu_ext',
-    ['../src/bindings/gpu_binding.cpp'] + gpu_objs,
-    link_args: settings['link_args'],
-    include_directories: include_directories('..', '../src'),
-    dependencies: general_dependencies + settings['gpu_dependency'],
-    cpp_args: ['-DMANAGED_MEMORY'],
-    install: true,
-    install_dir: py_install_dir,
-  )
+      ] + backend['device_link_libs'],
+    )
+    
+    batch_idx += 1
+  endforeach
+  
+  # final device link combining all batches
+  if device_link_objects.length() > 1
+    final_dlink = custom_target(
+      'gpu_dlink_final',
+      input: device_link_objects,
+      output: 'gpu_dlink_final.o',
+      command: [
+        compiler,
+        backend['device_link_args'],
+        '@INPUT@',
+        '-o', '@OUTPUT@',
+      ] + backend['device_link_libs'],
+    )
+    all_gpu_objects = gpu_objects + [final_dlink]
+  else
+    all_gpu_objects = gpu_objects + device_link_objects
+  endif
+else
+  # hip doesn't need device linking
+  all_gpu_objects = gpu_objects
 endif
+
+# =============================================================================
+# build python extension module
+# =============================================================================
+
+py3.extension_module(
+  'gpu_ext',
+  '../src/bindings/gpu_binding.cpp',
+  objects: all_gpu_objects,
+  include_directories: all_inc,
+  dependencies: general_dependencies + [gpu_dep],
+  cpp_args: backend['defines'] + gpu_common_flags,
+  link_args: backend['link_args'],
+  install: true,
+  install_dir: py_install_dir,
+  override_options: ['b_lundef=false'],
+)

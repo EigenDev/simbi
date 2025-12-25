@@ -1,19 +1,22 @@
-# Main Meson Build File
+# =============================================================================
+# meson.build
+#
+# main build configuration for simbi
+# =============================================================================
 
 project(
   'simbi',
   'c',
   'cpp',
-  version: run_command('git', 'describe', '--tag', '--abbrev=0', check: true).stdout().strip(),
+  version: run_command('git', 'describe', '--tag', '--abbrev=0', check: false).stdout().strip(),
   license: 'MIT',
   default_options: {
     'cpp_std': 'c++20',
-    'cpp_args': ['-march=native'],
     'warning_level': '3',
   },
 )
 
-# Add common project arguments
+# common project arguments
 add_project_arguments(
   [
     '-Wno-nested-anon-types',
@@ -21,20 +24,21 @@ add_project_arguments(
   ],
   language: 'cpp',
 )
-# Python installation directory
-py3 = import('python').find_installation('python3', required: true)
-py_install_dir = meson.current_source_dir() + '/simbi/libs'
-pybind11_dep = dependency('pybind11')
-pybind11_include = run_command(py3, ['-c', 'import pybind11; print(pybind11.get_include())'], check: true).stdout().strip()
 
-# show maximum of n errors before stopping the build
+# python and pybind11 setup
+py3 = import('python').find_installation('python3', required: true)
+py_install_dir = meson.current_source_dir() / 'simbi' / 'libs'
+pybind11_dep = dependency('pybind11')
+
+# limit error output during compilation
 cc = meson.get_compiler('cpp')
 if cc.get_id() == 'clang'
   add_project_arguments('-ferror-limit=1', language: 'cpp')
 elif cc.get_id() == 'gcc'
   add_project_arguments('-fmax-errors=1', language: 'cpp')
 endif
-#Build configuration
+
+# build configuration
 conf_data = configuration_data()
 foreach opt : ['four_velocity', 'column_major']
   conf_data.set10(opt.to_upper(), get_option(opt))
@@ -50,12 +54,13 @@ configure_file(
   configuration: conf_data,
 )
 
+# dependencies
 openmp_dep = dependency('openmp', language: 'cpp', required: true)
 hdf5_dep = dependency('hdf5', language: 'cpp', required: true)
 
 all_inc = include_directories('src')
 
-#Include Subdirectories
+# include subdirectories
 subdir('src')
 subdir('simbi/afterglow')
 
@@ -74,44 +79,23 @@ simbi_core = static_library(
   dependencies: general_dependencies,
 )
 
-#CPU Extension Module
+# cpu extension module
 py3.extension_module(
   'cpu_ext',
   'src/bindings/cpu_binding.cpp',
-  include_directories: [all_inc],
+  include_directories: all_inc,
   dependencies: general_dependencies,
   link_with: simbi_core,
   install: true,
   install_dir: py_install_dir,
 )
 
-#Check and configure GPU compilation
+# gpu compilation
 if get_option('gpu_compilation').enabled()
-  fs = import('fs')
-  hdf5_inc = get_option('hdf5_inc')
-  python_include = run_command(
-    py3,
-    ['-c', 'import sysconfig; print(sysconfig.get_path("include"))'],
-    check: true,
-  ).stdout().strip()
-
-  # Build include directories list
-  include_dirs = [
-    meson.current_source_dir() / 'src',
-    '.',
-    meson.current_build_dir(),
-    pybind11_include,
-    python_include,
-    hdf5_inc,
-  ]
-
-  if hdf5_inc == ''
-    error('HDF5 include directory was not found for GPU compilation')
-  endif
   subdir('gpu')
 endif
 
-# Tests
+# tests
 if get_option('build_tests')
   subdir('tests')
 endif
