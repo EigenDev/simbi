@@ -335,55 +335,6 @@ namespace simbi::ecs {
             sim.exchange_halos(lvl);
         }
 
-      private:
-        template <typename Sim>
-        void apply_physical_bcs(Sim& sim, std::uint64_t lvl) const
-        {
-            constexpr std::uint64_t Rank   = Sim::rank;
-            constexpr bool          is_mhd = Sim::is_mhd;
-
-            // create boundary policy for this physics
-            auto& mesh_cfg = sim.mesh(lvl);
-            auto& geo      = mesh_cfg.geometry;
-
-            // extract theta bounds for spherical coordinate handling
-            // theta is x2 (logical), which is at array index Rank-2
-            real theta_min = 0.0;
-            real theta_max = std::numbers::pi;
-            if constexpr (Rank >= 2) {
-                constexpr std::uint64_t theta_idx = Rank - 2;
-                if (geo.dims.size() > theta_idx) {
-                    theta_min = geo.dims[theta_idx].start;
-                    theta_max = geo.dims[theta_idx].end;
-                }
-            }
-
-            auto policy =
-                hydro::make_boundary_policy<is_mhd, Rank>(geo.metric, theta_min, theta_max);
-
-            // simple context (no dynamic expressions for now)
-            geometry::simple_context_t context;
-
-            auto& decomp = sim.decomposition(lvl);
-
-            for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
-                auto& fields = sim.partition_hydro(lvl, pp);
-                auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
-
-                // apply boundaries using the driver
-                geometry::boundary_driver_t::apply_boundaries(
-                    fields.cons,
-                    part.block.id,
-                    decomp.skeleton,
-                    mesh_cfg,
-                    policy,
-                    context,
-                    exec
-                );
-            }
-        }
-
         template <typename Sim>
         void prolongate_from_coarse(Sim& sim, std::uint64_t fine_lvl) const
         {
@@ -459,6 +410,55 @@ namespace simbi::ecs {
                         exec
                     );
                 }
+            }
+        }
+
+      private:
+        template <typename Sim>
+        void apply_physical_bcs(Sim& sim, std::uint64_t lvl) const
+        {
+            constexpr std::uint64_t Rank   = Sim::rank;
+            constexpr bool          is_mhd = Sim::is_mhd;
+
+            // create boundary policy for this physics
+            auto& mesh_cfg = sim.mesh(lvl);
+            auto& geo      = mesh_cfg.geometry;
+
+            // extract theta bounds for spherical coordinate handling
+            // theta is x2 (logical), which is at array index Rank-2
+            real theta_min = 0.0;
+            real theta_max = std::numbers::pi;
+            if constexpr (Rank >= 2) {
+                constexpr std::uint64_t theta_idx = Rank - 2;
+                if (geo.dims.size() > theta_idx) {
+                    theta_min = geo.dims[theta_idx].start;
+                    theta_max = geo.dims[theta_idx].end;
+                }
+            }
+
+            auto policy =
+                hydro::make_boundary_policy<is_mhd, Rank>(geo.metric, theta_min, theta_max);
+
+            // simple context (no dynamic expressions for now)
+            geometry::simple_context_t context;
+
+            auto& decomp = sim.decomposition(lvl);
+
+            for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                auto& fields = sim.partition_hydro(lvl, pp);
+                auto& part   = sim.partition(lvl, pp);
+                auto  exec   = sim.partition_executor(lvl, pp);
+
+                // apply boundaries using the driver
+                geometry::boundary_driver_t::apply_boundaries(
+                    fields.cons,
+                    part.block.id,
+                    decomp.skeleton,
+                    mesh_cfg,
+                    policy,
+                    context,
+                    exec
+                );
             }
         }
     };
