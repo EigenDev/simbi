@@ -53,6 +53,7 @@
 #include "compat.hpp"
 
 #include <atomic>
+#include <concepts>
 #include <cstdint>
 #include <exception>
 #include <string>
@@ -63,11 +64,14 @@ namespace simbi {
     template <typename T, std::uint64_t Rank>
     struct vector_t;
 
-    template <std::uint64_t Rank>
-    using uarray = vector_t<std::uint64_t, Rank>;
+    template <std::integral T, std::uint64_t Rank>
+    using ivec = vector_t<T, Rank>;
 
     template <std::uint64_t Rank>
-    using iarray = vector_t<std::int64_t, Rank>;
+    using uarray = ivec<std::uint64_t, Rank>;
+
+    template <std::uint64_t Rank>
+    using iarray = ivec<std::int64_t, Rank>;
 
     enum class ErrorCode : uint32_t {
         NONE                  = 0,
@@ -92,7 +96,7 @@ namespace simbi {
         {
           public:
             InterruptException(std::int64_t s) : status(s) {};
-            const char* what() const noexcept;
+            const char*  what() const noexcept;
             std::int64_t status;
         };
 
@@ -103,7 +107,7 @@ namespace simbi {
             const char* what() const noexcept;
         };
 
-    }   // namespace exception
+    } // namespace exception
 
     inline DUAL constexpr ErrorCode operator|(ErrorCode lhs, ErrorCode rhs)
     {
@@ -123,21 +127,21 @@ namespace simbi {
 
     inline DUAL constexpr bool has_error(ErrorCode code, ErrorCode error)
     {
-        return (static_cast<uint32_t>(code) & static_cast<uint32_t>(error)) !=
-               0;
+        return (static_cast<uint32_t>(code) & static_cast<uint32_t>(error)) != 0;
     }
 
-    struct error_budget_t {
-        std::atomic<int> remaining{1};   // start with budget of 1 error
+    struct error_budget_t
+    {
+        std::atomic<int>  remaining{1}; // start with budget of 1 error
         std::atomic<bool> error_captured{false};
 
         // error details (only filled by the winning thread)
-        std::atomic<ErrorCode> first_error_code{ErrorCode::NONE};
+        std::atomic<ErrorCode>     first_error_code{ErrorCode::NONE};
         std::atomic<std::uint64_t> first_error_index{0};
 
         // coordinate storage (non-atomic, only written by winning thread)
-        std::int64_t error_coord[3]{0, 0, 0};    // index space coordinates
-        real error_position[3]{0.0, 0.0, 0.0};   // physical space coordinates
+        std::int64_t error_coord[3]{0, 0, 0};          // index space coordinates
+        real         error_position[3]{0.0, 0.0, 0.0}; // physical space coordinates
 
         // try to consume budget - returns true if this thread "wins"
         bool try_consume()
@@ -147,7 +151,10 @@ namespace simbi {
         }
 
         // check if budget is exhausted
-        bool is_exhausted() const { return remaining.load() <= 0; }
+        bool is_exhausted() const
+        {
+            return remaining.load() <= 0;
+        }
 
         void reset()
         {
@@ -234,27 +241,24 @@ namespace simbi {
             result += "), chi=" + std::to_string(cons.chi);
         }
         else {
-            result += "), nrg=" + std::to_string(cons.nrg) +
-                      ", chi=" + std::to_string(cons.chi);
+            result += "), nrg=" + std::to_string(cons.nrg) + ", chi=" + std::to_string(cons.chi);
         }
 
         return result;
     }
 
-    struct error_info_t {
+    struct error_info_t
+    {
         std::string coord_str;
         // std::string position_str;
-        ErrorCode error_code;
-        std::string message;   // additional message for context
+        ErrorCode   error_code;
+        std::string message; // additional message for context
     };
 
     class primitive_conversion_error_t : public std::exception
     {
       public:
-        primitive_conversion_error_t(const error_info_t& error_info)
-            : info_(error_info)
-        {
-        }
+        primitive_conversion_error_t(const error_info_t& error_info) : info_(error_info) {}
 
         const char* what() const noexcept override
         {
@@ -265,13 +269,12 @@ namespace simbi {
         }
 
       private:
-        error_info_t info_;
+        error_info_t        info_;
         mutable std::string what_message_;
 
         std::string format_error_message() const
         {
-            return std::string("Primitive conversion failed:\n") + "  " +
-                   info_.coord_str + "\n" +
+            return std::string("Primitive conversion failed:\n") + "  " + info_.coord_str + "\n" +
                    "  "
                    "  Error: " +
                    helpers::error_code_to_string(info_.error_code) + "\n" +
@@ -279,6 +282,6 @@ namespace simbi {
         }
     };
 
-}   // namespace simbi
+} // namespace simbi
 
 #endif
