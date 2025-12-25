@@ -88,7 +88,7 @@ namespace simbi::evolution {
                 checkpoint::save(sim, state.progress);
             }
         }
-        catch (exception::SimulationFailureException) {
+        catch (exception::SimulationFailureException& e) {
             // diagnose and report detailed failure information
             diagnostics::diagnose_cons2prim_failure(sim, state.progress.table);
             throw;
