@@ -10,7 +10,6 @@ project(
     'cpp_std': 'c++20',
     'cpp_args': ['-march=native'],
     'warning_level': '3',
-    'b_lto': true,
   },
 )
 
