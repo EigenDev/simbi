@@ -2,9 +2,16 @@
 #define HET_PRIMITIVES_HPP
 
 #include "compat.hpp"
-#include "hesi/device/context.hpp"   // for grid::idx() and api::
+#include "hesi/device/context.hpp" // for grid::idx() and api::
+
 #include <cstddef>
 #include <cstdint>
+
+// forward declarations for shuffle specializations
+namespace simbi::body {
+    template <std::uint64_t Rank>
+    struct weighted_sums_t;
+}
 
 namespace simbi::het {
 
@@ -21,9 +28,15 @@ namespace simbi::het {
       public:
         DEV explicit atomic_ref_t(T* ptr) : ptr_(ptr) {}
 
-        DEV T fetch_add(T val) { return api::atomic_add(ptr_, val); }
+        DEV T fetch_add(T val)
+        {
+            return api::atomic_add(ptr_, val);
+        }
 
-        DEV T fetch_min(T val) { return api::atomic_min(ptr_, val); }
+        DEV T fetch_min(T val)
+        {
+            return api::atomic_min(ptr_, val);
+        }
 
         // [TODO]: can add fetch_max, fetch_and, fetch_or, etc. here
     };
@@ -33,7 +46,8 @@ namespace simbi::het {
      * this object has no size; its address is the start of the array.
      */
     template <typename T>
-    struct shared_memory_t {
+    struct shared_memory_t
+    {
         // provides s_mem[idx] syntax
         DEV T& operator[](std::size_t idx)
         {
@@ -82,12 +96,18 @@ namespace simbi::het {
         /**
          * @brief   the number of threads in this sub-group (e.g., 32 or 64).
          */
-        DEV std::uint64_t size() const { return group_size; }
+        DEV std::uint64_t size() const
+        {
+            return group_size;
+        }
 
         /**
          * @brief   is this thread the leader (lane 0) of the sub-group?
          */
-        DEV bool is_leader() const { return rank() == 0; }
+        DEV bool is_leader() const
+        {
+            return rank() == 0;
+        }
 
         /**
          * @brief   get a value from another thread in this sub-group.
@@ -101,7 +121,7 @@ namespace simbi::het {
             return __shfl(var, root_lane, group_size);
 #else
             (void) root_lane;
-            return var;   // cpu fallback
+            return var; // cpu fallback
 #endif
         }
 
@@ -117,7 +137,7 @@ namespace simbi::het {
             return __shfl_down(var, offset, group_size);
 #else
             (void) offset;
-            return var;   // cpu fallback
+            return var; // cpu fallback
 #endif
         }
 
@@ -133,8 +153,27 @@ namespace simbi::het {
             return __shfl_up(var, offset, group_size);
 #else
             (void) offset;
-            return var;   // cpu fallback
+            return var; // cpu fallback
 #endif
+        }
+
+        // specialization for weighted_sums_t: shuffle each member independently
+        template <std::uint64_t Rank>
+        DEV body::weighted_sums_t<Rank>
+            shuffle_down(body::weighted_sums_t<Rank> var, std::uint64_t offset) const
+        {
+            body::weighted_sums_t<Rank> result;
+            result.weighted_density = shuffle_down(var.weighted_density, offset);
+            result.weighted_cs      = shuffle_down(var.weighted_cs, offset);
+            result.sum_weight       = shuffle_down(var.sum_weight, offset);
+            result.sum_mass         = shuffle_down(var.sum_mass, offset);
+
+            // shuffle vector components individually
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                result.weighted_v_vec[ii] = shuffle_down(var.weighted_v_vec[ii], offset);
+            }
+
+            return result;
         }
     };
 
@@ -147,7 +186,10 @@ namespace simbi::het {
         /**
          * @brief   this thread's id within the block (e.g., 0-255).
          */
-        DEV std::uint32_t rank() const { return dgrid::ctx().thread_id(); }
+        DEV std::uint32_t rank() const
+        {
+            return dgrid::ctx().thread_id();
+        }
 
         /**
          * @brief   the total number of threads in this block.
@@ -160,12 +202,18 @@ namespace simbi::het {
         /**
          * @brief   is this the leader (thread 0) of the entire block?
          */
-        DEV bool is_leader() const { return rank() == 0; }
+        DEV bool is_leader() const
+        {
+            return rank() == 0;
+        }
 
         /**
          * @brief   get this thread's sub_group_t object.
          */
-        DEV sub_group_t get_sub_group() const { return sub_group_t{}; }
+        DEV sub_group_t get_sub_group() const
+        {
+            return sub_group_t{};
+        }
 
         /**
          * @brief   get the total number of sub-groups in this block.
@@ -178,18 +226,27 @@ namespace simbi::het {
         /**
          * @brief   synchronize all threads in this block.
          */
-        DEV void sync() const { api::sync_threads(); }
+        DEV void sync() const
+        {
+            api::sync_threads();
+        }
     };
 
     /**
      * @brief   get the sub_group_t for the currently executing thread.
      */
-    DEV inline sub_group_t this_sub_group() { return sub_group_t{}; }
+    DEV inline sub_group_t this_sub_group()
+    {
+        return sub_group_t{};
+    }
 
     /**
      * @brief   get the block_group_t for the currently executing thread.
      */
-    DEV inline block_group_t this_block() { return block_group_t{}; }
+    DEV inline block_group_t this_block()
+    {
+        return block_group_t{};
+    }
 
     /**
      * @brief   performs a fast, parallel reduction *within* a sub-group.
@@ -206,6 +263,6 @@ namespace simbi::het {
         return val;
     }
 
-}   // namespace simbi::het
+} // namespace simbi::het
 
-#endif   // HETERO_PRIMITIVES_HPP
+#endif // HETERO_PRIMITIVES_HPP
