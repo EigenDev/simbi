@@ -18,12 +18,16 @@ if not cuda.found() and not hip.found()
   error('gpu compilation enabled but no gpu runtime found')
 endif
 
-# gpu-specific sources only (not cpu sources)
+# gpu-specific sources (cuda implementation + backend dispatch)
 gpu_sources = files(
   '../src/hesi/cuda/event.cpp',
   '../src/hesi/cuda/stream.cpp',
   '../src/hesi/cuda/memory.cpp',
   '../src/hesi/cuda/transfer.cpp',
+  '../src/hesi/backend/event.cpp',
+  '../src/hesi/backend/stream.cpp',
+  '../src/hesi/backend/memory.cpp',
+  '../src/hesi/backend/transfer.cpp',
 )
 
 # common gpu flags
@@ -32,33 +36,39 @@ gpu_common_flags = [
   '-DMANAGED_MEMORY',
 ]
 
-# extract include paths from dependencies
-hdf5_includes = []
-foreach arg : hdf5_dep.get_compile_args()
-  if arg.startswith('-I')
-    hdf5_includes += [arg]
-  endif
-endforeach
-
-pybind11_includes = []
-foreach arg : pybind11_dep.get_compile_args()
-  if arg.startswith('-I')
-    pybind11_includes += [arg]
-  endif
-endforeach
-
-python_includes = []
-foreach arg : py3.dependency().get_compile_args()
-  if arg.startswith('-I')
-    python_includes += [arg]
-  endif
-endforeach
-
-# build common include flags
+# build include flags manually since not all dependency types support get_compile_args()
+# just use the essential paths that we know we need
 include_flags = [
   '-I' + meson.current_source_dir() / '..' / 'src',
   '-I' + meson.current_build_dir() / '..',
-] + hdf5_includes + pybind11_includes + python_includes
+]
+
+# add pybind11 include (we know this works)
+pybind11_inc = run_command(
+  py3,
+  ['-c', 'import pybind11; print(pybind11.get_include())'],
+  check: true
+).stdout().strip()
+include_flags += ['-I' + pybind11_inc]
+
+# add python include
+python_inc = run_command(
+  py3,
+  ['-c', 'import sysconfig; print(sysconfig.get_path("include"))'],
+  check: true
+).stdout().strip()
+include_flags += ['-I' + python_inc]
+
+# hdf5 include - try pkg-config
+hdf5_inc = run_command(
+  'pkg-config',
+  '--cflags-only-I',
+  'hdf5',
+  check: false
+).stdout().strip()
+if hdf5_inc != ''
+  include_flags += [hdf5_inc]
+endif
 
 # =============================================================================
 # backend configurations
@@ -78,9 +88,8 @@ cuda_config = {
     '-std=c++20',
     '--compiler-options', '-fPIC',
     '--compiler-options', '-fdiagnostics-color=always',
-    '-g0',  # no debug symbols to reduce memory usage
   ],
-  'link_args': ['-lcudart'],
+  'link_args': ['-L/opt/cuda/lib64', '-lcudart', '-lcudadevrt'],
   'device_link_args': ['-dlink', '-rdc=true', '-Xcompiler', '-fPIC'],
   'device_link_libs': ['-lcudadevrt'],
 }
@@ -212,9 +221,10 @@ py3.extension_module(
   objects: all_gpu_objects,
   include_directories: all_inc,
   dependencies: general_dependencies + [gpu_dep],
+  link_with: simbi_core,
+  link_whole: simbi_core,
   cpp_args: backend['defines'] + gpu_common_flags,
   link_args: backend['link_args'],
   install: true,
   install_dir: py_install_dir,
-  override_options: ['b_lundef=false'],
 )

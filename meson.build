@@ -10,11 +10,30 @@ project(
   'cpp',
   version: run_command('git', 'describe', '--tag', '--abbrev=0', check: false).stdout().strip(),
   license: 'MIT',
+  meson_version: '>=1.2.0',
   default_options: {
     'cpp_std': 'c++20',
     'warning_level': '3',
+    'buildtype': 'release',
+    'optimization': '3',
+    'b_lto': true,
   },
 )
+
+# detect and use fastest available linker
+linker_preference = ['mold', 'lld', 'gold', 'bfd']
+selected_linker = 'bfd'  # fallback
+
+foreach linker : linker_preference
+  if find_program(linker, required: false).found()
+    selected_linker = linker
+    break
+  endif
+endforeach
+
+if selected_linker != 'bfd'
+  add_project_link_arguments('-fuse-ld=' + selected_linker, language: ['c', 'cpp'])
+endif
 
 # common project arguments
 add_project_arguments(
@@ -99,3 +118,23 @@ endif
 if get_option('build_tests')
   subdir('tests')
 endif
+
+# =============================================================================
+# build configuration summary
+# =============================================================================
+
+summary({
+  'Buildtype': get_option('buildtype'),
+  'Optimization': get_option('optimization'),
+  'C++ Standard': get_option('cpp_std'),
+  'Precision': get_option('precision'),
+  'Column Major': get_option('column_major'),
+  'Four Velocity': get_option('four_velocity'),
+  'GPU Compilation': get_option('gpu_compilation'),
+  'Build Tests': get_option('build_tests'),
+  'Compiler': cc.get_id() + ' ' + cc.version(),
+  'Linker': selected_linker,
+  'LTO': get_option('b_lto'),
+  'OpenMP': openmp_dep.found(),
+  'HDF5': hdf5_dep.found(),
+}, section: 'Configuration', bool_yn: true)
