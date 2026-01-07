@@ -7,7 +7,7 @@
 //
 // usage:
 //   #include <xpu/xpu.hpp>
-//   using namespace xpu;
+//   using namespace simbi::xpu;
 //
 //   parallel_for<cpu_space>(range, kernel);
 //   executor_t<default_space> exec;
@@ -19,9 +19,9 @@
 #include "core/device_concepts.hpp"
 #include "core/execution_concepts.hpp"
 #include "core/memory_concepts.hpp"
-#include "domain.hpp"
 #include "domain_partition.hpp"
 #include "execution_space.hpp"
+#include "grid/domain.hpp"
 
 // temporary backward compatibility includes
 #include "cpu_space.hpp"
@@ -41,7 +41,10 @@
 #include "unified_memory.hpp"
 #include "view.hpp"
 
-namespace xpu {
+// communication layer (multi-device coordination)
+#include "comm/comm.hpp"
+
+namespace simbi::xpu {
 
     // =============================================================================
     // default space selection (after all includes)
@@ -113,13 +116,4 @@ namespace xpu {
 #endif
     }
 
-    constexpr bool openmp_enabled()
-    {
-#ifdef _OPENMP
-        return true;
-#else
-        return false;
-#endif
-    }
-
-} // namespace xpu
+} // namespace simbi::xpu

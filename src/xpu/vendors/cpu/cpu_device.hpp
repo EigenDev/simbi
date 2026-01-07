@@ -31,7 +31,7 @@
 #include <string_view>
 #include <thread>
 
-namespace xpu::vendors::cpu {
+namespace simbi::xpu::vendors::cpu {
 
     // =============================================================================
     // cpu device handles
@@ -137,7 +137,7 @@ namespace xpu::vendors::cpu {
         }
 
         // construction
-        explicit cpu_device_t(int device_id = 0) : device_id_(device_id) {}
+        explicit cpu_device_t(std::int64_t device_id = 0) : device_id_(device_id) {}
 
         ~cpu_device_t() = default;
 
@@ -304,7 +304,7 @@ namespace xpu::vendors::cpu {
         // device properties (device_properties concept)
         // =============================================================================
 
-        int device_id() const
+        std::int64_t device_id() const
         {
             return device_id_;
         }
@@ -363,7 +363,7 @@ namespace xpu::vendors::cpu {
         }
 
       private:
-        int device_id_;
+        std::int64_t device_id_;
     };
 
-} // namespace xpu::vendors::cpu
+} // namespace simbi::xpu::vendors::cpu

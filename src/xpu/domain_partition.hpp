@@ -18,13 +18,13 @@
 
 #pragma once
 
-#include "domain.hpp"
+#include "grid/domain.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <vector>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // partitioning strategies
@@ -199,7 +199,7 @@ namespace xpu {
 
         if (lower_boundary) {
             // lower boundary: [start, start + depth)
-            boundary.end[Axis] = std::min(boundary.start[Axis] + depth, domain.end[Axis]);
+            boundary.end[Axis] = std::min(boundary.start[Axis] + depth, domain.fin[Axis]);
         }
         else {
             // upper boundary: [end - depth, end)
@@ -367,4 +367,4 @@ namespace xpu {
         return neighbors;
     }
 
-} // namespace xpu
+} // namespace simbi::xpu

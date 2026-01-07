@@ -35,3 +35,10 @@ option(
     type: 'boolean',
     value: false
 )
+
+option(
+    'device_arch',
+    type: 'string',
+    value: '',
+    description: 'GPU device architecture - CUDA: sm_XX (e.g., sm_61, sm_75, sm_86), HIP: gfx### (e.g., gfx906, gfx1030)'
+)

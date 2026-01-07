@@ -37,7 +37,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // memory arena configuration
@@ -258,7 +258,7 @@ namespace xpu {
       private:
         struct device_pool_t
         {
-            int device_id;
+            std::int64_t device_id;
 #ifdef XPU_CUDA_AVAILABLE
             cudaMemPool_t      memory_pool = nullptr;
             std::vector<void*> allocations;
@@ -336,7 +336,7 @@ namespace xpu {
 #endif
         }
 
-        void* allocate(std::size_t size, int device_id = 0)
+        void* allocate(std::size_t size, std::int64_t device_id = 0)
         {
 #ifdef XPU_CUDA_AVAILABLE
             if (device_id >= static_cast<int>(device_pools_.size())) {
@@ -371,7 +371,7 @@ namespace xpu {
 #endif
         }
 
-        void deallocate(void* ptr, int device_id = 0)
+        void deallocate(void* ptr, std::int64_t device_id = 0)
         {
 #ifdef XPU_CUDA_AVAILABLE
             if (device_id >= static_cast<int>(device_pools_.size())) {
@@ -403,7 +403,7 @@ namespace xpu {
             return device_pools_.size();
         }
 
-        std::size_t bytes_allocated(int device_id = 0) const
+        std::size_t bytes_allocated(std::int64_t device_id = 0) const
         {
             if (device_id >= static_cast<int>(device_pools_.size())) {
                 return 0;
@@ -549,6 +549,7 @@ namespace xpu {
         }
 
         // memory transfers using pinned buffers
+#ifdef XPU_CUDA_AVAILABLE
         template <typename T>
         void transfer_h2d_async(
             const T*     host_src,
@@ -557,17 +558,12 @@ namespace xpu {
             cudaStream_t stream = nullptr
         )
         {
-#ifdef XPU_CUDA_AVAILABLE
             std::size_t bytes = sizeof(T) * count;
             cudaMemcpyAsync(device_dst, host_src, bytes, cudaMemcpyHostToDevice, stream);
-#else
-            (void) host_src;
-            (void) device_dst;
-            (void) count;
-            (void) stream;
-#endif
         }
+#endif
 
+#ifdef XPU_CUDA_AVAILABLE
         template <typename T>
         void transfer_d2h_async(
             const T*     device_src,
@@ -576,16 +572,10 @@ namespace xpu {
             cudaStream_t stream = nullptr
         )
         {
-#ifdef XPU_CUDA_AVAILABLE
             std::size_t bytes = sizeof(T) * count;
             cudaMemcpyAsync(host_dst, device_src, bytes, cudaMemcpyDeviceToHost, stream);
-#else
-            (void) device_src;
-            (void) host_dst;
-            (void) count;
-            (void) stream;
-#endif
         }
+#endif
 
         // bulk reset for arena-style usage
         void reset()
@@ -627,4 +617,4 @@ namespace xpu {
         }
     };
 
-} // namespace xpu
+} // namespace simbi::xpu

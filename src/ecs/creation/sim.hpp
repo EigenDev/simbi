@@ -41,8 +41,6 @@
 #include "grid/mesh_config.hpp"
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
-#include "hesi/adapter.hpp"
-#include "hesi/core/types.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/serialization/all.hpp"
 #include "io/serialization/skeleton_serial.hpp"
@@ -89,30 +87,9 @@ namespace simbi::ecs::builders {
         // optional gravitational system config (binary, triple, n-body)
         std::optional<gravitational_system_blueprint_t> grav_sys_bp_;
 
-        // optional locality override:
-        // default base locality is chosen at runtime based on detected devices.
-        // prefer the compiled backend (cuda/hip) when devices are available,
-        // otherwise fall back to host. callers may override via
-        // configure_locality().
-        het::locality_t base_locality_ = []() {
-            if constexpr (platform::is_cuda) {
-                int n = het::info::device_count();
-                if (n > 0) {
-                    return het::locality_t{het::backend_type_t::cuda, 0};
-                }
-                return het::locality_t::host();
-            }
-            else if constexpr (platform::is_hip) {
-                int n = het::info::device_count();
-                if (n > 0) {
-                    return het::locality_t{het::backend_type_t::hip, 0};
-                }
-                return het::locality_t::host();
-            }
-            else {
-                return het::locality_t::host();
-            }
-        }();
+        // base device id for partition allocation
+        // default is device 0 (works for both cpu and gpu)
+        std::int64_t base_device_id_ = 0;
 
         // =========================================================================
         // configuration methods (fluent interface)
@@ -197,11 +174,11 @@ namespace simbi::ecs::builders {
         // configure_locality
         //
         // sets the base locality for field allocation.
-        // use this to allocate on gpu instead of host.
+        // set base device id for partition allocation
         // -------------------------------------------------------------------------
-        auto& configure_locality(het::locality_t loc)
+        auto& configure_device(std::int64_t device_id)
         {
-            base_locality_ = loc;
+            base_device_id_ = device_id;
             return *this;
         }
 
@@ -348,7 +325,7 @@ namespace simbi::ecs::builders {
 
                 // use production-grade checkpoint reader for reconstruction
                 auto [part, fields] =
-                    reader_t::read_partition(part_group, block, base_locality_, pp);
+                    reader_t::read_partition(part_group, block, base_device_id_, pp);
 
                 // create field entity and attach loaded fields
                 entity_t field_entity = sim.registry.create();
@@ -551,21 +528,15 @@ namespace simbi::ecs::builders {
 
             if (decomp_bp_) {
                 // multi-device path
-                decomp = creation::decomposition_builder_t<Rank>::
-                    template build<conserved_t, primitive_t>(
-                        skeleton,
-                        *decomp_bp_,
-                        mesh_bp_,
-                        phys_bp_,
-                        sim.registry,
-                        base_locality_
-                    );
+                decomp = creation::decomposition_builder_t<Rank>::template build<
+                    conserved_t,
+                    primitive_t>(skeleton, *decomp_bp_, mesh_bp_, phys_bp_, sim.registry);
             }
             else {
                 // single-device path (backward compatible)
                 decomp = creation::decomposition_builder_t<Rank>::template build_single_device<
                     conserved_t,
-                    primitive_t>(skeleton, mesh_bp_, phys_bp_, sim.registry, base_locality_);
+                    primitive_t>(skeleton, mesh_bp_, phys_bp_, sim.registry);
             }
 
             // register decomposition on level entity

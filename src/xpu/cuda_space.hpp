@@ -31,7 +31,7 @@
 #include <string_view>
 #endif
 
-namespace xpu {
+namespace simbi::xpu {
 
 #ifdef XPU_CUDA_AVAILABLE
 
@@ -176,7 +176,7 @@ namespace xpu {
             return count;
         }
 
-        static void set_device(int device_id)
+        static void set_device(std::int64_t device_id)
         {
             cudaSetDevice(device_id);
         }
@@ -226,35 +226,23 @@ namespace xpu {
 
         static stream_handle_type create_stream()
         {
-#ifdef XPU_CUDA_AVAILABLE
             cudaStream_t stream;
             cudaStreamCreate(&stream);
             return stream;
-#else
-            return nullptr;
-#endif
         }
 
         static void destroy_stream(stream_handle_type stream)
         {
-#ifdef XPU_CUDA_AVAILABLE
             if (stream != nullptr) {
                 cudaStreamDestroy(stream);
             }
-#else
-            (void) stream;
-#endif
         }
 
         static void synchronize_stream(stream_handle_type stream)
         {
-#ifdef XPU_CUDA_AVAILABLE
             if (stream != nullptr) {
                 cudaStreamSynchronize(stream);
             }
-#else
-            (void) stream;
-#endif
         }
 
         // =============================================================================
@@ -263,48 +251,30 @@ namespace xpu {
 
         static event_handle_type create_event()
         {
-#ifdef XPU_CUDA_AVAILABLE
             cudaEvent_t event;
             cudaEventCreate(&event);
             return event;
-#else
-            return nullptr;
-#endif
         }
 
         static event_handle_type record_event(stream_handle_type stream)
         {
-#ifdef XPU_CUDA_AVAILABLE
             auto event = create_event();
             cudaEventRecord(event, stream);
             return event;
-#else
-            (void) stream;
-            return nullptr;
-#endif
         }
 
         static void wait_for_event(const event_handle_type& event)
         {
-#ifdef XPU_CUDA_AVAILABLE
             if (event != nullptr) {
                 cudaEventSynchronize(event);
             }
-#else
-            (void) event;
-#endif
         }
 
         static void stream_wait_event(stream_handle_type stream, const event_handle_type& event)
         {
-#ifdef XPU_CUDA_AVAILABLE
             if (stream != nullptr && event != nullptr) {
                 cudaStreamWaitEvent(stream, event, 0);
             }
-#else
-            (void) stream;
-            (void) event;
-#endif
         }
 
         // =============================================================================
@@ -467,10 +437,11 @@ namespace xpu {
 
 #else // XPU_CUDA_AVAILABLE
 
-    // fallback implementation when cuda is not available
+    // cpu fallback implementation when cuda is not available
+    // degrades to host execution using STL
     struct cuda_space
     {
-        using device_type        = void;
+        using device_type        = vendors::cpu::cpu_device_t;
         using memory_space_type  = void;
         using stream_handle_type = void*;
         using event_handle_type  = void*;
@@ -485,25 +456,72 @@ namespace xpu {
             return space_name();
         }
 
-        static constexpr bool is_host_space   = false;
-        static constexpr bool is_device_space = true;
-        static constexpr bool is_async        = true;
-        static constexpr bool is_gpu          = true;
+        // concept requirements
+        static constexpr bool is_host_space    = true;  // fallback to host
+        static constexpr bool is_device_space  = false; // no real device
+        static constexpr bool supports_async   = false; // no async in fallback
+        static constexpr bool supports_kernels = false; // no kernels in fallback
 
-        static constexpr bool supports_shared_memory   = true;
-        static constexpr bool supports_async_execution = true;
-        static constexpr bool supports_unified_memory  = true;
+        // legacy compatibility
+        static constexpr bool is_async = false;
+        static constexpr bool is_gpu   = false;
+
+        static constexpr bool supports_shared_memory   = false;
+        static constexpr bool supports_async_execution = false;
+        static constexpr bool supports_unified_memory  = false;
+
+        static std::size_t max_concurrency()
+        {
+            return 1; // fallback is sequential
+        }
+
+        static constexpr std::size_t preferred_block_size()
+        {
+            return 1;
+        }
+
+        static constexpr double memory_bandwidth_gb_per_sec()
+        {
+            return 0.0; // not applicable
+        }
 
         struct execution_context
         {
             void* stream     = nullptr;
             int   device_id  = 0;
-            int   block_size = 256;
+            int   block_size = 1;
 
             execution_context() = default;
         };
 
         static void initialize() {}
+
+        static stream_handle_type create_stream()
+        {
+            return nullptr;
+        }
+
+        static void destroy_stream(stream_handle_type) {}
+
+        static event_handle_type create_event()
+        {
+            return nullptr;
+        }
+
+        static void destroy_event(event_handle_type) {}
+
+        static void record_event(event_handle_type, stream_handle_type) {}
+
+        static void wait_event(event_handle_type, stream_handle_type) {}
+
+        static bool query_event(event_handle_type)
+        {
+            return true;
+        }
+
+        static void synchronize_stream(stream_handle_type) {}
+
+        static void synchronize_event(event_handle_type) {}
 
         static void* allocate(std::size_t)
         {
@@ -526,4 +544,4 @@ namespace xpu {
     // note: static_assert(execution_space<cuda_space>) moved to xpu.hpp
     // cannot verify here due to incomplete types
 
-} // namespace xpu
+} // namespace simbi::xpu

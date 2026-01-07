@@ -16,10 +16,10 @@
 #include "ecs/geometry_visitor.hpp"
 #include "geometry/block_geometry.hpp"
 #include "grid/domain.hpp"
-#include "hesi/exec/executor.hpp"
-#include "hesi/exec/reduce.hpp"
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/helpers.hpp"
+#include "xpu/execution_space.hpp"
+#include "xpu/executor.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -33,14 +33,18 @@ namespace simbi::timestep {
     // computes minimum dt over a partition's owned domain using proper
     // geometry. block_geometry provides scale factors and coordinate maps.
     // =========================================================================
-    template <typename PrimField, typename Geometry, std::uint64_t Rank>
+    template <
+        typename PrimField,
+        typename Geometry,
+        std::uint64_t        Rank,
+        xpu::execution_space ExecutionSpace>
     real compute_partition_timestep(
-        const PrimField&            prim,
-        const grid::domain_t<Rank>& domain,
-        const Geometry&             geometry,
-        real                        cfl,
-        real                        gamma,
-        het::exec::executor_t&      exec
+        const PrimField&                 prim,
+        const grid::domain_t<Rank>&      domain,
+        const Geometry&                  geometry,
+        real                             cfl,
+        real                             gamma,
+        xpu::executor_t<ExecutionSpace>& exec
     )
     {
         if (domain.empty()) {
@@ -77,13 +81,11 @@ namespace simbi::timestep {
             return min_dt;
         };
 
-        return het::exec::reduce_sync(
-            exec,
+        return exec.reduce(
             domain,
             std::numeric_limits<real>::max(),
             kernel,
-            [] DEV(real a, real b) { return helpers::my_min(a, b); },
-            std::numeric_limits<real>::max()
+            [] DEV(real a, real b) { return helpers::my_min(a, b); }
         );
     }
 
@@ -106,7 +108,7 @@ namespace simbi::timestep {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 real local_dt = compute_partition_timestep(
                     fields.prim,

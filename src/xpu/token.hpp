@@ -19,12 +19,14 @@
 
 #pragma once
 
+#include "cpu_space.hpp"
+#include "cuda_space.hpp"
 #include "detail/event_wrapper.hpp"
 #include "execution_space.hpp"
 
 #include <utility>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // forward declaration
     template <execution_space ExecutionSpace>
@@ -222,25 +224,25 @@ namespace xpu {
         // space-specific accessors
         // =============================================================================
 
+#ifdef XPU_USE_CUDA
         // cuda-specific event access
-        template <typename Space = ExecutionSpace>
-        auto cuda_event() const noexcept
-            -> std::enable_if_t<std::is_same_v<Space, cuda_space>, cudaEvent_t>
+        cudaEvent_t cuda_event() const noexcept
+            requires std::same_as<ExecutionSpace, cuda_space>
         {
             if (owns_resource_) {
-                return event_.template cuda_event<Space>();
+                return event_.template cuda_event<ExecutionSpace>();
             }
             else {
                 return nullptr; // immediate token
             }
         }
+#endif
 
         // cpu-specific completion check
-        template <typename Space = ExecutionSpace>
-        auto is_cpu_ready() const noexcept
-            -> std::enable_if_t<std::is_same_v<Space, cpu_space>, bool>
+        bool is_cpu_ready() const noexcept
+            requires std::same_as<ExecutionSpace, cpu_space>
         {
-            // cpu tokens are typically always ready
+            // cpu events are typically always ready
             return true;
         }
 
@@ -336,7 +338,10 @@ namespace xpu {
     // convenience aliases
     // =============================================================================
 
-    using cpu_token  = token_t<cpu_space>;
-    using cuda_token = token_t<cuda_space>;
+    using cpu_token = token_t<cpu_space>;
 
-} // namespace xpu
+#ifdef XPU_USE_CUDA
+    using cuda_token = token_t<cuda_space>;
+#endif
+
+} // namespace simbi::xpu

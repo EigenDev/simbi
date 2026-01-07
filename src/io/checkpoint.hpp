@@ -164,7 +164,7 @@ namespace simbi::io {
         {
             const auto& part = sim.partition(lvl, pp);
 
-            write_attribute(g, "device_id", part.device_id);
+            write_attribute(g, "device_id", part.executor.device_id());
 
             // owned domain bounds
             std::vector<std::int64_t> owned_start(

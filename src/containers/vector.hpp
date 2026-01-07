@@ -60,9 +60,14 @@ namespace simbi {
         {
             using result_t = detail::promote_t<typename Vec::value_type, real>;
             const auto n   = norm(vec);
-            return n > 0 ? vec | fp::map([n](const auto& x) -> result_t { return x / n; }) |
-                               fp::collect<vector_t<result_t, Vec::rank>>
-                         : vec;
+            if (n > 0) {
+                vector_t<result_t, Vec::rank> result;
+                for (std::uint64_t ii = 0; ii < Vec::rank; ++ii) {
+                    result[ii] = static_cast<result_t>(vec[ii]) / static_cast<result_t>(n);
+                }
+                return result;
+            }
+            return vec;
         }
 
         // cross product
@@ -424,8 +429,11 @@ namespace simbi {
             const auto n   = norm();
             using result_t = detail::promote_t<T, decltype(n)>;
             if (n > T{0}) {
-                return *this | fp::map([n](const auto& x) -> result_t { return x / n; }) |
-                       fp::collect<vector_t<result_t, Rank>>;
+                vector_t<result_t, Rank> result;
+                for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                    result[ii] = static_cast<result_t>(storage[ii]) / static_cast<result_t>(n);
+                }
+                return result;
             }
             return *this;
         }
@@ -433,15 +441,11 @@ namespace simbi {
         // unary negation
         DUAL constexpr auto operator-() const
         {
-            // tradiational for loop version
-            // vector_t<T, Rank> result;
-            // for (std::uint64_t ii = 0; ii < Rank; ++ii) {
-            //     result[ii] = -storage[ii];
-            // }
-            // return result;
-
-            return *this | fp::map([](const auto& x) { return -x; }) |
-                   fp::collect<vector_t<T, Rank>>;
+            vector_t<T, Rank> result;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                result[ii] = -storage[ii];
+            }
+            return result;
         }
 
         // comparison operators
@@ -578,10 +582,11 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        return vec | fp::map([scalar](const auto& x) -> result_t {
-                   return static_cast<result_t>(x) * static_cast<result_t>(scalar);
-               }) |
-               fp::collect<vector_t<result_t, Vec::rank>>;
+        vector_t<result_t, Vec::rank> result;
+        for (std::uint64_t ii = 0; ii < Vec::rank; ++ii) {
+            result[ii] = static_cast<result_t>(vec[ii]) * static_cast<result_t>(scalar);
+        }
+        return result;
     }
 
     template <vector_like_c Vec, typename U>
@@ -589,10 +594,11 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        return vec | fp::map([scalar](const auto& x) -> result_t {
-                   return static_cast<result_t>(x) * static_cast<result_t>(scalar);
-               }) |
-               fp::collect<vector_t<result_t, Vec::rank>>;
+        vector_t<result_t, Vec::rank> result;
+        for (std::uint64_t ii = 0; ii < Vec::rank; ++ii) {
+            result[ii] = static_cast<result_t>(scalar) * static_cast<result_t>(vec[ii]);
+        }
+        return result;
     }
 
     // vector-like scalar division
@@ -601,10 +607,11 @@ namespace simbi {
         requires(std::is_arithmetic_v<U>)
     {
         using result_t = detail::promote_t<typename Vec::value_type, U>;
-        return vec | fp::map([scalar](const auto& x) -> result_t {
-                   return static_cast<result_t>(x) / static_cast<result_t>(scalar);
-               }) |
-               fp::collect<vector_t<result_t, Vec::rank>>;
+        vector_t<result_t, Vec::rank> result;
+        for (std::uint64_t ii = 0; ii < Vec::rank; ++ii) {
+            result[ii] = static_cast<result_t>(vec[ii]) / static_cast<result_t>(scalar);
+        }
+        return result;
     }
 
     // vector-like scalar multiply assignment
@@ -765,8 +772,11 @@ namespace simbi {
     template <std::uint64_t Rank, typename T = std::uint64_t>
     constexpr auto ones()
     {
-        return fp::range(Rank) | fp::map([](auto) { return T{1}; }) |
-               fp::collect<vector_t<T, Rank>>;
+        vector_t<T, Rank> result;
+        for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+            result[ii] = T{1};
+        }
+        return result;
     }
 
     // -------------------------------------------------------------

@@ -23,7 +23,7 @@
 #include <string_view>
 #include <thread>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // cpu execution space
@@ -226,4 +226,4 @@ namespace xpu {
     // note: static_assert(execution_space<cpu_space>) moved to xpu.hpp
     // cannot verify here due to incomplete types (executor_t, token_t, host_memory)
 
-} // namespace xpu
+} // namespace simbi::xpu

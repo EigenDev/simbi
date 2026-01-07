@@ -13,8 +13,7 @@ namespace simbi::grid::domain_algebra {
 
     // set intersection - needed for overlap detection
     template <std::uint64_t Rank>
-    constexpr auto
-    intersection(const domain_t<Rank>& a, const domain_t<Rank>& b)
+    constexpr auto intersection(const domain_t<Rank>& a, const domain_t<Rank>& b)
     {
         iarray<Rank> new_start, new_end;
         for (std::uint64_t ii = 0; ii < Rank; ++ii) {
@@ -45,8 +44,7 @@ namespace simbi::grid::domain_algebra {
 
     // expand end only
     template <std::uint64_t Rank>
-    constexpr auto
-    expand_end(const domain_t<Rank>& d, const iarray<Rank>& amount)
+    constexpr auto expand_end(const domain_t<Rank>& d, const iarray<Rank>& amount)
     {
         iarray<Rank> new_end = d.fin + amount;
         return domain_t<Rank>{d.start, new_end};
@@ -61,12 +59,10 @@ namespace simbi::grid::domain_algebra {
 
     // containment queries
     template <std::uint64_t Rank>
-    constexpr bool
-    contains(const domain_t<Rank>& container, const iarray<Rank>& point)
+    constexpr bool contains(const domain_t<Rank>& container, const iarray<Rank>& point)
     {
         for (std::uint64_t ii = 0; ii < Rank; ++ii) {
-            if (point[ii] < container.start[ii] ||
-                point[ii] >= container.fin[ii]) {
+            if (point[ii] < container.start[ii] || point[ii] >= container.fin[ii]) {
                 return false;
             }
         }
@@ -74,8 +70,7 @@ namespace simbi::grid::domain_algebra {
     }
 
     template <std::uint64_t Rank>
-    constexpr bool
-    contains(const domain_t<Rank>& container, const domain_t<Rank>& contained)
+    constexpr bool contains(const domain_t<Rank>& container, const domain_t<Rank>& contained)
     {
         for (std::uint64_t ii = 0; ii < Rank; ++ii) {
             if (contained.start[ii] < container.start[ii] ||
@@ -118,24 +113,40 @@ namespace simbi::grid::domain_algebra {
 
     // set difference container - holds non-overlapping result regions
     template <std::uint64_t Rank>
-    struct difference_set_t {
+    struct difference_set_t
+    {
         static constexpr std::size_t max_regions = []() {
             std::size_t total = 1;
             for (std::uint64_t i = 0; i < Rank; ++i) {
-                total *= 3;   // {before, inside, after} for each dim
+                total *= 3; // {before, inside, after} for each dim
             }
-            return total - 1;   // minus the center "inside" region
+            return total - 1; // minus the center "inside" region
         }();
 
         vector_t<domain_t<Rank>, max_regions> regions;
-        std::size_t count = 0;
+        std::size_t                           count = 0;
 
-        auto begin() { return regions.begin(); }
-        auto end() { return regions.begin() + count; }
-        auto begin() const { return regions.begin(); }
-        auto end() const { return regions.begin() + count; }
+        auto begin()
+        {
+            return regions.begin();
+        }
+        auto end()
+        {
+            return regions.begin() + count;
+        }
+        auto begin() const
+        {
+            return regions.begin();
+        }
+        auto end() const
+        {
+            return regions.begin() + count;
+        }
 
-        bool empty() const { return count == 0; }
+        bool empty() const
+        {
+            return count == 0;
+        }
     };
 
     template <std::uint64_t Rank>
@@ -146,15 +157,15 @@ namespace simbi::grid::domain_algebra {
                 coord[dim]++;
                 return true;
             }
-            coord[dim] = 0;   // carry to next dimension
+            coord[dim] = 0; // carry to next dimension
         }
-        return false;   // overflow - we're done
+        return false; // overflow - we're done
     }
 
     template <std::uint64_t Rank>
     constexpr auto difference(const domain_t<Rank>& a, const domain_t<Rank>& b)
     {
-        auto overlap = intersection(a, b);
+        auto                   overlap = intersection(a, b);
         difference_set_t<Rank> result;
 
         if (overlap.empty()) {
@@ -169,9 +180,10 @@ namespace simbi::grid::domain_algebra {
         }
 
         // define interval type
-        struct interval_t {
+        struct interval_t
+        {
             std::int64_t start, end;
-            bool valid;
+            bool         valid;
         };
 
         // for each dimension, generate exactly 3 intervals: {before, overlap,
@@ -180,15 +192,13 @@ namespace simbi::grid::domain_algebra {
 
         for (std::uint64_t dim = 0; dim < Rank; ++dim) {
             interval_sets[dim] = {
-              {// before: [a.start, overlap.start)
-               {a.start[dim],
-                overlap.start[dim],
-                a.start[dim] < overlap.start[dim]},
-               // overlap: [overlap.start, overlap.fin)
-               {overlap.start[dim], overlap.fin[dim], true},
-               // after: [overlap.fin, a.fin)
-               {overlap.fin[dim], a.fin[dim], overlap.fin[dim] < a.fin[dim]}
-              }
+                {// before: [a.start, overlap.start)
+                 {a.start[dim], overlap.start[dim], a.start[dim] < overlap.start[dim]},
+                 // overlap: [overlap.start, overlap.fin)
+                 {overlap.start[dim], overlap.fin[dim], true},
+                 // after: [overlap.fin, a.fin)
+                 {overlap.fin[dim], a.fin[dim], overlap.fin[dim] < a.fin[dim]}
+                }
             };
         }
 
@@ -197,16 +207,23 @@ namespace simbi::grid::domain_algebra {
         do {
             // skip center region (all overlap intervals, i.e., all indices ==
             // 1)
-            bool is_center = fp::range(Rank) | fp::all_of([&](auto dim) {
-                                 return indices[dim] == 1;
-                             });
+            bool is_center = true;
+            for (std::uint64_t dim = 0; dim < Rank; ++dim) {
+                if (indices[dim] != 1) {
+                    is_center = false;
+                    break;
+                }
+            }
 
             if (!is_center) {
                 // check if all intervals in this combination are valid
-                bool valid_combination =
-                    fp::range(Rank) | fp::all_of([&](auto dim) {
-                        return interval_sets[dim][indices[dim]].valid;
-                    });
+                bool valid_combination = true;
+                for (std::uint64_t dim = 0; dim < Rank; ++dim) {
+                    if (!interval_sets[dim][indices[dim]].valid) {
+                        valid_combination = false;
+                        break;
+                    }
+                }
 
                 if (valid_combination) {
                     domain_t<Rank> region;
@@ -229,11 +246,8 @@ namespace simbi::grid::domain_algebra {
 
     // get lower boundary region of specified width in dimension d
     template <std::uint64_t Rank>
-    constexpr auto get_lower_boundary(
-        const domain_t<Rank>& d,
-        std::uint64_t dim,
-        std::int64_t width
-    )
+    constexpr auto
+    get_lower_boundary(const domain_t<Rank>& d, std::uint64_t dim, std::int64_t width)
     {
         auto boundary     = d;
         boundary.fin[dim] = boundary.start[dim] + width;
@@ -242,11 +256,8 @@ namespace simbi::grid::domain_algebra {
 
     // get upper boundary region of specified width in dimension d
     template <std::uint64_t Rank>
-    constexpr auto get_upper_boundary(
-        const domain_t<Rank>& d,
-        std::uint64_t dim,
-        std::int64_t width
-    )
+    constexpr auto
+    get_upper_boundary(const domain_t<Rank>& d, std::uint64_t dim, std::int64_t width)
     {
         auto boundary       = d;
         boundary.start[dim] = boundary.fin[dim] - width;
@@ -256,8 +267,7 @@ namespace simbi::grid::domain_algebra {
     // shift a domain by a vector (v)
     // useful for "moving" a neighbor's domain to check connectivity
     template <std::uint64_t Rank>
-    constexpr domain_t<Rank>
-    shift(const domain_t<Rank>& d, const iarray<Rank>& v)
+    constexpr domain_t<Rank> shift(const domain_t<Rank>& d, const iarray<Rank>& v)
     {
         return domain_t<Rank>{d.start + v, d.fin + v};
     }
@@ -265,8 +275,7 @@ namespace simbi::grid::domain_algebra {
     // "wrap" a coordinate into the global domain [0, shape)
     // e.g. -1 -> 99 (if shape is 100)
     template <std::uint64_t Rank>
-    constexpr iarray<Rank>
-    wrap_coord(iarray<Rank> coord, const iarray<Rank>& global_shape)
+    constexpr iarray<Rank> wrap_coord(iarray<Rank> coord, const iarray<Rank>& global_shape)
     {
         iarray<Rank> wrapped;
         for (std::uint64_t ii = 0; ii < Rank; ++ii) {
@@ -286,11 +295,11 @@ namespace simbi::grid::domain_algebra {
     constexpr domain_t<Rank> periodic_image(
         const domain_t<Rank>& d,
         const domain_t<Rank>& global_box,
-        std::uint64_t dim,
-        int direction
+        std::uint64_t         dim,
+        int                   direction
     )
     {
-        iarray<Rank> shift_vec{};   // all zeros
+        iarray<Rank> shift_vec{}; // all zeros
         std::int64_t len = global_box.fin[dim] - global_box.start[dim];
 
         shift_vec[dim] = (direction * len);
@@ -332,6 +341,6 @@ namespace simbi::grid::domain_algebra {
     //     return std::pair{subdomains, count};
     // }a
 
-}   // namespace simbi::grid::domain_algebra
+} // namespace simbi::grid::domain_algebra
 
 #endif

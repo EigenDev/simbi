@@ -301,7 +301,7 @@ namespace simbi::ecs {
         {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
                 recover_primitives(exec, fields.prim, fields.cons, sim.metadata().gamma);
             }
         }
@@ -350,7 +350,7 @@ namespace simbi::ecs {
             for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
                 auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
                 auto& fine_part   = sim.partition(fine_lvl, fp);
-                auto  exec        = sim.partition_executor(fine_lvl, fp);
+                auto& exec        = sim.partition_executor(fine_lvl, fp);
 
                 // find overlapping coarse partition
                 std::uint64_t cp = 0;
@@ -447,7 +447,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // apply boundaries using the driver
                 geometry::boundary_driver_t::apply_boundaries(
@@ -476,7 +476,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // computes E = avg(Flux) + contact_terms
                 // stores into fields.efield
@@ -507,7 +507,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // compute fluxes for each direction
                 for (std::uint64_t dir = 0; dir < rank; ++dir) {
@@ -550,7 +550,7 @@ namespace simbi::ecs {
 
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 if (!sim.has_workspace(lvl, pp)) {
                     sim.create_workspace(lvl, pp);
@@ -588,7 +588,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // godunov operator L(u)
                 auto ell = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
@@ -655,7 +655,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // ensure workspace exists
                 if (!sim.has_workspace(lvl, pp)) {
@@ -722,7 +722,7 @@ namespace simbi::ecs {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
                 auto& ws     = sim.workspace(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // compute L(u*)
                 auto k2 = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
@@ -808,7 +808,7 @@ namespace simbi::ecs {
                 auto& fine_part     = sim.partition(fine_lvl, fp);
 
                 // use coarse executor since we're writing to coarse field
-                auto exec = sim.partition_executor(coarse_lvl, cp);
+                auto& exec = sim.partition_executor(coarse_lvl, cp);
 
                 // restrict fine owned cells -> coarse owned cells (no ghosts)
                 auto fine_owned_cons = fine_fields.cons[fine_part.owned_domain];
@@ -883,7 +883,7 @@ namespace simbi::ecs {
             for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
                 auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
                 auto& fine_part   = sim.partition(fine_lvl, fp);
-                auto  exec        = sim.partition_executor(fine_lvl, fp);
+                auto& exec        = sim.partition_executor(fine_lvl, fp);
 
                 // find overlapping coarse partition
                 std::uint64_t cp = find_coarse_partition(sim, fine_lvl, fp);
@@ -929,8 +929,8 @@ namespace simbi::ecs {
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
-                auto& part = sim.partition(lvl, pp);
-                part.stream.synchronize();
+                auto& exec = sim.partition_executor(lvl, pp);
+                exec.sync();
             }
         }
     };
@@ -979,15 +979,6 @@ namespace simbi::ecs {
                     // execution on an executor that cannot directly write into
                     // the register backing storage (important for single-device
                     // correctness).
-                    auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-                    if (coarse_fields.cons.locality() != coarse_part.stream.locality()) {
-                        throw std::runtime_error(
-                            "flux register initialization failed: partition "
-                            "stream locality "
-                            "does not match coarse field locality"
-                        );
-                    }
-
                     flux_regs.registers.emplace_back(coarse_part.owned_domain, ratio);
                 }
 
@@ -1019,7 +1010,7 @@ namespace simbi::ecs {
 
             // zero all registers using executor from first coarse partition
             for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl); ++cp) {
-                auto exec = sim.partition_executor(coarse_lvl, cp);
+                auto& exec = sim.partition_executor(coarse_lvl, cp);
                 flux_regs.registers[cp].zero_all(exec);
             }
         }
@@ -1053,7 +1044,7 @@ namespace simbi::ecs {
                 // for each coarse partition that borders fine region
                 for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl); ++cp) {
                     auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-                    auto  exec          = sim.partition_executor(coarse_lvl, cp);
+                    auto& exec          = sim.partition_executor(coarse_lvl, cp);
 
                     // accumulate coarse flux for each dimension
                     for (std::uint64_t dim = 0; dim < Rank; ++dim) {
@@ -1113,7 +1104,7 @@ namespace simbi::ecs {
                 // for each fine partition
                 for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
                     auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
-                    auto  exec        = sim.partition_executor(fine_lvl, fp);
+                    auto& exec        = sim.partition_executor(fine_lvl, fp);
 
                     // determine which coarse partition this fine partition
                     // overlaps for single-partition case, it's always 0
@@ -1179,7 +1170,7 @@ namespace simbi::ecs {
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl); ++cp) {
                     auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-                    auto  exec          = sim.partition_executor(coarse_lvl, cp);
+                    auto& exec          = sim.partition_executor(coarse_lvl, cp);
 
                     grid::amr::apply_flux_correction(
                         coarse_fields.cons,

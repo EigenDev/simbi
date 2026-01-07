@@ -1,7 +1,7 @@
 # =============================================================================
 # meson.build
 #
-# main build configuration for simbi
+# build configuration for simbi
 # =============================================================================
 
 project(
@@ -10,7 +10,7 @@ project(
   'cpp',
   version: run_command('git', 'describe', '--tag', '--abbrev=0', check: false).stdout().strip(),
   license: 'MIT',
-  meson_version: '>=1.2.0',
+  meson_version: '>=1.4.0',
   default_options: {
     'cpp_std': 'c++20',
     'warning_level': '3',
@@ -20,9 +20,9 @@ project(
   },
 )
 
-# detect and use fastest available linker
+# detect and use available fast linker
 linker_preference = ['mold', 'lld', 'gold', 'bfd']
-selected_linker = 'bfd'  # fallback
+selected_linker = 'bfd' # fallback
 
 foreach linker : linker_preference
   if find_program(linker, required: false).found()
@@ -34,6 +34,27 @@ endforeach
 if selected_linker != 'bfd'
   add_project_link_arguments('-fuse-ld=' + selected_linker, language: ['c', 'cpp'])
 endif
+
+# memory-optimized linker flags
+# only add memory flags for bfd/gold linkers (not mold/lld)
+memory_flags = []
+if selected_linker == 'bfd' or selected_linker == 'gold'
+  memory_flags = [
+    '-Wl,--no-keep-memory',
+    '-Wl,--reduce-memory-overheads',
+  ]
+endif
+
+# universal linker flags
+universal_flags = [
+  '-Wl,--as-needed',
+  '-Wl,--gc-sections',
+]
+
+add_project_link_arguments(
+  memory_flags + universal_flags,
+  language: ['c', 'cpp'],
+)
 
 # common project arguments
 add_project_arguments(
@@ -79,10 +100,6 @@ hdf5_dep = dependency('hdf5', language: 'cpp', required: true)
 
 all_inc = include_directories('src')
 
-# include subdirectories
-subdir('src')
-subdir('simbi/afterglow')
-
 general_dependencies = [
   openmp_dep,
   hdf5_dep,
@@ -90,13 +107,19 @@ general_dependencies = [
   pybind11_dep,
 ]
 
-# compile once, link many
+# include src subdirectory first to define sources and build gpu library
+subdir('src')
+
+# compile cpu core library after sources are defined
 simbi_core = static_library(
   'simbi_core',
-  sources + cpu_sources,
+  sources,
   include_directories: all_inc,
   dependencies: general_dependencies,
 )
+
+# include other subdirectories
+subdir('simbi/afterglow')
 
 # cpu extension module
 py3.extension_module(
@@ -120,21 +143,25 @@ if get_option('build_tests')
 endif
 
 # =============================================================================
-# build configuration summary
+# build summary
 # =============================================================================
 
-summary({
-  'Buildtype': get_option('buildtype'),
-  'Optimization': get_option('optimization'),
-  'C++ Standard': get_option('cpp_std'),
-  'Precision': get_option('precision'),
-  'Column Major': get_option('column_major'),
-  'Four Velocity': get_option('four_velocity'),
-  'GPU Compilation': get_option('gpu_compilation'),
-  'Build Tests': get_option('build_tests'),
-  'Compiler': cc.get_id() + ' ' + cc.version(),
-  'Linker': selected_linker,
-  'LTO': get_option('b_lto'),
-  'OpenMP': openmp_dep.found(),
-  'HDF5': hdf5_dep.found(),
-}, section: 'Configuration', bool_yn: true)
+summary(
+  {
+    'Buildtype': get_option('buildtype'),
+    'Optimization': get_option('optimization'),
+    'C++ Standard': get_option('cpp_std'),
+    'Precision': get_option('precision'),
+    'Column Major': get_option('column_major'),
+    'Four Velocity Prim': get_option('four_velocity'),
+    'GPU Compilation': get_option('gpu_compilation'),
+    'Build Tests': get_option('build_tests'),
+    'Compiler': cc.get_id() + ' ' + cc.version(),
+    'Linker': selected_linker,
+    'LTO': get_option('b_lto'),
+    'OpenMP': openmp_dep.found(),
+    'HDF5': hdf5_dep.found(),
+  },
+  section: 'Configuration',
+  bool_yn: true,
+)

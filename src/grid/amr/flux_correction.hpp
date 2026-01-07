@@ -8,8 +8,8 @@
 #include "grid/connectivity.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "hesi/core/types.hpp"
-#include "hesi/exec/executor.hpp"
+#include "xpu/execution_space.hpp"
+#include "xpu/executor.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -37,8 +37,8 @@ namespace simbi::grid::amr {
             registers_.resize(2 * Rank);
         }
 
-        // allocate buffer for a face
-        void initialize_face(std::size_t dim, side_t side, het::locality_t loc)
+        // allocate buffer for a face (uses unified memory)
+        void initialize_face(std::size_t dim, side_t side)
         {
             std::size_t idx = dim * 2 + static_cast<std::size_t>(side);
             if (registers_[idx]) {
@@ -54,7 +54,7 @@ namespace simbi::grid::amr {
                 face.start[dim] = face.fin[dim] - 1;
             }
 
-            registers_[idx] = std::make_unique<field_type>(face, loc);
+            registers_[idx] = std::make_unique<field_type>(face);
         }
 
         // access
@@ -65,7 +65,8 @@ namespace simbi::grid::amr {
         }
 
         // zero all registers
-        void zero_all(het::exec::executor_t& exec)
+        template <xpu::execution_space ExecutionSpace>
+        void zero_all(xpu::executor_t<ExecutionSpace>& exec)
         {
             for (auto& reg : registers_) {
                 if (reg) {
@@ -79,14 +80,14 @@ namespace simbi::grid::amr {
         // ---------------------------------------------------------------------
 
         // coarse: R += -F * dt * area
-        template <typename Geometry>
+        template <xpu::execution_space ExecutionSpace, typename Geometry>
         void accumulate_coarse(
-            het::exec::executor_t& exec,
-            const field_type&      coarse_flux,
-            const Geometry&        geometry,
-            std::size_t            dim,
-            side_t                 side,
-            real                   dt
+            xpu::executor_t<ExecutionSpace>& exec,
+            const field_type&                coarse_flux,
+            const Geometry&                  geometry,
+            std::size_t                      dim,
+            side_t                           side,
+            real                             dt
         )
         {
             auto* reg = get_register(dim, side);
@@ -122,14 +123,14 @@ namespace simbi::grid::amr {
         }
 
         // fine: R += average(F * area) * dt
-        template <typename Geometry>
+        template <xpu::execution_space ExecutionSpace, typename Geometry>
         void accumulate_fine(
-            het::exec::executor_t& exec,
-            const field_type&      fine_flux,
-            const Geometry&        geometry,
-            std::size_t            dim,
-            side_t                 side,
-            real                   dt
+            xpu::executor_t<ExecutionSpace>& exec,
+            const field_type&                fine_flux,
+            const Geometry&                  geometry,
+            std::size_t                      dim,
+            side_t                           side,
+            real                             dt
         )
         {
             auto* reg = get_register(dim, side);

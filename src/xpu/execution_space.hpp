@@ -29,7 +29,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // re-export core concepts for convenience
@@ -37,7 +37,6 @@ namespace xpu {
 
     using core::execution_space;
     using core::hetero_device;
-    using core::hetero_executor;
     using core::memory_space;
 
     // =============================================================================
@@ -152,4 +151,4 @@ namespace xpu {
 
     using default_space = default_space_selector<>::type;
 
-} // namespace xpu
+} // namespace simbi::xpu

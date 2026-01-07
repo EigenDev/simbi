@@ -244,11 +244,11 @@ namespace simbi::cfd {
     template <typename PrimField, typename Geometry, typename CfdOps>
     struct compute_fluxes_op_t
     {
+        static constexpr std::uint64_t rank = PrimField::rank;
         using prim_t                        = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t                   = typename prim_t::counterpart_t;
         using value_type                    = conserved_t;
         using argument_type                 = iarray<PrimField::rank>;
-        static constexpr std::uint64_t rank = PrimField::rank;
 
         PrimField           prims;
         Geometry            geometry;
@@ -505,7 +505,7 @@ namespace simbi::cfd {
                 }
 
                 if (diagnostics) {
-                    diagnostics->accumulate_delta(delta);
+                    // diagnostics->accumulate_delta(delta);
                 }
             });
 

@@ -32,7 +32,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // arena memory allocator
@@ -378,4 +378,4 @@ namespace xpu {
         }
     } // namespace arena_futures
 
-} // namespace xpu
+} // namespace simbi::xpu

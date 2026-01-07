@@ -20,7 +20,7 @@
 #include <new>
 #include <string_view>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // host memory space
@@ -212,4 +212,4 @@ namespace xpu {
     template <typename T>
     using host_buffer_t = memory_block_t<host_memory>;
 
-} // namespace xpu
+} // namespace simbi::xpu

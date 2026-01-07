@@ -29,7 +29,7 @@
 #include <numeric>
 #include <type_traits>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // forward declarations
     template <typename T, memory_space MemorySpace>
@@ -420,4 +420,4 @@ namespace xpu {
     using buffer_ops::zero_async;
     using buffer_ops::zero_buffer;
 
-} // namespace xpu
+} // namespace simbi::xpu

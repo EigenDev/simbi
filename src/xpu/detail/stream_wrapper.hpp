@@ -23,7 +23,7 @@
 
 #include <utility>
 
-namespace xpu::detail {
+namespace simbi::xpu::detail {
 
     // =============================================================================
     // stream wrapper implementation
@@ -46,13 +46,13 @@ namespace xpu::detail {
         // construction and destruction
         // =============================================================================
 
-        explicit stream_wrapper_t(int device_id = 0) : device_id_(device_id)
+        explicit stream_wrapper_t(std::int64_t device_id = 0) : device_id_(device_id)
         {
             handle_ = ExecutionSpace::create_stream();
         }
 
         // construct from existing handle (non-owning)
-        stream_wrapper_t(stream_handle_type handle, int device_id, bool owns = false)
+        stream_wrapper_t(stream_handle_type handle, std::int64_t device_id, bool owns = false)
             : handle_(handle), device_id_(device_id), owns_resource_(owns)
         {
         }
@@ -127,7 +127,7 @@ namespace xpu::detail {
             return handle_;
         }
 
-        int device_id() const noexcept
+        std::int64_t device_id() const noexcept
         {
             return device_id_;
         }
@@ -175,6 +175,7 @@ namespace xpu::detail {
         // space-specific optimizations
         // =============================================================================
 
+#ifdef XPU_USE_CUDA
         // cuda-specific stream operations
         template <typename Space = ExecutionSpace>
         auto cuda_stream() const noexcept
@@ -183,6 +184,7 @@ namespace xpu::detail {
             static_assert(std::is_same_v<Space, ExecutionSpace>);
             return handle_;
         }
+#endif
 
         // cpu-specific thread id
         template <typename Space = ExecutionSpace>
@@ -199,7 +201,7 @@ namespace xpu::detail {
     // =============================================================================
 
     template <execution_space ExecutionSpace>
-    stream_wrapper_t<ExecutionSpace> make_stream(int device_id = 0)
+    stream_wrapper_t<ExecutionSpace> make_stream(std::int64_t device_id = 0)
     {
         return stream_wrapper_t<ExecutionSpace>{device_id};
     }
@@ -207,16 +209,9 @@ namespace xpu::detail {
     // create non-owning wrapper around existing handle
     template <execution_space ExecutionSpace>
     stream_wrapper_t<ExecutionSpace>
-    wrap_stream(typename ExecutionSpace::stream_handle_type handle, int device_id = 0)
+    wrap_stream(typename ExecutionSpace::stream_handle_type handle, std::int64_t device_id = 0)
     {
         return stream_wrapper_t<ExecutionSpace>{handle, device_id, false};
     }
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
-
-    using cpu_stream_wrapper  = stream_wrapper_t<cpu_space>;
-    using cuda_stream_wrapper = stream_wrapper_t<cuda_space>;
-
-} // namespace xpu::detail
+} // namespace simbi::xpu::detail

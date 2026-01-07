@@ -76,7 +76,7 @@ namespace simbi::evolution {
         auto& meta = sim.metadata();
 
         // get executor from partition 0 level 0 for timing
-        auto exec = sim.partition_executor(0, 0);
+        auto& exec = sim.partition_executor(0, 0);
 
         // initial checkpoint
         state.progress.table.refresh();

@@ -24,7 +24,7 @@
 #include <memory>
 #include <type_traits>
 
-namespace xpu::core {
+namespace simbi::xpu::core {
 
     // =============================================================================
     // fundamental device handle types
@@ -360,4 +360,4 @@ namespace xpu::core {
         }
     }
 
-} // namespace xpu::core
+} // namespace simbi::xpu::core

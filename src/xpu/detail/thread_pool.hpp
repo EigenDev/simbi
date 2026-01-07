@@ -20,7 +20,7 @@
 #include <thread>
 #include <vector>
 
-namespace xpu::detail {
+namespace simbi::xpu::detail {
 
     class thread_pool_t
     {
@@ -96,4 +96,4 @@ namespace xpu::detail {
         }
     }
 
-} // namespace xpu::detail
+} // namespace simbi::xpu::detail

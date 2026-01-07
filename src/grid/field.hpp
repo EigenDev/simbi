@@ -7,12 +7,12 @@
 #include "functional/fp.hpp"
 #include "grid/algebra.hpp"
 #include "grid/domain.hpp"
-#include "hesi/adapter.hpp"
-#include "hesi/core/types.hpp"
-#include "hesi/exec/for_each.hpp"
-#include "hesi/exec/reduce.hpp"
 #include "io/exceptions.hpp"
 #include "traits/traits.hpp"
+#include "xpu/execution_space.hpp"
+#include "xpu/executor.hpp"
+#include "xpu/shared_buffer.hpp"
+#include "xpu/view.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -26,12 +26,16 @@ namespace simbi::grid {
     using namespace compute;
 
     // forward declaration of the execution driver
-    template <typename T, std::uint64_t Rank, typename Expression>
+    template <
+        typename T,
+        std::uint64_t Rank,
+        typename Expression,
+        xpu::execution_space ExecutionSpace>
     void commit(
-        het::executor_t&      exec,
-        const domain_t<Rank>& domain,
-        het::view_t<T, Rank>  dest,
-        const Expression&     expr
+        xpu::executor_t<ExecutionSpace>& exec,
+        const domain_t<Rank>&            domain,
+        xpu::view_t<T, Rank>             dest,
+        const Expression&                expr
     );
 
     // -------------------------------------------------------------------------
@@ -40,13 +44,13 @@ namespace simbi::grid {
     // this is the proxy object that enables u = expr.with(exec)
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank>
-    struct field_view_t : public het::view_t<T, Rank>
+    struct field_view_t : public xpu::view_t<T, Rank>
     {
         using value_type                    = T;
         using reference_type                = T&;
         using const_reference_type          = const T&;
         using argument_type                 = iarray<Rank>;
-        using base_type                     = het::view_t<T, Rank>;
+        using base_type                     = xpu::view_t<T, Rank>;
         static constexpr std::uint64_t rank = Rank;
 
         // the topological domain this view represents
@@ -55,7 +59,7 @@ namespace simbi::grid {
         field_view_t() = default;
 
         field_view_t(T* ptr, iarray<Rank> shape, iarray<Rank> strides, domain_t<Rank> dom)
-            : base_type({ptr, shape, dom.start, strides}), domain_(dom)
+            : base_type(ptr, shape, dom.start, strides), domain_(dom)
         {
         }
 
@@ -177,8 +181,8 @@ namespace simbi::grid {
         static constexpr std::uint64_t rank = Rank;
 
       private:
-        // shared ownership of gpu/cpu memory
-        het::shared_handle_t<het::block_t> storage_;
+        // shared ownership of unified memory
+        xpu::shared_buffer_t<T, xpu::unified_memory> storage_;
 
         // the "logical" domain this field represents (active region)
         domain_t<Rank> domain_;
@@ -190,19 +194,17 @@ namespace simbi::grid {
 
         // default
         field_t() = default;
-        // allocates memory for domain + halo_width
-        field_t(const domain_t<Rank>& domain, het::locality_t loc = het::locality_t::host())
-            : domain_(domain)
+        // allocates unified memory for domain (accessible from all devices)
+        explicit field_t(const domain_t<Rank>& domain) : domain_(domain)
         {
             auto          shape       = domain.shape();
-            std::uint64_t total_elems = fp::product(shape);
+            std::uint64_t total_elems = 1;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                total_elems *= shape[ii];
+            }
 
-            // allocate via shared handle factory
-            storage_ = het::shared_handle_t<het::block_t>::make(
-                total_elems * sizeof(T),
-                loc,
-                het::memory_type_t::host_visible
-            );
+            // allocate unified memory
+            storage_ = xpu::shared_buffer_t<T, xpu::unified_memory>(total_elems);
         }
 
         // copy constructor (shallow)
@@ -314,7 +316,7 @@ namespace simbi::grid {
         // call operator
         // allows syntax: view(coord) to access elements
         // T& operator()(const iarray<Rank>& coord) { return view()(coord); }
-        const T& operator()(const iarray<Rank>& coord) const
+        DUAL const T& operator()(const iarray<Rank>& coord) const
         {
             return view()(coord);
         }
@@ -338,15 +340,16 @@ namespace simbi::grid {
         {
             return domain_;
         }
-        het::locality_t locality() const
+        // unified memory is accessible from all devices
+        constexpr std::int64_t device_id() const
         {
-            return storage_->locality();
+            return 0; // unified memory, no specific device
         }
 
         // direct pointer access (use with caution)
         T* data() const
         {
-            return static_cast<T*>(storage_->data());
+            return storage_.data();
         }
 
         // ---------------------------------------------------------------------
@@ -360,72 +363,50 @@ namespace simbi::grid {
         // ---------------------------------------------------------------------
 
         // synchronous clone (convenience)
-        field_t clone(het::locality_t target) const
+        // deep copy: allocates new storage and copies data
+        field_t clone() const
         {
-            // quick path: same locality -> shallow copy
-            if (storage_->locality() == target) {
-                return *this;
-            }
-
-            // host move optimization: if target is host and we are sole owner
-            // and already host-local, perform an ownership transfer
-            if (target.backend == het::backend_type_t::cpu && storage_.use_count() == 1 &&
-                storage_->locality().backend == het::backend_type_t::cpu) {
-                field_t out;
-                out.storage_ = std::move(storage_);
-                out.domain_  = domain_;
-                return out;
-            }
-
-            // otherwise allocate a destination handle on the target and perform
-            // a blocking copy
-            auto dst = het::mem::make_handle(
-                storage_->size(),
-                target,
-                (target.backend == het::backend_type_t::cpu) ? het::memory_type_t::host_visible
-                                                             : het::memory_type_t::device_local
-            );
-
-            het::mem::copy_handle_sync(dst, storage_, storage_->size());
-
             field_t out;
-            out.storage_ = std::move(dst);
             out.domain_  = domain_;
+            out.storage_ = xpu::shared_buffer_t<T, xpu::unified_memory>(storage_.size());
+
+            // synchronous copy (unified memory accessible from host)
+            std::copy(storage_.data(), storage_.data() + storage_.size(), out.storage_.data());
+
             return out;
         }
 
-        field_t clone() const
+        // async clone with executor
+        template <xpu::execution_space ExecutionSpace>
+        xpu::token_t<ExecutionSpace>
+        clone_async(xpu::executor_t<ExecutionSpace>& exec, field_t& out) const
         {
-            return clone(locality());
-        }
-
-        // asynchronous clone: prepares `out` and returns a token that completes
-        // when the transfer to `target` on `stream` finishes. `out` will own
-        // the destination handle immediately; the returned token tracks the
-        // copy completion.
-        het::exec::token_t
-        clone_async(het::locality_t target, het::exec::stream_t& stream, field_t& out) const
-        {
-            // shallow-copy fast path
-            if (storage_->locality() == target) {
-                out = *this;
-                return het::exec::token_t::immediate(target.backend);
-            }
-
-            // allocate destination handle
-            auto dst = het::mem::make_handle(
-                storage_->size(),
-                target,
-                (target.backend == het::backend_type_t::cpu) ? het::memory_type_t::host_visible
-                                                             : het::memory_type_t::device_local
-            );
-
-            // transfer ownership of the handle into the output field
-            out.storage_ = dst;
             out.domain_  = domain_;
+            out.storage_ = xpu::shared_buffer_t<T, xpu::unified_memory>(storage_.size());
 
-            // schedule async copy into out.storage_ and return the token
-            return het::mem::copy_handle_async(out.storage_, storage_, storage_->size(), stream);
+            // create device-compatible copy functor using views
+            struct copy_functor_t
+            {
+
+                using argument_type = std::array<std::int64_t, 1>;
+                enum {
+                    rank = 1
+                };
+
+                xpu::view_t<T, 1> src_view;
+                xpu::view_t<T, 1> dst_view;
+
+                DUAL void operator()(const argument_type& idx) const
+                {
+                    dst_view[idx[0]] = src_view[idx[0]];
+                }
+            };
+
+            // create views and dispatch copy kernel
+            auto src_view  = storage_.view();
+            auto dst_view  = out.storage_.view();
+            auto domain_1d = grid::extents<1>({static_cast<std::int64_t>(storage_.size())});
+            return exec.dispatch(domain_1d, copy_functor_t{src_view, dst_view});
         }
 
       private:
@@ -450,7 +431,7 @@ namespace simbi::grid {
                 stride_accum *= alloc_shape[ii];
             }
 
-            T* ptr = static_cast<T*>(storage_->data()) + linear_offset;
+            T* ptr = storage_.data() + linear_offset;
             return view_type(ptr, target.shape(), strides, target);
         }
     };
@@ -458,19 +439,22 @@ namespace simbi::grid {
     // -------------------------------------------------------------------------
     // commitment driver
     // -------------------------------------------------------------------------
-    template <typename T, std::uint64_t Rank, typename Expression>
+    template <
+        typename T,
+        std::uint64_t Rank,
+        typename Expression,
+        xpu::execution_space ExecutionSpace>
     void try_commit(
-        het::executor_t&      exec,
-        const domain_t<Rank>& domain,
-        het::view_t<T, Rank>  dest,
-        const Expression&     expr
+        xpu::executor_t<ExecutionSpace>& exec,
+        const domain_t<Rank>&            domain,
+        xpu::view_t<T, Rank>             dest,
+        const Expression&                expr
     )
     {
-        auto nerrors = het::exec::reduce_sync(
-            exec,
+        auto nerrors = exec.reduce(
             domain,
             std::size_t{0},
-            [=] DUAL(const iarray<Rank>& coord) -> std::size_t {
+            [=] DUAL(const typename grid::domain_t<Rank>::coord_t& coord) -> std::size_t {
                 auto maybe_value = expr(coord);
                 if (maybe_value.has_value()) {
                     dest(coord) = maybe_value.value();
@@ -488,34 +472,60 @@ namespace simbi::grid {
         };
     }
 
+    // function object for assignment operation
     template <typename T, std::uint64_t Rank, typename Expression>
+    struct assign_functor_t
+    {
+        using value_type                    = void;
+        using argument_type                 = typename grid::domain_t<Rank>::coord_t;
+        static constexpr std::uint64_t rank = Rank;
+
+        xpu::view_t<T, Rank> dest;
+        Expression           expr;
+
+        DUAL constexpr assign_functor_t(xpu::view_t<T, Rank> d, const Expression& e)
+            : dest(d), expr(e)
+        {
+        }
+
+        DUAL void operator()(const argument_type& coord) const
+        {
+            dest(coord) = expr(coord);
+        }
+    };
+
+    template <
+        typename T,
+        std::uint64_t Rank,
+        typename Expression,
+        xpu::execution_space ExecutionSpace>
     void direct_commit(
-        het::executor_t&      exec,
-        const domain_t<Rank>& domain,
-        het::view_t<T, Rank>  dest,
-        const Expression&     expr
+        xpu::executor_t<ExecutionSpace>& exec,
+        const domain_t<Rank>&            domain,
+        xpu::view_t<T, Rank>             dest,
+        const Expression&                expr
     )
     {
-        // launch kernel using generic parallel_for
-        // the compiler fuses the expression tree into the lambda
-        het::exec::parallel_for(
-            het::exec::default_t{},
-            exec,
-            domain,
-            [=] DUAL(const iarray<Rank>& coord) -> void { dest(coord) = expr(coord); }
-        );
+        // dispatch kernel over domain
+        auto functor = assign_functor_t<T, Rank, Expression>{dest, expr};
+        exec.dispatch(domain, functor);
     }
 
-    template <typename T, std::uint64_t Rank, typename Expression>
+    template <
+        typename T,
+        std::uint64_t Rank,
+        typename Expression,
+        xpu::execution_space ExecutionSpace>
     void commit(
-        het::executor_t&      exec,
-        const domain_t<Rank>& domain,
-        het::view_t<T, Rank>  dest,
-        const Expression&     expr
+        xpu::executor_t<ExecutionSpace>& exec,
+        const domain_t<Rank>&            domain,
+        xpu::view_t<T, Rank>             dest,
+        const Expression&                expr
     )
     {
         // check the expression's return type, not the destination field type
-        using expr_result_t = std::invoke_result_t<Expression, iarray<Rank>>;
+        using expr_result_t =
+            std::invoke_result_t<Expression, typename grid::domain_t<Rank>::coord_t>;
 
         if constexpr (is_maybe_v<expr_result_t>) {
             try_commit(exec, domain, dest, expr);

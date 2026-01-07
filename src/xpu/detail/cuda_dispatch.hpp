@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "../domain.hpp"
+#include "grid/domain.hpp"
 
 #ifdef XPU_CUDA_AVAILABLE
 
@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // launch configuration helpers
@@ -78,13 +78,13 @@ namespace xpu {
 #ifdef __CUDACC__
     // 1d grid-stride kernel
     template <typename Func>
-    __global__ void dispatch_kernel_1d(domain_t<1> domain, Func func)
+    __global__ void dispatch_kernel_1d(grid::domain_t<1> domain, Func func)
     {
         const std::int64_t total_size = domain.size();
         const std::int64_t stride     = blockDim.x * gridDim.x;
         const std::int64_t start_idx  = blockIdx.x * blockDim.x + threadIdx.x;
 
-        for (std::int64_t linear = start_idx; linear < total_size; linear += stride) {
+        for (std::uint64_t linear = start_idx; linear < total_size; linear += stride) {
             auto coord = domain.linear_to_coord(linear);
             func(coord);
         }
@@ -92,7 +92,7 @@ namespace xpu {
 
     // 2d grid-stride kernel
     template <typename Func>
-    __global__ void dispatch_kernel_2d(domain_t<2> domain, Func func)
+    __global__ void dispatch_kernel_2d(grid::domain_t<2> domain, Func func)
     {
         const auto shape    = domain.shape();
         const auto stride_x = blockDim.x * gridDim.x;
@@ -102,7 +102,10 @@ namespace xpu {
 
         for (std::int64_t yy = start_y; yy < shape[0]; yy += stride_y) {
             for (std::int64_t xx = start_x; xx < shape[1]; xx += stride_x) {
-                typename domain_t<2>::coord_t coord{yy + domain.start[0], xx + domain.start[1]};
+                typename grid::domain_t<2>::coord_t coord{
+                    yy + domain.start[0],
+                    xx + domain.start[1]
+                };
                 func(coord);
             }
         }
@@ -110,7 +113,7 @@ namespace xpu {
 
     // 3d grid-stride kernel
     template <typename Func>
-    __global__ void dispatch_kernel_3d(domain_t<3> domain, Func func)
+    __global__ void dispatch_kernel_3d(grid::domain_t<3> domain, Func func)
     {
         const auto shape    = domain.shape();
         const auto stride_x = blockDim.x * gridDim.x;
@@ -123,7 +126,7 @@ namespace xpu {
         for (std::int64_t zz = start_z; zz < shape[0]; zz += stride_z) {
             for (std::int64_t yy = start_y; yy < shape[1]; yy += stride_y) {
                 for (std::int64_t xx = start_x; xx < shape[2]; xx += stride_x) {
-                    typename domain_t<3>::coord_t coord{
+                    typename grid::domain_t<3>::coord_t coord{
                         zz + domain.start[0],
                         yy + domain.start[1],
                         xx + domain.start[2]
@@ -143,18 +146,19 @@ namespace xpu {
 #ifdef __CUDACC__
     // 1d dispatch
     template <typename Func>
-    inline void cuda_dispatch_1d(const domain_t<1>& domain, Func&& func, cudaStream_t stream)
+    inline void cuda_dispatch_1d(const grid::domain_t<1>& domain, Func&& func, cudaStream_t stream)
     {
         const auto     total_size = domain.size();
         const auto     grid       = compute_launch_config_1d(total_size);
         constexpr dim3 block(256, 1, 1);
+        printf("IN THE CUDA DISPATCH!\n");
 
         dispatch_kernel_1d<<<grid, block, 0, stream>>>(domain, func);
     }
 
     // 2d dispatch
     template <typename Func>
-    inline void cuda_dispatch_2d(const domain_t<2>& domain, Func&& func, cudaStream_t stream)
+    inline void cuda_dispatch_2d(const grid::domain_t<2>& domain, Func&& func, cudaStream_t stream)
     {
         const auto     shape = domain.shape();
         const auto     grid  = compute_launch_config_2d(shape[1], shape[0]);
@@ -165,7 +169,7 @@ namespace xpu {
 
     // 3d dispatch
     template <typename Func>
-    inline void cuda_dispatch_3d(const domain_t<3>& domain, Func&& func, cudaStream_t stream)
+    inline void cuda_dispatch_3d(const grid::domain_t<3>& domain, Func&& func, cudaStream_t stream)
     {
         const auto     shape = domain.shape();
         const auto     grid  = compute_launch_config_3d(shape[2], shape[1], shape[0]);
@@ -181,7 +185,7 @@ namespace xpu {
 
 #ifdef __CUDACC__
     template <std::uint64_t Rank, typename Func>
-    inline void cuda_dispatch(const domain_t<Rank>& domain, Func&& func, cudaStream_t stream)
+    inline void cuda_dispatch(const grid::domain_t<Rank>& domain, Func&& func, cudaStream_t stream)
     {
         if constexpr (Rank == 1) {
             cuda_dispatch_1d(domain, std::forward<Func>(func), stream);
@@ -205,7 +209,7 @@ namespace xpu {
     // fallback stub when not compiled with nvcc (e.g., regular c++ compiler)
     // this allows non-cuda tests to compile but will never be called at runtime
     template <std::uint64_t Rank, typename Func>
-    inline void cuda_dispatch(const domain_t<Rank>&, Func&&, cudaStream_t)
+    inline void cuda_dispatch(const grid::domain_t<Rank>&, Func&&, cudaStream_t)
     {
         // stub - never called since dispatch_impl is constexpr-if guarded
     }
@@ -217,26 +221,40 @@ namespace xpu {
 
 #ifdef __CUDACC__
     // warp-level reduction using shuffle operations (modern cuda)
+    // warp reduction using shared memory for all types
+    // simpler approach to avoid nvcc compiler crashes
     template <typename T, typename ReduceOp>
     __device__ T warp_reduce(T value, ReduceOp reduce_op)
     {
-        constexpr unsigned int warp_size = 32;
-        for (unsigned int offset = warp_size / 2; offset > 0; offset /= 2) {
-            T other = __shfl_down_sync(0xffffffff, value, offset);
-            value   = reduce_op(value, other);
+        __shared__ T warp_shared[1024]; // max threads per block
+
+        const unsigned int lane     = threadIdx.x % 32;
+        const unsigned int warp_id  = threadIdx.x / 32;
+        T*                 warp_mem = &warp_shared[warp_id * 32];
+
+        warp_mem[lane] = value;
+        __syncwarp();
+
+        // reduce within warp using shared memory
+        for (unsigned int offset = 16; offset > 0; offset /= 2) {
+            if (lane < offset) {
+                warp_mem[lane] = reduce_op(warp_mem[lane], warp_mem[lane + offset]);
+            }
+            __syncwarp();
         }
-        return value;
+
+        return warp_mem[0];
     }
 
     // block-level reduction kernel - phase 1
     // each block reduces its portion and writes result to block_results
     template <typename T, std::uint64_t Rank, typename MapFunc, typename ReduceOp>
     __global__ void reduce_kernel_phase1(
-        domain_t<Rank> domain,
-        T              init_value,
-        MapFunc        map_func,
-        ReduceOp       reduce_op,
-        T*             block_results
+        grid::domain_t<Rank> domain,
+        T                    init_value,
+        MapFunc              map_func,
+        ReduceOp             reduce_op,
+        T*                   block_results
     )
     {
         constexpr unsigned int block_size = 256;
@@ -248,7 +266,7 @@ namespace xpu {
 
         // phase 1: grid-stride map and thread-local reduction
         T thread_result = init_value;
-        for (std::int64_t linear = start_idx; linear < total_size; linear += stride) {
+        for (std::uint64_t linear = start_idx; linear < total_size; linear += stride) {
             auto coord        = domain.linear_to_coord(linear);
             T    mapped_value = map_func(coord);
             thread_result     = reduce_op(thread_result, mapped_value);
@@ -321,11 +339,11 @@ namespace xpu {
     // cuda reduce implementation
     template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
     T cuda_reduce(
-        const domain_t<Rank>& domain,
-        T                     init_value,
-        MapFunc&&             map_func,
-        ReduceOp&&            reduce_op,
-        cudaStream_t          stream
+        const grid::domain_t<Rank>& domain,
+        T                           init_value,
+        MapFunc&&                   map_func,
+        ReduceOp&&                  reduce_op,
+        cudaStream_t                stream
     )
     {
         const auto total_size = domain.size();
@@ -375,12 +393,13 @@ namespace xpu {
 #else
     // fallback stub for cuda_reduce when not compiled with nvcc
     template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
-    inline T cuda_reduce(const domain_t<Rank>&, T init_value, MapFunc&&, ReduceOp&&, cudaStream_t)
+    inline T
+    cuda_reduce(const grid::domain_t<Rank>&, T init_value, MapFunc&&, ReduceOp&&, cudaStream_t)
     {
         return init_value;
     }
 #endif // __CUDACC__
 
-} // namespace xpu
+} // namespace simbi::xpu
 
 #endif // XPU_CUDA_AVAILABLE

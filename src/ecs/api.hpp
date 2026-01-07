@@ -21,8 +21,8 @@ namespace simbi::ecs::initialization {
     void initialize_state(Sim& sim, Exec& exec, InitFunc&& func)
     {
         // initialize level 0 (the root)
-        auto& l0_hydro      = sim.hydro(0);
-        const auto& l0_mesh = sim.mesh(0);
+        auto&       l0_hydro = sim.hydro(0);
+        const auto& l0_mesh  = sim.mesh(0);
 
         // apply functor to primitive variables
         // func signature: coord_t -> primitive_t
@@ -30,11 +30,10 @@ namespace simbi::ecs::initialization {
 
         // convert to conserved variables
         const real gamma = sim.metadata().gamma;
-        l0_hydro.cons    = l0_hydro.prim
-                            .map([gamma] DUAL(const auto& p) {
-                                return hydro::to_conserved(p, gamma);
-                            })
-                            .with(exec);
+        l0_hydro.cons =
+            l0_hydro.prim.map(
+                             [gamma] DEV(const auto& p) { return hydro::to_conserved(p, gamma); }
+            ).with(exec);
 
         // prolongate to fine levels (if amr enabled)
         if (sim.has_refinement()) {
@@ -55,15 +54,13 @@ namespace simbi::ecs::initialization {
                 // execute fill on the fine domain
                 // the computation engine handles the coordinate mapping (fine
                 // -> coarse)
-                fine.cons = compute::computation(fine.cons.domain(), prolong_op)
-                                .with(exec);
+                fine.cons = compute::computation(fine.cons.domain(), prolong_op).with(exec);
 
                 // recover primitives on fine level
-                fine.prim = fine.cons
-                                .map([gamma] DUAL(const auto& u) {
-                                    return hydro::to_primitive(u, gamma);
-                                })
-                                .with(exec);
+                fine.prim =
+                    fine.cons
+                        .map([gamma] DEV(const auto& u) { return hydro::to_primitive(u, gamma); })
+                        .with(exec);
             }
         }
 
@@ -75,6 +72,6 @@ namespace simbi::ecs::initialization {
         }
     }
 
-}   // namespace simbi::ecs::initialization
+} // namespace simbi::ecs::initialization
 
-#endif   // ECS_INITIALIZATION_API_HPP
+#endif // ECS_INITIALIZATION_API_HPP

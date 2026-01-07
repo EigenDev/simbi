@@ -25,7 +25,6 @@ Doxyfile
 *.xml
 *.csv
 *.job
-*.txt
 *.so
 *.log
 *.sh

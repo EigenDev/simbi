@@ -22,7 +22,7 @@
 #include <string_view>
 #include <type_traits>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // memory space concept - defined in core/memory_concepts.hpp
@@ -187,4 +187,4 @@ namespace xpu {
     template <bool gpu_available = false>
     struct default_memory_space_selector;
 
-} // namespace xpu
+} // namespace simbi::xpu

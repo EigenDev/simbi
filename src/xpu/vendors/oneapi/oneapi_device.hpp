@@ -32,7 +32,7 @@
 #include <sycl/sycl.hpp>
 #endif
 
-namespace xpu::vendors::oneapi {
+namespace simbi::xpu::vendors::oneapi {
 
     // =============================================================================
     // oneapi device handles
@@ -105,7 +105,7 @@ namespace xpu::vendors::oneapi {
         }
 
         // construction
-        explicit oneapi_device_t(int device_id = 0) : device_id_(device_id)
+        explicit oneapi_device_t(std::int64_t device_id = 0) : device_id_(device_id)
         {
             // future: sycl device selection and context creation
             // oneAPI support not yet implemented
@@ -113,7 +113,7 @@ namespace xpu::vendors::oneapi {
         }
 
         // device information
-        int device_id() const noexcept
+        std::int64_t device_id() const noexcept
         {
             return device_id_;
         }
@@ -365,7 +365,7 @@ namespace xpu::vendors::oneapi {
         }
 
       private:
-        int device_id_;
+        std::int64_t device_id_;
     };
 
     // =============================================================================
@@ -376,7 +376,7 @@ namespace xpu::vendors::oneapi {
     // (commented out because implementation is incomplete)
     // static_assert(core::hetero_device<oneapi_device_t>);
 
-} // namespace xpu::vendors::oneapi
+} // namespace simbi::xpu::vendors::oneapi
 
 // =============================================================================
 // implementation notes for future development

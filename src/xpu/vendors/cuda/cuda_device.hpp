@@ -33,7 +33,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace xpu::vendors::cuda {
+namespace simbi::xpu::vendors::cuda {
 
     // =============================================================================
     // cuda device handles - trivially copyable for concept compliance
@@ -194,7 +194,7 @@ namespace xpu::vendors::cuda {
         }
 
         // construction
-        explicit cuda_device_t(int device_id = 0) : device_id_(device_id)
+        explicit cuda_device_t(std::int64_t device_id = 0) : device_id_(device_id)
         {
 #ifdef XPU_CUDA_AVAILABLE
             cudaSetDevice(device_id_);
@@ -230,7 +230,7 @@ namespace xpu::vendors::cuda {
         // device information (device_properties concept)
         // =============================================================================
 
-        int device_id() const noexcept
+        std::int64_t device_id() const noexcept
         {
             return device_id_;
         }
@@ -703,4 +703,4 @@ namespace xpu::vendors::cuda {
 
     using nvidia_device_t = cuda_device_t;
 
-} // namespace xpu::vendors::cuda
+} // namespace simbi::xpu::vendors::cuda

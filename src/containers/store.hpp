@@ -1,232 +1,172 @@
+// =============================================================================
+// store.hpp
+//
+// dynamic array for heterogeneous memory backed by xpu shared_buffer_t
+// thin wrapper around shared_buffer_t<T, unified_memory> that adds:
+//   - add() for dynamic growth during parsing
+//   - constructor from std::vector
+//   - compatibility with existing simbi store_t api
+//
+// usage:
+//   store_t<ExprNode> nodes;
+//   nodes.reserve(50);
+//   nodes.add(node);  // grows dynamically
+//   // then use as const ref with unified memory access
+// =============================================================================
+
 #ifndef CONTAINERS_STORE_HPP
 #define CONTAINERS_STORE_HPP
 
 #include "compat.hpp"
-#include "hesi/adapter.hpp"
-#include "hesi/core/types.hpp"
-#include "hesi/mem/block.hpp"
-#include "hesi/mem/transfer.hpp"
+#include "xpu/xpu.hpp"
 
-#include <algorithm>
 #include <cstdint>
-#include <cstring>
 #include <utility>
 #include <vector>
 
 namespace simbi {
 
     // -------------------------------------------------------------------------
-    // dynamic array for heterogeneous memory
-    // essentially std::vector but backed by hal block_t (managed memory)
+    // dynamic array backed by xpu unified memory
     // -------------------------------------------------------------------------
     template <typename T>
     class store_t
     {
       private:
-        het::mem::block_t storage_;
-        std::uint64_t size_     = 0;
-        std::uint64_t capacity_ = 0;
-
-        // cached typed pointer to avoid casting on every access
-        T* data_ = nullptr;
-
-        // helper: expand storage if needed
-        void ensure_capacity(std::uint64_t required)
-        {
-            if (required <= capacity_) {
-                return;
-            }
-
-            // geometric growth (1.5x or 2x)
-            std::uint64_t new_capacity = std::max(required, capacity_ * 2);
-            if (capacity_ == 0) {
-                new_capacity = std::max(required, std::uint64_t(16));
-            }
-
-            // allocate new block (managed memory by default for store_t)
-            auto new_block = het::mem::block_t(
-                new_capacity * sizeof(T),
-                storage_.locality(),   // keep same locality
-                het::memory_type_t::managed
-            );
-
-            // move data
-            if (size_ > 0) {
-                // synchronous copy for resize operations
-                // usage of store_t implies host-side setup usually
-                het::mem::copy(
-                    new_block.data(),
-                    storage_.locality(),
-                    storage_.data(),
-                    storage_.locality(),
-                    size_ * sizeof(T)
-                );
-            }
-
-            // swap and update
-            storage_  = std::move(new_block);
-            capacity_ = new_capacity;
-            data_     = static_cast<T*>(storage_.data());
-        }
+        xpu::shared_buffer_t<T, xpu::unified_memory> buffer_;
+        std::uint64_t                                size_ = 0;
 
       public:
         // ---------------------------------------------------------------------
         // construction
         // ---------------------------------------------------------------------
 
-        // default: empty on host
-        store_t() : storage_() {}   // default block is empty
+        // default: empty
+        store_t() = default;
 
-        // sized: allocates on default gpu if available
-        explicit store_t(std::uint64_t size, const T& val = T())
+        // sized with optional fill value
+        explicit store_t(std::uint64_t size, const T& val = T()) : buffer_(size), size_(size)
         {
-            // default to gpu 0 if available, else cpu
-            // auto backend = het::info::is_gpu ? het::backend_type_t::cuda
-            //                                  : het::backend_type_t::cpu;
-
-            // het::locality_t loc{backend, 0};
-
-            resize(size, val);
-
-            // if we just resized, storage_ is set. update locality if needed?
-            // block_t handles its own locality.
+            if (size > 0) {
+                for (std::uint64_t ii = 0; ii < size; ++ii) {
+                    buffer_.data()[ii] = val;
+                }
+            }
         }
 
         // from host vector
         explicit store_t(const std::vector<T>& values)
+            : buffer_(values.size()), size_(values.size())
         {
-            // same locality logic
-            auto backend = het::info::is_gpu ? het::backend_type_t::cuda
-                                             : het::backend_type_t::cpu;
-            het::locality_t loc{backend, 0};
-
-            reserve(values.size());
-
-            // initial copy
-            // since storage is managed, we can just memcpy or use hal copy
-            het::mem::copy(
-                storage_.data(),
-                loc,
-                values.data(),
-                het::locality_t::host(),
-                values.size() * sizeof(T)
-            );
-
-            size_ = values.size();
-        }
-
-        // disable copy (block_t is unique), allow move
-        store_t(const store_t&)            = delete;
-        store_t& operator=(const store_t&) = delete;
-
-        store_t(store_t&& other) noexcept
-            : storage_(std::move(other.storage_)),
-              size_(other.size_),
-              capacity_(other.capacity_),
-              data_(other.data_)
-        {
-            other.size_     = 0;
-            other.capacity_ = 0;
-            other.data_     = nullptr;
-        }
-
-        store_t& operator=(store_t&& other) noexcept
-        {
-            if (this != &other) {
-                storage_  = std::move(other.storage_);
-                size_     = other.size_;
-                capacity_ = other.capacity_;
-                data_     = other.data_;
-
-                other.size_     = 0;
-                other.capacity_ = 0;
-                other.data_     = nullptr;
+            if (!values.empty()) {
+                std::copy(values.begin(), values.end(), buffer_.data());
             }
-            return *this;
         }
+
+        // move semantics (shared_buffer_t handles this)
+        store_t(store_t&&) noexcept            = default;
+        store_t& operator=(store_t&&) noexcept = default;
+
+        // shallow copy semantics (reference counting, preserves hesi behavior)
+        store_t(const store_t&)            = default;
+        store_t& operator=(const store_t&) = default;
 
         // ---------------------------------------------------------------------
         // accessors
         // ---------------------------------------------------------------------
 
-        DUAL T& operator[](std::uint64_t idx) { return data_[idx]; }
-        DUAL const T& operator[](std::uint64_t idx) const { return data_[idx]; }
+        T& operator[](std::uint64_t idx)
+        {
+            return buffer_.data()[idx];
+        }
+        const T& operator[](std::uint64_t idx) const
+        {
+            return buffer_.data()[idx];
+        }
 
-        DUAL T* data() { return data_; }
-        DUAL const T* data() const { return data_; }
+        T* data()
+        {
+            return buffer_.data();
+        }
+        DUAL const T* data() const
+        {
+            return buffer_.data();
+        }
 
-        DUAL std::uint64_t size() const { return size_; }
-        DUAL std::uint64_t capacity() const { return capacity_; }
-        DUAL bool empty() const { return size_ == 0; }
+        DUAL std::uint64_t size() const
+        {
+            return size_;
+        }
+        DUAL std::uint64_t capacity() const
+        {
+            return buffer_.capacity();
+        }
+        DUAL bool empty() const
+        {
+            return size_ == 0;
+        }
 
         // ---------------------------------------------------------------------
         // mutation
         // ---------------------------------------------------------------------
 
+        // add element with dynamic growth
         void add(const T& value)
         {
-            ensure_capacity(size_ + 1);
-            // since it's managed memory, we can write from host directly
-            data_[size_++] = value;
+            if (size_ >= buffer_.capacity()) {
+                // geometric growth: 2x or minimum 16
+                std::uint64_t new_capacity = buffer_.capacity() == 0 ? 16 : buffer_.capacity() * 2;
+                buffer_.reserve(new_capacity);
+            }
+            buffer_.resize(size_ + 1);
+            buffer_.data()[size_] = value;
+            ++size_;
         }
 
+        // reserve capacity
         void reserve(std::uint64_t new_capacity)
         {
-            ensure_capacity(new_capacity);
+            if (new_capacity > buffer_.capacity()) {
+                buffer_.reserve(new_capacity);
+            }
         }
 
-        void clear() { size_ = 0; }
+        // clear (keep capacity)
+        void clear()
+        {
+            size_ = 0;
+        }
 
+        // resize with optional fill value
         void resize(std::uint64_t new_size, const T& value = T())
         {
-            ensure_capacity(new_size);
+            buffer_.resize(new_size);
 
+            // fill new elements if growing
             if (new_size > size_) {
-                // fill new elements
-                // manually loop on host since managed memory allows it
-                for (std::uint64_t i = size_; i < new_size; ++i) {
-                    data_[i] = value;
+                for (std::uint64_t ii = size_; ii < new_size; ++ii) {
+                    buffer_.data()[ii] = value;
                 }
             }
+
             size_ = new_size;
         }
 
         // ---------------------------------------------------------------------
-        // optimization
+        // unified memory optimization (no-ops for now)
         // ---------------------------------------------------------------------
 
-        // prefetch to all available devices (for read-only broadcast data)
-        void sync_to_all_devices()
+        // unified memory driver handles migration automatically
+        // explicit prefetch can be added later if profiling shows benefit
+        void sync_to_all_devices() {}
+
+        // placeholder for explicit prefetch
+        template <typename ExecutorType>
+        void prefetch(ExecutorType& /*exec*/)
         {
-            // simple loop over detected devices
-            // logic assumes managed memory prefetch support
-
-            // [todo]: get real device count from HAL
-            // int device_count = 0;
-            // if (het::info::is_gpu) {
-            //     // naive assumption or query device layer
-            //     device_count = 1;   // placeholder
-            // }
-
-            // strictly speaking, prefetch requires a stream.
-            // creating temporary streams here is expensive.
-            // usually, the unified memory driver handles migration on demand.
-            // explicit prefetch is an optimization.
-            // we skip implementation unless we pass in an executor.
-        }
-
-        // prefetch using a specific stream (preferred)
-        void prefetch(het::stream_t& stream, het::locality_t loc)
-        {
-            het::mem::prefetch_async(
-                storage_.data(),
-                loc,
-                size_ * sizeof(T),
-                stream
-            );
         }
     };
 
-}   // namespace simbi
+} // namespace simbi
 
-#endif   // CONTAINERS_STORE_HPP
+#endif // CONTAINERS_STORE_HPP

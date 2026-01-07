@@ -22,7 +22,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // device memory space
@@ -184,7 +184,7 @@ namespace xpu {
 #endif
         }
 
-        static bool set_device(int device_id)
+        static bool set_device(std::int64_t device_id)
         {
 #ifdef XPU_CUDA_AVAILABLE
             return cudaSetDevice(device_id) == cudaSuccess;
@@ -298,4 +298,4 @@ namespace xpu {
     template <typename T>
     using device_buffer_t = memory_block_t<device_memory>;
 
-} // namespace xpu
+} // namespace simbi::xpu

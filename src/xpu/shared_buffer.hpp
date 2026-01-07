@@ -28,7 +28,7 @@
 #include <memory>
 #include <utility>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // forward declarations
     template <execution_space ExecutionSpace>
@@ -588,4 +588,4 @@ namespace xpu {
         lhs.swap(rhs);
     }
 
-} // namespace xpu
+} // namespace simbi::xpu

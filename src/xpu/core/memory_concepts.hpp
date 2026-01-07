@@ -19,8 +19,6 @@
 
 #pragma once
 
-#include "device_concepts.hpp"
-
 #include <concepts>
 #include <cstddef>
 #include <memory>
@@ -28,26 +26,23 @@
 #include <span>
 #include <type_traits>
 
-namespace xpu::core {
+namespace simbi::xpu::core {
 
     // =============================================================================
-    // memory alignment and layout concepts
+    // memory alignment constants
     // =============================================================================
 
-    template <std::size_t Alignment>
-    concept valid_alignment = (Alignment > 0) && ((Alignment & (Alignment - 1)) == 0); // power of 2
+    static constexpr std::size_t cache_line_size      = 64;
+    static constexpr std::size_t gpu_memory_alignment = 256;
+    static constexpr std::size_t simd_alignment       = 32;
 
+    // trivially transferable concept for safe memory operations
     template <typename T>
     concept trivially_transferable = std::is_trivially_copyable_v<T> && !std::is_pointer_v<T> &&
                                      !std::has_virtual_destructor_v<T>;
 
-    // cache-line alignment for high-performance access patterns
-    static constexpr std::size_t cache_line_size      = 64;
-    static constexpr std::size_t gpu_memory_alignment = 256;
-    static constexpr std::size_t simd_alignment       = 32; // avx-256
-
     // =============================================================================
-    // memory space requirements
+    // memory space concept
     // =============================================================================
 
     template <typename Space>
@@ -167,13 +162,14 @@ namespace xpu::core {
     };
 
     template <typename Arena>
-    concept multi_device_arena = memory_arena<Arena> && requires(Arena arena, int device_id) {
-        { arena.device_count() } -> std::convertible_to<std::size_t>;
-        {
-            arena.allocate_on_device(std::declval<std::size_t>(), device_id)
-        } -> std::convertible_to<void*>;
-        { arena.current_device() } -> std::convertible_to<int>;
-    };
+    concept multi_device_arena =
+        memory_arena<Arena> && requires(Arena arena, std::int64_t device_id) {
+            { arena.device_count() } -> std::convertible_to<std::size_t>;
+            {
+                arena.allocate_on_device(std::declval<std::size_t>(), device_id)
+            } -> std::convertible_to<void*>;
+            { arena.current_device() } -> std::convertible_to<int>;
+        };
 
     // =============================================================================
     // memory transfer concepts
@@ -447,4 +443,4 @@ namespace xpu::core {
         { guard.reset() } -> std::same_as<void>;
     };
 
-} // namespace xpu::core
+} // namespace simbi::xpu::core

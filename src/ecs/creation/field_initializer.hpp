@@ -21,11 +21,10 @@
 #include "grid/amr/prolongation.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-// #include "hesi/adapter.hpp"
-#include "hesi/core/types.hpp"
 #include "physics/em/api.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/enums.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstdint>
 #include <pybind11/cast.h>
@@ -48,8 +47,7 @@ namespace simbi::ecs::creation {
 
         if (py::isinstance<py::tuple>(obj)) {
             auto tuple = obj.cast<py::tuple>();
-            for (std::uint64_t ii = 0; ii < tuple.size() && ii < T::nmem;
-                 ++ii) {
+            for (std::uint64_t ii = 0; ii < tuple.size() && ii < T::nmem; ++ii) {
                 state[ii] = tuple[ii].cast<real>();
             }
         }
@@ -63,9 +61,7 @@ namespace simbi::ecs::creation {
             state = obj.cast<real>();
         }
         else {
-            throw std::runtime_error(
-                "expected tuple, list, or scalar from generator"
-            );
+            throw std::runtime_error("expected tuple, list, or scalar from generator");
         }
 
         return state;
@@ -73,22 +69,20 @@ namespace simbi::ecs::creation {
 
     template <typename T, std::uint64_t Rank>
     grid::field_t<T, Rank> from_generator(
-        py::iterator& gen,
+        py::iterator&               gen,
         const grid::domain_t<Rank>& full_domain,
-        const grid::domain_t<Rank>& active_domain,
-        het::locality_t loc = het::locality_t::host()
+        const grid::domain_t<Rank>& active_domain
     )
     {
-        grid::field_t<T, Rank> field(full_domain, loc);
+        // use unified memory for python generator initialization
+        grid::field_t<T, Rank> field(full_domain);
 
         // iterate over active domain and fill from generator
         std::uint64_t total = active_domain.size();
 
         for (std::uint64_t linear = 0; linear < total; ++linear) {
             if (gen == py::iterator::sentinel()) {
-                throw std::runtime_error(
-                    "generator exhausted before filling field"
-                );
+                throw std::runtime_error("generator exhausted before filling field");
             }
 
             auto coord = active_domain.linear_to_coord(linear);
@@ -107,10 +101,10 @@ namespace simbi::ecs::creation {
         return field;
     }
 
-    struct mean_magnetic_functor_t {
+    struct mean_magnetic_functor_t
+    {
         template <typename PrimField, std::uint64_t Rank>
-        DEV PrimField
-        operator()(PrimField prim, vector_t<real, Rank> bavg) const
+        DEV PrimField operator()(PrimField prim, vector_t<real, Rank> bavg) const
         {
             PrimField p = prim;
             p.mag       = bavg;
@@ -123,11 +117,12 @@ namespace simbi::ecs::creation {
     // =============================================================================
 
     template <typename Sim>
-    struct field_initializer_t {
+    struct field_initializer_t
+    {
         using conserved_t                   = typename Sim::conserved_t;
         using primitive_t                   = typename Sim::primitive_t;
         static constexpr std::uint64_t Rank = Sim::rank;
-        static constexpr regime_t R         = Sim::regime;
+        static constexpr regime_t      R    = Sim::regime;
 
         // -------------------------------------------------------------------------
         // initialize
@@ -136,10 +131,10 @@ namespace simbi::ecs::creation {
         // must be called after simulation is built.
         // -------------------------------------------------------------------------
         static void initialize(
-            Sim& sim,
-            py::iterator prim_gen,
+            Sim&                      sim,
+            py::iterator              prim_gen,
             vector_t<py::iterator, 3> bfield_gens,
-            real gamma
+            real                      gamma
         )
         {
             // initialize level 0
@@ -157,11 +152,11 @@ namespace simbi::ecs::creation {
         // fills a single level's fields from generators.
         // -------------------------------------------------------------------------
         static void initialize_level(
-            Sim& sim,
-            std::uint64_t lvl,
-            py::iterator prim_gen,
+            Sim&                      sim,
+            std::uint64_t             lvl,
+            py::iterator              prim_gen,
             vector_t<py::iterator, 3> bfield_gens,
-            real gamma
+            real                      gamma
         )
         {
             // for multi-partition, we need to handle each partition
@@ -181,27 +176,10 @@ namespace simbi::ecs::creation {
 
             // initialize primitives from a host-local generator and then clone
             // to the partition locality. create host-local prims explicitly so
-            // the initializer remains small and contained; perform a
-            // synchronous clone for single-device testing.
-            auto host_prim = from_generator<primitive_t, Rank>(
-                prim_gen,
-                full_domain,
-                active_domain,
-                het::locality_t::host()
-            );
+            // initialize primitives from generator (uses unified memory)
+            fields.prim = from_generator<primitive_t, Rank>(prim_gen, full_domain, active_domain);
 
-            // determine partition locality from the partition's stream
-            auto part_loc = part.stream.locality();
-
-            if (host_prim.locality() == part_loc) {
-                fields.prim = std::move(host_prim);
-            }
-            else {
-                // synchronous clone into partition-local storage
-                fields.prim = host_prim.clone(part_loc);
-            }
-
-            auto exec = sim.partition_executor(lvl, 0);
+            auto& exec = sim.partition_executor(lvl, 0);
 
             // initialize magnetic field (mhd only)
             if constexpr (R == regime_t::MHD || R == regime_t::RMHD) {
@@ -221,31 +199,22 @@ namespace simbi::ecs::creation {
                     auto staggered_active = active_domain;
                     staggered_active.fin[dir] += 1;
 
-                    auto host_bn = from_generator<real, Rank>(
+                    fields.bfield[dir] = from_generator<real, Rank>(
                         bfield_gens[dir],
                         staggered_domain,
                         staggered_active
                     );
-                    if (host_bn.locality() == part_loc) {
-                        fields.bfield[dir] = std::move(host_bn);
-                    }
-                    else {
-                        // synchronous clone into partition-local storage
-                        fields.bfield[dir] = host_bn.clone(part_loc);
-                    }
                     face_domains[dir] = staggered_active;
                 }
 
                 // interpolate face-centered B to cell-centered for conserved
                 // state
-                auto& mesh  = sim.mesh(lvl);
-                auto motion = ecs::get_motion_state(sim);
+                auto& mesh   = sim.mesh(lvl);
+                auto  motion = ecs::get_motion_state(sim);
                 ecs::with_block_geometry<Sim::coord_system>(
                     mesh,
                     motion,
-                    [&exec, face_domains, active_domain, fields](
-                        const auto& block_geo
-                    ) {
+                    [&exec, face_domains, active_domain, fields](const auto& block_geo) {
                         auto bavg = interpolate_face_to_cell_magnetic(
                             fields.bfield,
                             block_geo,
@@ -253,19 +222,17 @@ namespace simbi::ecs::creation {
                             active_domain
                         );
                         auto prims = fields.prim[active_domain];
-                        prims      = prims.zip(bavg, mean_magnetic_functor_t{})
-                                    .with(exec);
+                        prims      = prims.zip(bavg, mean_magnetic_functor_t{}).with(exec);
                     }
                 );
             }
 
             // convert primitives to conserved
-            fields.cons[active_domain] =
-                fields.prim[active_domain]
-                    .map([gamma] DEV(primitive_t prim) -> conserved_t {
-                        return hydro::to_conserved(prim, gamma);
-                    })
-                    .with(exec);
+            fields.cons[active_domain] = fields.prim[active_domain]
+                                             .map([gamma] DEV(primitive_t prim) -> conserved_t {
+                                                 return hydro::to_conserved(prim, gamma);
+                                             })
+                                             .with(exec);
         }
 
         // -------------------------------------------------------------------------
@@ -273,14 +240,10 @@ namespace simbi::ecs::creation {
         //
         // initializes a refined level by prolongation from parent.
         // -------------------------------------------------------------------------
-        static void
-        initialize_refined_level(Sim& sim, std::uint64_t lvl, real gamma)
+        static void initialize_refined_level(Sim& sim, std::uint64_t lvl, real gamma)
         {
-            if (sim.num_partitions(lvl) != 1 ||
-                sim.num_partitions(lvl - 1) != 1) {
-                throw std::runtime_error(
-                    "prolongation not yet supported for multi-partition"
-                );
+            if (sim.num_partitions(lvl) != 1 || sim.num_partitions(lvl - 1) != 1) {
+                throw std::runtime_error("prolongation not yet supported for multi-partition");
             }
 
             // get parent and child fields
@@ -288,16 +251,15 @@ namespace simbi::ecs::creation {
             auto& child_fields  = sim.partition_hydro(lvl, 0);
 
             // get refinement ratio from level info
-            const auto& level_info = sim.level_info(lvl);
+            const auto&  level_info = sim.level_info(lvl);
             iarray<Rank> ratio;
             ratio.fill(static_cast<std::int64_t>(level_info.refinement_ratio));
 
-            auto exec = sim.partition_executor(lvl, 0);
+            auto& exec = sim.partition_executor(lvl, 0);
 
             // prolong primitives from parent to child
             auto parent_prim_comp = parent_fields.prim.as_computation();
-            auto prolonged_prim =
-                grid::amr::prolong<2>(parent_prim_comp, ratio);
+            auto prolonged_prim   = grid::amr::prolong<2>(parent_prim_comp, ratio);
 
             child_fields.prim = prolonged_prim.with(exec);
 
@@ -308,10 +270,8 @@ namespace simbi::ecs::creation {
                         continue;
                     }
 
-                    auto parent_b_comp =
-                        parent_fields.bfield[dir].as_computation();
-                    auto prolonged_b =
-                        grid::amr::prolong<2>(parent_b_comp, ratio);
+                    auto parent_b_comp       = parent_fields.bfield[dir].as_computation();
+                    auto prolonged_b         = grid::amr::prolong<2>(parent_b_comp, ratio);
                     child_fields.bfield[dir] = prolonged_b.with(exec);
                 }
 
@@ -319,8 +279,8 @@ namespace simbi::ecs::creation {
                 // state
                 auto& child_part = sim.partition(lvl, 0);
                 auto& child_mesh = sim.mesh(lvl);
-                auto motion      = ecs::get_motion_state(sim);
-                auto exec        = sim.partition_executor(lvl, 0);
+                auto  motion     = ecs::get_motion_state(sim);
+                auto& exec       = sim.partition_executor(lvl, 0);
                 ecs::with_block_geometry<Sim::coord_system>(
                     child_mesh,
                     motion,
@@ -332,22 +292,20 @@ namespace simbi::ecs::creation {
                             child_part.owned_domain
                         );
                         auto prims = child_fields.prim[child_part.owned_domain];
-                        prims      = prims.zip(bavg, mean_magnetic_functor_t{})
-                                    .with(exec);
+                        prims      = prims.zip(bavg, mean_magnetic_functor_t{}).with(exec);
                     }
                 );
             }
 
             // convert prolonged primitives to conserved
-            child_fields.cons =
-                child_fields.prim
-                    .map([gamma] DEV(primitive_t prim) -> conserved_t {
-                        return hydro::to_conserved(prim, gamma);
-                    })
-                    .with(exec);
+            child_fields.cons = child_fields.prim
+                                    .map([gamma] DEV(primitive_t prim) -> conserved_t {
+                                        return hydro::to_conserved(prim, gamma);
+                                    })
+                                    .with(exec);
         }
     };
 
-}   // namespace simbi::ecs::creation
+} // namespace simbi::ecs::creation
 
-#endif   // ECS_CREATION_FIELD_INITIALIZER_HPP
+#endif // ECS_CREATION_FIELD_INITIALIZER_HPP

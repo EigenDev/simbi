@@ -6,8 +6,9 @@
 #include "containers/vector.hpp"
 #include "ecs/geometry_visitor.hpp"
 #include "geometry/block_geometry.hpp"
-#include "hesi/exec/reduce.hpp"
 #include "physics/hydro/physics.hpp"
+#include "xpu/execution_space.hpp"
+#include "xpu/executor.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -74,7 +75,7 @@ namespace simbi::body {
         real                 sum_mass{0};
         vector_t<real, Rank> weighted_v_vec{0};
 
-        constexpr auto operator+(const weighted_sums_t& other) const
+        constexpr DUAL auto operator+(const weighted_sums_t& other) const
         {
             return weighted_sums_t{
                 weighted_density + other.weighted_density,
@@ -89,7 +90,7 @@ namespace simbi::body {
     struct weight_reducer_t
     {
         template <std::uint64_t Rank>
-        constexpr DEV auto
+        constexpr DUAL auto
         operator()(const weighted_sums_t<Rank>& a, const weighted_sums_t<Rank>& b) const
             -> weighted_sums_t<Rank>
         {
@@ -177,7 +178,7 @@ namespace simbi::body {
         for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
             const auto& hydro = sim.partition_hydro(lvl, pp);
             const auto& part  = sim.partition(lvl, pp);
-            auto        exec  = sim.partition_executor(lvl, pp);
+            auto&       exec  = sim.partition_executor(lvl, pp);
 
             const auto prims  = hydro.prim;
             const auto domain = part.owned_domain;
@@ -187,7 +188,6 @@ namespace simbi::body {
                 mesh_cfg,
                 motion,
                 [&](const auto& block_geo) {
-
                     auto mapper = sink_weight_mapper_t{
                         .block_geo     = block_geo,
                         .prims         = prims[domain],
@@ -197,14 +197,7 @@ namespace simbi::body {
                         .is_binary     = is_binary
                     };
 
-                    return het::exec::reduce_sync(
-                        exec,
-                        domain,
-                        weighted_sums_t<Rank>{},
-                        mapper,
-                        weight_reducer_t{},
-                        weighted_sums_t<Rank>{}
-                    );
+                    return exec.reduce(domain, weighted_sums_t<Rank>{}, mapper, weight_reducer_t{});
                 }
             );
 

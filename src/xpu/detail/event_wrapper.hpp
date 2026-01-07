@@ -24,7 +24,7 @@
 
 #include <utility>
 
-namespace xpu::detail {
+namespace simbi::xpu::detail {
 
     // =============================================================================
     // event wrapper implementation
@@ -222,6 +222,7 @@ namespace xpu::detail {
         // space-specific optimizations
         // =============================================================================
 
+#ifdef XPU_USE_CUDA
         // cuda-specific event operations
         template <typename Space = ExecutionSpace>
         auto cuda_event() const noexcept
@@ -230,6 +231,7 @@ namespace xpu::detail {
             static_assert(std::is_same_v<Space, ExecutionSpace>);
             return handle_;
         }
+#endif
 
         // cpu-specific completion check
         template <typename Space = ExecutionSpace>
@@ -268,11 +270,4 @@ namespace xpu::detail {
         return event_wrapper_t<ExecutionSpace>{handle, false};
     }
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
-
-    using cpu_event_wrapper  = event_wrapper_t<cpu_space>;
-    using cuda_event_wrapper = event_wrapper_t<cuda_space>;
-
-} // namespace xpu::detail
+} // namespace simbi::xpu::detail

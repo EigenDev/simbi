@@ -1,20 +1,22 @@
 // =============================================================================
 // unified_memory.hpp
 //
-// unified memory space implementation using cuda managed memory.
-// provides both host and device accessible memory allocation.
-// implements memory_space concept for unified data storage.
+// unified memory space implementation with clean cuda/cpu separation.
+// when cuda available: uses cudaMallocManaged for true unified memory.
+// when cuda unavailable: uses host allocation (already "unified" with one memory space).
+//
+// design: cpu fallback degrades gracefully without preprocessor spaghetti.
 //
 // usage:
-//   auto block = allocate<unified_memory, float>(1000);
-//   shared_buffer_t<int, unified_memory> buffer(n);
-//   bool accessible = unified_memory::is_accessible_from<host_memory>();
+//   auto buffer = shared_buffer_t<float, unified_memory>(1024);
+//   // works with or without cuda
 // =============================================================================
 
 #pragma once
 
 #include "memory_space.hpp"
 
+#include <cstdlib>
 #include <cstring>
 #include <string_view>
 
@@ -22,7 +24,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // unified memory space
@@ -31,101 +33,74 @@ namespace xpu {
     struct unified_memory
     {
         // =============================================================================
-        // type requirements for memory_space concept
+        // memory_space concept requirements
         // =============================================================================
 
         using pointer_type       = void*;
         using const_pointer_type = const void*;
         using size_type          = std::size_t;
 
-        // =============================================================================
-        // compile-time properties
-        // =============================================================================
-
         static constexpr std::string_view space_name()
         {
             return "unified";
         }
 
-        static constexpr std::string_view name() // legacy
+        static constexpr std::string_view name()
         {
-            return "unified";
+            return space_name();
         }
 
-        static constexpr bool        is_device_accessible = true;
         static constexpr bool        is_host_accessible   = true;
+        static constexpr bool        is_device_accessible = true;
         static constexpr bool        is_unified           = true;
-        static constexpr std::size_t preferred_alignment  = 256; // gpu alignment for unified memory
+        static constexpr bool        requires_staging     = false;
+        static constexpr std::size_t preferred_alignment  = 64;
 
         static constexpr double memory_bandwidth_gb_per_sec()
         {
-            // unified memory typically limited by pcie bandwidth
-            return 16.0; // pcie gen3 x16 theoretical
+            return 16.0; // conservative estimate for pcie gen3
         }
 
         // =============================================================================
-        // allocation interface
+        // allocation
         // =============================================================================
 
         static void* allocate(std::size_t size)
         {
-#ifdef XPU_CUDA_AVAILABLE
             if (size == 0) {
                 return nullptr;
             }
 
+#ifdef XPU_CUDA_AVAILABLE
             void*       ptr;
             cudaError_t err = cudaMallocManaged(&ptr, size);
             if (err != cudaSuccess) {
-                return nullptr; // allocation failed
+                return nullptr;
             }
-
-            // record allocation for debugging
             stats::record_allocation(size);
             return ptr;
 #else
-            // fallback to host allocation when cuda not available
-            return std::aligned_alloc(64, (size + 63) & ~63);
+            // cpu fallback: aligned host allocation
+            void* ptr = std::aligned_alloc(64, (size + 63) & ~63);
+            if (ptr) {
+                stats::record_allocation(size);
+            }
+            return ptr;
 #endif
         }
 
         static void deallocate(void* ptr, std::size_t size)
         {
+            if (!ptr) {
+                return;
+            }
+
 #ifdef XPU_CUDA_AVAILABLE
-            if (ptr) {
-                cudaFree(ptr);
-                stats::record_deallocation(size);
-            }
+            cudaFree(ptr);
 #else
-            if (ptr) {
-                std::free(ptr);
-            }
+            std::free(ptr);
 #endif
-        }
-
-        // =============================================================================
-        // accessibility queries
-        // =============================================================================
-
-        template <memory_space OtherSpace>
-        static constexpr bool is_accessible_from()
-        {
-            // unified memory is accessible from all spaces
-            return true;
-        }
-
-        // specialized accessibility queries for known spaces
-        static constexpr bool is_accessible_from_host()
-        {
-            return true;
-        }
-        static constexpr bool is_accessible_from_device()
-        {
-            return true;
-        }
-        static constexpr bool is_accessible_from_unified()
-        {
-            return true;
+            stats::record_deallocation(size);
         }
 
         // =============================================================================
@@ -134,134 +109,99 @@ namespace xpu {
 
         static void memset(void* ptr, int value, std::size_t size)
         {
-#ifdef XPU_CUDA_AVAILABLE
-            // can use either host or device memset for unified memory
             std::memset(ptr, value, size);
-#else
-            std::memset(ptr, value, size);
-#endif
         }
 
         static void memcpy(void* dest, const void* src, std::size_t size)
         {
-            // unified memory can be copied with standard memcpy
             std::memcpy(dest, src, size);
         }
 
         // =============================================================================
-        // memory hints and prefetching
+        // accessibility queries
         // =============================================================================
 
-        static void prefetch_to_device(void* ptr, std::size_t size, int device_id = -1)
+        template <typename MemorySpace>
+        static constexpr bool is_accessible_from()
         {
+            return true; // unified memory accessible from all spaces
+        }
+
+        // =============================================================================
+        // cuda-specific operations (only when cuda available)
+        // =============================================================================
+
 #ifdef XPU_CUDA_AVAILABLE
-            if (ptr == nullptr || size == 0) {
+        static void prefetch_to_device(void* ptr, std::size_t size, std::int64_t device_id = -1)
+        {
+            if (!ptr || size == 0) {
                 return;
             }
 
-// use modern cudaMemLocation API for CUDA 12+
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
             cudaMemLocation location;
             location.type = cudaMemLocationTypeDevice;
             location.id   = (device_id >= 0) ? device_id : 0;
-
-            cudaError_t err = cudaMemPrefetchAsync(ptr, size, location, 0);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
+            cudaMemPrefetchAsync(ptr, size, location, 0, nullptr);
 #else
-            // fallback for older cuda versions using device id directly
-            int         target_device = (device_id >= 0) ? device_id : 0;
-            cudaError_t err           = cudaMemPrefetchAsync(ptr, size, target_device);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
-#endif
+            int target_device = (device_id >= 0) ? device_id : 0;
+            cudaMemPrefetchAsync(ptr, size, target_device, nullptr);
 #endif
         }
 
         static void prefetch_to_host(void* ptr, std::size_t size)
         {
-#ifdef XPU_CUDA_AVAILABLE
-            if (ptr == nullptr || size == 0) {
+            if (!ptr || size == 0) {
                 return;
             }
 
-// use modern cudaMemLocation API for CUDA 12+
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
             cudaMemLocation location;
             location.type = cudaMemLocationTypeHost;
             location.id   = 0;
-
-            cudaError_t err = cudaMemPrefetchAsync(ptr, size, location, 0);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
+            cudaMemPrefetchAsync(ptr, size, location, 0, nullptr);
 #else
-            // fallback for older cuda versions using cudaCpuDeviceId
-            cudaError_t err = cudaMemPrefetchAsync(ptr, size, cudaCpuDeviceId);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
-#endif
+            cudaMemPrefetchAsync(ptr, size, cudaCpuDeviceId, nullptr);
 #endif
         }
 
-        static void advise_read_mostly(void* ptr, std::size_t size)
+        static void advise_read_mostly(void* ptr, std::size_t size, std::int64_t device_id = 0)
         {
-#ifdef XPU_CUDA_AVAILABLE
-            if (ptr == nullptr || size == 0) {
+            if (!ptr || size == 0) {
                 return;
             }
 
-// use modern cudaMemLocation API for CUDA 12+
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
             cudaMemLocation location;
             location.type = cudaMemLocationTypeDevice;
-            location.id   = 0; // current device
-
-            cudaError_t err = cudaMemAdvise(ptr, size, cudaMemAdviseSetReadMostly, location);
-            if (err != cudaSuccess) {
-                // advise failed, continue without error
-            }
+            location.id   = device_id;
+            cudaMemAdvise(ptr, size, cudaMemAdviseSetReadMostly, location);
 #else
-            // fallback for older cuda versions using device id directly
-            cudaError_t err = cudaMemAdvise(ptr, size, cudaMemAdviseSetReadMostly, 0);
-            if (err != cudaSuccess) {
-                // advise failed, continue without error
-            }
-#endif
+            cudaMemAdvise(ptr, size, cudaMemAdviseSetReadMostly, device_id);
 #endif
         }
 
-        static void advise_preferred_location(void* ptr, std::size_t size, int device_id)
+        static void advise_preferred_location(void* ptr, std::size_t size, std::int64_t device_id)
         {
-#ifdef XPU_CUDA_AVAILABLE
-            if (ptr == nullptr || size == 0) {
+            if (!ptr || size == 0) {
                 return;
             }
 
-// use modern cudaMemLocation API for CUDA 12+
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
             cudaMemLocation location;
             location.type = cudaMemLocationTypeDevice;
-            location.id   = (device_id >= 0) ? device_id : 0;
-
-            cudaError_t err = cudaMemAdvise(ptr, size, cudaMemAdviseSetPreferredLocation, location);
-            if (err != cudaSuccess) {
-                // advise failed, continue without error
-            }
+            location.id   = device_id;
+            cudaMemAdvise(ptr, size, cudaMemAdviseSetPreferredLocation, location);
 #else
-            // fallback for older cuda versions using device id directly
-            int         target_device = (device_id >= 0) ? device_id : 0;
-            cudaError_t err =
-                cudaMemAdvise(ptr, size, cudaMemAdviseSetPreferredLocation, target_device);
-            if (err != cudaSuccess) {
-                // advise failed, continue without error
-            }
-#endif
+            cudaMemAdvise(ptr, size, cudaMemAdviseSetPreferredLocation, device_id);
 #endif
         }
+
+        static void synchronize_stream(cudaStream_t stream)
+        {
+            cudaStreamSynchronize(stream);
+        }
+#endif // XPU_CUDA_AVAILABLE
 
         // =============================================================================
         // synchronization
@@ -272,81 +212,11 @@ namespace xpu {
 #ifdef XPU_CUDA_AVAILABLE
             cudaDeviceSynchronize();
 #endif
-        }
-
-        static void synchronize_stream(cudaStream_t stream)
-        {
-#ifdef XPU_CUDA_AVAILABLE
-            cudaStreamSynchronize(stream);
-#endif
+            // no-op for cpu-only
         }
 
         // =============================================================================
-        // async prefetch with stream support
-        // =============================================================================
-
-        static void prefetch_to_device_async(
-            void*        ptr,
-            std::size_t  size,
-            cudaStream_t stream,
-            int          device_id = -1
-        )
-        {
-#ifdef XPU_CUDA_AVAILABLE
-            if (ptr == nullptr || size == 0) {
-                return;
-            }
-
-// use modern cudaMemLocation API for CUDA 12+
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
-            cudaMemLocation location;
-            location.type = cudaMemLocationTypeDevice;
-            location.id   = (device_id >= 0) ? device_id : 0;
-
-            cudaError_t err = cudaMemPrefetchAsync(ptr, size, location, 0, stream);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
-#else
-            // fallback for older cuda versions using device id directly
-            int         target_device = (device_id >= 0) ? device_id : 0;
-            cudaError_t err           = cudaMemPrefetchAsync(ptr, size, target_device, stream);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
-#endif
-#endif
-        }
-
-        static void prefetch_to_host_async(void* ptr, std::size_t size, cudaStream_t stream)
-        {
-#ifdef XPU_CUDA_AVAILABLE
-            if (ptr == nullptr || size == 0) {
-                return;
-            }
-
-// use modern cudaMemLocation API for CUDA 12+
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
-            cudaMemLocation location;
-            location.type = cudaMemLocationTypeHost;
-            location.id   = 0;
-
-            cudaError_t err = cudaMemPrefetchAsync(ptr, size, location, 0, stream);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
-#else
-            // fallback for older cuda versions using cudaCpuDeviceId
-            cudaError_t err = cudaMemPrefetchAsync(ptr, size, cudaCpuDeviceId, stream);
-            if (err != cudaSuccess) {
-                // prefetch failed, continue without error
-            }
-#endif
-#endif
-        }
-
-        // =============================================================================
-        // memory info and queries
+        // memory info queries
         // =============================================================================
 
         static bool is_managed_pointer(const void* ptr)
@@ -356,7 +226,8 @@ namespace xpu {
             cudaError_t           err = cudaPointerGetAttributes(&attrs, ptr);
             return err == cudaSuccess && attrs.type == cudaMemoryTypeManaged;
 #else
-            return true; // assume all pointers are "managed" without cuda
+            (void) ptr;
+            return true; // all host pointers are "managed" in cpu-only mode
 #endif
         }
 
@@ -367,47 +238,32 @@ namespace xpu {
             cudaMemGetInfo(&free_mem, &total_mem);
             return free_mem;
 #else
-            return SIZE_MAX; // unlimited host memory assumption
+            return SIZE_MAX; // no practical limit for host memory
 #endif
         }
 
-        // =============================================================================
-        // performance hints
-        // =============================================================================
-
-        struct allocation_hints
-        {
-            static constexpr bool        supports_concurrent_access = true;
-            static constexpr bool        supports_cache_coherency   = true;
-            static constexpr bool        requires_explicit_sync     = false;
-            static constexpr std::size_t preferred_alignment        = 256; // cuda managed alignment
-        };
-
-        // =============================================================================
-        // debug and introspection
-        // =============================================================================
-
         static bool is_valid_pointer(const void* ptr)
         {
-            if (ptr == nullptr) {
+            if (!ptr) {
                 return false;
             }
+
 #ifdef XPU_CUDA_AVAILABLE
             cudaPointerAttributes attrs;
             cudaError_t           err = cudaPointerGetAttributes(&attrs, ptr);
             return err == cudaSuccess;
 #else
-            return true;
+            return true; // assume all non-null host pointers are valid
 #endif
         }
 
         static std::size_t get_alignment()
         {
-            return allocation_hints::preferred_alignment;
+            return 64; // cache line alignment
         }
 
         // =============================================================================
-        // statistics (for debugging and monitoring)
+        // statistics
         // =============================================================================
 
         struct stats
@@ -438,7 +294,7 @@ namespace xpu {
     };
 
     // =============================================================================
-    // static member definitions
+    // static member initialization
     // =============================================================================
 
     inline std::size_t unified_memory::stats::total_allocated   = 0;
@@ -446,8 +302,14 @@ namespace xpu {
     inline std::size_t unified_memory::stats::current_usage     = 0;
 
     // =============================================================================
-    // default memory space specialization when cuda available
+    // default memory space selection
     // =============================================================================
+
+    template <bool has_cuda>
+    struct default_memory_space_selector
+    {
+        using type = host_memory;
+    };
 
 #ifdef XPU_CUDA_AVAILABLE
     template <>
@@ -457,7 +319,10 @@ namespace xpu {
     };
 #endif
 
-    // static assertion to verify concept compliance
+    // =============================================================================
+    // concept verification
+    // =============================================================================
+
     static_assert(memory_space<unified_memory>);
 
     // =============================================================================
@@ -469,4 +334,4 @@ namespace xpu {
     template <typename T>
     using unified_buffer_t = memory_block_t<unified_memory>;
 
-} // namespace xpu
+} // namespace simbi::xpu

@@ -27,7 +27,7 @@
 #include <mutex>
 #include <optional>
 
-namespace xpu::detail {
+namespace simbi::xpu::detail {
 
     // forward declaration for token dependency
     template <execution_space ExecutionSpace>
@@ -408,4 +408,4 @@ namespace xpu::detail {
     template <typename T>
     inline constexpr bool is_control_block_v = is_control_block<T>::value;
 
-} // namespace xpu::detail
+} // namespace simbi::xpu::detail

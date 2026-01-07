@@ -8,9 +8,9 @@
 #include "grid/exchange_pattern.hpp"
 #include "grid/field.hpp"
 #include "grid/patch_id.hpp"
-#include "hesi/core/types.hpp"
-#include "hesi/exec/executor.hpp"
-#include "hesi/mem/transfer.hpp"
+#include "xpu/buffer_ops.hpp"
+#include "xpu/execution_space.hpp"
+#include "xpu/executor.hpp"
 
 #include <cstdint>
 #include <functional>
@@ -19,16 +19,17 @@
 
 namespace simbi::grid::comm {
 
-    struct communicator_t {
+    struct communicator_t
+    {
 
-        using executor_lookup_f =
-            std::function<het::exec::executor_t&(het::locality_t)>;
+        template <xpu::execution_space ExecutionSpace>
+        using executor_lookup_f = std::function<xpu::executor_t<ExecutionSpace>&(int)>;
 
-        template <typename T, std::uint64_t Rank>
+        template <typename T, std::uint64_t Rank, xpu::execution_space ExecutionSpace>
         static void exchange_halos(
-            const std::vector<transfer_op_t<Rank>>& pattern,
+            const std::vector<transfer_op_t<Rank>>&       pattern,
             const std::map<patch_id_t, field_t<T, Rank>>& patches,
-            executor_lookup_f get_exec
+            executor_lookup_f<ExecutionSpace>             get_exec
         )
         {
             for (const auto& op : pattern) {
@@ -40,27 +41,29 @@ namespace simbi::grid::comm {
                 }
 
                 const auto& src_field = src_it->second;
-                auto& dst_field       = dst_it->second;
+                auto&       dst_field = dst_it->second;
 
-                auto& executor = get_exec(src_field.locality());
+                auto& executor = get_exec(src_field.device_id());
 
                 // check levels
                 std::int64_t src_level = op.src_id.level;
                 std::int64_t dst_level = op.dst_id.level;
 
                 // create views
-                auto src_view = src_field[op.send_box];   // global coords
-                auto dst_view = dst_field[op.recv_box];   // global coords
+                auto src_view = src_field[op.send_box]; // global coords
+                auto dst_view = dst_field[op.recv_box]; // global coords
 
                 if (src_level == dst_level) {
                     // === case a: peer-to-peer copy ===
-                    het::mem::copy_async(
-                        dst_view.data(),
-                        dst_field.locality(),
-                        src_view.data(),
-                        src_field.locality(),
-                        src_view.size() * sizeof(T),
-                        executor.stream()
+                    // unified memory: simple copy via dispatch
+                    auto copy_domain =
+                        grid::extents<1>({static_cast<std::int64_t>(src_view.size())});
+                    executor.dispatch(
+                        copy_domain,
+                        [src = src_view.data(),
+                         dst = dst_view.data()] DUAL(const std::array<std::int64_t, 1>& idx) {
+                            dst[idx[0]] = src[idx[0]];
+                        }
                     );
                 }
                 else if (src_level < dst_level) {
@@ -76,14 +79,8 @@ namespace simbi::grid::comm {
                     // in a real engine, this is a policy configuration.
                     auto interpolator = amr::prolong<2>(src_view, ratio);
 
-                    // functional assignment
-                    // this triggers the kernel launch on the executor
-                    simbi::grid::assign(
-                        executor,
-                        op.recv_box,   // iterate over fine ghost domain
-                        dst_view,
-                        compute::computation(op.recv_box, interpolator)
-                    );
+                    // functional assignment via field commitment
+                    dst_view = compute::computation(op.recv_box, interpolator).with(executor);
                 }
                 else {
                     // === case c: fine -> coarse (restriction) ===
@@ -95,17 +92,13 @@ namespace simbi::grid::comm {
 
                     auto restrictor = amr::restrict(src_view, ratio);
 
-                    simbi::grid::assign(
-                        executor,
-                        op.recv_box,   // Iterate over Coarse Ghost Domain
-                        dst_view,
-                        compute::computation(op.recv_box, restrictor)
-                    );
+                    // functional assignment via field commitment
+                    dst_view = compute::computation(op.recv_box, restrictor).with(executor);
                 }
             }
         }
     };
 
-}   // namespace simbi::grid::comm
+} // namespace simbi::grid::comm
 
 #endif

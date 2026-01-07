@@ -22,7 +22,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // device memory space
@@ -64,7 +64,7 @@ namespace xpu {
         }
 
         // =============================================================================
-        // allocation interface
+        // allocation and deallocation
         // =============================================================================
 
         static void* allocate(std::size_t size)
@@ -84,7 +84,15 @@ namespace xpu {
             stats::record_allocation(size);
             return ptr;
 #else
-            static_assert(sizeof(size) == 0, "device_memory requires CUDA compilation");
+            // cpu fallback: use aligned allocation
+            if (size == 0) {
+                return nullptr;
+            }
+            void* ptr = std::aligned_alloc(64, (size + 63) & ~63);
+            if (ptr) {
+                stats::record_allocation(size);
+            }
+            return ptr;
 #endif
         }
 
@@ -93,6 +101,11 @@ namespace xpu {
 #ifdef XPU_CUDA_AVAILABLE
             if (ptr) {
                 cudaFree(ptr);
+                stats::record_deallocation(size);
+            }
+#else
+            if (ptr) {
+                std::free(ptr);
                 stats::record_deallocation(size);
             }
 #endif
@@ -131,6 +144,8 @@ namespace xpu {
         {
 #ifdef XPU_CUDA_AVAILABLE
             cudaMemset(ptr, value, size);
+#else
+            std::memset(ptr, value, size);
 #endif
         }
 
@@ -138,6 +153,8 @@ namespace xpu {
         {
 #ifdef XPU_CUDA_AVAILABLE
             cudaMemcpy(dest, src, size, cudaMemcpyHostToDevice);
+#else
+            std::memcpy(dest, src, size);
 #endif
         }
 
@@ -145,6 +162,8 @@ namespace xpu {
         {
 #ifdef XPU_CUDA_AVAILABLE
             cudaMemcpy(dest, src, size, cudaMemcpyDeviceToHost);
+#else
+            std::memcpy(dest, src, size);
 #endif
         }
 
@@ -152,6 +171,8 @@ namespace xpu {
         {
 #ifdef XPU_CUDA_AVAILABLE
             cudaMemcpy(dest, src, size, cudaMemcpyDeviceToDevice);
+#else
+            std::memcpy(dest, src, size);
 #endif
         }
 
@@ -162,6 +183,8 @@ namespace xpu {
         // enable peer access between two devices
         static bool enable_peer_access(int src_device, int dst_device)
         {
+            (void) src_device;
+            (void) dst_device;
 #ifdef XPU_CUDA_AVAILABLE
             int         can_access = 0;
             cudaError_t err        = cudaDeviceCanAccessPeer(&can_access, dst_device, src_device);
@@ -180,6 +203,7 @@ namespace xpu {
         // disable peer access between two devices
         static bool disable_peer_access(int src_device)
         {
+            (void) src_device;
 #ifdef XPU_CUDA_AVAILABLE
             cudaError_t err = cudaDeviceDisablePeerAccess(src_device);
             return err == cudaSuccess;
@@ -191,6 +215,8 @@ namespace xpu {
         // check if peer access is possible between devices
         static bool can_access_peer(int src_device, int dst_device)
         {
+            (void) src_device;
+            (void) dst_device;
 #ifdef XPU_CUDA_AVAILABLE
             int         can_access = 0;
             cudaError_t err        = cudaDeviceCanAccessPeer(&can_access, dst_device, src_device);
@@ -204,6 +230,8 @@ namespace xpu {
         static bool
         memcpy_peer(void* dst, int dst_device, const void* src, int src_device, std::size_t size)
         {
+            (void) dst_device;
+            (void) src_device;
 #ifdef XPU_CUDA_AVAILABLE
             if (size == 0) {
                 return true;
@@ -217,11 +245,17 @@ namespace xpu {
 
             return err == cudaSuccess;
 #else
+            // cpu fallback: simple memcpy
+            if (dst && src && size > 0) {
+                std::memcpy(dst, src, size);
+                return true;
+            }
             return false;
 #endif
         }
 
-        // async peer-to-peer copy
+#ifdef XPU_CUDA_AVAILABLE
+        // async peer-to-peer copy (cuda only)
         static bool memcpy_peer_async(
             void*        dst,
             int          dst_device,
@@ -231,7 +265,6 @@ namespace xpu {
             cudaStream_t stream
         )
         {
-#ifdef XPU_CUDA_AVAILABLE
             if (size == 0) {
                 return true;
             }
@@ -243,9 +276,6 @@ namespace xpu {
             cudaError_t err = cudaMemcpyPeerAsync(dst, dst_device, src, src_device, size, stream);
 
             return err == cudaSuccess;
-#else
-            return false;
-#endif
         }
 
         // =============================================================================
@@ -259,17 +289,13 @@ namespace xpu {
             cudaStream_t stream = 0
         )
         {
-#ifdef XPU_CUDA_AVAILABLE
             cudaMemcpyAsync(dest, src, size, cudaMemcpyHostToDevice, stream);
-#endif
         }
 
         static void
         memcpy_to_host_async(void* dest, const void* src, std::size_t size, cudaStream_t stream = 0)
         {
-#ifdef XPU_CUDA_AVAILABLE
             cudaMemcpyAsync(dest, src, size, cudaMemcpyDeviceToHost, stream);
-#endif
         }
 
         static void memcpy_device_to_device_async(
@@ -279,10 +305,9 @@ namespace xpu {
             cudaStream_t stream = 0
         )
         {
-#ifdef XPU_CUDA_AVAILABLE
             cudaMemcpyAsync(dest, src, size, cudaMemcpyDeviceToDevice, stream);
-#endif
         }
+#endif // XPU_CUDA_AVAILABLE
 
         // =============================================================================
         // device management
@@ -299,8 +324,9 @@ namespace xpu {
 #endif
         }
 
-        static bool set_device(int device_id)
+        static bool set_device(std::int64_t device_id)
         {
+            (void) device_id;
 #ifdef XPU_CUDA_AVAILABLE
             return cudaSetDevice(device_id) == cudaSuccess;
 #else
@@ -348,6 +374,7 @@ namespace xpu {
 
         static bool is_valid_pointer(const void* ptr)
         {
+            (void) ptr;
 #ifdef XPU_CUDA_AVAILABLE
             cudaPointerAttributes attrs;
             cudaError_t           err = cudaPointerGetAttributes(&attrs, ptr);
@@ -413,4 +440,4 @@ namespace xpu {
     template <typename T>
     using device_buffer_t = memory_block_t<device_memory>;
 
-} // namespace xpu
+} // namespace simbi::xpu

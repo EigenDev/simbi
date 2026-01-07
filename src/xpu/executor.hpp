@@ -18,18 +18,21 @@
 //   auto chained = exec.then(token, next_kernel);
 //
 //   // phase 3: domain dispatch
-//   auto domain = xpu::extents<3>({100, 200, 50});
+//   auto domain = grid::extents<3>({100, 200, 50});
 //   exec.dispatch(domain, [=](auto idx) { /* work */ });
 //   exec.sync();
 // =============================================================================
 
 #pragma once
 
+#include "cpu_space.hpp"
+#include "cuda_space.hpp"
 #include "detail/cpu_dispatch.hpp"
 #include "detail/event_wrapper.hpp"
+#include "detail/portability.hpp"
 #include "detail/stream_wrapper.hpp"
-#include "domain.hpp"
 #include "execution_space.hpp"
+#include "grid/domain.hpp"
 
 #ifdef XPU_CUDA_AVAILABLE
 #include "detail/cuda_dispatch.hpp"
@@ -39,7 +42,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace xpu {
+namespace simbi::xpu {
 
     // =============================================================================
     // reduction operators (global scope for cuda compatibility)
@@ -48,7 +51,7 @@ namespace xpu {
     template <typename T>
     struct max_op_t
     {
-        __host__ __device__ constexpr T operator()(const T& a, const T& b) const
+        XPU_HOST_DEVICE constexpr T operator()(const T& a, const T& b) const
         {
             return a > b ? a : b;
         }
@@ -57,7 +60,7 @@ namespace xpu {
     template <typename T>
     struct min_op_t
     {
-        __host__ __device__ constexpr T operator()(const T& a, const T& b) const
+        XPU_HOST_DEVICE constexpr T operator()(const T& a, const T& b) const
         {
             return a < b ? a : b;
         }
@@ -88,7 +91,9 @@ namespace xpu {
         // construction and destruction
         // =============================================================================
 
-        explicit executor_t(int device_id = 0) : stream_(device_id), device_id_(device_id) {}
+        explicit executor_t(std::int64_t device_id = 0) : stream_(device_id), device_id_(device_id)
+        {
+        }
 
         ~executor_t()
         {
@@ -167,7 +172,7 @@ namespace xpu {
         // dispatch work over n-dimensional domain
         // returns token for async composition
         template <std::uint64_t Rank, typename Func>
-        token_type dispatch(const domain_t<Rank>& domain, Func&& kernel)
+        token_type dispatch(const grid::domain_t<Rank>& domain, Func&& kernel)
         {
             if (domain.empty()) {
                 // empty domain: return ready token
@@ -188,8 +193,12 @@ namespace xpu {
         // map_func: domain index -> value
         // reduce_op: binary operator to combine values
         template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
-        T
-        reduce(const domain_t<Rank>& domain, T init_value, MapFunc&& map_func, ReduceOp&& reduce_op)
+        T reduce(
+            const grid::domain_t<Rank>& domain,
+            T                           init_value,
+            MapFunc&&                   map_func,
+            ReduceOp&&                  reduce_op
+        ) const
         {
             if (domain.empty()) {
                 return init_value;
@@ -206,21 +215,21 @@ namespace xpu {
 
         // convenience: sum reduction
         template <std::uint64_t Rank, typename T, typename MapFunc>
-        T sum(const domain_t<Rank>& domain, MapFunc&& map_func)
+        T sum(const grid::domain_t<Rank>& domain, MapFunc&& map_func)
         {
             return reduce(domain, T{}, std::forward<MapFunc>(map_func), std::plus<T>{});
         }
 
         // convenience: max reduction
         template <std::uint64_t Rank, typename T, typename MapFunc>
-        T max(const domain_t<Rank>& domain, T init_value, MapFunc&& map_func)
+        T max(const grid::domain_t<Rank>& domain, T init_value, MapFunc&& map_func)
         {
             return reduce(domain, init_value, std::forward<MapFunc>(map_func), max_op_t<T>{});
         }
 
         // convenience: min reduction
         template <std::uint64_t Rank, typename T, typename MapFunc>
-        T min(const domain_t<Rank>& domain, T init_value, MapFunc&& map_func)
+        T min(const grid::domain_t<Rank>& domain, T init_value, MapFunc&& map_func)
         {
             return reduce(domain, init_value, std::forward<MapFunc>(map_func), min_op_t<T>{});
         }
@@ -258,7 +267,7 @@ namespace xpu {
             return {};
         }
 
-        int device_id() const noexcept
+        std::int64_t device_id() const noexcept
         {
             return device_id_;
         }
@@ -267,20 +276,20 @@ namespace xpu {
         // space-specific accessors
         // =============================================================================
 
+#ifdef XPU_USE_CUDA
         // cuda-specific stream access
-        template <typename Space = ExecutionSpace>
-        auto cuda_stream() const noexcept
-            -> std::enable_if_t<std::is_same_v<Space, cuda_space>, cudaStream_t>
+        cudaStream_t cuda_stream() const noexcept
+            requires std::same_as<ExecutionSpace, cuda_space>
         {
-            return stream_.template cuda_stream<Space>();
+            return stream_.template cuda_stream<ExecutionSpace>();
         }
+#endif
 
         // cpu-specific thread access
-        template <typename Space = ExecutionSpace>
-        auto thread_id() const noexcept
-            -> std::enable_if_t<std::is_same_v<Space, cpu_space>, std::thread::id>
+        std::thread::id thread_id() const noexcept
+            requires std::same_as<ExecutionSpace, cpu_space>
         {
-            return stream_.template thread_id<Space>();
+            return stream_.template thread_id<ExecutionSpace>();
         }
 
       private:
@@ -339,7 +348,7 @@ namespace xpu {
 
         // cpu dispatch - iterate domain with openmp
         template <std::uint64_t Rank, typename Func>
-        token_type dispatch_impl(const domain_t<Rank>& domain, Func&& kernel)
+        token_type dispatch_impl(const grid::domain_t<Rank>& domain, Func&& kernel)
             requires(std::is_same_v<ExecutionSpace, cpu_space>)
         {
             // dispatch to cpu parallel implementation
@@ -353,7 +362,7 @@ namespace xpu {
 
         // cuda dispatch - launch grid-stride kernel
         template <std::uint64_t Rank, typename Func>
-        token_type dispatch_impl(const domain_t<Rank>& domain, Func&& kernel)
+        token_type dispatch_impl(const grid::domain_t<Rank>& domain, Func&& kernel)
             requires(std::is_same_v<ExecutionSpace, cuda_space>)
         {
             // dispatch to cuda kernel implementation
@@ -366,11 +375,11 @@ namespace xpu {
         // cpu reduce - openmp parallel reduction
         template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
         T reduce_impl(
-            const domain_t<Rank>& domain,
-            T                     init_value,
-            MapFunc&&             map_func,
-            ReduceOp&&            reduce_op
-        )
+            const grid::domain_t<Rank>& domain,
+            T                           init_value,
+            MapFunc&&                   map_func,
+            ReduceOp&&                  reduce_op
+        ) const
             requires(std::is_same_v<ExecutionSpace, cpu_space>)
         {
             return cpu_reduce(
@@ -384,11 +393,11 @@ namespace xpu {
         // cuda reduce - two-phase gpu reduction
         template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
         T reduce_impl(
-            const domain_t<Rank>& domain,
-            T                     init_value,
-            MapFunc&&             map_func,
-            ReduceOp&&            reduce_op
-        )
+            const grid::domain_t<Rank>& domain,
+            T                           init_value,
+            MapFunc&&                   map_func,
+            ReduceOp&&                  reduce_op
+        ) const
             requires(std::is_same_v<ExecutionSpace, cuda_space>)
         {
             return cuda_reduce(
@@ -402,14 +411,15 @@ namespace xpu {
 
         // cpu dispatch implementation - inline wrapper to detail implementation
         template <std::uint64_t Rank, typename Func>
-        void cpu_dispatch(const domain_t<Rank>& domain, Func&& kernel)
+        void cpu_dispatch(const grid::domain_t<Rank>& domain, Func&& kernel)
         {
             xpu::cpu_dispatch(domain, std::forward<Func>(kernel));
         }
 
         // cuda dispatch implementation - inline wrapper to detail implementation
         template <std::uint64_t Rank, typename Func>
-        void cuda_dispatch(const domain_t<Rank>& domain, Func&& kernel, stream_handle_type stream)
+        void
+        cuda_dispatch(const grid::domain_t<Rank>& domain, Func&& kernel, stream_handle_type stream)
         {
 #ifdef XPU_CUDA_AVAILABLE
             xpu::cuda_dispatch(domain, std::forward<Func>(kernel), stream);
@@ -423,11 +433,11 @@ namespace xpu {
         // cpu reduce implementation - inline wrapper to detail implementation
         template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
         T cpu_reduce(
-            const domain_t<Rank>& domain,
-            T                     init_value,
-            MapFunc&&             map_func,
-            ReduceOp&&            reduce_op
-        )
+            const grid::domain_t<Rank>& domain,
+            T                           init_value,
+            MapFunc&&                   map_func,
+            ReduceOp&&                  reduce_op
+        ) const
         {
             return xpu::cpu_reduce(
                 domain,
@@ -440,12 +450,12 @@ namespace xpu {
         // cuda reduce implementation - inline wrapper to detail implementation
         template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
         T cuda_reduce(
-            const domain_t<Rank>& domain,
-            T                     init_value,
-            MapFunc&&             map_func,
-            ReduceOp&&            reduce_op,
-            stream_handle_type    stream
-        )
+            const grid::domain_t<Rank>& domain,
+            T                           init_value,
+            MapFunc&&                   map_func,
+            ReduceOp&&                  reduce_op,
+            stream_handle_type          stream
+        ) const
         {
 #ifdef XPU_CUDA_AVAILABLE
             return xpu::cuda_reduce(
@@ -471,15 +481,18 @@ namespace xpu {
     // =============================================================================
 
     template <execution_space ExecutionSpace>
-    executor_t<ExecutionSpace> make_executor(int device_id = 0)
+    executor_t<ExecutionSpace> make_executor(std::int64_t device_id = 0)
     {
         return executor_t<ExecutionSpace>{device_id};
     }
 
     // create executor on specific cuda stream
-    template <execution_space ExecutionSpace = cuda_space>
-    auto make_stream_executor(typename ExecutionSpace::stream_handle_type stream, int device_id = 0)
-        -> std::enable_if_t<std::is_same_v<ExecutionSpace, cuda_space>, executor_t<ExecutionSpace>>
+    template <execution_space ExecutionSpace>
+    executor_t<ExecutionSpace> make_stream_executor(
+        typename ExecutionSpace::stream_handle_type stream,
+        std::int64_t                                device_id = 0
+    )
+        requires std::same_as<ExecutionSpace, cuda_space>
     {
         // note: would need constructor that accepts existing stream
         // for now, create new executor and rely on stream management
@@ -490,7 +503,10 @@ namespace xpu {
     // convenience aliases
     // =============================================================================
 
-    using cpu_executor  = executor_t<cpu_space>;
-    using cuda_executor = executor_t<cuda_space>;
+    using cpu_executor = executor_t<cpu_space>;
 
-} // namespace xpu
+#ifdef XPU_USE_CUDA
+    using cuda_executor = executor_t<cuda_space>;
+#endif
+
+} // namespace simbi::xpu
