@@ -31,7 +31,7 @@
 #include <hip/hip_runtime.h>
 #endif
 
-namespace xpu::vendors::rocm {
+namespace simbi::xpu::vendors::rocm {
 
     // =============================================================================
     // rocm device handles
@@ -104,14 +104,14 @@ namespace xpu::vendors::rocm {
         }
 
         // construction
-        explicit rocm_device_t(int device_id = 0) : device_id_(device_id)
+        explicit rocm_device_t(std::int64_t device_id = 0) : device_id_(device_id)
         {
             // future: hip device initialization
             throw std::runtime_error("ROCm support not yet implemented");
         }
 
         // device information
-        int device_id() const noexcept
+        std::int64_t device_id() const noexcept
         {
             return device_id_;
         }
@@ -325,7 +325,7 @@ namespace xpu::vendors::rocm {
         }
 
       private:
-        int device_id_;
+        std::int64_t device_id_;
     };
 
     // =============================================================================
@@ -336,7 +336,7 @@ namespace xpu::vendors::rocm {
     // (commented out because implementation is incomplete)
     // static_assert(core::hetero_device<rocm_device_t>);
 
-} // namespace xpu::vendors::rocm
+} // namespace simbi::xpu::vendors::rocm
 
 // =============================================================================
 // implementation notes for future development
