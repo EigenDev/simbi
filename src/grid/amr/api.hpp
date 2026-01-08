@@ -21,7 +21,7 @@ namespace simbi::grid::amr {
     using namespace simbi::compute;
 
     // -------------------------------------------------------------------------
-    // reflux functor (local to this header)
+    // reflux functor
     // applies flux correction to coarse cells
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank, typename Geometry>

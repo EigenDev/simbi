@@ -105,7 +105,7 @@ namespace simbi::geometry {
     };
 
     // -------------------------------------------------------------------------
-    // physics boundary functor (local to this header)
+    // physics boundary functor
     // applies physics policy to boundary values
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank, typename Policy>

@@ -21,7 +21,7 @@ namespace simbi::grid::amr {
     using namespace simbi::compute;
 
     // -------------------------------------------------------------------------
-    // coarse flux accumulation functor (local to this header)
+    // coarse flux accumulation functor
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank, typename Geometry, typename FluxComp>
     struct coarse_flux_accumulate_t
@@ -49,7 +49,7 @@ namespace simbi::grid::amr {
     };
 
     // -------------------------------------------------------------------------
-    // fine flux area functor (local to this header)
+    // fine flux area functor
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank, typename Geometry>
     struct fine_flux_area_t

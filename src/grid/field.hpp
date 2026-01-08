@@ -556,10 +556,8 @@ namespace simbi::grid {
         const Expression&                expr
     )
     {
-        // check the expression's return type, not the destination field type
-        using expr_result_t = decltype(std::declval<Expression>()(
-            std::declval<typename grid::domain_t<Rank>::coord_t>()
-        ));
+        // check the expression's return type
+        using expr_result_t = std::invoke_result_t<Expression, iarray<Rank>>;
 
         if constexpr (is_maybe_v<expr_result_t>) {
             try_commit(exec, domain, dest, expr);
