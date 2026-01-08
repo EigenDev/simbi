@@ -332,7 +332,7 @@ namespace simbi::ecs {
                 prolongate_from_coarse(sim, lvl);
             }
 
-            // // exchange halos between partitions
+            // exchange halos between partitions
             // sim.exchange_halos(lvl);
         }
 
