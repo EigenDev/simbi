@@ -22,7 +22,6 @@
 #include "grid/amr/prolongation.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "physics/hydro/physics.hpp"
 #include "utility/enums.hpp"
 
 #include <cstdint>

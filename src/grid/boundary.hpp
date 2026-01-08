@@ -76,6 +76,32 @@ namespace simbi {
         {grid::boundary_type_t::reflect, "reflecting"},
         {grid::boundary_type_t::partition, "partition"}
     );
-}
+
+    // ostream overload for boundary_type_t
+    inline std::ostream& operator<<(std::ostream& os, const grid::boundary_type_t& bt)
+    {
+        switch (bt) {
+            case grid::boundary_type_t::dynamic:
+                os << "dynamic";
+                break;
+            case grid::boundary_type_t::outflow:
+                os << "outflow";
+                break;
+            case grid::boundary_type_t::periodic:
+                os << "periodic";
+                break;
+            case grid::boundary_type_t::reflect:
+                os << "reflecting";
+                break;
+            case grid::boundary_type_t::partition:
+                os << "partition";
+                break;
+            default:
+                os << "unknown";
+                break;
+        }
+        return os;
+    }
+} // namespace simbi
 
 #endif // GRID_BOUNDARY_HPP

@@ -25,7 +25,6 @@
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -366,6 +365,7 @@ namespace simbi::evolution {
             using namespace ecs;
             ghost_fill_system_t{}(sim, lvl);
             c2p_system_t{}(sim, lvl);
+            std::cin.get();
             if (sim.has_refinement()) {
                 init_flux_registers_system_t{}(sim, lvl);
             }
@@ -381,15 +381,15 @@ namespace simbi::evolution {
 
             timestep_system_t{}(sim);
 
-            if (meta.timestepping == timestepping_t::RK2) {
-                advance_level_rk2(0);
-            }
-            else if (meta.timestepping == timestepping_t::EULER) {
-                advance_level_euler(0);
-            }
-            else {
-                throw std::runtime_error("that timestepping method is not implemented.");
-            }
+            // if (meta.timestepping == timestepping_t::RK2) {
+            //     advance_level_rk2(0);
+            // }
+            // else if (meta.timestepping == timestepping_t::EULER) {
+            //     advance_level_euler(0);
+            // }
+            // else {
+            //     throw std::runtime_error("that timestepping method is not implemented.");
+            // }
 
             meta.time += meta.global_dt;
 

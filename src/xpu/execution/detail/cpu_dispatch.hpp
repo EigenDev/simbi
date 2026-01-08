@@ -2,80 +2,62 @@
 // cpu_dispatch.hpp
 //
 // cpu execution space dispatch implementation for parallel domain iteration.
-// uses openmp for parallelization with grid-stride iteration pattern for
-// consistency with cuda implementation.
+// supports both serial and openmp modes with cache-friendly tiling.
 //
 // design principles:
-//   - openmp parallel for with collapse directives
-//   - row-major iteration order (matches cuda grid-stride)
-//   - minimal overhead for small domains
-//   - scales to arbitrary rank via template specialization
+//   - tiled iteration for cache locality (mimics cuda block structure)
+//   - serial mode for debugging and testing
+//   - openmp parallel mode with configurable tile sizes
+//   - consistent coordinate access: coord[0]=z, coord[1]=y, coord[2]=x for 3d
 //
 // usage:
-//   // internal use only - called from executor_t::dispatch()
-//   cpu_dispatch(domain, [](auto idx) { /* work */ });
+//   cpu_dispatch(domain, tile_size, use_serial, [](auto idx) { /* work */ });
 // =============================================================================
 
 #pragma once
 
 #include "grid/domain.hpp"
+#include "hesi/core/types.hpp"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace simbi::xpu {
 
     // =============================================================================
-    // cpu dispatch implementations by rank
+    // serial dispatch (no threading, for debugging)
     // =============================================================================
 
-    // 1d dispatch - simple parallel for
     template <typename Func>
-    void cpu_dispatch_1d(const grid::domain_t<1>& domain, Func&& func)
+    void cpu_dispatch_serial_1d(const grid::domain_t<1>& domain, Func&& func)
     {
-        const auto start = domain.start[0];
-        const auto end   = domain.fin[0];
+        auto coord = domain.start;
 
-#pragma omp parallel for schedule(static)
-        for (std::int64_t ii = start; ii < end; ++ii) {
-            typename grid::domain_t<1>::coord_t coord{ii};
+        for (coord[0] = domain.start[0]; coord[0] < domain.fin[0]; ++coord[0]) {
             func(coord);
         }
     }
 
-    // 2d dispatch - collapsed parallel loops
     template <typename Func>
-    void cpu_dispatch_2d(const grid::domain_t<2>& domain, Func&& func)
+    void cpu_dispatch_serial_2d(const grid::domain_t<2>& domain, Func&& func)
     {
-        const auto start_y = domain.start[0];
-        const auto end_y   = domain.fin[0];
-        const auto start_x = domain.start[1];
-        const auto end_x   = domain.fin[1];
+        auto coord = domain.start;
 
-#pragma omp parallel for collapse(2) schedule(static)
-        for (std::int64_t jj = start_y; jj < end_y; ++jj) {
-            for (std::int64_t ii = start_x; ii < end_x; ++ii) {
-                typename grid::domain_t<2>::coord_t coord{jj, ii};
+        for (coord[0] = domain.start[0]; coord[0] < domain.fin[0]; ++coord[0]) {
+            for (coord[1] = domain.start[1]; coord[1] < domain.fin[1]; ++coord[1]) {
                 func(coord);
             }
         }
     }
 
-    // 3d dispatch - triple collapsed loops
     template <typename Func>
-    void cpu_dispatch_3d(const grid::domain_t<3>& domain, Func&& func)
+    void cpu_dispatch_serial_3d(const grid::domain_t<3>& domain, Func&& func)
     {
-        const auto start_z = domain.start[0];
-        const auto end_z   = domain.fin[0];
-        const auto start_y = domain.start[1];
-        const auto end_y   = domain.fin[1];
-        const auto start_x = domain.start[2];
-        const auto end_x   = domain.fin[2];
+        auto coord = domain.start;
 
-#pragma omp parallel for collapse(3) schedule(static)
-        for (std::int64_t kk = start_z; kk < end_z; ++kk) {
-            for (std::int64_t jj = start_y; jj < end_y; ++jj) {
-                for (std::int64_t ii = start_x; ii < end_x; ++ii) {
-                    typename grid::domain_t<3>::coord_t coord{kk, jj, ii};
+        for (coord[0] = domain.start[0]; coord[0] < domain.fin[0]; ++coord[0]) {
+            for (coord[1] = domain.start[1]; coord[1] < domain.fin[1]; ++coord[1]) {
+                for (coord[2] = domain.start[2]; coord[2] < domain.fin[2]; ++coord[2]) {
                     func(coord);
                 }
             }
@@ -83,39 +65,147 @@ namespace simbi::xpu {
     }
 
     // =============================================================================
-    // generic dispatch - delegates to rank-specific implementation
+    // tiled openmp dispatch (cache-friendly parallel execution)
     // =============================================================================
 
-    template <std::uint64_t Rank, typename Func>
-    void cpu_dispatch(const grid::domain_t<Rank>& domain, Func&& func)
+    template <typename Func>
+    void cpu_dispatch_tiled_1d(
+        const grid::domain_t<1>&  domain,
+        const simbi::het::dim3_t& tile_size,
+        Func&&                    func
+    )
     {
-        if constexpr (Rank == 1) {
-            cpu_dispatch_1d(domain, std::forward<Func>(func));
-        }
-        else if constexpr (Rank == 2) {
-            cpu_dispatch_2d(domain, std::forward<Func>(func));
-        }
-        else if constexpr (Rank == 3) {
-            cpu_dispatch_3d(domain, std::forward<Func>(func));
-        }
-        else {
-            // fallback for higher ranks - linearized iteration
-            const auto total_size = domain.size();
+        const auto shape       = domain.shape();
+        const auto tx          = std::max<std::uint64_t>(1, tile_size.x);
+        const auto num_tiles_x = (shape[0] + tx - 1) / tx;
+
 #pragma omp parallel for schedule(static)
-            for (std::uint64_t linear = 0; linear < total_size; ++linear) {
-                auto coord = domain.linear_to_coord(linear);
-                func(coord);
+        for (std::uint64_t tile_x = 0; tile_x < num_tiles_x; ++tile_x) {
+            grid::domain_t<1> tile = domain;
+            tile.start[0]          = domain.start[0] + tile_x * tx;
+            tile.fin[0]            = std::min<std::int64_t>(tile.start[0] + tx, domain.fin[0]);
+
+            cpu_dispatch_serial_1d(tile, func);
+        }
+    }
+
+    template <typename Func>
+    void cpu_dispatch_tiled_2d(
+        const grid::domain_t<2>&  domain,
+        const simbi::het::dim3_t& tile_size,
+        Func&&                    func
+    )
+    {
+        const auto shape       = domain.shape();
+        const auto tx          = std::max<std::uint64_t>(1, tile_size.x);
+        const auto ty          = std::max<std::uint64_t>(1, tile_size.y);
+        const auto num_tiles_x = (shape[1] + tx - 1) / tx;
+        const auto num_tiles_y = (shape[0] + ty - 1) / ty;
+
+#pragma omp parallel for collapse(2) schedule(static)
+        for (std::uint64_t tile_y = 0; tile_y < num_tiles_y; ++tile_y) {
+            for (std::uint64_t tile_x = 0; tile_x < num_tiles_x; ++tile_x) {
+                grid::domain_t<2> tile = domain;
+                tile.start[0]          = domain.start[0] + tile_y * ty;
+                tile.start[1]          = domain.start[1] + tile_x * tx;
+                tile.fin[0]            = std::min<std::int64_t>(tile.start[0] + ty, domain.fin[0]);
+                tile.fin[1]            = std::min<std::int64_t>(tile.start[1] + tx, domain.fin[1]);
+
+                cpu_dispatch_serial_2d(tile, func);
+            }
+        }
+    }
+
+    template <typename Func>
+    void cpu_dispatch_tiled_3d(
+        const grid::domain_t<3>&  domain,
+        const simbi::het::dim3_t& tile_size,
+        Func&&                    func
+    )
+    {
+        const auto shape       = domain.shape();
+        const auto tx          = std::max<std::uint64_t>(1, tile_size.x);
+        const auto ty          = std::max<std::uint64_t>(1, tile_size.y);
+        const auto tz          = std::max<std::uint64_t>(1, tile_size.z);
+        const auto num_tiles_x = (shape[2] + tx - 1) / tx;
+        const auto num_tiles_y = (shape[1] + ty - 1) / ty;
+        const auto num_tiles_z = (shape[0] + tz - 1) / tz;
+
+#pragma omp parallel for collapse(3) schedule(static)
+        for (std::uint64_t tile_z = 0; tile_z < num_tiles_z; ++tile_z) {
+            for (std::uint64_t tile_y = 0; tile_y < num_tiles_y; ++tile_y) {
+                for (std::uint64_t tile_x = 0; tile_x < num_tiles_x; ++tile_x) {
+                    grid::domain_t<3> tile = domain;
+                    tile.start[0]          = domain.start[0] + tile_z * tz;
+                    tile.start[1]          = domain.start[1] + tile_y * ty;
+                    tile.start[2]          = domain.start[2] + tile_x * tx;
+                    tile.fin[0] = std::min<std::int64_t>(tile.start[0] + tz, domain.fin[0]);
+                    tile.fin[1] = std::min<std::int64_t>(tile.start[1] + ty, domain.fin[1]);
+                    tile.fin[2] = std::min<std::int64_t>(tile.start[2] + tx, domain.fin[2]);
+
+                    cpu_dispatch_serial_3d(tile, func);
+                }
             }
         }
     }
 
     // =============================================================================
-    // cpu reduction implementations
+    // generic dispatch with mode selection
     // =============================================================================
 
-    // generic cpu reduce with map-reduce pattern
+    template <std::uint64_t Rank, typename Func>
+    void cpu_dispatch(
+        const grid::domain_t<Rank>& domain,
+        const simbi::het::dim3_t&   tile_size,
+        bool                        use_serial,
+        Func&&                      func
+    )
+    {
+        if (use_serial) {
+            if constexpr (Rank == 1) {
+                cpu_dispatch_serial_1d(domain, std::forward<Func>(func));
+            }
+            else if constexpr (Rank == 2) {
+                cpu_dispatch_serial_2d(domain, std::forward<Func>(func));
+            }
+            else if constexpr (Rank == 3) {
+                cpu_dispatch_serial_3d(domain, std::forward<Func>(func));
+            }
+            else {
+                const auto total_size = domain.size();
+                for (std::uint64_t linear = 0; linear < total_size; ++linear) {
+                    auto coord = domain.linear_to_coord(linear);
+                    func(coord);
+                }
+            }
+        }
+        else {
+            if constexpr (Rank == 1) {
+                cpu_dispatch_tiled_1d(domain, tile_size, std::forward<Func>(func));
+            }
+            else if constexpr (Rank == 2) {
+                cpu_dispatch_tiled_2d(domain, tile_size, std::forward<Func>(func));
+            }
+            else if constexpr (Rank == 3) {
+                cpu_dispatch_tiled_3d(domain, tile_size, std::forward<Func>(func));
+            }
+            else {
+                const auto total_size = domain.size();
+#pragma omp parallel for schedule(static)
+                for (std::uint64_t linear = 0; linear < total_size; ++linear) {
+                    auto coord = domain.linear_to_coord(linear);
+                    func(coord);
+                }
+            }
+        }
+    }
+
+    // =============================================================================
+    // cpu reduction with tiling support
+    // =============================================================================
+
     template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
-    T cpu_reduce(
+    T cpu_reduce_serial(
         const grid::domain_t<Rank>& domain,
         T                           init_value,
         MapFunc&&                   map_func,
@@ -125,22 +215,37 @@ namespace simbi::xpu {
         const auto total_size = domain.size();
         T          result     = init_value;
 
-        // use custom reduction for c++20
-        // openmp user-defined reductions require declaring reduction operator
-        // simpler approach: manual reduction with critical section
+        for (std::uint64_t linear = 0; linear < total_size; ++linear) {
+            auto coord        = domain.linear_to_coord(linear);
+            T    mapped_value = map_func(coord);
+            result            = reduce_op(result, mapped_value);
+        }
 
-        // parallel map phase with thread-local accumulation
+        return result;
+    }
+
+    template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
+    T cpu_reduce_parallel(
+        const grid::domain_t<Rank>& domain,
+        T                           init_value,
+        MapFunc&&                   map_func,
+        ReduceOp&&                  reduce_op
+    )
+    {
+        const auto total_size = domain.size();
+        T          result     = init_value;
+
+#pragma omp parallel
         {
             T thread_local_result = init_value;
 
-#pragma omp for schedule(static)
+#pragma omp for schedule(static) nowait
             for (std::uint64_t linear = 0; linear < total_size; ++linear) {
                 auto coord          = domain.linear_to_coord(linear);
                 T    mapped_value   = map_func(coord);
                 thread_local_result = reduce_op(thread_local_result, mapped_value);
             }
 
-// combine thread results with critical section
 #pragma omp critical
             {
                 result = reduce_op(result, thread_local_result);
@@ -148,6 +253,33 @@ namespace simbi::xpu {
         }
 
         return result;
+    }
+
+    template <std::uint64_t Rank, typename T, typename MapFunc, typename ReduceOp>
+    T cpu_reduce(
+        const grid::domain_t<Rank>& domain,
+        T                           init_value,
+        MapFunc&&                   map_func,
+        ReduceOp&&                  reduce_op,
+        bool                        use_serial
+    )
+    {
+        if (use_serial) {
+            return cpu_reduce_serial(
+                domain,
+                init_value,
+                std::forward<MapFunc>(map_func),
+                std::forward<ReduceOp>(reduce_op)
+            );
+        }
+        else {
+            return cpu_reduce_parallel(
+                domain,
+                init_value,
+                std::forward<MapFunc>(map_func),
+                std::forward<ReduceOp>(reduce_op)
+            );
+        }
     }
 
 } // namespace simbi::xpu

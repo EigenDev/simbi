@@ -94,7 +94,7 @@ namespace simbi::xpu {
         template <typename Index, typename Functor>
         static void parallel_for(Index first, Index last, Functor&& func)
         {
-#pragma omp parallel for
+            // #pragma omp parallel for
             for (Index ii = first; ii < last; ++ii) {
                 func(ii);
             }
@@ -103,7 +103,7 @@ namespace simbi::xpu {
         template <typename Index, typename Functor>
         static void parallel_for(Index first, Index last, Functor&& func, const execution_context&)
         {
-#pragma omp parallel for
+            // #pragma omp parallel for
             for (Index ii = first; ii < last; ++ii) {
                 func(ii);
             }
@@ -113,7 +113,7 @@ namespace simbi::xpu {
         static T reduce(Index first, Index last, T init, Functor&& func)
         {
             T result = init;
-#pragma omp parallel for reduction(+ : result)
+            // #pragma omp parallel for reduction(+ : result)
             for (Index ii = first; ii < last; ++ii) {
                 result += func(ii);
             }
@@ -124,7 +124,7 @@ namespace simbi::xpu {
         static T reduce(Index first, Index last, T init, Functor&& func, const execution_context&)
         {
             T result = init;
-#pragma omp parallel for reduction(+ : result)
+            // #pragma omp parallel for reduction(+ : result)
             for (Index ii = first; ii < last; ++ii) {
                 result += func(ii);
             }

@@ -141,7 +141,7 @@ namespace simbi::compute {
         template <typename UnaryOp>
         auto remap(UnaryOp op) const
         {
-            // compose: field( map(coord) )``
+            // compose: field( map(coord) )
             auto mapped_func = fp::compose(func, std::move(op));
 
             return computation_t<Rank, decltype(mapped_func)>{std::move(mapped_func), domain_};

@@ -10,11 +10,7 @@
 #include "io/exceptions.hpp"
 #include "traits/traits.hpp"
 #include "xpu/execution/execution_space.hpp"
-// #include "xpu/execution/executor.hpp"
 #include "xpu/xpu.hpp"
-// #include "xpu/mem/mem.hpp"
-// #include "xpu/mem/memory_config.hpp"
-// #include "xpu/mem/view.hpp"
 
 #include <cstddef>
 #include <cstdint>

@@ -17,7 +17,8 @@
 //   auto token = transfer_async(src_rank, src_ptr, dst_rank, dst_ptr, size, exec);
 // =============================================================================
 
-#pragma once
+#ifndef XPU_TRANSFER_HPP
+#define XPU_TRANSFER_HPP
 
 #include "types.hpp"
 #include "xpu/execution/execution_space.hpp"
@@ -232,3 +233,5 @@ namespace simbi::xpu::comm {
     }
 
 } // namespace simbi::xpu::comm
+
+#endif // XPU_TRANSFER_HPP

@@ -34,7 +34,6 @@
 #include "utility/config_dict.hpp"
 #include "utility/enums.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <pybind11/pybind11.h>

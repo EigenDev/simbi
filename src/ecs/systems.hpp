@@ -31,8 +31,6 @@
 #include "physics/hydro/boundary_policy.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
-#include "update/prim_recovery.hpp"
-#include "update/timestep.hpp"
 #include "utility/enums.hpp"
 
 #include <algorithm>
@@ -195,7 +193,7 @@ namespace simbi::ecs {
             auto& meta   = sim.metadata();
             auto  motion = get_motion_state(sim);
 
-            meta.level_dts[lvl] = timestep::compute_level_timestep(sim, lvl, motion);
+            meta.level_dts[lvl] = numerics::compute_level_timestep(sim, lvl, motion);
         }
 
         template <typename Sim>
@@ -300,10 +298,12 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
+            using namespace numerics;
+            real gamma = sim.metadata().gamma;
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
-                recover_primitives(exec, fields.prim, fields.cons, sim.metadata().gamma);
+                fields.prim  = fields.cons.enum_map(to_primitive_t{gamma}).with(exec);
             }
         }
     };

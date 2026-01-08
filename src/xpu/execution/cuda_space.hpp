@@ -21,6 +21,7 @@
 
 #include "xpu/core/device_concepts.hpp"
 #include "xpu/core/execution_concepts.hpp"
+#include "xpu/vendors/cpu/cpu_device.hpp"
 #include "xpu/vendors/cuda/cuda_device.hpp"
 
 #ifdef XPU_CUDA_AVAILABLE

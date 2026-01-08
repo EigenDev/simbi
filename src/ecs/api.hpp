@@ -55,7 +55,7 @@ namespace simbi::ecs::initialization {
                 fine.cons = compute::computation(fine.cons.domain(), prolong_op).with(exec);
 
                 // recover primitives on fine level
-                fine.prim = fine.cons.map(numerics::to_primitive_t{gamma}).with(exec);
+                fine.prim = fine.cons.enum_map(numerics::to_primitive_t{gamma}).with(exec);
             }
         }
 
