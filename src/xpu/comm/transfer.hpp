@@ -117,7 +117,7 @@ namespace simbi::xpu::comm {
                         src_ptr,
                         src_rank.device_id,
                         bytes,
-                        exec.native_stream()
+                        exec.stream()
                     );
                     token.record(exec);
 #endif

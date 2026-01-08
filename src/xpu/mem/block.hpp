@@ -25,8 +25,9 @@ namespace simbi::xpu::mem {
     class memory_block_t
     {
       private:
-        void*       ptr_   = nullptr;
-        std::size_t bytes_ = 0;
+        void*        ptr_       = nullptr;
+        std::size_t  bytes_     = 0;
+        std::int64_t device_id_ = 0;
 
       public:
         using memory_space_type = MemorySpace;
@@ -35,7 +36,8 @@ namespace simbi::xpu::mem {
         memory_block_t() = default;
 
         // allocate memory
-        explicit memory_block_t(std::size_t bytes) : bytes_(bytes)
+        explicit memory_block_t(std::size_t bytes, std::int64_t device_id = 0)
+            : bytes_(bytes), device_id_(device_id)
         {
             if (bytes > 0) {
                 ptr_ = MemorySpace::allocate(bytes);
@@ -55,10 +57,12 @@ namespace simbi::xpu::mem {
         memory_block_t& operator=(const memory_block_t&) = delete;
 
         // enable move
-        memory_block_t(memory_block_t&& other) noexcept : ptr_(other.ptr_), bytes_(other.bytes_)
+        memory_block_t(memory_block_t&& other) noexcept
+            : ptr_(other.ptr_), bytes_(other.bytes_), device_id_(other.device_id_)
         {
-            other.ptr_   = nullptr;
-            other.bytes_ = 0;
+            other.ptr_       = nullptr;
+            other.bytes_     = 0;
+            other.device_id_ = 0;
         }
 
         memory_block_t& operator=(memory_block_t&& other) noexcept
@@ -67,11 +71,13 @@ namespace simbi::xpu::mem {
                 if (ptr_) {
                     MemorySpace::deallocate(ptr_, bytes_);
                 }
-                ptr_   = other.ptr_;
-                bytes_ = other.bytes_;
+                ptr_       = other.ptr_;
+                bytes_     = other.bytes_;
+                device_id_ = other.device_id_;
 
-                other.ptr_   = nullptr;
-                other.bytes_ = 0;
+                other.ptr_       = nullptr;
+                other.bytes_     = 0;
+                other.device_id_ = 0;
             }
             return *this;
         }
@@ -119,6 +125,12 @@ namespace simbi::xpu::mem {
         {
             return MemorySpace::is_unified;
         }
+
+        // device affinity
+        std::int64_t device_id() const noexcept
+        {
+            return device_id_;
+        }
     };
 
     // =============================================================================
@@ -126,9 +138,9 @@ namespace simbi::xpu::mem {
     // =============================================================================
 
     template <typename T, typename MemorySpace>
-    memory_block_t<MemorySpace> make_block(std::size_t count)
+    memory_block_t<MemorySpace> make_block(std::size_t count, std::int64_t device_id = 0)
     {
-        return memory_block_t<MemorySpace>(count * sizeof(T));
+        return memory_block_t<MemorySpace>(count * sizeof(T), device_id);
     }
 
 } // namespace simbi::xpu::mem

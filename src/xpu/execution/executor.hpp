@@ -29,6 +29,7 @@
 #include "cpu_space.hpp"
 #include "cuda_space.hpp"
 #include "detail/cpu_dispatch.hpp"
+#include "device_guard.hpp"
 #include "execution_space.hpp"
 #include "grid/domain.hpp"
 #include "xpu/device/detail/stream_wrapper.hpp"
@@ -129,8 +130,8 @@ namespace simbi::xpu {
         template <typename Kernel, typename... Args>
         token_type submit(Kernel&& kernel, Args&&... args)
         {
-            // create token for this operation
-            auto token = token_type::create();
+            device_guard_t<ExecutionSpace> guard(device_id_);
+            auto                           token = token_type::create();
 
             // execute kernel based on execution space
             if constexpr (std::is_same_v<ExecutionSpace, cpu_space>) {
@@ -408,8 +409,8 @@ namespace simbi::xpu {
         token_type dispatch_impl(const grid::domain_t<Rank>& domain, Func&& kernel)
             requires(std::is_same_v<ExecutionSpace, cuda_space>)
         {
-            // dispatch to cuda kernel implementation
-            auto token = token_type::create();
+            device_guard_t<ExecutionSpace> guard(device_id_);
+            auto                           token = token_type::create();
             cuda_dispatch(domain, std::forward<Func>(kernel), stream_.native_handle());
             token.record(*this);
             return token;
@@ -443,6 +444,7 @@ namespace simbi::xpu {
         ) const
             requires(std::is_same_v<ExecutionSpace, cuda_space>)
         {
+            device_guard_t<ExecutionSpace> guard(device_id_);
             return cuda_reduce(
                 domain,
                 init_value,

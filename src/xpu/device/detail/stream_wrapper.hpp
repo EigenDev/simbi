@@ -49,6 +49,9 @@ namespace simbi::xpu::detail {
 
         explicit stream_wrapper_t(std::int64_t device_id = 0) : device_id_(device_id)
         {
+            if constexpr (requires { ExecutionSpace::set_device(device_id); }) {
+                ExecutionSpace::set_device(device_id);
+            }
             handle_ = ExecutionSpace::create_stream();
         }
 
