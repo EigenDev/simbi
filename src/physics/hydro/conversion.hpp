@@ -30,8 +30,6 @@ namespace simbi::hydro::newtonian {
         prim.pre = pressure_from_conserved(cons, gamma);
 
         if (prim.pre <= 0.0 || !std::isfinite(prim.pre)) {
-            std::cout << "cons2prim failed to converge" << std::endl;
-            std::cout << "cons: " << cons << "\n";
             return None(ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE);
         }
         return prim;
