@@ -50,12 +50,17 @@ namespace simbi::body {
 
         static auto from_config(const config_dict_t& props) -> binary_parameters_t
         {
-            auto total_mass   = try_read<real>(props, "total_mass");
-            auto semi_major   = try_read<real>(props, "semi_major");
-            auto eccentricity = try_read<real>(props, "eccentricity");
-            auto mass_ratio   = try_read<real>(props, "mass_ratio");
+            auto total_mass_maybe   = try_read<real>(props, "total_mass");
+            auto semi_major_maybe   = try_read<real>(props, "semi_major");
+            auto eccentricity_maybe = try_read<real>(props, "eccentricity");
+            auto mass_ratio_maybe   = try_read<real>(props, "mass_ratio");
 
-            auto orbital_period = real{2} * std::numbers::pi_v<real> *
+            real total_mass   = total_mass_maybe.unwrap_or(1.0);
+            real semi_major   = semi_major_maybe.unwrap_or(1.0);
+            real eccentricity = eccentricity_maybe.unwrap_or(0.0);
+            real mass_ratio   = mass_ratio_maybe.unwrap_or(1.0);
+
+            real orbital_period = real{2} * std::numbers::pi_v<real> *
                                   std::sqrt((semi_major * semi_major * semi_major) / total_mass);
 
             bool is_circular = (eccentricity < real{1e-10});
