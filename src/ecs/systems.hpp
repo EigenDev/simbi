@@ -591,7 +591,7 @@ namespace simbi::ecs {
                     meta.level_dts[lvl]
                 );
 
-                // u^{n+1} = u^n + dt * L(u^n)
+                // u^{n+1} = u^n + dt * L(u^n) + dt * B(u^n)
                 auto u_view = fields.cons[part.owned_domain];
                 u_view      = u_view.zip(ell, numerics::euler_step_t{dt})
                              .zip(be, numerics::euler_step_t{dt})
@@ -669,7 +669,7 @@ namespace simbi::ecs {
     };
 
     // =========================================================================
-    // rk2 stage 2 functor (local to this header)
+    // rk2 stage 2 functor
     // =========================================================================
     template <std::uint64_t Rank, typename UStarComp, typename K2Comp, typename BEComp>
     struct rk2_final_stage_t

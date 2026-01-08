@@ -15,7 +15,7 @@
 namespace simbi::em {
 
     // =========================================================================
-    // mhd energy update functors (local to this header)
+    // mhd energy update functors
     // =========================================================================
     template <std::uint64_t Rank>
     struct update_magnetic_energy_t
