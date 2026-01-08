@@ -144,7 +144,7 @@ class QuadPlotComponent(Component):
                 " It can only render 2D FieldData."
             )
 
-        if self.props.plot_type == "polar":
+        if self.ax.name == "polar":
             # (r, theta) -> (theta, r) for polar plot
             x, y = data.domain[0], data.domain[1]
             values = data.values.T
@@ -162,6 +162,7 @@ class QuadPlotComponent(Component):
             self.props.log_scale,
             self.props.power,
         )
+
 
         if self._mesh is None:
             self._mesh = self.ax.pcolormesh(
@@ -191,7 +192,7 @@ class QuadPlotComponent(Component):
         self.last_y = y
 
         # set limits only on first render (preserves CLI limits and user zoom)
-        if self._first_render and self.ax.name != "polar":
+        if self._first_render:
             self.ax.set_xlim(x_min, x_max)
             self.ax.set_ylim(y_min, y_max)
             self._first_render = False
