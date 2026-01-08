@@ -25,7 +25,7 @@ int main()
 #endif
 
     xpu::executor_t<execution_space> exec(0);
-    grid::domain_t<1>                alloc_domain({-1}, {11});
+    grid::domain_t<1>                alloc_domain(iarray<1>{-1}, iarray<1>{11});
     grid::field_t<real, 1>           u(alloc_domain);
 
     std::int64_t halo_width = 1;

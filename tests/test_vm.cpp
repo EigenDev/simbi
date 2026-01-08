@@ -23,6 +23,7 @@
 #include <iostream>
 #include <variant>
 
+using namespace simbi;
 using namespace simbi::grid;
 using namespace simbi::geometry;
 
@@ -56,8 +57,8 @@ int main()
     using test_metric_t = cartesian_metric_t<uniform_map_t>;
     std::cout << "testing dynamic boundaries..." << std::endl;
 
-    domain_t<1> alloc{{-1}, {5}};
-    domain_t<1> active{{0}, {4}};
+    domain_t<1> alloc(iarray<1>{-1}, iarray<1>{5});
+    domain_t<1> active(iarray<1>{0}, iarray<1>{4});
 
 #ifdef XPU_CUDA_AVAILABLE
     using execution_space = simbi::xpu::cuda_space;

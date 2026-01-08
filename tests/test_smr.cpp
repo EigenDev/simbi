@@ -35,8 +35,8 @@ int main()
     std::cout << "testing SMR operations..." << std::endl;
 
     iarray<2>         ratio{2, 2};
-    grid::domain_t<2> coarse_domain{{0, 0}, {8, 8}};
-    grid::domain_t<2> fine_active{{4, 4}, {12, 12}};
+    grid::domain_t<2> coarse_domain(iarray<2>{0, 0}, iarray<2>{8, 8});
+    grid::domain_t<2> fine_active(iarray<2>{4, 4}, iarray<2>{12, 12});
     grid::domain_t<2> fine_alloc = domain_algebra::expand(fine_active, iarray<2>{2, 2});
 
 #ifdef XPU_CUDA_AVAILABLE
@@ -72,7 +72,7 @@ int main()
     std::cout << "  prolongation ✓" << std::endl;
 
     // test flux correction
-    grid::domain_t<2>               footprint{{2, 2}, {6, 6}};
+    grid::domain_t<2>               footprint(iarray<2>{2, 2}, iarray<2>{6, 6});
     amr::flux_register_t<double, 2> flux_reg(footprint, ratio);
     flux_reg.initialize_face(0, side_t::left);
 
@@ -85,15 +85,16 @@ int main()
 
     double dt = 0.1;
 
-    field_t<double, 2> c_flux(grid::domain_t<2>{{2, 2}, {3, 6}});
+    field_t<double, 2> c_flux(grid::domain_t<2>(iarray<2>{2, 2}, iarray<2>{3, 6}));
     c_flux = compute::constant(c_flux.domain(), 1.0).with(exec);
     flux_reg.accumulate_coarse(exec, c_flux, geo, 0, side_t::left, dt);
 
-    field_t<double, 2> f_flux(grid::domain_t<2>{{4, 4}, {6, 12}});
+    field_t<double, 2> f_flux(grid::domain_t<2>(iarray<2>{4, 4}, iarray<2>{6, 12}));
     f_flux = compute::constant(f_flux.domain(), 1.2).with(exec);
     flux_reg.accumulate_fine(exec, f_flux, geo, 0, side_t::left, dt);
 
     auto* reg = flux_reg.get_register(0, side_t::left);
+    std::cout << "    coarse flux at (2,2): " << reg->view()({2, 2}) << std::endl;
     assert(std::abs(reg->view()({2, 2}) - 0.02) < 1e-9);
     std::cout << "  flux correction ✓" << std::endl;
 

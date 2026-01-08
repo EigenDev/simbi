@@ -34,7 +34,7 @@ int main()
     std::cout << "testing boundary driver..." << std::endl;
 
     // setup: 4x4 active interior with 1-cell ghost ring
-    grid::domain_t<2> alloc_domain{{-1, -1}, {5, 5}};
+    grid::domain_t<2> alloc_domain(iarray<2>{-1, -1}, iarray<2>{5, 5});
     std::uint64_t     halo_width = 1;
 
 #ifdef XPU_CUDA_AVAILABLE

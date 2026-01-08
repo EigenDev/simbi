@@ -43,7 +43,7 @@ int main()
     std::cout << "testing CFL reduction..." << std::endl;
 
     constexpr std::uint64_t N = 100;
-    grid::domain_t<2>       domain{{0, 0}, {N, N}};
+    grid::domain_t<2>       domain(iarray<2>{0, 0}, iarray<2>{N, N});
 
     double gamma = 1.4;
     double dx    = 0.1;
