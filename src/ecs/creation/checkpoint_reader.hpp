@@ -82,7 +82,7 @@ namespace simbi::ecs::creation {
                 << "'. this code supports: ";
             for (std::size_t ii = 0; ii < std::size(COMPATIBLE_VERSIONS); ++ii) {
                 oss << "'" << COMPATIBLE_VERSIONS[ii] << "'";
-                if (ii < std::size(COMPATIBLE_VERSIONS) - 1) {
+                if (ii + 1 < std::size(COMPATIBLE_VERSIONS)) {
                     oss << ", ";
                 }
             }

@@ -6,15 +6,16 @@
 // implements memory_space concept for device-side data storage.
 //
 // usage:
-//   auto block = allocate<device_memory, float>(1000);
-//   shared_buffer_t<int, device_memory> buffer(n);
-//   bool accessible = device_memory::is_accessible_from<host_memory>();
+//   auto block = allocate<device_memory_t, float>(1000);
+//   shared_buffer_t<int, device_memory_t> buffer(n);
+//   bool accessible = device_memory_t::is_accessible_from<host_memory>();
 // =============================================================================
 
 #pragma once
 
 #include "memory_space.hpp"
 
+#include <cstdlib>
 #include <cstring>
 #include <string_view>
 
@@ -28,7 +29,7 @@ namespace simbi::xpu {
     // device memory space
     // =============================================================================
 
-    struct device_memory
+    struct device_memory_t
     {
         // =============================================================================
         // type requirements for memory_space concept
@@ -424,20 +425,20 @@ namespace simbi::xpu {
     // static member definitions
     // =============================================================================
 
-    inline std::size_t device_memory::stats::total_allocated   = 0;
-    inline std::size_t device_memory::stats::total_deallocated = 0;
-    inline std::size_t device_memory::stats::current_usage     = 0;
+    inline std::size_t device_memory_t::stats::total_allocated   = 0;
+    inline std::size_t device_memory_t::stats::total_deallocated = 0;
+    inline std::size_t device_memory_t::stats::current_usage     = 0;
 
     // static assertion to verify concept compliance
-    static_assert(memory_space<device_memory>);
+    static_assert(memory_space<device_memory_t>);
 
     // =============================================================================
     // convenience aliases
     // =============================================================================
 
-    using device_block_t = memory_block_t<device_memory>;
+    using device_block_t = block_t<device_memory_t>;
 
     template <typename T>
-    using device_buffer_t = memory_block_t<device_memory>;
+    using device_buffer_t = block_t<device_memory_t>;
 
 } // namespace simbi::xpu

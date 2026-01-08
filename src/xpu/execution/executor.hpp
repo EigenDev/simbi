@@ -28,11 +28,9 @@
 #include "cpu_space.hpp"
 #include "cuda_space.hpp"
 #include "detail/cpu_dispatch.hpp"
-#include "detail/event_wrapper.hpp"
-#include "detail/portability.hpp"
-#include "detail/stream_wrapper.hpp"
 #include "execution_space.hpp"
 #include "grid/domain.hpp"
+#include "xpu/device/detail/stream_wrapper.hpp"
 
 #ifdef XPU_CUDA_AVAILABLE
 #include "detail/cuda_dispatch.hpp"
@@ -51,7 +49,7 @@ namespace simbi::xpu {
     template <typename T>
     struct max_op_t
     {
-        XPU_HOST_DEVICE constexpr T operator()(const T& a, const T& b) const
+        DUAL constexpr T operator()(const T& a, const T& b) const
         {
             return a > b ? a : b;
         }
@@ -60,7 +58,7 @@ namespace simbi::xpu {
     template <typename T>
     struct min_op_t
     {
-        XPU_HOST_DEVICE constexpr T operator()(const T& a, const T& b) const
+        DUAL constexpr T operator()(const T& a, const T& b) const
         {
             return a < b ? a : b;
         }
@@ -488,10 +486,8 @@ namespace simbi::xpu {
 
     // create executor on specific cuda stream
     template <execution_space ExecutionSpace>
-    executor_t<ExecutionSpace> make_stream_executor(
-        typename ExecutionSpace::stream_handle_type stream,
-        std::int64_t                                device_id = 0
-    )
+    executor_t<ExecutionSpace>
+    make_stream_executor(typename ExecutionSpace::stream_handle_type, std::int64_t device_id = 0)
         requires std::same_as<ExecutionSpace, cuda_space>
     {
         // note: would need constructor that accepts existing stream

@@ -14,12 +14,13 @@
 #include "compat.hpp"
 #include "containers/vector.hpp"
 #include "ecs/geometry_visitor.hpp"
+#include "functional/fp.hpp"
 #include "geometry/block_geometry.hpp"
 #include "grid/domain.hpp"
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/helpers.hpp"
-#include "xpu/execution_space.hpp"
-#include "xpu/executor.hpp"
+#include "xpu/execution/execution_space.hpp"
+#include "xpu/execution/executor.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -51,7 +52,7 @@ namespace simbi::timestep {
             return std::numeric_limits<real>::max();
         }
 
-        auto kernel = [=] DUAL(const iarray<Rank>& coord) -> real {
+        auto kernel = [=] DEV(const iarray<Rank>& coord) -> real {
             const auto p = prim(coord);
 
             // scale factors h_i account for curvilinear coordinates
@@ -81,12 +82,7 @@ namespace simbi::timestep {
             return min_dt;
         };
 
-        return exec.reduce(
-            domain,
-            std::numeric_limits<real>::max(),
-            kernel,
-            [] DEV(real a, real b) { return helpers::my_min(a, b); }
-        );
+        return exec.reduce(domain, std::numeric_limits<real>::max(), kernel, fp::min_op);
     }
 
     // =========================================================================
@@ -111,7 +107,7 @@ namespace simbi::timestep {
                 auto& exec   = sim.partition_executor(lvl, pp);
 
                 real local_dt = compute_partition_timestep(
-                    fields.prim,
+                    fields.prim.view(),
                     part.owned_domain,
                     block_geo,
                     meta.cfl,

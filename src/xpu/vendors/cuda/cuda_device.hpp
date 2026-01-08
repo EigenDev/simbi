@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "../../core/device_concepts.hpp"
+#include "xpu/core/device_concepts.hpp"
 
 #include <algorithm>
 #include <memory>

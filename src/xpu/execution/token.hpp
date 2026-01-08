@@ -21,8 +21,8 @@
 
 #include "cpu_space.hpp"
 #include "cuda_space.hpp"
-#include "detail/event_wrapper.hpp"
 #include "execution_space.hpp"
+#include "xpu/device/detail/event_wrapper.hpp"
 
 #include <utility>
 
@@ -139,6 +139,7 @@ namespace simbi::xpu {
                 sync();
             }
 #else
+            (void) other_exec;
             sync();
 #endif
         }

@@ -19,10 +19,10 @@
 
 #pragma once
 
-#include "../device_memory.hpp"
-#include "../execution_space.hpp"
-#include "../token.hpp"
 #include "types.hpp"
+#include "xpu/execution/execution_space.hpp"
+#include "xpu/execution/token.hpp"
+#include "xpu/mem/device_memory.hpp"
 
 #include <cstddef>
 #include <cstring>
@@ -56,7 +56,7 @@ namespace simbi::xpu::comm {
 
             case transfer_strategy_t::peer_copy:
                 // same node, different devices: use peer copy
-                device_memory::memcpy_peer(
+                device_memory_t::memcpy_peer(
                     dst_ptr,
                     dst_rank.device_id,
                     src_ptr,
@@ -110,7 +110,7 @@ namespace simbi::xpu::comm {
 
                 if constexpr (std::is_same_v<ExecutionSpace, cuda_space>) {
 #ifdef XPU_CUDA_AVAILABLE
-                    device_memory::memcpy_peer_async(
+                    device_memory_t::memcpy_peer_async(
                         dst_ptr,
                         dst_rank.device_id,
                         src_ptr,
@@ -122,6 +122,7 @@ namespace simbi::xpu::comm {
 #endif
                 }
                 else {
+                    (void) exec; // suppress unused warning
                     // cpu space: just do synchronous copy
                     transfer_sync(src_rank, src_ptr, dst_rank, dst_ptr, bytes);
                     token.mark_ready();
@@ -215,11 +216,11 @@ namespace simbi::xpu::comm {
     // async region-based transfer (for future gpu support)
     template <execution_space ExecutionSpace, typename DstView, typename SrcView, typename Region>
     token_t<ExecutionSpace> transfer_region_async(
-        executor_t<ExecutionSpace>& exec,
-        DstView                     dst_view,
-        const Region&               dst_region,
-        SrcView                     src_view,
-        const Region&               src_region
+        executor_t<ExecutionSpace>& /*exec*/,
+        DstView       dst_view,
+        const Region& dst_region,
+        SrcView       src_view,
+        const Region& src_region
     )
     {
         // for cpu space, just do sync transfer and return ready token

@@ -21,7 +21,7 @@
 
 #include <concepts>
 #include <cstddef>
-#include <memory>
+#include <string_view>
 #include <type_traits>
 
 namespace simbi::xpu::core {
@@ -338,7 +338,7 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <hetero_device Device>
-    constexpr auto dispatch_by_vendor(Device device)
+    constexpr auto dispatch_by_vendor(Device /*device*/)
     {
         if constexpr (device_traits<Device>::vendor == "nvidia") {
             return []<typename... Args>(Args&&... args) {

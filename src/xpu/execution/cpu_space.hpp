@@ -13,13 +13,11 @@
 
 #pragma once
 
-#include "execution_space.hpp"
-#include "vendors/cpu/cpu_device.hpp"
+#include "utility/threading.hpp"
+#include "xpu/vendors/cpu/cpu_device.hpp"
 
-#include <atomic>
 #include <cstring>
 #include <future>
-#include <omp.h>
 #include <string_view>
 #include <thread>
 
@@ -82,18 +80,11 @@ namespace simbi::xpu {
 
         struct execution_context
         {
-            stream_handle_type stream_id;
-            int                thread_count;
+            std::thread::id stream_id;
 
-            execution_context()
-                : stream_id(std::this_thread::get_id()), thread_count(omp_get_max_threads())
-            {
-            }
+            execution_context() : stream_id(std::this_thread::get_id()) {}
 
-            execution_context(int threads)
-                : stream_id(std::this_thread::get_id()), thread_count(threads)
-            {
-            }
+            explicit execution_context(std::thread::id id) : stream_id(id) {}
         };
 
         // =============================================================================
@@ -110,18 +101,12 @@ namespace simbi::xpu {
         }
 
         template <typename Index, typename Functor>
-        static void
-        parallel_for(Index first, Index last, Functor&& func, const execution_context& ctx)
+        static void parallel_for(Index first, Index last, Functor&& func, const execution_context&)
         {
-            const int old_threads = omp_get_max_threads();
-            omp_set_num_threads(ctx.thread_count);
-
 #pragma omp parallel for
             for (Index ii = first; ii < last; ++ii) {
                 func(ii);
             }
-
-            omp_set_num_threads(old_threads);
         }
 
         template <typename Index, typename Functor, typename T>
@@ -136,19 +121,13 @@ namespace simbi::xpu {
         }
 
         template <typename Index, typename Functor, typename T>
-        static T
-        reduce(Index first, Index last, T init, Functor&& func, const execution_context& ctx)
+        static T reduce(Index first, Index last, T init, Functor&& func, const execution_context&)
         {
-            const int old_threads = omp_get_max_threads();
-            omp_set_num_threads(ctx.thread_count);
-
             T result = init;
 #pragma omp parallel for reduction(+ : result)
             for (Index ii = first; ii < last; ++ii) {
                 result += func(ii);
             }
-
-            omp_set_num_threads(old_threads);
             return result;
         }
 
@@ -208,7 +187,7 @@ namespace simbi::xpu {
 
         static std::size_t max_concurrency()
         {
-            return static_cast<std::size_t>(omp_get_max_threads());
+            return threading::hardware_concurrency();
         }
 
         static constexpr std::size_t preferred_block_size()

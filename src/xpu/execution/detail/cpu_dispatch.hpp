@@ -21,7 +21,6 @@
 #include "grid/domain.hpp"
 
 #include <cstdint>
-#include <omp.h>
 
 namespace simbi::xpu {
 

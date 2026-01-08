@@ -158,6 +158,12 @@ def build_command(args):
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 pass
 
+        # linker configuration
+        if args.linker and args.linker != "auto":
+            setup_cmd.append(f"-Dc_link_args=-fuse-ld={args.linker}")
+            setup_cmd.append(f"-Dcpp_link_args=-fuse-ld={args.linker}")
+            print(f"using {args.linker} linker")
+
         # physics configuration
         if args.precision:
             setup_cmd.append(f"-Dprecision={args.precision}")
@@ -167,6 +173,11 @@ def build_command(args):
 
         if args.four_velocity:
             setup_cmd.append("-Dfour_velocity=true")
+
+        # memory configuration
+        if args.unified_memory:
+            setup_cmd.append("-Dunified_memory=true")
+            print("enabling CUDA unified memory")
 
         # development options
         if args.build_tests:
@@ -215,9 +226,12 @@ def build_command(args):
             compile_cmd.append("--verbose")
 
         # build timeout based on system and compilation type
-        timeout = 600 if args.gpu else 300  # longer timeout for gpu builds
-        if capabilities['memory_gb'] < 8:
-            timeout *= 2  # longer for low memory systems
+        if args.timeout:
+            timeout = args.timeout
+        else:
+            timeout = 1800 if args.gpu else 600  # 30min for gpu, 10min for cpu
+            if capabilities['memory_gb'] < 8:
+                timeout *= 2  # longer for low memory systems
 
         print(f"starting {'gpu' if args.gpu else 'cpu'} compilation...")
         start_time = time.time()
@@ -371,6 +385,10 @@ def main():
         "--device-arch", help="GPU device architecture (e.g., sm_75, gfx906)"
     )
     build_parser.add_argument(
+        "--linker", choices=["auto", "mold", "lld", "gold", "bfd"], default="auto",
+        help="linker to use (auto=fastest available, others=force specific linker)"
+    )
+    build_parser.add_argument(
         "--precision", choices=["single", "double"], help="floating point precision"
     )
     build_parser.add_argument(
@@ -378,6 +396,9 @@ def main():
     )
     build_parser.add_argument(
         "--four-velocity", action="store_true", help="use four-velocity primitive"
+    )
+    build_parser.add_argument(
+        "--unified-memory", action="store_true", help="use CUDA unified memory (default: device memory)"
     )
     build_parser.add_argument("--build-tests", action="store_true", help="build tests")
     build_parser.add_argument(
@@ -390,7 +411,7 @@ def main():
         "--gpu-jobs", type=int, help="max parallel jobs for gpu compilation (auto-detected if not specified)"
     )
     build_parser.add_argument(
-        "--timeout", type=int, help="build timeout in seconds"
+        "--timeout", type=int, help="build timeout in seconds (default: 1800 for gpu, 600 for cpu)"
     )
     build_parser.set_defaults(func=build_command)
 
@@ -403,6 +424,10 @@ def main():
         "--device-arch", help="GPU device architecture (e.g., sm_75, gfx906)"
     )
     install_parser.add_argument(
+        "--linker", choices=["auto", "mold", "lld", "gold", "bfd"], default="auto",
+        help="linker to use (auto=fastest available, others=force specific linker)"
+    )
+    install_parser.add_argument(
         "--precision", choices=["single", "double"], help="floating point precision"
     )
     install_parser.add_argument(
@@ -410,6 +435,9 @@ def main():
     )
     install_parser.add_argument(
         "--four-velocity", action="store_true", help="use four-velocity primitive"
+    )
+    install_parser.add_argument(
+        "--unified-memory", action="store_true", help="use CUDA unified memory (default: device memory)"
     )
     install_parser.add_argument(
         "--build-tests", action="store_true", help="build tests"
@@ -424,7 +452,7 @@ def main():
         "--gpu-jobs", type=int, help="max parallel jobs for gpu compilation (auto-detected if not specified)"
     )
     install_parser.add_argument(
-        "--timeout", type=int, help="build timeout in seconds"
+        "--timeout", type=int, help="build timeout in seconds (default: 1800 for gpu, 600 for cpu)"
     )
     install_parser.add_argument(
         "--editable", "-e", action="store_true", help="editable install"

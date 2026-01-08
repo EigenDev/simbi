@@ -8,12 +8,13 @@
 // usage:
 //   auto block = allocate<device_memory, float>(1000);
 //   shared_buffer_t<int, device_memory> buffer(n);
-//   bool accessible = device_memory::is_accessible_from<host_memory>();
+//   bool accessible = device_memory_t::is_accessible_from<host_memory>();
 // =============================================================================
 
 #pragma once
 
-#include "memory_space.hpp"
+#include "xpu/mem/device_memory.hpp"
+#include "xpu/mem/memory_space.hpp"
 
 #include <cstring>
 #include <string_view>
@@ -278,24 +279,16 @@ namespace simbi::xpu {
         };
     };
 
-    // =============================================================================
-    // static member definitions
-    // =============================================================================
-
-    inline std::size_t device_memory::stats::total_allocated   = 0;
-    inline std::size_t device_memory::stats::total_deallocated = 0;
-    inline std::size_t device_memory::stats::current_usage     = 0;
-
     // static assertion to verify concept compliance
-    static_assert(memory_space<device_memory>);
+    static_assert(memory_space<device_memory_t>);
 
     // =============================================================================
     // convenience aliases
     // =============================================================================
 
-    using device_block_t = memory_block_t<device_memory>;
+    using device_block_t = block_t<device_memory_t>;
 
     template <typename T>
-    using device_buffer_t = memory_block_t<device_memory>;
+    using device_buffer_t = block_t<device_memory_t>;
 
 } // namespace simbi::xpu

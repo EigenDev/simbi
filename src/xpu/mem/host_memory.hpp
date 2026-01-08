@@ -26,7 +26,7 @@ namespace simbi::xpu {
     // host memory space
     // =============================================================================
 
-    struct host_memory
+    struct host_memory_t
     {
         // =============================================================================
         // type requirements for memory_space concept
@@ -186,9 +186,9 @@ namespace simbi::xpu {
     // static member definitions
     // =============================================================================
 
-    inline std::size_t host_memory::stats::total_allocated   = 0;
-    inline std::size_t host_memory::stats::total_deallocated = 0;
-    inline std::size_t host_memory::stats::current_usage     = 0;
+    inline std::size_t host_memory_t::stats::total_allocated   = 0;
+    inline std::size_t host_memory_t::stats::total_deallocated = 0;
+    inline std::size_t host_memory_t::stats::current_usage     = 0;
 
     // =============================================================================
     // default memory space specialization when cuda not available
@@ -201,15 +201,15 @@ namespace simbi::xpu {
     };
 
     // static assertion to verify concept compliance
-    static_assert(memory_space<host_memory>);
+    static_assert(memory_space<host_memory_t>);
 
     // =============================================================================
     // convenience aliases
     // =============================================================================
 
-    using host_block_t = memory_block_t<host_memory>;
+    using host_block_t = block_t<host_memory_t>;
 
     template <typename T>
-    using host_buffer_t = memory_block_t<host_memory>;
+    using host_buffer_t = block_t<host_memory_t>;
 
 } // namespace simbi::xpu

@@ -3,19 +3,20 @@
 
 #include "compat.hpp"
 
-#include <cmath>   // for std::sqrt
+#include <cmath> // for std::sqrt
 
 namespace simbi::eos {
-    struct isothermal_gas_eos_t {
+    struct isothermal_gas_eos_t
+    {
         // this is a nominal param. gamma = 1 in isothermal gas
         real gamma;
 
-        DEV auto sound_speed(real rho, real pressure) const
+        DEV real sound_speed(real rho, real pressure) const
         {
             return std::sqrt(pressure / rho);
         }
 
-        DEV auto enthalpy(real /*rho*/, real /*pressure*/) const
+        DEV real enthalpy(real /*rho*/, real /*pressure*/) const
         {
             return 1.0;
             // if constexpr (R == regime_t::NEWTONIAN || R == regime_t::MHD) {
@@ -25,6 +26,6 @@ namespace simbi::eos {
             // return 1.0 + pressure / rho;
         }
     };
-}   // namespace simbi::eos
+} // namespace simbi::eos
 
 #endif

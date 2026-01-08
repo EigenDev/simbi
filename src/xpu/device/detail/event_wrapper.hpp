@@ -19,8 +19,8 @@
 
 #pragma once
 
-#include "../execution_space.hpp"
 #include "stream_wrapper.hpp"
+#include "xpu/execution/execution_space.hpp"
 
 #include <utility>
 

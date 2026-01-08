@@ -43,7 +43,7 @@
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "utility/enums.hpp"
-#include "xpu/execution_space.hpp"
+#include "xpu/execution/execution_space.hpp"
 #include "xpu/xpu.hpp"
 
 #include <cstdint>

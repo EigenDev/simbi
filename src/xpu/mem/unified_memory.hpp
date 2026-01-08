@@ -8,7 +8,7 @@
 // design: cpu fallback degrades gracefully without preprocessor spaghetti.
 //
 // usage:
-//   auto buffer = shared_buffer_t<float, unified_memory>(1024);
+//   auto buffer = shared_buffer_t<float, unified_memory_t>(1024);
 //   // works with or without cuda
 // =============================================================================
 
@@ -30,7 +30,7 @@ namespace simbi::xpu {
     // unified memory space
     // =============================================================================
 
-    struct unified_memory
+    struct unified_memory_t
     {
         // =============================================================================
         // memory_space concept requirements
@@ -297,9 +297,9 @@ namespace simbi::xpu {
     // static member initialization
     // =============================================================================
 
-    inline std::size_t unified_memory::stats::total_allocated   = 0;
-    inline std::size_t unified_memory::stats::total_deallocated = 0;
-    inline std::size_t unified_memory::stats::current_usage     = 0;
+    inline std::size_t unified_memory_t::stats::total_allocated   = 0;
+    inline std::size_t unified_memory_t::stats::total_deallocated = 0;
+    inline std::size_t unified_memory_t::stats::current_usage     = 0;
 
     // =============================================================================
     // default memory space selection
@@ -315,7 +315,7 @@ namespace simbi::xpu {
     template <>
     struct default_memory_space_selector<true>
     {
-        using type = unified_memory;
+        using type = unified_memory_t;
     };
 #endif
 
@@ -323,15 +323,15 @@ namespace simbi::xpu {
     // concept verification
     // =============================================================================
 
-    static_assert(memory_space<unified_memory>);
+    static_assert(memory_space<unified_memory_t>);
 
     // =============================================================================
     // convenience aliases
     // =============================================================================
 
-    using unified_block_t = memory_block_t<unified_memory>;
+    using unified_block_t = block_t<unified_memory_t>;
 
     template <typename T>
-    using unified_buffer_t = memory_block_t<unified_memory>;
+    using unified_buffer_t = block_t<unified_memory_t>;
 
 } // namespace simbi::xpu

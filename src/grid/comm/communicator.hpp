@@ -9,8 +9,8 @@
 #include "grid/field.hpp"
 #include "grid/patch_id.hpp"
 #include "xpu/buffer_ops.hpp"
-#include "xpu/execution_space.hpp"
-#include "xpu/executor.hpp"
+#include "xpu/execution/execution_space.hpp"
+#include "xpu/execution/executor.hpp"
 
 #include <cstdint>
 #include <functional>

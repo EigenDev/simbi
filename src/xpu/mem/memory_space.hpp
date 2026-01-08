@@ -15,12 +15,10 @@
 
 #pragma once
 
-#include "core/memory_concepts.hpp"
+#include "xpu/core/memory_concepts.hpp"
 
-#include <concepts>
 #include <cstddef>
 #include <string_view>
-#include <type_traits>
 
 namespace simbi::xpu {
 
@@ -59,27 +57,27 @@ namespace simbi::xpu {
     // =============================================================================
 
     template <memory_space Space>
-    struct memory_block_t
+    struct block_t
     {
         void*       data;
         std::size_t size;
         Space       space;
 
-        memory_block_t() : data(nullptr), size(0), space{} {}
+        block_t() : data(nullptr), size(0), space{} {}
 
-        memory_block_t(void* ptr, std::size_t sz) : data(ptr), size(sz), space{} {}
+        block_t(void* ptr, std::size_t sz) : data(ptr), size(sz), space{} {}
 
-        memory_block_t(const memory_block_t&)            = delete;
-        memory_block_t& operator=(const memory_block_t&) = delete;
+        block_t(const block_t&)            = delete;
+        block_t& operator=(const block_t&) = delete;
 
-        memory_block_t(memory_block_t&& other) noexcept
+        block_t(block_t&& other) noexcept
             : data(other.data), size(other.size), space(std::move(other.space))
         {
             other.data = nullptr;
             other.size = 0;
         }
 
-        memory_block_t& operator=(memory_block_t&& other) noexcept
+        block_t& operator=(block_t&& other) noexcept
         {
             if (this != &other) {
                 if (data) {
@@ -94,7 +92,7 @@ namespace simbi::xpu {
             return *this;
         }
 
-        ~memory_block_t()
+        ~block_t()
         {
             if (data) {
                 space.deallocate(data, size);
@@ -152,24 +150,24 @@ namespace simbi::xpu {
     // =============================================================================
 
     template <memory_space Space, typename T>
-    memory_block_t<Space> allocate(std::size_t count)
+    block_t<Space> allocate(std::size_t count)
     {
         std::size_t size = count * sizeof(T);
         void*       ptr  = Space::allocate(size);
         if (!ptr) {
             throw std::bad_alloc{};
         }
-        return memory_block_t<Space>(ptr, size);
+        return block_t<Space>(ptr, size);
     }
 
     template <memory_space Space>
-    memory_block_t<Space> allocate_bytes(std::size_t size)
+    block_t<Space> allocate_bytes(std::size_t size)
     {
         void* ptr = Space::allocate(size);
         if (!ptr) {
             throw std::bad_alloc{};
         }
-        return memory_block_t<Space>(ptr, size);
+        return block_t<Space>(ptr, size);
     }
 
     // =============================================================================

@@ -19,27 +19,28 @@
 #include "core/device_concepts.hpp"
 #include "core/execution_concepts.hpp"
 #include "core/memory_concepts.hpp"
-#include "domain_partition.hpp"
-#include "execution_space.hpp"
+#include "device/domain_partition.hpp"
+#include "execution/execution_space.hpp"
 #include "grid/domain.hpp"
 
-// temporary backward compatibility includes
-#include "cpu_space.hpp"
-#include "cuda_space.hpp"
-
-// async execution framework
-#include "executor.hpp"
-#include "executor_arena.hpp"
-#include "token.hpp"
+// execution framework
+#include "execution/cpu_space.hpp"
+#include "execution/cuda_space.hpp"
+#include "execution/executor.hpp"
+#include "execution/executor_arena.hpp"
+#include "execution/token.hpp"
 
 // memory management - order matters for complete types
-#include "buffer_ops.hpp"
-#include "device_memory.hpp"
-#include "host_memory.hpp"
-#include "memory_space.hpp"
-#include "shared_buffer.hpp"
-#include "unified_memory.hpp"
-#include "view.hpp"
+#include "mem/device_memory.hpp"
+#include "mem/host_memory.hpp"
+#include "mem/memory_config.hpp"
+#include "mem/memory_space.hpp"
+#include "mem/ops.hpp"
+#include "mem/unified_memory.hpp"
+#include "mem/view.hpp"
+
+// new hesi-style memory system
+#include "mem/mem.hpp"
 
 // communication layer (multi-device coordination)
 #include "comm/comm.hpp"
@@ -57,9 +58,9 @@ namespace simbi::xpu {
     using default_space = cpu_space;
 #endif
 
-// memory space selection
+// memory space selection based on build configuration
 #ifdef XPU_CUDA_AVAILABLE
-    using default_memory_space = unified_memory;
+    using default_memory_space = sim_memory_space;
 #else
     using default_memory_space = host_memory;
 #endif
@@ -89,6 +90,35 @@ namespace simbi::xpu {
     using cpu_token     = token_t<cpu_space>;
     using cuda_token    = token_t<cuda_space>;
     using default_token = token_t<default_space>;
+
+    // =============================================================================
+    // new memory system integration
+    // =============================================================================
+
+    // import mem namespace for convenience
+
+    // aliases for the new memory system
+    template <typename T>
+    using shared_handle_t = mem::shared_handle_t<T>;
+
+    template <typename MemorySpace>
+    using memory_block_t = mem::memory_block_t<MemorySpace>;
+
+    // convenience aliases for configured memory space
+    using sim_block_t = mem::memory_block_t<sim_memory_space>;
+
+    // factory functions
+    template <typename T, typename... Args>
+    auto make_shared_handle(Args&&... args)
+    {
+        return mem::shared_handle_t<T>::make(std::forward<Args>(args)...);
+    }
+
+    template <typename T, typename MemorySpace = sim_memory_space>
+    auto make_memory_block(std::size_t count)
+    {
+        return mem::make_block<T, MemorySpace>(count);
+    }
 
     // =============================================================================
     // version information

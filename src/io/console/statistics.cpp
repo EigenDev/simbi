@@ -306,7 +306,7 @@ namespace simbi {
         // display system information using PrettyTable
         void display_system_info()
         {
-            using namespace simbi::xpu::vendors::cuda;
+            using namespace xpu::vendors::cuda;
             std::cout << std::string(104, '=') << "\n";
 
             // initialize common settings

@@ -5,7 +5,7 @@
 // validates rank identification and transfer strategy selection
 // =============================================================================
 
-#include "../xpu.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cassert>
 #include <iostream>

@@ -19,9 +19,9 @@
 
 #pragma once
 
-#include "core/device_concepts.hpp"
-#include "core/execution_concepts.hpp"
-#include "vendors/cuda/cuda_device.hpp"
+#include "xpu/core/device_concepts.hpp"
+#include "xpu/core/execution_concepts.hpp"
+#include "xpu/vendors/cuda/cuda_device.hpp"
 
 #ifdef XPU_CUDA_AVAILABLE
 #include <cublas_v2.h>

@@ -16,10 +16,12 @@
 
 #include "compat.hpp"
 #include "compute/cfd.hpp"
+#include "compute/numerics.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "ecs/components.hpp"
 #include "ecs/geometry_visitor.hpp"
+#include "functional/fp.hpp"
 #include "geometry/block_geometry.hpp"
 #include "geometry/boundary/driver.hpp"
 #include "grid/amr/api.hpp"
@@ -35,7 +37,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <numbers>
@@ -338,7 +339,6 @@ namespace simbi::ecs {
         template <typename Sim>
         void prolongate_from_coarse(Sim& sim, std::uint64_t fine_lvl) const
         {
-            using cons_t              = typename Sim::conserved_t;
             constexpr auto Rank       = Sim::rank;
             const auto     coarse_lvl = fine_lvl - 1;
             const auto     ref_ratio  = sim.level_info(fine_lvl).refinement_ratio;
@@ -370,16 +370,9 @@ namespace simbi::ecs {
                 if (do_interpolation) {
                     // interpolate between u_n and current state
                     auto& coarse_ws = sim.workspace(coarse_lvl, cp);
-                    auto  u_interp  = coarse_ws.u_n
-                                        .zip(
-                                            coarse_fields.cons,
-                                            [a = alpha] DEV(cons_t u_n, cons_t u_curr) -> cons_t {
-                                                using namespace simbi::structs;
-                                                return u_n | scale_gas(1.0 - a) |
-                                                       add_gas(u_curr | scale_gas(a));
-                                            }
-                                        )
-                                        .with(exec);
+                    auto  u_interp =
+                        coarse_ws.u_n.zip(coarse_fields.cons, numerics::time_interpolate_t{alpha})
+                            .with(exec);
 
                     grid::amr::fill_fine_ghosts(
                         fine_fields.cons,
@@ -546,8 +539,6 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
-            using cons_t = typename Sim::conserved_t;
-
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
@@ -558,7 +549,7 @@ namespace simbi::ecs {
                 auto& ws = sim.workspace(lvl, pp);
 
                 // store u^n for time interpolation
-                ws.u_n = fields.cons.map([] DEV(cons_t u) { return u; }).with(exec);
+                ws.u_n = fields.cons.map(fp::identity).with(exec);
             }
         }
     };
@@ -575,7 +566,6 @@ namespace simbi::ecs {
         void operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
-            using cons_t = typename Sim::conserved_t;
 
             auto&      meta    = sim.metadata();
             auto&      sources = sim.sources();
@@ -603,19 +593,9 @@ namespace simbi::ecs {
 
                 // u^{n+1} = u^n + dt * L(u^n)
                 auto u_view = fields.cons[part.owned_domain];
-                u_view =
-                    u_view
-                        .zip(
-                            ell,
-                            [dt] DEV(cons_t u, cons_t dudt) -> cons_t {
-                                return u | add_gas(dudt * dt);
-                            }
-                        )
-                        .zip(
-                            be,
-                            [dt] DEV(cons_t u, cons_t be) -> cons_t { return u | add_gas(be * dt); }
-                        )
-                        .with(exec);
+                u_view      = u_view.zip(ell, numerics::euler_step_t{dt})
+                             .zip(be, numerics::euler_step_t{dt})
+                             .with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     em::update_magnetic_fields(
@@ -643,7 +623,6 @@ namespace simbi::ecs {
         void operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
-            using cons_t = typename Sim::conserved_t;
 
             auto&      meta    = sim.metadata();
             auto&      sources = sim.sources();
@@ -664,7 +643,7 @@ namespace simbi::ecs {
                 auto& ws = sim.workspace(lvl, pp);
 
                 // store u^n
-                ws.u_n = fields.cons.map([] DEV(cons_t u) { return u; }).with(exec);
+                ws.u_n = fields.cons.map(fp::identity).with(exec);
 
                 // compute L(u^n)
                 auto k1 = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
@@ -675,19 +654,14 @@ namespace simbi::ecs {
 
                 // u* = u^n + dt * L(u^n)
                 auto u_star = fields.cons[part.owned_domain];
-                u_star =
-                    u_star.zip(k1, [dt] DEV(cons_t u, cons_t us) { return u | add_gas(us * dt); })
-                        .zip(
-                            be,
-                            [dt] DEV(cons_t u, cons_t be) -> cons_t { return u | add_gas(be * dt); }
-                        )
-                        .with(exec);
+                u_star      = u_star.zip(k1, numerics::euler_step_t{dt})
+                             .zip(be, numerics::euler_step_t{dt})
+                             .with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     // save E^n for rk2 stage 2
                     for (std::uint64_t dd = 0; dd < Sim::rank; ++dd) {
-                        ws.e_n[dd] =
-                            fields.efield[dd].map([] DEV(real e) -> real { return e; }).with(exec);
+                        ws.e_n[dd] = fields.efield[dd].map(fp::identity).with(exec);
                     }
                 }
             }
@@ -695,7 +669,27 @@ namespace simbi::ecs {
     };
 
     // =========================================================================
-    // rk2 stage 2: u* -> u^{n+1}
+    // rk2 stage 2 functor (local to this header)
+    // =========================================================================
+    template <std::uint64_t Rank, typename UStarComp, typename K2Comp, typename BEComp>
+    struct rk2_final_stage_t
+    {
+        UStarComp u_star;
+        K2Comp    k2;
+        BEComp    be;
+        real      dt;
+
+        template <typename ConsT>
+        DEV ConsT operator()(const iarray<Rank>& coord, const ConsT& u) const
+        {
+            using namespace simbi::structs;
+            return u | scale_gas(0.5) | add_gas(0.5 * u_star(coord)) |
+                   add_gas(0.5 * dt * k2(coord)) | add_gas(0.5 * dt * be(coord));
+        }
+    };
+
+    // =========================================================================
+    // rk2 stage 2 system
     // =========================================================================
     template <typename Ops>
     struct rk2_stage2_system_t
@@ -706,8 +700,6 @@ namespace simbi::ecs {
         void operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
-            constexpr std::uint64_t Rank = Sim::rank;
-            using cons_t                 = typename Sim::conserved_t;
 
             auto&      meta    = sim.metadata();
             auto&      sources = sim.sources();
@@ -734,29 +726,19 @@ namespace simbi::ecs {
                 auto u_n    = ws.u_n[part.owned_domain];
                 auto u_star = fields.cons[part.owned_domain];
 
-                u_n = u_n.enum_map(
-                             [u_star, k2, be, dt] DEV(iarray<Rank> coord, cons_t u) -> cons_t {
-                                 return u | scale_gas(0.5) | add_gas(0.5 * u_star(coord)) |
-                                        add_gas(0.5 * dt * k2(coord)) |
-                                        add_gas(0.5 * dt * be(coord));
-                             }
-                ).with(exec);
+                rk2_final_stage_t<Sim::rank, decltype(u_star), decltype(k2), decltype(be)>
+                    rk2_combine{u_star, k2, be, dt};
+
+                u_n = u_n.enum_map(rk2_combine).with(exec);
 
                 // copy result back
-                fields.cons = ws.u_n.map([] DEV(cons_t u) -> cons_t { return u; }).with(exec);
+                fields.cons = ws.u_n.map(fp::identity).with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     // compute E^{n+1/2} = 0.5 * (E^n + E^*)
                     for (std::uint64_t dd = 0; dd < Sim::rank; ++dd) {
                         auto en = fields.efield[dd];
-                        en      = ws.e_n[dd]
-                                 .zip(
-                                     en,
-                                     [] DEV(real e_n, real e_star) -> real {
-                                         return 0.5 * (e_n + e_star);
-                                     }
-                                 )
-                                 .with(exec);
+                        en      = ws.e_n[dd].zip(en, fp::average_op).with(exec);
                     }
 
                     // update magnetic fields using rk2 E-fields

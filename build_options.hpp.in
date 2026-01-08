@@ -17,4 +17,7 @@
 #mesondefine COLUMN_MAJOR
 #mesondefine FOUR_VELOCITY
 
+// Memory configuration
+#mesondefine UNIFIED_MEMORY
+
 #endif   // BUILD_OPTIONS_HPP

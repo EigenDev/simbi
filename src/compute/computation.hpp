@@ -1,7 +1,6 @@
 #ifndef COMPUTATION_HPP
 #define COMPUTATION_HPP
 
-#include "base/concepts.hpp"
 #include "compat.hpp"
 #include "containers/vector.hpp"
 #include "functional/fp.hpp"
@@ -14,10 +13,8 @@
 #include <utility>
 
 namespace simbi::compute {
-
     // forward declarations
-    template <std::uint64_t Rank, concepts::computable F>
-        requires(F::rank == Rank)
+    template <std::uint64_t Rank, typename F>
     struct computation_t;
 
     namespace detail {
@@ -68,31 +65,13 @@ namespace simbi::compute {
         inline constexpr bool returns_reference_v = returns_reference<F, Rank>::value;
     } // namespace detail
 
-    // adapter for map operations with non-computable operators
-    template <std::uint64_t Rank, typename UnaryOp, typename F>
-    struct map_adapter_t
-    {
-        using value_type                    = std::invoke_result_t<UnaryOp, typename F::value_type>;
-        using argument_type                 = typename F::argument_type;
-        static constexpr std::uint64_t rank = Rank;
-
-        UnaryOp op;
-        F       inner;
-
-        constexpr DUAL value_type operator()(argument_type coord) const
-        {
-            return op(inner(coord));
-        }
-    };
-
     // pure lazy computation graph - no memory, no device knowledge
     // immutable, composable, device-agnostic
-    template <std::uint64_t Rank, concepts::computable F>
-        requires(F::rank == Rank)
+    template <std::uint64_t Rank, typename F>
     struct computation_t
     {
-        using value_type                    = typename F::value_type;
-        using argument_type                 = typename F::argument_type;
+        using argument_type = coordinate_t<Rank>;
+        using value_type    = decltype(std::declval<F>()(std::declval<argument_type>()));
         static constexpr std::uint64_t rank = Rank;
 
         F                    func;
@@ -130,16 +109,7 @@ namespace simbi::compute {
         auto map(UnaryOp op) const
         {
             auto new_func = fp::compose(op, func);
-
-            // check if composition is computable
-            if constexpr (concepts::computable<decltype(new_func)>) {
-                return computation_t<Rank, decltype(new_func)>{std::move(new_func), domain_};
-            }
-            else {
-                // wrap in computable adapter
-                using adapter_t = map_adapter_t<Rank, UnaryOp, F>;
-                return computation_t<Rank, adapter_t>{adapter_t{std::move(op), func}, domain_};
-            }
+            return computation_t<Rank, decltype(new_func)>(std::move(new_func), domain_);
         }
 
         // enum_map: transform with coordinates
@@ -179,8 +149,7 @@ namespace simbi::compute {
 
         // zip: combine two computations element-wise
         // binary_op(f(coord), g(coord))
-        template <concepts::computable G, typename BinaryOp>
-            requires(G::rank == Rank)
+        template <typename G, typename BinaryOp>
         auto zip(const computation_t<Rank, G>& other, BinaryOp op) const
         {
             using namespace grid::domain_algebra;
@@ -343,7 +312,7 @@ namespace simbi::compute {
     auto identity(const grid::domain_t<Rank>& domain)
     {
         // adapter functor satisfying simbi::concepts::computable
-        struct identity_functor_t
+        struct identity_t
         {
             using value_type    = coordinate_t<Rank>;
             using argument_type = coordinate_t<Rank>;
@@ -357,7 +326,8 @@ namespace simbi::compute {
             }
         };
 
-        return computation_t<Rank, identity_functor_t>{identity_functor_t{}, domain};
+        identity_t functor;
+        return computation_t<Rank, identity_t>{std::move(functor), domain};
     }
 
     // constant computation: returns same value everywhere
@@ -365,7 +335,7 @@ namespace simbi::compute {
     auto constant(const grid::domain_t<Rank>& domain, T value)
     {
         // adapter functor satisfying simbi::concepts::computable
-        struct constant_functor_t
+        struct constant_t
         {
             using value_type    = T;
             using argument_type = coordinate_t<Rank>;
@@ -375,8 +345,8 @@ namespace simbi::compute {
 
             T v;
 
-            constant_functor_t() = default;
-            explicit constant_functor_t(T vv) : v(std::move(vv)) {}
+            constant_t() = default;
+            explicit constant_t(T vv) : v(std::move(vv)) {}
 
             DUAL value_type operator()(argument_type) const
             {
@@ -384,10 +354,7 @@ namespace simbi::compute {
             }
         };
 
-        return computation_t<Rank, constant_functor_t>{
-            constant_functor_t{std::move(value)},
-            domain
-        };
+        return computation_t<Rank, constant_t>{constant_t{std::move(value)}, domain};
     }
 
     // -------------------------------------------------------------------------
@@ -402,8 +369,7 @@ namespace simbi::compute {
         { t.domain() } -> std::same_as<const grid::domain_t<T::rank>&>;
     };
 
-    // overload for objects that know their own domain (e.g. field_t,
-    // field_view_t)
+    // overload for field_view_t and other view-like objects
     template <typename View>
         requires has_domain_method<View>
     auto computation(const View& v)

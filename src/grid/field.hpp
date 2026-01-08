@@ -9,10 +9,12 @@
 #include "grid/domain.hpp"
 #include "io/exceptions.hpp"
 #include "traits/traits.hpp"
-#include "xpu/execution_space.hpp"
-#include "xpu/executor.hpp"
-#include "xpu/shared_buffer.hpp"
-#include "xpu/view.hpp"
+#include "xpu/execution/execution_space.hpp"
+// #include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
+// #include "xpu/mem/mem.hpp"
+// #include "xpu/mem/memory_config.hpp"
+// #include "xpu/mem/view.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -125,14 +127,17 @@ namespace simbi::grid {
         {
             // helper to normalize inputs to computations
             auto ensure_comp = [](const auto& obj) {
-                if constexpr (is_computation_v<decltype(obj)>) {
+                using obj_t = std::decay_t<decltype(obj)>;
+
+                if constexpr (is_computation_v<obj_t>) {
                     return obj;
                 }
-                else if constexpr (std::is_same_v<decltype(obj), field_view_t>) {
-                    return computation(obj);
+                else if constexpr (requires { obj.as_computation(); }) {
+                    // has .as_computation() method - use it
+                    return obj.as_computation();
                 }
                 else {
-                    // assume view-like or already liftable
+                    // assume view-like - call computation() to lift it
                     return computation(obj);
                 }
             };
@@ -181,8 +186,8 @@ namespace simbi::grid {
         static constexpr std::uint64_t rank = Rank;
 
       private:
-        // shared ownership of unified memory
-        xpu::shared_buffer_t<T, xpu::unified_memory> storage_;
+        // shared ownership using new clean memory system
+        xpu::shared_handle_t<xpu::sim_block_t> storage_;
 
         // the "logical" domain this field represents (active region)
         domain_t<Rank> domain_;
@@ -194,7 +199,7 @@ namespace simbi::grid {
 
         // default
         field_t() = default;
-        // allocates unified memory for domain (accessible from all devices)
+        // allocates memory for domain using configured memory space
         explicit field_t(const domain_t<Rank>& domain) : domain_(domain)
         {
             auto          shape       = domain.shape();
@@ -203,8 +208,9 @@ namespace simbi::grid {
                 total_elems *= shape[ii];
             }
 
-            // allocate unified memory
-            storage_ = xpu::shared_buffer_t<T, xpu::unified_memory>(total_elems);
+            // allocate using new clean memory system
+            auto block = xpu::make_memory_block<T>(total_elems);
+            storage_   = xpu::make_shared_handle<xpu::sim_block_t>(std::move(block));
         }
 
         // copy constructor (shallow)
@@ -277,17 +283,19 @@ namespace simbi::grid {
         template <typename Other, typename BinaryOp>
         auto zip(const Other& other, BinaryOp&& op) const
         {
-
             // helper to normalize inputs to computations
             auto ensure_comp = [](const auto& obj) {
-                if constexpr (is_computation_v<decltype(obj)>) {
+                using obj_t = std::decay_t<decltype(obj)>;
+
+                if constexpr (is_computation_v<obj_t>) {
                     return obj;
                 }
-                else if constexpr (std::is_same_v<decltype(obj), field_t>) {
-                    return computation(obj.view());
+                else if constexpr (requires { obj.as_computation(); }) {
+                    // has .as_computation() method - use it
+                    return obj.as_computation();
                 }
                 else {
-                    // assume view-like or already liftable
+                    // assume view-like - call computation() to lift it
                     return computation(obj);
                 }
             };
@@ -316,7 +324,7 @@ namespace simbi::grid {
         // call operator
         // allows syntax: view(coord) to access elements
         // T& operator()(const iarray<Rank>& coord) { return view()(coord); }
-        DUAL const T& operator()(const iarray<Rank>& coord) const
+        const T& operator()(const iarray<Rank>& coord) const
         {
             return view()(coord);
         }
@@ -349,7 +357,7 @@ namespace simbi::grid {
         // direct pointer access (use with caution)
         T* data() const
         {
-            return storage_.data();
+            return storage_->template as<T>();
         }
 
         // ---------------------------------------------------------------------
@@ -367,11 +375,24 @@ namespace simbi::grid {
         field_t clone() const
         {
             field_t out;
-            out.domain_  = domain_;
-            out.storage_ = xpu::shared_buffer_t<T, xpu::unified_memory>(storage_.size());
+            out.domain_ = domain_;
 
-            // synchronous copy (unified memory accessible from host)
-            std::copy(storage_.data(), storage_.data() + storage_.size(), out.storage_.data());
+            auto          shape       = domain_.shape();
+            std::uint64_t total_elems = 1;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                total_elems *= shape[ii];
+            }
+
+            auto block   = xpu::make_memory_block<T>(total_elems);
+            out.storage_ = xpu::make_shared_handle<xpu::sim_block_t>(std::move(block));
+
+            // synchronous copy using new memory system
+            std::copy(
+                storage_->template as<T>(),
+                storage_->template as<T>() + total_elems,
+                out.storage_->template as<T>()
+            );
+            xpu::mark_host_dirty_if_needed(out.storage_);
 
             return out;
         }
@@ -381,11 +402,19 @@ namespace simbi::grid {
         xpu::token_t<ExecutionSpace>
         clone_async(xpu::executor_t<ExecutionSpace>& exec, field_t& out) const
         {
-            out.domain_  = domain_;
-            out.storage_ = xpu::shared_buffer_t<T, xpu::unified_memory>(storage_.size());
+            out.domain_ = domain_;
+
+            auto          shape       = domain_.shape();
+            std::uint64_t total_elems = 1;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                total_elems *= shape[ii];
+            }
+
+            auto block   = xpu::make_memory_block<T>(total_elems);
+            out.storage_ = xpu::make_shared_handle<xpu::sim_block_t>(std::move(block));
 
             // create device-compatible copy functor using views
-            struct copy_functor_t
+            struct copy_t
             {
 
                 using argument_type = std::array<std::int64_t, 1>;
@@ -396,17 +425,23 @@ namespace simbi::grid {
                 xpu::view_t<T, 1> src_view;
                 xpu::view_t<T, 1> dst_view;
 
-                DUAL void operator()(const argument_type& idx) const
+                DEV void operator()(const argument_type& idx) const
                 {
                     dst_view[idx[0]] = src_view[idx[0]];
                 }
             };
 
             // create views and dispatch copy kernel
-            auto src_view  = storage_.view();
-            auto dst_view  = out.storage_.view();
-            auto domain_1d = grid::extents<1>({static_cast<std::int64_t>(storage_.size())});
-            return exec.dispatch(domain_1d, copy_functor_t{src_view, dst_view});
+            auto          copy_shape = domain_.shape();
+            std::uint64_t copy_elems = 1;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                copy_elems *= copy_shape[ii];
+            }
+
+            auto src_view  = xpu::view_t<T, 1>(storage_->template as<T>(), {copy_elems});
+            auto dst_view  = xpu::view_t<T, 1>(out.storage_->template as<T>(), {copy_elems});
+            auto domain_1d = grid::extents<1>({static_cast<std::int64_t>(copy_elems)});
+            return exec.dispatch(domain_1d, copy_t{src_view, dst_view});
         }
 
       private:
@@ -431,7 +466,8 @@ namespace simbi::grid {
                 stride_accum *= alloc_shape[ii];
             }
 
-            T* ptr = storage_.data() + linear_offset;
+            xpu::mark_host_dirty_if_needed(storage_); // mark as modified from host
+            T* ptr = storage_->template as<T>() + linear_offset;
             return view_type(ptr, target.shape(), strides, target);
         }
     };
@@ -454,7 +490,7 @@ namespace simbi::grid {
         auto nerrors = exec.reduce(
             domain,
             std::size_t{0},
-            [=] DUAL(const typename grid::domain_t<Rank>::coord_t& coord) -> std::size_t {
+            [=] DEV(const typename grid::domain_t<Rank>::coord_t& coord) -> std::size_t {
                 auto maybe_value = expr(coord);
                 if (maybe_value.has_value()) {
                     dest(coord) = maybe_value.value();
@@ -474,7 +510,7 @@ namespace simbi::grid {
 
     // function object for assignment operation
     template <typename T, std::uint64_t Rank, typename Expression>
-    struct assign_functor_t
+    struct assign_t
     {
         using value_type                    = void;
         using argument_type                 = typename grid::domain_t<Rank>::coord_t;
@@ -483,12 +519,9 @@ namespace simbi::grid {
         xpu::view_t<T, Rank> dest;
         Expression           expr;
 
-        DUAL constexpr assign_functor_t(xpu::view_t<T, Rank> d, const Expression& e)
-            : dest(d), expr(e)
-        {
-        }
+        constexpr assign_t(xpu::view_t<T, Rank> d, const Expression& e) : dest(d), expr(e) {}
 
-        DUAL void operator()(const argument_type& coord) const
+        DEV void operator()(const argument_type& coord) const
         {
             dest(coord) = expr(coord);
         }
@@ -507,7 +540,7 @@ namespace simbi::grid {
     )
     {
         // dispatch kernel over domain
-        auto functor = assign_functor_t<T, Rank, Expression>{dest, expr};
+        auto functor = assign_t<T, Rank, Expression>{dest, expr};
         exec.dispatch(domain, functor);
     }
 
@@ -524,8 +557,9 @@ namespace simbi::grid {
     )
     {
         // check the expression's return type, not the destination field type
-        using expr_result_t =
-            std::invoke_result_t<Expression, typename grid::domain_t<Rank>::coord_t>;
+        using expr_result_t = decltype(std::declval<Expression>()(
+            std::declval<typename grid::domain_t<Rank>::coord_t>()
+        ));
 
         if constexpr (is_maybe_v<expr_result_t>) {
             try_commit(exec, domain, dest, expr);

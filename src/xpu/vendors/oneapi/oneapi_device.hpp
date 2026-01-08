@@ -23,9 +23,11 @@
 
 #pragma once
 
-#include "../../core/device_concepts.hpp"
-#include "../../core/execution_concepts.hpp"
-#include "../../core/memory_concepts.hpp"
+#include "xpu/core/device_concepts.hpp"
+#include "xpu/core/execution_concepts.hpp"
+#include "xpu/core/memory_concepts.hpp"
+
+#include <stdexcept>
 
 #ifdef XPU_ONEAPI_AVAILABLE
 #include <level_zero/ze_api.h>

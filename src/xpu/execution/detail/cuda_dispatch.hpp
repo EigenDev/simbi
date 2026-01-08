@@ -151,7 +151,6 @@ namespace simbi::xpu {
         const auto     total_size = domain.size();
         const auto     grid       = compute_launch_config_1d(total_size);
         constexpr dim3 block(256, 1, 1);
-        printf("IN THE CUDA DISPATCH!\n");
 
         dispatch_kernel_1d<<<grid, block, 0, stream>>>(domain, func);
     }
@@ -220,13 +219,15 @@ namespace simbi::xpu {
     // =============================================================================
 
 #ifdef __CUDACC__
-    // warp-level reduction using shuffle operations (modern cuda)
-    // warp reduction using shared memory for all types
-    // simpler approach to avoid nvcc compiler crashes
+    // trait to detect large types (>32 bytes triggers global memory path)
+    template <typename T>
+    constexpr bool use_global_reduce_v = sizeof(T) > 32;
+
+    // warp reduction using shared memory for small types
     template <typename T, typename ReduceOp>
     __device__ T warp_reduce(T value, ReduceOp reduce_op)
     {
-        __shared__ T warp_shared[1024]; // max threads per block
+        __shared__ T warp_shared[1024];
 
         const unsigned int lane     = threadIdx.x % 32;
         const unsigned int warp_id  = threadIdx.x / 32;
@@ -235,7 +236,6 @@ namespace simbi::xpu {
         warp_mem[lane] = value;
         __syncwarp();
 
-        // reduce within warp using shared memory
         for (unsigned int offset = 16; offset > 0; offset /= 2) {
             if (lane < offset) {
                 warp_mem[lane] = reduce_op(warp_mem[lane], warp_mem[lane + offset]);
@@ -246,8 +246,35 @@ namespace simbi::xpu {
         return warp_mem[0];
     }
 
-    // block-level reduction kernel - phase 1
-    // each block reduces its portion and writes result to block_results
+    // global memory reduction for large types
+    template <typename T, std::uint64_t Rank, typename MapFunc, typename ReduceOp>
+    __global__ void reduce_kernel_global(
+        grid::domain_t<Rank> domain,
+        T                    init_value,
+        MapFunc              map_func,
+        ReduceOp             reduce_op,
+        T*                   thread_results,
+        int                  total_threads
+    )
+    {
+        const std::int64_t total_size = domain.size();
+        const std::int64_t stride     = blockDim.x * gridDim.x;
+        const std::int64_t start_idx  = blockIdx.x * blockDim.x + threadIdx.x;
+        const std::int64_t tid        = start_idx;
+
+        T thread_result = init_value;
+        for (std::uint64_t linear = start_idx; linear < total_size; linear += stride) {
+            auto coord        = domain.linear_to_coord(linear);
+            T    mapped_value = map_func(coord);
+            thread_result     = reduce_op(thread_result, mapped_value);
+        }
+
+        if (tid < total_threads) {
+            thread_results[tid] = thread_result;
+        }
+    }
+
+    // block-level reduction kernel - phase 1 (small types only)
     template <typename T, std::uint64_t Rank, typename MapFunc, typename ReduceOp>
     __global__ void reduce_kernel_phase1(
         grid::domain_t<Rank> domain,
@@ -257,14 +284,13 @@ namespace simbi::xpu {
         T*                   block_results
     )
     {
-        constexpr unsigned int block_size = 256;
-        __shared__ T           shared[block_size / 32]; // one per warp
+        constexpr unsigned int block_size = 128;
+        __shared__ T           shared[block_size / 32];
 
         const std::int64_t total_size = domain.size();
         const std::int64_t stride     = blockDim.x * gridDim.x;
         const std::int64_t start_idx  = blockIdx.x * blockDim.x + threadIdx.x;
 
-        // phase 1: grid-stride map and thread-local reduction
         T thread_result = init_value;
         for (std::uint64_t linear = start_idx; linear < total_size; linear += stride) {
             auto coord        = domain.linear_to_coord(linear);
@@ -272,31 +298,26 @@ namespace simbi::xpu {
             thread_result     = reduce_op(thread_result, mapped_value);
         }
 
-        // phase 2: warp-level reduction
         const unsigned int lane    = threadIdx.x % 32;
         const unsigned int warp_id = threadIdx.x / 32;
         thread_result              = warp_reduce(thread_result, reduce_op);
 
-        // first thread in each warp writes to shared memory
         if (lane == 0) {
             shared[warp_id] = thread_result;
         }
         __syncthreads();
 
-        // phase 3: final reduction within block (first warp only)
         if (warp_id == 0) {
             T warp_result = (lane < blockDim.x / 32) ? shared[lane] : init_value;
             warp_result   = warp_reduce(warp_result, reduce_op);
 
-            // first thread writes block result
             if (lane == 0) {
                 block_results[blockIdx.x] = warp_result;
             }
         }
     }
 
-    // final reduction kernel - phase 2
-    // reduces block results to final value
+    // final reduction kernel - phase 2 (small types only)
     template <typename T, typename ReduceOp>
     __global__ void reduce_kernel_phase2(
         T*       block_results,
@@ -306,16 +327,14 @@ namespace simbi::xpu {
         T*       final_result
     )
     {
-        constexpr unsigned int block_size = 256;
+        constexpr unsigned int block_size = 128;
         __shared__ T           shared[block_size / 32];
 
-        // load block results
         T thread_result = init_value;
         for (int ii = threadIdx.x; ii < num_blocks; ii += blockDim.x) {
             thread_result = reduce_op(thread_result, block_results[ii]);
         }
 
-        // warp reduction
         const unsigned int lane    = threadIdx.x % 32;
         const unsigned int warp_id = threadIdx.x / 32;
         thread_result              = warp_reduce(thread_result, reduce_op);
@@ -325,7 +344,6 @@ namespace simbi::xpu {
         }
         __syncthreads();
 
-        // final reduction
         if (warp_id == 0) {
             T warp_result = (lane < blockDim.x / 32) ? shared[lane] : init_value;
             warp_result   = warp_reduce(warp_result, reduce_op);
@@ -348,47 +366,89 @@ namespace simbi::xpu {
     {
         const auto total_size = domain.size();
 
-        // launch configuration
-        constexpr int threads_per_block = 256;
-        const int     num_blocks        = std::min(
-            static_cast<int>((total_size + threads_per_block - 1) / threads_per_block),
-            1024
-        );
+        if constexpr (use_global_reduce_v<T>) {
+            // large types: use global memory reduction (no shared memory)
+            constexpr int threads_per_block = 128;
+            const int     num_blocks        = std::min(
+                static_cast<int>((total_size + threads_per_block - 1) / threads_per_block),
+                1024
+            );
+            const int total_threads = num_blocks * threads_per_block;
 
-        // allocate device memory for block results
-        T* d_block_results = nullptr;
-        T* d_final_result  = nullptr;
-        cudaMalloc(&d_block_results, num_blocks * sizeof(T));
-        cudaMalloc(&d_final_result, sizeof(T));
+            T* d_thread_results = nullptr;
+            cudaMalloc(&d_thread_results, total_threads * sizeof(T));
 
-        // phase 1: map and block-level reduction
-        reduce_kernel_phase1<<<num_blocks, threads_per_block, 0, stream>>>(
-            domain,
-            init_value,
-            map_func,
-            reduce_op,
-            d_block_results
-        );
+            reduce_kernel_global<<<num_blocks, threads_per_block, 0, stream>>>(
+                domain,
+                init_value,
+                map_func,
+                reduce_op,
+                d_thread_results,
+                total_threads
+            );
 
-        // phase 2: final reduction
-        reduce_kernel_phase2<<<1, threads_per_block, 0, stream>>>(
-            d_block_results,
-            num_blocks,
-            init_value,
-            reduce_op,
-            d_final_result
-        );
+            // cpu-side reduction of thread results
+            std::vector<T> h_thread_results(total_threads);
+            cudaMemcpyAsync(
+                h_thread_results.data(),
+                d_thread_results,
+                total_threads * sizeof(T),
+                cudaMemcpyDeviceToHost,
+                stream
+            );
+            cudaStreamSynchronize(stream);
+            cudaFree(d_thread_results);
 
-        // copy result back to host
-        T final_result;
-        cudaMemcpyAsync(&final_result, d_final_result, sizeof(T), cudaMemcpyDeviceToHost, stream);
-        cudaStreamSynchronize(stream);
+            T final_result = init_value;
+            for (const auto& val : h_thread_results) {
+                final_result = reduce_op(final_result, val);
+            }
+            return final_result;
+        }
+        else {
+            // small types: use shared memory reduction (fast path)
+            constexpr int threads_per_block = 128;
+            const int     num_blocks        = std::min(
+                static_cast<int>((total_size + threads_per_block - 1) / threads_per_block),
+                1024
+            );
 
-        // cleanup
-        cudaFree(d_block_results);
-        cudaFree(d_final_result);
+            T* d_block_results = nullptr;
+            T* d_final_result  = nullptr;
+            cudaMalloc(&d_block_results, num_blocks * sizeof(T));
+            cudaMalloc(&d_final_result, sizeof(T));
 
-        return final_result;
+            reduce_kernel_phase1<<<num_blocks, threads_per_block, 0, stream>>>(
+                domain,
+                init_value,
+                map_func,
+                reduce_op,
+                d_block_results
+            );
+
+            reduce_kernel_phase2<<<1, threads_per_block, 0, stream>>>(
+                d_block_results,
+                num_blocks,
+                init_value,
+                reduce_op,
+                d_final_result
+            );
+
+            T final_result;
+            cudaMemcpyAsync(
+                &final_result,
+                d_final_result,
+                sizeof(T),
+                cudaMemcpyDeviceToHost,
+                stream
+            );
+            cudaStreamSynchronize(stream);
+
+            cudaFree(d_block_results);
+            cudaFree(d_final_result);
+
+            return final_result;
+        }
     }
 #else
     // fallback stub for cuda_reduce when not compiled with nvcc

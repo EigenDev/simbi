@@ -33,7 +33,7 @@ namespace simbi::state {
         store_t<expression::LinearExprInstr> linear_instructions;
 
         template <concepts::is_hydro_conserved_c conserved_t>
-        DEV auto
+        DEV conserved_t
         apply(const vector_t<real, Rank> coords, const conserved_t& cons, real time = 0.0) const
         {
             if (!enabled) {
@@ -62,7 +62,7 @@ namespace simbi::state {
         }
 
         template <concepts::is_hydro_primitive_c primitive_t>
-        DEV auto apply(
+        DEV typename primitive_t::counterpart_t apply(
             const vector_t<real, Rank> coords,
             const primitive_t&         prim,
             real                       time,
@@ -141,14 +141,6 @@ namespace simbi::state {
             expr.output_indices        = std::move(output_indices);
             expr.output_indices_mapped = std::move(mapped_output);
             expr.parameters            = std::move(params);
-
-            if constexpr (platform::is_gpu) {
-                expr.nodes.sync_to_all_devices();
-                expr.output_indices.sync_to_all_devices();
-                expr.parameters.sync_to_all_devices();
-                expr.linear_instructions.sync_to_all_devices();
-                expr.output_indices_mapped.sync_to_all_devices();
-            }
 
             return expr;
         }

@@ -20,14 +20,11 @@
 
 #pragma once
 
-#include "../../core/device_concepts.hpp"
+#include "utility/threading.hpp"
 
-#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <future>
-#include <memory>
-#include <omp.h>
 #include <string_view>
 #include <thread>
 
@@ -334,7 +331,7 @@ namespace simbi::xpu::vendors::cpu {
 
         std::size_t compute_units() const
         {
-            return static_cast<std::size_t>(omp_get_max_threads());
+            return threading::hardware_concurrency();
         }
 
         std::size_t max_threads_per_block() const

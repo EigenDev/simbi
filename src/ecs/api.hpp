@@ -3,6 +3,7 @@
 
 #include "compat.hpp"
 #include "compute/computation.hpp"
+#include "compute/numerics.hpp"
 #include "containers/vector.hpp"
 #include "grid/amr/prolongation.hpp"
 #include "physics/hydro/conversion.hpp"
@@ -30,10 +31,7 @@ namespace simbi::ecs::initialization {
 
         // convert to conserved variables
         const real gamma = sim.metadata().gamma;
-        l0_hydro.cons =
-            l0_hydro.prim.map(
-                             [gamma] DEV(const auto& p) { return hydro::to_conserved(p, gamma); }
-            ).with(exec);
+        l0_hydro.cons    = l0_hydro.prim.map(numerics::to_conserved_t{gamma}).with(exec);
 
         // prolongate to fine levels (if amr enabled)
         if (sim.has_refinement()) {
@@ -57,10 +55,7 @@ namespace simbi::ecs::initialization {
                 fine.cons = compute::computation(fine.cons.domain(), prolong_op).with(exec);
 
                 // recover primitives on fine level
-                fine.prim =
-                    fine.cons
-                        .map([gamma] DEV(const auto& u) { return hydro::to_primitive(u, gamma); })
-                        .with(exec);
+                fine.prim = fine.cons.map(numerics::to_primitive_t{gamma}).with(exec);
             }
         }
 

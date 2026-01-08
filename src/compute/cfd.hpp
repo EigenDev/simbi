@@ -120,7 +120,7 @@ namespace simbi::cfd {
         real                 time;
         real                 gamma;
 
-        DEV constexpr auto operator()(iarray<rank> coord) const
+        DEV constexpr conserved_t operator()(iarray<rank> coord) const
         {
             if (!gravity_source || !gravity_source->enabled) {
                 return conserved_t{};
@@ -171,7 +171,7 @@ namespace simbi::cfd {
         Geometry           geometry;
         real               time;
 
-        DEV constexpr auto operator()(iarray<rank> coord) const
+        DEV constexpr conserved_t operator()(iarray<rank> coord) const
         {
             if (!hydro_source || !hydro_source->enabled) {
                 return conserved_t{};

@@ -24,6 +24,7 @@ if cuda.found()
     '-L/opt/cuda/lib64',
     '-lcudart',
     '-lcudadevrt',
+    '-lcuda',
   ]
 elif hip.found()
   gpu_dep = hip
@@ -43,6 +44,8 @@ py3.extension_module(
   dependencies: general_dependencies + [gpu_dep],
   link_with: simbi_gpu_core,
   link_args: link_args,
+  link_language: 'cpp',
   install: true,
   install_dir: py_install_dir,
+
 )

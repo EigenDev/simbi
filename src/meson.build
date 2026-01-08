@@ -55,7 +55,7 @@ if get_option('gpu_compilation').enabled()
     meson.project_build_root(),
   ]
 
-  # add python includes
+  # add python and pybind11 includes
   pybind11_inc = run_command(py3, ['-c', 'import pybind11; print(pybind11.get_include())'], check: true).stdout().strip()
   python_inc = run_command(
     py3,
@@ -64,15 +64,6 @@ if get_option('gpu_compilation').enabled()
   ).stdout().strip()
 
   gpu_includes += [pybind11_inc, python_inc]
-
-  # add hdf5 includes
-  hdf5_result = run_command('pkg-config', '--cflags-only-I', 'hdf5', check: false)
-  if hdf5_result.returncode() == 0
-    hdf5_inc = hdf5_result.stdout().strip()
-    if hdf5_inc != ''
-      gpu_includes += [hdf5_inc]
-    endif
-  endif
 
   # build compiler flags based on backend
   gpu_flags = []
@@ -91,6 +82,7 @@ if get_option('gpu_compilation').enabled()
       '--compiler-options',
       '-DNDEBUG',
       '-O3',
+      '-rdc=true',
     ]
 
     device_arch = get_option('device_arch')
@@ -106,6 +98,7 @@ if get_option('gpu_compilation').enabled()
       '-fopenmp',
       '-O3',
       '-DNDEBUG',
+      '-fgpu-rdc',
     ]
 
     device_arch = get_option('device_arch')
@@ -131,7 +124,7 @@ if get_option('gpu_compilation').enabled()
     gpu_flags += ['-D', def]
   endforeach
 
-  # compile gpu objects individually for reliability
+  # compile gpu objects individually with relocatable device code
   gpu_objects = []
   foreach src : sources
     src_name = src.full_path().split('/')[-1]
@@ -148,10 +141,32 @@ if get_option('gpu_compilation').enabled()
     gpu_objects += gpu_obj
   endforeach
 
+  # device link step for relocatable device code
+  device_link_flags = ['-dlink', '-Xcompiler=-fPIC']
+  if gpu_backend == 'cuda'
+    device_arch = get_option('device_arch')
+    if device_arch != ''
+      device_link_flags += ['-arch', device_arch]
+    endif
+  elif gpu_backend == 'hip'
+    device_arch = get_option('device_arch')
+    if device_arch != ''
+      device_link_flags += ['--offload-arch', device_arch]
+    endif
+  endif
+
+  device_link_obj = custom_target(
+    'device_link.o',
+    output: 'device_link.o',
+    command: [gpu_compiler] + device_link_flags + gpu_objects + ['-o', '@OUTPUT@'],
+    depends: gpu_objects,
+    install: false,
+  )
+
   # create gpu library
   simbi_gpu_core = static_library(
     'simbi_gpu_core',
-    objects: gpu_objects,
+    objects: gpu_objects + [device_link_obj],
     install: false,
   )
 

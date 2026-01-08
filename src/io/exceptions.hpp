@@ -193,10 +193,12 @@ namespace simbi {
     std::string format_coord(const iarray<Rank>& coord)
     {
         std::string result = "(";
-        for (std::uint64_t i = 0; i < Rank; ++i) {
-            result += std::to_string(coord[i]);
-            if (i < Rank - 1) {
-                result += ", ";
+        for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+            result += std::to_string(coord[ii]);
+            if constexpr (Rank > 1) {
+                if (ii < Rank - 1) {
+                    result += ", ";
+                }
             }
         }
         result += ")";
@@ -207,10 +209,12 @@ namespace simbi {
     std::string format_position(const vector_t<T, Rank>& position)
     {
         std::string result = "(";
-        for (std::uint64_t i = 0; i < Rank; ++i) {
-            result += std::to_string(position[i]);
-            if (i < Rank - 1) {
-                result += ", ";
+        for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+            result += std::to_string(position[ii]);
+            if constexpr (Rank > 1) {
+                if (ii < Rank - 1) {
+                    result += ", ";
+                }
             }
         }
         result += ")";

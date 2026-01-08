@@ -19,8 +19,9 @@
 
 #pragma once
 
-#include "../execution_space.hpp"
+#include "xpu/execution/execution_space.hpp"
 
+#include <thread>
 #include <utility>
 
 namespace simbi::xpu::detail {

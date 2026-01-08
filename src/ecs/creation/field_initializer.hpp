@@ -15,16 +15,15 @@
 
 #include "base/concepts.hpp"
 #include "compat.hpp"
+#include "compute/numerics.hpp"
 #include "containers/vector.hpp"
 #include "ecs/systems.hpp"
 #include "functional/fp.hpp"
 #include "grid/amr/prolongation.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "physics/em/api.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/enums.hpp"
-#include "xpu/xpu.hpp"
 
 #include <cstdint>
 #include <pybind11/cast.h>
@@ -101,7 +100,7 @@ namespace simbi::ecs::creation {
         return field;
     }
 
-    struct mean_magnetic_functor_t
+    struct mean_magnetic_t
     {
         template <typename PrimField, std::uint64_t Rank>
         DEV PrimField operator()(PrimField prim, vector_t<real, Rank> bavg) const
@@ -222,17 +221,14 @@ namespace simbi::ecs::creation {
                             active_domain
                         );
                         auto prims = fields.prim[active_domain];
-                        prims      = prims.zip(bavg, mean_magnetic_functor_t{}).with(exec);
+                        prims      = prims.zip(bavg, mean_magnetic_t{}).with(exec);
                     }
                 );
             }
 
             // convert primitives to conserved
-            fields.cons[active_domain] = fields.prim[active_domain]
-                                             .map([gamma] DEV(primitive_t prim) -> conserved_t {
-                                                 return hydro::to_conserved(prim, gamma);
-                                             })
-                                             .with(exec);
+            fields.cons[active_domain] =
+                fields.prim[active_domain].map(numerics::to_conserved_t{gamma}).with(exec);
         }
 
         // -------------------------------------------------------------------------
@@ -292,17 +288,13 @@ namespace simbi::ecs::creation {
                             child_part.owned_domain
                         );
                         auto prims = child_fields.prim[child_part.owned_domain];
-                        prims      = prims.zip(bavg, mean_magnetic_functor_t{}).with(exec);
+                        prims      = prims.zip(bavg, mean_magnetic_t{}).with(exec);
                     }
                 );
             }
 
             // convert prolonged primitives to conserved
-            child_fields.cons = child_fields.prim
-                                    .map([gamma] DEV(primitive_t prim) -> conserved_t {
-                                        return hydro::to_conserved(prim, gamma);
-                                    })
-                                    .with(exec);
+            child_fields.cons = child_fields.prim.map(numerics::to_conserved_t{gamma}).with(exec);
         }
     };
 

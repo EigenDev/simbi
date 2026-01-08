@@ -33,7 +33,8 @@ namespace simbi::xpu {
     // uniform partition along first axis (typical for 1d or slab decomposition)
     // splits domain into n roughly-equal chunks, distributing remainder uniformly
     template <std::uint64_t Rank>
-    std::vector<domain_t<Rank>> partition_uniform(const domain_t<Rank>& domain, std::size_t n)
+    std::vector<grid::domain_t<Rank>>
+    partition_uniform(const grid::domain_t<Rank>& domain, std::size_t n)
     {
         if (n == 0 || domain.empty()) {
             return {};
@@ -43,7 +44,7 @@ namespace simbi::xpu {
             return {domain};
         }
 
-        std::vector<domain_t<Rank>> result;
+        std::vector<grid::domain_t<Rank>> result;
         result.reserve(n);
 
         auto               shape      = domain.shape();
@@ -54,10 +55,10 @@ namespace simbi::xpu {
         std::int64_t current_start = domain.start[0];
 
         for (std::size_t ii = 0; ii < n; ++ii) {
-            domain_t<Rank> chunk     = domain;
-            chunk.start[0]           = current_start;
-            const std::int64_t extra = (ii < static_cast<std::size_t>(remainder)) ? 1 : 0;
-            chunk.end[0]             = current_start + chunk_size + extra;
+            grid::domain_t<Rank> chunk = domain;
+            chunk.start[0]             = current_start;
+            const std::int64_t extra   = (ii < static_cast<std::size_t>(remainder)) ? 1 : 0;
+            chunk.end[0]               = current_start + chunk_size + extra;
 
             result.push_back(chunk);
             current_start = chunk.end[0];
@@ -68,7 +69,8 @@ namespace simbi::xpu {
 
     // partition along a specific axis (for more control over decomposition)
     template <std::uint64_t Axis, std::uint64_t Rank>
-    std::vector<domain_t<Rank>> partition_along_axis(const domain_t<Rank>& domain, std::size_t n)
+    std::vector<grid::domain_t<Rank>>
+    partition_along_axis(const grid::domain_t<Rank>& domain, std::size_t n)
     {
         static_assert(Axis < Rank, "axis must be less than rank");
 
@@ -80,7 +82,7 @@ namespace simbi::xpu {
             return {domain};
         }
 
-        std::vector<domain_t<Rank>> result;
+        std::vector<grid::domain_t<Rank>> result;
         result.reserve(n);
 
         auto               shape      = domain.shape();
@@ -91,10 +93,10 @@ namespace simbi::xpu {
         std::int64_t current_start = domain.start[Axis];
 
         for (std::size_t ii = 0; ii < n; ++ii) {
-            domain_t<Rank> chunk     = domain;
-            chunk.start[Axis]        = current_start;
-            const std::int64_t extra = (ii < static_cast<std::size_t>(remainder)) ? 1 : 0;
-            chunk.end[Axis]          = current_start + chunk_size + extra;
+            grid::domain_t<Rank> chunk = domain;
+            chunk.start[Axis]          = current_start;
+            const std::int64_t extra   = (ii < static_cast<std::size_t>(remainder)) ? 1 : 0;
+            chunk.end[Axis]            = current_start + chunk_size + extra;
 
             result.push_back(chunk);
             current_start = chunk.end[Axis];
@@ -106,8 +108,8 @@ namespace simbi::xpu {
     // 2d/3d decomposition: partition along multiple axes
     // useful for pencil or block decomposition in multi-dimensional hydro
     template <std::uint64_t Rank>
-    std::vector<domain_t<Rank>> partition_block(
-        const domain_t<Rank>&                domain,
+    std::vector<grid::domain_t<Rank>> partition_block(
+        const grid::domain_t<Rank>&          domain,
         const std::array<std::size_t, Rank>& partitions_per_axis
     )
     {
@@ -126,12 +128,12 @@ namespace simbi::xpu {
             total_blocks *= partitions_per_axis[ii];
         }
 
-        std::vector<domain_t<Rank>> result;
+        std::vector<grid::domain_t<Rank>> result;
         result.reserve(total_blocks);
 
         // precompute chunk sizes per axis
-        std::array<std::int64_t, Rank> chunk_sizes;
-        std::array<std::int64_t, Rank> remainders;
+        vector_t<std::int64_t, Rank> chunk_sizes;
+        vector_t<std::int64_t, Rank> remainders;
 
         auto shape = domain.shape();
         for (std::uint64_t axis = 0; axis < Rank; ++axis) {
@@ -143,7 +145,7 @@ namespace simbi::xpu {
         std::array<std::size_t, Rank> indices{};
 
         for (std::size_t linear = 0; linear < total_blocks; ++linear) {
-            domain_t<Rank> block = domain;
+            grid::domain_t<Rank> block = domain;
 
             // compute start/end for each axis based on current indices
             for (std::uint64_t axis = 0; axis < Rank; ++axis) {
@@ -187,15 +189,15 @@ namespace simbi::xpu {
     // extract boundary slice along specified axis and direction
     // useful for extracting data to send to neighboring ranks/devices
     template <std::uint64_t Axis, std::uint64_t Rank>
-    domain_t<Rank> extract_boundary(
-        const domain_t<Rank>& domain,
-        std::int64_t          depth,
-        bool                  lower_boundary // true = lower, false = upper
+    grid::domain_t<Rank> extract_boundary(
+        const grid::domain_t<Rank>& domain,
+        std::int64_t                depth,
+        bool                        lower_boundary // true = lower, false = upper
     )
     {
         static_assert(Axis < Rank, "axis must be less than rank");
 
-        domain_t<Rank> boundary = domain;
+        grid::domain_t<Rank> boundary = domain;
 
         if (lower_boundary) {
             // lower boundary: [start, start + depth)
@@ -211,9 +213,10 @@ namespace simbi::xpu {
 
     // extract interior domain (excluding ghost/halo cells)
     template <std::uint64_t Rank>
-    domain_t<Rank> extract_interior(const domain_t<Rank>& domain, std::int64_t halo_depth)
+    grid::domain_t<Rank>
+    extract_interior(const grid::domain_t<Rank>& domain, std::int64_t halo_depth)
     {
-        domain_t<Rank> interior = domain;
+        grid::domain_t<Rank> interior = domain;
 
         for (std::uint64_t axis = 0; axis < Rank; ++axis) {
             interior.start[axis] += halo_depth;
@@ -236,10 +239,10 @@ namespace simbi::xpu {
     // compute load-balanced partition based on work weights
     // useful when some regions require more computation than others
     template <std::uint64_t Rank>
-    std::vector<domain_t<Rank>> partition_weighted(
-        const domain_t<Rank>&      domain,
-        const std::vector<double>& weights,
-        std::size_t                n_partitions
+    std::vector<grid::domain_t<Rank>> partition_weighted(
+        const grid::domain_t<Rank>& domain,
+        const std::vector<double>&  weights,
+        std::size_t                 n_partitions
     )
     {
         if (n_partitions == 0 || domain.empty() || weights.empty()) {
@@ -261,7 +264,7 @@ namespace simbi::xpu {
         const double total_weight  = cumulative.back();
         const double target_weight = total_weight / n_partitions;
 
-        std::vector<domain_t<Rank>> result;
+        std::vector<grid::domain_t<Rank>> result;
         result.reserve(n_partitions);
 
         std::int64_t current_start = domain.start[0];
@@ -283,9 +286,9 @@ namespace simbi::xpu {
                 end_idx = shape[0];
             }
 
-            domain_t<Rank> chunk = domain;
-            chunk.start[0]       = domain.start[0] + current_start;
-            chunk.end[0]         = domain.start[0] + end_idx;
+            grid::domain_t<Rank> chunk = domain;
+            chunk.start[0]             = domain.start[0] + current_start;
+            chunk.end[0]               = domain.start[0] + end_idx;
 
             result.push_back(chunk);
             current_start = end_idx;
@@ -300,7 +303,7 @@ namespace simbi::xpu {
 
     // check if two domains overlap (for detecting communication needs)
     template <std::uint64_t Rank>
-    bool domains_overlap(const domain_t<Rank>& a, const domain_t<Rank>& b)
+    bool domains_overlap(const grid::domain_t<Rank>& a, const grid::domain_t<Rank>& b)
     {
         for (std::uint64_t axis = 0; axis < Rank; ++axis) {
             if (a.end[axis] <= b.start[axis] || b.end[axis] <= a.start[axis]) {
@@ -312,9 +315,10 @@ namespace simbi::xpu {
 
     // compute intersection of two domains
     template <std::uint64_t Rank>
-    domain_t<Rank> domain_intersection(const domain_t<Rank>& a, const domain_t<Rank>& b)
+    grid::domain_t<Rank>
+    domain_intersection(const grid::domain_t<Rank>& a, const grid::domain_t<Rank>& b)
     {
-        domain_t<Rank> result;
+        grid::domain_t<Rank> result;
 
         for (std::uint64_t axis = 0; axis < Rank; ++axis) {
             result.start[axis] = std::max(a.start[axis], b.start[axis]);
@@ -335,9 +339,9 @@ namespace simbi::xpu {
     // returns indices of partitions that share a boundary with partition_idx
     template <std::uint64_t Rank>
     std::vector<std::size_t> find_neighbors(
-        const std::vector<domain_t<Rank>>& partitions,
-        std::size_t                        partition_idx,
-        std::int64_t                       halo_depth = 1
+        const std::vector<grid::domain_t<Rank>>& partitions,
+        std::size_t                              partition_idx,
+        std::int64_t                             halo_depth = 1
     )
     {
         if (partition_idx >= partitions.size()) {
@@ -348,7 +352,7 @@ namespace simbi::xpu {
         const auto&              my_domain = partitions[partition_idx];
 
         // expand domain by halo depth to find overlapping neighbors
-        domain_t<Rank> expanded = my_domain;
+        grid::domain_t<Rank> expanded = my_domain;
         for (std::uint64_t axis = 0; axis < Rank; ++axis) {
             expanded.start[axis] -= halo_depth;
             expanded.end[axis] += halo_depth;
