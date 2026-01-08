@@ -1,3 +1,12 @@
+// =============================================================================
+// stencil.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+
 #pragma once
 
 #include "base/concepts.hpp"
