@@ -13,10 +13,11 @@
 //   prim_field = cons_field.map(to_primitive_t{gamma}).with(exec);
 // =============================================================================
 
-#include "../compat.hpp"
-#include "../containers/state_ops.hpp"
-#include "../physics/hydro/conversion.hpp"
-#include "../physics/hydro/physics.hpp"
+#include "compat.hpp"
+#include "containers/state_ops.hpp"
+#include "functional/monad/maybe.hpp"
+#include "physics/hydro/conversion.hpp"
+#include "physics/hydro/physics.hpp"
 
 namespace simbi::numerics {
 
@@ -40,7 +41,7 @@ namespace simbi::numerics {
         real gamma;
 
         template <typename Cons>
-        constexpr DEV typename Cons::counterpart_t operator()(const Cons& cons) const
+        constexpr DEV maybe_t<typename Cons::counterpart_t> operator()(const Cons& cons) const
         {
             return hydro::to_primitive(cons, gamma);
         }
