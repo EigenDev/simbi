@@ -76,11 +76,11 @@ namespace simbi {
             }
         }
 
-        // move semantics (shared_buffer_t handles this)
+        // move semantics (shared_handle_t handles this)
         store_t(store_t&&) noexcept            = default;
         store_t& operator=(store_t&&) noexcept = default;
 
-        // shallow copy semantics (reference counting, preserves hesi behavior)
+        // shallow copy semantics (reference counting)
         store_t(const store_t&)            = default;
         store_t& operator=(const store_t&) = default;
 

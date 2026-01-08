@@ -17,10 +17,11 @@
 #ifndef COMPAT_HPP
 #define COMPAT_HPP
 
-#include "build_options.hpp"   // include the Meson-generated configuration
-#include <cstdint>             // for fixed-width integer types
+#include "build_options.hpp" // include the Meson-generated configuration
+
+#include <cstdint> // for fixed-width integer types
 #include <cstdlib>
-#include <type_traits>   // for std::conditional_t and other type traits
+#include <type_traits> // for std::conditional_t and other type traits
 
 namespace simbi {
     namespace build {
@@ -69,7 +70,7 @@ namespace simbi {
                                             : is_hip ? type::hip
                                             : is_cpu ? type::cpu
                                                      : type::unknown;
-        }   // namespace platform
+        } // namespace platform
 
         /**
          * features - compile-time feature flags
@@ -108,7 +109,7 @@ namespace simbi {
 #else
                 false;
 #endif
-        }   // namespace features
+        } // namespace features
 
         /**
          * types - compile-time type definitions based on configuration
@@ -124,7 +125,7 @@ namespace simbi {
 #else
                 double;
 #endif
-        }   // namespace types
+        } // namespace types
 
         /**
          * constants - hardware/algorithm constants based on configuration
@@ -144,8 +145,8 @@ namespace simbi {
 
             // algorithm parameters
             inline constexpr std::int64_t max_iterations = 1000;
-        }   // namespace constants
-    }   // namespace build
+        } // namespace constants
+    } // namespace build
 
     /**
      * Backward compatibility layer
@@ -176,21 +177,18 @@ namespace simbi {
         inline bool use_omp = false;
 
         // convert from new platform detection to old enum
-        constexpr Platform BuildPlatform =
-            build::platform::is_gpu ? Platform::GPU : Platform::CPU;
+        constexpr Platform BuildPlatform = build::platform::is_gpu ? Platform::GPU : Platform::CPU;
 
-        constexpr Runtime BuildRuntime =
-            build::platform::is_cuda  ? Runtime::CUDA
-            : build::platform::is_hip ? Runtime::ROCM
-                                      : Runtime::CPU;
+        constexpr Runtime BuildRuntime = build::platform::is_cuda  ? Runtime::CUDA
+                                         : build::platform::is_hip ? Runtime::ROCM
+                                                                   : Runtime::CPU;
 
         // convert from new warp size constant
         constexpr std::uint64_t WARP_SIZE = build::constants::warp_size;
 
         // convert from new velocity feature
-        constexpr Velocity VelocityType = build::features::four_velocity
-                                              ? Velocity::FourVelocity
-                                              : Velocity::Beta;
+        constexpr Velocity VelocityType =
+            build::features::four_velocity ? Velocity::FourVelocity : Velocity::Beta;
 
         // other feature flag conversions
         constexpr bool debug_mode      = build::features::debug;
@@ -205,12 +203,12 @@ namespace simbi {
 
         // these shortcuts are actually useful - keep them
         constexpr bool on_gpu = build::platform::is_gpu;
-    }   // namespace global
+    } // namespace global
 
     // Expose real in global namespace for backward compatibility
     // but this is bad practice - [TODO] consider removing in future versions
     using real = build::types::real;
-}   // namespace simbi
+} // namespace simbi
 
 using namespace simbi::build::types;
 using namespace simbi::build::constants;
@@ -225,13 +223,9 @@ using namespace simbi::build;
  */
 #if GPU_ENABLED
 #if defined(CUDA_ENABLED) || defined(HIP_ENABLED)
-#define DEV        __device__
-#define KERNEL     __global__
-#define DUAL       __host__ __device__
-#define STATIC     __host__ __device__ inline
-#define EXTERN     extern __shared__
-#define STATIC_VAR __device__ volatile
-#define SHARED     __shared__
+#define DEV    __device__
+#define KERNEL __global__
+#define DUAL   __host__ __device__
 
 #if CUDA_ENABLED
 #include <cuda_runtime.h>
@@ -239,35 +233,17 @@ using namespace simbi::build;
 #include <hip/hip_runtime.h>
 #endif
 
-// these macros should be replaced with template functions
-#define SINGLE(kernel_name, ...) kernel_name<<<1, 1>>>(__VA_ARGS__);
-#define CALL(kernel_name, gridsize, blocksize, ...)                            \
-    kernel_name<<<(gridsize), (blocksize)>>>(__VA_ARGS__);
 #else
 // fallbacks for other GPU platforms - should never reach here
 #define DEV
 #define KERNEL
 #define DUAL
-#define STATIC     inline
-#define EXTERN     static
-#define STATIC_VAR static
-#define SHARED     const
-
-#define SINGLE(kernel_name, ...)                    kernel_name(__VA_ARGS__);
-#define CALL(kernel_name, gridsize, blocksize, ...) kernel_name(__VA_ARGS__);
 #endif
 #else
 // CPU mode
 #define DEV
 #define KERNEL
 #define DUAL
-#define STATIC     inline
-#define EXTERN     static
-#define STATIC_VAR static
-#define SHARED     const
-
-#define SINGLE(kernel_name, ...)                    kernel_name(__VA_ARGS__);
-#define CALL(kernel_name, gridsize, blocksize, ...) kernel_name(__VA_ARGS__);
 #endif
 
-#endif   // CONFIG_HPP
+#endif // CONFIG_HPP

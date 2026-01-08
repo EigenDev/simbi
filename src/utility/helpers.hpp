@@ -50,22 +50,23 @@
 #define HELPERS_HIP_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"              // for real, STATIC, std::uint64_t, sint
-#include "containers/vector.hpp"   // for vector_t
-#include "io/exceptions.hpp"       // for ErrorCode
-#include "utility/enums.hpp"       // for geometry_t, BoundaryCondition, Solver
-#include <H5Cpp.h>       // for H5::Exception, H5::DataSpace, H5::DataType, etc
-#include <cmath>         // for sqrt, exp, INFINITY
-#include <concepts>      // for std::integral, std::floating_point
-#include <cstdint>       // for std::uint64_t, std::int64_t
-#include <cstdlib>       // for abs, size_t
-#include <iterator>      // for std::disance, etc
-#include <memory>        // for std::unique_ptr, std::shared_ptr
-#include <stdexcept>     // for std::runtime_error, std::out_of_range
-#include <string>        // for string, operator<=>
-#include <tuple>         // for tuple, make_tuple, get
-#include <type_traits>   // for is_same_v, is_integral_v, is_floating_point_v
-#include <utility>       // for move, forward
+#include "compat.hpp"            // for real, DEV, std::uint64_t, sint
+#include "containers/vector.hpp" // for vector_t
+#include "io/exceptions.hpp"     // for ErrorCode
+#include "utility/enums.hpp"     // for geometry_t, BoundaryCondition, Solver
+
+#include <H5Cpp.h>     // for H5::Exception, H5::DataSpace, H5::DataType, etc
+#include <cmath>       // for sqrt, exp, INFINITY
+#include <concepts>    // for std::integral, std::floating_point
+#include <cstdint>     // for std::uint64_t, std::int64_t
+#include <cstdlib>     // for abs, size_t
+#include <iterator>    // for std::disance, etc
+#include <memory>      // for std::unique_ptr, std::shared_ptr
+#include <stdexcept>   // for std::runtime_error, std::out_of_range
+#include <string>      // for string, operator<=>
+#include <tuple>       // for tuple, make_tuple, get
+#include <type_traits> // for is_same_v, is_integral_v, is_floating_point_v
+#include <utility>     // for move, forward
 
 // Some useful global constants
 constexpr real QUIRK_THRESHOLD = 1e-4;
@@ -75,10 +76,6 @@ constexpr real QUIRK_THRESHOLD = 1e-4;
 // extern real gpu_theoretical_bw;   //  = 1875e6 * (192.0 / 8.0) * 2 / 1e9;
 
 namespace simbi::helpers {
-    // forward declarations
-    STATIC real minmod(real a, real b, real c);
-    STATIC real vanLeer(real a, real b);
-
     //==========================================================================
     // TEMPLATES
     //==========================================================================
@@ -95,8 +92,7 @@ namespace simbi::helpers {
      * @return column index
      */
     template <typename index_type, typename T>
-    STATIC index_type
-    get_column(index_type idx, T width, T length = 1, index_type k = 0)
+    DEV index_type get_column(index_type idx, T width, T length = 1, index_type k = 0)
     {
         idx -= (k * width * length);
         return idx % width;
@@ -114,8 +110,7 @@ namespace simbi::helpers {
      * @return row index
      */
     template <typename index_type, typename T>
-    STATIC index_type
-    get_row(index_type idx, T width, T length = 1, index_type k = 0)
+    DEV index_type get_row(index_type idx, T width, T length = 1, index_type k = 0)
     {
         idx -= (k * width * length);
         return idx / width;
@@ -132,7 +127,7 @@ namespace simbi::helpers {
      * @return height index
      */
     template <typename index_type, typename T>
-    STATIC index_type get_height(index_type idx, T width, T length)
+    DEV index_type get_height(index_type idx, T width, T length)
     {
         return idx / width / length;
     }
@@ -152,7 +147,7 @@ namespace simbi::helpers {
      * @return maximum
      */
     template <typename T>
-    STATIC constexpr T my_max(const T a, const T b)
+    DEV constexpr T my_max(const T a, const T b)
     {
         return a > b ? a : b;
     }
@@ -166,7 +161,7 @@ namespace simbi::helpers {
      * @return minimum
      */
     template <typename T>
-    STATIC constexpr T my_min(const T a, const T b)
+    DEV constexpr T my_min(const T a, const T b)
     {
         return a < b ? a : b;
     }
@@ -181,7 +176,7 @@ namespace simbi::helpers {
      * @return maximum
      */
     template <typename T>
-    STATIC constexpr T my_max3(const T a, const T b, const T c)
+    DEV constexpr T my_max3(const T a, const T b, const T c)
     {
         return (a > b) ? (a > c ? a : c) : b > c ? b : c;
     }
@@ -196,7 +191,7 @@ namespace simbi::helpers {
      * @return minimum
      */
     template <typename T>
-    STATIC constexpr T my_min3(const T a, const T b, const T c)
+    DEV constexpr T my_min3(const T a, const T b, const T c)
     {
         return (a < b) ? (a < c ? a : c) : b < c ? b : c;
     }
@@ -217,52 +212,68 @@ namespace simbi::helpers {
      * @return sign of val
      */
     template <typename T>
-    STATIC constexpr std::int64_t sgn(T val)
+    DEV constexpr std::int64_t sgn(T val)
     {
         return (T(0) < val) - (val < T(0));
+    }
+
+    // constexpr absolute value helper (std::abs not constexpr until c++23)
+    template <typename T>
+    DEV constexpr T my_abs(T x)
+    {
+        return x < T(0) ? -x : x;
+    }
+
+    /**
+     * @brief compute the minmod slope limiter
+     *
+     * @param x
+     * @param y
+     * @return minmod value between x and y
+     */
+    DEV inline constexpr real minmod(const real x, const real y)
+    {
+        return 0.5 * my_abs(sgn(x) + sgn(y)) * sgn(x) * my_min(my_abs(x), my_abs(y));
+    }
+
+    /**
+     * @brief compute the minmod slope limiter
+     *
+     * @param x
+     * @param y
+     * @param z
+     * @return minmod value between x, y, and z
+     */
+    DEV inline constexpr real minmod(const real x, const real y, const real z)
+    {
+        return 0.25 * my_abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) *
+               my_min3(my_abs(x), my_abs(y), my_abs(z));
+    }
+
+    /**
+     * @brief compute the van Leer slope limiter (van Leer 1977)
+     *
+     * @param x
+     * @param y
+     * @return van Leer value between x and y
+     */
+    DEV inline constexpr real vanLeer(const real x, const real y)
+    {
+        if (x * y > 0.0) {
+            return static_cast<real>(2.0) * (x * y) / (x + y);
+        }
+        return static_cast<real>(0.0);
     }
 
     //---------------------------------------------------------------------------------------------------------
     //  HELPER-METHODS
 
-    /**
-     * @brief set the riemann solver function pointer on
-     * the device or the host depending on the platform
-     *
-     * @tparam T
-     * @param hydro_class
-     * @return void
-     */
-    template <typename T>
-    KERNEL void hybrid_set_riemann_solver(T hydro_class)
-    {
-        hydro_class->set_riemann_solver();
-    }
-
-    /**
-     * @brief set the face area function pointer on
-     * the device or the host depending on the platform
-     *
-     * @tparam T
-     * @param hydro_class
-     * @return void
-     */
-    template <typename T>
-    KERNEL void hybrid_set_mesh_funcs(T geom_class)
-    {
-        geom_class->initialize_function_pointers();
-    }
-
     // the plm gradient for generic hydro
     template <is_hydro_primitive_c prim_t>
-    STATIC prim_t plm_gradient(
-        const prim_t& pl,
-        const prim_t& pc,
-        const prim_t& pr,
-        const real plm_theta
-    )
+    DEV prim_t
+    plm_gradient(const prim_t& pl, const prim_t& pc, const prim_t& pr, const real plm_theta)
     {
-        prim_t result;
+        prim_t         result;
         constexpr auto count = prim_t::nmem;
         for (std::uint64_t qq = 0; qq < count; qq++) {
             if constexpr (is_mhd_c<prim_t>) {
@@ -312,7 +323,7 @@ namespace simbi::helpers {
         const std::uint64_t radius,
         const std::uint64_t total_zones,
         const std::uint64_t real_zones,
-        const float delta_t
+        const float         delta_t
     );
 
     // separate values in a string using custom delimiter
@@ -339,10 +350,10 @@ namespace simbi::helpers {
 
     // Quick sort implementation
     template <typename T, std::integral index_type>
-    DUAL void recursiveQuickSort(T arr[], index_type low, index_type high);
+    DUAL void recursive_quicksort(T arr[], index_type low, index_type high);
 
     template <typename T, std::integral index_type>
-    DUAL void iterativeQuickSort(T arr[], index_type low, index_type high);
+    DUAL void iterative_quicksort(T arr[], index_type low, index_type high);
 
     template <typename T>
     DUAL bool goes_to_zero(T val)
@@ -354,12 +365,6 @@ namespace simbi::helpers {
     DUAL bool approx_equal(T a, T b)
     {
         return std::abs(a - b) < global::epsilon;
-    }
-
-    template <typename T>
-    DUAL bool less_than_or_equal(T a, T b)
-    {
-        return (a < b) || is_close(a, b);
     }
 
     template <typename T>
@@ -377,109 +382,6 @@ namespace simbi::helpers {
     std::string get_color_code(color_t color);
 
     /**
-     * @brief the next permutation in the set {1,2} or {1, 2, 3}
-     *
-     * @param nhat normal component value
-     * @param step permutation steps
-     * @return next permutation
-     */
-    STATIC
-    constexpr auto next_perm(const std::uint64_t nhat, const std::uint64_t step)
-    {
-        return ((nhat - 1) + step) % 3 + 1;
-    };
-
-    template <std::uint64_t Rank>
-    DUAL constexpr auto unravel_idx(const std::uint64_t idx, const auto& shape)
-    {
-        iarray<Rank> coords;
-        auto stride = 1;
-        if constexpr (global::col_major) {
-            // Column major: shape=(nk,nj,ni)
-            // Want [k,j,i] where i is fastest
-            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
-                coords[Rank - 1 - ii] = (idx / stride) % shape[Rank - 1 - ii];
-                stride *= shape[Rank - 1 - ii];
-            }
-        }
-        else {
-            // Row major: shape=(nk,nj,ni)
-            // Want [i,j,k] where i is fastest
-            for (std::uint64_t ii = Rank - 1; ii < Rank; --ii) {
-                coords[Rank - 1 - ii] = (idx / stride) % shape[ii];
-                stride *= shape[ii];
-            }
-        }
-
-        return coords;
-    }
-
-    /**
-     * @brief Get the 3D idx object depending on row-major or column-major
-     * ordering
-     *
-     * @param ii column index
-     * @param jj row index
-     * @param kk height index
-     * @param nx number of columns
-     * @param ny number of rows
-     * @param nz number of heights
-     * @return row-major or column-major index for 3D array
-     */
-    STATIC
-    auto idx3(
-        const std::uint64_t ii,
-        const std::uint64_t jj,
-        const std::uint64_t kk,
-        const std::uint64_t nx,
-        const std::uint64_t ny,
-        const std::uint64_t nk
-    )
-    {
-        if constexpr (global::col_major) {
-            return ii * nk * ny + jj * nk + kk;
-        }
-        return kk * nx * ny + jj * nx + ii;
-    }
-
-    /**
-     * @brief kronecker delta
-     *
-     * @param i
-     * @param j
-     * @return 1 for identity, 0 otherwise
-     */
-    STATIC
-    constexpr std::uint64_t kronecker(std::uint64_t i, std::uint64_t j)
-    {
-        return (i == j);
-    }
-
-    /**
-     * @brief Get the 2d idx object depending on row-major or column-major
-     * ordering
-     *
-     * @param ii column index
-     * @param jj row index
-     * @param nx number of columns
-     * @param ny number of rows
-     * @return row-major or column-major index for 2D array
-     */
-    STATIC
-    auto idx2(
-        const std::uint64_t ii,
-        const std::uint64_t jj,
-        const std::uint64_t nx,
-        const std::uint64_t ny
-    )
-    {
-        if constexpr (global::col_major) {
-            return ii * ny + jj;
-        }
-        return jj * nx + ii;
-    }
-
-    /**
      * @brief check if left and right pressures meet the Quirk (1994)
      * criterion
      *
@@ -487,13 +389,12 @@ namespace simbi::helpers {
      * @param pr right pressure
      * @return true if smoothing needed, false otherwise
      */
-    STATIC
-    bool quirk_strong_shock(const real pl, const real pr)
+    DEV inline constexpr bool quirk_strong_shock(const real pl, const real pr)
     {
-        return std::abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
+        return my_abs(pr - pl) / my_min(pl, pr) > QUIRK_THRESHOLD;
     }
 
-    STATIC constexpr std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>
+    DEV constexpr std::tuple<std::uint64_t, std::uint64_t, std::uint64_t>
     get_indices(const std::uint64_t idx, const auto nx, const auto ny)
     {
         const auto kk = get_height(idx, nx, ny);
@@ -507,11 +408,19 @@ namespace simbi::helpers {
      * @param gamma adiabatic index
      * @param tau energy density minus rest mass energy
      * @param d lab frame density
-     * @param S lab frame momentum density
+     * @param s lab frame momentum density
      * @param p pressure
      */
-    DEV std::tuple<real, real>
-    newton_fg(real gamma, real tau, real d, real s, real p);
+    DEV inline std::tuple<real, real> newton_fg(real gamma, real tau, real d, real s, real p)
+    {
+        const auto et  = tau + d + p;
+        const auto v2  = s * s / (et * et);
+        const auto w   = 1.0 / std::sqrt(1.0 - v2);
+        const auto rho = d / w;
+        const auto eps = (tau + (1.0 - w) * d + (1.0 - w * w) * p) / (d * w);
+        const auto c2  = (gamma - 1) * gamma * eps / (1.0 + gamma * eps);
+        return std::make_tuple((gamma - 1.0) * rho * eps - p, c2 * v2 - 1.0);
+    }
 
     /**
      * @brief calculate the bracketing function described in Kastaun,
@@ -519,16 +428,17 @@ namespace simbi::helpers {
      *
      * @param mu minimization variable
      * @param beesq rescaled magnetic field squared
+     * @param beedrsq inner product between rescaled magnetic field & momentum
      * @param r vector of rescaled momentum
-     * @param beedr inner product between rescaled magnetic field & momentum
      * @return Eq. (49)
      */
-    DEV real kkc_fmu49(
-        const real mu,
-        const real beesq,
-        const real beedrsq,
-        const real r
-    );
+    DEV inline real kkc_fmu49(const real mu, const real beesq, const real beedrsq, const real r)
+    {
+        constexpr real hlim    = 1.0;
+        const real     x       = 1.0 / (1.0 + mu * beesq);
+        const real     rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
+        return mu * std::sqrt(hlim * hlim + rbar_sq) - 1.0;
+    }
 
     /**
      * @brief Returns the master function described in Kastaun, Kalinani, &
@@ -536,14 +446,15 @@ namespace simbi::helpers {
      *
      * @param mu minimization variable
      * @param r vector of rescaled momentum
+     * @param rperp perpendicular momentum
      * @param beesq rescaled magnetic field squared
-     * @param beedr inner product between rescaled magnetic field & momentum
+     * @param beedrsq inner product between rescaled magnetic field & momentum
      * @param qterm rescaled gas energy density
      * @param dterm mass density
      * @param gamma adiabatic index
      * @return Eq. (44)
      */
-    DEV real kkc_fmu44(
+    DEV inline real kkc_fmu44(
         const real mu,
         const real r,
         const real rperp,
@@ -552,51 +463,81 @@ namespace simbi::helpers {
         const real qterm,
         const real dterm,
         const real gamma
-    );
-
-    DEV real find_mu_plus(const real beesq, const real beedrsq, const real r);
-
-    /**
-     * @brief compute the minmod slope limiter
-     *
-     * @param x
-     * @param y
-     * @param z
-     * @return minmod value between x, y, and z
-     */
-    STATIC real minmod(const real x, const real y, const real z)
+    )
     {
-        return 0.25 * std::abs(sgn(x) + sgn(y)) * (sgn(x) + sgn(z)) *
-               my_min3(std::abs(x), std::abs(y), std::abs(z));
-    };
+        constexpr real h0      = 1.0;
+        const real     x       = 1.0 / (1.0 + mu * beesq);
+        const real     rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
+        const real     qbar    = qterm - 0.5 * (beesq + mu * mu * x * x * beesq * rperp);
 
-    /**
-     * @brief compute the minmod slope limiter
-     *
-     * @param x
-     * @param y
-     * @return minmod value between x and y
-     */
-    STATIC real minmod(const real x, const real y)
-    {
-        return 0.5 * std::abs(sgn(x) + sgn(y)) * sgn(x) *
-               my_min(std::abs(x), std::abs(y));
-    };
+        const real z_upper = r / h0;
+        const real v_limit = z_upper / std::sqrt(1.0 + z_upper * z_upper);
+        const real vsq     = my_min(mu * mu * rbar_sq, v_limit * v_limit);
+        const real gbsq    = vsq / (1.0 - vsq);
+        const real g       = std::sqrt(1.0 + gbsq);
 
-    /**
-     * @brief compute the van Leer slope limiter (van Leer 1977)
-     *
-     * @param x
-     * @param y
-     * @return van Leer value between x and y
-     */
-    STATIC real vanLeer(const real x, const real y)
+        const real rhohat = dterm / g;
+        const real eps    = g * (qbar - mu * rbar_sq) + gbsq / (1.0 + g);
+
+        constexpr auto pfloor  = 1.0e-3;
+        const real     eps_min = pfloor / (rhohat * (gamma - 1.0));
+        const real     epshat  = my_max(eps, eps_min);
+
+        const real phat = (gamma - 1.0) * rhohat * epshat;
+        const real ahat = phat / (rhohat * (1.0 + epshat));
+
+        const real nu_hatA = (1.0 + ahat) * (1.0 + epshat) / g;
+        const real nu_hatB = (1.0 + ahat) * (1.0 + qbar - mu * rbar_sq);
+        const real nu_hat  = (eps < eps_min) ? nu_hatA : my_max(nu_hatA, nu_hatB);
+
+        const real muhat = 1.0 / (nu_hat + rbar_sq * mu);
+        return mu - muhat;
+    }
+
+    DEV inline real find_mu_plus(const real beesq, const real beedrsq, const real r)
     {
-        if (x * y > 0.0) {
-            return static_cast<real>(2.0) * (x * y) / (x + y);
+        constexpr real h0 = 1.0;
+
+        if (r < h0) {
+            return 1.0 / h0;
         }
-        return static_cast<real>(0.0);
-    };
+
+        real mu_lower = 0.0;
+        real mu_upper = 1.0;
+
+        real f_upper = kkc_fmu49(mu_upper, beesq, beedrsq, r);
+        while (f_upper < 0.0) {
+            mu_upper *= 2.0;
+            f_upper = kkc_fmu49(mu_upper, beesq, beedrsq, r);
+        }
+
+        const std::int64_t max_iter = 50;
+        std::uint64_t      iter     = 0;
+        real               f_mid, mu_mid = 1.0;
+        real               f_lower = kkc_fmu49(mu_lower, beesq, beedrsq, r);
+
+        while (iter < max_iter && (mu_upper - mu_lower) > global::epsilon) {
+            mu_mid = 0.5 * (mu_lower + mu_upper);
+            f_mid  = kkc_fmu49(mu_mid, beesq, beedrsq, r);
+
+            if (std::abs(f_mid) < global::epsilon) {
+                break;
+            }
+
+            if (f_mid * f_lower < 0.0) {
+                mu_upper = mu_mid;
+                f_upper  = f_mid;
+            }
+            else {
+                mu_lower = mu_mid;
+                f_lower  = f_mid;
+            }
+
+            iter++;
+        }
+
+        return mu_mid * 1.000001;
+    }
 
     /**
      * @brief formats a real number to a string in the format 000_000 etc
@@ -609,15 +550,13 @@ namespace simbi::helpers {
     std::string error_code_to_string(const ErrorCode code);
 
     template <std::uint64_t Rank>
-    DUAL static auto
-    memory_layout_coordinates(auto idx, const iarray<Rank>& shape)
-        -> iarray<Rank>;
+    DUAL static auto memory_layout_coordinates(auto idx, const iarray<Rank>& shape) -> iarray<Rank>;
 
     template <typename F, std::size_t... Is>
     void for_each_index(F&& func, std::index_sequence<Is...>)
     {
         // this expands the lambda call for each index in the sequence
-        (func(Is), ...);   // fold expression
+        (func(Is), ...); // fold expression
     }
 
     // template function to create the index sequence and call the helper
@@ -639,17 +578,14 @@ namespace simbi::helpers {
     template <typename... Args>
     std::string string_format(const std::string& format, Args... args)
     {
-        size_t size = snprintf(nullptr, 0, format.c_str(), args...) +
-                      1;   // Extra space for '\0'
+        size_t size = snprintf(nullptr, 0, format.c_str(), args...) + 1; // Extra space for '\0'
         if (size <= 0) {
             throw std::runtime_error("Error during formatting.");
         }
         std::unique_ptr<char[]> buf(new char[size]);
         snprintf(buf.get(), size, format.c_str(), args...);
-        return std::string(
-            buf.get(),
-            buf.get() + size - 1
-        );   // We don't want the '\0' inside
+        return std::string(buf.get(),
+                           buf.get() + size - 1); // We don't want the '\0' inside
     }
 
     /***
@@ -661,9 +597,7 @@ namespace simbi::helpers {
     template <const unsigned num, const char separator>
     void separate(std::string& input)
     {
-        for (auto it = input.rbegin() + 1;
-             (num + 0) <= std::distance(it, input.rend());
-             ++it) {
+        for (auto it = input.rbegin() + 1; (num + 0) <= std::distance(it, input.rend()); ++it) {
             std::advance(it, num - 1);
             it = std::make_reverse_iterator(input.insert(it.base(), separator));
         }
@@ -708,8 +642,7 @@ namespace simbi::helpers {
         T q = 0.125 * b * b * b - 0.5 * b * c + d;
         T m = solve_cubic<real>(
             p,
-            0.25 * p * p + 0.01171875 * b * b * b * b - e + 0.25 * b * d -
-                0.0625 * b * b * c,
+            0.25 * p * p + 0.01171875 * b * b * b * b - e + 0.25 * b * d - 0.0625 * b * b * c,
             -0.125 * q * q
         );
         if (goes_to_zero(q)) {
@@ -717,8 +650,8 @@ namespace simbi::helpers {
                 return 0;
             };
 
-            std::int64_t nroots = 0;
-            T sqrt_2m           = std::sqrt(2.0 * m);
+            std::int64_t nroots  = 0;
+            T            sqrt_2m = std::sqrt(2.0 * m);
             if (-m - p > 0.0) {
                 T delta       = std::sqrt(2.0 * (-m - p));
                 res[nroots++] = -0.25 * b + 0.5 * (sqrt_2m - delta);
@@ -734,10 +667,10 @@ namespace simbi::helpers {
 
             constexpr auto zero = static_cast<std::int64_t>(0);
             if constexpr (platform::is_gpu) {
-                iterativeQuickSort(res, zero, nroots - 1);
+                iterative_quicksort(res, zero, nroots - 1);
             }
             else {
-                recursiveQuickSort(res, zero, nroots - 1);
+                recursive_quicksort(res, zero, nroots - 1);
             }
             return nroots;
         }
@@ -745,8 +678,8 @@ namespace simbi::helpers {
         if (m < 0.0) {
             return 0;
         };
-        T sqrt_2m           = std::sqrt(2.0 * m);
-        std::int64_t nroots = 0;
+        T            sqrt_2m = std::sqrt(2.0 * m);
+        std::int64_t nroots  = 0;
         if (-m - p + q / sqrt_2m >= 0.0) {
             T delta       = std::sqrt(2.0 * (-m - p + q / sqrt_2m));
             res[nroots++] = 0.5 * (-sqrt_2m + delta) - 0.25 * b;
@@ -761,10 +694,10 @@ namespace simbi::helpers {
 
         constexpr auto zero = static_cast<std::int64_t>(0);
         if constexpr (platform::is_gpu) {
-            iterativeQuickSort(res, zero, nroots - 1);
+            iterative_quicksort(res, zero, nroots - 1);
         }
         else {
-            recursiveQuickSort(res, zero, nroots - 1);
+            recursive_quicksort(res, zero, nroots - 1);
         }
         return nroots;
     }
@@ -782,8 +715,8 @@ namespace simbi::helpers {
     template <typename T, typename index_type>
     DUAL index_type partition(T arr[], index_type low, index_type high)
     {
-        T pivot      = arr[high];   // Choose the rightmost element as the pivot
-        index_type i = low - 1;     // Index of the smaller element
+        T          pivot = arr[high]; // Choose the rightmost element as the pivot
+        index_type i     = low - 1;   // Index of the smaller element
 
         for (index_type j = low; j <= high - 1; j++) {
             if (arr[j] <= pivot) {
@@ -792,24 +725,24 @@ namespace simbi::helpers {
             }
         }
         myswap(arr[i + 1], arr[high]);
-        return i + 1;   // Return the pivot index
+        return i + 1; // Return the pivot index
     }
 
     // Quick sort implementation
     template <typename T, std::integral index_type>
-    DUAL void recursiveQuickSort(T arr[], index_type low, index_type high)
+    DUAL void recursive_quicksort(T arr[], index_type low, index_type high)
     {
         if (low < high) {
             index_type pivotIndex = partition(arr, low, high);
 
             // Recursively sort the left and right subarrays
-            recursiveQuickSort(arr, low, pivotIndex - 1);
-            recursiveQuickSort(arr, pivotIndex + 1, high);
+            recursive_quicksort(arr, low, pivotIndex - 1);
+            recursive_quicksort(arr, pivotIndex + 1, high);
         }
     }
 
     template <typename T, std::integral index_type>
-    DUAL void iterativeQuickSort(T arr[], index_type low, index_type high)
+    DUAL void iterative_quicksort(T arr[], index_type low, index_type high)
     {
         // Create an auxiliary stack
         T stack[4];
@@ -853,25 +786,21 @@ namespace simbi::helpers {
         const std::uint64_t radius,
         const std::uint64_t total_zones,
         const std::uint64_t real_zones,
-        const float delta_t
+        const float         delta_t
     )
     {
         // the advance step does one write plus 1.0 + dim * 2 * hr reads
-        const float advance_contr =
-            real_zones * sizeof(T) * (1.0 + (1.0 + dim * 2 * radius));
+        const float advance_contr    = real_zones * sizeof(T) * (1.0 + (1.0 + dim * 2 * radius));
         const float cons2prim_contr  = total_zones * sizeof(U);
         const float ghost_conf_contr = (total_zones - real_zones) * sizeof(T);
-        return (advance_contr + cons2prim_contr + ghost_conf_contr) /
-               (delta_t * 1e9);
+        return (advance_contr + cons2prim_contr + ghost_conf_contr) / (delta_t * 1e9);
     }
 
     template <std::uint64_t Rank>
-    DEV static auto
-    memory_layout_coordinates(auto idx, const iarray<Rank>& shape)
-        -> iarray<Rank>
+    DEV static auto memory_layout_coordinates(auto idx, const iarray<Rank>& shape) -> iarray<Rank>
     {
         iarray<Rank> coords;
-        auto stride = 1;
+        auto         stride = 1;
         if constexpr (global::col_major) {
             // Column major: shape=(nk,nj,ni)
             // Want [k,j,i] where k is fastest
@@ -891,16 +820,6 @@ namespace simbi::helpers {
         return coords;
     }
 
-    constexpr std::uint64_t reconstruction_to_ghosts(reconstruction_t rec)
-    {
-        if (rec == reconstruction_t::PLM) {
-            return 2;
-        }
-        else {
-            return 1;   // we're 1st order
-        }
-    }
-
-}   // namespace simbi::helpers
+} // namespace simbi::helpers
 
 #endif
