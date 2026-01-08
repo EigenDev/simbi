@@ -2,9 +2,9 @@
 #include "compute/computation.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "hesi/adapter.hpp"
-#include "hesi/core/types.hpp"
-#include "hesi/mem/transfer.hpp"
+#include "xpu/execution/cpu_space.hpp"
+#include "xpu/execution/cuda_space.hpp"
+#include "xpu/execution/executor.hpp"
 
 #include <cassert>
 #include <cstddef>
@@ -18,35 +18,29 @@ int main()
 {
     std::cout << "testing field map operations..." << std::endl;
 
-    auto backend = het::info::is_gpu ? het::backend_type_t::cuda
-                                     : het::backend_type_t::cpu;
-    het::locality_t loc{backend, 0};
-    het::stream_t stream(backend);
-    het::executor_t exec(stream);
+#ifdef XPU_CUDA_AVAILABLE
+    using execution_space = xpu::cuda_space;
+#else
+    using execution_space = xpu::cpu_space;
+#endif
 
-    grid::domain_t<1> alloc_domain({-1}, {11});
-    grid::field_t<real, 1> u(alloc_domain, loc);
+    xpu::executor_t<execution_space> exec(0);
+    grid::domain_t<1>                alloc_domain({-1}, {11});
+    grid::field_t<real, 1>           u(alloc_domain);
 
     std::int64_t halo_width = 1;
-    auto interior           = alloc_domain.contract(halo_width);
+    auto         interior   = alloc_domain.contract(halo_width);
 
     u           = compute::constant(alloc_domain, 0.0).with(exec);
     u[interior] = compute::constant(interior, 1.0).with(exec);
 
-    real scale = 2.5;
-    u[interior] =
-        u[interior].map([=] DUAL(real v) { return v * scale; }).with(exec);
+    real scale  = 2.5;
+    u[interior] = u[interior].map([=] DUAL(real v) { return v * scale; }).with(exec);
 
-    exec.stream().synchronize();
+    exec.sync();
 
     std::vector<real> host_data(alloc_domain.size());
-    het::mem::copy(
-        host_data.data(),
-        het::locality_t::host(),
-        u.view().data(),
-        u.locality(),
-        alloc_domain.size() * sizeof(real)
-    );
+    std::copy(u.data(), u.data() + alloc_domain.size(), host_data.data());
 
     assert(host_data[0] == 0.0);
     assert(host_data[11] == 0.0);

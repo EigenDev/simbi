@@ -10,9 +10,10 @@
 #include "grid/connectivity.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "hesi/adapter.hpp"
-#include "hesi/core/types.hpp"
 #include "test_helpers.hpp"
+#include "xpu/execution/cpu_space.hpp"
+#include "xpu/execution/cuda_space.hpp"
+#include "xpu/execution/executor.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -38,13 +39,15 @@ int main()
     grid::domain_t<2> fine_active{{4, 4}, {12, 12}};
     grid::domain_t<2> fine_alloc = domain_algebra::expand(fine_active, iarray<2>{2, 2});
 
-    auto backend = het::info::is_gpu ? het::backend_type_t::cuda : het::backend_type_t::cpu;
-    het::locality_t loc{backend, 0};
-    het::stream_t   stream(backend);
-    het::executor_t exec(stream);
+#ifdef XPU_CUDA_AVAILABLE
+    using execution_space = xpu::cuda_space;
+#else
+    using execution_space = xpu::cpu_space;
+#endif
 
-    field_t<double, 2> coarse(coarse_domain, loc);
-    field_t<double, 2> fine(fine_alloc, loc);
+    xpu::executor_t<execution_space> exec(0);
+    field_t<double, 2>               coarse(coarse_domain);
+    field_t<double, 2>               fine(fine_alloc);
 
     // test restriction
     fine   = compute::constant(fine.domain(), 10.0).with(exec);
@@ -71,7 +74,7 @@ int main()
     // test flux correction
     grid::domain_t<2>               footprint{{2, 2}, {6, 6}};
     amr::flux_register_t<double, 2> flux_reg(footprint, ratio);
-    flux_reg.initialize_face(0, side_t::left, loc);
+    flux_reg.initialize_face(0, side_t::left);
 
     // create uniform cartesian geometry for test
     auto x1_map = geometry::uniform_map_t(0.0, 1.0);
@@ -82,11 +85,11 @@ int main()
 
     double dt = 0.1;
 
-    field_t<double, 2> c_flux(grid::domain_t<2>{{2, 2}, {3, 6}}, loc);
+    field_t<double, 2> c_flux(grid::domain_t<2>{{2, 2}, {3, 6}});
     c_flux = compute::constant(c_flux.domain(), 1.0).with(exec);
     flux_reg.accumulate_coarse(exec, c_flux, geo, 0, side_t::left, dt);
 
-    field_t<double, 2> f_flux(grid::domain_t<2>{{4, 4}, {6, 12}}, loc);
+    field_t<double, 2> f_flux(grid::domain_t<2>{{4, 4}, {6, 12}});
     f_flux = compute::constant(f_flux.domain(), 1.2).with(exec);
     flux_reg.accumulate_fine(exec, f_flux, geo, 0, side_t::left, dt);
 

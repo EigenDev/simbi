@@ -9,9 +9,10 @@
 #include "grid/mesh_config.hpp"
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
-#include "hesi/adapter.hpp"
-#include "hesi/core/types.hpp"
 #include "test_helpers.hpp"
+#include "xpu/execution/cpu_space.hpp"
+#include "xpu/execution/cuda_space.hpp"
+#include "xpu/execution/executor.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -20,13 +21,9 @@
 using namespace simbi;
 using namespace simbi::grid;
 
-struct reflect_policy_t {
-    double apply(
-        double val,
-        std::uint64_t /*dim*/,
-        side_t /*side*/,
-        boundary_type_t type
-    ) const
+struct reflect_policy_t
+{
+    double apply(double val, std::uint64_t /*dim*/, side_t /*side*/, boundary_type_t type) const
     {
         return (type == boundary_type_t::reflect) ? -val : val;
     }
@@ -38,20 +35,20 @@ int main()
 
     // setup: 4x4 active interior with 1-cell ghost ring
     grid::domain_t<2> alloc_domain{{-1, -1}, {5, 5}};
-    std::uint64_t halo_width = 1;
+    std::uint64_t     halo_width = 1;
 
-    auto backend = het::info::is_gpu ? het::backend_type_t::cuda
-                                     : het::backend_type_t::cpu;
-    het::locality_t loc{backend, 0};
-    het::stream_t stream(backend);
-    het::executor_t exec(stream);
+#ifdef XPU_CUDA_AVAILABLE
+    using execution_space = xpu::cuda_space;
+#else
+    using execution_space = xpu::cpu_space;
+#endif
 
-    field_t<double, 2> u(alloc_domain, loc);
+    xpu::executor_t<execution_space> exec(0);
+    field_t<double, 2>               u(alloc_domain);
 
     // initialize: interior = 10.0, ghosts = -999.0
     auto init = [](const iarray<2>& coord) {
-        bool inside =
-            coord[0] >= 0 && coord[0] < 4 && coord[1] >= 0 && coord[1] < 4;
+        bool inside = coord[0] >= 0 && coord[0] < 4 && coord[1] >= 0 && coord[1] < 4;
         return inside ? 10.0 : -999.0;
     };
 
