@@ -15,7 +15,6 @@ Doxyfile
 .clangd
 .vscode/
 .cache/
-.*
 !*.gitignore
 *.h5
 *.pdf
