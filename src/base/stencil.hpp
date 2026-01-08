@@ -5,7 +5,6 @@
 #include "utility/enums.hpp"
 
 #include <cassert>
-#include <cstddef>
 #include <cstdint>
 
 namespace simbi::base {
