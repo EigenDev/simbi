@@ -15,6 +15,7 @@ Doxyfile
 .clangd
 .vscode/
 .cache/
+gitrepo_home.txt
 !*.gitignore
 *.h5
 *.pdf
