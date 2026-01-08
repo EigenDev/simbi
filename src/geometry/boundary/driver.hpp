@@ -392,6 +392,13 @@ namespace simbi::geometry {
                 };
 
                 field[ghost.domain] = field[ghost.domain].remap(map).map(phys_op).with(exec);
+                // field[ghost.domain] = field[ghost.domain]
+                //                           .enum_map([](auto coord, auto c) {
+                //                               std::cout << "ghost coord: " << coord
+                //                                         << " value: " << c << "\n";
+                //                               return c;
+                //                           })
+                //                           .with(exec);
             }
         }
     };

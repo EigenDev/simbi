@@ -303,7 +303,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
-                fields.prim  = fields.cons.enum_map(to_primitive_t{gamma}).with(exec);
+                fields.prim  = fields.cons.map(to_primitive_t{gamma}).with(exec);
             }
         }
     };
@@ -332,8 +332,8 @@ namespace simbi::ecs {
                 prolongate_from_coarse(sim, lvl);
             }
 
-            // exchange halos between partitions
-            sim.exchange_halos(lvl);
+            // // exchange halos between partitions
+            // sim.exchange_halos(lvl);
         }
 
         template <typename Sim>

@@ -44,11 +44,9 @@ namespace simbi::numerics {
     {
         real gamma;
 
-        template <typename Cons, std::uint64_t Rank>
-        constexpr DEV maybe_t<typename Cons::counterpart_t>
-                      operator()(iarray<Rank> coord, const Cons& cons) const
+        template <typename Cons>
+        constexpr DEV maybe_t<typename Cons::counterpart_t> operator()(const Cons& cons) const
         {
-            std::cout << " coord: " << coord << "\n";
             return hydro::to_primitive(cons, gamma);
         }
     };
