@@ -51,22 +51,20 @@
 
 #include "compat.hpp"
 #include "io/exceptions.hpp"
+
 #include <type_traits>
 
 namespace simbi {
 
-    struct nothing_t {
+    struct nothing_t
+    {
         DUAL constexpr explicit nothing_t() : error_code(ErrorCode::NONE) {}
         DUAL constexpr explicit nothing_t(ErrorCode code) : error_code(code) {}
 
         // copy constructor
-        DUAL constexpr nothing_t(const nothing_t& other)
-            : error_code(other.error_code)
-        {
-        }
+        DUAL constexpr nothing_t(const nothing_t& other) : error_code(other.error_code) {}
         // move constructor
-        DUAL constexpr nothing_t(nothing_t&& other) noexcept
-            : error_code(other.error_code)
+        DUAL constexpr nothing_t(nothing_t&& other) noexcept : error_code(other.error_code)
         {
             other.error_code = ErrorCode::NONE;
         }
@@ -100,10 +98,7 @@ namespace simbi {
       public:
         using value_type = T;
 
-        DUAL constexpr maybe_t()
-            : valid{false}, this_value{}, error_code_(ErrorCode::NONE)
-        {
-        }
+        DUAL constexpr maybe_t() : valid{false}, this_value{}, error_code_(ErrorCode::NONE) {}
 
         DUAL constexpr maybe_t(nothing_t nothing)
             : valid{false}, this_value{}, error_code_(nothing.error_code)
@@ -116,22 +111,17 @@ namespace simbi {
         }
 
         DUAL constexpr maybe_t(T&& value)
-            : valid{true},
-              this_value{std::move(value)},
-              error_code_(ErrorCode::NONE)
+            : valid{true}, this_value{std::move(value)}, error_code_(ErrorCode::NONE)
         {
         }
 
         DUAL constexpr maybe_t(const maybe_t& other)
-            : valid{other.valid},
-              this_value{other.this_value},
-              error_code_(other.error_code_)
+            : valid{other.valid}, this_value{other.this_value}, error_code_(other.error_code_)
         {
         }
         // ctor deduced from the value type
         DUAL constexpr maybe_t(maybe_t&& other) noexcept
-            : valid{other.valid},
-              this_value{std::move(other.this_value)},
+            : valid{other.valid}, this_value{std::move(other.this_value)},
               error_code_(other.error_code_)
         {
             // Clear the source
@@ -199,35 +189,42 @@ namespace simbi {
             return *this;
         }
 
-        DUAL constexpr bool has_value() const { return valid; }
+        DUAL constexpr bool has_value() const
+        {
+            return valid;
+        }
 
-        DUAL constexpr const T& value() const& { return this_value; }
+        DUAL constexpr const T& value() const&
+        {
+            return this_value;
+        }
 
-        DUAL constexpr T& value() & { return this_value; }
+        DUAL constexpr T& value() &
+        {
+            return this_value;
+        }
 
-        DUAL constexpr T value() && { return std::move(this_value); }
-        DUAL constexpr ErrorCode error_code() const { return error_code_; }
+        DUAL constexpr T value() &&
+        {
+            return std::move(this_value);
+        }
+        DUAL constexpr ErrorCode error_code() const
+        {
+            return error_code_;
+        }
 
         template <typename U>
         DUAL constexpr T unwrap_or(U&& default_value) const&
         {
-            static_assert(
-                std::is_convertible_v<U, T>,
-                "U must be convertible to T"
-            );
-            return valid ? this_value
-                         : static_cast<T>(std::forward<U>(default_value));
+            static_assert(std::is_convertible_v<U, T>, "U must be convertible to T");
+            return valid ? this_value : static_cast<T>(std::forward<U>(default_value));
         }
 
         template <typename U>
         DUAL constexpr T unwrap_or(U&& default_value) &&
         {
-            static_assert(
-                std::is_convertible_v<U, T>,
-                "U must be convertible to T"
-            );
-            return valid ? std::move(this_value)
-                         : static_cast<T>(std::forward<U>(default_value));
+            static_assert(std::is_convertible_v<U, T>, "U must be convertible to T");
+            return valid ? std::move(this_value) : static_cast<T>(std::forward<U>(default_value));
         }
 
         template <typename F>
@@ -395,16 +392,25 @@ namespace simbi {
         }
 
         // reference access operators
-        DUAL constexpr T* operator->() { return std::addressof(this_value); }
+        DUAL constexpr T* operator->()
+        {
+            return std::addressof(this_value);
+        }
 
         DUAL constexpr const T* operator->() const
         {
             return std::addressof(this_value);
         }
 
-        DUAL constexpr T& operator*() & { return this_value; }
+        DUAL constexpr T& operator*() &
+        {
+            return this_value;
+        }
 
-        DUAL constexpr const T& operator*() const& { return this_value; }
+        DUAL constexpr const T& operator*() const&
+        {
+            return this_value;
+        }
 
         // in-place construction
         template <typename... Args>
@@ -415,49 +421,9 @@ namespace simbi {
             return this_value;
         }
 
-        // Math overloads with scalar types
-        template <typename U>
-        DUAL constexpr maybe_t<T> operator+(const U& rhs) const
-        {
-            if (valid) {
-                return maybe_t<T>{this_value + rhs};
-            }
-            return maybe_t<T>{Nothing};
-        }
-
-        template <typename U>
-        DUAL constexpr maybe_t<T> operator-(const U& rhs) const
-        {
-            if (valid) {
-                return maybe_t<T>{this_value - rhs};
-            }
-            return maybe_t<T>{Nothing};
-        }
-
-        template <typename U>
-        DUAL constexpr maybe_t<T> operator*(const U& rhs) const
-        {
-            if (valid) {
-                return maybe_t<T>{this_value * rhs};
-            }
-            return maybe_t<T>{Nothing};
-        }
-
-        template <typename U>
-        DUAL constexpr maybe_t<T> operator/(const U& rhs) const
-        {
-            if (valid) {
-                return maybe_t<T>{this_value / rhs};
-            }
-            return maybe_t<T>{Nothing};
-        }
-
-        // implicit conversion to T
-        DUAL constexpr operator T() const { return this_value; }
-
       private:
-        bool valid;
-        T this_value;
+        bool      valid;
+        T         this_value;
         ErrorCode error_code_;
     };
 
@@ -470,6 +436,6 @@ namespace simbi {
     {
         return maybe_t<T>(value);
     }
-}   // namespace simbi
+} // namespace simbi
 
 #endif
