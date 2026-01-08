@@ -1,9 +1,9 @@
-#ifndef CORE_GRAPH_STENCIL_HPP
-#define CORE_GRAPH_STENCIL_HPP
+#pragma once
 
 #include "base/concepts.hpp"
 #include "containers/vector.hpp"
 #include "utility/enums.hpp"
+
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -22,15 +22,14 @@ namespace simbi::base {
         else {
             // nvcc doesn't like false static_assert, so we switch to the
             // lambda trick
-            []<bool flag = false>() {
-                static_assert(flag, "Unsupported reconstruction order");
-            }();
+            []<bool flag = false>() { static_assert(flag, "Unsupported reconstruction order"); }();
         }
     }
 
     // compile-time stencil pattern generation
     template <std::uint64_t Rank, reconstruction_t Rec>
-    struct stencil_t {
+    struct stencil_t
+    {
         static constexpr std::uint64_t size = stencil_size<Rec>();
         using coord_array_t                 = vector_t<iarray<Rank>, size>;
 
@@ -40,7 +39,7 @@ namespace simbi::base {
             coord_array_t pattern{};
 
             if constexpr (Rec == reconstruction_t::PCM) {
-                pattern[0][direction] = -1;   // use left cell
+                pattern[0][direction] = -1; // use left cell
             }
             else if constexpr (Rec == reconstruction_t::PLM) {
                 // PLM: i-1, i, i+1
@@ -58,7 +57,7 @@ namespace simbi::base {
             coord_array_t pattern{};
 
             if constexpr (Rec == reconstruction_t::PCM) {
-                pattern[0][direction] = 0;   // use right cell
+                pattern[0][direction] = 0; // use right cell
             }
             else if constexpr (Rec == reconstruction_t::PLM) {
                 // PLM: i, i+1, i+2
@@ -108,6 +107,5 @@ namespace simbi::base {
         {
             return make_symmetric_stencil<Rank, 7>(direction);
         }
-    }   // namespace stencils
-}   // namespace simbi::base
-#endif
+    } // namespace stencils
+} // namespace simbi::base
