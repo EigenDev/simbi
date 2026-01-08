@@ -360,14 +360,17 @@ namespace simbi::evolution {
         // ---------------------------------------------------------------------
         // configure (called before evolution loop)
         // ---------------------------------------------------------------------
-        void configure(std::uint64_t lvl) const
+        void configure() const
         {
             using namespace ecs;
-            ghost_fill_system_t{}(sim, lvl);
-            c2p_system_t{}(sim, lvl);
-            if (sim.has_refinement()) {
-                init_flux_registers_system_t{}(sim, lvl);
+            for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                ghost_fill_system_t{}(sim, lvl);
+                c2p_system_t{}(sim, lvl);
+                if (sim.has_refinement()) {
+                    init_flux_registers_system_t{}(sim, lvl);
+                }
             }
+            timestep_system_t{}(sim);
         }
 
         // ---------------------------------------------------------------------

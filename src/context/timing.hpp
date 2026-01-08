@@ -47,7 +47,7 @@ namespace simbi::timing {
             total_time += duration;
             min_time = std::min(min_time, duration);
             max_time = std::max(max_time, duration);
-            zone_updates += nzones / duration;
+            zone_updates += static_cast<real>(nzones) / duration;
             count++;
         }
 
@@ -104,7 +104,7 @@ namespace simbi::timing {
     {
         timer_t         timer_;
         timing_stats_t* stats_;
-        std::uint64_t   nzones_;
+        std::uint64_t   nzones_{0};
 
         scoped_timer_t(
             xpu::executor_t<xpu::default_space>& exec,
