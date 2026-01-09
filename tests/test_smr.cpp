@@ -93,8 +93,9 @@ int main()
     f_flux = compute::constant(f_flux.domain(), 1.2).with(exec);
     flux_reg.accumulate_fine(exec, f_flux, geo, 0, side_t::left, dt);
 
+    exec.sync();
+
     auto* reg = flux_reg.get_register(0, side_t::left);
-    std::cout << "    coarse flux at (2,2): " << reg->view()({2, 2}) << std::endl;
     assert(std::abs(reg->view()({2, 2}) - 0.02) < 1e-9);
     std::cout << "  flux correction ✓" << std::endl;
 
