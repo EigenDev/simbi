@@ -81,16 +81,22 @@ namespace simbi::xpu {
                 return nullptr; // allocation failed
             }
 
+            // zero-initialize to match cuda behavior
+            cudaMemset(ptr, 0, size);
+
             // record allocation for debugging
             stats::record_allocation(size);
             return ptr;
 #else
-            // cpu fallback: use aligned allocation
+            // cpu fallback: use aligned allocation with zero-init
             if (size == 0) {
                 return nullptr;
             }
-            void* ptr = std::aligned_alloc(64, (size + 63) & ~63);
+            std::size_t aligned_size = (size + 63) & ~63;
+            void*       ptr          = std::aligned_alloc(64, aligned_size);
             if (ptr) {
+                // zero-initialize to match cuda behavior
+                std::memset(ptr, 0, aligned_size);
                 stats::record_allocation(size);
             }
             return ptr;

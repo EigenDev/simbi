@@ -32,7 +32,7 @@ namespace simbi::xpu {
         {
             return data_[vecops::dot(coord - start_, strides_)];
         }
-        DUAL T& operator[](iarray<Rank> coord)
+        DUAL T& operator[](iarray<Rank> coord) const
         {
             return data_[vecops::dot(coord - start_, strides_)];
         }

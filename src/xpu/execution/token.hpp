@@ -24,6 +24,7 @@
 #include "execution_space.hpp"
 #include "xpu/device/detail/event_wrapper.hpp"
 
+#include <atomic>
 #include <utility>
 
 namespace simbi::xpu {
@@ -46,7 +47,7 @@ namespace simbi::xpu {
       private:
         detail::event_wrapper_t<ExecutionSpace> event_;
         bool                                    owns_resource_ = true;
-        bool                                    is_ready_      = false;
+        mutable std::atomic<bool>               is_ready_{false};
 
       public:
         // =============================================================================
@@ -68,8 +69,9 @@ namespace simbi::xpu {
         token_t(token_t&& other) noexcept
             : event_(std::move(other.event_)),
               owns_resource_(std::exchange(other.owns_resource_, false)),
-              is_ready_(std::exchange(other.is_ready_, false))
+              is_ready_(other.is_ready_.load(std::memory_order_acquire))
         {
+            other.is_ready_.store(false, std::memory_order_release);
         }
 
         token_t& operator=(token_t&& other) noexcept
@@ -77,7 +79,11 @@ namespace simbi::xpu {
             if (this != &other) {
                 event_         = std::move(other.event_);
                 owns_resource_ = std::exchange(other.owns_resource_, false);
-                is_ready_      = std::exchange(other.is_ready_, false);
+                is_ready_.store(
+                    other.is_ready_.load(std::memory_order_acquire),
+                    std::memory_order_release
+                );
+                other.is_ready_.store(false, std::memory_order_release);
             }
             return *this;
         }
@@ -146,17 +152,17 @@ namespace simbi::xpu {
 
         void sync()
         {
-            if (!is_ready_) {
+            if (!is_ready_.load(std::memory_order_acquire)) {
                 if (owns_resource_) {
                     event_.sync();
                 }
-                is_ready_ = true;
+                is_ready_.store(true, std::memory_order_release);
             }
         }
 
         bool ready() const
         {
-            if (is_ready_) {
+            if (is_ready_.load(std::memory_order_acquire)) {
                 return true;
             }
 
@@ -166,7 +172,7 @@ namespace simbi::xpu {
 
             bool event_ready = event_.ready();
             if (event_ready) {
-                const_cast<token_t*>(this)->is_ready_ = true;
+                is_ready_.store(true, std::memory_order_release);
             }
             return event_ready;
         }

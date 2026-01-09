@@ -77,12 +77,16 @@ namespace simbi::xpu {
             if (err != cudaSuccess) {
                 return nullptr;
             }
+            // cudaMallocManaged already zero-initializes
             stats::record_allocation(size);
             return ptr;
 #else
-            // cpu fallback: aligned host allocation
-            void* ptr = std::aligned_alloc(64, (size + 63) & ~63);
+            // cpu fallback: aligned host allocation with zero-init
+            std::size_t aligned_size = (size + 63) & ~63;
+            void*       ptr          = std::aligned_alloc(64, aligned_size);
             if (ptr) {
+                // zero-initialize to match cudaMallocManaged behavior
+                std::memset(ptr, 0, aligned_size);
                 stats::record_allocation(size);
             }
             return ptr;

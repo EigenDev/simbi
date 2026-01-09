@@ -101,9 +101,12 @@ namespace simbi::xpu::comm {
         }
 
         if (same_node(src, dst)) {
-            // assume peer-to-peer is available
-            // could query cudaDeviceCanAccessPeer in actual implementation
-            return transfer_strategy_t::peer_copy;
+            // check if peer access is actually available
+            if (device_memory_t::can_access_peer(src.device_id, dst.device_id)) {
+                return transfer_strategy_t::peer_copy;
+            }
+            // fallback to host-staged if peer access not available
+            return transfer_strategy_t::host_staged;
         }
 
         return transfer_strategy_t::mpi_send;

@@ -44,11 +44,17 @@ namespace simbi::xpu {
             }
         }
 
-        ~device_guard_t()
+        ~device_guard_t() noexcept
         {
             if (active_) {
                 if constexpr (requires { ExecutionSpace::set_device(prev_device_); }) {
-                    ExecutionSpace::set_device(prev_device_);
+                    try {
+                        ExecutionSpace::set_device(prev_device_);
+                    }
+                    catch (...) {
+                        // device context restoration failed - can't propagate from destructor
+                        // this is a fatal error but terminating is worse than continuing
+                    }
                 }
             }
         }

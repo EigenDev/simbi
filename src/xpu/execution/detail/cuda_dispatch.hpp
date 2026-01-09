@@ -415,8 +415,8 @@ namespace simbi::xpu {
 
             T* d_block_results = nullptr;
             T* d_final_result  = nullptr;
-            cudaMalloc(&d_block_results, num_blocks * sizeof(T));
-            cudaMalloc(&d_final_result, sizeof(T));
+            cudaMallocAsync(&d_block_results, num_blocks * sizeof(T), stream);
+            cudaMallocAsync(&d_final_result, sizeof(T), stream);
 
             reduce_kernel_phase1<<<num_blocks, threads_per_block, 0, stream>>>(
                 domain,
@@ -444,8 +444,8 @@ namespace simbi::xpu {
             );
             cudaStreamSynchronize(stream);
 
-            cudaFree(d_block_results);
-            cudaFree(d_final_result);
+            cudaFreeAsync(d_block_results, stream);
+            cudaFreeAsync(d_final_result, stream);
 
             return final_result;
         }

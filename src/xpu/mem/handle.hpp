@@ -98,27 +98,19 @@ namespace simbi::xpu::mem {
             other.cb_ = nullptr;
         }
 
-        // copy assignment
+        // copy assignment (copy-and-swap idiom)
         shared_handle_t& operator=(const shared_handle_t& other)
         {
-            if (this != &other) {
-                release();
-                cb_ = other.cb_;
-                if (cb_) {
-                    cb_->ref_count.fetch_add(1, std::memory_order_relaxed);
-                }
-            }
+            shared_handle_t temp(other);
+            swap(temp);
             return *this;
         }
 
-        // move assignment
+        // move assignment (copy-and-swap idiom)
         shared_handle_t& operator=(shared_handle_t&& other) noexcept
         {
-            if (this != &other) {
-                release();
-                cb_       = other.cb_;
-                other.cb_ = nullptr;
-            }
+            shared_handle_t temp(std::move(other));
+            swap(temp);
             return *this;
         }
 
@@ -206,6 +198,12 @@ namespace simbi::xpu::mem {
         block_type* control_block() const noexcept
         {
             return cb_;
+        }
+
+        // swap implementation for copy-and-swap idiom
+        void swap(shared_handle_t& other) noexcept
+        {
+            std::swap(cb_, other.cb_);
         }
 
       private:

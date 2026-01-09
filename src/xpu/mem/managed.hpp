@@ -74,13 +74,11 @@ namespace simbi {
         {
             if constexpr (platform::is_gpu) {
                 void* ptr;
-// Use raw API for custom allocators - bypass RAII wrapper
+// use raw api for custom allocators - bypass raii wrapper
 #ifdef CUDA_ENABLED
                 cudaMallocManaged(&ptr, len);
-                cudaDeviceSynchronize();
 #elif defined(HIP_ENABLED)
                 hipMallocManaged(&ptr, len);
-                hipDeviceSynchronize();
 #else
                 ptr = ::operator new(len);
 #endif
@@ -93,10 +91,8 @@ namespace simbi {
         {
             if constexpr (platform::is_gpu) {
 #ifdef CUDA_ENABLED
-                cudaDeviceSynchronize();
                 cudaFree(ptr);
 #elif defined(HIP_ENABLED)
-                hipDeviceSynchronize();
                 hipFree(ptr);
 #else
                 ::operator delete(ptr);

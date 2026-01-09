@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstring>
 #include <stdexcept>
+#include <vector>
 
 namespace simbi::xpu::comm {
 
@@ -55,23 +56,36 @@ namespace simbi::xpu::comm {
                 // same device, no transfer needed
                 return;
 
-            case transfer_strategy_t::peer_copy:
+            case transfer_strategy_t::peer_copy: {
                 // same node, different devices: use peer copy
-                device_memory_t::memcpy_peer(
+                bool success = device_memory_t::memcpy_peer(
                     dst_ptr,
                     dst_rank.device_id,
                     src_ptr,
                     src_rank.device_id,
                     bytes
                 );
+                if (!success) {
+                    throw std::runtime_error("peer-to-peer copy failed");
+                }
                 return;
+            }
 
-            case transfer_strategy_t::host_staged:
-                // fallback for peer copy disabled (should query capability)
-                // for now, assume peer copy works
-                throw std::runtime_error(
-                    "host-staged transfer not implemented (peer copy should work)"
-                );
+            case transfer_strategy_t::host_staged: {
+                // fallback when peer access unavailable: copy via host
+                std::vector<char> staging(bytes);
+
+// device -> host
+#ifdef XPU_CUDA_AVAILABLE
+                cudaMemcpy(staging.data(), src_ptr, bytes, cudaMemcpyDeviceToHost);
+                // host -> device
+                cudaMemcpy(dst_ptr, staging.data(), bytes, cudaMemcpyHostToDevice);
+#else
+                std::memcpy(staging.data(), src_ptr, bytes);
+                std::memcpy(dst_ptr, staging.data(), bytes);
+#endif
+                return;
+            }
 
             case transfer_strategy_t::mpi_send:
                 // cross-node: requires mpi
@@ -85,6 +99,9 @@ namespace simbi::xpu::comm {
 
     // async transfer between two ranks
     // returns token for synchronization
+    //
+    // IMPORTANT: executor stream must remain valid until token.sync() completes
+    // the stream is used for async operations but not retained by the token
     template <execution_space ExecutionSpace>
     token_t<ExecutionSpace> transfer_async(
         const rank_id_t&            src_rank,
