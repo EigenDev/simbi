@@ -49,6 +49,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace simbi::ecs {
@@ -499,7 +500,11 @@ namespace simbi::ecs {
     template <std::uint64_t Rank>
     struct body_info_t
     {
-        std::unique_ptr<body::body_diagnostics_t<Rank>> diagnostics;
+        using diag_t = std::conditional_t<
+            platform::is_gpu,
+            body::gpu_diagnostics_t<Rank>,
+            body::cpu_diagnostics_t<Rank>>;
+        std::unique_ptr<diag_t> diagnostics;
     };
 
     // =============================================================================

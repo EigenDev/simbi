@@ -17,7 +17,7 @@
 #pragma once
 
 #include "grid/domain.hpp"
-#include "hesi/core/types.hpp"
+#include "xpu/core/types.hpp"
 
 #include <algorithm>
 #include <cstdint>

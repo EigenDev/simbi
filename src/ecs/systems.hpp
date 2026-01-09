@@ -67,8 +67,12 @@ namespace simbi::ecs {
     template <std::uint64_t Rank>
     struct body_effects_system_t
     {
-        std::unique_ptr<body::body_diagnostics_t<Rank>> null_diag{nullptr};
-        bool                                            update_diagnostics{true};
+        using diag_t = std::conditional_t<
+            platform::is_gpu,
+            body::gpu_diagnostics_t<Rank>,
+            body::cpu_diagnostics_t<Rank>>;
+        std::unique_ptr<diag_t> null_diag{nullptr};
+        bool                    update_diagnostics{true};
 
         template <typename MeshConfig>
         static bool partition_contains(const vector_t<real, Rank>& pos, const MeshConfig& mesh_cfg)

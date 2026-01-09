@@ -33,6 +33,27 @@ namespace simbi::runtime_config {
     inline bool use_omp = false;
 
     // =========================================================================
+    // block/tile dimensions
+    // =========================================================================
+
+    struct block_dims_t
+    {
+        int x = 256;
+        int y = 1;
+        int z = 1;
+
+        int total_threads() const
+        {
+            return x * y * z;
+        }
+    };
+
+    // block dimensions for gpu kernels and cpu tiling
+    // set by BLOCK_X, BLOCK_Y, BLOCK_Z environment variables
+    // defaults chosen based on typical workload dimensionality
+    inline block_dims_t block_dims;
+
+    // =========================================================================
     // initialization from environment
     // =========================================================================
 
@@ -46,10 +67,16 @@ namespace simbi::runtime_config {
             use_omp = (val == "1" || val == "true" || val == "TRUE");
         }
 
-        // future: add other runtime config here
-        // - thread counts
-        // - device selection
-        // - debug flags
+        // read block dimension environment variables
+        if (const char* bx = std::getenv("BLOCK_X")) {
+            block_dims.x = std::atoi(bx);
+        }
+        if (const char* by = std::getenv("BLOCK_Y")) {
+            block_dims.y = std::atoi(by);
+        }
+        if (const char* bz = std::getenv("BLOCK_Z")) {
+            block_dims.z = std::atoi(bz);
+        }
     }
 
 } // namespace simbi::runtime_config
