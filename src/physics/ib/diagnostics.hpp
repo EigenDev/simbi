@@ -29,6 +29,7 @@
 #include "xpu/mem/block.hpp"
 #include "xpu/mem/managed.hpp"
 #include "xpu/mem/unified_memory.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -163,7 +164,7 @@ namespace simbi::body {
 
         vector_t<body_delta_t<Rank>, MaxBodies> consolidate()
         {
-            xpu::unified_memory_t::synchronize();
+            xpu::synchronize();
 
             vector_t<body_delta_t<Rank>, MaxBodies> result{};
             for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
@@ -184,7 +185,7 @@ namespace simbi::body {
         void reset()
         {
             // synchronize via xpu
-            xpu::unified_memory_t::synchronize();
+            xpu::synchronize();
 
             // clear unified memory buffer via cached pointer
             for (std::int64_t block = 0; block < num_blocks; ++block) {

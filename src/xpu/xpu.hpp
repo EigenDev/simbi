@@ -146,4 +146,15 @@ namespace simbi::xpu {
 #endif
     }
 
+    inline void synchronize()
+    {
+#ifdef XPU_CUDA_AVAILABLE
+        cudaDeviceSynchronize();
+#elif defined(XPU_HIP_AVAILABLE)
+        hipDeviceSynchronize();
+#else
+// no-op for CPU
+#endif
+    }
+
 } // namespace simbi::xpu

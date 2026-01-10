@@ -7,8 +7,6 @@
 #include "ecs/geometry_visitor.hpp"
 #include "geometry/block_geometry.hpp"
 #include "physics/hydro/physics.hpp"
-#include "xpu/execution/execution_space.hpp"
-#include "xpu/execution/executor.hpp"
 
 #include <cmath>
 #include <cstddef>

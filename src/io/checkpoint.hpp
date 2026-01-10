@@ -10,6 +10,7 @@
 #include "serialization/skeleton_serial.hpp"
 #include "utility/helpers.hpp"
 #include "write_policy.hpp"
+#include "xpu/mem/unified_memory.hpp"
 
 #include <H5Cpp.h>
 #include <cmath>
@@ -89,6 +90,9 @@ namespace simbi::io {
             // write file format version
             write_attribute(file, "format_version", std::string("2.0"));
             write_attribute(file, "simbi_version", std::string("0.8.0"));
+
+            // force a device syncronization before writing
+            xpu::synchronize();
 
             // metadata
             write_metadata(file);
