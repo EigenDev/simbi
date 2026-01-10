@@ -172,7 +172,7 @@ namespace simbi::xpu {
     {
         const auto     shape = domain.shape();
         const auto     grid  = compute_launch_config_3d(shape[2], shape[1], shape[0]);
-        constexpr dim3 block(8, 8, 8);
+        constexpr dim3 block(4, 4, 4);
 
         dispatch_kernel_3d<<<grid, block, 0, stream>>>(domain, func);
     }
