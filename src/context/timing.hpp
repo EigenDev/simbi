@@ -118,7 +118,7 @@ namespace simbi::timing {
 
         ~scoped_timer_t()
         {
-            xpu::synchroize();
+            xpu::synchronize();
             timer_.stop();
             if (stats_) {
                 stats_->record(timer_.elapsed_seconds(), nzones_);
