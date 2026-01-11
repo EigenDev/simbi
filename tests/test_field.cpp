@@ -1,11 +1,12 @@
 #include "build_config.hpp"
 #include "compute/computation.hpp"
+#include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "xpu/execution/cpu_space.hpp"
-#include "xpu/execution/cuda_space.hpp"
-#include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -19,9 +20,9 @@ int main()
     std::cout << "testing field map operations..." << std::endl;
 
 #ifdef XPU_CUDA_AVAILABLE
-    using execution_space = xpu::cuda_space;
+    using execution_space = xpu::cuda_space_t;
 #else
-    using execution_space = xpu::cpu_space;
+    using execution_space = xpu::cpu_space_t;
 #endif
 
     xpu::executor_t<execution_space> exec(0);

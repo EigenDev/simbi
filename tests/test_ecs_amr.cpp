@@ -1,17 +1,17 @@
 #include "build_config.hpp"
 #include "ecs/blueprints.hpp"
 #include "ecs/components.hpp"
-#include "ecs/creation/decomposition.hpp"
 #include "ecs/creation/sim.hpp"
 #include "ecs/simulation.hpp"
 #include "utility/enums.hpp"
 
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 
 struct ideal_gas_t
 {
-    real gamma;
+    simbi::real gamma;
 };
 
 // =============================================================================

@@ -1,6 +1,6 @@
-#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "geometry/boundary/driver.hpp"
 #include "geometry/coordinate_map.hpp"
 #include "geometry/metrics.hpp"
@@ -13,9 +13,7 @@
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
 #include "test_helpers.hpp"
-#include "xpu/execution/cpu_space.hpp"
-#include "xpu/execution/cuda_space.hpp"
-#include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -61,9 +59,9 @@ int main()
     domain_t<1> active(iarray<1>{0}, iarray<1>{4});
 
 #ifdef XPU_CUDA_AVAILABLE
-    using execution_space = simbi::xpu::cuda_space;
+    using execution_space = simbi::xpu::cuda_space_t;
 #else
-    using execution_space = simbi::xpu::cpu_space;
+    using execution_space = simbi::xpu::cpu_space_t;
 #endif
 
     simbi::xpu::executor_t<execution_space> exec(0);

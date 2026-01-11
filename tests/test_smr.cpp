@@ -1,6 +1,6 @@
-#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "geometry/block_geometry.hpp"
 #include "geometry/coordinate_map.hpp"
 #include "geometry/metrics.hpp"
@@ -11,9 +11,7 @@
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
 #include "test_helpers.hpp"
-#include "xpu/execution/cpu_space.hpp"
-#include "xpu/execution/cuda_space.hpp"
-#include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -40,9 +38,9 @@ int main()
     grid::domain_t<2> fine_alloc = domain_algebra::expand(fine_active, iarray<2>{2, 2});
 
 #ifdef XPU_CUDA_AVAILABLE
-    using execution_space = xpu::cuda_space;
+    using execution_space = xpu::cuda_space_t;
 #else
-    using execution_space = xpu::cpu_space;
+    using execution_space = xpu::cpu_space_t;
 #endif
 
     xpu::executor_t<execution_space> exec(0);

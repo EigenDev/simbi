@@ -10,9 +10,7 @@
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
 #include "test_helpers.hpp"
-#include "xpu/execution/cpu_space.hpp"
-#include "xpu/execution/cuda_space.hpp"
-#include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -38,9 +36,9 @@ int main()
     std::uint64_t     halo_width = 1;
 
 #ifdef XPU_CUDA_AVAILABLE
-    using execution_space = xpu::cuda_space;
+    using execution_space = xpu::cuda_space_t;
 #else
-    using execution_space = xpu::cpu_space;
+    using execution_space = xpu::cpu_space_t;
 #endif
 
     xpu::executor_t<execution_space> exec(0);
