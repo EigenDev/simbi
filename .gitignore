@@ -20,6 +20,7 @@ gitrepo_home.txt
 *.h5
 *.pdf
 *.png
+.*
 *.pyc
 *.mp4
 *.xml
