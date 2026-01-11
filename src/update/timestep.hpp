@@ -11,15 +11,16 @@
 //   auto dt = compute_level_timestep(sim, lvl, motion);
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "ecs/geometry_visitor.hpp"
+#include "functional/fp.hpp"
 #include "geometry/block_geometry.hpp"
 #include "grid/domain.hpp"
-#include "hesi/exec/executor.hpp"
-#include "hesi/exec/reduce.hpp"
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/helpers.hpp"
+#include "xpu/xpu.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -33,21 +34,25 @@ namespace simbi::timestep {
     // computes minimum dt over a partition's owned domain using proper
     // geometry. block_geometry provides scale factors and coordinate maps.
     // =========================================================================
-    template <typename PrimField, typename Geometry, std::uint64_t Rank>
+    template <
+        typename PrimField,
+        typename Geometry,
+        std::uint64_t          Rank,
+        xpu::execution_space_c ExecutionSpace>
     real compute_partition_timestep(
-        const PrimField&            prim,
-        const grid::domain_t<Rank>& domain,
-        const Geometry&             geometry,
-        real                        cfl,
-        real                        gamma,
-        het::exec::executor_t&      exec
+        const PrimField&                 prim,
+        const grid::domain_t<Rank>&      domain,
+        const Geometry&                  geometry,
+        real                             cfl,
+        real                             gamma,
+        xpu::executor_t<ExecutionSpace>& exec
     )
     {
         if (domain.empty()) {
             return std::numeric_limits<real>::max();
         }
 
-        auto kernel = [=] DUAL(const iarray<Rank>& coord) -> real {
+        auto kernel = [=] DEV(const iarray<Rank>& coord) -> real {
             const auto p = prim(coord);
 
             // scale factors h_i account for curvilinear coordinates
@@ -77,14 +82,7 @@ namespace simbi::timestep {
             return min_dt;
         };
 
-        return het::exec::reduce_sync(
-            exec,
-            domain,
-            std::numeric_limits<real>::max(),
-            kernel,
-            [] DEV(real a, real b) { return helpers::my_min(a, b); },
-            std::numeric_limits<real>::max()
-        );
+        return exec.reduce(domain, std::numeric_limits<real>::max(), kernel, fp::min_op);
     }
 
     // =========================================================================
@@ -106,10 +104,10 @@ namespace simbi::timestep {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 real local_dt = compute_partition_timestep(
-                    fields.prim,
+                    fields.prim.view(),
                     part.owned_domain,
                     block_geo,
                     meta.cfl,

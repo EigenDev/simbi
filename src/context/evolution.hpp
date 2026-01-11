@@ -14,7 +14,7 @@
 // =============================================================================
 
 #include "checkpoint.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/systems.hpp"
 #include "io/console/dprintb.hpp"
 #include "io/diagnostics.hpp"
@@ -25,7 +25,6 @@
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -76,7 +75,7 @@ namespace simbi::evolution {
         auto& meta = sim.metadata();
 
         // get executor from partition 0 level 0 for timing
-        auto exec = sim.partition_executor(0, 0);
+        auto& exec = sim.partition_executor(0, 0);
 
         // initial checkpoint
         state.progress.table.refresh();
@@ -88,7 +87,7 @@ namespace simbi::evolution {
                 checkpoint::save(sim, state.progress);
             }
         }
-        catch (exception::SimulationFailureException) {
+        catch (exception::SimulationFailureException& e) {
             // diagnose and report detailed failure information
             diagnostics::diagnose_cons2prim_failure(sim, state.progress.table);
             throw;
@@ -361,14 +360,17 @@ namespace simbi::evolution {
         // ---------------------------------------------------------------------
         // configure (called before evolution loop)
         // ---------------------------------------------------------------------
-        void configure(std::uint64_t lvl) const
+        void configure() const
         {
             using namespace ecs;
-            ghost_fill_system_t{}(sim, lvl);
-            c2p_system_t{}(sim, lvl);
-            if (sim.has_refinement()) {
-                init_flux_registers_system_t{}(sim, lvl);
+            for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                ghost_fill_system_t{}(sim, lvl);
+                c2p_system_t{}(sim, lvl);
+                if (sim.has_refinement()) {
+                    init_flux_registers_system_t{}(sim, lvl);
+                }
             }
+            timestep_system_t{}(sim);
         }
 
         // ---------------------------------------------------------------------

@@ -1,8 +1,7 @@
-#ifndef CONCEPTS_HPP
-#define CONCEPTS_HPP
+#pragma once
 
-#include "compat.hpp"
-#include "utility/enums.hpp"
+#include "build_config.hpp"  // for real type
+#include "utility/enums.hpp" // for regime_t
 
 #include <array>
 #include <concepts>
@@ -13,7 +12,7 @@
 namespace simbi {
     template <typename T, std::uint64_t Rank>
     struct vector_t;
-}   // namespace simbi
+} // namespace simbi
 
 namespace simbi::concepts {
     // =============================================================================
@@ -34,10 +33,7 @@ namespace simbi::concepts {
     template <typename T>
     concept is_hydro_primitive_c = requires(T t) {
         { t.rho } -> std::convertible_to<real>;
-        {
-            t.vel
-        } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::rank>>;
+        { t.vel } -> std::convertible_to<vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.pre } -> std::convertible_to<real>;
         { t.chi } -> std::convertible_to<real>;
     };
@@ -45,10 +41,7 @@ namespace simbi::concepts {
     template <typename T>
     concept is_hydro_conserved_c = requires(T t) {
         { t.den } -> std::convertible_to<real>;
-        {
-            t.mom
-        } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::rank>>;
+        { t.mom } -> std::convertible_to<vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.nrg } -> std::convertible_to<real>;
         { t.chi } -> std::convertible_to<real>;
     };
@@ -56,38 +49,25 @@ namespace simbi::concepts {
     template <typename T>
     concept is_mhd_primitive_c = requires(T t) {
         { t.rho } -> std::convertible_to<real>;
-        {
-            t.vel
-        } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::rank>>;
+        { t.vel } -> std::convertible_to<vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.pre } -> std::convertible_to<real>;
-        {
-            t.mag
-        } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::rank>>;
+        { t.mag } -> std::convertible_to<vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.chi } -> std::convertible_to<real>;
     };
 
     template <typename T>
     concept is_mhd_conserved_c = requires(T t) {
         { t.den } -> std::convertible_to<real>;
-        {
-            t.mom
-        } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::rank>>;
+        { t.mom } -> std::convertible_to<vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.nrg } -> std::convertible_to<real>;
-        {
-            t.mag
-        } -> std::convertible_to<
-            vector_t<real, std::remove_reference_t<T>::rank>>;
+        { t.mag } -> std::convertible_to<vector_t<real, std::remove_reference_t<T>::rank>>;
         { t.chi } -> std::convertible_to<real>;
     };
 
     // concept defining a state variable - type approach
     template <typename T>
-    concept is_any_state_variable_c =
-        is_hydro_primitive_c<T> || is_hydro_conserved_c<T> ||
-        is_mhd_primitive_c<T> || is_mhd_conserved_c<T>;
+    concept is_any_state_variable_c = is_hydro_primitive_c<T> || is_hydro_conserved_c<T> ||
+                                      is_mhd_primitive_c<T> || is_mhd_conserved_c<T>;
 
     template <typename T>
     concept is_relativistic_c = requires {
@@ -97,13 +77,11 @@ namespace simbi::concepts {
 
     template <typename T>
     concept is_relativistic_primitive_c =
-        (is_hydro_primitive_c<T> || is_mhd_primitive_c<T>) &&
-        is_relativistic_c<T>;
+        (is_hydro_primitive_c<T> || is_mhd_primitive_c<T>) && is_relativistic_c<T>;
 
     template <typename T>
     concept is_relativistic_conserved_c =
-        (is_hydro_conserved_c<T> || is_mhd_conserved_c<T>) &&
-        is_relativistic_c<T>;
+        (is_hydro_conserved_c<T> || is_mhd_conserved_c<T>) && is_relativistic_c<T>;
 
     template <typename T>
     concept is_srhd_c = is_relativistic_c<T> && T::regime == regime_t::SRHD;
@@ -145,8 +123,7 @@ namespace simbi::concepts {
     concept has_computable_value_type = requires { typename T::value_type; };
 
     template <typename T>
-    concept has_computable_argument_type =
-        requires { typename T::argument_type; };
+    concept has_computable_argument_type = requires { typename T::argument_type; };
 
     template <typename T>
     concept has_computable_rank = requires {
@@ -155,8 +132,7 @@ namespace simbi::concepts {
 
     template <typename T>
     concept already_computable =
-        has_computable_value_type<T> && has_computable_argument_type<T> &&
-        has_computable_rank<T>;
+        has_computable_value_type<T> && has_computable_argument_type<T> && has_computable_rank<T>;
 
     // core computable: any callable with explicit type metadata
     template <typename T>
@@ -168,6 +144,4 @@ namespace simbi::concepts {
         { comp(arg) } -> std::convertible_to<typename T::value_type>;
     };
 
-}   // namespace simbi::concepts
-
-#endif
+} // namespace simbi::concepts

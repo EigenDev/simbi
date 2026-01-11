@@ -1,7 +1,7 @@
 #ifndef IO_SERIAL_BODY_HPP
 #define IO_SERIAL_BODY_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/write_policy.hpp"
 #include "physics/ib/body.hpp"

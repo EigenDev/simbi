@@ -1,6 +1,6 @@
 #include "progress.hpp"
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "io/console/statistics.hpp"
 #include "io/tabulate/table.hpp"
 

@@ -1,7 +1,7 @@
 #ifndef GRID_AMR_API_HPP
 #define GRID_AMR_API_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
@@ -19,6 +19,24 @@
 namespace simbi::grid::amr {
 
     using namespace simbi::compute;
+
+    // -------------------------------------------------------------------------
+    // reflux functor
+    // applies flux correction to coarse cells
+    // -------------------------------------------------------------------------
+    template <typename T, std::uint64_t Rank, typename Geometry>
+    struct reflux_t
+    {
+        Geometry geometry;
+
+        DEV T operator()(const iarray<Rank>& coord, const std::pair<T, T>& p) const
+        {
+            using namespace structs;
+            const auto& [u, dfa] = p;
+            real inv_vol         = 1.0 / geometry.volume(coord);
+            return u | add_gas(dfa * inv_vol);
+        }
+    };
 
     // -------------------------------------------------------------------------
     // ghost cell filling (coarse -> fine)
@@ -133,7 +151,8 @@ namespace simbi::grid::amr {
         Exec&                     exec
     )
     {
-        using namespace structs;
+        reflux_t<T, Rank, Geometry> reflux_op{geometry};
+
         // iterate over all face directions
         for (std::uint64_t dd = 0; dd < Rank; ++dd) {
 
@@ -148,25 +167,8 @@ namespace simbi::grid::amr {
 
                 // register now contains (F * dt * area)
                 // apply: u += (F * dt * area) / volume
-                auto reflux_op =
-                    [geometry] DUAL(const iarray<Rank>& coord, const T& u, const T& dfa) -> T {
-                    real inv_vol = 1.0 / geometry.volume(coord);
-                    return u | add_gas(dfa * inv_vol);
-                };
-
-                // apply the kernel
                 coarse[region] =
-                    coarse[region]
-                        .zip(
-                            *reg,
-                            [] DEV(const T& u, const T& dfa) { return std::make_pair(u, dfa); }
-                        )
-                        .enum_map(
-                            [reflux_op] DEV(const iarray<Rank>& coord, const std::pair<T, T>& p) {
-                                return reflux_op(coord, p.first, p.second);
-                            }
-                        )
-                        .with(exec);
+                    coarse[region].zip(*reg, fp::make_pair_func).enum_map(reflux_op).with(exec);
             }
         }
     }

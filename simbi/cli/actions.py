@@ -49,16 +49,16 @@ class RegisterGPUBlockDimensions(Action):
 
         if values is not None and len(values) == 3:
             os.environ["BLOCK_X"] = str(values[0])
-            os.environ["GPU_BLOCK_Y"] = str(values[1])
-            os.environ["GPU_BLOCK_Z"] = str(values[2])
+            os.environ["BLOCK_Y"] = str(values[1])
+            os.environ["BLOCK_Z"] = str(values[2])
         elif values is not None and len(values) == 2:
             os.environ["BLOCK_X"] = str(values[0])
-            os.environ["GPU_BLOCK_Y"] = str(values[1])
-            os.environ["GPU_BLOCK_Z"] = "1"
+            os.environ["BLOCK_Y"] = str(values[1])
+            os.environ["BLOCK_Z"] = "1"
         elif values is not None and len(values) == 1:
             os.environ["BLOCK_X"] = str(values[0])
-            os.environ["GPU_BLOCK_Y"] = "1"
-            os.environ["GPU_BLOCK_Z"] = "1"
+            os.environ["BLOCK_Y"] = "1"
+            os.environ["BLOCK_Z"] = "1"
         else:
             raise ValueError(
                 "GPU block dimensions must be specified as 1, 2, or 3 integers."

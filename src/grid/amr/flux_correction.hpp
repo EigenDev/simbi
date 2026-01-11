@@ -1,15 +1,15 @@
 #ifndef GRID_AMR_FLUX_CORRECTION_HPP
 #define GRID_AMR_FLUX_CORRECTION_HPP
 
-#include "compat.hpp"
-#include "compute/computation.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
+#include "functional/fp.hpp"
 #include "grid/amr/restriction.hpp"
 #include "grid/connectivity.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "hesi/core/types.hpp"
-#include "hesi/exec/executor.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -19,6 +19,60 @@
 namespace simbi::grid::amr {
 
     using namespace simbi::compute;
+
+    // -------------------------------------------------------------------------
+    // coarse flux accumulation functor
+    // -------------------------------------------------------------------------
+    template <typename T, std::uint64_t Rank, typename Geometry, typename FluxComp>
+    struct coarse_flux_accumulate_t
+    {
+        real        dt;
+        std::size_t dim;
+        side_t      side;
+        Geometry    geometry;
+        FluxComp    flux_comp;
+
+        DEV T operator()(const iarray<Rank>& coord, const T& curr) const
+        {
+            auto f = flux_comp(coord);
+            // compute face area at the interface
+            real area;
+            if (side == side_t::left) {
+                area = geometry.face_area(coord, dim);
+            }
+            else {
+                auto rc = coord + unit_vectors::array_offset<Rank>(dim);
+                area    = geometry.face_area(rc, dim);
+            }
+            return curr + f * (-dt * area);
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // fine flux area functor
+    // -------------------------------------------------------------------------
+    template <typename T, std::uint64_t Rank, typename Geometry>
+    struct fine_flux_area_t
+    {
+        std::size_t dim;
+        side_t      side;
+        Geometry    geometry;
+
+        DEV T operator()(const iarray<Rank>& fine_coord, const T& f) const
+        {
+            // fine_coord is in fine index space
+            // compute face area at fine resolution
+            real area;
+            if (side == side_t::left) {
+                area = geometry.face_area(fine_coord, dim);
+            }
+            else {
+                auto rc = fine_coord + unit_vectors::array_offset<Rank>(dim);
+                area    = geometry.face_area(rc, dim);
+            }
+            return f * area;
+        }
+    };
 
     template <typename T, std::uint64_t Rank>
     class flux_register_t
@@ -37,8 +91,8 @@ namespace simbi::grid::amr {
             registers_.resize(2 * Rank);
         }
 
-        // allocate buffer for a face
-        void initialize_face(std::size_t dim, side_t side, het::locality_t loc)
+        // allocate buffer for a face (uses unified memory)
+        void initialize_face(std::size_t dim, side_t side)
         {
             std::size_t idx = dim * 2 + static_cast<std::size_t>(side);
             if (registers_[idx]) {
@@ -54,7 +108,7 @@ namespace simbi::grid::amr {
                 face.start[dim] = face.fin[dim] - 1;
             }
 
-            registers_[idx] = std::make_unique<field_type>(face, loc);
+            registers_[idx] = std::make_unique<field_type>(face);
         }
 
         // access
@@ -65,11 +119,12 @@ namespace simbi::grid::amr {
         }
 
         // zero all registers
-        void zero_all(het::exec::executor_t& exec)
+        template <xpu::execution_space_c ExecutionSpace>
+        void zero_all(xpu::executor_t<ExecutionSpace>& exec)
         {
             for (auto& reg : registers_) {
                 if (reg) {
-                    *reg = computation(*reg).map([] DUAL(const T&) { return T{}; }).with(exec);
+                    *reg = reg->as_computation().map(fp::zero_func).with(exec);
                 }
             }
         }
@@ -79,14 +134,14 @@ namespace simbi::grid::amr {
         // ---------------------------------------------------------------------
 
         // coarse: R += -F * dt * area
-        template <typename Geometry>
+        template <xpu::execution_space_c ExecutionSpace, typename Geometry>
         void accumulate_coarse(
-            het::exec::executor_t& exec,
-            const field_type&      coarse_flux,
-            const Geometry&        geometry,
-            std::size_t            dim,
-            side_t                 side,
-            real                   dt
+            xpu::executor_t<ExecutionSpace>& exec,
+            const field_type&                coarse_flux,
+            const Geometry&                  geometry,
+            std::size_t                      dim,
+            side_t                           side,
+            real                             dt
         )
         {
             auto* reg = get_register(dim, side);
@@ -98,38 +153,26 @@ namespace simbi::grid::amr {
             auto flux_slice = coarse_flux[reg->domain()];
 
             // perform additive update: reg = reg + (-flux * dt * area)
-            auto current_val = computation(*reg);
-            auto flux_comp   = computation(flux_slice);
+            auto current_val = reg->as_computation();
+            auto flux_comp   = flux_slice.as_computation();
 
-            auto update = current_val.enum_map([dt, dim, side, geometry, flux_comp] DUAL(
-                                                   const iarray<Rank>& coord,
-                                                   const T&            curr
-                                               ) {
-                auto f = flux_comp(coord);
-                // compute face area at the interface
-                real area;
-                if (side == side_t::left) {
-                    area = geometry.face_area(coord, dim);
-                }
-                else {
-                    auto rc = coord + unit_vectors::array_offset<Rank>(dim);
-                    area    = geometry.face_area(rc, dim);
-                }
-                return curr + f * (-dt * area);
-            });
+            coarse_flux_accumulate_t<T, Rank, Geometry, decltype(flux_comp)>
+                accumulate_op{dt, dim, side, geometry, flux_comp};
+
+            auto update = current_val.enum_map(accumulate_op);
 
             *reg = update.with(exec);
         }
 
         // fine: R += average(F * area) * dt
-        template <typename Geometry>
+        template <xpu::execution_space_c ExecutionSpace, typename Geometry>
         void accumulate_fine(
-            het::exec::executor_t& exec,
-            const field_type&      fine_flux,
-            const Geometry&        geometry,
-            std::size_t            dim,
-            side_t                 side,
-            real                   dt
+            xpu::executor_t<ExecutionSpace>& exec,
+            const field_type&                fine_flux,
+            const Geometry&                  geometry,
+            std::size_t                      dim,
+            side_t                           side,
+            real                             dt
         )
         {
             auto* reg = get_register(dim, side);
@@ -139,21 +182,9 @@ namespace simbi::grid::amr {
 
             // multiply fine flux by fine face area before restricting
             // this creates F * A at fine resolution
-            auto fine_flux_area = computation(fine_flux).enum_map(
-                [dim, side, geometry] DUAL(const iarray<Rank>& fine_coord, const T& f) -> T {
-                    // fine_coord is in fine index space
-                    // compute face area at fine resolution
-                    real area;
-                    if (side == side_t::left) {
-                        area = geometry.face_area(fine_coord, dim);
-                    }
-                    else {
-                        auto rc = fine_coord + unit_vectors::array_offset<Rank>(dim);
-                        area    = geometry.face_area(rc, dim);
-                    }
-                    return f * area;
-                }
-            );
+            fine_flux_area_t<T, Rank, Geometry> flux_area_op{dim, side, geometry};
+
+            auto fine_flux_area = fine_flux.enum_map(flux_area_op);
 
             // now restrict F*A to coarse domain (conservative averaging)
             auto restricted_flux_area = restrict(fine_flux_area, ratio_);
@@ -162,12 +193,10 @@ namespace simbi::grid::amr {
             auto face_flux_area = restricted_flux_area.at(reg->domain());
 
             // update: current + average(F*A) * dt
-            auto current_val = computation(*reg);
+            auto current_val = reg->as_computation();
 
-            auto update =
-                current_val.zip(face_flux_area, [dt] DUAL(const T& curr, const T& fa_avg) {
-                    return curr + fa_avg * dt;
-                });
+            auto scaled_flux = face_flux_area.map(fp::scalar_multiply(dt));
+            auto update      = current_val.zip(scaled_flux, fp::add_op);
 
             *reg = update.with(exec);
         }

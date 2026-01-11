@@ -14,12 +14,14 @@
 //   - geometry uses motion_state_t snapshots
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/cfd.hpp"
+#include "compute/numerics.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "ecs/components.hpp"
 #include "ecs/geometry_visitor.hpp"
+#include "functional/fp.hpp"
 #include "geometry/block_geometry.hpp"
 #include "geometry/boundary/driver.hpp"
 #include "grid/amr/api.hpp"
@@ -29,13 +31,11 @@
 #include "physics/hydro/boundary_policy.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
-#include "update/prim_recovery.hpp"
-#include "update/timestep.hpp"
+#include "platform.hpp"
 #include "utility/enums.hpp"
 
 #include <algorithm>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <numbers>
@@ -68,8 +68,12 @@ namespace simbi::ecs {
     template <std::uint64_t Rank>
     struct body_effects_system_t
     {
-        std::unique_ptr<body::body_diagnostics_t<Rank>> null_diag{nullptr};
-        bool                                            update_diagnostics{true};
+        using diag_t = std::conditional_t<
+            platform::is_gpu,
+            body::gpu_diagnostics_t<Rank>,
+            body::cpu_diagnostics_t<Rank>>;
+        std::unique_ptr<diag_t> null_diag{nullptr};
+        bool                    update_diagnostics{true};
 
         template <typename MeshConfig>
         static bool partition_contains(const vector_t<real, Rank>& pos, const MeshConfig& mesh_cfg)
@@ -194,7 +198,7 @@ namespace simbi::ecs {
             auto& meta   = sim.metadata();
             auto  motion = get_motion_state(sim);
 
-            meta.level_dts[lvl] = timestep::compute_level_timestep(sim, lvl, motion);
+            meta.level_dts[lvl] = numerics::compute_level_timestep(sim, lvl, motion);
         }
 
         template <typename Sim>
@@ -299,10 +303,12 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
+            using namespace numerics;
+            real gamma = sim.metadata().gamma;
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
-                recover_primitives(exec, fields.prim, fields.cons, sim.metadata().gamma);
+                auto& exec   = sim.partition_executor(lvl, pp);
+                fields.prim  = fields.cons.map(to_primitive_t{gamma}).with(exec);
             }
         }
     };
@@ -332,7 +338,77 @@ namespace simbi::ecs {
             }
 
             // exchange halos between partitions
-            sim.exchange_halos(lvl);
+            // sim.exchange_halos(lvl);
+        }
+
+        template <typename Sim>
+        void prolongate_from_coarse(Sim& sim, std::uint64_t fine_lvl) const
+        {
+            constexpr auto Rank       = Sim::rank;
+            const auto     coarse_lvl = fine_lvl - 1;
+            const auto     ref_ratio  = sim.level_info(fine_lvl).refinement_ratio;
+
+            iarray<Rank> ratio;
+            ratio.fill(static_cast<std::int64_t>(ref_ratio));
+
+            // for each fine partition, prolongate from overlapping coarse
+            for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
+                auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
+                auto& fine_part   = sim.partition(fine_lvl, fp);
+                auto& exec        = sim.partition_executor(fine_lvl, fp);
+
+                // find overlapping coarse partition
+                std::uint64_t cp = 0;
+                if (sim.num_partitions(coarse_lvl) > 1) {
+                    cp = fp % sim.num_partitions(coarse_lvl);
+                }
+
+                if (cp >= sim.num_partitions(coarse_lvl)) {
+                    continue;
+                }
+
+                auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
+
+                // time interpolation enabled and workspace exists?
+                const bool do_interpolation = alpha >= 0.0 && sim.has_workspace(coarse_lvl, cp);
+
+                if (do_interpolation) {
+                    // interpolate between u_n and current state
+                    auto& coarse_ws = sim.workspace(coarse_lvl, cp);
+                    auto  u_interp =
+                        coarse_ws.u_n.zip(coarse_fields.cons, numerics::time_interpolate_t{alpha})
+                            .with(exec);
+
+                    grid::amr::fill_fine_ghosts(
+                        fine_fields.cons,
+                        u_interp,
+                        fine_part.owned_domain,
+                        ratio,
+                        exec
+                    );
+                }
+                else if (use_coarse_u_n && sim.has_workspace(coarse_lvl, cp)) {
+                    // use stored u^n from workspace
+                    auto& coarse_ws = sim.workspace(coarse_lvl, cp);
+                    grid::amr::fill_fine_ghosts(
+                        fine_fields.cons,
+                        coarse_ws.u_n,
+                        fine_part.owned_domain,
+                        ratio,
+                        exec
+                    );
+                }
+                else {
+                    // use current state in cons
+                    grid::amr::fill_fine_ghosts(
+                        fine_fields.cons,
+                        coarse_fields.cons,
+                        fine_part.owned_domain,
+                        ratio,
+                        exec
+                    );
+                }
+            }
         }
 
       private:
@@ -369,7 +445,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // apply boundaries using the driver
                 geometry::boundary_driver_t::apply_boundaries(
@@ -381,84 +457,6 @@ namespace simbi::ecs {
                     context,
                     exec
                 );
-            }
-        }
-
-        template <typename Sim>
-        void prolongate_from_coarse(Sim& sim, std::uint64_t fine_lvl) const
-        {
-            using cons_t              = typename Sim::conserved_t;
-            constexpr auto Rank       = Sim::rank;
-            const auto     coarse_lvl = fine_lvl - 1;
-            const auto     ref_ratio  = sim.level_info(fine_lvl).refinement_ratio;
-
-            iarray<Rank> ratio;
-            ratio.fill(static_cast<std::int64_t>(ref_ratio));
-
-            // for each fine partition, prolongate from overlapping coarse
-            for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
-                auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
-                auto& fine_part   = sim.partition(fine_lvl, fp);
-                auto  exec        = sim.partition_executor(fine_lvl, fp);
-
-                // find overlapping coarse partition
-                std::uint64_t cp = 0;
-                if (sim.num_partitions(coarse_lvl) > 1) {
-                    cp = fp % sim.num_partitions(coarse_lvl);
-                }
-
-                if (cp >= sim.num_partitions(coarse_lvl)) {
-                    continue;
-                }
-
-                auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-
-                // time interpolation enabled and workspace exists?
-                const bool do_interpolation = alpha >= 0.0 && sim.has_workspace(coarse_lvl, cp);
-
-                if (do_interpolation) {
-                    // interpolate between u_n and current state
-                    auto& coarse_ws = sim.workspace(coarse_lvl, cp);
-                    auto  u_interp  = coarse_ws.u_n
-                                        .zip(
-                                            coarse_fields.cons,
-                                            [a = alpha] DEV(cons_t u_n, cons_t u_curr) -> cons_t {
-                                                using namespace simbi::structs;
-                                                return u_n | scale_gas(1.0 - a) |
-                                                       add_gas(u_curr | scale_gas(a));
-                                            }
-                                        )
-                                        .with(exec);
-
-                    grid::amr::fill_fine_ghosts(
-                        fine_fields.cons,
-                        u_interp,
-                        fine_part.owned_domain,
-                        ratio,
-                        exec
-                    );
-                }
-                else if (use_coarse_u_n && sim.has_workspace(coarse_lvl, cp)) {
-                    // use stored u^n from workspace
-                    auto& coarse_ws = sim.workspace(coarse_lvl, cp);
-                    grid::amr::fill_fine_ghosts(
-                        fine_fields.cons,
-                        coarse_ws.u_n,
-                        fine_part.owned_domain,
-                        ratio,
-                        exec
-                    );
-                }
-                else {
-                    // use current state in cons
-                    grid::amr::fill_fine_ghosts(
-                        fine_fields.cons,
-                        coarse_fields.cons,
-                        fine_part.owned_domain,
-                        ratio,
-                        exec
-                    );
-                }
             }
         }
     };
@@ -476,7 +474,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // computes E = avg(Flux) + contact_terms
                 // stores into fields.efield
@@ -507,7 +505,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // compute fluxes for each direction
                 for (std::uint64_t dir = 0; dir < rank; ++dir) {
@@ -546,11 +544,9 @@ namespace simbi::ecs {
         template <typename Sim>
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
-            using cons_t = typename Sim::conserved_t;
-
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 if (!sim.has_workspace(lvl, pp)) {
                     sim.create_workspace(lvl, pp);
@@ -558,7 +554,7 @@ namespace simbi::ecs {
                 auto& ws = sim.workspace(lvl, pp);
 
                 // store u^n for time interpolation
-                ws.u_n = fields.cons.map([] DEV(cons_t u) { return u; }).with(exec);
+                ws.u_n = fields.cons.map(fp::identity).with(exec);
             }
         }
     };
@@ -575,7 +571,6 @@ namespace simbi::ecs {
         void operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
-            using cons_t = typename Sim::conserved_t;
 
             auto&      meta    = sim.metadata();
             auto&      sources = sim.sources();
@@ -588,7 +583,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // godunov operator L(u)
                 auto ell = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
@@ -601,21 +596,11 @@ namespace simbi::ecs {
                     meta.level_dts[lvl]
                 );
 
-                // u^{n+1} = u^n + dt * L(u^n)
+                // u^{n+1} = u^n + dt * L(u^n) + dt * B(u^n)
                 auto u_view = fields.cons[part.owned_domain];
-                u_view =
-                    u_view
-                        .zip(
-                            ell,
-                            [dt] DEV(cons_t u, cons_t dudt) -> cons_t {
-                                return u | add_gas(dudt * dt);
-                            }
-                        )
-                        .zip(
-                            be,
-                            [dt] DEV(cons_t u, cons_t be) -> cons_t { return u | add_gas(be * dt); }
-                        )
-                        .with(exec);
+                u_view      = u_view.zip(ell, numerics::euler_step_t{dt})
+                             .zip(be, numerics::euler_step_t{dt})
+                             .with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     em::update_magnetic_fields(
@@ -643,7 +628,6 @@ namespace simbi::ecs {
         void operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
-            using cons_t = typename Sim::conserved_t;
 
             auto&      meta    = sim.metadata();
             auto&      sources = sim.sources();
@@ -655,7 +639,7 @@ namespace simbi::ecs {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // ensure workspace exists
                 if (!sim.has_workspace(lvl, pp)) {
@@ -664,7 +648,7 @@ namespace simbi::ecs {
                 auto& ws = sim.workspace(lvl, pp);
 
                 // store u^n
-                ws.u_n = fields.cons.map([] DEV(cons_t u) { return u; }).with(exec);
+                ws.u_n = fields.cons.map(fp::identity).with(exec);
 
                 // compute L(u^n)
                 auto k1 = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
@@ -675,19 +659,14 @@ namespace simbi::ecs {
 
                 // u* = u^n + dt * L(u^n)
                 auto u_star = fields.cons[part.owned_domain];
-                u_star =
-                    u_star.zip(k1, [dt] DEV(cons_t u, cons_t us) { return u | add_gas(us * dt); })
-                        .zip(
-                            be,
-                            [dt] DEV(cons_t u, cons_t be) -> cons_t { return u | add_gas(be * dt); }
-                        )
-                        .with(exec);
+                u_star      = u_star.zip(k1, numerics::euler_step_t{dt})
+                             .zip(be, numerics::euler_step_t{dt})
+                             .with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     // save E^n for rk2 stage 2
                     for (std::uint64_t dd = 0; dd < Sim::rank; ++dd) {
-                        ws.e_n[dd] =
-                            fields.efield[dd].map([] DEV(real e) -> real { return e; }).with(exec);
+                        ws.e_n[dd] = fields.efield[dd].map(fp::identity).with(exec);
                     }
                 }
             }
@@ -695,7 +674,27 @@ namespace simbi::ecs {
     };
 
     // =========================================================================
-    // rk2 stage 2: u* -> u^{n+1}
+    // rk2 stage 2 functor
+    // =========================================================================
+    template <std::uint64_t Rank, typename UStarComp, typename K2Comp, typename BEComp>
+    struct rk2_final_stage_t
+    {
+        UStarComp u_star;
+        K2Comp    k2;
+        BEComp    be;
+        real      dt;
+
+        template <typename ConsT>
+        DEV ConsT operator()(const iarray<Rank>& coord, const ConsT& u) const
+        {
+            using namespace simbi::structs;
+            return u | scale_gas(0.5) | add_gas(0.5 * u_star(coord)) |
+                   add_gas(0.5 * dt * k2(coord)) | add_gas(0.5 * dt * be(coord));
+        }
+    };
+
+    // =========================================================================
+    // rk2 stage 2 system
     // =========================================================================
     template <typename Ops>
     struct rk2_stage2_system_t
@@ -706,8 +705,6 @@ namespace simbi::ecs {
         void operator()(Sim& sim, const Geometry& block_geo, std::uint64_t lvl) const
         {
             using namespace simbi::structs;
-            constexpr std::uint64_t Rank = Sim::rank;
-            using cons_t                 = typename Sim::conserved_t;
 
             auto&      meta    = sim.metadata();
             auto&      sources = sim.sources();
@@ -722,7 +719,7 @@ namespace simbi::ecs {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
                 auto& ws     = sim.workspace(lvl, pp);
-                auto  exec   = sim.partition_executor(lvl, pp);
+                auto& exec   = sim.partition_executor(lvl, pp);
 
                 // compute L(u*)
                 auto k2 = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
@@ -734,29 +731,19 @@ namespace simbi::ecs {
                 auto u_n    = ws.u_n[part.owned_domain];
                 auto u_star = fields.cons[part.owned_domain];
 
-                u_n = u_n.enum_map(
-                             [u_star, k2, be, dt] DEV(iarray<Rank> coord, cons_t u) -> cons_t {
-                                 return u | scale_gas(0.5) | add_gas(0.5 * u_star(coord)) |
-                                        add_gas(0.5 * dt * k2(coord)) |
-                                        add_gas(0.5 * dt * be(coord));
-                             }
-                ).with(exec);
+                rk2_final_stage_t<Sim::rank, decltype(u_star), decltype(k2), decltype(be)>
+                    rk2_combine{u_star, k2, be, dt};
+
+                u_n = u_n.enum_map(rk2_combine).with(exec);
 
                 // copy result back
-                fields.cons = ws.u_n.map([] DEV(cons_t u) -> cons_t { return u; }).with(exec);
+                fields.cons = ws.u_n.map(fp::identity).with(exec);
 
                 if constexpr (Sim::is_mhd) {
                     // compute E^{n+1/2} = 0.5 * (E^n + E^*)
                     for (std::uint64_t dd = 0; dd < Sim::rank; ++dd) {
                         auto en = fields.efield[dd];
-                        en      = ws.e_n[dd]
-                                 .zip(
-                                     en,
-                                     [] DEV(real e_n, real e_star) -> real {
-                                         return 0.5 * (e_n + e_star);
-                                     }
-                                 )
-                                 .with(exec);
+                        en      = ws.e_n[dd].zip(en, fp::average_op).with(exec);
                     }
 
                     // update magnetic fields using rk2 E-fields
@@ -808,7 +795,7 @@ namespace simbi::ecs {
                 auto& fine_part     = sim.partition(fine_lvl, fp);
 
                 // use coarse executor since we're writing to coarse field
-                auto exec = sim.partition_executor(coarse_lvl, cp);
+                auto& exec = sim.partition_executor(coarse_lvl, cp);
 
                 // restrict fine owned cells -> coarse owned cells (no ghosts)
                 auto fine_owned_cons = fine_fields.cons[fine_part.owned_domain];
@@ -883,7 +870,7 @@ namespace simbi::ecs {
             for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
                 auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
                 auto& fine_part   = sim.partition(fine_lvl, fp);
-                auto  exec        = sim.partition_executor(fine_lvl, fp);
+                auto& exec        = sim.partition_executor(fine_lvl, fp);
 
                 // find overlapping coarse partition
                 std::uint64_t cp = find_coarse_partition(sim, fine_lvl, fp);
@@ -929,8 +916,8 @@ namespace simbi::ecs {
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
-                auto& part = sim.partition(lvl, pp);
-                part.stream.synchronize();
+                auto& exec = sim.partition_executor(lvl, pp);
+                exec.sync();
             }
         }
     };
@@ -979,15 +966,6 @@ namespace simbi::ecs {
                     // execution on an executor that cannot directly write into
                     // the register backing storage (important for single-device
                     // correctness).
-                    auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-                    if (coarse_fields.cons.locality() != coarse_part.stream.locality()) {
-                        throw std::runtime_error(
-                            "flux register initialization failed: partition "
-                            "stream locality "
-                            "does not match coarse field locality"
-                        );
-                    }
-
                     flux_regs.registers.emplace_back(coarse_part.owned_domain, ratio);
                 }
 
@@ -1019,7 +997,7 @@ namespace simbi::ecs {
 
             // zero all registers using executor from first coarse partition
             for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl); ++cp) {
-                auto exec = sim.partition_executor(coarse_lvl, cp);
+                auto& exec = sim.partition_executor(coarse_lvl, cp);
                 flux_regs.registers[cp].zero_all(exec);
             }
         }
@@ -1053,7 +1031,7 @@ namespace simbi::ecs {
                 // for each coarse partition that borders fine region
                 for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl); ++cp) {
                     auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-                    auto  exec          = sim.partition_executor(coarse_lvl, cp);
+                    auto& exec          = sim.partition_executor(coarse_lvl, cp);
 
                     // accumulate coarse flux for each dimension
                     for (std::uint64_t dim = 0; dim < Rank; ++dim) {
@@ -1113,7 +1091,7 @@ namespace simbi::ecs {
                 // for each fine partition
                 for (std::uint64_t fp = 0; fp < sim.num_partitions(fine_lvl); ++fp) {
                     auto& fine_fields = sim.partition_hydro(fine_lvl, fp);
-                    auto  exec        = sim.partition_executor(fine_lvl, fp);
+                    auto& exec        = sim.partition_executor(fine_lvl, fp);
 
                     // determine which coarse partition this fine partition
                     // overlaps for single-partition case, it's always 0
@@ -1179,7 +1157,7 @@ namespace simbi::ecs {
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 for (std::uint64_t cp = 0; cp < sim.num_partitions(coarse_lvl); ++cp) {
                     auto& coarse_fields = sim.partition_hydro(coarse_lvl, cp);
-                    auto  exec          = sim.partition_executor(coarse_lvl, cp);
+                    auto& exec          = sim.partition_executor(coarse_lvl, cp);
 
                     grid::amr::apply_flux_correction(
                         coarse_fields.cons,

@@ -9,15 +9,15 @@
 // =============================================================================
 
 #include "base/stencil_view.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "grid/domain.hpp"
 #include "io/exceptions.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
-#include "physics/ib/diagnostics.hpp"
 #include "physics/ib/effects.hpp"
 #include "utility/enums.hpp"
 
@@ -120,7 +120,7 @@ namespace simbi::cfd {
         real                 time;
         real                 gamma;
 
-        DEV constexpr auto operator()(iarray<rank> coord) const
+        DEV constexpr conserved_t operator()(iarray<rank> coord) const
         {
             if (!gravity_source || !gravity_source->enabled) {
                 return conserved_t{};
@@ -171,7 +171,7 @@ namespace simbi::cfd {
         Geometry           geometry;
         real               time;
 
-        DEV constexpr auto operator()(iarray<rank> coord) const
+        DEV constexpr conserved_t operator()(iarray<rank> coord) const
         {
             if (!hydro_source || !hydro_source->enabled) {
                 return conserved_t{};
@@ -244,11 +244,11 @@ namespace simbi::cfd {
     template <typename PrimField, typename Geometry, typename CfdOps>
     struct compute_fluxes_op_t
     {
+        static constexpr std::uint64_t rank = PrimField::rank;
         using prim_t                        = std::remove_cvref_t<typename PrimField::value_type>;
         using conserved_t                   = typename prim_t::counterpart_t;
         using value_type                    = conserved_t;
         using argument_type                 = iarray<PrimField::rank>;
-        static constexpr std::uint64_t rank = PrimField::rank;
 
         PrimField           prims;
         Geometry            geometry;
@@ -435,7 +435,7 @@ namespace simbi::cfd {
     // =========================================================================
     // body effects operator
     // =========================================================================
-    template <typename Bodies, typename PrimField, typename Geometry>
+    template <typename Bodies, typename PrimField, typename Geometry, typename Diagnostics>
     struct body_effects_op_t
     {
         using prim_t                        = std::remove_cvref_t<typename PrimField::value_type>;
@@ -444,12 +444,12 @@ namespace simbi::cfd {
         using argument_type                 = iarray<PrimField::rank>;
         static constexpr std::uint64_t rank = PrimField::rank;
 
-        Bodies                          bodies;
-        PrimField                       prims;
-        Geometry                        geometry;
-        body::body_diagnostics_t<rank>* diagnostics;
-        real                            gamma;
-        real                            dt;
+        Bodies       bodies;
+        PrimField    prims;
+        Geometry     geometry;
+        Diagnostics* diagnostics;
+        real         gamma;
+        real         dt;
 
         DEV constexpr auto operator()(iarray<rank> coord) const
         {
@@ -516,26 +516,19 @@ namespace simbi::cfd {
     // =========================================================================
     // body effects computation
     // =========================================================================
-    template <typename PrimField, typename Geometry, typename Bodies>
+    template <typename PrimField, typename Geometry, typename Bodies, typename Diagnostics>
     auto body_effects(
-        const PrimField&                           prims,
-        const grid::domain_t<PrimField::rank>&     active_domain,
-        const Geometry&                            geometry,
-        const Bodies&                              bodies,
-        body::body_diagnostics_t<PrimField::rank>* diagnostics,
-        real                                       gamma,
-        real                                       dt
+        const PrimField&                       prims,
+        const grid::domain_t<PrimField::rank>& active_domain,
+        const Geometry&                        geometry,
+        const Bodies&                          bodies,
+        Diagnostics*                           diagnostics,
+        real                                   gamma,
+        real                                   dt
     )
     {
         return compute::computation_t{
-            body_effects_op_t<Bodies, PrimField, Geometry>{
-                bodies,
-                prims,
-                geometry,
-                diagnostics,
-                gamma,
-                dt
-            },
+            body_effects_op_t{bodies, prims, geometry, diagnostics, gamma, dt},
             active_domain
         };
     }

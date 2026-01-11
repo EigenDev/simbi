@@ -72,6 +72,7 @@ def apply_axis_labels(
 
 def apply_axis_limits(ax: Axes, config: FigureConfig) -> None:
     """Sets axis limits if provided in config."""
+
     if config.xlims:
         ax.set_xlim(config.xlims.min, config.xlims.max)
     if config.ylims:
@@ -353,6 +354,26 @@ class FigureFormatter:
                 remove_spines(main_ax)
             except Exception:
                 pass
+        # if any("lines" in x.keys() for x in rendered_artists) and not any(
+        #     isinstance(x["collection"], (PolyCollection, QuadMesh))
+        #     for x in rendered_artists
+        # ):
+        if main_ax.name != "polar" and ndim <= 1:
+            try:
+                remove_spines(main_ax)
+            except Exception:
+                pass
+
+        if main_ax.name == "polar":
+            main_ax.grid(False)
+            main_ax.set_theta_zero_location("N")
+            main_ax.set_theta_direction(-1)
+
+            # Hide tick labels if specified
+            main_ax.set_xticklabels([])
+            main_ax.set_yticklabels([])
+
+
 
     def _format_colorbar(
         self, fig: Figure, ax: Axes, artist: Any, field_data: Any

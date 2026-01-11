@@ -1,8 +1,10 @@
 #include "evolver.hpp"
-#include "compat.hpp"
+
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "context/evolution.hpp"
 #include "dispatch.hpp"
+#include "ecs/systems.hpp"
 #include "utility/config_dict.hpp"
 
 #include <cstdint>
@@ -18,9 +20,9 @@ namespace py = pybind11;
 namespace simbi::hydrostate {
     // convenience dispatcher based on runtime parameters
     void dispatch_simulation(
-        config_dict_t& init,
-        py::iterator prim_gen,
-        py::list bstagg,
+        config_dict_t&                   init,
+        py::iterator                     prim_gen,
+        py::list                         bstagg,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative
     )
@@ -50,19 +52,12 @@ namespace simbi::hydrostate {
             scale_factor_derivative,
             [](auto& sim, const auto& ops) {
                 // rev up those fryers
-                auto evo_state =
-                    evolution::initialize(sim, "Cool Simulation [TM]");
-                auto pipeline = evolution::hydro_pipeline_t{sim, ops};
-                for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
-                    pipeline.configure(lvl);
-                }
+                auto evo_state = evolution::initialize(sim, "Cool Simulation [TM]");
+                auto pipeline  = evolution::hydro_pipeline_t{sim, ops};
+                pipeline.configure();
 
-                evolution::run(
-                    sim,
-                    [&](auto&) { pipeline.step_all(); },
-                    evo_state
-                );
+                evolution::run(sim, [&](auto&) { pipeline.step_all(); }, evo_state);
             }
         );
     }
-}   // namespace simbi::hydrostate
+} // namespace simbi::hydrostate

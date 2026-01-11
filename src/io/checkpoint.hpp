@@ -1,7 +1,7 @@
 #ifndef IO_CHECKPOINT_HPP
 #define IO_CHECKPOINT_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/components.hpp"
 #include "grid/mesh_config.hpp"
 #include "grid/skeleton.hpp"
@@ -10,6 +10,7 @@
 #include "serialization/skeleton_serial.hpp"
 #include "utility/helpers.hpp"
 #include "write_policy.hpp"
+#include "xpu/xpu.hpp"
 
 #include <H5Cpp.h>
 #include <cmath>
@@ -90,6 +91,9 @@ namespace simbi::io {
             write_attribute(file, "format_version", std::string("2.0"));
             write_attribute(file, "simbi_version", std::string("0.8.0"));
 
+            // force a device syncronization before writing
+            xpu::synchronize();
+
             // metadata
             write_metadata(file);
 
@@ -164,7 +168,7 @@ namespace simbi::io {
         {
             const auto& part = sim.partition(lvl, pp);
 
-            write_attribute(g, "device_id", part.device_id);
+            write_attribute(g, "device_id", part.executor.device_id());
 
             // owned domain bounds
             std::vector<std::int64_t> owned_start(

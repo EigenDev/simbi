@@ -1,142 +1,51 @@
-# Check for GPU dependencies
-hip = dependency(
-  'HIP',
-  cmake_module_path: '/opt/rocm',
-  modules: ['hip::device', 'hip::host'],
-  required: false,
-)
+# =============================================================================
+# gpu/meson.build
+#
+# gpu extension module using precompiled gpu core library
+# =============================================================================
+
+# verify gpu compilation is enabled
+if not get_option('gpu_compilation').enabled()
+  error('gpu subdir should only be processed when gpu_compilation is enabled')
+endif
+
+# gpu backend detection and configuration
 cuda = dependency('CUDA', required: false)
-fs = import('fs')
-include_flags = []
-foreach inc : include_dirs
-  include_flags += ['-I' + inc]
-endforeach
+hip = dependency('HIP', required: false)
 
-gpu_flags = [
-  '-DGPU_ENABLED=1',
-  '-DMANAGED_MEMORY',
-]
-
-# Get CUDA paths
-cuda_path = run_command('which', 'nvcc', check: false).stdout().strip()
-cuda_root = ''
-if cuda_path != ''
-  cuda_root = fs.parent(fs.parent(cuda_path))
+if not cuda.found() and not hip.found()
+  error('gpu compilation enabled but no gpu runtime found')
 endif
 
-# Get ROCm paths
-rocm_path = ''
-if hip.found()
-  rocm_path = run_command('hipconfig', '--path', check: false).stdout().strip()
-endif
-
-gpu_arch = get_option('gpu_arch').strip()
-
-gpu_sources = files(
-  '../src/hesi/cuda/event.cpp',
-  '../src/hesi/cuda/stream.cpp',
-  '../src/hesi/cuda/memory.cpp',
-  '../src/hesi/cuda/transfer.cpp',
-)
-
-gpu_settings = {
-  'nvidia': {
-    'compiler': 'nvcc',
-    'arch': gpu_arch,
-    'args': gpu_arch.split(' ')
-    + [
-      '-x', 'cu',
-      '-dc',
-      '-rdc=true',
-      '--extended-lambda',
-      '--expt-relaxed-constexpr',
-      # '-w',
-      '-std=c++20',
-      '--compiler-options',
-      '-fPIC',
-      '--compiler-options',
-      '-fdiagnostics-color=always',
-      '-DCUDA_ENABLED',
-    ],
-    'link_args': [f'-L@cuda_root@/lib64', '-lcudart'],
-    'inter_link_args': ['-dlink', '-rdc=true', '-Xcompiler', '-fPIC'],
-    'extra_link_args': ['-lcudadevrt'],
-    'gpu_dependency': cuda,
-  },
-  'amd': {
-    'compiler': 'hipcc',
-    'arch': gpu_arch,
-    'args': ['-fPIC', '-fdiagnostics-color=always'] + gpu_arch.split(' ') + ['-DHIP_ENABLED'],
-    'link_args': [f'-L@rocm_path@/lib', '-lamdhip64'],
-    'inter_link_args': [],
-    'extra_link_args': [],
-    'gpu_dependency': hip,
-  },
-}
-
-settings = {}
-if hip.found() or cuda.found()
-  if hip.found()
-    if run_command('hipconfig', '--platform', check: true).stdout().strip() == 'nvidia'
-      settings = gpu_settings['nvidia']
-    else
-      settings = gpu_settings['amd']
-    endif
-  elif cuda.found()
-    settings = gpu_settings['nvidia']
-  endif
-  gpu_compiler = find_program(settings['compiler'])
-
-  # Compile GPU sources
-  gpu_objs = []
-  foreach src : sources + gpu_sources + cpu_sources
-    gpu_objs += [
-      custom_target(
-        # include parent directory name so targets are unique (e.g. cuda_event_o vs backend_event_o)
-        fs.name(fs.parent(src)) + '_' + fs.name(src) + '_gpu_obj',
-        input: src,
-        # make produced object filename unique by prefixing with parent dir
-        output: fs.name(fs.parent(src)) + '_@BASENAME@.o',
-        command: [
-          gpu_compiler,
-          include_flags,
-          settings['args'],
-          '-c', '@INPUT@',
-          '-o', '@OUTPUT@',
-          gpu_flags,
-        ],
-        build_by_default: true,
-      ),
-    ]
-  endforeach
-
-  # perform intermediate link step
-  gpu_objs += [
-    custom_target(
-      'gpu_link',
-      input: gpu_objs,
-      output: 'gpu_link.o',
-      command: [
-        gpu_compiler,
-        settings['link_args'],
-        settings['inter_link_args'],
-        '@INPUT@',
-        '-o', '@OUTPUT@',
-      ]
-      + settings['extra_link_args']
-      + settings['arch'].split(' '),
-      build_by_default: true,
-    ),
+# select backend configuration
+if cuda.found()
+  gpu_dep = cuda
+  link_args = [
+    '-L/opt/cuda/lib64',
+    '-lcudart',
+    '-lcudadevrt',
+    '-lcuda',
   ]
-
-  py3.extension_module(
-    'gpu_ext',
-    ['../src/bindings/gpu_binding.cpp'] + gpu_objs,
-    link_args: settings['link_args'],
-    include_directories: include_directories('..', '../src'),
-    dependencies: general_dependencies + settings['gpu_dependency'],
-    cpp_args: ['-DMANAGED_MEMORY'],
-    install: true,
-    install_dir: py_install_dir,
-  )
+elif hip.found()
+  gpu_dep = hip
+  link_args = [
+    '-lamdhip64',
+  ]
 endif
+
+# =============================================================================
+# gpu python extension
+# =============================================================================
+
+py3.extension_module(
+  'gpu_ext',
+  '../src/bindings/gpu_binding.cpp',
+  include_directories: all_inc,
+  dependencies: general_dependencies + [gpu_dep],
+  link_with: simbi_gpu_core,
+  link_args: link_args,
+  link_language: 'cpp',
+  install: true,
+  install_dir: py_install_dir,
+
+)

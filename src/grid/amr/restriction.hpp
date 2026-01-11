@@ -2,14 +2,14 @@
 #define GRID_AMR_RESTRICTION_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
 #include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "grid/domain.hpp"
 
 #include <cstdint>
-#include <iostream>
+#include <stdexcept>
 #include <type_traits>
 
 namespace simbi::grid::amr {
@@ -21,15 +21,15 @@ namespace simbi::grid::amr {
     // averages r^rank fine cells to produce one coarse cell value
     // -------------------------------------------------------------------------
     template <typename FineComp, std::uint64_t Rank>
-    struct restrict_average_t {
-        using value_type = std::remove_cv_t<
-            std::remove_reference_t<typename FineComp::value_type>>;
+    struct restrict_average_t
+    {
+        using value_type = std::remove_cv_t<std::remove_reference_t<typename FineComp::value_type>>;
         using argument_type                 = iarray<Rank>;
         static constexpr std::uint64_t rank = Rank;
 
-        FineComp fine_comp_;
+        FineComp      fine_comp_;
         argument_type ratio_;
-        double inv_volume_;
+        double        inv_volume_;
 
         DUAL restrict_average_t(FineComp fine, argument_type ratio)
             : fine_comp_(std::move(fine)), ratio_(ratio), inv_volume_(1.0)
@@ -75,23 +75,15 @@ namespace simbi::grid::amr {
                 for (std::int64_t jj = 0; jj < ratio_[1]; ++jj) {
                     for (std::int64_t ii = 0; ii < ratio_[0]; ++ii) {
                         if (first_iter) {
-                            sum = fine_comp_(
-                                {fine_base[0] + ii, fine_base[1] + jj}
-                            );
+                            sum        = fine_comp_({fine_base[0] + ii, fine_base[1] + jj});
                             first_iter = false;
                             continue;
                         }
                         if constexpr (is_hydro_conserved_c<value_type>) {
-                            sum =
-                                sum | add_gas(fine_comp_(
-                                          {fine_base[0] + ii, fine_base[1] + jj}
-                                      ));
+                            sum = sum | add_gas(fine_comp_({fine_base[0] + ii, fine_base[1] + jj}));
                         }
                         else {
-                            sum =
-                                sum + fine_comp_(
-                                          {fine_base[0] + ii, fine_base[1] + jj}
-                                      );
+                            sum = sum + fine_comp_({fine_base[0] + ii, fine_base[1] + jj});
                         }
                     }
                 }
@@ -103,26 +95,22 @@ namespace simbi::grid::amr {
                         for (std::int64_t ii = 0; ii < ratio_[0]; ++ii) {
                             if (first_iter) {
                                 sum = fine_comp_(
-                                    {fine_base[0] + ii,
-                                     fine_base[1] + jj,
-                                     fine_base[2] + kk}
+                                    {fine_base[0] + ii, fine_base[1] + jj, fine_base[2] + kk}
                                 );
                                 first_iter = false;
                                 continue;
                             }
                             if constexpr (is_hydro_conserved_c<value_type>) {
-                                sum = sum | add_gas(fine_comp_(
-                                                {fine_base[0] + ii,
-                                                 fine_base[1] + jj,
-                                                 fine_base[2] + kk}
-                                            ));
+                                sum = sum |
+                                      add_gas(fine_comp_(
+                                          {fine_base[0] + ii, fine_base[1] + jj, fine_base[2] + kk}
+                                      ));
                             }
                             else {
-                                sum = sum + fine_comp_(
-                                                {fine_base[0] + ii,
-                                                 fine_base[1] + jj,
-                                                 fine_base[2] + kk}
-                                            );
+                                sum = sum +
+                                      fine_comp_(
+                                          {fine_base[0] + ii, fine_base[1] + jj, fine_base[2] + kk}
+                                      );
                             }
                         }
                     }
@@ -139,12 +127,13 @@ namespace simbi::grid::amr {
     // samples a single fine cell
     // -------------------------------------------------------------------------
     template <typename FineComp, std::uint64_t Rank>
-    struct restrict_injection_t {
+    struct restrict_injection_t
+    {
         using value_type                    = typename FineComp::value_type;
         using argument_type                 = iarray<Rank>;
         static constexpr std::uint64_t rank = Rank;
 
-        FineComp fine_comp_;
+        FineComp      fine_comp_;
         argument_type ratio_;
 
         DUAL restrict_injection_t(FineComp fine, argument_type ratio)
@@ -202,24 +191,18 @@ namespace simbi::grid::amr {
         // default to averaging (conservative)
         auto kernel = restrict_average_t<Computation, Rank>(fine, ratio);
 
-        return computation_t<Rank, decltype(kernel)>{
-          std::move(kernel),
-          coarse_domain
-        };
+        return computation_t<Rank, decltype(kernel)>{std::move(kernel), coarse_domain};
     }
 
     template <typename Computation, std::uint64_t Rank>
     auto restrict_inject(const Computation& fine, iarray<Rank> ratio)
     {
         auto coarse_domain = scale_domain_down(fine.domain(), ratio);
-        auto kernel = restrict_injection_t<Computation, Rank>(fine, ratio);
+        auto kernel        = restrict_injection_t<Computation, Rank>(fine, ratio);
 
-        return computation_t<Rank, decltype(kernel)>{
-          std::move(kernel),
-          coarse_domain
-        };
+        return computation_t<Rank, decltype(kernel)>{std::move(kernel), coarse_domain};
     }
 
-}   // namespace simbi::grid::amr
+} // namespace simbi::grid::amr
 
-#endif   // GRID_AMR_RESTRICTION_HPP
+#endif // GRID_AMR_RESTRICTION_HPP

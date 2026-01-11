@@ -206,9 +206,19 @@ class Figure:
                                 if len(data.domain) > 1
                                 else data.domain[0]
                             )
+
                             y_data = (
                                 data.domain[0] if len(data.domain) > 1 else None
                             )
+                            if x_data is None:
+                                raise ValueError("empty x_data in domain")
+
+                            if y_data is None:
+                                raise ValueError("empty y_data in domain")
+
+                            if main_ax.name == "polar":
+                                x_data, y_data = y_data, x_data
+
                             main_ax.set_xlim(x_data.min(), x_data.max())
                             if y_data is not None:
                                 main_ax.set_ylim(y_data.min(), y_data.max())

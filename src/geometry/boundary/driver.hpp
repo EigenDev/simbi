@@ -1,7 +1,7 @@
 #ifndef GRID_BOUNDARY_DRIVER_HPP
 #define GRID_BOUNDARY_DRIVER_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "geometry/boundary/index_map.hpp"
 #include "geometry/visit.hpp"
@@ -16,7 +16,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::geometry {
 
@@ -94,7 +93,7 @@ namespace simbi::geometry {
         // idx: the ghost cell index
         // interior_state: the state at the nearest active edge (provided by
         // remap)
-        DUAL T operator()(const iarray<Rank>& idx, const T& interior_state) const
+        DEV T operator()(const iarray<Rank>& idx, const T& interior_state) const
         {
             // geometry: convert index to physical position
             auto phys_pos = geometry.centroid(idx);
@@ -102,6 +101,24 @@ namespace simbi::geometry {
             // physics: execute the vm
             // apply(position, interior_state, time)
             return vm.apply(phys_pos, interior_state, time);
+        }
+    };
+
+    // -------------------------------------------------------------------------
+    // physics boundary functor
+    // applies physics policy to boundary values
+    // -------------------------------------------------------------------------
+    template <typename T, std::uint64_t Rank, typename Policy>
+    struct physics_boundary_t
+    {
+        Policy                physics_policy;
+        std::uint64_t         dim;
+        grid::side_t          side;
+        grid::boundary_type_t bc_type;
+
+        DEV T operator()(const T& val) const
+        {
+            return physics_policy.apply(val, dim, side, bc_type);
         }
     };
 
@@ -238,9 +255,11 @@ namespace simbi::geometry {
 
                         auto pole_map = spherical_pole_map_t<Rank>{pivot, phi_start, phi_len};
 
-                        auto phys_op = [=] DUAL(const T& val) {
-                            return physics_policy
-                                .apply(val, primary_dd, primary_side, primary_bc_type);
+                        auto phys_op = physics_boundary_t<T, Rank, Policy>{
+                            physics_policy,
+                            primary_dd,
+                            primary_side,
+                            primary_bc_type
                         };
 
                         field[ghost.domain] =
@@ -259,8 +278,11 @@ namespace simbi::geometry {
                         global_dims[primary_dd]
                     };
 
-                    auto phys_op = [=] DUAL(const T& val) {
-                        return physics_policy.apply(val, primary_dd, primary_side, primary_bc_type);
+                    auto phys_op = physics_boundary_t<T, Rank, Policy>{
+                        physics_policy,
+                        primary_dd,
+                        primary_side,
+                        primary_bc_type
                     };
 
                     field[ghost.domain] =
@@ -304,9 +326,11 @@ namespace simbi::geometry {
                                                  : geometry.fin[primary_dd] - 1;
                         auto         clamp = clamp_map_t<Rank>{primary_dd, edge, edge + 1};
 
-                        auto phys_op = [=] DUAL(const T& val) {
-                            return physics_policy
-                                .apply(val, primary_dd, primary_side, primary_bc_type);
+                        auto phys_op = physics_boundary_t<T, Rank, Policy>{
+                            physics_policy,
+                            primary_dd,
+                            primary_side,
+                            primary_bc_type
                         };
 
                         field[ghost.domain] =
@@ -359,11 +383,21 @@ namespace simbi::geometry {
                     }
                 }
 
-                auto phys_op = [=] DUAL(const T& val) {
-                    return physics_policy.apply(val, primary_dd, primary_side, primary_bc_type);
+                auto phys_op = physics_boundary_t<T, Rank, Policy>{
+                    physics_policy,
+                    primary_dd,
+                    primary_side,
+                    primary_bc_type
                 };
 
                 field[ghost.domain] = field[ghost.domain].remap(map).map(phys_op).with(exec);
+                // field[ghost.domain] = field[ghost.domain]
+                //                           .enum_map([](auto coord, auto c) {
+                //                               std::cout << "ghost coord: " << coord
+                //                                         << " value: " << c << "\n";
+                //                               return c;
+                //                           })
+                //                           .with(exec);
             }
         }
     };

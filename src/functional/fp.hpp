@@ -1,418 +1,420 @@
-#ifndef FP_TOOKKIT_HPP
-#define FP_TOOKKIT_HPP
+#ifndef FP_TOOLKIT_HPP
+#define FP_TOOLKIT_HPP
 
-#include "base/concepts.hpp"
-#include "compat.hpp"
+#include "decorators.hpp"
 
-#include <algorithm>
-#include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <iterator>
 #include <tuple>
-#include <type_traits>
-#include <utility>
-#include <vector>
 
-namespace simbi {
+namespace simbi::grid {
+    // domain: pure topology defined by integer vectors
+    // represents the half-open interval [start, end)
+    template <std::uint64_t Rank>
+    struct domain_t;
+} // namespace simbi::grid
+
+namespace simbi::fp {
+
     template <typename T, std::uint64_t Rank>
     struct vector_t;
 
-    template <std::uint64_t Rank>
-    using coordinate_t = vector_t<std::int64_t, Rank>;
+    // =========================================================================
+    // lambda lifting
+    //
+    // provides a wrapper to make __device__ lambdas more robust for nvcc's
+    // type deduction by giving them a "cleaner" type.
+    // =========================================================================
 
-    template <std::uint64_t Rank>
-    struct domain_t;
-}   // namespace simbi
+    template <typename L>
+    struct lifted_lambda_t
+    {
+        mutable L lambda;
 
-namespace simbi::fp {
-    // ========================================================================
-    // computable protocol
-    // ========================================================================
-    //
-    // functors that participate in computation graphs must satisfy the
-    // computable concept (defined in base/concepts.hpp):
-    //
-    //   template <typename T>
-    //   concept computable = requires {
-    //       typename T::value_type;      // semantic output type
-    //       typename T::argument_type;   // input type
-    //       { T::rank };                 // spatial dimensionality
-    //   } && requires(const T& t, typename T::argument_type arg) {
-    //       { t(arg) } -> std::convertible_to<typename T::value_type>;
-    //   };
-    //
-    // why this matters:
-    //   - nvcc cannot handle std::invoke_result_t through deep template chains
-    //   - explicit type metadata bypasses broken template instantiation
-    //   - enables zip, compose, and other combinators to work on cuda
-    //
-    // protocol-aware functors in this file:
-    //   - compose_t<F, G>           (if G is computable)
-    //   - zip_t<F, G, BinaryOp>     (requires both F, G computable)
-    //   - select_t<Pred, A, B>      (requires A, B computable)
-    //   - offset_transform_t<Rank>
-    //   - domain_predicate_t<Rank>
-    //   - contains_op_t<Rank>
-    //
-    // ========================================================================
+        DUAL lifted_lambda_t(L l) : lambda(std::move(l)) {}
 
-    // ========================================================================
-    // core concepts
-    // ========================================================================
-
-    template <typename T>
-    concept iterable = requires(T& t) {
-        { std::begin(t) } -> std::input_iterator;
-        { std::end(t) } -> std::sentinel_for<decltype(std::begin(t))>;
+        template <typename... Args>
+        constexpr DUAL auto operator()(Args&&... args) const
+        {
+            return lambda(std::forward<Args>(args)...);
+        }
     };
 
-    // ========================================================================
-    // core utilities
-    // ========================================================================
-    // ========================================================================
-    // composition: (f (of) g)(x) = f(g(x))
-    // ========================================================================
+    template <typename L>
+    constexpr DUAL auto lift(L lambda)
+    {
+        return lifted_lambda_t<L>{lambda};
+    }
 
-    // compose: adapts to whether G is computable
-    template <typename F, typename G>
-    struct compose_t {
-        // provide protocol types if G is computable
-        using argument_type = std::conditional_t<
-            concepts::computable<G>,
-            typename G::argument_type,
-            void>;
+    // =========================================================================
+    // common device functors
+    // =========================================================================
 
-        using value_type = std::conditional_t<
-            concepts::computable<G>,
-            std::invoke_result_t<F, typename G::value_type>,
-            void>;
-
-        static constexpr std::uint64_t rank =
-            concepts::computable<G> ? G::rank : 0;
-
-        mutable F f;
-        mutable G g;
-
-        // computable path
-        template <typename Arg>
-            requires concepts::computable<G> &&
-                     std::same_as<Arg, typename G::argument_type>
-        constexpr DUAL value_type operator()(Arg arg) const
+    // pair creation
+    struct make_pair_t
+    {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A a, B b) const
         {
-            return f(g(arg));
+            return std::make_pair(a, b);
         }
+    };
 
-        // non-computable path
+    // scalar multiplication
+    template <typename S>
+    struct scalar_multiply_t
+    {
+        S scalar;
+
+        template <typename T>
+        constexpr DUAL auto operator()(T x) const
+        {
+            return x * scalar;
+        }
+    };
+
+    // scalar addition
+    template <typename S>
+    struct scalar_add_t
+    {
+        S scalar;
+
+        template <typename T>
+        constexpr DUAL auto operator()(T x) const
+        {
+            return x + scalar;
+        }
+    };
+
+    // zero initializer
+    struct zero_t
+    {
+        template <typename T>
+        constexpr DUAL T operator()(const T&) const
+        {
+            return T{};
+        }
+    };
+
+    // factory functions
+    inline constexpr make_pair_t make_pair_func{};
+    inline constexpr zero_t      zero_func{};
+
+    template <typename S>
+    constexpr auto scalar_multiply(S scalar)
+    {
+        return scalar_multiply_t<S>{scalar};
+    }
+
+    template <typename S>
+    constexpr auto scalar_add(S scalar)
+    {
+        return scalar_add_t<S>{scalar};
+    }
+
+    // =========================================================================
+    // core composition
+    // =========================================================================
+
+    template <typename F, typename G>
+    struct compose_t
+    {
+        F f;
+        G g;
+
         template <typename Arg>
-            requires(!concepts::computable<G>)
-        constexpr DUAL auto operator()(Arg&& arg) const -> decltype(auto)
+        constexpr DUAL auto operator()(Arg&& arg) const
         {
             return f(g(std::forward<Arg>(arg)));
         }
     };
 
     template <typename F, typename G>
-    constexpr auto compose(F f, G g)
+    DUAL compose_t<F, G> compose(F f, G g)
     {
-        return compose_t<F, G>{std::move(f), std::move(g)};
+        return {f, g};
     }
 
-    // ========================================================================
-    // partial application: curry(f, args...)(x) = f(args..., x)
-    // ========================================================================
+    // variadic compose: base case
+    template <typename F>
+    constexpr DUAL auto compose(F f)
+    {
+        return f;
+    }
+
+    // variadic compose: recursive case
+    template <typename F, typename G, typename... Rest>
+    constexpr DUAL auto compose(F f, G g, Rest... rest)
+    {
+        if constexpr (sizeof...(Rest) == 0) {
+            return compose_t<F, G>{f, g};
+        }
+        else {
+            return compose_t<F, decltype(compose(g, rest...))>{f, compose(g, rest...)};
+        }
+    }
+
+    // =========================================================================
+    // partial application
+    // =========================================================================
 
     template <typename F, typename... BoundArgs>
-    struct partial_t {
-        F f;
+    struct partial_t
+    {
+        F                        f;
         std::tuple<BoundArgs...> bound_args;
 
-        template <typename... Args>
-        constexpr DUAL auto operator()(Args&&... args) const -> decltype(auto)
+        template <typename... FreeArgs>
+        constexpr DUAL decltype(auto) operator()(FreeArgs&&... free_args) const
         {
             return std::apply(
-                [&](auto&&... bound) -> decltype(auto) {
-                    return f(bound..., std::forward<Args>(args)...);
+                [&](auto&&... bound) {
+                    return f(
+                        std::forward<decltype(bound)>(bound)...,
+                        std::forward<FreeArgs>(free_args)...
+                    );
                 },
                 bound_args
             );
         }
     };
 
-    template <typename F, typename... Args>
-    constexpr auto partial(F f, Args... args)
+    template <typename F, typename... BoundArgs>
+    constexpr DUAL auto partial(F f, BoundArgs... args)
     {
-        return partial_t<F, Args...>{
-          std::move(f),
-          std::make_tuple(std::move(args)...)
-        };
+        return partial_t<F, BoundArgs...>{f, std::make_tuple(args...)};
     }
 
-    // ========================================================================
-    // selection: pred(x) ? a(x) : b(x)
-    // ========================================================================
-    template <typename Pred, typename A, typename B>
-        requires concepts::computable<A> && concepts::computable<B>
-    struct select_t {
-        using argument_type                 = typename A::argument_type;
-        using value_type                    = typename A::value_type;
-        static constexpr std::uint64_t rank = A::rank;
+    // =========================================================================
+    // conditional selection
+    // =========================================================================
 
+    template <typename Pred, typename A, typename B>
+    struct select_t
+    {
         Pred pred;
-        A a;
-        B b;
+        A    a;
+        B    b;
 
-        constexpr DUAL value_type operator()(argument_type arg) const
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&& arg) const
         {
-            if (pred(arg)) {
-                return a(arg);
-            }
-            else {
-                return b(arg);
-            }
+            return pred(arg) ? a(arg) : b(arg);
         }
     };
 
     template <typename Pred, typename A, typename B>
-    constexpr auto select(Pred pred, A a, B b)
+    constexpr DUAL auto select(Pred pred, A a, B b)
     {
-        return select_t<Pred, A, B>{
-          {std::move(pred)},
-          std::move(a),
-          std::move(b)
-        };
+        return select_t<Pred, A, B>{pred, a, b};
     }
 
-    // ========================================================================
-    // product/zip: combine(f, g)(x) = binary_op(f(x), g(x))
-    // ========================================================================
+    // =========================================================================
+    // zip operations
+    // =========================================================================
 
     template <typename F, typename G, typename BinaryOp>
-        requires concepts::computable<F> && concepts::computable<G>
-    struct zip_t {
-        using argument_type = typename F::argument_type;
-        using value_type    = std::invoke_result_t<
-               BinaryOp,
-               typename F::value_type,
-               typename G::value_type>;
-        static constexpr std::uint64_t rank = F::rank;
+    struct zip_t
+    {
+        F        f;
+        G        g;
+        BinaryOp op;
 
-        mutable F f;
-        mutable G g;
-        mutable BinaryOp op;
-
-        constexpr DUAL value_type operator()(argument_type arg) const
+        template <typename Arg>
+        constexpr DUAL auto operator()(Arg&& arg) const
         {
             return op(f(arg), g(arg));
         }
     };
 
-    // adapter for the case where the left functor is not protocol-computable
-    // but is callable with the right functor's argument_type. this allows
-    // using polymorphic callables such as identity_t for coordinate-producing
-    // functions while keeping the computable metadata coming from G.
     template <typename F, typename G, typename BinaryOp>
-        requires(!concepts::computable<F>) && concepts::computable<G>
-    struct zip_adapter_t {
-        using argument_type = typename G::argument_type;
-        using left_result_t = std::invoke_result_t<F, argument_type>;
-        using value_type    = std::
-            invoke_result_t<BinaryOp, left_result_t, typename G::value_type>;
-        static constexpr std::uint64_t rank = G::rank;
-
-        mutable F f;
-        mutable G g;
-        mutable BinaryOp op;
-
-        constexpr DUAL value_type operator()(argument_type arg) const
-        {
-            return op(f(arg), g(arg));
-        }
-    };
-
-    // factory overloads: choose the appropriate wrapper based on whether
-    // the left functor satisfies the computable protocol.
-    template <typename F, typename G, typename BinaryOp>
-        requires concepts::computable<F> && concepts::computable<G>
-    constexpr auto zip(F f, G g, BinaryOp op)
+    constexpr DUAL auto zip(F f, G g, BinaryOp op)
     {
-        return zip_t<F, G, BinaryOp>{std::move(f), std::move(g), std::move(op)};
+        return zip_t<F, G, BinaryOp>{f, g, op};
     }
 
-    template <typename F, typename G, typename BinaryOp>
-        requires(!concepts::computable<F>) && concepts::computable<G>
-    constexpr auto zip(F f, G g, BinaryOp op)
+    // =========================================================================
+    // basic operators
+    // =========================================================================
+
+    struct add_op_t
     {
-        return zip_adapter_t<F, G, BinaryOp>{
-          std::move(f),
-          std::move(g),
-          std::move(op)
-        };
-    }
-
-    // ========================================================================
-    // coordinate transformation: transform(f, t)(x) = f(t(x))
-    // ========================================================================
-    template <typename BinaryOp, typename Init>
-    constexpr DUAL auto fold(BinaryOp&& op, Init&& init)
-    {
-        // capture init by value (or copy)
-        // capture op by forwarding
-        return [op   = std::forward<BinaryOp>(op),
-                init = std::forward<Init>(init)]<iterable Source>(
-                   Source&& source
-               ) -> Init   // always return the type of the initial value
-        {
-            auto result = init;
-            for (auto&& item : source) {
-                // move the accumulated result into the next operation
-                result =
-                    op(std::move(result), std::forward<decltype(item)>(item));
-            }
-            return result;
-        };
-    }
-
-    template <typename BinaryOp>
-    constexpr DUAL auto reduce(BinaryOp&& op)
-    {
-        // capture op by forwarding
-        return
-            [op =
-                 std::forward<BinaryOp>(op)]<iterable Source>(Source&& source) {
-                auto begin = std::begin(std::forward<Source>(source));
-                auto end   = std::end(std::forward<Source>(source));
-
-                // get the actual value type, not a reference
-                using value_type = std::decay_t<decltype(*begin)>;
-
-                if (begin == end) {
-                    // matches std::reduce behavior for an empty range
-                    return value_type{};
-                }
-
-                // first element is the initial value
-                auto result = *begin;
-                ++begin;
-
-                for (; begin != end; ++begin) {
-                    // move the accumulated result into the next operation
-                    result = op(std::move(result), *begin);
-                }
-                return result;
-            };
-    }
-
-    // ========================================================================
-    // mathematical operators as function objects
-    // ========================================================================
-    struct add_op_t {
         template <typename A, typename B>
-        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        constexpr DUAL auto operator()(A&& a, B&& b) const
         {
             return std::forward<A>(a) + std::forward<B>(b);
         }
     };
 
-    struct subtract_op_t {
+    struct subtract_op_t
+    {
         template <typename A, typename B>
-        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        constexpr DUAL auto operator()(A&& a, B&& b) const
         {
             return std::forward<A>(a) - std::forward<B>(b);
         }
     };
 
-    struct multiply_op_t {
+    struct multiply_op_t
+    {
         template <typename A, typename B>
-        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        constexpr DUAL auto operator()(A&& a, B&& b) const
         {
             return std::forward<A>(a) * std::forward<B>(b);
         }
     };
 
-    struct divide_op_t {
+    struct divide_op_t
+    {
         template <typename A, typename B>
-        constexpr DUAL auto operator()(A&& a, B&& b) const -> decltype(auto)
+        constexpr DUAL auto operator()(A&& a, B&& b) const
         {
             return std::forward<A>(a) / std::forward<B>(b);
         }
     };
 
-    constexpr auto add_op      = add_op_t{};
-    constexpr auto subtract_op = subtract_op_t{};
-    constexpr auto multiply_op = multiply_op_t{};
-    constexpr auto divide_op   = divide_op_t{};
+    struct min_op_t
+    {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A&& a, B&& b) const
+        {
+            return (a < b) ? std::forward<A>(a) : std::forward<B>(b);
+        }
+    };
 
-    // ========================================================================
-    // coordinate utilities
-    // ========================================================================
+    struct max_op_t
+    {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A&& a, B&& b) const
+        {
+            return (a > b) ? std::forward<A>(a) : std::forward<B>(b);
+        }
+    };
+
+    struct abs_op_t
+    {
+        template <typename T>
+        constexpr DUAL auto operator()(T&& x) const
+        {
+            return (x < T{}) ? -std::forward<T>(x) : std::forward<T>(x);
+        }
+    };
+
+    struct negate_op_t
+    {
+        template <typename T>
+        constexpr DUAL auto operator()(T&& x) const
+        {
+            return -std::forward<T>(x);
+        }
+    };
+
+    struct average_op_t
+    {
+        template <typename A, typename B>
+        constexpr DUAL auto operator()(A&& a, B&& b) const
+        {
+            return (std::forward<A>(a) + std::forward<B>(b)) * 0.5;
+        }
+    };
+
+    inline constexpr add_op_t      add_op{};
+    inline constexpr subtract_op_t subtract_op{};
+    inline constexpr multiply_op_t multiply_op{};
+    inline constexpr divide_op_t   divide_op{};
+    inline constexpr min_op_t      min_op{};
+    inline constexpr max_op_t      max_op{};
+    inline constexpr abs_op_t      abs_op{};
+    inline constexpr negate_op_t   negate_op{};
+    inline constexpr average_op_t  average_op{};
+
+    // =========================================================================
+    // coordinate transforms
+    // =========================================================================
 
     template <std::uint64_t Rank>
-    struct offset_transform_t {
-        using value_type                    = coordinate_t<Rank>;
-        using argument_type                 = coordinate_t<Rank>;
-        static constexpr std::uint64_t rank = Rank;
+    struct offset_transform_t
+    {
+        vector_t<std::int64_t, Rank> offset;
 
-        coordinate_t<Rank> offset;
-
-        constexpr DUAL value_type operator()(argument_type coord) const
+        template <typename Coord>
+        constexpr DUAL auto operator()(Coord&& coord) const
         {
-            return offset + coord;
+            return std::forward<Coord>(coord) + offset;
         }
     };
 
     template <std::uint64_t Rank>
-    constexpr auto offset_transform(coordinate_t<Rank> offset)
+    constexpr auto offset_transform(vector_t<std::int64_t, Rank> offset)
     {
         return offset_transform_t<Rank>{offset};
     }
 
+    // =========================================================================
+    // domain predicates
+    // =========================================================================
+
     template <std::uint64_t Rank>
-    struct domain_predicate_t {
-        using value_type                    = bool;
-        using argument_type                 = coordinate_t<Rank>;
-        static constexpr std::uint64_t rank = Rank;
+    struct domain_predicate_t
+    {
+        grid::domain_t<Rank> domain;
 
-        domain_t<Rank> domain;
-
-        constexpr DUAL value_type operator()(argument_type coord) const
+        template <typename Coord>
+        constexpr DUAL bool operator()(Coord&& coord) const
         {
-            return domain.contains(coord);
+            return domain.contains(std::forward<Coord>(coord));
         }
     };
 
     template <std::uint64_t Rank>
-    constexpr auto domain_predicate(domain_t<Rank> domain)
+    constexpr auto domain_predicate(grid::domain_t<Rank> domain)
     {
         return domain_predicate_t<Rank>{domain};
     }
 
-    // ========================================================================
-    // identity and constants
-    // ========================================================================
+    template <std::uint64_t Rank>
+    struct contains_op_t
+    {
+        grid::domain_t<Rank> domain;
 
-    // identity_t: returns argument unchanged (polymorphic)
-    struct identity_t {
-        template <typename T>
-        constexpr DUAL auto operator()(T&& t) const -> decltype(auto)
+        template <typename Coord>
+        constexpr DUAL bool operator()(Coord&& coord) const
         {
-            return std::forward<T>(t);
+            return domain.contains(std::forward<Coord>(coord));
         }
     };
 
-    // constant_t: returns same value for any argument (polymorphic)
+    template <std::uint64_t Rank>
+    constexpr auto contains_op(grid::domain_t<Rank> domain)
+    {
+        return contains_op_t<Rank>{domain};
+    }
+
+    // =========================================================================
+    // utilities
+    // =========================================================================
+
+    struct identity_t
+    {
+        template <typename T>
+        constexpr DUAL auto operator()(T&& x) const
+        {
+            return std::forward<T>(x);
+        }
+    };
+
     template <typename T>
-    struct constant_t {
+    struct constant_t
+    {
         T value;
 
-        template <typename Arg>
-        constexpr DUAL auto operator()(Arg&&) const -> const T&
+        template <typename U>
+        constexpr DUAL const T& operator()(U&&) const
         {
             return value;
         }
     };
 
-    constexpr auto identity = identity_t{};
+    inline constexpr identity_t identity{};
 
     template <typename T>
     constexpr auto constant(T value)
@@ -420,873 +422,36 @@ namespace simbi::fp {
         return constant_t<T>{std::move(value)};
     }
 
-    template <typename T>
-    struct default_t {
-        template <typename Arg>
-        constexpr DUAL T operator()(Arg&&) const
-        {
-            return T{};
-        }
-    };
+    // =========================================================================
+    // folds and reductions (simplified)
+    // =========================================================================
 
-    // domain operations
-    template <std::uint64_t Rank>
-    struct contains_op_t {
-        using value_type                    = bool;
-        using argument_type                 = coordinate_t<Rank>;
-        static constexpr std::uint64_t rank = Rank;
-
-        domain_t<Rank> domain;
-
-        constexpr DEV value_type operator()(argument_type coord) const
-        {
-            return domain.contains(coord);
-        }
-    };
-
-    template <std::uint64_t Rank>
-    constexpr auto contains_op(domain_t<Rank> domain)
+    template <typename Range, typename BinaryOp>
+    constexpr DUAL auto fold(Range&& range, BinaryOp op)
     {
-        return contains_op_t<Rank>{domain};
+        auto it = std::begin(range);
+        if (it == std::end(range)) {
+            return typename std::iterator_traits<decltype(it)>::value_type{};
+        }
+
+        auto result = *it;
+        ++it;
+        for (; it != std::end(range); ++it) {
+            result = op(result, *it);
+        }
+        return result;
     }
 
-    // ========================================================================
-    // integer range generator
-    // ========================================================================
-
-    template <typename T = std::uint64_t>
-    struct integer_range_t {
-        T start_, end_, step_;
-
-        class iterator
-        {
-            T current_, end_, step_;
-
-          public:
-            using iterator_category = std::forward_iterator_tag;
-            using value_type        = T;
-            using difference_type   = std::ptrdiff_t;
-            using pointer           = T*;
-            using reference         = T;
-
-            constexpr iterator() : current_(0), end_(0), step_(1) {}
-            constexpr iterator(T current, T end, T step)
-                : current_(current), end_(end), step_(step)
-            {
-            }
-
-            constexpr T operator*() const noexcept { return current_; }
-
-            constexpr iterator& operator++() noexcept
-            {
-                current_ += step_;
-                return *this;
-            }
-
-            constexpr iterator operator++(int) noexcept
-            {
-                auto temp = *this;
-                ++(*this);
-                return temp;
-            }
-
-            constexpr bool operator==(const iterator& other) const noexcept
-            {
-                return current_ >= end_ || current_ == other.current_;
-            }
-
-            constexpr bool operator!=(const iterator& other) const noexcept
-            {
-                return !(*this == other);
-            }
-        };
-
-        constexpr iterator begin() const
-        {
-            return iterator{start_, end_, step_};
-        }
-        constexpr iterator end() const { return iterator{end_, end_, step_}; }
-
-        template <typename Op>
-        constexpr auto operator|(Op&& op) const
-        {
-            return std::forward<Op>(op)(*this);
-        }
-    };
-
-    // ========================================================================
-    // generator for infinite sequences
-    // ========================================================================
-
-    template <typename Generator>
-    struct generator_view_t {
-        Generator gen_;
-
-        constexpr generator_view_t(Generator gen) : gen_(std::move(gen)) {}
-
-        class iterator
-        {
-            const Generator* gen_;
-            std::uint64_t index_;
-
-          public:
-            using iterator_category = std::forward_iterator_tag;
-            using value_type = std::invoke_result_t<Generator, std::uint64_t>;
-            using difference_type = std::ptrdiff_t;
-            using pointer         = void;
-            using reference       = value_type;
-
-            constexpr iterator() : gen_(nullptr), index_(0) {}
-            constexpr iterator(const Generator* gen, std::uint64_t index)
-                : gen_(gen), index_(index)
-            {
-            }
-
-            constexpr value_type operator*() const noexcept
-            {
-                return (*gen_)(index_);
-            }
-
-            constexpr iterator& operator++()
-            {
-                ++index_;
-                return *this;
-            }
-
-            constexpr iterator operator++(int)
-            {
-                auto temp = *this;
-                ++(*this);
-                return temp;
-            }
-
-            // infinite sequence - never equal to end
-            constexpr bool operator==(const iterator&) const { return false; }
-            constexpr bool operator!=(const iterator&) const { return true; }
-        };
-
-        constexpr iterator begin() const { return iterator{&gen_, 0}; }
-        constexpr iterator end() const { return iterator{&gen_, ~0ULL}; }
-
-        template <typename Op>
-        constexpr auto operator|(Op&& op) const
-        {
-            return std::forward<Op>(op)(*this);
-        }
-    };
-
-    // ========================================================================
-    // view implementations
-    // ========================================================================
-
-    template <iterable Source, typename Func>
-    class map_view_t
+    template <typename Range, typename T, typename BinaryOp>
+    constexpr DUAL auto reduce(Range&& range, T init, BinaryOp op)
     {
-        Source source_;
-        Func func_;
-
-      public:
-        template <typename S>
-        constexpr map_view_t(S&& source, Func func)
-            : source_(std::forward<S>(source)), func_(std::move(func))
-        {
+        auto result = init;
+        for (const auto& item : range) {
+            result = op(result, item);
         }
-
-        template <typename SourceIter>
-        class iterator_t
-        {
-            SourceIter it_;
-            const Func* func_;
-
-          public:
-            using iterator_category =
-                typename std::iterator_traits<SourceIter>::iterator_category;
-            using difference_type =
-                typename std::iterator_traits<SourceIter>::difference_type;
-            using value_type = std::invoke_result_t<
-                Func,
-                typename std::iterator_traits<SourceIter>::reference>;
-            using reference = value_type;
-
-            constexpr iterator_t() : it_{}, func_{nullptr} {}
-            constexpr iterator_t(SourceIter it, const Func* func)
-                : it_(std::move(it)), func_(func)
-            {
-            }
-
-            constexpr reference operator*() const noexcept
-            {
-                return std::invoke(*func_, *it_);
-            }
-            constexpr iterator_t& operator++()
-            {
-                ++it_;
-                return *this;
-            }
-            constexpr iterator_t operator++(int)
-            {
-                auto tmp = *this;
-                ++(*this);
-                return tmp;
-            }
-            constexpr bool operator==(const iterator_t& other) const
-            {
-                return it_ == other.it_;
-            }
-            constexpr bool operator!=(const iterator_t& other) const
-            {
-                return !(*this == other);
-            }
-        };
-
-        constexpr auto begin() const
-        {
-            return iterator_t<decltype(std::begin(source_))>(
-                std::begin(source_),
-                &func_
-            );
-        }
-        constexpr auto end() const
-        {
-            return iterator_t<decltype(std::end(source_))>(
-                std::end(source_),
-                &func_
-            );
-        }
-
-        template <typename Op>
-        constexpr auto operator|(Op&& op) const
-        {
-            return std::forward<Op>(op)(*this);
-        }
-    };
-
-    template <iterable Source, typename Pred>
-    class filter_view_t
-    {
-        Source source_;
-        Pred pred_;
-
-      public:
-        template <typename S>
-        constexpr filter_view_t(S&& source, Pred pred)
-            : source_(std::forward<S>(source)), pred_(std::move(pred))
-        {
-        }
-
-        template <typename SourceIter>
-        class iterator_t
-        {
-            SourceIter it_, end_;
-            const Pred* pred_;
-
-            constexpr void skip()
-            {
-                while (it_ != end_ && !std::invoke(*pred_, *it_)) {
-                    ++it_;
-                }
-            }
-
-          public:
-            using iterator_category = std::input_iterator_tag;
-            using difference_type =
-                typename std::iterator_traits<SourceIter>::difference_type;
-            using value_type =
-                typename std::iterator_traits<SourceIter>::value_type;
-            using reference =
-                typename std::iterator_traits<SourceIter>::reference;
-
-            constexpr iterator_t() : it_{}, end_{}, pred_{nullptr} {}
-            constexpr iterator_t(
-                SourceIter it,
-                SourceIter end,
-                const Pred* pred
-            )
-                : it_(std::move(it)), end_(std::move(end)), pred_(pred)
-            {
-                if (pred_) {
-                    skip();
-                }
-            }
-
-            constexpr reference operator*() const noexcept { return *it_; }
-            constexpr iterator_t& operator++()
-            {
-                ++it_;
-                skip();
-                return *this;
-            }
-            constexpr iterator_t operator++(int)
-            {
-                auto tmp = *this;
-                ++(*this);
-                return tmp;
-            }
-            constexpr bool operator==(const iterator_t& other) const
-            {
-                return it_ == other.it_;
-            }
-            constexpr bool operator!=(const iterator_t& other) const
-            {
-                return !(*this == other);
-            }
-        };
-
-        constexpr auto begin() const
-        {
-            return iterator_t<decltype(std::begin(source_))>(
-                std::begin(source_),
-                std::end(source_),
-                &pred_
-            );
-        }
-        constexpr auto end() const
-        {
-            return iterator_t<decltype(std::end(source_))>(
-                std::end(source_),
-                std::end(source_),
-                &pred_
-            );
-        }
-
-        template <typename Op>
-        constexpr auto operator|(Op&& op) const
-        {
-            return std::forward<Op>(op)(*this);
-        }
-    };
-
-    template <iterable First, iterable Second>
-    class zip_view_t
-    {
-        First first_;
-        Second second_;
-
-      public:
-        template <typename F, typename S>
-        constexpr zip_view_t(F&& first, S&& second)
-            : first_(std::forward<F>(first)), second_(std::forward<S>(second))
-        {
-        }
-
-        template <typename FirstIter, typename SecondIter>
-        class iterator_t
-        {
-            FirstIter first_it_;
-            SecondIter second_it_;
-
-          public:
-            using iterator_category = std::input_iterator_tag;
-            using difference_type   = std::ptrdiff_t;
-            using value_type        = std::pair<
-                       typename std::iterator_traits<FirstIter>::reference,
-                       typename std::iterator_traits<SecondIter>::reference>;
-            using reference = value_type;
-
-            constexpr iterator_t() : first_it_{}, second_it_{} {}
-            constexpr iterator_t(FirstIter first_it, SecondIter second_it)
-                : first_it_(std::move(first_it)),
-                  second_it_(std::move(second_it))
-            {
-            }
-
-            constexpr reference operator*() const noexcept
-            {
-                return {*first_it_, *second_it_};
-            }
-            constexpr iterator_t& operator++()
-            {
-                ++first_it_;
-                ++second_it_;
-                return *this;
-            }
-            constexpr iterator_t operator++(int)
-            {
-                auto tmp = *this;
-                ++(*this);
-                return tmp;
-            }
-            constexpr bool operator==(const iterator_t& other) const
-            {
-                return first_it_ == other.first_it_ ||
-                       second_it_ == other.second_it_;
-            }
-            constexpr bool operator!=(const iterator_t& other) const
-            {
-                return !(*this == other);
-            }
-        };
-
-        constexpr auto begin() const
-        {
-            return iterator_t<
-                decltype(std::begin(first_)),
-                decltype(std::begin(second_))>(
-                std::begin(first_),
-                std::begin(second_)
-            );
-        }
-        constexpr auto end() const
-        {
-            return iterator_t<
-                decltype(std::end(first_)),
-                decltype(std::end(second_))>(
-                std::end(first_),
-                std::end(second_)
-            );
-        }
-
-        template <typename Op>
-        constexpr auto operator|(Op&& op) const
-        {
-            return std::forward<Op>(op)(*this);
-        }
-    };
-
-    template <iterable Source>
-    class take_view_t
-    {
-        Source source_;
-        std::size_t count_;
-
-      public:
-        template <typename S>
-        constexpr take_view_t(S&& source, std::size_t count)
-            : source_(std::forward<S>(source)), count_(count)
-        {
-        }
-
-        template <typename SourceIter>
-        class iterator_t
-        {
-            SourceIter it_;
-            std::size_t remaining_;
-
-          public:
-            using iterator_category =
-                typename std::iterator_traits<SourceIter>::iterator_category;
-            using difference_type =
-                typename std::iterator_traits<SourceIter>::difference_type;
-            using value_type =
-                typename std::iterator_traits<SourceIter>::value_type;
-            using reference =
-                typename std::iterator_traits<SourceIter>::reference;
-
-            constexpr iterator_t() : it_{}, remaining_{0} {}
-            constexpr iterator_t(SourceIter it, std::size_t remaining)
-                : it_(std::move(it)), remaining_(remaining)
-            {
-            }
-
-            constexpr reference operator*() const noexcept { return *it_; }
-            constexpr iterator_t& operator++()
-            {
-                if (remaining_ > 0) {
-                    ++it_;
-                    --remaining_;
-                }
-                return *this;
-            }
-            constexpr iterator_t operator++(int)
-            {
-                auto tmp = *this;
-                ++(*this);
-                return tmp;
-            }
-            constexpr bool operator==(const iterator_t& other) const
-            {
-                return remaining_ == 0 || it_ == other.it_;
-            }
-            constexpr bool operator!=(const iterator_t& other) const
-            {
-                return !(*this == other);
-            }
-        };
-
-        constexpr auto begin() const
-        {
-            return iterator_t<decltype(std::begin(source_))>(
-                std::begin(source_),
-                count_
-            );
-        }
-        constexpr auto end() const
-        {
-            return iterator_t<decltype(std::end(source_))>(
-                std::end(source_),
-                0
-            );
-        }
-
-        template <typename Op>
-        constexpr auto operator|(Op&& op) const
-        {
-            return std::forward<Op>(op)(*this);
-        }
-    };
-
-    // ========================================================================
-    // collection terminal
-    // ========================================================================
-
-    template <typename Container>
-    struct collect_t {
-        template <iterable Source>
-        constexpr auto operator()(Source&& source) const
-        {
-            using source_value_type =
-                std::decay_t<decltype(*std::begin(source))>;
-
-            if constexpr (std::is_same_v<Container, void>) {
-                // auto-deduce container type
-                std::vector<source_value_type> result;
-                for (auto&& item : source) {
-                    result.push_back(item);
-                }
-                return result;
-            }
-            else {
-                Container result{};
-
-                if constexpr (requires {
-                                  result.push_back(source_value_type{});
-                              }) {
-                    // dynamic containers (std::vector, std::deque, etc.)
-                    if constexpr (requires { result.reserve(1); }) {
-                        // reserve space if possible
-                        if constexpr (requires { std::size(source); }) {
-                            result.reserve(std::size(source));
-                        }
-                    }
-                    for (auto&& item : source) {
-                        result.push_back(item);
-                    }
-                }
-                // else if constexpr (requires {
-                //                        result.insert(
-                //                            result.end(),
-                //                            source_value_type{}
-                //                        );
-                //                    }) {
-                //     // associative containers
-                //     for (auto&& item : source) {
-                //         result.insert(result.end(), item);
-                //     }
-                // }
-                else if constexpr (requires {
-                                       result[0] = source_value_type{};
-                                       result.size();
-                                   }) {
-                    // fixed-size indexable containers
-                    std::size_t idx = 0;
-                    for (auto&& item : source) {
-                        if (idx >= result.size()) {
-                            break;   // prevent overflow
-                        }
-                        result[idx++] = item;
-                    }
-                }
-                else {
-                    []<bool success = false>() {
-                        static_assert(
-                            success,
-                            "Container must support push_back, insert, or "
-                            "indexing "
-                            "with size()"
-                        );
-                    }();
-                }
-                return result;
-            }
-        }
-    };
-
-    // ========================================================================
-    // function adapters
-    // ========================================================================
-
-    template <typename F>
-    struct map_fn_t {
-        F func_;
-        constexpr explicit map_fn_t(F func) : func_(std::move(func)) {}
-
-        template <iterable Source>
-        constexpr auto operator()(Source&& source) const
-        {
-            return map_view_t<Source, F>(std::forward<Source>(source), func_);
-        }
-    };
-
-    template <typename Pred>
-    struct filter_fn_t {
-        Pred pred_;
-        constexpr explicit filter_fn_t(Pred pred) : pred_(std::move(pred)) {}
-
-        template <iterable Source>
-        constexpr auto operator()(Source&& source) const
-        {
-            return filter_view_t<Source, Pred>(
-                std::forward<Source>(source),
-                pred_
-            );
-        }
-    };
-
-    template <iterable Second>
-    struct zip_fn_t {
-        Second second_;
-        constexpr explicit zip_fn_t(Second second) : second_(std::move(second))
-        {
-        }
-
-        template <iterable First>
-        constexpr auto operator()(First&& first) const
-        {
-            return zip_view_t<First, Second>(
-                std::forward<First>(first),
-                second_
-            );
-        }
-    };
-
-    struct take_fn_t {
-        std::size_t count_;
-        constexpr explicit take_fn_t(std::size_t count) : count_(count) {}
-
-        template <iterable Source>
-        constexpr auto operator()(Source&& source) const
-        {
-            return take_view_t<Source>(std::forward<Source>(source), count_);
-        }
-    };
-
-    template <typename F>
-    struct for_each_fn_t {
-        F func_;
-        constexpr explicit for_each_fn_t(F func) : func_(std::move(func)) {}
-
-        template <iterable Source>
-        constexpr void operator()(Source&& source) const
-        {
-            for (auto&& item : source) {
-                std::invoke(func_, item);
-            }
-        }
-    };
-
-    // any_of, all_of, none_of
-    template <typename Pred>
-    struct any_of_fn_t {
-        Pred pred_;
-        constexpr explicit any_of_fn_t(Pred pred) : pred_(std::move(pred)) {}
-
-        template <iterable Source>
-        constexpr bool operator()(Source&& source) const
-        {
-            for (auto&& item : source) {
-                if (std::invoke(pred_, item)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-    };
-
-    template <typename Pred>
-    struct all_of_fn_t {
-        Pred pred_;
-        constexpr explicit all_of_fn_t(Pred pred) : pred_(std::move(pred)) {}
-
-        template <iterable Source>
-        constexpr bool operator()(Source&& source) const
-        {
-            for (auto&& item : source) {
-                if (!std::invoke(pred_, item)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-    };
-
-    template <typename Pred>
-    struct none_of_fn_t {
-        Pred pred_;
-        constexpr explicit none_of_fn_t(Pred pred) : pred_(std::move(pred)) {}
-
-        template <iterable Source>
-        constexpr bool operator()(Source&& source) const
-        {
-            for (auto&& item : source) {
-                if (std::invoke(pred_, item)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-    };
-
-    // ========================================================================
-    // terminals
-    // ========================================================================
-
-    struct sum_fn_t {
-        template <iterable Range>
-        constexpr auto operator()(Range&& range) const noexcept
-        {
-            auto begin = std::begin(std::forward<Range>(range));
-            auto end   = std::end(std::forward<Range>(range));
-
-            if (begin == end) {
-                using value_type =
-                    typename std::iterator_traits<decltype(begin)>::value_type;
-                return value_type{0};
-            }
-
-            auto result = *begin;
-            ++begin;
-            for (; begin != end; ++begin) {
-                result = result + *begin;
-            }
-            return result;
-        }
-    };
-
-    struct product_fn_t {
-        template <iterable Range>
-        constexpr auto operator()(Range&& range) const noexcept
-        {
-            auto begin = std::begin(std::forward<Range>(range));
-            auto end   = std::end(std::forward<Range>(range));
-
-            if (begin == end) {
-                using value_type =
-                    typename std::iterator_traits<decltype(begin)>::value_type;
-                return value_type{1};
-            }
-
-            auto result = *begin;
-            ++begin;
-            for (; begin != end; ++begin) {
-                result = result * *begin;
-            }
-            return result;
-        }
-    };
-
-    // ========================================================================
-    // factory functions
-    // ========================================================================
-    constexpr auto range(std::uint64_t end)
-    {
-        return integer_range_t<std::uint64_t>{0, end, 1};
+        return result;
     }
 
-    constexpr auto range(std::uint64_t start, std::uint64_t end)
-    {
-        return integer_range_t<std::uint64_t>{start, end, 1};
-    }
+} // namespace simbi::fp
 
-    constexpr auto
-    range(std::uint64_t start, std::uint64_t end, std::uint64_t step)
-    {
-        return integer_range_t<std::uint64_t>{start, end, step};
-    }
-
-    template <typename Generator>
-    constexpr auto generate(Generator&& gen)
-    {
-        return generator_view_t<Generator>{std::forward<Generator>(gen)};
-    }
-
-    template <typename F>
-    constexpr auto map(F&& func)
-    {
-        return map_fn_t<F>(std::forward<F>(func));
-    }
-
-    template <typename Pred>
-    constexpr auto filter(Pred&& pred)
-    {
-        return filter_fn_t<Pred>(std::forward<Pred>(pred));
-    }
-
-    template <iterable Second>
-    constexpr auto zip(Second&& second)
-    {
-        return zip_fn_t<Second>(std::forward<Second>(second));
-    }
-
-    constexpr auto take(std::size_t count) { return take_fn_t{count}; }
-
-    template <typename F>
-    constexpr auto for_each(F&& func)
-    {
-        return for_each_fn_t<F>(std::forward<F>(func));
-    }
-
-    template <typename Container = void>
-    constexpr DEV auto collect = collect_t<Container>{};
-
-    constexpr DEV auto sum     = sum_fn_t{};
-    constexpr DEV auto product = product_fn_t{};
-
-    template <typename Pred>
-    constexpr DEV auto any_of(Pred&& pred)
-    {
-        return any_of_fn_t<Pred>(std::forward<Pred>(pred));
-    }
-
-    template <typename Pred>
-    constexpr DUAL auto all_of(Pred&& pred)
-    {
-        return all_of_fn_t<Pred>(std::forward<Pred>(pred));
-    }
-
-    template <typename Pred>
-    constexpr DUAL auto none_of(Pred&& pred)
-    {
-        return none_of_fn_t<Pred>(std::forward<Pred>(pred));
-    }
-
-    // ========================================================================
-    // convenience helpers
-    // ========================================================================
-
-    // unpack_map for tuples/pairs
-    template <typename F>
-    constexpr DUAL auto unpack_map(F&& func)
-    {
-        return map([func = std::forward<F>(func)](const auto& tuple) {
-            return std::apply(func, tuple);
-        });
-    }
-
-    // binary zip for convenience
-    template <iterable First, iterable Second>
-    constexpr DUAL auto zip(First&& first, Second&& second)
-    {
-        return zip_view_t<First, Second>(
-            std::forward<First>(first),
-            std::forward<Second>(second)
-        );
-    }
-
-    // ========================================================================
-    // protocol verification
-    // ========================================================================
-    //
-    // note: static assertions for computable protocol are done in files
-    // that include this header after vector_t is fully defined (e.g.,
-    // computation.hpp, field.hpp).
-    //
-    // to manually verify protocol compliance after vector_t is available:
-    //   static_assert(concepts::computable<offset_transform_t<3>>);
-    //   static_assert(concepts::computable<domain_predicate_t<3>>);
-    //   static_assert(concepts::computable<contains_op_t<3>>);
-    //
-    // ========================================================================
-
-}   // namespace simbi::fp
-
-#endif   // FP_TOOLKIT_HPP
+#endif // FP_TOOLKIT_HPP

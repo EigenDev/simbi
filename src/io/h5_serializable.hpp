@@ -1,7 +1,7 @@
 #ifndef IO_H5_SERIALIZABLE_HPP
 #define IO_H5_SERIALIZABLE_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "write_policy.hpp"
 #include "write_traits.hpp"
 

@@ -1,7 +1,7 @@
 #ifndef BINDINGS_STATE_HPP
 #define BINDINGS_STATE_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "utility/config_dict.hpp"
 
 #include <functional>
@@ -19,12 +19,12 @@ namespace simbi {
 
 namespace simbi::hydrostate {
     void dispatch_simulation(
-        config_dict_t& init,
-        py::iterator prim_gen,
-        py::list staggered_bfields,
+        config_dict_t&                   init,
+        py::iterator                     prim_gen,
+        py::list                         staggered_bfields,
         std::function<real(real)> const& scale_factor,
         std::function<real(real)> const& scale_factor_derivative
     );
-}   // namespace simbi::hydrostate
+} // namespace simbi::hydrostate
 
 #endif

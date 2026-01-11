@@ -1,7 +1,7 @@
 #ifndef IO_SERIAL_FIELD_HPP
 #define IO_SERIAL_FIELD_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
 #include "io/h5_serializable.hpp"
@@ -24,30 +24,25 @@ namespace simbi::io {
     // -------------------------------------------------------------------------
     template <std::uint64_t Rank>
     void write_scalar_field(
-        H5::Group& parent,
-        const std::string& name,
+        H5::Group&                       parent,
+        const std::string&               name,
         const grid::field_t<real, Rank>& field,
-        const write_policy_t& policy
+        const write_policy_t&            policy
     )
     {
         auto g = parent.createGroup(name);
 
         // serialize domain
         const auto& domain = field.domain();
-        h5_serializable<grid::domain_t<Rank>>::write_named(
-            g,
-            "domain",
-            domain,
-            policy
-        );
+        h5_serializable<grid::domain_t<Rank>>::write_named(g, "domain", domain, policy);
 
         // extract data in row-major order
-        auto shape = domain.shape();
+        auto              shape = domain.shape();
         std::vector<real> data;
         data.reserve(static_cast<std::size_t>(domain.size()));
 
         // iterate domain in row-major order (matches hdf5 default)
-        for (std::int64_t linear = 0; linear < domain.size(); ++linear) {
+        for (std::uint64_t linear = 0; linear < domain.size(); ++linear) {
             auto coord = domain.linear_to_coord(linear);
             data.push_back(field(coord));
         }
@@ -61,14 +56,12 @@ namespace simbi::io {
     // read a scalar field
     // -------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    grid::field_t<real, Rank>
-    read_scalar_field(const H5::Group& parent, const std::string& name)
+    grid::field_t<real, Rank> read_scalar_field(const H5::Group& parent, const std::string& name)
     {
         auto g = parent.openGroup(name);
 
         // read domain
-        auto domain =
-            h5_serializable<grid::domain_t<Rank>>::read_named(g, "domain");
+        auto domain = h5_serializable<grid::domain_t<Rank>>::read_named(g, "domain");
 
         // read data
         auto data = read_dataset<real>(g, "data");
@@ -77,7 +70,7 @@ namespace simbi::io {
         grid::field_t<real, Rank> field(domain);
 
         // populate field
-        for (std::int64_t linear = 0; linear < domain.size(); ++linear) {
+        for (std::uint64_t linear = 0; linear < domain.size(); ++linear) {
             auto coord                      = domain.linear_to_coord(linear);
             const_cast<real&>(field(coord)) = data[linear];
         }
@@ -91,20 +84,20 @@ namespace simbi::io {
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank, typename Extractor>
     void write_field_component(
-        H5::Group& parent,
-        const std::string& name,
+        H5::Group&                    parent,
+        const std::string&            name,
         const grid::field_t<T, Rank>& field,
-        Extractor&& extractor,
-        const write_policy_t& policy
+        Extractor&&                   extractor,
+        const write_policy_t&         policy
     )
     {
         const auto& domain = field.domain();
-        auto shape         = domain.shape();
+        auto        shape  = domain.shape();
 
         std::vector<real> data;
         data.reserve(static_cast<std::size_t>(domain.size()));
 
-        for (std::int64_t linear = 0; linear < domain.size(); ++linear) {
+        for (std::uint64_t linear = 0; linear < domain.size(); ++linear) {
             auto coord = domain.linear_to_coord(linear);
             data.push_back(extractor(field(coord)));
         }
@@ -118,16 +111,16 @@ namespace simbi::io {
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank, typename Inserter>
     void read_field_component(
-        const H5::Group& parent,
-        const std::string& name,
+        const H5::Group&        parent,
+        const std::string&      name,
         grid::field_t<T, Rank>& field,
-        Inserter&& inserter
+        Inserter&&              inserter
     )
     {
-        auto data          = read_dataset<real>(parent, name);
+        auto        data   = read_dataset<real>(parent, name);
         const auto& domain = field.domain();
 
-        for (std::int64_t linear = 0; linear < domain.size(); ++linear) {
+        for (std::uint64_t linear = 0; linear < domain.size(); ++linear) {
             auto coord = domain.linear_to_coord(linear);
             inserter(const_cast<T&>(field(coord)), data[linear]);
         }
@@ -138,52 +131,37 @@ namespace simbi::io {
     // domain is serialized once, components serialized individually
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank>
-    struct struct_field_writer_t {
-        H5::Group group;
+    struct struct_field_writer_t
+    {
+        H5::Group                     group;
         const grid::field_t<T, Rank>& field;
-        const write_policy_t& policy;
+        const write_policy_t&         policy;
 
-        struct_field_writer_t(
-            H5::Group g,
-            const grid::field_t<T, Rank>& f,
-            const write_policy_t& p
-        )
+        struct_field_writer_t(H5::Group g, const grid::field_t<T, Rank>& f, const write_policy_t& p)
             : group(std::move(g)), field(f), policy(p)
         {
         }
 
         template <typename Extractor>
-        struct_field_writer_t&
-        component(const std::string& name, Extractor&& extractor)
+        struct_field_writer_t& component(const std::string& name, Extractor&& extractor)
         {
-            write_field_component(
-                group,
-                name,
-                field,
-                std::forward<Extractor>(extractor),
-                policy
-            );
+            write_field_component(group, name, field, std::forward<Extractor>(extractor), policy);
             return *this;
         }
     };
 
     template <typename T, std::uint64_t Rank>
     struct_field_writer_t<T, Rank> write_struct_field(
-        H5::Group& parent,
-        const std::string& name,
+        H5::Group&                    parent,
+        const std::string&            name,
         const grid::field_t<T, Rank>& field,
-        const write_policy_t& policy
+        const write_policy_t&         policy
     )
     {
         auto g = parent.createGroup(name);
 
         // serialize domain once
-        h5_serializable<grid::domain_t<Rank>>::write_named(
-            g,
-            "domain",
-            field.domain(),
-            policy
-        );
+        h5_serializable<grid::domain_t<Rank>>::write_named(g, "domain", field.domain(), policy);
 
         return struct_field_writer_t<T, Rank>(g, field, policy);
     }
@@ -192,8 +170,9 @@ namespace simbi::io {
     // read a struct-valued field
     // -------------------------------------------------------------------------
     template <typename T, std::uint64_t Rank>
-    struct struct_field_reader_t {
-        H5::Group group;
+    struct struct_field_reader_t
+    {
+        H5::Group              group;
         grid::field_t<T, Rank> field;
 
         struct_field_reader_t(H5::Group g, grid::field_t<T, Rank> f)
@@ -202,20 +181,17 @@ namespace simbi::io {
         }
 
         template <typename Inserter>
-        struct_field_reader_t&
-        component(const std::string& name, Inserter&& inserter)
+        struct_field_reader_t& component(const std::string& name, Inserter&& inserter)
         {
-            read_field_component(
-                group,
-                name,
-                field,
-                std::forward<Inserter>(inserter)
-            );
+            read_field_component(group, name, field, std::forward<Inserter>(inserter));
             return *this;
         }
 
         // extract the field after all components are read
-        grid::field_t<T, Rank> take() { return std::move(field); }
+        grid::field_t<T, Rank> take()
+        {
+            return std::move(field);
+        }
     };
 
     template <typename T, std::uint64_t Rank>
@@ -225,8 +201,7 @@ namespace simbi::io {
         auto g = parent.openGroup(name);
 
         // read domain
-        auto domain =
-            h5_serializable<grid::domain_t<Rank>>::read_named(g, "domain");
+        auto domain = h5_serializable<grid::domain_t<Rank>>::read_named(g, "domain");
 
         // allocate field with correct domain
         grid::field_t<T, Rank> field(domain);
@@ -236,17 +211,13 @@ namespace simbi::io {
 
     // simpler version that returns the field directly after building
     template <typename T, std::uint64_t Rank>
-    grid::field_t<T, Rank> read_struct_field_with(
-        const H5::Group& parent,
-        const std::string& name,
-        auto&& builder
-    )
+    grid::field_t<T, Rank>
+    read_struct_field_with(const H5::Group& parent, const std::string& name, auto&& builder)
     {
         auto g = parent.openGroup(name);
 
         // read domain
-        auto domain =
-            h5_serializable<grid::domain_t<Rank>>::read_named(g, "domain");
+        auto domain = h5_serializable<grid::domain_t<Rank>>::read_named(g, "domain");
 
         // allocate field with correct domain
         grid::field_t<T, Rank> field(domain);
@@ -257,6 +228,6 @@ namespace simbi::io {
         return field;
     }
 
-}   // namespace simbi::io
+} // namespace simbi::io
 
-#endif   // IO_SERIAL_FIELD_HPP
+#endif // IO_SERIAL_FIELD_HPP

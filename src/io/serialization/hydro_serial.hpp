@@ -1,7 +1,7 @@
 #ifndef IO_SERIAL_HYDRO_HPP
 #define IO_SERIAL_HYDRO_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "ecs/components.hpp"
 #include "field_serial.hpp"

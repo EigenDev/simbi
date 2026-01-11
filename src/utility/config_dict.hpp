@@ -1,8 +1,8 @@
 #ifndef CONFIG_DICT_HPP
 #define CONFIG_DICT_HPP
 
-#include "compat.hpp"   // for real, std::uint64_t, global::managed_memory, use
-#include "containers/vector.hpp"   // for vector_t
+#include "build_config.hpp"      // for real type
+#include "containers/vector.hpp" // for vector_t
 #include "enums.hpp"
 #include "functional/monad/maybe.hpp"
 
@@ -25,28 +25,29 @@ namespace simbi {
     using config_dict_t = std::unordered_map<std::string, config_value_t>;
 
     // Variant to hold different value types
-    struct config_value_t {
+    struct config_value_t
+    {
         // The variant type that can hold various data types including nested
         // dictionary
         using ValueType = std::variant<
-            std::monostate,      // For empty/null values
-            bool,                // For boolean values
-            std::int64_t,        // For integer values
-            std::int32_t,        // For integer 32-bit values
-            std::uint64_t,       // For unsigned integer values
-            std::uint32_t,       // For unsigned 32-bit integer values
-            real,                // For floating point
-            std::string,         // For string values
-            std::vector<real>,   // For numeric arrays
-            std::vector<std::vector<real>>,   // For 2D arrays
-            std::vector<std::string>,         // For string arrays
-            std::vector<std::int64_t>,        // For integer arrays
-            std::vector<std::uint64_t>,       // For unsigned integer arrays
-            std::vector<std::uint32_t>,   // For unsigned 32-bit integer arrays
-            std::pair<real, real>,        // For pairs of real values
-            config_dict_t,                // For nested dictionaries
-            std::list<config_dict_t>,     // For list of dictionaries
-            body_capability_t             // For BodyCapabilities
+            std::monostate,                 // For empty/null values
+            bool,                           // For boolean values
+            std::int64_t,                   // For integer values
+            std::int32_t,                   // For integer 32-bit values
+            std::uint64_t,                  // For unsigned integer values
+            std::uint32_t,                  // For unsigned 32-bit integer values
+            real,                           // For floating point
+            std::string,                    // For string values
+            std::vector<real>,              // For numeric arrays
+            std::vector<std::vector<real>>, // For 2D arrays
+            std::vector<std::string>,       // For string arrays
+            std::vector<std::int64_t>,      // For integer arrays
+            std::vector<std::uint64_t>,     // For unsigned integer arrays
+            std::vector<std::uint32_t>,     // For unsigned 32-bit integer arrays
+            std::pair<real, real>,          // For pairs of real values
+            config_dict_t,                  // For nested dictionaries
+            std::list<config_dict_t>,       // For list of dictionaries
+            body_capability_t               // For BodyCapabilities
             >;
 
         ValueType value;
@@ -68,9 +69,7 @@ namespace simbi {
         config_value_t(std::vector<std::int64_t> v) : value(std::move(v)) {}
         config_value_t(std::vector<std::uint64_t> v) : value(std::move(v)) {}
         config_value_t(std::vector<std::uint32_t> v) : value(std::move(v)) {}
-        config_value_t(std::vector<std::vector<real>> v) : value(std::move(v))
-        {
-        }
+        config_value_t(std::vector<std::vector<real>> v) : value(std::move(v)) {}
         config_value_t(config_dict_t v) : value(std::move(v)) {}
         config_value_t(std::list<config_dict_t> v) : value(std::move(v)) {}
         config_value_t(std::pair<real, real> v) : value(std::move(v)) {}
@@ -92,7 +91,10 @@ namespace simbi {
         {
             return std::holds_alternative<std::monostate>(value);
         }
-        bool is_bool() const { return std::holds_alternative<bool>(value); }
+        bool is_bool() const
+        {
+            return std::holds_alternative<bool>(value);
+        }
         bool is_int() const
         {
             return std::holds_alternative<std::int64_t>(value);
@@ -113,7 +115,10 @@ namespace simbi {
         {
             return std::holds_alternative<real>(value);
         }
-        bool is_number() const { return is_int() || is_real_number(); }
+        bool is_number() const
+        {
+            return is_int() || is_real_number();
+        }
         bool is_string() const
         {
             return std::holds_alternative<std::string>(value);
@@ -132,9 +137,7 @@ namespace simbi {
         }
         bool is_nested_array_of_floats() const
         {
-            return std::holds_alternative<std::vector<std::vector<real>>>(
-                value
-            );
+            return std::holds_alternative<std::vector<std::vector<real>>>(value);
         }
         bool is_nested_array_of_uints() const
         {
@@ -236,9 +239,7 @@ namespace simbi {
                 }
                 return std::get<std::vector<std::int64_t>>(value);
             }
-            else if constexpr (std::is_same_v<
-                                   T,
-                                   std::vector<std::vector<real>>>) {
+            else if constexpr (std::is_same_v<T, std::vector<std::vector<real>>>) {
                 if (!is_nested_array_of_floats()) {
                     throw std::runtime_error("Not a nested array of floats");
                 }
@@ -267,9 +268,7 @@ namespace simbi {
                     return std::get<std::uint64_t>(value);
                 }
                 if (is_int()) {
-                    return static_cast<std::uint64_t>(
-                        std::get<std::int64_t>(value)
-                    );
+                    return static_cast<std::uint64_t>(std::get<std::int64_t>(value));
                 }
                 throw std::runtime_error("Not an unsigned integer value");
             }
@@ -281,9 +280,7 @@ namespace simbi {
                     return std::get<std::int32_t>(value);
                 }
                 if (is_int()) {
-                    return static_cast<std::int32_t>(
-                        std::get<std::int64_t>(value)
-                    );
+                    return static_cast<std::int32_t>(std::get<std::int64_t>(value));
                 }
                 throw std::runtime_error("Not a 32-bit integer value");
             }
@@ -315,7 +312,8 @@ namespace simbi {
       private:
         // Helper for static_assert failure
         template <typename>
-        struct always_false : std::false_type {
+        struct always_false : std::false_type
+        {
         };
     };
 
@@ -344,8 +342,7 @@ namespace simbi {
         }
 
         template <typename T, std::uint64_t Rank>
-        maybe_t<vector_t<T, Rank>>
-        try_read_vec(const config_dict_t& dict, const std::string& key)
+        maybe_t<vector_t<T, Rank>> try_read_vec(const config_dict_t& dict, const std::string& key)
         {
             if (!dict.contains(key)) {
                 return Nothing;
@@ -365,9 +362,8 @@ namespace simbi {
         template <typename T>
         auto has_property_of_type(const std::string& key)
         {
-            return [key](const config_dict_t& props) {
-                return try_read<T>(props, key).has_value();
-            };
+            return
+                [key](const config_dict_t& props) { return try_read<T>(props, key).has_value(); };
         }
 
         // predicate for checking if a property exists and equals a specific
@@ -377,10 +373,9 @@ namespace simbi {
         {
             return [key, expected_value](const config_dict_t& props) {
                 auto maybe_value = try_read<T>(props, key);
-                return maybe_value.has_value() &&
-                       *maybe_value == expected_value;
+                return maybe_value.has_value() && *maybe_value == expected_value;
             };
         }
-    }   // namespace config
-}   // namespace simbi
+    } // namespace config
+} // namespace simbi
 #endif

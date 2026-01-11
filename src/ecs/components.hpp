@@ -9,17 +9,23 @@
 // architecture overview:
 //   - simulation owns levels (amr hierarchy)
 //   - each level is decomposed into partitions (one per device)
-//   - each partition owns its fields, stream, and halo metadata
+//   - each partition owns its fields, executor, and halo metadata
 //   - halo_graph describes all inter-partition data transfers
 //
 // key types:
-//   - partition_t:           device assignment + execution context
+//   - partition_t:           execution context + domain metadata
 //   - halo_link_t:           single send/recv pair between partitions
 //   - level_decomposition_t: all partitions + halo graph for one level
 //   - partition_fields_t:    hydro fields for one partition
+//
+// migration notes (hesi → xpu):
+//   - partition_t.stream → partition_t.executor (executor owns stream)
+//   - partition_t.device_id removed (query executor.device_id() if needed)
+//   - het::comm::rank_id_t → xpu::comm::rank_id_t
+//   - executor stored by value, owns its resources (modern c++ pattern)
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "dag/express_t.hpp"
 #include "entity.hpp"
@@ -34,16 +40,16 @@
 #include "grid/mesh_config.hpp"
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
-#include "hesi/adapter.hpp"
-#include "hesi/comm/types.hpp"
-#include "hesi/exec/stream.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "utility/enums.hpp"
+#include "xpu/comm/types.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace simbi::ecs {
@@ -56,20 +62,20 @@ namespace simbi::ecs {
     // -----------------------------------------------------------------------------
     // partition_t
     //
-    // binds a block's topology to a specific compute device.
+    // binds a block's topology to a specific execution context.
     // each partition owns:
     //   - block metadata (geometry, connectivity)
-    //   - execution stream (for async kernel launch)
-    //   - device assignment
+    //   - executor (owns stream + device for async kernel launch)
+    //   - domain decomposition (owned cells + ghost padding)
     //
     // the allocated_domain includes ghost cells; owned_domain is the interior
     // that this partition actually computes.
+    //
+    // note: device_id no longer stored - query executor.device_id() if needed.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct partition_t {
-        // which device this partition lives on
-        std::int64_t device_id;
-
+    struct partition_t
+    {
         // block metadata from the skeleton (id, geometry, face connectivity)
         grid::block_info_t<Rank> block;
 
@@ -88,13 +94,13 @@ namespace simbi::ecs {
         // dimensions
         vector_t<grid::domain_t<Rank>, Rank> edge_domains;
 
-        // execution stream for this partition's kernels
-        // each partition gets its own stream to enable concurrent execution
-        het::exec::stream_t stream;
+        // execution context for this partition's kernels
+        // each partition gets its own executor to enable concurrent execution
+        xpu::executor_t<xpu::default_space> executor;
 
         // mpi rank info (node id + local device id)
         // used by communicator to determine transfer strategy
-        het::comm::rank_id_t rank_id;
+        xpu::comm::rank_id_t rank_id;
     };
 
     // -----------------------------------------------------------------------------
@@ -108,21 +114,22 @@ namespace simbi::ecs {
     // (self-communication with coordinate wrapping).
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct halo_link_t {
+    struct halo_link_t
+    {
         // source partition info
-        grid::patch_id_t src_patch;
-        het::comm::rank_id_t src_rank;
-        grid::domain_t<Rank> src_region;   // interior boundary to read from
+        grid::patch_id_t     src_patch;
+        xpu::comm::rank_id_t src_rank;
+        grid::domain_t<Rank> src_region; // interior boundary to read from
 
         // destination partition info
-        grid::patch_id_t dst_patch;
-        het::comm::rank_id_t dst_rank;
-        grid::domain_t<Rank> dst_region;   // ghost zone to write into
+        grid::patch_id_t     dst_patch;
+        xpu::comm::rank_id_t dst_rank;
+        grid::domain_t<Rank> dst_region; // ghost zone to write into
 
         // which dimension and direction this link corresponds to
         // useful for debugging and for building dimension-ordered exchanges
         std::uint64_t dimension;
-        grid::side_t direction;
+        grid::side_t  direction;
     };
 
     // -----------------------------------------------------------------------------
@@ -137,7 +144,8 @@ namespace simbi::ecs {
     // partition_entities maps to ecs entities that hold the actual field data.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct level_decomposition_t {
+    struct level_decomposition_t
+    {
         // block-level metadata (topology, connectivity)
         grid::skeleton_t<Rank> skeleton;
 
@@ -161,7 +169,10 @@ namespace simbi::ecs {
         // queries
         // -----------------------------------------------------------------
 
-        std::uint64_t num_partitions() const { return partitions.size(); }
+        std::uint64_t num_partitions() const
+        {
+            return partitions.size();
+        }
 
         // find partition index by patch id
         // returns -1 if not found (patch may be on another mpi rank)
@@ -197,7 +208,8 @@ namespace simbi::ecs {
     // now we have one partition_fields_t per partition per level.
     // -----------------------------------------------------------------------------
     template <typename Conserved, typename Primitive, std::uint64_t Rank>
-    struct partition_fields_t {
+    struct partition_fields_t
+    {
         // conserved variables (density, momentum, energy, ...)
         grid::field_t<Conserved, Rank> cons;
 
@@ -225,7 +237,8 @@ namespace simbi::ecs {
     // stores the initial state and intermediate stages.
     // -----------------------------------------------------------------------------
     template <typename Conserved, std::uint64_t Rank>
-    struct partition_workspace_t {
+    struct partition_workspace_t
+    {
         // state at the beginning of the timestep
         grid::field_t<Conserved, Rank> u_n;
 
@@ -251,7 +264,8 @@ namespace simbi::ecs {
     // using the partition's topological coordinates.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank, geometry_t G>
-    struct partition_geometry_t {
+    struct partition_geometry_t
+    {
         grid::mesh_config_t<Rank> config;
     };
 
@@ -266,7 +280,8 @@ namespace simbi::ecs {
     // metadata for an amr level.
     // level 0 is the coarsest; higher levels are finer.
     // -----------------------------------------------------------------------------
-    struct level_info_t {
+    struct level_info_t
+    {
         // which level in the amr hierarchy (0 = coarsest)
         std::uint64_t level_id;
 
@@ -282,7 +297,8 @@ namespace simbi::ecs {
     // includes coordinate maps, boundaries, and cell counts.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct level_mesh_t {
+    struct level_mesh_t
+    {
         grid::mesh_config_t<Rank> config;
     };
 
@@ -293,7 +309,8 @@ namespace simbi::ecs {
     // stores the parent entity and which region of the parent is covered.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct refinement_child_t {
+    struct refinement_child_t
+    {
         // entity handle for the parent level
         entity_t parent;
 
@@ -311,7 +328,8 @@ namespace simbi::ecs {
     // boundaries.
     // -----------------------------------------------------------------------------
     template <typename Conserved, std::uint64_t Rank>
-    struct flux_register_component_t {
+    struct flux_register_component_t
+    {
         // one flux register per partition
         // each register tracks the coarse-fine flux mismatch for that partition
         std::vector<grid::amr::flux_register_t<Conserved, Rank>> registers;
@@ -335,38 +353,39 @@ namespace simbi::ecs {
     // single instance attached to the global entity.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct simulation_metadata_t {
+    struct simulation_metadata_t
+    {
         // === numeric parameters ===
-        real gamma;                  // adiabatic index
-        real plm_theta;              // plm limiter parameter
-        real viscosity;              // artificial viscosity coefficient
-        real cfl;                    // courant number
-        real time;                   // current simulation time
-        real tend;                   // final simulation time
-        real global_dt;              // current global timestep
-        real dlogt;                  // logarithmic output spacing (0 = linear)
-        real checkpoint_interval;    // time between checkpoints
-        real checkpoint_time;        // next scheduled checkpoint time
-        real prev_checkpoint_time;   // last checkpoint time
-        real ambient_sound_speed;    // for vacuum/floor handling
+        real gamma;                // adiabatic index
+        real plm_theta;            // plm limiter parameter
+        real viscosity;            // artificial viscosity coefficient
+        real cfl;                  // courant number
+        real time;                 // current simulation time
+        real tend;                 // final simulation time
+        real global_dt;            // current global timestep
+        real dlogt;                // logarithmic output spacing (0 = linear)
+        real checkpoint_interval;  // time between checkpoints
+        real checkpoint_time;      // next scheduled checkpoint time
+        real prev_checkpoint_time; // last checkpoint time
+        real ambient_sound_speed;  // for vacuum/floor handling
 
         // === integer tracking ===
-        std::uint64_t iteration;          // current iteration count
-        std::uint64_t halo_radius;        // ghost zone width
-        std::uint64_t checkpoint_index;   // current checkpoint number
-        std::uint64_t checkpoint_zones;   // zones per checkpoint file
-        std::uint64_t dimensions{Rank};   // spatial dimensions
+        std::uint64_t iteration;        // current iteration count
+        std::uint64_t halo_radius;      // ghost zone width
+        std::uint64_t checkpoint_index; // current checkpoint number
+        std::uint64_t checkpoint_zones; // zones per checkpoint file
+        std::uint64_t dimensions{Rank}; // spatial dimensions
 
         // === configuration enums ===
-        regime_t regime;                      // newtonian, srhd, rmhd
-        shockwave_limiter_t shock_smoother;   // shock detection method
-        solver_t solver;                      // riemann solver type
-        cellspacing_t x1_spacing;             // x1 coordinate spacing
-        cellspacing_t x2_spacing;             // x2 coordinate spacing
-        cellspacing_t x3_spacing;             // x3 coordinate spacing
-        geometry_t coord_system;           // cartesian, spherical, cylindrical
-        reconstruction_t reconstruction;   // pcm, plm, ppm, weno
-        timestepping_t timestepping;       // euler, rk2, rk3
+        regime_t                                  regime;         // newtonian, srhd, rmhd
+        shockwave_limiter_t                       shock_smoother; // shock detection method
+        solver_t                                  solver;         // riemann solver type
+        cellspacing_t                             x1_spacing;     // x1 coordinate spacing
+        cellspacing_t                             x2_spacing;     // x2 coordinate spacing
+        cellspacing_t                             x3_spacing;     // x3 coordinate spacing
+        geometry_t                                coord_system; // cartesian, spherical, cylindrical
+        reconstruction_t                          reconstruction; // pcm, plm, ppm, weno
+        timestepping_t                            timestepping;   // euler, rk2, rk3
         vector_t<grid::boundary_type_t, 2 * Rank> boundary_conditions;
 
         // global resolution (1, 1, nx) or (1, ny, nx) or (nz, ny, nx)
@@ -380,9 +399,9 @@ namespace simbi::ecs {
         std::string data_dir;
 
         // === multi-level timestepping ===
-        std::vector<real> level_dts;                 // dt for each level
-        std::vector<std::uint64_t> level_substeps;   // substeps per coarse step
-        subcycling_mode_t subcycling_mode{subcycling_mode_t::STANDARD};
+        std::vector<real>          level_dts;      // dt for each level
+        std::vector<std::uint64_t> level_substeps; // substeps per coarse step
+        subcycling_mode_t          subcycling_mode{subcycling_mode_t::STANDARD};
 
         // -----------------------------------------------------------------
         // methods
@@ -407,8 +426,9 @@ namespace simbi::ecs {
     // evaluated lazily via expression trees.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct sources_t {
-        state::expression_t<Rank> hydro_source;   // momentum/energy sources
+    struct sources_t
+    {
+        state::expression_t<Rank> hydro_source; // momentum/energy sources
         // gravitational acceleration
         state::expression_t<Rank> gravity_source;
 
@@ -424,7 +444,8 @@ namespace simbi::ecs {
     // stores the collection of solid bodies embedded in the fluid.
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct immersed_bodies_t {
+    struct immersed_bodies_t
+    {
         body::body_collection_t<Rank> bodies;
     };
 
@@ -437,7 +458,8 @@ namespace simbi::ecs {
     //
     // attached to global entity when mesh_motion is enabled.
     // -----------------------------------------------------------------------------
-    struct mesh_motion_config_t {
+    struct mesh_motion_config_t
+    {
         // scale factor a(t) and its derivative da/dt
         std::function<real(real)> scale_factor;
         std::function<real(real)> scale_factor_derivative;
@@ -448,14 +470,13 @@ namespace simbi::ecs {
         // produce device-side snapshot at given time
         geometry::motion_state_t snapshot(real time) const
         {
-            real a = scale_factor ? scale_factor(time) : 1.0;
-            real adot =
-                scale_factor_derivative ? scale_factor_derivative(time) : 0.0;
+            real a    = scale_factor ? scale_factor(time) : 1.0;
+            real adot = scale_factor_derivative ? scale_factor_derivative(time) : 0.0;
             return geometry::motion_state_t{
-              .is_moving     = true,
-              .is_homologous = homologous,
-              .a             = a,
-              .a_dot         = adot
+                .is_moving     = true,
+                .is_homologous = homologous,
+                .a             = a,
+                .a_dot         = adot
             };
         }
 
@@ -463,10 +484,10 @@ namespace simbi::ecs {
         static geometry::motion_state_t static_mesh()
         {
             return geometry::motion_state_t{
-              .is_moving     = false,
-              .is_homologous = false,
-              .a             = 1.0,
-              .a_dot         = 0.0
+                .is_moving     = false,
+                .is_homologous = false,
+                .a             = 1.0,
+                .a_dot         = 0.0
             };
         }
     };
@@ -477,8 +498,13 @@ namespace simbi::ecs {
     // diagnostics for immersed bodies (forces, torques, etc).
     // -----------------------------------------------------------------------------
     template <std::uint64_t Rank>
-    struct body_info_t {
-        std::unique_ptr<body::body_diagnostics_t<Rank>> diagnostics;
+    struct body_info_t
+    {
+        using diag_t = std::conditional_t<
+            platform::is_gpu,
+            body::gpu_diagnostics_t<Rank>,
+            body::cpu_diagnostics_t<Rank>>;
+        std::unique_ptr<diag_t> diagnostics;
     };
 
     // =============================================================================
@@ -494,6 +520,6 @@ namespace simbi::ecs {
     template <std::uint64_t Rank, geometry_t G>
     using mesh_geometry_t = partition_geometry_t<Rank, G>;
 
-}   // namespace simbi::ecs
+} // namespace simbi::ecs
 
 #endif

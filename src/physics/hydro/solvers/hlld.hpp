@@ -1,19 +1,20 @@
 #ifndef HYDRO_HLLD_HPP
 #define HYDRO_HLLD_HPP
 
-#include "base/concepts.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c
-#include "compat.hpp"          // for global::epsilon
-#include "containers/vector.hpp"   // for vector_t
+#include "base/concepts.hpp"     // for is_hydro_primitive_c, is_mhd_primitive_c
+#include "build_config.hpp"      // for build::epsilon
+#include "containers/vector.hpp" // for vector_t
+#include "decorators.hpp"        // for DUAL, DEV
 #include "physics/hydro/conversion.hpp"
-#include "physics/hydro/physics.hpp"   // for to_flux, to_conserved, to_primitive
-#include "physics/hydro/wave_speeds.hpp"   // for wave_speeds
-#include "utility/enums.hpp"               // for Regime
-#include "utility/helpers.hpp"   // for goes_to_zero, sgn, safe_less_than, safe_greater_than
+#include "physics/hydro/physics.hpp"     // for to_flux, to_conserved, to_primitive
+#include "physics/hydro/wave_speeds.hpp" // for wave_speeds
+#include "utility/enums.hpp"             // for Regime
+#include "utility/helpers.hpp"           // for goes_to_zero, sgn, safe_less_than, safe_greater_than
 
-#include <algorithm>   // for min, max
-#include <cmath>       // for abs, sqrt
-#include <cstdint>     // for int64_t
-#include <limits>      // for numeric_limits
+#include <algorithm> // for min, max
+#include <cmath>     // for abs, sqrt
+#include <cstdint>   // for int64_t
+#include <limits>    // for numeric_limits
 
 namespace simbi::hydro::rmhd {
     using namespace simbi::concepts;
@@ -23,30 +24,30 @@ namespace simbi::hydro::rmhd {
 
     template <is_hydro_primitive_c primitive_t>
     DUAL real hlld_vdiff(
-        const real p,
+        const real                                             p,
         const vector_t<typename primitive_t::counterpart_t, 2> r,
-        const vector_t<real, 2> lam,
-        const real bn,
-        const unit_vector_t<primitive_t::rank>& nhat,
-        primitive_t& praL,
-        primitive_t& praR,
-        primitive_t& prC
+        const vector_t<real, 2>                                lam,
+        const real                                             bn,
+        const unit_vector_t<primitive_t::rank>&                nhat,
+        primitive_t&                                           praL,
+        primitive_t&                                           praR,
+        primitive_t&                                           prC
     )
 
     {
-        vector_t<real, 2> eta, enthalpy;
+        vector_t<real, 2>              eta, enthalpy;
         vector_t<vector_t<real, 3>, 2> kv, bv, vv;
-        const auto sgnBn = sgn(bn) + global::epsilon;
+        const auto                     sgnBn = sgn(bn) + build::epsilon;
 
         // compute Alfven terms
         for (std::int64_t ii = 0; ii < 2; ii++) {
-            const auto aS      = lam[ii];
-            const auto rS      = r[ii];
-            const auto& rmn    = dot(rS.mom, nhat);
-            const auto rmtrans = rS.mom - rmn * nhat;
-            const auto rbn     = dot(rS.mag, nhat);
-            const auto rbtrans = rS.mag - rbn * nhat;
-            const auto ret     = rS.nrg + rS.den;
+            const auto  aS      = lam[ii];
+            const auto  rS      = r[ii];
+            const auto& rmn     = dot(rS.mom, nhat);
+            const auto  rmtrans = rS.mom - rmn * nhat;
+            const auto  rbn     = dot(rS.mag, nhat);
+            const auto  rbtrans = rS.mag - rbn * nhat;
+            const auto  ret     = rS.nrg + rS.den;
 
             // Eqs (26) - (30)
             const real a  = rmn - aS * ret + p * (1.0 - aS * aS);
@@ -101,16 +102,14 @@ namespace simbi::hydro::rmhd {
 
         // Compute contact terms
         // Equation (45)
-        const auto dkn  = (alfR - alfL) + global::epsilon;
+        const auto dkn  = (alfR - alfL) + build::epsilon;
         const auto var3 = 1.0 / dkn;
-        const auto bc =
-            ((bR * (alfR - vnR) + bn * vR) - (bL * (alfL - vnL) + bn * vL)) *
-            var3;
+        const auto bc   = ((bR * (alfR - vnR) + bn * vR) - (bL * (alfL - vnL) + bn * vL)) * var3;
 
         // Left side Eq.(49)
-        real ksq      = dot(kL, kL);
-        real kdb      = dot(kL, bc);
-        const auto yL = (1.0 - ksq) / (etaL * dkn - kdb * dkn);
+        real       ksq = dot(kL, kL);
+        real       kdb = dot(kL, bc);
+        const auto yL  = (1.0 - ksq) / (etaL * dkn - kdb * dkn);
         // Left side Eq.(47)
         const auto vcL = kL - ((bc * (1.0 - ksq) / (etaL - kdb)));
 
@@ -135,14 +134,14 @@ namespace simbi::hydro::rmhd {
         }();
 
         // check if solution is physically consistent, Eq. (54)
-        auto eqn54ok = (vL[index(nhat)] - kL[index(nhat)]) > -global::epsilon;
-        eqn54ok &= (kR[index(nhat)] - vR[index(nhat)]) > -global::epsilon;
+        auto eqn54ok = (vL[index(nhat)] - kL[index(nhat)]) > -build::epsilon;
+        eqn54ok &= (kR[index(nhat)] - vR[index(nhat)]) > -build::epsilon;
         eqn54ok &= (lam[0] - vL[index(nhat)]) < 0.0;
         eqn54ok &= (lam[1] - vR[index(nhat)]) > 0.0;
         eqn54ok &= (enthalpy[1] - p) > 0.0;
         eqn54ok &= (enthalpy[0] - p) > 0.0;
-        eqn54ok &= (kL[index(nhat)] - lam[0]) > -global::epsilon;
-        eqn54ok &= (lam[1] - kR[index(nhat)]) > -global::epsilon;
+        eqn54ok &= (kL[index(nhat)] - lam[0]) > -build::epsilon;
+        eqn54ok &= (lam[1] - kR[index(nhat)]) > -build::epsilon;
 
         if (!eqn54ok) {
             return std::numeric_limits<real>::infinity();
@@ -165,12 +164,12 @@ namespace simbi::hydro::rmhd {
 
     template <is_mhd_primitive_c primitive_t>
     DEV constexpr auto hlld_flux(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real vface,
-        real gamma,
-        shockwave_limiter_t shock_smoother
+        real                                    vface,
+        real                                    gamma,
+        shockwave_limiter_t                     shock_smoother
     )
     {
         using conserved_t = typename primitive_t::counterpart_t;
@@ -209,8 +208,7 @@ namespace simbi::hydro::rmhd {
             const auto hll_state = (uR * aR - uL * aL - fR + fL) * afac;
 
             //------------------Calculate the RHLLE Flux---------------
-            const auto hll_flux =
-                (fL * aR - fR * aL + (uR - uL) * aR * aL) * afac;
+            const auto hll_flux = (fL * aR - fR * aL + (uR - uL) * aR * aL) * afac;
 
             // the normal component of the magnetic field is assumed to
             // be continuous across the interface, so bnL = bnR = bn
@@ -219,7 +217,7 @@ namespace simbi::hydro::rmhd {
 
             // Eq. (12)
             const vector_t<conserved_t, 2> r{uL * aL - fL, uR * aR - fR};
-            const vector_t<real, 2> lam{aL, aR};
+            const vector_t<real, 2>        lam{aL, aR};
 
             //------------------------------------
             // Iteratively solve for the pressure
@@ -232,19 +230,19 @@ namespace simbi::hydro::rmhd {
             auto p0 = total_pressure(maybe_prim.value());
 
             // params to smoothen secant method if HLLD fails
-            constexpr real feps          = global::epsilon;
-            constexpr real peps          = global::epsilon;
-            constexpr real prat_lim      = 0.01;    // pressure ratio limit
-            constexpr real pguess_offset = 1.e-6;   // pressure guess offset
+            constexpr real feps          = build::epsilon;
+            constexpr real peps          = build::epsilon;
+            constexpr real prat_lim      = 0.01;  // pressure ratio limit
+            constexpr real pguess_offset = 1.e-6; // pressure guess offset
 
             // secant tries before giving up
-            constexpr std::int64_t num_tries = 15;
-            bool hlld_success                = true;
+            constexpr std::int64_t num_tries    = 15;
+            bool                   hlld_success = true;
 
             // L / R Alfven prims and Contact prims
             primitive_t prAL, prAR, prC;
-            const auto p = [&] {
-                if (bn * bn / p0 < prat_lim) {   // Eq.(53)
+            const auto  p = [&] {
+                if (bn * bn / p0 < prat_lim) { // Eq.(53)
                     // in this limit, the pressure is found through Eq. (55)
                     const real et_hll  = hll_state.total_energy();
                     const real fet_hll = hll_flux.total_energy();
@@ -263,13 +261,12 @@ namespace simbi::hydro::rmhd {
                 }
 
                 const real ptol = p0 * peps;
-                real p1         = p0 * (1.0 + pguess_offset);
-                auto iter       = 0;
-                real dp;
+                real       p1   = p0 * (1.0 + pguess_offset);
+                auto       iter = 0;
+                real       dp;
                 // Use the secant method to solve for the pressure
                 do {
-                    auto f_lower =
-                        hlld_vdiff(p1, r, lam, bn, nhat, prAL, prAR, prC);
+                    auto f_lower = hlld_vdiff(p1, r, lam, bn, nhat, prAL, prAR, prC);
 
                     dp = (p1 - p0) / (f_lower - f0) * f_lower;
                     p0 = p1;
@@ -297,12 +294,10 @@ namespace simbi::hydro::rmhd {
             }
 
             // do compound inequalities in two steps
-            const auto on_left =
-                (safe_less_than(vface, vnc) && safe_greater_than(vface, laL)) ||
-                (safe_less_than(vface, laL) && safe_greater_than(vface, aL));
-            const auto at_contact =
-                (safe_less_than(vface, laR) && safe_greater_than(vface, vnc)) ||
-                (safe_less_than(vface, vnc) && safe_greater_than(vface, laL));
+            const auto on_left = (safe_less_than(vface, vnc) && safe_greater_than(vface, laL)) ||
+                                 (safe_less_than(vface, laL) && safe_greater_than(vface, aL));
+            const auto at_contact = (safe_less_than(vface, laR) && safe_greater_than(vface, vnc)) ||
+                                    (safe_less_than(vface, vnc) && safe_greater_than(vface, laL));
 
             const auto uc = on_left ? uL : uR;
             const auto pa = on_left ? prAL : prAR;
@@ -313,14 +308,13 @@ namespace simbi::hydro::rmhd {
 
             // compute intermediate state across fast waves (Section 3.1)
             // === Fast / Slow Waves ===
-            const auto& va  = pa.vel;
-            const auto& ba  = pa.mag;
-            const auto vdba = dot(va, ba);
-            const auto vna  = dot(va, nhat);
+            const auto& va   = pa.vel;
+            const auto& ba   = pa.mag;
+            const auto  vdba = dot(va, ba);
+            const auto  vna  = dot(va, nhat);
 
             const auto da = rc.den / (lc - vna);
-            const auto ea =
-                (rc.total_energy() + p * vna - vdba * bn) / (lc - vna);
+            const auto ea = (rc.total_energy() + p * vna - vdba * bn) / (lc - vna);
             const auto ma = (ea + p) * va - vdba * ba;
 
             conserved_t ua;
@@ -337,13 +331,13 @@ namespace simbi::hydro::rmhd {
 
             // === Contact Wave ===
             // compute jump conditions across alfven waves (Section 3.3)
-            const auto vdbC = dot(prC.vel, prC.mag);
-            const auto& bc  = prC.mag;
-            const auto& vc  = prC.vel;
-            const auto dc   = da * (la - vna) / (la - vnc);
-            const auto man  = dot(ua.mom, nhat);
-            const auto ec = (ea * la - man + p * vnc - vdbC * bn) / (la - vnc);
-            const auto mc = (ec + p) * vc - vdbC * bc;
+            const auto  vdbC = dot(prC.vel, prC.mag);
+            const auto& bc   = prC.mag;
+            const auto& vc   = prC.vel;
+            const auto  dc   = da * (la - vna) / (la - vnc);
+            const auto  man  = dot(ua.mom, nhat);
+            const auto  ec   = (ea * la - man + p * vnc - vdbC * bn) / (la - vnc);
+            const auto  mc   = (ec + p) * vc - vdbC * bc;
 
             conserved_t ut;
             ut.den = dc;
@@ -364,6 +358,6 @@ namespace simbi::hydro::rmhd {
 
         return net_flux;
     };
-}   // namespace simbi::hydro::rmhd
+} // namespace simbi::hydro::rmhd
 
-#endif   // HYDRO_HLLD_HPP
+#endif // HYDRO_HLLD_HPP

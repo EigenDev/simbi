@@ -1,24 +1,24 @@
 #ifndef EOS_IDEAL_HPP
 #define EOS_IDEAL_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
+#include "decorators.hpp"
 #include "utility/enums.hpp"
 
-#include <cmath>   // for std::sqrt
+#include <cmath> // for std::sqrt
 
 namespace simbi::eos {
     template <regime_t R>
-    struct ideal_gas_eos_t {
+    struct ideal_gas_eos_t
+    {
         real gamma;
 
-        DEV auto sound_speed(real rho, real pressure) const
+        DEV real sound_speed(real rho, real pressure) const
         {
-            return std::sqrt(
-                gamma * pressure / (rho * enthalpy(rho, pressure))
-            );
+            return std::sqrt(gamma * pressure / (rho * enthalpy(rho, pressure)));
         }
 
-        DEV auto enthalpy(real rho, real pressure) const
+        DEV real enthalpy(real rho, real pressure) const
         {
             if constexpr (!(R == regime_t::SRHD || R == regime_t::RMHD)) {
                 return 1.0;
@@ -26,11 +26,11 @@ namespace simbi::eos {
             return 1.0 + gamma * pressure / (rho * (gamma - 1.0));
         }
 
-        DEV auto specific_internal_energy(real rho, real pressure) const
+        DEV real specific_internal_energy(real rho, real pressure) const
         {
             return pressure / (rho * (gamma - 1.0));
         }
     };
-}   // namespace simbi::eos
+} // namespace simbi::eos
 
 #endif

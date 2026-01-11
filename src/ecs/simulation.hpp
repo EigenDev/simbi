@@ -29,16 +29,15 @@
 // per-partition, each on its own stream, enabling concurrent execution.
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "components.hpp"
 #include "entity.hpp"
 #include "geometry/block_geometry.hpp"
 #include "geometry_visitor.hpp"
 #include "grid/field.hpp"
-#include "hesi/comm/communicator.hpp"
-#include "hesi/exec/executor.hpp"
 #include "hydro_state_types.hpp"
 #include "utility/enums.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstdint>
 #include <vector>
@@ -84,7 +83,8 @@ namespace simbi::ecs {
         entity_t global;
 
         // communication backbone for halo exchange
-        het::comm::communicator_t communicator;
+        // todo: implement xpu communicator wrapper
+        // het::comm::communicator_t communicator;
 
         // error/interrupt flags
         bool in_failure_state{false};
@@ -239,12 +239,17 @@ namespace simbi::ecs {
         // -------------------------------------------------------------------------
         // partition_executor
         //
-        // returns an executor bound to the partition's stream.
+        // returns reference to the partition's executor.
         // use this to launch kernels on the partition's device.
         // -------------------------------------------------------------------------
-        het::exec::executor_t partition_executor(std::uint64_t lvl, std::uint64_t part_id) const
+        auto& partition_executor(std::uint64_t lvl, std::uint64_t part_id)
         {
-            return het::exec::executor_t{partition(lvl, part_id).stream};
+            return partition(lvl, part_id).executor;
+        }
+
+        const auto& partition_executor(std::uint64_t lvl, std::uint64_t part_id) const
+        {
+            return partition(lvl, part_id).executor;
         }
 
         // -------------------------------------------------------------------------
@@ -347,11 +352,8 @@ namespace simbi::ecs {
                     auto& src_fields = partition_hydro(lvl, src_idx);
                     auto& dst_fields = partition_hydro(lvl, dst_idx);
 
-                    auto exec = partition_executor(lvl, dst_idx);
-
                     // copy cons field halo region
-                    het::comm::local_copy_region(
-                        exec,
+                    xpu::comm::transfer_region_sync(
                         dst_fields.cons.view(),
                         link.dst_region,
                         src_fields.cons.view(),
@@ -407,20 +409,16 @@ namespace simbi::ecs {
             }
 
             auto& decomp = decomposition(lvl);
-            auto& fields = partition_hydro(lvl, part_id);
             auto& part   = partition(lvl, part_id);
 
             // allocate workspace on same device as fields
             workspace_t ws;
-            ws.u_n =
-                grid::field_t<conserved_t, Rank>(part.allocated_domain, fields.cons.locality());
-            ws.u_star =
-                grid::field_t<conserved_t, Rank>(part.allocated_domain, fields.cons.locality());
+            ws.u_n    = grid::field_t<conserved_t, Rank>(part.allocated_domain);
+            ws.u_star = grid::field_t<conserved_t, Rank>(part.allocated_domain);
 
             if constexpr (is_mhd) {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    ws.e_n[dd] =
-                        grid::field_t<real, Rank>(part.edge_domains[dd], fields.cons.locality());
+                    ws.e_n[dd] = grid::field_t<real, Rank>(part.edge_domains[dd]);
                 }
             }
 

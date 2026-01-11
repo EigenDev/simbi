@@ -24,15 +24,15 @@
 //   );
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/components.hpp"
 #include "grid/block_info.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "hesi/adapter.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/serialization/all.hpp"
 #include "utility/enums.hpp"
+#include "xpu/xpu.hpp"
 
 #include <H5Cpp.h>
 #include <cstdint>
@@ -82,7 +82,7 @@ namespace simbi::ecs::creation {
                 << "'. this code supports: ";
             for (std::size_t ii = 0; ii < std::size(COMPATIBLE_VERSIONS); ++ii) {
                 oss << "'" << COMPATIBLE_VERSIONS[ii] << "'";
-                if (ii < std::size(COMPATIBLE_VERSIONS) - 1) {
+                if (ii + 1 < std::size(COMPATIBLE_VERSIONS)) {
                     oss << ", ";
                 }
             }
@@ -208,10 +208,10 @@ namespace simbi::ecs::creation {
         // -------------------------------------------------------------------------
         static void allocate_flux_arrays(const partition_t<Rank>& part, partition_fields_t& fields)
         {
-            auto loc = part.stream.locality();
+            // use unified memory by default for field allocation
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 auto flux_domain = part.face_domains[dd];
-                fields.flux[dd]  = grid::field_t<Conserved, Rank>(flux_domain, loc);
+                fields.flux[dd]  = grid::field_t<Conserved, Rank>(flux_domain);
             }
         }
 
@@ -225,10 +225,10 @@ namespace simbi::ecs::creation {
         allocate_efield_arrays(const partition_t<Rank>& part, partition_fields_t& fields)
         {
             if constexpr (R == regime_t::MHD || R == regime_t::RMHD) {
-                auto loc = part.stream.locality();
+                // use unified memory by default for field allocation
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                     auto efield_domain = part.edge_domains[dd];
-                    fields.efield[dd]  = grid::field_t<real, Rank>(efield_domain, loc);
+                    fields.efield[dd]  = grid::field_t<real, Rank>(efield_domain);
                 }
             }
         }
@@ -244,7 +244,7 @@ namespace simbi::ecs::creation {
         static std::pair<partition_t<Rank>, partition_fields_t> read_partition(
             const H5::Group&                part_group,
             const grid::block_info_t<Rank>& block,
-            het::locality_t                 loc,
+            std::int64_t                    device_id,
             std::uint64_t                   partition_id
         )
         {
@@ -262,12 +262,11 @@ namespace simbi::ecs::creation {
 
             // phase 5: construct partition_t with proper initialization
             partition_t<Rank> part;
-            part.device_id        = 0; // overridden by caller if multi-device
             part.block            = block;
             part.owned_domain     = owned_domain;
             part.allocated_domain = allocated_domain;
-            part.stream           = het::exec::stream_t(loc);
-            part.rank_id          = het::comm::rank_id_t{0, -1}; // single-rank default
+            part.executor         = xpu::executor_t<xpu::default_space>(device_id);
+            part.rank_id          = xpu::comm::rank_id_t{0, device_id}; // single-rank default
 
             // phase 6: compute derived domains (face, edge)
             compute_face_domains(part);

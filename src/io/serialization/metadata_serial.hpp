@@ -1,7 +1,7 @@
 #ifndef IO_SERIAL_METADATA_HPP
 #define IO_SERIAL_METADATA_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/components.hpp"
 #include "grid/boundary.hpp"
 #include "io/h5_serializable.hpp"

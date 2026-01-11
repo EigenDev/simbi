@@ -1,7 +1,7 @@
 #ifndef EXP_LOAD_HPP
 #define EXP_LOAD_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/store.hpp"
 #include "dag/expression.hpp"
 #include "utility/config_dict.hpp"

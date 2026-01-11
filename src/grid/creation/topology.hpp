@@ -1,7 +1,7 @@
 #ifndef GRID_CREATION_TOPOLOGY_BUILDER_HPP
 #define GRID_CREATION_TOPOLOGY_BUILDER_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"
 #include "grid/block_info.hpp"
@@ -18,20 +18,19 @@
 namespace simbi::grid::creation {
 
     template <std::uint64_t Rank>
-    struct topology_builder_t {
+    struct topology_builder_t
+    {
 
         static std::vector<skeleton_t<Rank>> build_hierarchy(
             const ecs::mesh_blueprint_t<Rank>& root_bp,
-            const ecs::amr_blueprint_t& amr_bp
+            const ecs::amr_blueprint_t&        amr_bp
         )
         {
             std::vector<skeleton_t<Rank>> hierarchy;
 
             // level 0: root
             auto root_config = mesh_setup_t<Rank>::create_config(root_bp);
-            hierarchy.push_back(
-                skeleton_builder_t<Rank>::build_single_block(root_config)
-            );
+            hierarchy.push_back(skeleton_builder_t<Rank>::build_single_block(root_config));
 
             if (!amr_bp.enabled || amr_bp.max_levels <= 1) {
                 return hierarchy;
@@ -39,16 +38,13 @@ namespace simbi::grid::creation {
 
             // build refined levels iteratively
             for (std::uint64_t lvl = 1; lvl < amr_bp.max_levels; ++lvl) {
-                std::uint64_t ratio =
-                    (lvl - 1 < amr_bp.refinement_ratios.size())
-                        ? amr_bp.refinement_ratios[lvl - 1]
-                        : 2;
+                std::uint64_t ratio = (lvl - 1 < amr_bp.refinement_ratios.size())
+                                          ? amr_bp.refinement_ratios[lvl - 1]
+                                          : 2;
 
                 const auto& region = amr_bp.static_refinement_regions[lvl - 1];
 
-                hierarchy.push_back(
-                    build_refined_level(root_bp, amr_bp, region, ratio, lvl)
-                );
+                hierarchy.push_back(build_refined_level(root_bp, amr_bp, region, ratio, lvl));
             }
 
             return hierarchy;
@@ -57,25 +53,20 @@ namespace simbi::grid::creation {
       private:
         static skeleton_t<Rank> build_refined_level(
             const ecs::mesh_blueprint_t<Rank>& root_bp,
-            const ecs::amr_blueprint_t& amr_bp,
-            const std::vector<real>& refinement_region,
-            std::uint64_t refinement_ratio,
-            std::uint64_t child_level
+            const ecs::amr_blueprint_t&        amr_bp,
+            const std::vector<real>&           refinement_region,
+            std::uint64_t                      refinement_ratio,
+            std::uint64_t                      child_level
         )
         {
             skeleton_t<Rank> child_skeleton;
 
             // convert physical bounds to parent index space
-            auto parent_domain = physical_to_parent_domain(
-                refinement_region,
-                root_bp,
-                amr_bp,
-                child_level - 1
-            );
+            auto parent_domain =
+                physical_to_parent_domain(refinement_region, root_bp, amr_bp, child_level - 1);
 
             // scale to child index space
-            auto child_domain =
-                scale_domain_up(parent_domain, refinement_ratio);
+            auto child_domain = scale_domain_up(parent_domain, refinement_ratio);
 
             // create block
             patch_id_t id;
@@ -88,13 +79,8 @@ namespace simbi::grid::creation {
 
             // boundaries: internal to parent (will be filled by prolongation)
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                block
-                    .set_boundary(dd, side_t::left, boundary_type_t::partition);
-                block.set_boundary(
-                    dd,
-                    side_t::right,
-                    boundary_type_t::partition
-                );
+                block.set_boundary(dd, side_t::left, boundary_type_t::partition);
+                block.set_boundary(dd, side_t::right, boundary_type_t::partition);
             }
 
             child_skeleton.add_block(block);
@@ -102,10 +88,10 @@ namespace simbi::grid::creation {
         }
 
         static domain_t<Rank> physical_to_parent_domain(
-            const std::vector<real>& bounds,
+            const std::vector<real>&           bounds,
             const ecs::mesh_blueprint_t<Rank>& root_bp,
-            const ecs::amr_blueprint_t& amr_bp,
-            std::uint64_t parent_level
+            const ecs::amr_blueprint_t&        amr_bp,
+            std::uint64_t                      parent_level
         )
         {
             iarray<Rank> start, fin;
@@ -114,49 +100,43 @@ namespace simbi::grid::creation {
                 // bounds are in logical order (x1, x2, x3)
                 // but we need array order (x3, x2, x1 for 3d)
                 std::uint64_t logical_dim = Rank - 1 - dd;
-                real phys_start           = bounds[2 * logical_dim];
-                real phys_end             = bounds[2 * logical_dim + 1];
+                real          phys_start  = bounds[2 * logical_dim];
+                real          phys_end    = bounds[2 * logical_dim + 1];
                 // use root domain bounds for global coordinates
                 real root_domain_start = root_bp.bounds[dd].first;
-                real root_domain_len =
-                    root_bp.bounds[dd].second - root_domain_start;
+                real root_domain_len   = root_bp.bounds[dd].second - root_domain_start;
 
                 // compute parent's cell size from root
-                std::int64_t root_cells = root_bp.active_resolution[dd];
-                real root_cell_size =
-                    root_domain_len / static_cast<real>(root_cells);
+                std::int64_t root_cells     = root_bp.active_resolution[dd];
+                real         root_cell_size = root_domain_len / static_cast<real>(root_cells);
 
                 real parent_cell_size = root_cell_size;
                 for (std::uint64_t ll = 0; ll < parent_level; ++ll) {
-                    std::uint64_t ratio = (ll < amr_bp.refinement_ratios.size())
-                                              ? amr_bp.refinement_ratios[ll]
-                                              : 2;
+                    std::uint64_t ratio =
+                        (ll < amr_bp.refinement_ratios.size()) ? amr_bp.refinement_ratios[ll] : 2;
                     parent_cell_size /= ratio;
                 }
 
                 // compute global indices in parent's index space
-                start[dd] = static_cast<std::int64_t>(
-                    (phys_start - root_domain_start) / parent_cell_size
-                );
-                fin[dd] = static_cast<std::int64_t>(
-                    (phys_end - root_domain_start) / parent_cell_size
-                );
+                start[dd] =
+                    static_cast<std::int64_t>((phys_start - root_domain_start) / parent_cell_size);
+                fin[dd] =
+                    static_cast<std::int64_t>((phys_end - root_domain_start) / parent_cell_size);
             }
 
             return domain_t<Rank>{start, fin};
         }
 
-        static domain_t<Rank>
-        scale_domain_up(const domain_t<Rank>& d, std::uint64_t ratio)
+        static domain_t<Rank> scale_domain_up(const domain_t<Rank>& d, std::uint64_t ratio)
         {
             // scale to child's global index space (no shift)
             return domain_t<Rank>{
-              d.start * static_cast<std::int64_t>(ratio),
-              d.fin * static_cast<std::int64_t>(ratio)
+                d.start * static_cast<std::int64_t>(ratio),
+                d.fin * static_cast<std::int64_t>(ratio)
             };
         }
     };
 
-}   // namespace simbi::grid::creation
+} // namespace simbi::grid::creation
 
 #endif

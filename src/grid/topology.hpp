@@ -2,9 +2,8 @@
 #define GRID_MESH_TOPLOGY_HPP
 
 #include "field.hpp"
-#include "hesi/exec/executor.hpp"
-#include "hesi/exec/token.hpp"
 #include "patch_id.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstdint>
 #include <map>
@@ -46,7 +45,10 @@ namespace simbi::grid {
         }
 
         // removes a patch
-        void remove_patch(const patch_id_t& id) { active_patches_.erase(id); }
+        void remove_patch(const patch_id_t& id)
+        {
+            active_patches_.erase(id);
+        }
 
         // accessors
         patch_type* get_patch(const patch_id_t& id)
@@ -56,8 +58,14 @@ namespace simbi::grid {
         }
 
         // iterators for the computation loop
-        auto begin() { return active_patches_.begin(); }
-        auto end() { return active_patches_.end(); }
+        auto begin()
+        {
+            return active_patches_.begin();
+        }
+        auto end()
+        {
+            return active_patches_.end();
+        }
 
         // ---------------------------------------------------------------------
         // static refinement framework (placeholders)
@@ -95,17 +103,18 @@ namespace simbi::grid {
         }
 
         // utility to run all transfers, relying on comm::communicator_t
-        het::exec::token_t exchange_all_halos(
-            het::exec::executor_t& /*exec*/,
+        template <xpu::execution_space_c ExecutionSpace>
+        xpu::token_t<ExecutionSpace> exchange_all_halos(
+            xpu::executor_t<ExecutionSpace>& /*exec*/,
             comm::communicator_t& /*comm*/
         )
         {
             // fetches the transfer list and uses the communicator to dispatch
             // all async p2p copies, returning a single token for the batch
-            return het::exec::token_t{};
+            return xpu::token_t<ExecutionSpace>{};
         }
     };
 
-}   // namespace simbi::grid
+} // namespace simbi::grid
 
-#endif   // GRID_MESH_TOPLOGY_HPP
+#endif // GRID_MESH_TOPLOGY_HPP

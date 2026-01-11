@@ -278,13 +278,13 @@ def _configure_gpu_blocks(dimensionality: int) -> tuple[int, int, int]:
 
     if "BLOCK_X" not in os.environ:
         os.environ["BLOCK_X"] = str(default_blocks[0])
-        os.environ["GPU_BLOCK_Y"] = str(default_blocks[1])
-        os.environ["GPU_BLOCK_Z"] = str(default_blocks[2])
+        os.environ["BLOCK_Y"] = str(default_blocks[1])
+        os.environ["BLOCK_Z"] = str(default_blocks[2])
 
     return (
         int(os.environ.get("BLOCK_X", default_blocks[0])),
-        int(os.environ.get("GPU_BLOCK_Y", default_blocks[1])),
-        int(os.environ.get("GPU_BLOCK_Z", default_blocks[2])),
+        int(os.environ.get("BLOCK_Y", default_blocks[1])),
+        int(os.environ.get("BLOCK_Z", default_blocks[2])),
     )
 
 

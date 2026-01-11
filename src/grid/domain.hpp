@@ -1,8 +1,8 @@
 #ifndef GRID_DOMAIN_HPP
 #define GRID_DOMAIN_HPP
 
-#include "compat.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "functional/fp.hpp"
 
 #include <cstdint>
@@ -26,9 +26,14 @@ namespace simbi::grid {
         {
             return fin - start;
         }
-        DUAL constexpr std::int64_t size() const
+        DUAL constexpr std::uint64_t size() const
         {
-            return fp::product(shape());
+            auto          sh     = shape();
+            std::uint64_t result = 1;
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                result *= sh[ii];
+            }
+            return result;
         }
         DUAL constexpr bool empty() const
         {

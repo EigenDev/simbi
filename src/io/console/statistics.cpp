@@ -1,10 +1,14 @@
 #include "io/console/statistics.hpp"
-#include "compat.hpp"
-#include "hesi/device/queries.hpp"
-#include "io/tabulate/table.hpp"
 
+#include "build_config.hpp"
+#include "io/tabulate/table.hpp"
+#include "platform.hpp"
+#include "xpu/vendors/cuda/device_queries.hpp"
+
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -13,21 +17,22 @@
 #include <vector>
 
 #if GPU_ENABLED
-real gpu_theoretical_bw = 1.0;
+simbi::real gpu_theoretical_bw = 1.0;
 #endif
 
 namespace simbi {
     namespace statistics {
 
         // structure to hold cpu information
-        struct CPUInfo {
-            std::string model_name;
+        struct CPUInfo
+        {
+            std::string  model_name;
             std::int64_t num_cores;
             std::int64_t num_threads;
-            double frequency_mhz;
-            size_t l1_cache_size;
-            size_t l2_cache_size;
-            size_t l3_cache_size;
+            double       frequency_mhz;
+            size_t       l1_cache_size;
+            size_t       l2_cache_size;
+            size_t       l3_cache_size;
 
             // get current cpu information
             static CPUInfo gather()
@@ -47,7 +52,7 @@ namespace simbi {
                         KEY_READ,
                         &hKey
                     ) == ERROR_SUCCESS) {
-                    char value[1024];
+                    char  value[1024];
                     DWORD value_size = sizeof(value);
 
                     // get cpu model name
@@ -65,14 +70,8 @@ namespace simbi {
                     // get cpu frequency
                     DWORD mhz;
                     DWORD data_size = sizeof(mhz);
-                    if (RegQueryValueExA(
-                            hKey,
-                            "~MHz",
-                            NULL,
-                            NULL,
-                            (LPBYTE) &mhz,
-                            &data_size
-                        ) == ERROR_SUCCESS) {
+                    if (RegQueryValueExA(hKey, "~MHz", NULL, NULL, (LPBYTE) &mhz, &data_size) ==
+                        ERROR_SUCCESS) {
                         info.frequency_mhz = static_cast<double>(mhz);
                     }
 
@@ -89,13 +88,9 @@ namespace simbi {
                 GetLogicalProcessorInformation(0, &buffer_size);
                 if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
                     std::vector<SYSTEM_LOGICAL_PROCESSOR_INFORMATION> buffer(
-                        buffer_size /
-                        sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION)
+                        buffer_size / sizeof(SYSTEM_LOGICAL_PROCESSOR_INFORMATION)
                     );
-                    if (GetLogicalProcessorInformation(
-                            &buffer[0],
-                            &buffer_size
-                        )) {
+                    if (GetLogicalProcessorInformation(&buffer[0], &buffer_size)) {
                         for (const auto& i : buffer) {
                             if (i.Relationship == RelationCache) {
                                 CACHE_DESCRIPTOR Cache = i.Cache;
@@ -115,73 +110,42 @@ namespace simbi {
 
 #elif defined(PLATFORM_MACOS)
                 // macos implementation
-                char buffer[1024];
+                char   buffer[1024];
                 size_t size = sizeof(buffer);
 
                 // get cpu model name
-                if (sysctlbyname(
-                        "machdep.cpu.brand_string",
-                        &buffer,
-                        &size,
-                        NULL,
-                        0
-                    ) == 0) {
+                if (sysctlbyname("machdep.cpu.brand_string", &buffer, &size, NULL, 0) == 0) {
                     info.model_name = buffer;
                 }
 
                 // get cpu frequency
                 uint64_t freq = 0;
                 size          = sizeof(freq);
-                if (sysctlbyname("hw.cpufrequency", &freq, &size, NULL, 0) ==
-                    0) {
+                if (sysctlbyname("hw.cpufrequency", &freq, &size, NULL, 0) == 0) {
                     info.frequency_mhz = static_cast<double>(freq) / 1000000.0;
                 }
 
                 // get physical core count
                 std::int64_t core_count = 0;
                 size                    = sizeof(core_count);
-                if (sysctlbyname(
-                        "hw.physicalcpu",
-                        &core_count,
-                        &size,
-                        NULL,
-                        0
-                    ) == 0) {
+                if (sysctlbyname("hw.physicalcpu", &core_count, &size, NULL, 0) == 0) {
                     info.num_cores = core_count;
                 }
 
                 // get cache sizes
                 uint64_t cache_size = 0;
                 size                = sizeof(cache_size);
-                if (sysctlbyname(
-                        "hw.l1dcachesize",
-                        &cache_size,
-                        &size,
-                        NULL,
-                        0
-                    ) == 0) {
+                if (sysctlbyname("hw.l1dcachesize", &cache_size, &size, NULL, 0) == 0) {
                     info.l1_cache_size = cache_size;
                 }
 
                 size = sizeof(cache_size);
-                if (sysctlbyname(
-                        "hw.l2cachesize",
-                        &cache_size,
-                        &size,
-                        NULL,
-                        0
-                    ) == 0) {
+                if (sysctlbyname("hw.l2cachesize", &cache_size, &size, NULL, 0) == 0) {
                     info.l2_cache_size = cache_size;
                 }
 
                 size = sizeof(cache_size);
-                if (sysctlbyname(
-                        "hw.l3cachesize",
-                        &cache_size,
-                        &size,
-                        NULL,
-                        0
-                    ) == 0) {
+                if (sysctlbyname("hw.l3cachesize", &cache_size, &size, NULL, 0) == 0) {
                     info.l3_cache_size = cache_size;
                 }
 
@@ -190,15 +154,14 @@ namespace simbi {
 
                 // read cpu model from /proc/cpuinfo
                 std::ifstream cpuinfo("/proc/cpuinfo");
-                std::string line;
-                std::int64_t core_count = 0;
-                std::string model_name;
-                double cpu_freq = 0.0;
+                std::string   line;
+                std::int64_t  core_count = 0;
+                std::string   model_name;
+                double        cpu_freq = 0.0;
 
                 while (std::getline(cpuinfo, line)) {
                     // get cpu model
-                    if (line.find("model name") != std::string::npos &&
-                        model_name.empty()) {
+                    if (line.find("model name") != std::string::npos && model_name.empty()) {
                         size_t pos = line.find(':');
                         if (pos != std::string::npos) {
                             model_name = line.substr(pos + 2);
@@ -206,8 +169,7 @@ namespace simbi {
                     }
 
                     // get cpu frequency
-                    if (line.find("cpu MHz") != std::string::npos &&
-                        cpu_freq == 0.0) {
+                    if (line.find("cpu MHz") != std::string::npos && cpu_freq == 0.0) {
                         size_t pos = line.find(':');
                         if (pos != std::string::npos) {
                             try {
@@ -222,12 +184,11 @@ namespace simbi {
                     // count unique physical cores (not hyperthreaded ones)
                     if (line.find("physical id") != std::string::npos) {
                         std::int64_t physical_id = 0;
-                        size_t pos               = line.find(':');
+                        size_t       pos         = line.find(':');
                         if (pos != std::string::npos) {
                             try {
                                 physical_id = std::stoi(line.substr(pos + 2));
-                                core_count =
-                                    std::max(core_count, physical_id + 1);
+                                core_count  = std::max(core_count, physical_id + 1);
                             }
                             catch (...) {
                             }
@@ -237,15 +198,13 @@ namespace simbi {
 
                 info.model_name    = model_name;
                 info.frequency_mhz = cpu_freq;
-                info.num_cores     = core_count > 0 ? core_count
-                                                    : info.num_threads /
-                                                      2;   // fallback estimate
+                info.num_cores =
+                    core_count > 0 ? core_count : info.num_threads / 2; // fallback estimate
 
                 // try to get cache information from sysfs
                 auto read_cache_size = [](std::int64_t level) -> size_t {
-                    std::string path =
-                        "/sys/devices/system/cpu/cpu0/cache/index" +
-                        std::to_string(level) + "/size";
+                    std::string path = "/sys/devices/system/cpu/cpu0/cache/index" +
+                                       std::to_string(level) + "/size";
                     std::ifstream cache_file(path);
                     if (!cache_file) {
                         return 0;
@@ -258,13 +217,12 @@ namespace simbi {
                     size_t multiplier = 1;
 
                     // parse sizes like "32K" or "1M"
-                    if (!size_str.empty() &&
-                        (size_str.back() == 'K' || size_str.back() == 'k')) {
+                    if (!size_str.empty() && (size_str.back() == 'K' || size_str.back() == 'k')) {
                         multiplier = 1024;
                         size_str.pop_back();
                     }
-                    else if (!size_str.empty() && (size_str.back() == 'M' ||
-                                                   size_str.back() == 'm')) {
+                    else if (!size_str.empty() &&
+                             (size_str.back() == 'M' || size_str.back() == 'm')) {
                         multiplier = 1024 * 1024;
                         size_str.pop_back();
                     }
@@ -280,9 +238,9 @@ namespace simbi {
                 };
 
                 // try to read l1, l2, and l3 cache sizes
-                info.l1_cache_size = read_cache_size(0);   // l1 data cache
-                info.l2_cache_size = read_cache_size(2);   // l2 cache
-                info.l3_cache_size = read_cache_size(3);   // l3 cache
+                info.l1_cache_size = read_cache_size(0); // l1 data cache
+                info.l2_cache_size = read_cache_size(2); // l2 cache
+                info.l3_cache_size = read_cache_size(3); // l3 cache
 #endif
 
                 return info;
@@ -290,7 +248,8 @@ namespace simbi {
         };
 
         // structure to hold os information
-        struct OSInfo {
+        struct OSInfo
+        {
             std::string name;
             std::string version;
 
@@ -312,7 +271,7 @@ namespace simbi {
 
 #elif defined(PLATFORM_MACOS)
                 info.name = "macOS";
-                char str[256];
+                char   str[256];
                 size_t size = sizeof(str);
                 if (sysctlbyname("kern.osrelease", str, &size, NULL, 0) == 0) {
                     info.version = str;
@@ -322,7 +281,7 @@ namespace simbi {
                 info.name = "Linux";
                 // try to get distribution info from /etc/os-release
                 std::ifstream os_release("/etc/os-release");
-                std::string line;
+                std::string   line;
                 while (std::getline(os_release, line)) {
                     if (line.find("NAME=") == 0) {
                         std::string name = line.substr(5);
@@ -350,7 +309,7 @@ namespace simbi {
         // display system information using PrettyTable
         void display_system_info()
         {
-            using namespace het::device;
+            using namespace xpu::vendors::cuda;
             std::cout << std::string(104, '=') << "\n";
 
             // initialize common settings
@@ -358,8 +317,7 @@ namespace simbi {
 
             // CPU information table
             {
-                auto cpu_table =
-                    io::table_factory_t::create_system_info_table();
+                auto cpu_table = io::table_factory_t::create_system_info_table();
                 cpu_table.set_title("CPU & System Information");
                 cpu_table.center_table(true);
 
@@ -371,16 +329,12 @@ namespace simbi {
 
                 // gather CPU info
                 CPUInfo cpu_info = CPUInfo::gather();
-                OSInfo os_info   = OSInfo::gather();
+                OSInfo  os_info  = OSInfo::gather();
 
                 // add CPU information
                 cpu_table.add_row({"CPU Model", cpu_info.model_name});
-                cpu_table.add_row(
-                    {"Physical Cores", std::to_string(cpu_info.num_cores)}
-                );
-                cpu_table.add_row(
-                    {"Logical Threads", std::to_string(cpu_info.num_threads)}
-                );
+                cpu_table.add_row({"Physical Cores", std::to_string(cpu_info.num_cores)});
+                cpu_table.add_row({"Logical Threads", std::to_string(cpu_info.num_threads)});
 
                 // add CPU frequency if available
                 if (cpu_info.frequency_mhz > 0) {
@@ -397,19 +351,13 @@ namespace simbi {
 
                 // add cache information if available
                 if (cpu_info.l1_cache_size > 0) {
-                    cpu_table.add_row(
-                        {"L1 Cache", format_bytes(cpu_info.l1_cache_size)}
-                    );
+                    cpu_table.add_row({"L1 Cache", format_bytes(cpu_info.l1_cache_size)});
                 }
                 if (cpu_info.l2_cache_size > 0) {
-                    cpu_table.add_row(
-                        {"L2 Cache", format_bytes(cpu_info.l2_cache_size)}
-                    );
+                    cpu_table.add_row({"L2 Cache", format_bytes(cpu_info.l2_cache_size)});
                 }
                 if (cpu_info.l3_cache_size > 0) {
-                    cpu_table.add_row(
-                        {"L3 Cache", format_bytes(cpu_info.l3_cache_size)}
-                    );
+                    cpu_table.add_row({"L3 Cache", format_bytes(cpu_info.l3_cache_size)});
                 }
 
                 // add OS information
@@ -430,8 +378,7 @@ namespace simbi {
             // Memory information table
             {
 
-                auto memory_table =
-                    io::table_factory_t::create_system_info_table();
+                auto memory_table = io::table_factory_t::create_system_info_table();
                 memory_table.set_title("Memory Information");
                 memory_table.center_table(true);
 
@@ -453,8 +400,7 @@ namespace simbi {
 
                 // format memory usage percentage
                 std::ostringstream usage_str;
-                usage_str << std::fixed << std::setprecision(1)
-                          << mem_stats.percent_used << "%";
+                usage_str << std::fixed << std::setprecision(1) << mem_stats.percent_used << "%";
 
                 // add system RAM information
                 memory_table.add_row(
@@ -469,15 +415,13 @@ namespace simbi {
                 if (mem_stats.total_virtual > 0) {
                     double swap_percent = 0.0;
                     if (mem_stats.total_virtual > 0) {
-                        swap_percent =
-                            (static_cast<double>(mem_stats.used_virtual) /
-                             mem_stats.total_virtual) *
-                            100.0;
+                        swap_percent = (static_cast<double>(mem_stats.used_virtual) /
+                                        mem_stats.total_virtual) *
+                                       100.0;
                     }
 
                     std::ostringstream swap_usage_str;
-                    swap_usage_str << std::fixed << std::setprecision(1)
-                                   << swap_percent << "%";
+                    swap_usage_str << std::fixed << std::setprecision(1) << swap_percent << "%";
 
                     memory_table.add_row(
                         {"Virtual Memory/Swap",
@@ -509,12 +453,11 @@ namespace simbi {
             // GPU information table
             {
 
-                auto gpu_table =
-                    io::table_factory_t::create_system_info_table();
+                auto gpu_table = io::table_factory_t::create_system_info_table();
                 gpu_table.set_title("GPU Information");
 
-                auto dev_count = get_device_count(het::backend_type_t::cuda);
-                auto loc       = het::locality_t(het::backend_type_t::cuda, 0);
+                auto dev_count = get_device_count();
+                int  device_id = 0;
 
                 if (dev_count == 0) {
                     // set table header for no GPU case
@@ -530,7 +473,7 @@ namespace simbi {
                     gpu_table.set_column_alignment(1, io::Alignment::Left);
 
                     // we'll show info for the first GPU
-                    auto props = get_properties(loc);
+                    auto props = get_properties(device_id);
 
                     // add GPU details
                     gpu_table.add_row({"Device Name", props.name});
@@ -539,57 +482,41 @@ namespace simbi {
                          std::to_string(props.compute_capability_major) + "." +
                              std::to_string(props.compute_capability_minor)}
                     );
-                    gpu_table.add_row(
-                        {"Global Memory", format_bytes(props.total_memory)}
-                    );
+                    gpu_table.add_row({"Global Memory", format_bytes(props.total_memory)});
 
                     std::ostringstream mem_clock;
-                    int mem_clock_rate = 0;
-                    cudaDeviceGetAttribute(
-                        &mem_clock_rate,
-                        cudaDevAttrMemoryClockRate,
-                        0
-                    );
-                    mem_clock << std::fixed << std::setprecision(1)
-                              << (mem_clock_rate / 1000.0) << " MHz";
+                    int                mem_clock_rate = 0;
+                    cudaDeviceGetAttribute(&mem_clock_rate, cudaDevAttrMemoryClockRate, 0);
+                    mem_clock << std::fixed << std::setprecision(1) << (mem_clock_rate / 1000.0)
+                              << " MHz";
                     gpu_table.add_row({"Memory Clock", mem_clock.str()});
 
                     gpu_table.add_row(
-                        {"Memory Bus Width",
-                         std::to_string(props.memory_bus_width_bits) + " bits"}
+                        {"Memory Bus Width", std::to_string(props.memory_bus_width_bits) + " bits"}
                     );
 
                     std::ostringstream bandwidth;
                     bandwidth << std::fixed << std::setprecision(1)
-                              << (2.0 * mem_clock_rate *
-                                  (props.memory_bus_width_bits / 8) / 1.0e6)
+                              << (2.0 * mem_clock_rate * (props.memory_bus_width_bits / 8) / 1.0e6)
                               << " GB/s";
                     gpu_table.add_row({"Peak Bandwidth", bandwidth.str()});
 
                     gpu_table.add_row(
-                        {"Shared Memory/Block",
-                         format_bytes(props.shared_memory_per_block)}
+                        {"Shared Memory/Block", format_bytes(props.shared_memory_per_block)}
                     );
+                    gpu_table.add_row({"Warp Size", std::to_string(props.warp_size)});
                     gpu_table.add_row(
-                        {"Warp Size", std::to_string(props.warp_size)}
-                    );
-                    gpu_table.add_row(
-                        {"Max Threads/Block",
-                         std::to_string(props.max_threads_per_block)}
+                        {"Max Threads/Block", std::to_string(props.max_threads_per_block)}
                     );
 
                     std::ostringstream block_dim;
-                    block_dim << "[" << props.max_block_dims[0] << ", "
-                              << props.max_block_dims[1] << ", "
-                              << props.max_block_dims[2] << "]";
-                    gpu_table.add_row(
-                        {"Max Block Dimensions", block_dim.str()}
-                    );
+                    block_dim << "[" << props.max_block_dims[0] << ", " << props.max_block_dims[1]
+                              << ", " << props.max_block_dims[2] << "]";
+                    gpu_table.add_row({"Max Block Dimensions", block_dim.str()});
 
                     std::ostringstream grid_dim;
-                    grid_dim << "[" << props.max_grid_size[0] << ", "
-                             << props.max_grid_size[1] << ", "
-                             << props.max_grid_size[2] << "]";
+                    grid_dim << "[" << props.max_grid_size[0] << ", " << props.max_grid_size[1]
+                             << ", " << props.max_grid_size[2] << "]";
                     gpu_table.add_row({"Max Grid Dimensions", grid_dim.str()});
                 }
 
@@ -601,9 +528,9 @@ namespace simbi {
 #endif
 
             // add space to scroll the screen up before simulation starts
-            const auto vspace = global::on_gpu ? 42 : 40;
+            const auto vspace = platform::is_gpu ? 42 : 40;
             std::cout << std::string(vspace, '\n');
         }
 
-    }   // namespace statistics
-}   // namespace simbi
+    } // namespace statistics
+} // namespace simbi

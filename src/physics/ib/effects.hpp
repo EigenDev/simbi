@@ -4,8 +4,9 @@
 #include "base/concepts.hpp"
 #include "body.hpp"
 #include "body_delta.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/helpers.hpp"
 

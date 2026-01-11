@@ -14,7 +14,7 @@
 //   - skeleton_t<Rank>: full topology map
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "grid/block_info.hpp"
 #include "grid/connectivity.hpp"
 #include "grid/patch_id.hpp"

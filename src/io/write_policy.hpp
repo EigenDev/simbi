@@ -1,7 +1,7 @@
 #ifndef IO_WRITE_POLICY_HPP
 #define IO_WRITE_POLICY_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "write_traits.hpp"
 
 #include <H5Cpp.h>

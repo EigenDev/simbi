@@ -24,7 +24,7 @@
 // =============================================================================
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"
 #include "ecs/components.hpp"
@@ -36,8 +36,6 @@
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
 #include "grid/skeleton.hpp"
-#include "hesi/core/types.hpp"
-#include "hesi/exec/stream.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -70,8 +68,7 @@ namespace simbi::ecs::creation {
             const decomposition_blueprint_t<Rank>& decomp_bp,
             const mesh_blueprint_t<Rank>&          mesh_bp,
             const physics_blueprint_t&             phys_bp,
-            registry_t&                            registry,
-            het::locality_t                        base_locality = het::locality_t::host()
+            registry_t&                            registry
         )
         {
             level_decomposition_t<Rank> decomp;
@@ -91,19 +88,14 @@ namespace simbi::ecs::creation {
             // connectivity
             build_partitioned_skeleton(decomp, global_domain, boundaries);
 
-            // phase 2: create partition runtime state (streams, domains)
-            build_partitions(decomp, decomp_bp, base_locality);
+            // phase 2: create partition runtime state (executors, domains)
+            build_partitions(decomp, decomp_bp);
 
             // phase 3: build halo graph from connectivity
             build_halo_graph(decomp, decomp_bp.halo_width);
 
             // phase 4: allocate fields for each partition
-            allocate_partition_fields<Conserved, Primitive>(
-                decomp,
-                phys_bp,
-                registry,
-                base_locality
-            );
+            allocate_partition_fields<Conserved, Primitive>(decomp, phys_bp, registry);
 
             return decomp;
         }
@@ -119,8 +111,7 @@ namespace simbi::ecs::creation {
             const grid::skeleton_t<Rank>& skeleton,
             const mesh_blueprint_t<Rank>& mesh_bp,
             const physics_blueprint_t&    phys_bp,
-            registry_t&                   registry,
-            het::locality_t               base_locality = het::locality_t::host()
+            registry_t&                   registry
         )
         {
             decomposition_blueprint_t<Rank> decomp_bp;
@@ -145,14 +136,7 @@ namespace simbi::ecs::creation {
 
             decomp_bp.halo_width = halo_width;
 
-            return build<Conserved, Primitive>(
-                skeleton,
-                decomp_bp,
-                mesh_bp,
-                phys_bp,
-                registry,
-                base_locality
-            );
+            return build<Conserved, Primitive>(skeleton, decomp_bp, mesh_bp, phys_bp, registry);
         }
 
       private:
@@ -190,8 +174,7 @@ namespace simbi::ecs::creation {
         // -------------------------------------------------------------------------
         static void build_partitions(
             level_decomposition_t<Rank>&           decomp,
-            const decomposition_blueprint_t<Rank>& decomp_bp,
-            het::locality_t                        base_locality
+            const decomposition_blueprint_t<Rank>& decomp_bp
         )
         {
             std::uint64_t part_idx = 0;
@@ -199,13 +182,10 @@ namespace simbi::ecs::creation {
             for (const auto& [patch_id, block] : decomp.skeleton) {
                 partition_t<Rank> part;
 
-                // device assignment
-                // round-robin if fewer device_ids than partitions
+                // device assignment (round-robin if multiple device_ids)
+                std::int64_t device_id = 0;
                 if (!decomp_bp.device_ids.empty()) {
-                    part.device_id = decomp_bp.device_ids[part_idx % decomp_bp.device_ids.size()];
-                }
-                else {
-                    part.device_id = base_locality.device_id;
+                    device_id = decomp_bp.device_ids[part_idx % decomp_bp.device_ids.size()];
                 }
 
                 // copy block info
@@ -238,13 +218,12 @@ namespace simbi::ecs::creation {
                     part.edge_domains[dd] = edge_dom;
                 }
 
-                // create stream for this partition's device
-                het::locality_t loc{base_locality.backend, part.device_id};
-                part.stream = het::exec::stream_t{loc};
+                // create executor for this partition's device
+                part.executor = xpu::executor_t<xpu::default_space>{device_id};
 
                 // mpi rank info
-                part.rank_id.node   = decomp_bp.mpi_rank;
-                part.rank_id.device = part.device_id;
+                part.rank_id.node_id   = decomp_bp.mpi_rank;
+                part.rank_id.device_id = device_id;
 
                 decomp.partitions.push_back(std::move(part));
                 ++part_idx;
@@ -441,8 +420,7 @@ namespace simbi::ecs::creation {
         static void allocate_partition_fields(
             level_decomposition_t<Rank>& decomp,
             const physics_blueprint_t&   phys_bp,
-            registry_t&                  registry,
-            het::locality_t              base_locality
+            registry_t&                  registry
         )
         {
             using fields_t = partition_fields_t<Conserved, Primitive, Rank>;
@@ -452,9 +430,6 @@ namespace simbi::ecs::creation {
                 entity_t part_entity = registry.create();
                 decomp.partition_entities.push_back(part_entity);
 
-                // determine locality for allocation
-                het::locality_t loc{base_locality.backend, part.device_id};
-
                 // allocate fields on the allocated domain (includes ghosts)
                 // wrap allocation in a try/catch so we can emit diagnostic info
                 // if the underlying allocator fails (helps diagnose huge or
@@ -463,8 +438,7 @@ namespace simbi::ecs::creation {
                 fields = allocate_partition<Conserved, Primitive>(
                     part.allocated_domain,
                     part.owned_domain,
-                    phys_bp,
-                    loc
+                    phys_bp
                 );
 
                 // register in ecs
@@ -481,15 +455,14 @@ namespace simbi::ecs::creation {
         static partition_fields_t<Conserved, Primitive, Rank> allocate_partition(
             const grid::domain_t<Rank>& allocated_domain,
             const grid::domain_t<Rank>& active_domain,
-            const physics_blueprint_t&  phys_bp,
-            het::locality_t             loc
+            const physics_blueprint_t&  phys_bp
         )
         {
             partition_fields_t<Conserved, Primitive, Rank> fields;
 
             // primary state fields
-            fields.cons = grid::field_t<Conserved, Rank>(allocated_domain, loc);
-            fields.prim = grid::field_t<Primitive, Rank>(allocated_domain, loc);
+            fields.cons = grid::field_t<Conserved, Rank>(allocated_domain);
+            fields.prim = grid::field_t<Primitive, Rank>(allocated_domain);
 
             // flux fields (face-centered, one extra cell in each direction)
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
@@ -504,7 +477,7 @@ namespace simbi::ecs::creation {
                         }
                     }
                 }
-                fields.flux[dd] = grid::field_t<Conserved, Rank>(flux_domain, loc);
+                fields.flux[dd] = grid::field_t<Conserved, Rank>(flux_domain);
             }
 
             // magnetic field (face-centered, mhd only)
@@ -512,7 +485,7 @@ namespace simbi::ecs::creation {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                     auto bfield_domain = active_domain;
                     bfield_domain.fin[dd] += 1;
-                    fields.bfield[dd] = grid::field_t<real, Rank>(bfield_domain, loc);
+                    fields.bfield[dd] = grid::field_t<real, Rank>(bfield_domain);
                 }
 
                 // electric field (edge-centered, for constrained transport)
@@ -524,7 +497,7 @@ namespace simbi::ecs::creation {
                             efield_domain.fin[tt] += 1;
                         }
                     }
-                    fields.efield[dd] = grid::field_t<real, Rank>(efield_domain, loc);
+                    fields.efield[dd] = grid::field_t<real, Rank>(efield_domain);
                 }
             }
 

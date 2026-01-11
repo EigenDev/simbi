@@ -50,8 +50,9 @@
 #ifndef BODY_DELTA_HPP
 #define BODY_DELTA_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp" // for vector_t
+#include "decorators.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -71,7 +72,7 @@ namespace simbi::body {
         real prev_mass_delta{0};
 
         // spatial accumulation: sums all cell contributions within one timestep
-        DEV body_delta_t& operator+=(const body_delta_t& other)
+        DUAL body_delta_t& operator+=(const body_delta_t& other)
         {
             assert(idx == other.idx);
             force_delta += other.force_delta;   // sum spatially
@@ -82,7 +83,7 @@ namespace simbi::body {
 
         // temporal update: called after each timestep consolidation
         // preserves accumulated mass, replaces instantaneous force/torque
-        DEV void update_for_new_timestep(const body_delta_t& timestep_totals)
+        DUAL void update_for_new_timestep(const body_delta_t& timestep_totals)
         {
             assert(idx == timestep_totals.idx);
             force_delta  = timestep_totals.force_delta;  // replace with latest

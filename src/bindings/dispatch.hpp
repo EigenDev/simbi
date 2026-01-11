@@ -20,7 +20,7 @@
 //       });
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/cfd_ops.hpp"
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"
@@ -34,7 +34,6 @@
 #include "utility/config_dict.hpp"
 #include "utility/enums.hpp"
 
-#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <pybind11/pybind11.h>

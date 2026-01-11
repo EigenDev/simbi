@@ -1,18 +1,18 @@
 #ifndef PHYSICS_CONVERSION_HPP
 #define PHYSICS_CONVERSION_HPP
 
-#include "base/concepts.hpp"            // for is_hydro_conserved_c
-#include "compat.hpp"                   // for global::epsilon
-#include "functional/monad/maybe.hpp"   // for maybe_t, None
-#include "io/exceptions.hpp"            // for ErrorCode
-#include "physics/eos/ideal.hpp"        // for ideal_gas_eos_t
-#include "physics/hydro/physics.hpp"    // for pressure_from_conserved
-#include "utility/enums.hpp"            // for Regime
-#include "utility/helpers.hpp"          // for find_mu_plus, etc
+#include "base/concepts.hpp" // for is_hydro_conserved_c
+#include "build_config.hpp"  // for build::epsilon
+#include "decorators.hpp"
+#include "functional/monad/maybe.hpp" // for maybe_t, None
+#include "io/exceptions.hpp"          // for ErrorCode
+#include "physics/eos/ideal.hpp"      // for ideal_gas_eos_t
+#include "physics/hydro/physics.hpp"  // for pressure_from_conserved
+#include "utility/enums.hpp"          // for Regime
+#include "utility/helpers.hpp"        // for find_mu_plus, etc
 
-#include <cmath>     // for abs, isfinite, sqrt
-#include <cstdint>   // for std::uint64_t
-#include <iostream>
+#include <cmath>   // for abs, isfinite, sqrt
+#include <cstdint> // for std::uint64_t
 
 namespace simbi::hydro::newtonian {
     using namespace eos;
@@ -30,16 +30,13 @@ namespace simbi::hydro::newtonian {
         prim.pre = pressure_from_conserved(cons, gamma);
 
         if (prim.pre <= 0.0 || !std::isfinite(prim.pre)) {
-            return None(
-                ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE
-            );
+            return None(ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE);
         }
         return prim;
     }
-}   // namespace simbi::hydro::newtonian
+} // namespace simbi::hydro::newtonian
 
 namespace simbi::hydro::srhd {
-    using namespace simbi::build::types;
     using namespace simbi::eos;
 
     template <
@@ -53,26 +50,24 @@ namespace simbi::hydro::srhd {
         const auto& svec  = cons.mom;
         const auto& tau   = cons.nrg;
         const auto& dchi  = cons.chi;
-        const auto smag   = svec.norm();
+        const auto  smag  = svec.norm();
 
         // Perform modified Newton Raphson based on
         // https://www.sciencedirect.com/science/article/pii/S0893965913002930
         // so far, the convergence rate is the same, but perhaps I need
         // a slight tweak
         std::uint64_t iter = 0;
-        real peq           = std::abs(smag - d - tau);
-        const real tol     = d * global::epsilon;
-        real dp;
+        real          peq  = std::abs(smag - d - tau);
+        const real    tol  = d * build::epsilon;
+        real          dp;
         do {
             // compute x_[k+1]
             const auto [f, g] = helpers::newton_fg(gamma, tau, d, smag, peq);
             dp                = f / g;
             peq -= dp;
 
-            if (iter >= constants::max_iterations || !std::isfinite(peq)) {
-                return simbi::None(
-                    ErrorCode::MAX_ITER | ErrorCode::NON_FINITE_ROOT
-                );
+            if (iter >= build::max_iterations || !std::isfinite(peq)) {
+                return simbi::None(ErrorCode::MAX_ITER | ErrorCode::NON_FINITE_ROOT);
             }
             iter++;
 
@@ -84,26 +79,19 @@ namespace simbi::hydro::srhd {
 
         const auto inv_et   = 1.0 / (tau + d + peq);
         const auto velocity = svec * inv_et;
-        const auto w = 1.0 / std::sqrt(1.0 - vecops::dot(velocity, velocity));
+        const auto w        = 1.0 / std::sqrt(1.0 - vecops::dot(velocity, velocity));
 
-        return primitive_t{
-          d / w,
-          velocity * (global::using_four_velocity ? w : 1.0),
-          peq,
-          dchi / d
-        };
+        return primitive_t{d / w, velocity * (build::use_four_velocity ? w : 1.0), peq, dchi / d};
     }
 
-}   // namespace simbi::hydro::srhd
+} // namespace simbi::hydro::srhd
 
 namespace simbi::hydro::rmhd {
     using namespace simbi::eos;
     using namespace simbi::concepts;
     using namespace simbi::helpers;
 
-    template <
-        is_mhd_conserved_c conserved_t,
-        typename EoS = ideal_gas_eos_t<conserved_t::regime>>
+    template <is_mhd_conserved_c conserved_t, typename EoS = ideal_gas_eos_t<conserved_t::regime>>
     DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
         -> maybe_t<typename conserved_t::counterpart_t>
     {
@@ -128,7 +116,7 @@ namespace simbi::hydro::rmhd {
         const auto rsq    = vecops::dot(rvec, rvec);
         const auto rmag   = std::sqrt(rsq);
         const auto hvec   = bfield * isqrtd;
-        const auto beesq  = vecops::dot(hvec, hvec) + global::epsilon;
+        const auto beesq  = vecops::dot(hvec, hvec) + build::epsilon;
         const auto rdb    = vecops::dot(rvec, hvec);
         const auto rdbsq  = rdb * rdb;
         // r-parallel Eq. (25.a)
@@ -146,7 +134,7 @@ namespace simbi::hydro::rmhd {
         auto f_upper = kkc_fmu44(muu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
 
         std::uint64_t iter = 0.0;
-        real mu, ff;
+        real          mu, ff;
         do {
             mu = (mul * f_upper - muu * f_lower) / (f_upper - f_lower);
             ff = kkc_fmu44(mu, rmag, rpsq, beesq, rdbsq, q, d, gamma);
@@ -162,9 +150,9 @@ namespace simbi::hydro::rmhd {
                 muu     = mu;
                 f_upper = ff;
             }
-            if (iter >= constants::max_iterations || !std::isfinite(ff)) {
+            if (iter >= build::max_iterations || !std::isfinite(ff)) {
                 return simbi::None([iter]() -> ErrorCode {
-                    if (iter >= constants::max_iterations) {
+                    if (iter >= build::max_iterations) {
                         return ErrorCode::MAX_ITER;
                     }
                     else {
@@ -173,8 +161,7 @@ namespace simbi::hydro::rmhd {
                 }());
             }
             iter++;
-        } while (std::abs(mul - muu) > global::epsilon &&
-                 std::abs(ff) > global::epsilon);
+        } while (std::abs(mul - muu) > build::epsilon && std::abs(ff) > build::epsilon);
 
         if (!std::isfinite(mu)) {
             return simbi::None();
@@ -202,15 +189,13 @@ namespace simbi::hydro::rmhd {
         const auto eps = w * (qbar - mu * rbar_sq) + gbsq / (1.0 + w);
         // zero-temperature limit for gamma-law EoS
         constexpr auto pfloor = 1.0e-3;
-        const auto epshat     = my_max(eps, pfloor / (rhohat * (gamma - 1.0)));
+        const auto     epshat = my_max(eps, pfloor / (rhohat * (gamma - 1.0)));
 
         // Equation (43)
         const auto pg = (gamma - 1.0) * rhohat * epshat;
 
         if (!std::isfinite(pg) || pg < 0.0) {
-            return simbi::None(
-                ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE
-            );
+            return simbi::None(ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE);
         }
 
         // velocities Eq. (68)
@@ -218,13 +203,13 @@ namespace simbi::hydro::rmhd {
         if (vel.norm() > 1.0) {
             return simbi::None(ErrorCode::SUPERLUMINAL_VELOCITY);
         }
-        if constexpr (global::using_four_velocity) {
+        if constexpr (build::use_four_velocity) {
             vel *= w;
         }
 
         return primitive_t{rhohat, vel, pg, bfield, dchi / d};
     }
-}   // namespace simbi::hydro::rmhd
+} // namespace simbi::hydro::rmhd
 
 namespace simbi::hydro {
     template <is_hydro_conserved_c conserved_t>
@@ -251,5 +236,5 @@ namespace simbi::hydro {
         }
     }
 
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 #endif

@@ -1,7 +1,7 @@
 #ifndef GRID_CREATION_GEOMETRY_BUILDER_HPP
 #define GRID_CREATION_GEOMETRY_BUILDER_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/blueprints.hpp"
 #include "geometry/api.hpp"
 #include "geometry/coordinate_map.hpp"
@@ -17,12 +17,12 @@
 namespace simbi::grid::creation {
 
     template <std::uint64_t Rank>
-    struct geometry_builder_t {
+    struct geometry_builder_t
+    {
 
-        static std::map<patch_id_t, std::vector<geometry::any_map_t>>
-        build_maps(
+        static std::map<patch_id_t, std::vector<geometry::any_map_t>> build_maps(
             const std::vector<skeleton_t<Rank>>& hierarchy,
-            const ecs::mesh_blueprint_t<Rank>& root_bp
+            const ecs::mesh_blueprint_t<Rank>&   root_bp
         )
         {
             std::map<patch_id_t, std::vector<geometry::any_map_t>> all_maps;
@@ -36,9 +36,9 @@ namespace simbi::grid::creation {
 
       private:
         static void build_level_maps(
-            const skeleton_t<Rank>& skeleton,
-            const ecs::mesh_blueprint_t<Rank>& root_bp,
-            std::uint64_t level,
+            const skeleton_t<Rank>&                                 skeleton,
+            const ecs::mesh_blueprint_t<Rank>&                      root_bp,
+            std::uint64_t                                           level,
             std::map<patch_id_t, std::vector<geometry::any_map_t>>& out_maps
         )
         {
@@ -46,9 +46,7 @@ namespace simbi::grid::creation {
                 std::vector<geometry::any_map_t> maps;
 
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    maps.push_back(
-                        create_dimension_map(root_bp, dd, id.coords[dd], level)
-                    );
+                    maps.push_back(create_dimension_map(root_bp, dd, id.coords[dd], level));
                 }
 
                 out_maps[id] = std::move(maps);
@@ -57,9 +55,9 @@ namespace simbi::grid::creation {
 
         static geometry::any_map_t create_dimension_map(
             const ecs::mesh_blueprint_t<Rank>& root_bp,
-            std::uint64_t dim,
-            std::int64_t block_topo_coord,
-            std::uint64_t level
+            std::uint64_t                      dim,
+            std::int64_t                       block_topo_coord,
+            std::uint64_t                      level
         )
         {
             using namespace geometry;
@@ -72,14 +70,11 @@ namespace simbi::grid::creation {
             std::int64_t root_blocks  = 1;
             std::int64_t total_blocks = root_blocks * level_factor;
 
-            real block_width_phys =
-                global_len / static_cast<real>(total_blocks);
+            real block_width_phys = global_len / static_cast<real>(total_blocks);
             real block_start_phys =
-                phys_start +
-                static_cast<real>(block_topo_coord) * block_width_phys;
+                phys_start + static_cast<real>(block_topo_coord) * block_width_phys;
 
-            std::int64_t n_cells =
-                root_bp.active_resolution[dim] * level_factor;
+            std::int64_t n_cells = root_bp.active_resolution[dim] * level_factor;
 
             auto map_type = deserialize<map_type_t>(root_bp.spacing[dim]);
 
@@ -88,14 +83,14 @@ namespace simbi::grid::creation {
                 return uniform_map_t(block_start_phys, dx);
             }
             else {
-                real end_phys  = block_start_phys + block_width_phys;
-                real log_slope = std::log10(end_phys / block_start_phys) /
-                                 static_cast<real>(n_cells);
+                real end_phys = block_start_phys + block_width_phys;
+                real log_slope =
+                    std::log10(end_phys / block_start_phys) / static_cast<real>(n_cells);
                 return log_map_t(block_start_phys, log_slope);
             }
         }
     };
 
-}   // namespace simbi::grid::creation
+} // namespace simbi::grid::creation
 
 #endif

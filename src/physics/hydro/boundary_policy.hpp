@@ -25,7 +25,8 @@
 //   reflecting at walls only flips v_theta (normal component)
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
+#include "decorators.hpp"
 #include "geometry/api.hpp"
 #include "grid/boundary.hpp"
 #include "grid/connectivity.hpp"
@@ -46,7 +47,8 @@ namespace simbi::hydro {
     // periodic: copy (index remapping handles position)
     // =========================================================================
     template <std::uint64_t Rank>
-    struct hydro_boundary_policy_t {
+    struct hydro_boundary_policy_t
+    {
         // state layout: [rho, v1, v2, v3, p]
         // velocity starts at index 1, v_dim is at index (1 + dim)
         static constexpr std::uint64_t velocity_offset = 1;
@@ -60,9 +62,9 @@ namespace simbi::hydro {
 
         template <typename T>
         DUAL T apply(
-            const T& state,
-            std::uint64_t dim,
-            grid::side_t side,
+            const T&              state,
+            std::uint64_t         dim,
+            grid::side_t          side,
             grid::boundary_type_t type
         ) const
         {
@@ -84,20 +86,17 @@ namespace simbi::hydro {
                             dim == theta_array_dim) {
                             // theta boundary in spherical coordinates
                             // check if this is a pole or a wall
-                            bool is_pole            = false;
+                            bool           is_pole  = false;
                             constexpr real pole_tol = 1e-10;
                             constexpr real pi_half  = 0.5 * std::numbers::pi;
                             if (side == grid::side_t::left) {
                                 is_pole = (theta_min < pole_tol);
                             }
                             else {
-                                is_pole =
-                                    (std::abs(theta_max - std::numbers::pi) <
-                                     pole_tol);
+                                is_pole = (std::abs(theta_max - std::numbers::pi) < pole_tol);
                             }
 
-                            if (!is_pole &&
-                                helpers::goes_to_zero(theta_max - pi_half)) {
+                            if (!is_pole && helpers::goes_to_zero(theta_max - pi_half)) {
                                 // at non-pole wall (e.g., theta = pi/2)
                                 // only flip normal component (v_theta)
                                 result[vel_idx] = -result[vel_idx];
@@ -133,20 +132,21 @@ namespace simbi::hydro {
     // extends hydro policy with magnetic field handling
     // =========================================================================
     template <std::uint64_t Rank>
-    struct mhd_boundary_policy_t {
+    struct mhd_boundary_policy_t
+    {
         static constexpr std::uint64_t velocity_offset = 1;
         // magnetic field after pressure: [rho, v1, v2, v3, p, b1, b2, b3]
         static constexpr std::uint64_t bfield_offset = 1 + Rank + 1;
 
-        geometry::metric_type_t metric = geometry::metric_type_t::cartesian;
-        real theta_min                 = 0.0;
-        real theta_max                 = std::numbers::pi;
+        geometry::metric_type_t metric    = geometry::metric_type_t::cartesian;
+        real                    theta_min = 0.0;
+        real                    theta_max = std::numbers::pi;
 
         template <typename T>
         DUAL T apply(
-            const T& state,
-            std::uint64_t dim,
-            grid::side_t side,
+            const T&              state,
+            std::uint64_t         dim,
+            grid::side_t          side,
             grid::boundary_type_t type
         ) const
         {
@@ -166,34 +166,28 @@ namespace simbi::hydro {
                         if (metric == geometry::metric_type_t::spherical &&
                             dim == theta_array_dim) {
                             constexpr real pole_tol = 1e-10;
-                            bool is_pole            = false;
+                            bool           is_pole  = false;
 
                             if (side == grid::side_t::left) {
                                 is_pole = (theta_min < pole_tol);
                             }
                             else {
-                                is_pole =
-                                    (std::abs(theta_max - std::numbers::pi) <
-                                     pole_tol);
+                                is_pole = (std::abs(theta_max - std::numbers::pi) < pole_tol);
                             }
 
                             if (is_pole) {
                                 // at poles: flip tangential components
                                 // v_theta at velocity_offset + 1 (logical x2)
-                                result[velocity_offset + 1] =
-                                    -result[velocity_offset + 1];
+                                result[velocity_offset + 1] = -result[velocity_offset + 1];
                                 if constexpr (Rank > 2) {
                                     // v_phi at velocity_offset + 2 (logical x3)
-                                    result[velocity_offset + 2] =
-                                        -result[velocity_offset + 2];
+                                    result[velocity_offset + 2] = -result[velocity_offset + 2];
                                 }
                                 // magnetic field: same treatment
                                 if constexpr (T::nmem > bfield_offset) {
-                                    result[bfield_offset + 1] =
-                                        -result[bfield_offset + 1];
+                                    result[bfield_offset + 1] = -result[bfield_offset + 1];
                                     if constexpr (Rank > 2) {
-                                        result[bfield_offset + 2] =
-                                            -result[bfield_offset + 2];
+                                        result[bfield_offset + 2] = -result[bfield_offset + 2];
                                     }
                                 }
                             }
@@ -221,7 +215,8 @@ namespace simbi::hydro {
                     }
                     break;
                 }
-                default: break;
+                default:
+                    break;
             }
 
             return result;
@@ -233,9 +228,9 @@ namespace simbi::hydro {
     // =========================================================================
     template <bool IsMHD, std::uint64_t Rank>
     auto make_boundary_policy(
-        geometry::metric_type_t metric = geometry::metric_type_t::cartesian,
-        real theta_min                 = 0.0,
-        real theta_max                 = std::numbers::pi
+        geometry::metric_type_t metric    = geometry::metric_type_t::cartesian,
+        real                    theta_min = 0.0,
+        real                    theta_max = std::numbers::pi
     )
     {
         if constexpr (IsMHD) {
@@ -246,6 +241,6 @@ namespace simbi::hydro {
         }
     }
 
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 
-#endif   // PHYSICS_HYDRO_BOUNDARY_POLICY_HPP
+#endif // PHYSICS_HYDRO_BOUNDARY_POLICY_HPP

@@ -1,7 +1,9 @@
 #include "contact.hpp"
+
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 
 namespace simbi::em {
     // constrained transport contact algorithm developed by Gardiner & Stone
@@ -24,7 +26,7 @@ namespace simbi::em {
         const auto [fn, fs, fe, fw] = density_fluxes;
 
         // average of face-centered electric fields
-        const real eavg = static_cast<real>(0.25) * (es + en + ew + ee);
+        const real     eavg       = static_cast<real>(0.25) * (es + en + ew + ee);
         constexpr real one_eighth = static_cast<real>(0.125);
 
         // compute gradients with upwinding based on density flux directions
@@ -76,4 +78,4 @@ namespace simbi::em {
         // final CT Contact formula (Gardiner & Stone Eq. 51)
         return eavg + one_eighth * (de_dqjL - de_dqjR + de_dqkL - de_dqkR);
     }
-}   // namespace simbi::em
+} // namespace simbi::em
