@@ -32,7 +32,7 @@ gitrepo_home.txt
 *.sh
 *.json
 *.lock
-*.md
+#*.md
 *.txt
 !meson_build_options.txt
 !README.md
