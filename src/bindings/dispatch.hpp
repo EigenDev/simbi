@@ -388,54 +388,54 @@ namespace simbi::dispatch {
                         blueprints
                     );
                     break;
-                // case geometry_t::CYLINDRICAL:
-                //     dispatch_solver<R, D, geometry_t::CYLINDRICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         prim_gen,
-                //         bfield_gen,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         blueprints
-                //     );
-                //     break;
-                // case geometry_t::AXIS_CYLINDRICAL:
-                //     dispatch_solver<R, D, geometry_t::AXIS_CYLINDRICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         prim_gen,
-                //         bfield_gen,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         blueprints
-                //     );
-                //     break;
-                // case geometry_t::PLANAR_CYLINDRICAL:
-                //     dispatch_solver<R, D, geometry_t::PLANAR_CYLINDRICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         prim_gen,
-                //         bfield_gen,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         blueprints
-                //     );
-                //     break;
-                // case geometry_t::SPHERICAL:
-                //     dispatch_solver<R, D, geometry_t::SPHERICAL>(
-                //         solver,
-                //         rec,
-                //         std::forward<Visitor>(visitor),
-                //         prim_gen,
-                //         bfield_gen,
-                //         scale_factor,
-                //         scale_factor_derivative,
-                //         blueprints
-                //     );
-                //     break;
+                case geometry_t::CYLINDRICAL:
+                    dispatch_solver<R, D, geometry_t::CYLINDRICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        prim_gen,
+                        bfield_gen,
+                        scale_factor,
+                        scale_factor_derivative,
+                        blueprints
+                    );
+                    break;
+                case geometry_t::AXIS_CYLINDRICAL:
+                    dispatch_solver<R, D, geometry_t::AXIS_CYLINDRICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        prim_gen,
+                        bfield_gen,
+                        scale_factor,
+                        scale_factor_derivative,
+                        blueprints
+                    );
+                    break;
+                case geometry_t::PLANAR_CYLINDRICAL:
+                    dispatch_solver<R, D, geometry_t::PLANAR_CYLINDRICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        prim_gen,
+                        bfield_gen,
+                        scale_factor,
+                        scale_factor_derivative,
+                        blueprints
+                    );
+                    break;
+                case geometry_t::SPHERICAL:
+                    dispatch_solver<R, D, geometry_t::SPHERICAL>(
+                        solver,
+                        rec,
+                        std::forward<Visitor>(visitor),
+                        prim_gen,
+                        bfield_gen,
+                        scale_factor,
+                        scale_factor_derivative,
+                        blueprints
+                    );
+                    break;
                 default:
                     throw unsupported_configuration(
                         "unsupported geometry: " + std::to_string(static_cast<int>(geometry))
