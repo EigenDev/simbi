@@ -5,6 +5,7 @@ simbi/src/libs/
 src/libs/
 *.egg-info/
 /data
+manuscripts/
 science
 movies/
 deprecated/
@@ -31,6 +32,10 @@ gitrepo_home.txt
 *.sh
 *.json
 *.lock
+*.md
+*.txt
+!meson_build_options.txt
+!README.md
 
 # Automatically added by dev.py
 build*/
