@@ -12,7 +12,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::body::expr {
     using namespace simbi::hydro;
@@ -135,8 +134,8 @@ namespace simbi::body::expr {
             const auto sr_param = sink_rate(body);
             const auto dv       = geometry.volume(coord);
 
-            // quick exit if outside accretion radius
-            if (r_mag > 4.0 * r_acc) {
+            // quick exit if outside accretion radius (kernel drops to ~1e-3 at 2*r_acc)
+            if (r_mag > 2.0 * r_acc) {
                 return std::make_pair(
                     conserved_t{},
                     body_delta_t<Rank>{
@@ -150,15 +149,16 @@ namespace simbi::body::expr {
 
             real den_dot;
             if (std::abs(sr_param) != 0.0) {
-                const auto weight = [is_binary, r_mag, r_acc]() {
-                    if (is_binary) {
-                        const auto r_norm = r_mag / r_acc;
-                        return std::exp(-0.25 * std::pow(r_norm, 4));
-                    }
+                real weight;
+                if (is_binary) {
+                    const auto r_norm = r_mag / r_acc;
+                    weight            = std::exp(-0.25 * std::pow(r_norm, 4));
+                }
+                else {
                     const auto r_kernel = 0.5 * r_acc;
                     const auto r_norm   = r_mag / r_kernel;
-                    return std::exp(-r_norm * r_norm);
-                }();
+                    weight              = std::exp(-r_norm * r_norm);
+                }
 
                 // physical timescales
                 const auto cell_size           = min_cell_width(coord);
@@ -178,29 +178,47 @@ namespace simbi::body::expr {
                 den_dot              = labframe_density(prim) * sr;
             }
             else {
+                // guard against zero total weight
+                if (w_total < 1e-15) {
+                    return std::make_pair(
+                        conserved_t{},
+                        body_delta_t<Rank>{
+                            .idx          = body.idx,
+                            .force_delta  = {},
+                            .torque_delta = {},
+                            .mass_delta   = 0.0
+                        }
+                    );
+                }
+
                 const auto r_kernel    = 0.5 * r_acc;
                 const auto r_norm      = r_mag / r_kernel;
                 const auto weight      = std::exp(-r_norm * r_norm);
                 const auto norm_weight = weight / w_total;
                 den_dot                = mdot_target * (norm_weight / dv);
 
-                // no mass reduced by more than 25% per timestep
+                // constrain mass removal to 25% per timestep
                 if (den_dot > 0.0) {
                     const auto rho_n         = labframe_density(prim);
+                    const auto delta_rho_max = 0.25 * rho_n;
                     const auto delta_rho     = den_dot * dt;
-                    const auto delta_rho_lim = my_min(delta_rho, 0.25 * rho_n);
-                    const auto eta           = delta_rho_lim / delta_rho;
-                    den_dot                  = den_dot * eta;
+                    if (delta_rho > delta_rho_max) {
+                        den_dot = delta_rho_max / dt;
+                    }
                 }
             }
 
             // torque-controlled sink prescription
-            const auto v_star =
-                apply_torque_control(r_vec / r_mag, body.velocity, prim.vel, sink_delta(body));
-            const auto mom_dot = den_dot * v_star;
-            const auto ke_dot  = 0.5 * den_dot * vecops::dot(v_star, v_star);
-            const auto ie_dot  = den_dot * specific_internal_energy(prim, gamma);
-            const auto nrg_dot = ke_dot + ie_dot;
+            const auto r_hat = r_vec / r_mag;
+            const auto v_star_coord =
+                apply_torque_control(r_hat, body.velocity, prim.vel, sink_delta(body));
+            const auto mom_dot = den_dot * v_star_coord;
+
+            // energy: convert to cartesian for consistent kinetic energy
+            const auto v_star_cart = geometry.metric.to_cartesian(v_star_coord);
+            const auto ke_dot      = 0.5 * den_dot * vecops::dot(v_star_cart, v_star_cart);
+            const auto ie_dot      = den_dot * specific_internal_energy(prim, gamma);
+            const auto nrg_dot     = ke_dot + ie_dot;
 
             // force and torque from momentum removal
             const auto force_delta  = -mom_dot * dv;
