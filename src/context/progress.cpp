@@ -2,7 +2,8 @@
 
 #include "build_config.hpp"
 #include "io/console/statistics.hpp"
-#include "io/tabulate/table.hpp"
+#include "io/display/table.hpp"
+#include "utility/enums.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -14,25 +15,34 @@
 
 namespace simbi::progress {
 
-    progress_state_t initialize(const char* title)
+    const char* regime_display_name(regime_t regime)
     {
-        std::cout << std::string(5, '\n');
+        switch (regime) {
+            case regime_t::NEWTONIAN:
+                return "Newtonian Hydrodynamics";
+            case regime_t::SRHD:
+                return "Special Relativistic Hydrodynamics";
+            case regime_t::RMHD:
+                return "Relativistic Magnetohydrodynamics";
+            case regime_t::MHD:
+                return "Magnetohydrodynamics";
+            default:
+                return "Simulation";
+        }
+    }
+
+    progress_state_t initialize(regime_t regime)
+    {
+        // breathing room after python output
+        std::cout << std::string(3, '\n');
         statistics::display_system_info();
 
-        auto table = io::table_factory_t::create_elegant_table(
-            title,
-            io::display_mode_t::Dynamic,
-            io::progress_bar_t::Enabled
-        );
-
-        // set table to terminal width
-        io::terminal_capabilities_t term;
-        table.set_max_table_width(term.get_terminal_width());
-        table.auto_resize_columns(true);
-
+        display::table_t table(regime_display_name(regime), true);
         table.set_header({"Iteration", "Time", "dt", "Speed", "Elapsed", "ETA"});
-        table.add_row({"0", "0.0", "0.0", "0.0", "00:00:00", "00:00:00"});
+        table.update_row({"0", "0.0", "0.0", "0.0", "00:00:00", "00:00:00"});
+        table.set_progress(0);
         table.print();
+
         return {.table = std::move(table), .start_time = clock_t::now()};
     }
 
@@ -70,7 +80,6 @@ namespace simbi::progress {
         };
 
         state.table.update_row(
-            1,
             {std::to_string(iteration),
              format_sci(time),
              format_sci(dt),
@@ -79,16 +88,19 @@ namespace simbi::progress {
              format_time(eta_sec)}
         );
 
-        state.table.set_progress(static_cast<std::int64_t>((time / tend) * 100.0));
+        state.table.set_progress(static_cast<int>((time / tend) * 100.0));
         state.table.refresh();
 
         state.last_emit_iteration = iteration;
     }
 
-    void finalize(progress_state_t& state)
+    void finalize(progress_state_t& state, bool successful_sim)
     {
+        if (successful_sim) {
+            state.table.set_progress(100);
+            state.table.post_success("Simulation completed in full!");
+        }
         state.table.refresh();
-        std::cout << "Simulation completed.\n";
     }
 
 } // namespace simbi::progress

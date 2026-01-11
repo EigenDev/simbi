@@ -1,14 +1,14 @@
 #include "io/console/statistics.hpp"
 
-#include "build_config.hpp"
-#include "io/tabulate/table.hpp"
-#include "platform.hpp"
-#include "xpu/vendors/cuda/device_queries.hpp"
+#include "io/display/renderer.hpp"
+#include "io/display/terminal.hpp"
 
-#include <algorithm>
+#if GPU_ENABLED
+#include "xpu/vendors/cuda/device_queries.hpp"
+#endif
+
 #include <cstddef>
 #include <cstdint>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -309,227 +309,120 @@ namespace simbi {
         // display system information using PrettyTable
         void display_system_info()
         {
+#if GPU_ENABLED
             using namespace xpu::vendors::cuda;
-            std::cout << std::string(104, '=') << "\n";
+#endif
+            using namespace display;
 
-            // initialize common settings
-            constexpr std::int64_t SYSTEM_INFO_TABLE_WIDTH = 104;
+            const int   width = terminal_t::width();
+            renderer_t  renderer;
+            box_chars_t box =
+                terminal_t::supports_unicode() ? box_chars_t::modern() : box_chars_t::simple();
 
-            // CPU information table
-            {
-                auto cpu_table = io::table_factory_t::create_system_info_table();
-                cpu_table.set_title("CPU & System Information");
-                cpu_table.center_table(true);
+            // gather system info
+            CPUInfo     cpu_info  = CPUInfo::gather();
+            OSInfo      os_info   = OSInfo::gather();
+            MemoryStats mem_stats = MemoryStats::current();
 
-                // set table header
-                std::vector<std::string> header = {"Property", "Value"};
-                cpu_table.set_header(header);
-                cpu_table.set_column_alignment(0, io::Alignment::Left);
-                cpu_table.set_column_alignment(1, io::Alignment::Left);
+            // build single unified table
+            std::vector<std::string>              headers = {"Category", "Property", "Value"};
+            std::vector<std::vector<std::string>> rows;
 
-                // gather CPU info
-                CPUInfo cpu_info = CPUInfo::gather();
-                OSInfo  os_info  = OSInfo::gather();
+            // cpu info
+            rows.push_back({"CPU", "Model", cpu_info.model_name});
+            rows.push_back({"", "Cores", std::to_string(cpu_info.num_cores)});
+            rows.push_back({"", "Threads", std::to_string(cpu_info.num_threads)});
 
-                // add CPU information
-                cpu_table.add_row({"CPU Model", cpu_info.model_name});
-                cpu_table.add_row({"Physical Cores", std::to_string(cpu_info.num_cores)});
-                cpu_table.add_row({"Logical Threads", std::to_string(cpu_info.num_threads)});
-
-                // add CPU frequency if available
-                if (cpu_info.frequency_mhz > 0) {
-                    std::ostringstream freq_str;
-                    freq_str << std::fixed << std::setprecision(2);
-                    if (cpu_info.frequency_mhz >= 1000) {
-                        freq_str << (cpu_info.frequency_mhz / 1000) << " GHz";
-                    }
-                    else {
-                        freq_str << cpu_info.frequency_mhz << " MHz";
-                    }
-                    cpu_table.add_row({"CPU Frequency", freq_str.str()});
-                }
-
-                // add cache information if available
-                if (cpu_info.l1_cache_size > 0) {
-                    cpu_table.add_row({"L1 Cache", format_bytes(cpu_info.l1_cache_size)});
-                }
-                if (cpu_info.l2_cache_size > 0) {
-                    cpu_table.add_row({"L2 Cache", format_bytes(cpu_info.l2_cache_size)});
-                }
-                if (cpu_info.l3_cache_size > 0) {
-                    cpu_table.add_row({"L3 Cache", format_bytes(cpu_info.l3_cache_size)});
-                }
-
-                // add OS information
-                std::string os_version = os_info.name;
-                if (!os_info.version.empty()) {
-                    os_version += " " + os_info.version;
-                }
-                cpu_table.add_row({"Operating System", os_version});
-
-                cpu_table.set_minimum_width(SYSTEM_INFO_TABLE_WIDTH);
-
-                // prstd::int64_t the table
-                cpu_table.print();
+            if (cpu_info.frequency_mhz > 0) {
+                std::ostringstream freq_str;
+                freq_str
+                    << (cpu_info.frequency_mhz >= 1000
+                            ? std::to_string(static_cast<int>(cpu_info.frequency_mhz / 1000)) +
+                                  " GHz"
+                            : std::to_string(static_cast<int>(cpu_info.frequency_mhz)) + " MHz");
+                rows.push_back({"", "Frequency", freq_str.str()});
             }
 
-            std::cout << std::endl;
+            if (cpu_info.l3_cache_size > 0) {
+                rows.push_back({"", "L3 Cache", format_bytes(cpu_info.l3_cache_size)});
+            }
 
-            // Memory information table
-            {
+            // os info
+            std::string os_version = os_info.name;
+            if (!os_info.version.empty()) {
+                os_version += " " + os_info.version;
+            }
+            rows.push_back({"System", "OS", os_version});
 
-                auto memory_table = io::table_factory_t::create_system_info_table();
-                memory_table.set_title("Memory Information");
-                memory_table.center_table(true);
+            // memory info
+            std::ostringstream ram_usage;
+            ram_usage << std::fixed << std::setprecision(1) << mem_stats.percent_used << "%";
+            rows.push_back(
+                {"Memory",
+                 "System RAM",
+                 format_bytes(mem_stats.total_physical) + " (" +
+                     format_bytes(mem_stats.used_physical) + " used, " + ram_usage.str() + ")"}
+            );
 
-                // set table header
-                std::vector<std::string> header =
-                    {"Memory Type", "Total", "Used", "Available", "Usage"};
-                memory_table.set_header(header);
+            rows.push_back({"", "Process", format_bytes(mem_stats.process_physical)});
 
-                // align columns
-                for (std::int64_t ii = 0; ii < 5; ii++) {
-                    memory_table.set_column_alignment(
-                        ii,
-                        ii == 0 ? io::Alignment::Left : io::Alignment::Right
-                    );
-                }
-
-                // gather memory stats
-                MemoryStats mem_stats = MemoryStats::current();
-
-                // format memory usage percentage
-                std::ostringstream usage_str;
-                usage_str << std::fixed << std::setprecision(1) << mem_stats.percent_used << "%";
-
-                // add system RAM information
-                memory_table.add_row(
-                    {"System RAM",
-                     format_bytes(mem_stats.total_physical),
-                     format_bytes(mem_stats.used_physical),
-                     format_bytes(mem_stats.available_physical),
-                     usage_str.str()}
+            if (mem_stats.total_virtual > 0) {
+                double swap_percent =
+                    (static_cast<double>(mem_stats.used_virtual) / mem_stats.total_virtual) * 100.0;
+                std::ostringstream swap_str;
+                swap_str << std::fixed << std::setprecision(1) << swap_percent << "%";
+                rows.push_back(
+                    {"",
+                     "Swap",
+                     format_bytes(mem_stats.total_virtual) + " (" +
+                         format_bytes(mem_stats.used_virtual) + " used, " + swap_str.str() + ")"}
                 );
-
-                // add virtual memory/swap information if available
-                if (mem_stats.total_virtual > 0) {
-                    double swap_percent = 0.0;
-                    if (mem_stats.total_virtual > 0) {
-                        swap_percent = (static_cast<double>(mem_stats.used_virtual) /
-                                        mem_stats.total_virtual) *
-                                       100.0;
-                    }
-
-                    std::ostringstream swap_usage_str;
-                    swap_usage_str << std::fixed << std::setprecision(1) << swap_percent << "%";
-
-                    memory_table.add_row(
-                        {"Virtual Memory/Swap",
-                         format_bytes(mem_stats.total_virtual),
-                         format_bytes(mem_stats.used_virtual),
-                         format_bytes(mem_stats.available_virtual),
-                         swap_usage_str.str()}
-                    );
-                }
-
-                // add process memory information
-                memory_table.add_row(
-                    {"Process Memory",
-                     "N/A",
-                     format_bytes(mem_stats.process_physical),
-                     "N/A",
-                     "N/A"}
-                );
-
-                memory_table.set_minimum_width(SYSTEM_INFO_TABLE_WIDTH);
-
-                // prstd::int64_t the memory table
-                memory_table.print();
             }
 
 #if GPU_ENABLED
-            std::cout << std::endl;
+            auto dev_count = get_device_count();
+            if (dev_count > 0) {
+                auto props = get_properties(0);
+                rows.push_back({"GPU", "Device", props.name});
+                rows.push_back(
+                    {"",
+                     "Compute",
+                     std::to_string(props.compute_capability_major) + "." +
+                         std::to_string(props.compute_capability_minor)}
+                );
+                rows.push_back({"", "Memory", format_bytes(props.total_memory)});
 
-            // GPU information table
-            {
-
-                auto gpu_table = io::table_factory_t::create_system_info_table();
-                gpu_table.set_title("GPU Information");
-
-                auto dev_count = get_device_count();
-                int  device_id = 0;
-
-                if (dev_count == 0) {
-                    // set table header for no GPU case
-                    std::vector<std::string> header = {"Status"};
-                    gpu_table.set_header(header);
-                    gpu_table.add_row({"No CUDA-capable device detected"});
-                }
-                else {
-                    // set table header for GPU info
-                    std::vector<std::string> header = {"Property", "Value"};
-                    gpu_table.set_header(header);
-                    gpu_table.set_column_alignment(0, io::Alignment::Left);
-                    gpu_table.set_column_alignment(1, io::Alignment::Left);
-
-                    // we'll show info for the first GPU
-                    auto props = get_properties(device_id);
-
-                    // add GPU details
-                    gpu_table.add_row({"Device Name", props.name});
-                    gpu_table.add_row(
-                        {"Compute Capability",
-                         std::to_string(props.compute_capability_major) + "." +
-                             std::to_string(props.compute_capability_minor)}
-                    );
-                    gpu_table.add_row({"Global Memory", format_bytes(props.total_memory)});
-
-                    std::ostringstream mem_clock;
-                    int                mem_clock_rate = 0;
-                    cudaDeviceGetAttribute(&mem_clock_rate, cudaDevAttrMemoryClockRate, 0);
-                    mem_clock << std::fixed << std::setprecision(1) << (mem_clock_rate / 1000.0)
-                              << " MHz";
-                    gpu_table.add_row({"Memory Clock", mem_clock.str()});
-
-                    gpu_table.add_row(
-                        {"Memory Bus Width", std::to_string(props.memory_bus_width_bits) + " bits"}
-                    );
-
-                    std::ostringstream bandwidth;
-                    bandwidth << std::fixed << std::setprecision(1)
-                              << (2.0 * mem_clock_rate * (props.memory_bus_width_bits / 8) / 1.0e6)
-                              << " GB/s";
-                    gpu_table.add_row({"Peak Bandwidth", bandwidth.str()});
-
-                    gpu_table.add_row(
-                        {"Shared Memory/Block", format_bytes(props.shared_memory_per_block)}
-                    );
-                    gpu_table.add_row({"Warp Size", std::to_string(props.warp_size)});
-                    gpu_table.add_row(
-                        {"Max Threads/Block", std::to_string(props.max_threads_per_block)}
-                    );
-
-                    std::ostringstream block_dim;
-                    block_dim << "[" << props.max_block_dims[0] << ", " << props.max_block_dims[1]
-                              << ", " << props.max_block_dims[2] << "]";
-                    gpu_table.add_row({"Max Block Dimensions", block_dim.str()});
-
-                    std::ostringstream grid_dim;
-                    grid_dim << "[" << props.max_grid_size[0] << ", " << props.max_grid_size[1]
-                             << ", " << props.max_grid_size[2] << "]";
-                    gpu_table.add_row({"Max Grid Dimensions", grid_dim.str()});
-                }
-
-                gpu_table.set_minimum_width(SYSTEM_INFO_TABLE_WIDTH);
-
-                // print the GPU table
-                gpu_table.print();
+                int mem_clock_rate = 0;
+                cudaDeviceGetAttribute(&mem_clock_rate, cudaDevAttrMemoryClockRate, 0);
+                std::ostringstream bandwidth;
+                bandwidth << std::fixed << std::setprecision(1)
+                          << (2.0 * mem_clock_rate * (props.memory_bus_width_bits / 8) / 1.0e6)
+                          << " GB/s";
+                rows.push_back({"", "Bandwidth", bandwidth.str()});
             }
 #endif
 
-            // add space to scroll the screen up before simulation starts
-            const auto vspace = platform::is_gpu ? 42 : 40;
-            std::cout << std::string(vspace, '\n');
+            // render single table
+            std::cout << color::title() << "\n";
+            renderer.render_title(std::cout, "SYSTEM INFORMATION", width);
+            std::cout << color::reset();
+
+            renderer.calculate_layout(headers, rows[0], width);
+            renderer.render_row(std::cout, headers, true);
+            renderer.render_separator(std::cout);
+            for (const auto& row : rows) {
+                renderer.render_row(std::cout, row, false);
+            }
+            renderer.render_border_bottom(std::cout);
+
+            // separator before simulation
+            std::cout << "\n" << color::border();
+            for (int ii = 0; ii < width; ++ii) {
+                std::cout << box.horizontal;
+            }
+            // breathing room before dynamic table outpout
+            std::cout << std::string(40, '\n');
+            std::cout << color::reset() << "\n\n";
         }
 
     } // namespace statistics

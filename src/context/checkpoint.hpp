@@ -77,6 +77,8 @@ namespace simbi::checkpoint {
                 sim.diagnostics()->reset();
             }
         }
+        progress.table.post_success("Checkpoint saved: " + filename);
+        progress.table.print();
     }
 
 } // namespace simbi::checkpoint

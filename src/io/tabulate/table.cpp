@@ -1878,28 +1878,23 @@ namespace simbi {
                         break;
                 }
 
-                // split message by newlines and wrap each line if needed
+                // split message by newlines and print each line separately
                 std::istringstream stream(msg.text);
                 std::string        line;
                 while (std::getline(stream, line)) {
-                    // wrap long lines to fit within table width
-                    std::string wrapped = wrap_text_to_width(line, total_width - 4);
+                    os << get_color_code(theme_config.border_color) << border_chars.vertical << " ";
+                    os << get_color_code(msg_color);
 
-                    // split wrapped text into individual lines
-                    std::istringstream wrapped_stream(wrapped);
-                    std::string        wrapped_line;
-                    while (std::getline(wrapped_stream, wrapped_line)) {
-                        os << get_color_code(theme_config.border_color) << border_chars.vertical
-                           << " ";
-                        os << get_color_code(msg_color);
-
-                        // pad to fill width
-                        wrapped_line += std::string(total_width - 4 - wrapped_line.length(), ' ');
-
-                        os << wrapped_line;
-                        os << reset_color() << " " << get_color_code(theme_config.border_color)
-                           << border_chars.vertical << "\n";
+                    if (line.length() > total_width - 4) {
+                        line = line.substr(0, total_width - 7) + "...";
                     }
+                    else {
+                        line += std::string(total_width - 4 - line.length(), ' ');
+                    }
+
+                    os << line;
+                    os << reset_color() << " " << get_color_code(theme_config.border_color)
+                       << border_chars.vertical << "\n";
                 }
                 os << reset_color();
 

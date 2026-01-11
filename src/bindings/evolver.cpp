@@ -52,7 +52,7 @@ namespace simbi::hydrostate {
             scale_factor_derivative,
             [](auto& sim, const auto& ops) {
                 // rev up those fryers
-                auto evo_state = evolution::initialize(sim, "Cool Simulation [TM]");
+                auto evo_state = evolution::initialize(sim);
                 auto pipeline  = evolution::hydro_pipeline_t{sim, ops};
                 pipeline.configure();
 

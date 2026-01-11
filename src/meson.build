@@ -4,6 +4,9 @@
 # source compilation with gpu backend support
 # =============================================================================
 
+# display subdirectory (defines display_lib and display_demo)
+subdir('io/display')
+
 # core source files that need compilation
 sources = files(
   'bindings/config_converter.cpp',
@@ -14,6 +17,9 @@ sources = files(
   'dag/exp_load.cpp',
   'dag/linearize.cpp',
   'io/console/statistics.cpp',
+  'io/display/renderer.cpp',
+  'io/display/table.cpp',
+  'io/display/terminal.cpp',
   'io/exceptions.cpp',
   'io/tabulate/table.cpp',
   'physics/em/contact.cpp',

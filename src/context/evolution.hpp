@@ -13,8 +13,8 @@
 //   - pipeline uses partition-aware systems
 // =============================================================================
 
-#include "checkpoint.hpp"
 #include "build_config.hpp"
+#include "checkpoint.hpp"
 #include "ecs/systems.hpp"
 #include "io/console/dprintb.hpp"
 #include "io/diagnostics.hpp"
@@ -27,7 +27,6 @@
 
 #include <cstdint>
 #include <stdexcept>
-#include <string>
 
 namespace simbi::evolution {
     template <typename Sim>
@@ -48,13 +47,13 @@ namespace simbi::evolution {
     // initialization
     // =========================================================================
     template <typename Sim>
-    evolution_state_t initialize(Sim& sim, const char* title = "Simulation")
+    evolution_state_t initialize(Sim& sim)
     {
         auto& meta = sim.metadata();
 
         return {
             .stats    = timing::timing_stats_t{},
-            .progress = progress::initialize(title),
+            .progress = progress::initialize(meta.regime),
             .schedule =
                 checkpoint::checkpoint_schedule_t{
                     .checkpoint_time     = meta.checkpoint_interval,
@@ -78,7 +77,6 @@ namespace simbi::evolution {
         auto& exec = sim.partition_executor(0, 0);
 
         // initial checkpoint
-        state.progress.table.refresh();
         try {
             if (meta.time == 0.0 || meta.checkpoint_index == 0) {
                 if (sim.in_failure_state) {
@@ -147,7 +145,8 @@ namespace simbi::evolution {
         if (!state.should_stop) {
             state.progress.table.set_progress(100);
         }
-        progress::finalize(state.progress);
+        bool successful_sim = !sim.in_failure_state && !sim.was_interrupted;
+        progress::finalize(state.progress, successful_sim);
 
         if (state.stats.count > 0) {
             io::writeln(
