@@ -228,8 +228,8 @@ namespace simbi::xpu::exec {
         // no copy, move ok
         executor_arena_t(const executor_arena_t&)            = delete;
         executor_arena_t& operator=(const executor_arena_t&) = delete;
-        executor_arena_t(executor_arena_t&&)                 = default;
-        executor_arena_t& operator=(executor_arena_t&&)      = default;
+        executor_arena_t(executor_arena_t&&)                 = delete;
+        executor_arena_t& operator=(executor_arena_t&&)      = delete;
 
         // submit task and get future
         template <typename Func>

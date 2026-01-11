@@ -136,14 +136,14 @@ namespace simbi::xpu::exec {
         // force cpu when prefer_gpu=false
         using type = std::conditional_t<
             prefer_gpu && is_device_available<vendors::cuda::cuda_device_t>(),
-            /* cuda available */ class cuda_space,
+            /* cuda available */ struct cuda_space,
             std::conditional_t<
                 prefer_gpu && is_device_available<vendors::rocm::rocm_device_t>(),
-                /* rocm available */ class rocm_space,
+                /* rocm available */ struct rocm_space,
                 std::conditional_t<
                     prefer_gpu && is_device_available<vendors::oneapi::oneapi_device_t>(),
-                    /* oneapi available */ class oneapi_space,
-                    /* fallback to cpu */ class cpu_space>>>;
+                    /* oneapi available */ struct oneapi_space,
+                    /* fallback to cpu */ struct cpu_space>>>;
     };
 
     // =============================================================================

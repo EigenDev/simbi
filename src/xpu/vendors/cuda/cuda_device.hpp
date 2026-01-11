@@ -680,7 +680,9 @@ namespace simbi::xpu::vendors::cuda {
       private:
         int                 device_id_;
         mutable std::string device_name_cache_;
-        bool                initialized_ = false;
+#if defined(XPU_CUDA_AVAILABLE)
+        bool initialized_ = false;
+#endif
 
         // resource management
         std::vector<stream_handle_type> managed_streams_;
