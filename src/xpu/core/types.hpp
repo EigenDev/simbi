@@ -3,7 +3,7 @@
 
 #include <cstdint>
 
-namespace simbi::het {
+namespace simbi::xpu::core {
     // -------------------------------------------------------------------------
     // enums
     // -------------------------------------------------------------------------
@@ -85,6 +85,6 @@ namespace simbi::het {
         std::int64_t gi, gj, gk; // global index
     };
 
-} // namespace simbi::het
+} // namespace simbi::xpu::core
 
 #endif // HETERO_TYPES_HPP

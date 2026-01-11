@@ -2,19 +2,19 @@
 #define BODY_FACTORY_HPP
 
 #include "body.hpp"
+#include "build_config.hpp"
 #include "collection.hpp"
-#include "compat.hpp"
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"
 #include "utility/config_dict.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <list>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace simbi::body::factory {
     using namespace simbi::config;
@@ -180,8 +180,6 @@ namespace simbi::body::factory {
     template <std::uint64_t Rank>
     auto create_binary_system_from_blueprint(const ecs::binary_system_blueprint_t& bp)
     {
-        using real = real;
-
         // create binary_parameters_t from blueprint
         binary_parameters_t binary_params{
             .total_mass        = bp.total_mass,

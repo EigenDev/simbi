@@ -2,14 +2,13 @@
 #define PHYSICS_HYDRO_SOURCE_TERMS_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "geometry/metrics.hpp"
 #include "physics/hydro/physics.hpp"
 
 #include <cmath>
 #include <cstdint>
-#include <iostream>
 #include <numbers>
 #include <type_traits>
 
@@ -52,12 +51,12 @@ namespace simbi::geometry {
             }();
 
             // singularity guard
-            if (r < global::epsilon) {
+            if (r < build::epsilon) {
                 return cons_t{};
             }
             const auto sin_t = std::sin(theta);
 
-            real cot = (std::abs(sin_t) > global::epsilon) ? std::cos(theta) / sin_t : 0.0;
+            real cot = (std::abs(sin_t) > build::epsilon) ? std::cos(theta) / sin_t : 0.0;
 
             // unpack primitives
             const real v1    = proper_velocity(prim, 1);
@@ -103,7 +102,7 @@ namespace simbi::geometry {
         else if constexpr (is_cylindrical_c<metric_t>) {
             auto centroid = metric.centroid(idx);
             real r        = centroid[0];
-            if (r < global::epsilon) {
+            if (r < build::epsilon) {
                 return cons_t{};
             }
 

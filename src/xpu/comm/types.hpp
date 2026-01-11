@@ -17,6 +17,9 @@
 
 #pragma once
 
+#include "xpu/mem/device_memory.hpp"
+
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 
@@ -102,7 +105,7 @@ namespace simbi::xpu::comm {
 
         if (same_node(src, dst)) {
             // check if peer access is actually available
-            if (device_memory_t::can_access_peer(src.device_id, dst.device_id)) {
+            if (mem::device_memory_t::can_access_peer(src.device_id, dst.device_id)) {
                 return transfer_strategy_t::peer_copy;
             }
             // fallback to host-staged if peer access not available

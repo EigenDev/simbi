@@ -24,6 +24,8 @@
 #include "xpu/vendors/cpu/cpu_device.hpp"
 #include "xpu/vendors/cuda/cuda_device.hpp"
 
+#include <cstddef>
+
 #ifdef XPU_CUDA_AVAILABLE
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
@@ -32,7 +34,7 @@
 #include <string_view>
 #endif
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec {
 
 #ifdef XPU_CUDA_AVAILABLE
 
@@ -545,4 +547,4 @@ namespace simbi::xpu {
     // note: static_assert(execution_space<cuda_space>) moved to xpu.hpp
     // cannot verify here due to incomplete types
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec

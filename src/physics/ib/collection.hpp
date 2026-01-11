@@ -2,7 +2,7 @@
 #define BODY_COLLECTION_HPP
 
 #include "body.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "sink.hpp"
 #include "utility/config_dict.hpp"
@@ -190,7 +190,7 @@ namespace simbi::body {
 
         constexpr const auto& operator[](std::size_t idx) const
         {
-            if constexpr (global::bounds_checking) {
+            if constexpr (build::debug_mode) {
                 assert(idx < size_);
             }
             return bodies_[idx];

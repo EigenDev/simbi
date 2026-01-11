@@ -27,7 +27,10 @@
 #include "xpu/core/execution_concepts.hpp"
 #include "xpu/core/memory_concepts.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
+#include <string_view>
 
 #ifdef XPU_ROCM_AVAILABLE
 #include <hip/hip_runtime.h>

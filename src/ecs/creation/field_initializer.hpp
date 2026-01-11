@@ -14,7 +14,7 @@
 // =============================================================================
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/numerics.hpp"
 #include "containers/vector.hpp"
 #include "ecs/systems.hpp"

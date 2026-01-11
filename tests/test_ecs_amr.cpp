@@ -1,4 +1,4 @@
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/blueprints.hpp"
 #include "ecs/components.hpp"
 #include "ecs/creation/decomposition.hpp"
@@ -9,7 +9,8 @@
 #include <cassert>
 #include <iostream>
 
-struct ideal_gas_t {
+struct ideal_gas_t
+{
     real gamma;
 };
 
@@ -22,7 +23,10 @@ void print_ok(const char* msg)
     std::cout << "  " << msg << " [ok]" << std::endl;
 }
 
-void print_section(const char* msg) { std::cout << "\n" << msg << std::endl; }
+void print_section(const char* msg)
+{
+    std::cout << "\n" << msg << std::endl;
+}
 
 // =============================================================================
 // test: single-device decomposition
@@ -74,17 +78,14 @@ void test_single_device_decomposition()
 
     std::cout << "Building simulation..." << std::endl;
     // build simulation (single device, default)
-    auto sim = builders::simulation_builder_t<
-                   regime_t::NEWTONIAN,
-                   2,
-                   geometry_t::CARTESIAN,
-                   ideal_gas_t>()
-                   .configure_mesh(mesh_bp)
-                   .configure_physics(phys_bp)
-                   .configure_execution(exec_bp)
-                   .configure_amr(amr_bp)
-                   .configure_numerics(num_bp)
-                   .build();
+    auto sim =
+        builders::simulation_builder_t<regime_t::NEWTONIAN, 2, geometry_t::CARTESIAN, ideal_gas_t>()
+            .configure_mesh(mesh_bp)
+            .configure_physics(phys_bp)
+            .configure_execution(exec_bp)
+            .configure_amr(amr_bp)
+            .configure_numerics(num_bp)
+            .build();
 
     std::cout << "Simulation built." << std::endl;
     // verify single level
@@ -118,12 +119,12 @@ void test_single_device_decomposition()
     // verify fields accessible via both apis (use partition_hydro API)
     auto& hydro = sim.partition_hydro(0, 0);
     // verify field domain
-    assert(hydro.cons.domain().size() == 400);   // 20x20
+    assert(hydro.cons.domain().size() == 400); // 20x20
     print_ok("cons field size (including ghosts) = 400");
 
     // verify flux fields exist and are face-centered
-    assert(hydro.flux[0].domain().fin[0] == 17);   // n+1 faces in x
-    assert(hydro.flux[1].domain().fin[1] == 17);   // n+1 faces in y
+    assert(hydro.flux[0].domain().fin[0] == 17); // n+1 faces in x
+    assert(hydro.flux[1].domain().fin[1] == 17); // n+1 faces in y
     print_ok("flux fields are face-centered");
 
     // verify metadata
@@ -187,21 +188,18 @@ void test_multi_partition_decomposition()
     decomp_bp.topology_dims = {2, 2};
     decomp_bp.halo_width    = 2;
     decomp_bp.mpi_rank      = 0;
-    decomp_bp.device_ids    = {0};   // all partitions on same device
+    decomp_bp.device_ids    = {0}; // all partitions on same device
 
     // build simulation
-    auto sim = builders::simulation_builder_t<
-                   regime_t::NEWTONIAN,
-                   2,
-                   geometry_t::CARTESIAN,
-                   ideal_gas_t>()
-                   .configure_mesh(mesh_bp)
-                   .configure_physics(phys_bp)
-                   .configure_execution(exec_bp)
-                   .configure_amr(amr_bp)
-                   .configure_numerics(num_bp)
-                   .configure_decomposition(decomp_bp)
-                   .build();
+    auto sim =
+        builders::simulation_builder_t<regime_t::NEWTONIAN, 2, geometry_t::CARTESIAN, ideal_gas_t>()
+            .configure_mesh(mesh_bp)
+            .configure_physics(phys_bp)
+            .configure_execution(exec_bp)
+            .configure_amr(amr_bp)
+            .configure_numerics(num_bp)
+            .configure_decomposition(decomp_bp)
+            .build();
 
     // verify 4 partitions
     assert(sim.num_partitions(0) == 4);
@@ -216,14 +214,14 @@ void test_multi_partition_decomposition()
     // with 2x2 topology on 16x16 grid, each partition owns 8x8
     std::uint64_t total_owned = 0;
     for (std::uint64_t pp = 0; pp < 4; ++pp) {
-        const auto& part = sim.partition(0, pp);
-        auto owned_size  = part.owned_domain.size();
+        const auto& part       = sim.partition(0, pp);
+        auto        owned_size = part.owned_domain.size();
         total_owned += owned_size;
 
         // each partition should own 8x8 = 64 cells
         assert(owned_size == 64);
     }
-    assert(total_owned == 256);   // 16x16 total
+    assert(total_owned == 256); // 16x16 total
     print_ok("partition owned domains are 8x8 each, total 256");
 
     // verify halo graph was built
@@ -271,13 +269,12 @@ void test_periodic_boundaries()
     print_section("test: periodic boundary decomposition");
 
     mesh_blueprint_t<2> mesh_bp;
-    mesh_bp.active_resolution = {16, 16};
-    mesh_bp.bounds            = {{0.0, 1.0}, {0.0, 1.0}};
-    mesh_bp.coord_system      = "cartesian";
-    mesh_bp.spacing           = {"linear", "linear"};
-    mesh_bp
-        .boundary_conditions = {"periodic", "periodic", "periodic", "periodic"};
-    mesh_bp.moving_mesh      = false;
+    mesh_bp.active_resolution    = {16, 16};
+    mesh_bp.bounds               = {{0.0, 1.0}, {0.0, 1.0}};
+    mesh_bp.coord_system         = "cartesian";
+    mesh_bp.spacing              = {"linear", "linear"};
+    mesh_bp.boundary_conditions  = {"periodic", "periodic", "periodic", "periodic"};
+    mesh_bp.moving_mesh          = false;
     mesh_bp.homologous_expansion = false;
     mesh_bp.halo_width           = 2;
 
@@ -313,18 +310,15 @@ void test_periodic_boundaries()
     decomp_bp.halo_width    = 2;
     decomp_bp.mpi_rank      = 0;
 
-    auto sim = builders::simulation_builder_t<
-                   regime_t::NEWTONIAN,
-                   2,
-                   geometry_t::CARTESIAN,
-                   ideal_gas_t>()
-                   .configure_mesh(mesh_bp)
-                   .configure_physics(phys_bp)
-                   .configure_execution(exec_bp)
-                   .configure_amr(amr_bp)
-                   .configure_numerics(num_bp)
-                   .configure_decomposition(decomp_bp)
-                   .build();
+    auto sim =
+        builders::simulation_builder_t<regime_t::NEWTONIAN, 2, geometry_t::CARTESIAN, ideal_gas_t>()
+            .configure_mesh(mesh_bp)
+            .configure_physics(phys_bp)
+            .configure_execution(exec_bp)
+            .configure_amr(amr_bp)
+            .configure_numerics(num_bp)
+            .configure_decomposition(decomp_bp)
+            .build();
 
     assert(sim.num_partitions(0) == 2);
     print_ok("2 partitions created");
@@ -357,13 +351,12 @@ void test_amr_with_decomposition()
     print_section("test: amr hierarchy with decomposition");
 
     mesh_blueprint_t<2> mesh_bp;
-    mesh_bp.active_resolution = {8, 8};
-    mesh_bp.bounds            = {{0.0, 1.0}, {0.0, 1.0}};
-    mesh_bp.coord_system      = "cartesian";
-    mesh_bp.spacing           = {"linear", "linear"};
-    mesh_bp
-        .boundary_conditions = {"periodic", "periodic", "periodic", "periodic"};
-    mesh_bp.moving_mesh      = false;
+    mesh_bp.active_resolution    = {8, 8};
+    mesh_bp.bounds               = {{0.0, 1.0}, {0.0, 1.0}};
+    mesh_bp.coord_system         = "cartesian";
+    mesh_bp.spacing              = {"linear", "linear"};
+    mesh_bp.boundary_conditions  = {"periodic", "periodic", "periodic", "periodic"};
+    mesh_bp.moving_mesh          = false;
     mesh_bp.homologous_expansion = false;
     mesh_bp.halo_width           = 2;
 
@@ -398,17 +391,14 @@ void test_amr_with_decomposition()
     num_bp.use_fleischmann_limiter = false;
 
     // single device for amr test
-    auto sim = builders::simulation_builder_t<
-                   regime_t::NEWTONIAN,
-                   2,
-                   geometry_t::CARTESIAN,
-                   ideal_gas_t>()
-                   .configure_mesh(mesh_bp)
-                   .configure_physics(phys_bp)
-                   .configure_execution(exec_bp)
-                   .configure_amr(amr_bp)
-                   .configure_numerics(num_bp)
-                   .build();
+    auto sim =
+        builders::simulation_builder_t<regime_t::NEWTONIAN, 2, geometry_t::CARTESIAN, ideal_gas_t>()
+            .configure_mesh(mesh_bp)
+            .configure_physics(phys_bp)
+            .configure_execution(exec_bp)
+            .configure_amr(amr_bp)
+            .configure_numerics(num_bp)
+            .build();
 
     // verify 2 levels
     assert(sim.num_levels() == 2);
@@ -502,17 +492,14 @@ void test_workspace_allocation()
     num_bp.use_quirk_smoothing     = false;
     num_bp.use_fleischmann_limiter = false;
 
-    auto sim = builders::simulation_builder_t<
-                   regime_t::NEWTONIAN,
-                   2,
-                   geometry_t::CARTESIAN,
-                   ideal_gas_t>()
-                   .configure_mesh(mesh_bp)
-                   .configure_physics(phys_bp)
-                   .configure_execution(exec_bp)
-                   .configure_amr(amr_bp)
-                   .configure_numerics(num_bp)
-                   .build();
+    auto sim =
+        builders::simulation_builder_t<regime_t::NEWTONIAN, 2, geometry_t::CARTESIAN, ideal_gas_t>()
+            .configure_mesh(mesh_bp)
+            .configure_physics(phys_bp)
+            .configure_execution(exec_bp)
+            .configure_amr(amr_bp)
+            .configure_numerics(num_bp)
+            .build();
 
     // workspace should not exist initially
     assert(!sim.has_workspace(0, 0));

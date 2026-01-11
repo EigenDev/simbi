@@ -2,13 +2,15 @@
 #define PHYSICS_HPP
 
 #include "base/concepts.hpp" // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
-#include "compat.hpp"            // for global::using_four_velocity
-#include "containers/vector.hpp" // for vector_t
-#include "physics/em/electromagnetism.hpp"
-#include "physics/eos/isothermal.hpp" // for isothermal_gas_eos_t
+#include "build_config.hpp"                // for build::use_four_velocity
+#include "containers/vector.hpp"           // for vector_t
+#include "decorators.hpp"                  // for DEV
+#include "physics/em/electromagnetism.hpp" // for em::electric_field
+#include "physics/eos/isothermal.hpp"      // for isothermal_gas_eos_t
 
 #include <concepts> // for std::same_as
-#include <cstddef>
+#include <cstddef>  // for std::size_t
+#include <cstdint>  // for std::uint64_t
 
 namespace simbi::hydro {
     using namespace simbi::concepts;
@@ -18,7 +20,7 @@ namespace simbi::hydro {
     DEV constexpr real lorentz_factor(const primitive_t& prim)
     {
         if constexpr (is_relativistic_c<primitive_t>) {
-            if constexpr (global::using_four_velocity) {
+            if constexpr (build::use_four_velocity) {
                 return std::sqrt(1.0 + vecops::dot(prim.vel, prim.vel));
             }
             return 1.0 / std::sqrt(1.0 - vecops::dot(prim.vel, prim.vel));
@@ -32,7 +34,7 @@ namespace simbi::hydro {
     DEV constexpr real lorentz_factor_squared(const primitive_t& prim)
     {
         if constexpr (is_relativistic_c<primitive_t>) {
-            if constexpr (global::using_four_velocity) {
+            if constexpr (build::use_four_velocity) {
                 return 1.0 + vecops::dot(prim.vel, prim.vel);
             }
             return 1.0 / (1.0 - vecops::dot(prim.vel, prim.vel));
@@ -219,7 +221,7 @@ namespace simbi::hydro {
                 return 0.0; // no z-velocity in 2D or 1D
             }
         }
-        if constexpr (global::using_four_velocity) {
+        if constexpr (build::use_four_velocity) {
             return prim.vel[comp - 1] / lorentz_factor(prim);
         }
         else {

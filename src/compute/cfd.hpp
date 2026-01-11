@@ -9,15 +9,15 @@
 // =============================================================================
 
 #include "base/stencil_view.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "grid/domain.hpp"
 #include "io/exceptions.hpp"
 #include "physics/ib/body.hpp"
 #include "physics/ib/body_delta.hpp"
-#include "physics/ib/diagnostics.hpp"
 #include "physics/ib/effects.hpp"
 #include "utility/enums.hpp"
 

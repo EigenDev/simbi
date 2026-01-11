@@ -1,4 +1,4 @@
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
 #include "geometry/block_geometry.hpp"

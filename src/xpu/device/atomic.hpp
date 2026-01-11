@@ -20,11 +20,11 @@
 #ifndef XPU_DEVICE_ATOMIC_HPP
 #define XPU_DEVICE_ATOMIC_HPP
 
-#include "compat.hpp"
+#include "decorators.hpp"
 
 #include <cstdint>
 
-namespace simbi::xpu {
+namespace simbi::xpu::device {
 
     // =============================================================================
     // atomic add
@@ -174,6 +174,6 @@ namespace simbi::xpu {
 #endif
     }
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::device
 
 #endif

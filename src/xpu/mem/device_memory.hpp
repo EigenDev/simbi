@@ -15,6 +15,8 @@
 
 #include "memory_space.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
@@ -23,7 +25,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace simbi::xpu {
+namespace simbi::xpu::mem {
 
     // =============================================================================
     // device memory space
@@ -122,7 +124,7 @@ namespace simbi::xpu {
         // accessibility queries
         // =============================================================================
 
-        template <memory_space OtherSpace>
+        template <memory_space_c OtherSpace>
         static constexpr bool is_accessible_from()
         {
             // device memory is accessible from device and unified spaces only
@@ -436,7 +438,7 @@ namespace simbi::xpu {
     inline std::size_t device_memory_t::stats::current_usage     = 0;
 
     // static assertion to verify concept compliance
-    static_assert(memory_space<device_memory_t>);
+    static_assert(memory_space_c<device_memory_t>);
 
     // =============================================================================
     // convenience aliases
@@ -447,4 +449,4 @@ namespace simbi::xpu {
     template <typename T>
     using device_buffer_t = block_t<device_memory_t>;
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::mem

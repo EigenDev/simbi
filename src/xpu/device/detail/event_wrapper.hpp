@@ -22,15 +22,16 @@
 #include "stream_wrapper.hpp"
 #include "xpu/execution/execution_space.hpp"
 
+#include <type_traits>
 #include <utility>
 
-namespace simbi::xpu::detail {
+namespace simbi::xpu::device::detail {
 
     // =============================================================================
     // event wrapper implementation
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <exec::execution_space_c ExecutionSpace>
     class event_wrapper_t
     {
       public:
@@ -236,7 +237,7 @@ namespace simbi::xpu::detail {
         // cpu-specific completion check
         template <typename Space = ExecutionSpace>
         auto is_cpu_ready() const noexcept
-            -> std::enable_if_t<std::is_same_v<Space, cpu_space>, bool>
+            -> std::enable_if_t<std::is_same_v<Space, exec::cpu_space>, bool>
         {
             static_assert(std::is_same_v<Space, ExecutionSpace>);
             // cpu events are typically always ready
@@ -248,14 +249,14 @@ namespace simbi::xpu::detail {
     // event factory functions
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <exec::execution_space_c ExecutionSpace>
     event_wrapper_t<ExecutionSpace> make_event()
     {
         return event_wrapper_t<ExecutionSpace>{};
     }
 
     // create immediate (ready) event
-    template <execution_space ExecutionSpace>
+    template <exec::execution_space_c ExecutionSpace>
     event_wrapper_t<ExecutionSpace> make_immediate_event()
     {
         auto event = event_wrapper_t<ExecutionSpace>{};
@@ -264,10 +265,10 @@ namespace simbi::xpu::detail {
     }
 
     // create non-owning wrapper around existing handle
-    template <execution_space ExecutionSpace>
+    template <exec::execution_space_c ExecutionSpace>
     event_wrapper_t<ExecutionSpace> wrap_event(typename ExecutionSpace::event_handle_type handle)
     {
         return event_wrapper_t<ExecutionSpace>{handle, false};
     }
 
-} // namespace simbi::xpu::detail
+} // namespace simbi::xpu::device::detail

@@ -21,16 +21,18 @@
 
 #include "xpu/execution/execution_space.hpp"
 
+#include <cstdint>
 #include <thread>
+#include <type_traits>
 #include <utility>
 
-namespace simbi::xpu::detail {
+namespace simbi::xpu::device::detail {
 
     // =============================================================================
     // stream wrapper implementation
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <exec::execution_space_c ExecutionSpace>
     class stream_wrapper_t
     {
       public:
@@ -193,7 +195,7 @@ namespace simbi::xpu::detail {
         // cpu-specific thread id
         template <typename Space = ExecutionSpace>
         auto thread_id() const noexcept
-            -> std::enable_if_t<std::is_same_v<Space, cpu_space>, std::thread::id>
+            -> std::enable_if_t<std::is_same_v<Space, exec::cpu_space>, std::thread::id>
         {
             static_assert(std::is_same_v<Space, ExecutionSpace>);
             return handle_;
@@ -204,18 +206,18 @@ namespace simbi::xpu::detail {
     // stream factory functions
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <exec::execution_space_c ExecutionSpace>
     stream_wrapper_t<ExecutionSpace> make_stream(std::int64_t device_id = 0)
     {
         return stream_wrapper_t<ExecutionSpace>{device_id};
     }
 
     // create non-owning wrapper around existing handle
-    template <execution_space ExecutionSpace>
+    template <exec::execution_space_c ExecutionSpace>
     stream_wrapper_t<ExecutionSpace>
     wrap_stream(typename ExecutionSpace::stream_handle_type handle, std::int64_t device_id = 0)
     {
         return stream_wrapper_t<ExecutionSpace>{handle, device_id, false};
     }
 
-} // namespace simbi::xpu::detail
+} // namespace simbi::xpu::device::detail

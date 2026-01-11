@@ -1,7 +1,7 @@
 #ifndef CHECKPOINT_HPP
 #define CHECKPOINT_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "io/checkpoint.hpp"
 #include "io/write_policy.hpp"
 #include "progress.hpp"

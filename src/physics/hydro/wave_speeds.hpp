@@ -2,46 +2,56 @@
 #define PHYSICS_WAVE_SPEEDS_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"               // for DEV, real, global
-#include "contact_properties.hpp"   // for wave_speeds_t
-#include "containers/vector.hpp"    // for unit_vector_t
-#include "physics/hydro/physics.hpp"   // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c
-#include "utility/enums.hpp"     // for WaveSpeedEstimate
-#include "utility/helpers.hpp"   // for solve_quartic,
+#include "build_config.hpp"       // for real type, build::
+#include "contact_properties.hpp" // for wave_speeds_t
+#include "containers/vector.hpp"  // for unit_vector_t
+#include "decorators.hpp"         // for DEV
+#include "physics/hydro/physics.hpp" // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c
+#include "utility/enums.hpp"         // for WaveSpeedEstimate
+#include "utility/helpers.hpp"       // for solve_quartic,
 
-#include <algorithm>     // for std::min, std::max
-#include <cmath>         // for std::sqrt, std::pow
-#include <cstdio>        // for printf
-#include <tuple>         // for std::tuple_size, std::tuple_element
-#include <type_traits>   // for std::integral_constant, std::is_same_v
+#include <algorithm>   // for std::min, std::max
+#include <cmath>       // for std::sqrt, std::pow
+#include <cstdio>      // for printf
+#include <tuple>       // for std::tuple_size, std::tuple_element
+#include <type_traits> // for std::integral_constant, std::is_same_v
 
 namespace simbi::hydro {
     struct wave_speeds_t;
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 
 // structured bindings for wave_speeds_t
 namespace std {
     template <>
-    struct tuple_size<simbi::hydro::wave_speeds_t>
-        : std::integral_constant<size_t, 2> {
+    struct tuple_size<simbi::hydro::wave_speeds_t> : std::integral_constant<size_t, 2>
+    {
     };
 
     template <>
-    struct tuple_element<0, simbi::hydro::wave_speeds_t> {
+    struct tuple_element<0, simbi::hydro::wave_speeds_t>
+    {
         using type = simbi::real;
     };
 
     template <>
-    struct tuple_element<1, simbi::hydro::wave_speeds_t> {
+    struct tuple_element<1, simbi::hydro::wave_speeds_t>
+    {
         using type = simbi::real;
     };
-}   // namespace std
+} // namespace std
 
 namespace simbi::hydro {
-    struct wave_speeds_t {
-        real left, right;
-        DEV constexpr auto min() const { return left; }
-        DEV constexpr auto max() const { return right; }
+    struct wave_speeds_t
+    {
+        real               left, right;
+        DEV constexpr auto min() const
+        {
+            return left;
+        }
+        DEV constexpr auto max() const
+        {
+            return right;
+        }
         // structured bindings support
         template <std::size_t Index>
         DEV std::tuple_element_t<Index, wave_speeds_t>& get()
@@ -56,7 +66,7 @@ namespace simbi::hydro {
                 // this will never be reached due to tuple_size specialization,
                 // but it's needed to satisfy the compiler
                 static_assert(Index < 2, "Index out of bounds");
-                return left;   // unreachable, but needed for compilation
+                return left; // unreachable, but needed for compilation
             }
         }
 
@@ -73,24 +83,22 @@ namespace simbi::hydro {
                 // this will never be reached due to tuple_size specialization,
                 // but it's needed to satisfy the compiler
                 static_assert(Index < 2, "Index out of bounds");
-                return left;   // unreachable, but needed for compilation
+                return left; // unreachable, but needed for compilation
             }
         }
     };
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 
 namespace simbi::hydro::newtonian {
-    struct wave_properties_t {
-        wave_speeds_t speeds;
+    struct wave_properties_t
+    {
+        wave_speeds_t        speeds;
         contact_properties_t contact;
     };
 
     template <is_hydro_primitive_c primitive_t>
-    DEV wave_speeds_t wave_speeds(
-        const primitive_t& prim,
-        const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
-    )
+    DEV wave_speeds_t
+    wave_speeds(const primitive_t& prim, const unit_vector_t<primitive_t::rank>& nhat, real gamma)
     {
         const auto cs = std::sqrt(gamma * prim.pre / prim.rho);
         const auto vn = vecops::dot(prim.vel, nhat);
@@ -99,26 +107,26 @@ namespace simbi::hydro::newtonian {
 
     template <is_hydro_primitive_c primitive_t>
     DEV wave_speeds_t extremal_speeds(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
+        real                                    gamma
     )
     {
         const auto left_waves  = wave_speeds(primL, nhat, gamma);
         const auto right_waves = wave_speeds(primR, nhat, gamma);
         return {
-          std::min({left_waves.min(), right_waves.min(), 0.0}),
-          std::max({left_waves.max(), right_waves.max(), 0.0})
+            std::min({left_waves.min(), right_waves.min(), 0.0}),
+            std::max({left_waves.max(), right_waves.max(), 0.0})
         };
     }
 
     template <is_hydro_primitive_c primitive_t>
     DEV wave_properties_t wave_properties(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
+        real                                    gamma
     )
     {
         const auto rhoL = primL.rho;
@@ -134,9 +142,9 @@ namespace simbi::hydro::newtonian {
         // ---- Standard adiabatic case ----
         const auto rho_bar = 0.5 * (rhoL + rhoR);
         const auto c_bar   = 0.5 * (csL + csR);
-        const real pvrs = 0.5 * (pL + pR) - 0.5 * (vR - vL) * rho_bar * c_bar;
-        const real pmin = std::min(pL, pR);
-        const real pmax = std::max(pL, pR);
+        const real pvrs    = 0.5 * (pL + pR) - 0.5 * (vR - vL) * rho_bar * c_bar;
+        const real pmin    = std::min(pL, pR);
+        const real pmax    = std::max(pL, pR);
 
         // Section 9.5.2 of Toro's book suggests a user-defined
         // threshold for the PVRS case
@@ -151,8 +159,7 @@ namespace simbi::hydro::newtonian {
             const real pL_pow       = std::pow(pL, gamma_factor);
             const real pR_pow       = std::pow(pR, gamma_factor);
             pStar                   = std::pow(
-                (csL + csR - 0.5 * (gamma - 1.0) * (vR - vL)) /
-                    (csL / pL_pow + csR / pR_pow),
+                (csL + csR - 0.5 * (gamma - 1.0) * (vR - vL)) / (csL / pL_pow + csR / pR_pow),
                 1.0 / gamma_factor
             );
         }
@@ -173,17 +180,13 @@ namespace simbi::hydro::newtonian {
             qL = 1.0;
         }
         else {
-            qL = std::sqrt(
-                1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pL - 1.0)
-            );
+            qL = std::sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pL - 1.0));
         }
         if (pStar <= pR) {
             qR = 1.0;
         }
         else {
-            qR = std::sqrt(
-                1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pR - 1.0)
-            );
+            qR = std::sqrt(1.0 + ((gamma + 1.0) / (2.0 * gamma)) * (pStar / pR - 1.0));
         }
 
         // signal speeds
@@ -191,22 +194,18 @@ namespace simbi::hydro::newtonian {
         const real aR = vR + csR * qR;
 
         // middle wave speed (contact discontinuity)
-        const real aStar =
-            (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
-            (rhoL * (aL - vL) - rhoR * (aR - vR));
+        const real aStar = (pR - pL + rhoL * vL * (aL - vL) - rhoR * vR * (aR - vR)) /
+                           (rhoL * (aL - vL) - rhoR * (aR - vR));
 
         return {{aL, aR}, {aStar, pStar}};
     }
 
-}   // namespace simbi::hydro::newtonian
+} // namespace simbi::hydro::newtonian
 
 namespace simbi::hydro::srhd {
     template <is_hydro_primitive_c primitive_t>
-    DEV wave_speeds_t wave_speeds(
-        const primitive_t& prim,
-        const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
-    )
+    DEV wave_speeds_t
+    wave_speeds(const primitive_t& prim, const unit_vector_t<primitive_t::rank>& nhat, real gamma)
     {
         const auto vn = vecops::dot(prim.vel, nhat);
         const auto cs = sound_speed(prim, gamma);
@@ -220,42 +219,36 @@ namespace simbi::hydro::srhd {
                 const real fac = std::sqrt(s * (1.0 - vn * vn + s));
                 return {(vn - fac) * qf, (vn + fac) * qf};
             }
-            default:   // Davis wave speeds
+            default: // Davis wave speeds
             {
-                return {
-                  (vn - cs) / (1.0 - cs * vn),
-                  (vn + cs) / (1.0 + cs * vn)
-                };
+                return {(vn - cs) / (1.0 - cs * vn), (vn + cs) / (1.0 + cs * vn)};
             }
         }
     }
 
     template <is_hydro_primitive_c primitive_t>
     DEV wave_speeds_t extremal_speeds(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
+        real                                    gamma
     )
     {
         const auto left_waves  = wave_speeds(primL, nhat, gamma);
         const auto right_waves = wave_speeds(primR, nhat, gamma);
         return {
-          std::min({left_waves.min(), right_waves.min(), 0.0}),
-          std::max({left_waves.max(), right_waves.max(), 0.0})
+            std::min({left_waves.min(), right_waves.min(), 0.0}),
+            std::max({left_waves.max(), right_waves.max(), 0.0})
         };
     }
 
-}   // namespace simbi::hydro::srhd
+} // namespace simbi::hydro::srhd
 
 namespace simbi::hydro::rmhd {
     using namespace simbi::helpers;
     template <is_mhd_primitive_c primitive_t>
-    DEV wave_speeds_t wave_speeds(
-        const primitive_t& prim,
-        const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
-    )
+    DEV wave_speeds_t
+    wave_speeds(const primitive_t& prim, const unit_vector_t<primitive_t::rank>& nhat, real gamma)
     {
         /*
         evaluate the full quartic if the simplifying conditions are not met.
@@ -303,7 +296,7 @@ namespace simbi::hydro::rmhd {
         const auto bnsq  = bn * bn;
         const auto vn    = vecops::dot(prim.vel, nhat);
         const auto vsq   = vecops::dot(prim.vel, prim.vel);
-        if (vsq < global::epsilon) {   // Eq.(57)
+        if (vsq < build::epsilon) { // Eq.(57)
             const auto fac     = 1.0 / (rho * h + bmusq);
             const auto a       = 1.0;
             const auto b       = -(bmusq + rho * h * cssq + bnsq * cssq) * fac;
@@ -313,19 +306,19 @@ namespace simbi::hydro::rmhd {
             const auto lambdaL = -lambdaR;
             return {lambdaL, lambdaR};
         }
-        else if (bnsq < global::epsilon) {   // Eq. (58)
+        else if (bnsq < build::epsilon) { // Eq. (58)
             const real g2      = w * w;
             const real vdbperp = vecops::dot(prim.vel, prim.mag) - vn * bn;
             const real q       = bmusq - cssq * vdbperp * vdbperp;
             const real a2      = rho * h * (cssq + g2 * (1.0 - cssq)) + q;
             const real a1      = -2.0 * rho * h * g2 * vn * (1.0 - cssq);
-            const real a0 = rho * h * (-cssq + g2 * vn * vn * (1.0 - cssq)) - q;
+            const real a0      = rho * h * (-cssq + g2 * vn * vn * (1.0 - cssq)) - q;
             const real disq    = a1 * a1 - 4.0 * a2 * a0;
             const auto lambdaR = 0.5 * (-a1 + std::sqrt(disq)) / a2;
             const auto lambdaL = 0.5 * (-a1 - std::sqrt(disq)) / a2;
             return {lambdaL, lambdaR};
         }
-        else {   // solve the full quartic Eq. (56)
+        else { // solve the full quartic Eq. (56)
             // initialize quartic speed array
             real speeds[4] = {0.0, 0.0, 0.0, 0.0};
 
@@ -335,36 +328,30 @@ namespace simbi::hydro::rmhd {
             const auto vn2  = vn * vn;
 
             const auto a4 =
-                (-bmu0 * bmu0 * cssq + bmusq * w2 - cssq * w2 * w2 * h * rho +
-                 cssq * w2 * h * rho + w2 * w2 * h * rho);
+                (-bmu0 * bmu0 * cssq + bmusq * w2 - cssq * w2 * w2 * h * rho + cssq * w2 * h * rho +
+                 w2 * w2 * h * rho);
             const auto fac = 1.0 / a4;
 
-            const auto a3 =
-                fac *
-                (2.0 * bmu0 * bmun * cssq - 2.0 * bmusq * w2 * vn +
-                 4.0 * cssq * w2 * w2 * h * rho * vn -
-                 2.0 * cssq * w2 * h * rho * vn - 4.0 * w2 * w2 * h * rho * vn);
+            const auto a3 = fac * (2.0 * bmu0 * bmun * cssq - 2.0 * bmusq * w2 * vn +
+                                   4.0 * cssq * w2 * w2 * h * rho * vn -
+                                   2.0 * cssq * w2 * h * rho * vn - 4.0 * w2 * w2 * h * rho * vn);
             const auto a2 =
-                fac *
-                (bmu0 * bmu0 * cssq + bmusq * w2 * vn2 - bmusq * w2 -
-                 bmun * bmun * cssq - 6.0 * cssq * w2 * w2 * h * rho * vn2 +
-                 cssq * w2 * h * rho * vn2 - cssq * w2 * h * rho +
-                 6.0 * w2 * w2 * h * rho * vn2);
+                fac * (bmu0 * bmu0 * cssq + bmusq * w2 * vn2 - bmusq * w2 - bmun * bmun * cssq -
+                       6.0 * cssq * w2 * w2 * h * rho * vn2 + cssq * w2 * h * rho * vn2 -
+                       cssq * w2 * h * rho + 6.0 * w2 * w2 * h * rho * vn2);
 
             const auto a1 =
                 fac * (-2.0 * bmu0 * bmun * cssq + 2.0 * bmusq * w2 * vn +
-                       4.0 * cssq * w2 * w2 * h * rho * vn * vn2 +
-                       2.0 * cssq * w2 * h * rho * vn -
+                       4.0 * cssq * w2 * w2 * h * rho * vn * vn2 + 2.0 * cssq * w2 * h * rho * vn -
                        4.0 * w2 * w2 * h * rho * vn * vn2);
 
             const auto a0 = fac * (-bmusq * w2 * vn2 + bmun * bmun * cssq -
                                    cssq * w2 * w2 * h * rho * vn2 * vn2 -
-                                   cssq * w2 * h * rho * vn2 +
-                                   w2 * w2 * h * rho * vn2 * vn2);
+                                   cssq * w2 * h * rho * vn2 + w2 * w2 * h * rho * vn2 * vn2);
 
             const auto nroots = solve_quartic(a3, a2, a1, a0, speeds);
 
-            if constexpr (global::debug_mode) {
+            if constexpr (build::debug_mode) {
                 if (nroots != 4) {
                     printf(
                         "\n number of quartic roots less than 4, nroots: %d."
@@ -377,11 +364,7 @@ namespace simbi::hydro::rmhd {
                     );
                 }
                 else {
-                    printf(
-                        "slowest wave: %.2e, fastest wave: %.2e\n",
-                        speeds[0],
-                        speeds[3]
-                    );
+                    printf("slowest wave: %.2e, fastest wave: %.2e\n", speeds[0], speeds[3]);
                 }
             }
 
@@ -395,28 +378,25 @@ namespace simbi::hydro::rmhd {
 
     template <is_mhd_primitive_c primitive_t>
     DEV wave_speeds_t extremal_speeds(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
+        real                                    gamma
     )
     {
         const auto left_waves  = wave_speeds(primL, nhat, gamma);
         const auto right_waves = wave_speeds(primR, nhat, gamma);
         return {
-          std::min({left_waves.min(), right_waves.min(), 0.0}),
-          std::max({left_waves.max(), right_waves.max(), 0.0})
+            std::min({left_waves.min(), right_waves.min(), 0.0}),
+            std::max({left_waves.max(), right_waves.max(), 0.0})
         };
     }
-}   // namespace simbi::hydro::rmhd
+} // namespace simbi::hydro::rmhd
 
 namespace simbi::hydro {
     template <is_hydro_primitive_c primitive_t>
-    DEV wave_speeds_t wave_speeds(
-        const primitive_t& prim,
-        const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
-    )
+    DEV wave_speeds_t
+    wave_speeds(const primitive_t& prim, const unit_vector_t<primitive_t::rank>& nhat, real gamma)
     {
         if constexpr (is_rmhd_c<primitive_t>) {
             return rmhd::wave_speeds(prim, nhat, gamma);
@@ -424,17 +404,17 @@ namespace simbi::hydro {
         else if constexpr (is_srhd_c<primitive_t>) {
             return srhd::wave_speeds(prim, nhat, gamma);
         }
-        else {   // newtonian hydro
+        else { // newtonian hydro
             return newtonian::wave_speeds(prim, nhat, gamma);
         }
     }
 
     template <is_hydro_primitive_c primitive_t>
     DEV wave_speeds_t extremal_speeds(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real gamma
+        real                                    gamma
     )
     {
         if constexpr (is_rmhd_c<primitive_t>) {
@@ -443,10 +423,10 @@ namespace simbi::hydro {
         else if constexpr (is_srhd_c<primitive_t>) {
             return srhd::extremal_speeds(primL, primR, nhat, gamma);
         }
-        else {   // newtonian hydro
+        else { // newtonian hydro
             return newtonian::extremal_speeds(primL, primR, nhat, gamma);
         }
     }
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 
-#endif   // PHYSICS_WAVE_SPEEDS_HPP
+#endif // PHYSICS_WAVE_SPEEDS_HPP

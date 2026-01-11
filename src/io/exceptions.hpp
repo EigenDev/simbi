@@ -50,7 +50,8 @@
 #define EXCEPTIONS_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
+#include "decorators.hpp"
 
 #include <atomic>
 #include <concepts>

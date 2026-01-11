@@ -3,15 +3,16 @@
 
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "grid/amr/prolongation.hpp"
 #include "grid/amr/restriction.hpp"
+#include "grid/domain.hpp"
 #include "grid/exchange_pattern.hpp"
 #include "grid/field.hpp"
 #include "grid/patch_id.hpp"
-#include "xpu/buffer_ops.hpp"
-#include "xpu/execution/execution_space.hpp"
-#include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -22,10 +23,10 @@ namespace simbi::grid::comm {
     struct communicator_t
     {
 
-        template <xpu::execution_space ExecutionSpace>
+        template <xpu::execution_space_c ExecutionSpace>
         using executor_lookup_f = std::function<xpu::executor_t<ExecutionSpace>&(int)>;
 
-        template <typename T, std::uint64_t Rank, xpu::execution_space ExecutionSpace>
+        template <typename T, std::uint64_t Rank, xpu::execution_space_c ExecutionSpace>
         static void exchange_halos(
             const std::vector<transfer_op_t<Rank>>&       pattern,
             const std::map<patch_id_t, field_t<T, Rank>>& patches,

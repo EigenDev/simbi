@@ -1,5 +1,5 @@
 #include "evaluator.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/store.hpp"
 #include "dag/expression.hpp"
 #include "utility/helpers.hpp"

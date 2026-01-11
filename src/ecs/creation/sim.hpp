@@ -23,7 +23,7 @@
 //       .build();
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "dag/express_t.hpp"
 #include "decomposition.hpp"

@@ -50,10 +50,12 @@
 #define HELPERS_HIP_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"            // for real, DEV, std::uint64_t, sint
+#include "build_config.hpp"      // for real, build::
 #include "containers/vector.hpp" // for vector_t
-#include "io/exceptions.hpp"     // for ErrorCode
-#include "utility/enums.hpp"     // for geometry_t, BoundaryCondition, Solver
+#include "decorators.hpp"
+#include "io/exceptions.hpp" // for ErrorCode
+#include "platform.hpp"      // for platform::
+#include "utility/enums.hpp" // for geometry_t, BoundaryCondition, Solver
 
 #include <H5Cpp.h>     // for H5::Exception, H5::DataSpace, H5::DataType, etc
 #include <cmath>       // for sqrt, exp, INFINITY
@@ -68,8 +70,8 @@
 #include <type_traits> // for is_same_v, is_integral_v, is_floating_point_v
 #include <utility>     // for move, forward
 
-// Some useful global constants
-constexpr real QUIRK_THRESHOLD = 1e-4;
+// Some useful build constants
+constexpr simbi::real QUIRK_THRESHOLD = 1e-4;
 
 // Calculation derived from:
 // https://developer.nvidia.com/blog/how-implement-performance-metrics-cuda-cc/
@@ -358,13 +360,13 @@ namespace simbi::helpers {
     template <typename T>
     DUAL bool goes_to_zero(T val)
     {
-        return std::abs(val) < global::epsilon;
+        return std::abs(val) < build::epsilon;
     }
 
     template <typename T>
     DUAL bool approx_equal(T a, T b)
     {
-        return std::abs(a - b) < global::epsilon;
+        return std::abs(a - b) < build::epsilon;
     }
 
     template <typename T>
@@ -516,11 +518,11 @@ namespace simbi::helpers {
         real               f_mid, mu_mid = 1.0;
         real               f_lower = kkc_fmu49(mu_lower, beesq, beedrsq, r);
 
-        while (iter < max_iter && (mu_upper - mu_lower) > global::epsilon) {
+        while (iter < max_iter && (mu_upper - mu_lower) > build::epsilon) {
             mu_mid = 0.5 * (mu_lower + mu_upper);
             f_mid  = kkc_fmu49(mu_mid, beesq, beedrsq, r);
 
-            if (std::abs(f_mid) < global::epsilon) {
+            if (std::abs(f_mid) < build::epsilon) {
                 break;
             }
 
@@ -801,7 +803,7 @@ namespace simbi::helpers {
     {
         iarray<Rank> coords;
         auto         stride = 1;
-        if constexpr (global::col_major) {
+        if constexpr (build::column_major) {
             // Column major: shape=(nk,nj,ni)
             // Want [k,j,i] where k is fastest
             for (std::uint64_t ii = 0; ii < Rank; ++ii) {

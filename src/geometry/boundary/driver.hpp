@@ -1,7 +1,7 @@
 #ifndef GRID_BOUNDARY_DRIVER_HPP
 #define GRID_BOUNDARY_DRIVER_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "geometry/boundary/index_map.hpp"
 #include "geometry/visit.hpp"
@@ -16,7 +16,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 
 namespace simbi::geometry {
 

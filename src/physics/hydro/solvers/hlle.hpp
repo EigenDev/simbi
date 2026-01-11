@@ -3,8 +3,9 @@
 
 // HLLE is the same for all regimes, so it can be defined here
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "physics/hydro/physics.hpp"
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/enums.hpp"
@@ -13,11 +14,11 @@ namespace simbi::hydro {
     using namespace simbi::em;
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto hlle_flux(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real vface,
-        real gamma,
+        real                                    vface,
+        real                                    gamma,
         shockwave_limiter_t = shockwave_limiter_t::NONE
     )
     {
@@ -38,8 +39,7 @@ namespace simbi::hydro {
             }
             else {
                 // intermediate state
-                auto f_hll =
-                    (fL * sR - fR * sL + (uR - uL) * sR * sL) / (sR - sL);
+                auto f_hll = (fL * sR - fR * sL + (uR - uL) * sR * sL) / (sR - sL);
                 auto u_hll = (uR * sR - uL * sL - fR + fL) / (sR - sL);
                 return f_hll - u_hll * vface;
             }
@@ -55,6 +55,6 @@ namespace simbi::hydro {
 
         return net_flux;
     }
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 
 #endif

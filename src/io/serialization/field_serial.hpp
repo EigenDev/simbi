@@ -1,7 +1,7 @@
 #ifndef IO_SERIAL_FIELD_HPP
 #define IO_SERIAL_FIELD_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
 #include "io/h5_serializable.hpp"

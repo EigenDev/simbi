@@ -1,27 +1,26 @@
 #ifndef HYDRO_HLLC_HPP
 #define HYDRO_HLLC_HPP
 
-#include "base/concepts.hpp"                // for is_hydro_primitive_c
-#include "compat.hpp"                       // for DEV macro
-#include "containers/vector.hpp"            // for vector_like_c
-#include "physics/hydro/solvers/hlle.hpp"   // for hlle_flux
-#include "physics/hydro/wave_speeds.hpp"    // for extremal_speeds
-#include "utility/enums.hpp"                // for shockwave_limiter_t
-#include "utility/helpers.hpp"   // for goes_to_zero, sgn, vecops::dot, vecops::norm
+#include "base/concepts.hpp"     // for is_hydro_primitive_c
+#include "build_config.hpp"      // for real type
+#include "containers/vector.hpp" // for vector_like_c
+#include "decorators.hpp"
+#include "physics/hydro/solvers/hlle.hpp" // for hlle_flux
+#include "physics/hydro/wave_speeds.hpp"  // for extremal_speeds
+#include "utility/enums.hpp"              // for shockwave_limiter_t
+#include "utility/helpers.hpp"            // for goes_to_zero, sgn, vecops::dot, vecops::norm
 
-#include <algorithm>   // for std::max, std::min
-#include <cmath>       // for std::abs, std::log
-#include <numbers>     // for std::numbers::pi
+#include <algorithm> // for std::max, std::min
+#include <cmath>     // for std::abs, std::log
+#include <numbers>   // for std::numbers::pi
 
 namespace simbi::hydro {
     using namespace simbi::helpers;
-    struct EntropyDetector {
+    struct EntropyDetector
+    {
         template <is_hydro_primitive_c primitive_t>
-        DEV static real compute_local_mach(
-            const primitive_t& primL,
-            const primitive_t& primR,
-            real gamma
-        )
+        DEV static real
+        compute_local_mach(const primitive_t& primL, const primitive_t& primR, real gamma)
         {
             const auto velL = primL.vel;
             const auto velR = primR.vel;
@@ -37,16 +36,13 @@ namespace simbi::hydro {
         }
 
         template <is_hydro_primitive_c primitive_t>
-        DEV static real detect_interface_correction(
-            const primitive_t& primL,
-            const primitive_t& primR
-        )
+        DEV static real
+        detect_interface_correction(const primitive_t& primL, const primitive_t& primR)
         {
             // detect material interfaces (RT-style contact discontinuities)
-            const real rho_jump = std::abs(primL.rho - primR.rho) /
-                                  (0.5 * (primL.rho + primR.rho));
-            const real pressure_jump = std::abs(primL.pre - primR.pre) /
-                                       (0.5 * (primL.pre + primR.pre));
+            const real rho_jump = std::abs(primL.rho - primR.rho) / (0.5 * (primL.rho + primR.rho));
+            const real pressure_jump =
+                std::abs(primL.pre - primR.pre) / (0.5 * (primL.pre + primR.pre));
 
             // interface = large density jump, small pressure jump (nearly
             // isentropic)
@@ -54,10 +50,10 @@ namespace simbi::hydro {
 
             if (is_contact) {
                 // need moderate dissipation to prevent interface oscillations
-                return 0.4;   // fixed moderate phi for interfaces
+                return 0.4; // fixed moderate phi for interfaces
             }
             else {
-                return 0.0;   // no correction
+                return 0.0; // no correction
             }
         }
 
@@ -65,39 +61,34 @@ namespace simbi::hydro {
         DEV static real detect_shock_correction(
             const primitive_t& primL,
             const primitive_t& primR,
-            const UnitVector& nhat,
-            real gamma
+            const UnitVector&  nhat,
+            real               gamma
         )
         {
             // entropy production (shocks increase entropy)
-            const real sL = std::log(primL.pre) - gamma * std::log(primL.rho);
-            const real sR = std::log(primR.pre) - gamma * std::log(primR.rho);
+            const real sL                 = std::log(primL.pre) - gamma * std::log(primL.rho);
+            const real sR                 = std::log(primR.pre) - gamma * std::log(primR.rho);
             const real entropy_production = sR - sL;
 
             // velocity convergence (shocks compress flow)
-            const real vL_normal = vecops::dot(primL.vel, nhat);
-            const real vR_normal = vecops::dot(primR.vel, nhat);
-            const real velocity_convergence =
-                vL_normal - vR_normal;   // > 0 for compression
+            const real vL_normal            = vecops::dot(primL.vel, nhat);
+            const real vR_normal            = vecops::dot(primR.vel, nhat);
+            const real velocity_convergence = vL_normal - vR_normal; // > 0 for compression
 
             // combined shock indicator
-            const bool is_shock =
-                (entropy_production > 0.01) && (velocity_convergence > 0.0);
+            const bool is_shock = (entropy_production > 0.01) && (velocity_convergence > 0.0);
 
             if (is_shock) {
-                return 1.0;   // force standard HLLC for shocks
+                return 1.0; // force standard HLLC for shocks
             }
             else {
-                return 0.0;   // no correction
+                return 0.0; // no correction
             }
         }
 
         template <is_hydro_primitive_c primitive_t>
-        DEV static real detect_stagnation_correction(
-            const primitive_t& primL,
-            const primitive_t& primR,
-            real gamma
-        )
+        DEV static real
+        detect_stagnation_correction(const primitive_t& primL, const primitive_t& primR, real gamma)
         {
             // detect very low velocity regions (want maximum LM treatment)
             const real cL     = sound_speed(primL, gamma);
@@ -111,10 +102,10 @@ namespace simbi::hydro {
 
             if (max_mach < 0.01) {
                 // nearly stagnant → force low dissipation
-                return -0.5;   // negative correction to reduce phi
+                return -0.5; // negative correction to reduce phi
             }
             else {
-                return 0.0;   // no correction
+                return 0.0; // no correction
             }
         }
 
@@ -122,8 +113,8 @@ namespace simbi::hydro {
         DEV static real detect_alignment_correction(
             const primitive_t& primL,
             const primitive_t& primR,
-            const UnitVector& nhat,
-            real gamma
+            const UnitVector&  nhat,
+            real               gamma
         )
         {
             // check if flow is aligned with interface (carbuncle risk)
@@ -139,28 +130,27 @@ namespace simbi::hydro {
 
                 // high speed + high alignment = carbuncle risk
                 const real avg_mach =
-                    0.5 * (vL_mag / sound_speed(primL, gamma) +
-                           vR_mag / sound_speed(primR, gamma));
+                    0.5 * (vL_mag / sound_speed(primL, gamma) + vR_mag / sound_speed(primR, gamma));
 
                 if ((max_alignment > 0.8) && (avg_mach > 0.5)) {
-                    return 1.0;   // force standard HLLC to prevent carbuncle
+                    return 1.0; // force standard HLLC to prevent carbuncle
                 }
             }
 
-            return 0.0;   // no correction
+            return 0.0; // no correction
         }
 
         template <is_hydro_primitive_c primitive_t, vector_like_c UnitVector>
         DEV static real compute_adaptive_phi(
             const primitive_t& primL,
             const primitive_t& primR,
-            const UnitVector& nhat,
-            real gamma,
-            bool use_fleischmann
+            const UnitVector&  nhat,
+            real               gamma,
+            bool               use_fleischmann
         )
         {
             if (!use_fleischmann) {
-                return 1.0;   // no adaptive phi, use standard HLLC
+                return 1.0; // no adaptive phi, use standard HLLC
             }
 
             // base Mach number criterion
@@ -168,34 +158,32 @@ namespace simbi::hydro {
             // A shock-stable modification of the HLLC Riemann solver with
             // reduced numerical dissipation
             constexpr real mach_lim = 0.1;
-            const real ma_local     = compute_local_mach(primL, primR, gamma);
-            real phi                = std::sin(
-                std::min(1.0, ma_local / mach_lim) * std::numbers::pi * 0.5
-            );
+            const real     ma_local = compute_local_mach(primL, primR, gamma);
+            real phi = std::sin(std::min(1.0, ma_local / mach_lim) * std::numbers::pi * 0.5);
 
             // physics-based corrections
             const real correction_factors[] = {
-              detect_interface_correction(
-                  primL,
-                  primR
-              ),   // boost phi for interfaces
-              detect_shock_correction(
-                  primL,
-                  primR,
-                  nhat,
-                  gamma
-              ),   // force phi=1 for shocks
-              detect_stagnation_correction(
-                  primL,
-                  primR,
-                  gamma
-              ),   // reduce phi for stagnant regions
-              detect_alignment_correction(
-                  primL,
-                  primR,
-                  nhat,
-                  gamma
-              )   // boost phi for aligned flows
+                detect_interface_correction(
+                    primL,
+                    primR
+                ), // boost phi for interfaces
+                detect_shock_correction(
+                    primL,
+                    primR,
+                    nhat,
+                    gamma
+                ), // force phi=1 for shocks
+                detect_stagnation_correction(
+                    primL,
+                    primR,
+                    gamma
+                ), // reduce phi for stagnant regions
+                detect_alignment_correction(
+                    primL,
+                    primR,
+                    nhat,
+                    gamma
+                ) // boost phi for aligned flows
             };
 
             // apply the strongest correction
@@ -207,7 +195,7 @@ namespace simbi::hydro {
         }
     };
 
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 
 // ==========================================================================
 // NEWTONIAN HLLC FLUX
@@ -216,12 +204,12 @@ namespace simbi::hydro::newtonian {
     using namespace simbi::concepts;
     template <is_hydro_primitive_c primitive_t>
     DEV constexpr auto hllc_flux(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real vface,
-        real gamma,
-        shockwave_limiter_t shock_smoother
+        real                                    vface,
+        real                                    gamma,
+        shockwave_limiter_t                     shock_smoother
     )
     {
         if constexpr (primitive_t::rank > 1) {
@@ -239,14 +227,14 @@ namespace simbi::hydro::newtonian {
         const auto fR = to_flux(primR, nhat, gamma);
 
         // calculate wave speeds
-        const auto wave_info = wave_properties(primL, primR, nhat, gamma);
-        const auto& ws       = wave_info.speeds;
-        const auto aL        = ws.min();
-        const auto aR        = ws.max();
+        const auto  wave_info = wave_properties(primL, primR, nhat, gamma);
+        const auto& ws        = wave_info.speeds;
+        const auto  aL        = ws.min();
+        const auto  aR        = ws.max();
 
         const auto& contact = wave_info.contact;
-        const real a_star   = contact.speed;
-        const real p_star   = contact.pressure;
+        const real  a_star  = contact.speed;
+        const real  p_star  = contact.pressure;
 
         // --------------Compute the L Star State----------
         real pre = primL.pre;
@@ -259,11 +247,10 @@ namespace simbi::hydro::newtonian {
         const real vnR = vecops::dot(primR.vel, nhat);
 
         // Left Star State in x-direction of coordinate lattice
-        real rhostar = fac * (aL - vnL) * rho;
-        auto mstar   = fac * (mom * (aL - vnL) + nhat * (p_star - pre));
-        real estar   = fac * (nrg * (aL - vnL) + (p_star * a_star - pre * vnL));
-        const auto starStateL =
-            conserved_t{rhostar, mstar, estar, rhostar * primL.chi};
+        real       rhostar    = fac * (aL - vnL) * rho;
+        auto       mstar      = fac * (mom * (aL - vnL) + nhat * (p_star - pre));
+        real       estar      = fac * (nrg * (aL - vnL) + (p_star * a_star - pre * vnL));
+        const auto starStateL = conserved_t{rhostar, mstar, estar, rhostar * primL.chi};
 
         pre = primR.pre;
         rho = uR.den;
@@ -271,11 +258,10 @@ namespace simbi::hydro::newtonian {
         nrg = uR.nrg;
         fac = 1.0 / (aR - a_star);
 
-        rhostar = fac * (aR - vnR) * rho;
-        mstar   = fac * (mom * (aR - vnR) + nhat * (-pre + p_star));
-        estar   = fac * (nrg * (aR - vnR) + (p_star * a_star - pre * vnR));
-        const auto starStateR =
-            conserved_t{rhostar, mstar, estar, rhostar * primR.chi};
+        rhostar               = fac * (aR - vnR) * rho;
+        mstar                 = fac * (mom * (aR - vnR) + nhat * (-pre + p_star));
+        estar                 = fac * (nrg * (aR - vnR) + (p_star * a_star - pre * vnR));
+        const auto starStateR = conserved_t{rhostar, mstar, estar, rhostar * primR.chi};
 
         // Apply the low-Mach HLLC fix found in Fleischmann et al 2020:
         // https://www.sciencedirect.com/science/article/pii/S0021999120305362
@@ -290,9 +276,8 @@ namespace simbi::hydro::newtonian {
         const real aL_lm          = phi * aL;
         const real aR_lm          = phi * aR;
         const auto face_starState = (a_star <= 0) ? starStateR : starStateL;
-        auto net_flux             = (fL + fR) * 0.5 +
-                        ((starStateL - uL) * aL_lm +
-                         (starStateL - starStateR) * std::abs(a_star) +
+        auto       net_flux       = (fL + fR) * 0.5 +
+                        ((starStateL - uL) * aL_lm + (starStateL - starStateR) * std::abs(a_star) +
                          (starStateR - uR) * aR_lm) *
                             0.5 -
                         face_starState * vface;
@@ -307,7 +292,7 @@ namespace simbi::hydro::newtonian {
 
         return net_flux;
     }
-}   // namespace simbi::hydro::newtonian
+} // namespace simbi::hydro::newtonian
 
 // ==========================================================================
 // SRHD HLLC FLUX
@@ -317,12 +302,12 @@ namespace simbi::hydro::srhd {
 
     template <is_hydro_primitive_c primitive_t>
     DUAL constexpr auto hllc_flux(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real vface,
-        real gamma,
-        shockwave_limiter_t shock_smoother
+        real                                    vface,
+        real                                    gamma,
+        shockwave_limiter_t                     shock_smoother
     )
     {
         if constexpr (primitive_t::rank > 1) {
@@ -342,22 +327,21 @@ namespace simbi::hydro::srhd {
         auto net_flux = [&]() {
             // quick returns for supersonic states
             if (aL >= vface) {
-                return fL - uL * vface;   // left state is supersonic
+                return fL - uL * vface; // left state is supersonic
             }
             if (aR <= vface) {
-                return fR - uR * vface;   // right state is supersonic
+                return fR - uR * vface; // right state is supersonic
             }
 
             // calculate intermediate state
-            const auto [a_star, p_star] =
-                contact_props(uL, uR, fL, fR, nhat, aL, aR);
-            const bool on_left = (vface <= a_star);
+            const auto [a_star, p_star] = contact_props(uL, uR, fL, fR, nhat, aL, aR);
+            const bool on_left          = (vface <= a_star);
 
             const auto& prim = on_left ? primL : primR;
             const auto& u    = on_left ? uL : uR;
             const auto& a    = on_left ? aL : aR;
             const auto& f    = on_left ? fL : fR;
-            const auto us    = star_state(prim, u, a, a_star, p_star, nhat);
+            const auto  us   = star_state(prim, u, a, a_star, p_star, nhat);
 
             const auto& pf = on_left ? primR : primL;
             const auto& uf = on_left ? uR : uL;
@@ -378,7 +362,7 @@ namespace simbi::hydro::srhd {
 
         return net_flux;
     }
-}   // namespace simbi::hydro::srhd
+} // namespace simbi::hydro::srhd
 
 namespace simbi::hydro::rmhd {
     using namespace simbi::concepts;
@@ -387,12 +371,12 @@ namespace simbi::hydro::rmhd {
 
     template <is_hydro_primitive_c primitive_t>
     DUAL constexpr auto hllc_flux(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
         // real bface,
-        real vface,
-        real gamma,
+        real                vface,
+        real                gamma,
         shockwave_limiter_t shock_smoother
     )
     {
@@ -411,7 +395,7 @@ namespace simbi::hydro::rmhd {
         const auto [aL, aR] = extremal_speeds(primL, primR, nhat, gamma);
 
         const auto stationary = aL == aR;
-        auto net_flux         = [&]() {
+        auto       net_flux   = [&]() {
             //---- Check Wave Speeds before wasting computations
             if (stationary) {
                 return (fL + fR) * 0.5 - (uR + uL) * 0.5 * vface;
@@ -427,8 +411,7 @@ namespace simbi::hydro::rmhd {
             const auto hll_state = (uR * aR - uL * aL - fR + fL) / (aR - aL);
 
             //------------------Calculate the RHLLE Flux---------------
-            const auto hll_flux =
-                (fL * aR - fR * aL + (uR - uL) * aR * aL) / (aR - aL);
+            const auto hll_flux = (fL * aR - fR * aL + (uR - uL) * aR * aL) / (aR - aL);
 
             // get the perpendicular directional unit vectors
             // the normal component of the magnetic field is assumed to
@@ -436,8 +419,8 @@ namespace simbi::hydro::rmhd {
             const auto bn = dot(hll_state.mag, nhat);
             // const auto bn = bface;
             // const real bn  = hll_state.bcomponent(nhat);
-            const auto& b_hll = hll_state.mag;
-            const auto bt_hll = b_hll - dot(b_hll, nhat) * nhat;
+            const auto& b_hll  = hll_state.mag;
+            const auto  bt_hll = b_hll - dot(b_hll, nhat) * nhat;
 
             // check if normal magnetic field is approaching zero
             const auto null_normal_field = goes_to_zero(bn);
@@ -446,11 +429,11 @@ namespace simbi::hydro::rmhd {
             const auto uhllm = dot(hll_state.mom, nhat);
             const auto uhlle = hll_state.nrg + uhlld;
 
-            const auto fhlld   = hll_flux.den;
-            const auto fhllm   = dot(hll_flux.mom, nhat);
-            const auto fhlle   = hll_flux.nrg + fhlld;
+            const auto  fhlld  = hll_flux.den;
+            const auto  fhllm  = dot(hll_flux.mom, nhat);
+            const auto  fhlle  = hll_flux.nrg + fhlld;
             const auto& fb_hll = hll_flux.mag;
-            const auto ft_hll  = fb_hll - dot(fb_hll, nhat) * nhat;
+            const auto  ft_hll = fb_hll - dot(fb_hll, nhat) * nhat;
 
             // //------Calculate the contact wave velocity and pressure
             real a, b, c;
@@ -502,17 +485,13 @@ namespace simbi::hydro::rmhd {
             }
             else {
                 const auto vtrans = (bt_hll * a_star - ft_hll) / bn;
-                const auto invg2 =
-                    (1.0 - (a_star * a_star + dot(vtrans, vtrans)));
-                const auto vsdB = (a_star * bn + dot(bt_hll, vtrans));
-                const auto p_star =
-                    -a_star * (fhlle - bn * vsdB) + fhllm + bn * bn * invg2;
-                const auto es =
-                    cfac * (ws * etot - mn + p_star * a_star - vsdB * bn);
-                const auto mn = (es + p_star) * a_star - vsdB * bn;
+                const auto invg2  = (1.0 - (a_star * a_star + dot(vtrans, vtrans)));
+                const auto vsdB   = (a_star * bn + dot(bt_hll, vtrans));
+                const auto p_star = -a_star * (fhlle - bn * vsdB) + fhllm + bn * bn * invg2;
+                const auto es     = cfac * (ws * etot - mn + p_star * a_star - vsdB * bn);
+                const auto mn     = (es + p_star) * a_star - vsdB * bn;
                 const auto mtrans =
-                    cfac * (-bn * (bt_hll * invg2 + vsdB * vtrans) +
-                            ws * umtrans - fmtrans);
+                    cfac * (-bn * (bt_hll * invg2 + vsdB * vtrans) + ws * umtrans - fmtrans);
 
                 us.den = ds;
                 us.mom = mn * nhat + mtrans;
@@ -534,51 +513,30 @@ namespace simbi::hydro::rmhd {
 
         return net_flux;
     }
-}   // namespace simbi::hydro::rmhd
+} // namespace simbi::hydro::rmhd
 
 namespace simbi::hydro {
     // HLLC flux function
     template <is_hydro_primitive_c primitive_t>
     DUAL constexpr auto hllc_flux(
-        const primitive_t& primL,
-        const primitive_t& primR,
+        const primitive_t&                      primL,
+        const primitive_t&                      primR,
         const unit_vector_t<primitive_t::rank>& nhat,
-        real vface,
-        real gamma,
-        shockwave_limiter_t shock_smoother
+        real                                    vface,
+        real                                    gamma,
+        shockwave_limiter_t                     shock_smoother
     )
     {
         if constexpr (primitive_t::regime == regime_t::NEWTONIAN) {
-            return newtonian::hllc_flux(
-                primL,
-                primR,
-                nhat,
-                vface,
-                gamma,
-                shock_smoother
-            );
+            return newtonian::hllc_flux(primL, primR, nhat, vface, gamma, shock_smoother);
         }
         else if constexpr (primitive_t::regime == regime_t::SRHD) {
-            return srhd::hllc_flux(
-                primL,
-                primR,
-                nhat,
-                vface,
-                gamma,
-                shock_smoother
-            );
+            return srhd::hllc_flux(primL, primR, nhat, vface, gamma, shock_smoother);
         }
         else if constexpr (primitive_t::regime == regime_t::RMHD) {
-            return rmhd::hllc_flux(
-                primL,
-                primR,
-                nhat,
-                vface,
-                gamma,
-                shock_smoother
-            );
+            return rmhd::hllc_flux(primL, primR, nhat, vface, gamma, shock_smoother);
         }
     }
-}   // namespace simbi::hydro
+} // namespace simbi::hydro
 
 #endif

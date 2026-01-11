@@ -3,8 +3,7 @@
 
 #include "field.hpp"
 #include "patch_id.hpp"
-#include "xpu/executor.hpp"
-#include "xpu/token.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstdint>
 #include <map>
@@ -104,7 +103,7 @@ namespace simbi::grid {
         }
 
         // utility to run all transfers, relying on comm::communicator_t
-        template <xpu::execution_space ExecutionSpace>
+        template <xpu::execution_space_c ExecutionSpace>
         xpu::token_t<ExecutionSpace> exchange_all_halos(
             xpu::executor_t<ExecutionSpace>& /*exec*/,
             comm::communicator_t& /*comm*/

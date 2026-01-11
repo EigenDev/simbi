@@ -24,7 +24,7 @@
 //   );
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/components.hpp"
 #include "grid/block_info.hpp"
 #include "grid/domain.hpp"

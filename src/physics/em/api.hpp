@@ -1,16 +1,19 @@
 #ifndef PHYSICS_EM_API_HPP
 #define PHYSICS_EM_API_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "contact.hpp"
 #include "containers/vector.hpp"
 #include "ct_geom.hpp"
+#include "decorators.hpp"
 #include "functional/fp.hpp"
 #include "geometry/metrics.hpp"
 #include "physics/em/electromagnetism.hpp"
 #include "utility/enums.hpp"
 #include "zero.hpp"
+
+#include <cstdint>
 
 namespace simbi::em {
 

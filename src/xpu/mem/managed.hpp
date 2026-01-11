@@ -49,7 +49,7 @@
 #ifndef MANAGED_HPP
 #define MANAGED_HPP
 
-#include "compat.hpp" // for global::managed_memory
+#include "platform.hpp" // for
 
 #include <cstddef> // for size_t
 

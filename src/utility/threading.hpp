@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <thread>
 
 namespace simbi::threading {

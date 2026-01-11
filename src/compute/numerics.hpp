@@ -13,15 +13,24 @@
 //   prim_field = cons_field.map(to_primitive_t{gamma}).with(exec);
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/state_ops.hpp"
+#include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "ecs/geometry_visitor.hpp"
+#include "functional/fp.hpp"
 #include "functional/monad/maybe.hpp"
 #include "geometry/block_geometry.hpp"
+#include "grid/domain.hpp"
 #include "physics/hydro/conversion.hpp"
 #include "physics/hydro/physics.hpp"
 #include "physics/hydro/wave_speeds.hpp"
-#include "xpu/execution/executor.hpp"
+#include "utility/helpers.hpp"
+#include "xpu/xpu.hpp"
+
+#include <algorithm>
+#include <cstdint>
+#include <limits>
 
 namespace simbi::numerics {
 
@@ -91,8 +100,8 @@ namespace simbi::numerics {
     template <
         typename PrimField,
         typename Geometry,
-        std::uint64_t        Rank,
-        xpu::execution_space ExecutionSpace>
+        std::uint64_t          Rank,
+        xpu::execution_space_c ExecutionSpace>
     real compute_partition_timestep(
         const PrimField&                 prim,
         const grid::domain_t<Rank>&      domain,

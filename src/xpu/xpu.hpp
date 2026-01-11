@@ -19,6 +19,7 @@
 #include "core/device_concepts.hpp"
 #include "core/execution_concepts.hpp"
 #include "core/memory_concepts.hpp"
+#include "core/types.hpp"
 #include "device/domain_partition.hpp"
 #include "execution/execution_space.hpp"
 #include "grid/domain.hpp"
@@ -31,7 +32,9 @@
 #include "execution/token.hpp"
 
 // memory management - order matters for complete types
+#include "mem/block.hpp"
 #include "mem/device_memory.hpp"
+#include "mem/handle.hpp"
 #include "mem/host_memory.hpp"
 #include "mem/memory_config.hpp"
 #include "mem/memory_space.hpp"
@@ -45,6 +48,11 @@
 // communication layer (multi-device coordination)
 #include "comm/comm.hpp"
 
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+#include <utility>
+
 namespace simbi::xpu {
 
     // =============================================================================
@@ -53,16 +61,16 @@ namespace simbi::xpu {
 
 // execution space selection
 #ifdef XPU_CUDA_AVAILABLE
-    using default_space = cuda_space;
+    using default_space = exec::cuda_space;
 #else
-    using default_space = cpu_space;
+    using default_space = exec::cpu_space;
 #endif
 
 // memory space selection based on build configuration
 #ifdef XPU_CUDA_AVAILABLE
-    using default_memory_space = sim_memory_space;
+    using default_memory_space = mem::sim_memory_space;
 #else
-    using default_memory_space = host_memory;
+    using default_memory_space = mem::host_memory;
 #endif
 
     // =============================================================================
@@ -70,34 +78,40 @@ namespace simbi::xpu {
     // =============================================================================
 
     // execution spaces
-    using cpu  = cpu_space;
-    using cuda = cuda_space;
+    using cpu_space_t  = exec::cpu_space;
+    using cuda_space_t = exec::cuda_space;
 
     // memory spaces
-    using host    = host_memory;
-    using device  = device_memory;
-    using unified = unified_memory;
+    using host_memory_t    = mem::host_memory_t;
+    using device_memory_t  = mem::device_memory_t;
+    using unified_memory_t = mem::unified_memory_t;
 
     // default spaces based on compilation flags
-    using default_exec = default_space;
-    using default_mem  = default_memory_space;
+    using default_exec_t = default_space;
+    using default_mem_t  = default_memory_space;
 
     // async execution
-    using cpu_executor     = executor_t<cpu_space>;
-    using cuda_executor    = executor_t<cuda_space>;
-    using default_executor = executor_t<default_space>;
+    using cpu_executor_t     = exec::executor_t<cpu_space_t>;
+    using cuda_executor_t    = exec::executor_t<cuda_space_t>;
+    using default_executor_t = exec::executor_t<default_space>;
 
-    using cpu_token     = token_t<cpu_space>;
-    using cuda_token    = token_t<cuda_space>;
-    using default_token = token_t<default_space>;
+    using cpu_token     = exec::token_t<cpu_space_t>;
+    using cuda_token    = exec::token_t<cuda_space_t>;
+    using default_token = exec::token_t<default_space>;
+
+    using core::execution_space_c;
+
+    template <typename ExecSpace>
+    using executor_t = exec::executor_t<ExecSpace>;
+
+    template <execution_space_c ExecSpace>
+    using token_t = exec::token_t<ExecSpace>;
 
     // =============================================================================
-    // new memory system integration
+    // memory system integration
     // =============================================================================
 
-    // import mem namespace for convenience
-
-    // aliases for the new memory system
+    // aliases for the memory system
     template <typename T>
     using shared_handle_t = mem::shared_handle_t<T>;
 
@@ -105,7 +119,7 @@ namespace simbi::xpu {
     using memory_block_t = mem::memory_block_t<MemorySpace>;
 
     // convenience aliases for configured memory space
-    using sim_block_t = mem::memory_block_t<sim_memory_space>;
+    using sim_block_t = mem::memory_block_t<mem::sim_memory_space>;
 
     // factory functions
     template <typename T, typename... Args>
@@ -114,11 +128,14 @@ namespace simbi::xpu {
         return mem::shared_handle_t<T>::make(std::forward<Args>(args)...);
     }
 
-    template <typename T, typename MemorySpace = sim_memory_space>
+    template <typename T, typename MemorySpace = mem::sim_memory_space>
     auto make_memory_block(std::size_t count)
     {
         return mem::make_block<T, MemorySpace>(count);
     }
+
+    template <typename T, std::uint64_t Rank>
+    using view_t = mem::view_t<T, Rank>;
 
     // =============================================================================
     // version information

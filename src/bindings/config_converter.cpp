@@ -1,5 +1,6 @@
 #include "config_converter.hpp"
-#include "compat.hpp"
+
+#include "build_config.hpp"
 #include "utility/config_dict.hpp"
 #include "utility/enums.hpp"
 
@@ -18,7 +19,10 @@
 namespace simbi {
     namespace py = pybind11;
 
-    bool is_enum(const py::object& obj) { return py::hasattr(obj, "value"); }
+    bool is_enum(const py::object& obj)
+    {
+        return py::hasattr(obj, "value");
+    }
 
     // helper function for safely accessing sequence items
     py::object get_item(const py::object& seq, size_t idx)
@@ -57,9 +61,7 @@ namespace simbi {
             if (py::isinstance<py::str>(get_item(first_item, 0))) {
                 std::vector<std::string> str_vec;
                 for (size_t ii = 0; ii < py::len(collection); ++ii) {
-                    str_vec.push_back(
-                        py::cast<std::string>(get_item(collection, ii))
-                    );
+                    str_vec.push_back(py::cast<std::string>(get_item(collection, ii)));
                 }
 
                 return config_value_t(std::move(str_vec));
@@ -67,7 +69,7 @@ namespace simbi {
 
             std::vector<std::vector<real>> nested_vec;
             for (size_t i = 0; i < py::len(collection); ++i) {
-                py::object item = get_item(collection, i);
+                py::object        item = get_item(collection, i);
                 std::vector<real> inner_vec;
                 for (size_t j = 0; j < py::len(item); ++j) {
                     inner_vec.push_back(py::cast<real>(get_item(item, j)));
@@ -81,9 +83,7 @@ namespace simbi {
         else if (py::isinstance<py::dict>(first_item)) {
             std::list<config_dict_t> dict_list;
             for (size_t i = 0; i < py::len(collection); ++i) {
-                dict_list.push_back(
-                    dict_to_config(py::cast<py::dict>(get_item(collection, i)))
-                );
+                dict_list.push_back(dict_to_config(py::cast<py::dict>(get_item(collection, i))));
             }
             return config_value_t(std::move(dict_list));
         }
@@ -94,9 +94,7 @@ namespace simbi {
             if (py::isinstance(first_item, np.attr("uint64"))) {
                 std::vector<std::uint64_t> uint_vec;
                 for (size_t i = 0; i < py::len(collection); ++i) {
-                    uint_vec.push_back(
-                        py::cast<std::uint64_t>(get_item(collection, i))
-                    );
+                    uint_vec.push_back(py::cast<std::uint64_t>(get_item(collection, i)));
                 }
                 return config_value_t(std::move(uint_vec));
             }
@@ -105,9 +103,7 @@ namespace simbi {
             else if (py::isinstance<py::int_>(first_item)) {
                 std::vector<std::int64_t> int_vec;
                 for (size_t i = 0; i < py::len(collection); ++i) {
-                    int_vec.push_back(
-                        py::cast<std::int64_t>(get_item(collection, i))
-                    );
+                    int_vec.push_back(py::cast<std::int64_t>(get_item(collection, i)));
                 }
                 return config_value_t(std::move(int_vec));
             }
@@ -128,9 +124,7 @@ namespace simbi {
                     std::vector<std::string> str_vec;
                     for (size_t i = 0; i < py::len(collection); ++i) {
                         py::object item = get_item(collection, i);
-                        str_vec.push_back(
-                            py::cast<std::string>(item.attr("value"))
-                        );
+                        str_vec.push_back(py::cast<std::string>(item.attr("value")));
                     }
                     return config_value_t(std::move(str_vec));
                 }
@@ -138,9 +132,7 @@ namespace simbi {
                     std::vector<std::int64_t> int_vec;
                     for (size_t i = 0; i < py::len(collection); ++i) {
                         py::object item = get_item(collection, i);
-                        int_vec.push_back(
-                            py::cast<std::int64_t>(item.attr("value"))
-                        );
+                        int_vec.push_back(py::cast<std::int64_t>(item.attr("value")));
                     }
                     return config_value_t(std::move(int_vec));
                 }
@@ -150,9 +142,7 @@ namespace simbi {
             else if (py::isinstance<py::str>(first_item)) {
                 std::vector<std::string> str_vec;
                 for (size_t i = 0; i < py::len(collection); ++i) {
-                    str_vec.push_back(
-                        py::cast<std::string>(get_item(collection, i))
-                    );
+                    str_vec.push_back(py::cast<std::string>(get_item(collection, i)));
                 }
                 return config_value_t(std::move(str_vec));
             }
@@ -176,8 +166,8 @@ namespace simbi {
 
         for (auto item : dict) {
             // get key as string
-            std::string key  = py::cast<std::string>(py::str(item.first));
-            py::object value = py::reinterpret_borrow<py::object>(item.second);
+            std::string key   = py::cast<std::string>(py::str(item.first));
+            py::object  value = py::reinterpret_borrow<py::object>(item.second);
 
             // Skip None values
             if (value.is_none()) {
@@ -196,9 +186,7 @@ namespace simbi {
             else if (py::isinstance<py::int_>(value)) {
                 if (key == "capability") {
                     result[key] = config_value_t(
-                        static_cast<body_capability_t>(
-                            py::cast<std::int64_t>(value)
-                        )
+                        static_cast<body_capability_t>(py::cast<std::int64_t>(value))
                     );
                 }
                 else {
@@ -215,23 +203,18 @@ namespace simbi {
             else if (py::hasattr(value, "value")) {
                 py::object enum_value = value.attr("value");
                 if (py::isinstance<py::str>(enum_value)) {
-                    result[key] =
-                        config_value_t(py::cast<std::string>(enum_value));
+                    result[key] = config_value_t(py::cast<std::string>(enum_value));
                 }
                 else if (py::isinstance<py::int_>(enum_value)) {
-                    result[key] =
-                        config_value_t(py::cast<std::int64_t>(enum_value));
+                    result[key] = config_value_t(py::cast<std::int64_t>(enum_value));
                 }
                 else {
-                    throw py::value_error(
-                        "Unsupported enum type for key: " + key
-                    );
+                    throw py::value_error("Unsupported enum type for key: " + key);
                 }
             }
             // Special case for bounds
             else if (key.find("bounds") != std::string::npos &&
-                     py::isinstance<py::sequence>(value) &&
-                     py::len(value) == 2) {
+                     py::isinstance<py::sequence>(value) && py::len(value) == 2) {
                 result[key] = config_value_t(
                     std::pair<real, real>(
                         py::cast<real>(get_item(value, 0)),
@@ -245,8 +228,7 @@ namespace simbi {
             }
             // Dictionaries
             else if (py::isinstance<py::dict>(value)) {
-                result[key] =
-                    config_value_t(dict_to_config(py::cast<py::dict>(value)));
+                result[key] = config_value_t(dict_to_config(py::cast<py::dict>(value)));
             }
             // Callable objects
             else if (py::isinstance<py::function>(value)) {
@@ -261,4 +243,4 @@ namespace simbi {
         return result;
     }
 
-}   // namespace simbi
+} // namespace simbi

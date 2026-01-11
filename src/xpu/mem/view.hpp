@@ -2,11 +2,12 @@
 #define XPU_VIEW_HPP
 
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 
 #include <cstdint>
 #include <type_traits>
 
-namespace simbi::xpu {
+namespace simbi::xpu::mem {
 
     // non-owning, lightweight window into a memory block
     // uses explicit strides for correct multi-dimensional access
@@ -58,6 +59,6 @@ namespace simbi::xpu {
         }
     };
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::mem
 
 #endif // XPU_VIEW_HPP

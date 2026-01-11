@@ -20,7 +20,7 @@
 //       });
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/cfd_ops.hpp"
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"

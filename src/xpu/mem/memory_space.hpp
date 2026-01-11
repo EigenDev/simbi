@@ -18,21 +18,22 @@
 #include "xpu/core/memory_concepts.hpp"
 
 #include <cstddef>
+#include <new>
 #include <string_view>
 
-namespace simbi::xpu {
+namespace simbi::xpu::mem {
 
     // =============================================================================
     // memory space concept - defined in core/memory_concepts.hpp
     // =============================================================================
 
-    using core::memory_space;
+    using core::memory_space_c;
 
     // =============================================================================
     // memory space traits
     // =============================================================================
 
-    template <memory_space Space>
+    template <memory_space_c Space>
     struct memory_space_traits
     {
         using space_type = Space;
@@ -45,7 +46,7 @@ namespace simbi::xpu {
         static constexpr bool is_host_accessible   = Space::is_host_accessible;
         static constexpr bool is_unified = Space::is_device_accessible && Space::is_host_accessible;
 
-        template <memory_space OtherSpace>
+        template <memory_space_c OtherSpace>
         static constexpr bool is_accessible_from()
         {
             return Space::template is_accessible_from<OtherSpace>();
@@ -56,7 +57,7 @@ namespace simbi::xpu {
     // memory allocation block
     // =============================================================================
 
-    template <memory_space Space>
+    template <memory_space_c Space>
     struct block_t
     {
         void*       data;
@@ -115,31 +116,31 @@ namespace simbi::xpu {
     // space compatibility utilities
     // =============================================================================
 
-    template <memory_space SourceSpace, memory_space DestSpace>
+    template <memory_space_c SourceSpace, memory_space_c DestSpace>
     constexpr bool can_access_directly()
     {
         return DestSpace::template is_accessible_from<SourceSpace>();
     }
 
-    template <memory_space SourceSpace, memory_space DestSpace>
+    template <memory_space_c SourceSpace, memory_space_c DestSpace>
     constexpr bool requires_staging()
     {
         return !can_access_directly<SourceSpace, DestSpace>();
     }
 
-    template <memory_space Space>
+    template <memory_space_c Space>
     constexpr bool is_unified_space()
     {
         return Space::is_device_accessible && Space::is_host_accessible;
     }
 
-    template <memory_space Space>
+    template <memory_space_c Space>
     constexpr bool is_host_only_space()
     {
         return Space::is_host_accessible && !Space::is_device_accessible;
     }
 
-    template <memory_space Space>
+    template <memory_space_c Space>
     constexpr bool is_device_only_space()
     {
         return Space::is_device_accessible && !Space::is_host_accessible;
@@ -149,7 +150,7 @@ namespace simbi::xpu {
     // allocation helpers
     // =============================================================================
 
-    template <memory_space Space, typename T>
+    template <memory_space_c Space, typename T>
     block_t<Space> allocate(std::size_t count)
     {
         std::size_t size = count * sizeof(T);
@@ -160,7 +161,7 @@ namespace simbi::xpu {
         return block_t<Space>(ptr, size);
     }
 
-    template <memory_space Space>
+    template <memory_space_c Space>
     block_t<Space> allocate_bytes(std::size_t size)
     {
         void* ptr = Space::allocate(size);
@@ -185,4 +186,4 @@ namespace simbi::xpu {
     template <bool gpu_available = false>
     struct default_memory_space_selector;
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::mem

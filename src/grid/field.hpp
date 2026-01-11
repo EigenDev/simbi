@@ -1,17 +1,18 @@
 #ifndef GRID_FIELD_HPP
 #define GRID_FIELD_HPP
 
-#include "compat.hpp"
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "functional/fp.hpp"
 #include "grid/algebra.hpp"
 #include "grid/domain.hpp"
 #include "io/exceptions.hpp"
 #include "traits/traits.hpp"
-#include "xpu/execution/execution_space.hpp"
+#include "xpu/mem/memory_config.hpp"
 #include "xpu/xpu.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -28,7 +29,7 @@ namespace simbi::grid {
         typename T,
         std::uint64_t Rank,
         typename Expression,
-        xpu::execution_space ExecutionSpace>
+        xpu::execution_space_c ExecutionSpace>
     void commit(
         xpu::executor_t<ExecutionSpace>& exec,
         const domain_t<Rank>&            domain,
@@ -388,13 +389,13 @@ namespace simbi::grid {
                 storage_->template as<T>() + total_elems,
                 out.storage_->template as<T>()
             );
-            xpu::mark_host_dirty_if_needed(out.storage_);
+            xpu::mem::mark_host_dirty_if_needed(out.storage_);
 
             return out;
         }
 
         // async clone with executor
-        template <xpu::execution_space ExecutionSpace>
+        template <xpu::execution_space_c ExecutionSpace>
         xpu::token_t<ExecutionSpace>
         clone_async(xpu::executor_t<ExecutionSpace>& exec, field_t& out) const
         {
@@ -462,7 +463,7 @@ namespace simbi::grid {
                 stride_accum *= alloc_shape[ii];
             }
 
-            xpu::mark_host_dirty_if_needed(storage_); // mark as modified from host
+            xpu::mem::mark_host_dirty_if_needed(storage_); // mark as modified from host
             T* ptr = storage_->template as<T>() + linear_offset;
             return view_type(ptr, target.shape(), strides, target);
         }
@@ -475,7 +476,7 @@ namespace simbi::grid {
         typename T,
         std::uint64_t Rank,
         typename Expression,
-        xpu::execution_space ExecutionSpace>
+        xpu::execution_space_c ExecutionSpace>
     void try_commit(
         xpu::executor_t<ExecutionSpace>& exec,
         const domain_t<Rank>&            domain,
@@ -527,7 +528,7 @@ namespace simbi::grid {
         typename T,
         std::uint64_t Rank,
         typename Expression,
-        xpu::execution_space ExecutionSpace>
+        xpu::execution_space_c ExecutionSpace>
     void direct_commit(
         xpu::executor_t<ExecutionSpace>& exec,
         const domain_t<Rank>&            domain,
@@ -544,7 +545,7 @@ namespace simbi::grid {
         typename T,
         std::uint64_t Rank,
         typename Expression,
-        xpu::execution_space ExecutionSpace>
+        xpu::execution_space_c ExecutionSpace>
     void commit(
         xpu::executor_t<ExecutionSpace>& exec,
         const domain_t<Rank>&            domain,

@@ -20,8 +20,9 @@
 #include <future>
 #include <string_view>
 #include <thread>
+#include <utility>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec {
 
     // =============================================================================
     // cpu execution space
@@ -205,4 +206,4 @@ namespace simbi::xpu {
     // note: static_assert(execution_space<cpu_space>) moved to xpu.hpp
     // cannot verify here due to incomplete types (executor_t, token_t, host_memory)
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec

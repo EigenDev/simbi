@@ -2,7 +2,7 @@
 #define STATE_STRUCTS_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "utility/enums.hpp"
 

@@ -12,20 +12,24 @@
 #pragma once
 
 #include <condition_variable>
+#include <cstddef>
 #include <functional>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <queue>
 #include <stdexcept>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
-namespace simbi::xpu::detail {
+namespace simbi::xpu::exec::detail {
 
     class thread_pool_t
     {
       public:
-        thread_pool_t(size_t);
+        thread_pool_t(std::size_t);
         template <class F, class... Args>
         auto enqueue(F&& f, Args&&... args)
             -> std::future<typename std::invoke_result<F, Args...>::type>;
@@ -39,9 +43,9 @@ namespace simbi::xpu::detail {
         bool                              stop;
     };
 
-    inline thread_pool_t::thread_pool_t(size_t threads) : stop(false)
+    inline thread_pool_t::thread_pool_t(std::size_t threads) : stop(false)
     {
-        for (size_t i = 0; i < threads; ++i) {
+        for (std::size_t ii = 0; ii < threads; ++ii) {
             workers.emplace_back([this] {
                 for (;;) {
                     std::function<void()> task;
@@ -96,4 +100,4 @@ namespace simbi::xpu::detail {
         }
     }
 
-} // namespace simbi::xpu::detail
+} // namespace simbi::xpu::exec::detail

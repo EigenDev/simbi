@@ -24,7 +24,7 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Space>
-    concept execution_space = requires {
+    concept execution_space_c = requires {
         // space identification
         { Space::space_name() } -> std::convertible_to<std::string_view>;
 
@@ -42,12 +42,12 @@ namespace simbi::xpu::core {
 
     // convenience concepts for space categories
     template <typename Space>
-    concept host_execution_space = execution_space<Space> && Space::is_host_space;
+    concept host_execution_space_c = execution_space_c<Space> && Space::is_host_space;
 
     template <typename Space>
-    concept device_execution_space = execution_space<Space> && Space::is_device_space;
+    concept device_execution_space_c = execution_space_c<Space> && Space::is_device_space;
 
     template <typename Space>
-    concept async_execution_space = execution_space<Space> && Space::supports_async;
+    concept async_execution_space_c = execution_space_c<Space> && Space::supports_async;
 
 } // namespace simbi::xpu::core

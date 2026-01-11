@@ -1,11 +1,14 @@
 #include "io/console/statistics.hpp"
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "io/tabulate/table.hpp"
+#include "platform.hpp"
 #include "xpu/vendors/cuda/device_queries.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -14,7 +17,7 @@
 #include <vector>
 
 #if GPU_ENABLED
-real gpu_theoretical_bw = 1.0;
+simbi::real gpu_theoretical_bw = 1.0;
 #endif
 
 namespace simbi {
@@ -525,7 +528,7 @@ namespace simbi {
 #endif
 
             // add space to scroll the screen up before simulation starts
-            const auto vspace = global::on_gpu ? 42 : 40;
+            const auto vspace = platform::is_gpu ? 42 : 40;
             std::cout << std::string(vspace, '\n');
         }
 

@@ -22,11 +22,15 @@
 
 #include "utility/threading.hpp"
 
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <future>
+#include <new>
 #include <string_view>
 #include <thread>
+#include <utility>
 
 namespace simbi::xpu::vendors::cpu {
 

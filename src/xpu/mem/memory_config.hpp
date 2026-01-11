@@ -23,7 +23,7 @@
 #include "device_memory.hpp"
 #include "unified_memory.hpp"
 
-namespace simbi::xpu {
+namespace simbi::xpu::mem {
 
     // =============================================================================
     // memory space selection based on build configuration
@@ -49,8 +49,8 @@ namespace simbi::xpu {
     using simulation_memory = sim_memory_space;
 
     // explicit aliases for clarity
-    using production_memory  = device_memory;
-    using development_memory = unified_memory;
+    using production_memory  = device_memory_t;
+    using development_memory = unified_memory_t;
 
     // =============================================================================
     // compile-time feature detection
@@ -100,4 +100,4 @@ namespace simbi::xpu {
         return false; // unified memory: never needs sync
     }
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::mem

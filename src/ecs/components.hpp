@@ -25,7 +25,7 @@
 //   - executor stored by value, owns its resources (modern c++ pattern)
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "dag/express_t.hpp"
 #include "entity.hpp"
@@ -43,7 +43,7 @@
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "utility/enums.hpp"
-#include "xpu/execution/execution_space.hpp"
+#include "xpu/comm/types.hpp"
 #include "xpu/xpu.hpp"
 
 #include <cstdint>

@@ -1,6 +1,6 @@
 #include "evolver.hpp"
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "context/evolution.hpp"
 #include "dispatch.hpp"

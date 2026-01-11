@@ -2,7 +2,7 @@
 #define GEOMETRY_BLOCK_GEOMETRY_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "geometry/source_terms.hpp"
 
@@ -15,11 +15,12 @@ namespace simbi::geometry {
     // motion state (device side)
     // purely value-based snapshot of the expansion at a specific time
     // -------------------------------------------------------------------------
-    struct motion_state_t {
+    struct motion_state_t
+    {
         bool is_moving;
         bool is_homologous;
-        real a;       // scale factor
-        real a_dot;   // expansion rate
+        real a;     // scale factor
+        real a_dot; // expansion rate
 
         // helpers for physical vs comoving conversion
         DUAL real physical_len(real comoving_len) const
@@ -38,18 +39,18 @@ namespace simbi::geometry {
                 return 0.0;
             }
             if (is_homologous) {
-                return (a_dot / a) * coord * a;   // v = H * r_phys
+                return (a_dot / a) * coord * a; // v = H * r_phys
             }
-            return a_dot;   // uniform translation
+            return a_dot; // uniform translation
         }
 
         static motion_state_t static_mesh()
         {
             return geometry::motion_state_t{
-              .is_moving     = false,
-              .is_homologous = false,
-              .a             = 1.0,
-              .a_dot         = 0.0
+                .is_moving     = false,
+                .is_homologous = false,
+                .a             = 1.0,
+                .a_dot         = 0.0
             };
         }
     };
@@ -59,14 +60,13 @@ namespace simbi::geometry {
     // composes a specific metric implementation with the global motion state
     // -------------------------------------------------------------------------
     template <typename Metric>
-    struct block_geometry_t {
+    struct block_geometry_t
+    {
         using metric_type = Metric;
-        Metric metric;
+        Metric         metric;
         motion_state_t motion;
 
-        DUAL block_geometry_t(Metric m, motion_state_t s) : metric(m), motion(s)
-        {
-        }
+        DUAL block_geometry_t(Metric m, motion_state_t s) : metric(m), motion(s) {}
 
         // ---------------------------------------------------------------------
         // metric forwarding (comoving coordinates)
@@ -96,11 +96,8 @@ namespace simbi::geometry {
         // momentum source update in curvilinear coordinates
         // ---------------------------------------------------------------------
         template <std::uint64_t Rank, is_hydro_primitive_c prim_t>
-        DUAL auto geomtric_source_factors(
-            const prim_t& prims,
-            real gamma,
-            const iarray<Rank>& idx
-        ) const
+        DUAL auto
+        geomtric_source_factors(const prim_t& prims, real gamma, const iarray<Rank>& idx) const
         {
             return geometric_source_terms(prims, gamma, idx, metric);
         }
@@ -129,10 +126,8 @@ namespace simbi::geometry {
         // used for flux correction F(u - v_g)
         // ---------------------------------------------------------------------
         template <std::uint64_t Rank>
-        DUAL real face_grid_velocity(
-            const simbi::vector_t<int64_t, Rank>& idx,
-            std::size_t dim
-        ) const
+        DUAL real
+        face_grid_velocity(const simbi::vector_t<int64_t, Rank>& idx, std::size_t dim) const
         {
             if (!motion.is_moving) {
                 return 0.0;
@@ -160,6 +155,6 @@ namespace simbi::geometry {
         return block_geometry_t<Metric>(m, s);
     }
 
-}   // namespace simbi::geometry
+} // namespace simbi::geometry
 
-#endif   // GRID_GEOMETRY_BLOCK_GEOMETRY_HPP
+#endif // GRID_GEOMETRY_BLOCK_GEOMETRY_HPP

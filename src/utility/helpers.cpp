@@ -1,12 +1,11 @@
 #include "utility/helpers.hpp"
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "io/exceptions.hpp"
 #include "utility/enums.hpp"
 
 #include <algorithm>
 #include <atomic>
-#include <cmath>
 #include <csignal>
 #include <cstdint>
 #include <iomanip>
@@ -14,7 +13,6 @@
 #include <sstream>
 #include <string>
 #include <sys/signal.h>
-#include <tuple>
 
 //==================================
 //              GPU HELPERS

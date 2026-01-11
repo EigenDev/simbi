@@ -1,8 +1,9 @@
 #ifndef CT_CONTACT_HPP
 #define CT_CONTACT_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 
 namespace simbi::em {
     // constrained transport contact algorithm developed by Gardiner & Stone
@@ -14,5 +15,5 @@ namespace simbi::em {
         const vector_t<real, 4>& cell_e_fields,
         const vector_t<real, 4>& density_fluxes
     );
-}   // namespace simbi::em
-#endif   // CT_CONTACT_HPP
+} // namespace simbi::em
+#endif // CT_CONTACT_HPP

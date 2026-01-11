@@ -11,16 +11,16 @@
 //   auto dt = compute_level_timestep(sim, lvl, motion);
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "ecs/geometry_visitor.hpp"
 #include "functional/fp.hpp"
 #include "geometry/block_geometry.hpp"
 #include "grid/domain.hpp"
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/helpers.hpp"
-#include "xpu/execution/execution_space.hpp"
-#include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -37,8 +37,8 @@ namespace simbi::timestep {
     template <
         typename PrimField,
         typename Geometry,
-        std::uint64_t        Rank,
-        xpu::execution_space ExecutionSpace>
+        std::uint64_t          Rank,
+        xpu::execution_space_c ExecutionSpace>
     real compute_partition_timestep(
         const PrimField&                 prim,
         const grid::domain_t<Rank>&      domain,

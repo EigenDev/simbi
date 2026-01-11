@@ -1,7 +1,7 @@
 #ifndef IO_SERIAL_MESH_HPP
 #define IO_SERIAL_MESH_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "geometry/api.hpp"
 #include "grid/boundary.hpp"
 #include "grid/mesh_config.hpp"

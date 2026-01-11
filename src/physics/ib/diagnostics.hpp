@@ -22,13 +22,13 @@
 #define BODY_DIAGNOSTICS_HPP
 
 #include "body_delta.hpp"
-#include "compat.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
+#include "platform.hpp"
 #include "xpu/device/atomic.hpp"
 #include "xpu/device/grid.hpp"
 #include "xpu/mem/block.hpp"
 #include "xpu/mem/managed.hpp"
-#include "xpu/mem/unified_memory.hpp"
 #include "xpu/xpu.hpp"
 
 #include <cstdint>
@@ -141,24 +141,30 @@ namespace simbi::body {
 
         DEV void accumulate_delta(const body_delta_t<Rank>& delta)
         {
-            const std::int64_t block_id = xpu::get_block_id();
+            const std::int64_t block_id = xpu::device::get_block_id();
 
             if (block_id < num_blocks) {
                 const std::int64_t offset = block_id * MaxBodies + delta.idx;
 
-                xpu::atomic_add(&data_ptr_[offset].force_delta[0], delta.force_delta[0]);
-                xpu::atomic_add(&data_ptr_[offset].force_delta[1], delta.force_delta[1]);
+                xpu::device::atomic_add(&data_ptr_[offset].force_delta[0], delta.force_delta[0]);
+                xpu::device::atomic_add(&data_ptr_[offset].force_delta[1], delta.force_delta[1]);
                 if constexpr (Rank == 3) {
-                    xpu::atomic_add(&data_ptr_[offset].force_delta[2], delta.force_delta[2]);
+                    xpu::device::atomic_add(
+                        &data_ptr_[offset].force_delta[2],
+                        delta.force_delta[2]
+                    );
                 }
 
-                xpu::atomic_add(&data_ptr_[offset].torque_delta[0], delta.torque_delta[0]);
-                xpu::atomic_add(&data_ptr_[offset].torque_delta[1], delta.torque_delta[1]);
+                xpu::device::atomic_add(&data_ptr_[offset].torque_delta[0], delta.torque_delta[0]);
+                xpu::device::atomic_add(&data_ptr_[offset].torque_delta[1], delta.torque_delta[1]);
                 if constexpr (Rank == 3) {
-                    xpu::atomic_add(&data_ptr_[offset].torque_delta[2], delta.torque_delta[2]);
+                    xpu::device::atomic_add(
+                        &data_ptr_[offset].torque_delta[2],
+                        delta.torque_delta[2]
+                    );
                 }
 
-                xpu::atomic_add(&data_ptr_[offset].mass_delta, delta.mass_delta);
+                xpu::device::atomic_add(&data_ptr_[offset].mass_delta, delta.mass_delta);
             }
         }
 

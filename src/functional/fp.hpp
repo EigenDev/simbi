@@ -1,7 +1,7 @@
 #ifndef FP_TOOLKIT_HPP
 #define FP_TOOLKIT_HPP
 
-#include "compat.hpp"
+#include "decorators.hpp"
 
 #include <cstdint>
 #include <tuple>

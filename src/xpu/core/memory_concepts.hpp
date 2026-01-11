@@ -24,7 +24,9 @@
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace simbi::xpu::core {
 
@@ -38,15 +40,15 @@ namespace simbi::xpu::core {
 
     // trivially transferable concept for safe memory operations
     template <typename T>
-    concept trivially_transferable = std::is_trivially_copyable_v<T> && !std::is_pointer_v<T> &&
-                                     !std::has_virtual_destructor_v<T>;
+    concept trivially_transferable_c = std::is_trivially_copyable_v<T> && !std::is_pointer_v<T> &&
+                                       !std::has_virtual_destructor_v<T>;
 
     // =============================================================================
     // memory space concept
     // =============================================================================
 
     template <typename Space>
-    concept memory_space = requires {
+    concept memory_space_c = requires {
         typename Space::pointer_type;
         typename Space::const_pointer_type;
         typename Space::size_type;
@@ -63,18 +65,18 @@ namespace simbi::xpu::core {
     };
 
     template <typename Space>
-    concept host_memory_space = memory_space<Space> && Space::is_host_accessible;
+    concept host_memory_space_c = memory_space_c<Space> && Space::is_host_accessible;
 
     template <typename Space>
     concept device_memory_space =
-        memory_space<Space> && Space::is_device_accessible && !Space::is_host_accessible;
+        memory_space_c<Space> && Space::is_device_accessible && !Space::is_host_accessible;
 
     template <typename Space>
-    concept unified_memory_space = memory_space<Space> && Space::is_unified &&
-                                   Space::is_host_accessible && Space::is_device_accessible;
+    concept unified_memory_space_c = memory_space_c<Space> && Space::is_unified &&
+                                     Space::is_host_accessible && Space::is_device_accessible;
 
     template <typename Space>
-    concept high_bandwidth_space = memory_space<Space> && requires {
+    concept high_bandwidth_space_c = memory_space_c<Space> && requires {
         { Space::memory_bandwidth_gb_per_sec() } -> std::convertible_to<double>;
     };
 
@@ -87,7 +89,7 @@ namespace simbi::xpu::core {
         typename Allocator::value_type;
         typename Allocator::pointer_type;
         typename Allocator::space_type;
-        requires memory_space<typename Allocator::space_type>;
+        requires memory_space_c<typename Allocator::space_type>;
         requires std::same_as<T, typename Allocator::value_type>;
 
         // allocation/deallocation
@@ -136,7 +138,7 @@ namespace simbi::xpu::core {
     template <typename Arena>
     concept memory_arena = requires(Arena arena, std::size_t bytes) {
         typename Arena::space_type;
-        requires memory_space<typename Arena::space_type>;
+        requires memory_space_c<typename Arena::space_type>;
 
         // bulk allocation from arena
         { arena.allocate(bytes) } -> std::convertible_to<void*>;
@@ -179,8 +181,8 @@ namespace simbi::xpu::core {
     concept memory_transfer_engine = requires(Transfer engine) {
         typename Transfer::source_space_type;
         typename Transfer::destination_space_type;
-        requires memory_space<typename Transfer::source_space_type>;
-        requires memory_space<typename Transfer::destination_space_type>;
+        requires memory_space_c<typename Transfer::source_space_type>;
+        requires memory_space_c<typename Transfer::destination_space_type>;
 
         // synchronous transfers
         {
@@ -388,16 +390,16 @@ namespace simbi::xpu::core {
     // compile-time memory optimization utilities
     // =============================================================================
 
-    template <memory_space Source, memory_space Destination>
+    template <memory_space_c Source, memory_space_c Destination>
     constexpr bool requires_transfer = !std::same_as<Source, Destination>;
 
-    template <memory_space Space>
+    template <memory_space_c Space>
     constexpr std::size_t optimal_alignment()
     {
         if constexpr (device_memory_space<Space>) {
             return gpu_memory_alignment;
         }
-        else if constexpr (high_bandwidth_space<Space>) {
+        else if constexpr (high_bandwidth_space_c<Space>) {
             return simd_alignment;
         }
         else {
@@ -405,7 +407,7 @@ namespace simbi::xpu::core {
         }
     }
 
-    template <trivially_transferable T>
+    template <trivially_transferable_c T>
     constexpr std::size_t optimal_chunk_size()
     {
         constexpr std::size_t element_size = sizeof(T);
@@ -414,11 +416,11 @@ namespace simbi::xpu::core {
     }
 
     // memory bandwidth-aware algorithm selection
-    template <memory_space Source, memory_space Destination>
+    template <memory_space_c Source, memory_space_c Destination>
     constexpr bool use_async_transfer()
     {
         return requires_transfer<Source, Destination> &&
-               (high_bandwidth_space<Source> || high_bandwidth_space<Destination>);
+               (high_bandwidth_space_c<Source> || high_bandwidth_space_c<Destination>);
     }
 
     // =============================================================================

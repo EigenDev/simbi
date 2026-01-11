@@ -14,7 +14,7 @@
 // =============================================================================
 
 #include "checkpoint.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/systems.hpp"
 #include "io/console/dprintb.hpp"
 #include "io/diagnostics.hpp"

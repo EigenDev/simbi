@@ -1,8 +1,8 @@
 #ifndef COMPUTATION_HPP
 #define COMPUTATION_HPP
 
-#include "compat.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "functional/fp.hpp"
 #include "grid/algebra.hpp"
 #include "grid/domain.hpp"

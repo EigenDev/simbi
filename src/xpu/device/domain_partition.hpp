@@ -18,13 +18,16 @@
 
 #pragma once
 
+#include "containers/vector.hpp"
 #include "grid/domain.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
-namespace simbi::xpu {
+namespace simbi::xpu::device {
 
     // =============================================================================
     // partitioning strategies
@@ -371,4 +374,4 @@ namespace simbi::xpu {
         return neighbors;
     }
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::device

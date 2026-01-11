@@ -14,7 +14,7 @@
 //   - geometry uses motion_state_t snapshots
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/cfd.hpp"
 #include "compute/numerics.hpp"
 #include "containers/state_ops.hpp"
@@ -31,6 +31,7 @@
 #include "physics/hydro/boundary_policy.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
+#include "platform.hpp"
 #include "utility/enums.hpp"
 
 #include <algorithm>

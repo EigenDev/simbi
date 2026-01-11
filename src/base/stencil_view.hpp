@@ -10,8 +10,8 @@
 #pragma once
 
 #include "base/stencil.hpp"
-#include "compat.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp" // for DEV
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"
 

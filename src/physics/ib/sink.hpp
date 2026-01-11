@@ -2,8 +2,9 @@
 #define SINK_HPP
 
 #include "body.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "ecs/geometry_visitor.hpp"
 #include "geometry/block_geometry.hpp"
 #include "physics/hydro/physics.hpp"

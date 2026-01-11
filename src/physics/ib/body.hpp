@@ -1,9 +1,11 @@
 #ifndef BODY_HPP
 #define BODY_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "utility/enums.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -12,57 +14,62 @@
 #include <unordered_map>
 
 namespace simbi::body::capabilities {
-    struct gravitational_tag {
+    struct gravitational_tag
+    {
     };
-    struct accretion_tag {
+    struct accretion_tag
+    {
     };
-    struct elastic_tag {
+    struct elastic_tag
+    {
     };
-    struct rigid_tag {
+    struct rigid_tag
+    {
     };
-    struct deformable_tag {
+    struct deformable_tag
+    {
     };
-    struct passive_tag {
+    struct passive_tag
+    {
     };
-}   // namespace simbi::body::capabilities
+} // namespace simbi::body::capabilities
 
 namespace simbi::body {
     // primary template - not found case (will cause compile error if used)
     template <typename Tag, typename... Caps>
-    struct find_capability_index {
-        static constexpr std::size_t value =
-            std::numeric_limits<std::size_t>::max();
+    struct find_capability_index
+    {
+        static constexpr std::size_t value = std::numeric_limits<std::size_t>::max();
     };
 
     // specialized template for when the first type has matching tag
     template <typename Tag, typename First, typename... Rest>
-    struct find_capability_index<Tag, First, Rest...> {
+    struct find_capability_index<Tag, First, Rest...>
+    {
       private:
-        static constexpr bool is_match =
-            std::is_same_v<Tag, typename First::tag_type>;
+        static constexpr bool is_match = std::is_same_v<Tag, typename First::tag_type>;
 
         // recursively search the rest if not a match
-        static constexpr std::size_t next_index =
-            find_capability_index<Tag, Rest...>::value;
+        static constexpr std::size_t next_index = find_capability_index<Tag, Rest...>::value;
 
       public:
         static constexpr std::size_t value =
             is_match ? 0
-                     : (next_index == std::numeric_limits<std::size_t>::max()
-                            ? next_index
-                            : 1 + next_index);
+                     : (next_index == std::numeric_limits<std::size_t>::max() ? next_index
+                                                                              : 1 + next_index);
     };
 
     // base case for recursion
     template <typename Tag>
-    struct find_capability_index<Tag> {
-        static constexpr std::size_t value =
-            std::numeric_limits<std::size_t>::max();
+    struct find_capability_index<Tag>
+    {
+        static constexpr std::size_t value = std::numeric_limits<std::size_t>::max();
     };
 
     template <typename T>
-    struct body_properties_t {
-        std::unordered_map<std::string, T> scalars;
+    struct body_properties_t
+    {
+        std::unordered_map<std::string, T>    scalars;
         std::unordered_map<std::string, bool> flags;
 
         bool has_capability(const std::string& cap) const
@@ -78,45 +85,51 @@ namespace simbi::body {
         }
     };
 
-}   // namespace simbi::body
+} // namespace simbi::body
 
 namespace simbi::body {
     template <std::uint64_t Rank, typename... Caps>
     struct body_t;
 
-    struct grav_component_t {
+    struct grav_component_t
+    {
         using tag_type = capabilities::gravitational_tag;
         real softening_length;
     };
 
-    struct accretion_component_t {
+    struct accretion_component_t
+    {
         using tag_type = capabilities::accretion_tag;
         real sink_rate;
         real accretion_radius;
         real total_accreted_mass;
         real accretion_rate;
-        real sink_delta;   // 0 = torque-free, 1 = standard
+        real sink_delta; // 0 = torque-free, 1 = standard
     };
 
-    struct elastic_component_t {
+    struct elastic_component_t
+    {
         using tag_type = capabilities::elastic_tag;
         real elastic_modulus;
         real poisson_ratio;
     };
 
-    struct rigid_component_t {
+    struct rigid_component_t
+    {
         using tag_type = capabilities::rigid_tag;
         real inertia;
         bool apply_no_slip;
     };
 
-    struct deformable_component_t {
+    struct deformable_component_t
+    {
         using tag_type = capabilities::deformable_tag;
         real yield_stress;
         real plastic_strain;
     };
 
-    struct passive_component_t {
+    struct passive_component_t
+    {
         using tag_type = capabilities::passive_tag;
     };
 
@@ -139,47 +152,40 @@ namespace simbi::body {
     // concepts for capabilities b/c c++20 is amazing :D
     template <typename T>
     concept has_gravitational_capability_c = requires {
-        requires T::template has_capability_v<
-                     capabilities::gravitational_tag> == true;
+        requires T::template has_capability_v<capabilities::gravitational_tag> == true;
     };
 
     template <typename T>
-    concept has_accretion_capability_c = requires {
-        requires T::template has_capability_v<capabilities::accretion_tag> ==
-                     true;
-    };
+    concept has_accretion_capability_c =
+        requires { requires T::template has_capability_v<capabilities::accretion_tag> == true; };
 
     template <typename T>
-    concept has_elastic_capability_c = requires {
-        requires T::template has_capability_v<capabilities::elastic_tag> ==
-                     true;
-    };
+    concept has_elastic_capability_c =
+        requires { requires T::template has_capability_v<capabilities::elastic_tag> == true; };
 
     template <typename T>
-    concept has_rigid_capability_c = requires {
-        requires T::template has_capability_v<capabilities::rigid_tag> == true;
-    };
+    concept has_rigid_capability_c =
+        requires { requires T::template has_capability_v<capabilities::rigid_tag> == true; };
 
     template <typename T>
-    concept has_deformable_capability_c = requires {
-        requires T::template has_capability_v<capabilities::deformable_tag> ==
-                     true;
-    };
+    concept has_deformable_capability_c =
+        requires { requires T::template has_capability_v<capabilities::deformable_tag> == true; };
 
     template <std::uint64_t Rank, typename... Caps>
-    struct body_t {
+    struct body_t
+    {
         // expose the types for easier access
         using caps_tuple                     = std::tuple<Caps...>;
         static constexpr std::uint64_t ncaps = sizeof...(Caps);
 
-        std::uint64_t idx;
+        std::uint64_t        idx;
         vector_t<real, Rank> position;
         vector_t<real, Rank> velocity;
         vector_t<real, Rank> force;
-        vector_t<real, 3> torque;
-        real mass;
-        real radius;
-        bool two_way_coupling;
+        vector_t<real, 3>    torque;
+        real                 mass;
+        real                 radius;
+        bool                 two_way_coupling;
 
         std::tuple<Caps...> capabilities;
 
@@ -218,10 +224,8 @@ namespace simbi::body {
     }
 
     template <std::uint64_t Rank, typename... Caps>
-    DUAL constexpr auto with_force(
-        const body_t<Rank, Caps...>& body,
-        const vector_t<real, Rank>& new_force
-    )
+    DUAL constexpr auto
+    with_force(const body_t<Rank, Caps...>& body, const vector_t<real, Rank>& new_force)
     {
         auto result  = body;
         result.force = new_force;
@@ -229,10 +233,8 @@ namespace simbi::body {
     }
 
     template <std::uint64_t Rank, typename... Caps>
-    DUAL constexpr auto with_torque(
-        const body_t<Rank, Caps...>& body,
-        const vector_t<real, 3>& new_torque
-    )
+    DUAL constexpr auto
+    with_torque(const body_t<Rank, Caps...>& body, const vector_t<real, 3>& new_torque)
     {
         auto result   = body;
         result.torque = new_torque;
@@ -240,10 +242,8 @@ namespace simbi::body {
     }
 
     template <std::uint64_t Rank, typename... Caps>
-    DUAL constexpr auto with_velocity(
-        const body_t<Rank, Caps...>& body,
-        const vector_t<real, Rank>& new_velocity
-    )
+    DUAL constexpr auto
+    with_velocity(const body_t<Rank, Caps...>& body, const vector_t<real, Rank>& new_velocity)
     {
         auto result     = body;
         result.velocity = new_velocity;
@@ -251,8 +251,7 @@ namespace simbi::body {
     }
 
     template <std::uint64_t Rank, typename... Caps>
-    DUAL constexpr auto
-    with_mass(const body_t<Rank, Caps...>& body, real new_mass)
+    DUAL constexpr auto with_mass(const body_t<Rank, Caps...>& body, real new_mass)
     {
         auto result = body;
         result.mass = new_mass;
@@ -260,8 +259,7 @@ namespace simbi::body {
     }
 
     template <std::uint64_t Rank, typename... Caps>
-    DUAL constexpr auto
-    with_radius(const body_t<Rank, Caps...>& body, real new_radius)
+    DUAL constexpr auto with_radius(const body_t<Rank, Caps...>& body, real new_radius)
     {
         auto result   = body;
         result.radius = new_radius;
@@ -269,10 +267,8 @@ namespace simbi::body {
     }
 
     template <std::uint64_t Rank, typename... Caps>
-    DUAL constexpr auto at_position(
-        const body_t<Rank, Caps...>& body,
-        const vector_t<real, Rank>& new_position
-    )
+    DUAL constexpr auto
+    at_position(const body_t<Rank, Caps...>& body, const vector_t<real, Rank>& new_position)
     {
         auto result     = body;
         result.position = new_position;
@@ -282,141 +278,139 @@ namespace simbi::body {
     // factory functions for common body types
     template <std::uint64_t Rank>
     DUAL constexpr auto make_basic_body(
-        std::uint64_t idx,
+        std::uint64_t               idx,
         const vector_t<real, Rank>& position,
         const vector_t<real, Rank>& velocity,
-        real mass,
-        real radius,
-        bool two_way_coupling = false
+        real                        mass,
+        real                        radius,
+        bool                        two_way_coupling = false
     )
     {
         return body_t<Rank, passive_component_t>{
-          idx,
-          position,
-          velocity,
-          vector_t<real, Rank>{},   // no force
-          vector_t<real, 3>{},      // no torque
-          mass,
-          radius,
-          two_way_coupling,
-          std::make_tuple(passive_component_t{})   // no capabilities
+            idx,
+            position,
+            velocity,
+            vector_t<real, Rank>{}, // no force
+            vector_t<real, 3>{},    // no torque
+            mass,
+            radius,
+            two_way_coupling,
+            std::make_tuple(passive_component_t{}) // no capabilities
         };
     }
 
     template <std::uint64_t Rank>
     DUAL constexpr auto make_gravitational_body(
-        std::uint64_t idx,
+        std::uint64_t               idx,
         const vector_t<real, Rank>& position,
         const vector_t<real, Rank>& velocity,
-        real mass,
-        real radius,
-        real softening_length,
-        bool two_way_coupling = false
+        real                        mass,
+        real                        radius,
+        real                        softening_length,
+        bool                        two_way_coupling = false
     )
     {
         return body_t<Rank, grav_component_t>{
-          idx,
-          position,
-          velocity,
-          vector_t<real, Rank>{},
-          vector_t<real, 3>{},
-          mass,
-          radius,
-          two_way_coupling,
-          std::make_tuple(grav_component_t{softening_length})
+            idx,
+            position,
+            velocity,
+            vector_t<real, Rank>{},
+            vector_t<real, 3>{},
+            mass,
+            radius,
+            two_way_coupling,
+            std::make_tuple(grav_component_t{softening_length})
         };
     }
 
     template <std::uint64_t Rank>
     DUAL constexpr auto make_black_hole(
-        std::uint64_t idx,
+        std::uint64_t               idx,
         const vector_t<real, Rank>& position,
         const vector_t<real, Rank>& velocity,
-        real mass,
-        real radius,
-        real softening_length,
-        real sink_rate,
-        real sink_delta,
-        real accretion_radius,
-        real accretion_rate      = 0.0,
-        real total_accreted_mass = 0.0,
-        bool two_way_coupling    = false
+        real                        mass,
+        real                        radius,
+        real                        softening_length,
+        real                        sink_rate,
+        real                        sink_delta,
+        real                        accretion_radius,
+        real                        accretion_rate      = 0.0,
+        real                        total_accreted_mass = 0.0,
+        bool                        two_way_coupling    = false
     )
     {
         return body_t<Rank, grav_component_t, accretion_component_t>{
-          idx,
-          position,
-          velocity,
-          vector_t<real, Rank>{},
-          vector_t<real, 3>{},
-          mass,
-          radius,
-          two_way_coupling,
-          std::make_tuple(
-              grav_component_t{softening_length},
-              accretion_component_t{
-                sink_rate,
-                accretion_radius,
-                total_accreted_mass,
-                accretion_rate,
-                sink_delta
-              }
-          )
+            idx,
+            position,
+            velocity,
+            vector_t<real, Rank>{},
+            vector_t<real, 3>{},
+            mass,
+            radius,
+            two_way_coupling,
+            std::make_tuple(
+                grav_component_t{softening_length},
+                accretion_component_t{
+                    sink_rate,
+                    accretion_radius,
+                    total_accreted_mass,
+                    accretion_rate,
+                    sink_delta
+                }
+            )
         };
     }
 
     template <std::uint64_t Rank>
     DUAL constexpr auto make_planet(
-        std::uint64_t idx,
+        std::uint64_t               idx,
         const vector_t<real, Rank>& position,
         const vector_t<real, Rank>& velocity,
-        real mass,
-        real radius,
-        real inertia,
-        bool apply_no_slip    = true,
-        bool two_way_coupling = false
+        real                        mass,
+        real                        radius,
+        real                        inertia,
+        bool                        apply_no_slip    = true,
+        bool                        two_way_coupling = false
     )
     {
         return body_t<Rank, grav_component_t, rigid_component_t>{
-          idx,
-          position,
-          velocity,
-          vector_t<real, Rank>{},
-          vector_t<real, 3>{},
-          mass,
-          radius,
-          two_way_coupling,
-          std::make_tuple(
-              grav_component_t{
-                0.0
-              },   // no softening for planets (can be set later)
-              rigid_component_t{inertia, apply_no_slip}
-          )
+            idx,
+            position,
+            velocity,
+            vector_t<real, Rank>{},
+            vector_t<real, 3>{},
+            mass,
+            radius,
+            two_way_coupling,
+            std::make_tuple(
+                grav_component_t{0.0}, // no softening for planets (can be set later)
+                rigid_component_t{inertia, apply_no_slip}
+            )
         };
     }
 
     template <std::uint64_t Rank>
     DUAL constexpr auto make_rigid_sphere(
-        std::uint64_t idx,
+        std::uint64_t               idx,
         const vector_t<real, Rank>& position,
         const vector_t<real, Rank>& velocity,
-        real mass,
-        real radius,
-        real inertia,
-        bool apply_no_slip    = true,
-        bool two_way_coupling = false
+        real                        mass,
+        real                        radius,
+        real                        inertia,
+        bool                        apply_no_slip    = true,
+        bool                        two_way_coupling = false
     )
     {
         return body_t<Rank, rigid_component_t>{
-          idx,
-          position,
-          velocity,
-          vector_t<real, Rank>{},
-          vector_t<real, 3>{},
-          mass,
-          radius,
-          two_way_coupling,
-          std::make_tuple(rigid_component_t{inertia, apply_no_slip})
+            idx,
+            position,
+            velocity,
+            vector_t<real, Rank>{},
+            vector_t<real, 3>{},
+            mass,
+            radius,
+            two_way_coupling,
+            std::make_tuple(rigid_component_t{inertia, apply_no_slip})
         };
     }
 
@@ -482,6 +476,6 @@ namespace simbi::body {
 
     // [TODO] add more properties as needed
 
-}   // namespace simbi::body
+} // namespace simbi::body
 
 #endif

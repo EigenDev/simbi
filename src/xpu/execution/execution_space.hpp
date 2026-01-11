@@ -26,27 +26,28 @@
 #include "xpu/vendors/rocm/rocm_device.hpp"
 
 #include <concepts>
+#include <cstddef>
 #include <string_view>
 #include <type_traits>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec {
 
     // =============================================================================
     // re-export core concepts for convenience
     // =============================================================================
 
-    using core::execution_space;
-    using core::hetero_device;
-    using core::memory_space;
+    using core::execution_space_c;
+    using core::hetero_device_c;
+    using core::memory_space_c;
 
     // =============================================================================
     // execution space concept (enhanced from core)
     // =============================================================================
 
     template <typename Space>
-    concept xpu_execution_space = core::execution_space<Space> && requires {
+    concept xpu_execution_space_c = core::execution_space_c<Space> && requires {
         typename Space::device_type;
-        requires hetero_device<typename Space::device_type>;
+        requires hetero_device_c<typename Space::device_type>;
 
         // xpu-specific requirements
         { Space::vendor_name() } -> std::convertible_to<std::string_view>;
@@ -57,7 +58,7 @@ namespace simbi::xpu {
     // execution space traits (vendor-aware)
     // =============================================================================
 
-    template <xpu_execution_space Space>
+    template <xpu_execution_space_c Space>
     struct execution_space_traits
     {
         using space_type         = Space;
@@ -151,4 +152,4 @@ namespace simbi::xpu {
 
     using default_space = default_space_selector<>::type;
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec

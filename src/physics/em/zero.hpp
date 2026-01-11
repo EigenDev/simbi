@@ -1,8 +1,9 @@
 #ifndef CT_ZERO_HPP
 #define CT_ZERO_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 
 namespace simbi::em {
     // the Constrained Transport "Zero" scheme
@@ -10,9 +11,7 @@ namespace simbi::em {
     // of Gardiner & Stone (2005)
 
     // CT Zero formula (Gardiner & Stone Eq. 51)
-    DEV real ct_zero_formula(
-        const vector_t<real, 4>& face_e_fields,
-        const vector_t<real, 4>& cell_e_fields
-    );
-}   // namespace simbi::em
-#endif   // CT_ZERO_HPP
+    DEV real
+    ct_zero_formula(const vector_t<real, 4>& face_e_fields, const vector_t<real, 4>& cell_e_fields);
+} // namespace simbi::em
+#endif // CT_ZERO_HPP

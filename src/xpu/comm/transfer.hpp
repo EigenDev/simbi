@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstring>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace simbi::xpu::comm {
@@ -58,7 +59,7 @@ namespace simbi::xpu::comm {
 
             case transfer_strategy_t::peer_copy: {
                 // same node, different devices: use peer copy
-                bool success = device_memory_t::memcpy_peer(
+                bool success = mem::device_memory_t::memcpy_peer(
                     dst_ptr,
                     dst_rank.device_id,
                     src_ptr,
@@ -102,14 +103,14 @@ namespace simbi::xpu::comm {
     //
     // IMPORTANT: executor stream must remain valid until token.sync() completes
     // the stream is used for async operations but not retained by the token
-    template <execution_space ExecutionSpace>
-    token_t<ExecutionSpace> transfer_async(
-        const rank_id_t&            src_rank,
-        const void*                 src_ptr,
-        const rank_id_t&            dst_rank,
-        void*                       dst_ptr,
-        std::size_t                 bytes,
-        executor_t<ExecutionSpace>& exec
+    template <exec::execution_space_c ExecutionSpace>
+    exec::token_t<ExecutionSpace> transfer_async(
+        const rank_id_t&                  src_rank,
+        const void*                       src_ptr,
+        const rank_id_t&                  dst_rank,
+        void*                             dst_ptr,
+        std::size_t                       bytes,
+        exec::executor_t<ExecutionSpace>& exec
     )
     {
         auto strategy = get_transfer_strategy(src_rank, dst_rank);
@@ -117,18 +118,18 @@ namespace simbi::xpu::comm {
         switch (strategy) {
             case transfer_strategy_t::none: {
                 // same device, no transfer needed
-                auto token = token_t<ExecutionSpace>::create();
+                auto token = exec::token_t<ExecutionSpace>::create();
                 token.mark_ready();
                 return token;
             }
 
             case transfer_strategy_t::peer_copy: {
                 // same node, different devices: use async peer copy
-                auto token = token_t<ExecutionSpace>::create();
+                auto token = exec::token_t<ExecutionSpace>::create();
 
-                if constexpr (std::is_same_v<ExecutionSpace, cuda_space>) {
+                if constexpr (std::is_same_v<ExecutionSpace, exec::cuda_space>) {
 #ifdef XPU_CUDA_AVAILABLE
-                    device_memory_t::memcpy_peer_async(
+                    mem::device_memory_t::memcpy_peer_async(
                         dst_ptr,
                         dst_rank.device_id,
                         src_ptr,
@@ -161,7 +162,7 @@ namespace simbi::xpu::comm {
         }
 
         // unreachable
-        auto token = token_t<ExecutionSpace>::create();
+        auto token = exec::token_t<ExecutionSpace>::create();
         token.mark_ready();
         return token;
     }
@@ -187,8 +188,8 @@ namespace simbi::xpu::comm {
         }
 
         // execute this transfer asynchronously
-        template <execution_space ExecutionSpace>
-        token_t<ExecutionSpace> execute_async(executor_t<ExecutionSpace>& exec) const
+        template <exec::execution_space_c ExecutionSpace>
+        exec::token_t<ExecutionSpace> execute_async(exec::executor_t<ExecutionSpace>& exec) const
         {
             return transfer_async(src_rank, src_ptr, dst_rank, dst_ptr, bytes, exec);
         }
@@ -232,9 +233,13 @@ namespace simbi::xpu::comm {
     }
 
     // async region-based transfer (for future gpu support)
-    template <execution_space ExecutionSpace, typename DstView, typename SrcView, typename Region>
-    token_t<ExecutionSpace> transfer_region_async(
-        executor_t<ExecutionSpace>& /*exec*/,
+    template <
+        exec::execution_space_c ExecutionSpace,
+        typename DstView,
+        typename SrcView,
+        typename Region>
+    exec::token_t<ExecutionSpace> transfer_region_async(
+        exec::executor_t<ExecutionSpace>& /*exec*/,
         DstView       dst_view,
         const Region& dst_region,
         SrcView       src_view,
@@ -244,7 +249,7 @@ namespace simbi::xpu::comm {
         // for cpu space, just do sync transfer and return ready token
         transfer_region_sync(dst_view, dst_region, src_view, src_region);
 
-        auto token = token_t<ExecutionSpace>::create();
+        auto token = exec::token_t<ExecutionSpace>::create();
         token.mark_ready();
         return token;
     }

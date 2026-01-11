@@ -36,9 +36,9 @@ namespace simbi::xpu::mem {
     // convenience aliases
     // =============================================================================
 
-    using host_memory_block    = memory_block_t<host_memory>;
-    using device_memory_block  = memory_block_t<device_memory>;
-    using unified_memory_block = memory_block_t<unified_memory>;
-    using sim_memory_block_t   = memory_block_t<sim_memory_space>;
+    using host_memory_block_t    = memory_block_t<host_memory>;
+    using device_memory_block_t  = memory_block_t<device_memory>;
+    using unified_memory_block_t = memory_block_t<unified_memory>;
+    using sim_memory_block_t     = memory_block_t<sim_memory_space>;
 
 } // namespace simbi::xpu::mem

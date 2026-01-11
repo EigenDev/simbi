@@ -1,8 +1,8 @@
 #ifndef GRID_DOMAIN_HPP
 #define GRID_DOMAIN_HPP
 
-#include "compat.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "functional/fp.hpp"
 
 #include <cstdint>

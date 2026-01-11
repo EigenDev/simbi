@@ -1,6 +1,6 @@
 #include "exp_load.hpp"
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/store.hpp"
 #include "dag/expression.hpp"
 #include "utility/config_dict.hpp"

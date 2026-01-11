@@ -1,7 +1,8 @@
 #ifndef GEOMETRY_COORDINATE_MAP_HPP
 #define GEOMETRY_COORDINATE_MAP_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
+#include "decorators.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -12,26 +13,25 @@ namespace simbi::geometry {
     // cell geometry info
     // return type for coordinate queries
     // -------------------------------------------------------------------------
-    struct cell_interval_t {
-        real start;   // left face x_i-1/2
-        real end;     // right face x_i+1/2
+    struct cell_interval_t
+    {
+        real start; // left face x_i-1/2
+        real end;   // right face x_i+1/2
         // centroid (geometric center, not necessarily arithmetic
         // avg)
         real center;
-        real width;   // dx
+        real width; // dx
     };
 
     // -------------------------------------------------------------------------
     // uniform map: x(i) = start + i * dx
     // -------------------------------------------------------------------------
-    struct uniform_map_t {
+    struct uniform_map_t
+    {
         real start_;
         real dx_;
 
-        DUAL constexpr uniform_map_t(real start, real dx)
-            : start_(start), dx_(dx)
-        {
-        }
+        DUAL constexpr uniform_map_t(real start, real dx) : start_(start), dx_(dx) {}
 
         // get full cell info at index i
         DUAL constexpr cell_interval_t operator()(std::int64_t ii) const
@@ -64,23 +64,19 @@ namespace simbi::geometry {
     // log map: x(i) = start * (ratio ^ i)
     // often used for radial coordinates in astrophysics
     // -------------------------------------------------------------------------
-    struct log_map_t {
-        real start_;       // x_min
-        real log_slope_;   // log10(x_max / x_min) / N
+    struct log_map_t
+    {
+        real start_;     // x_min
+        real log_slope_; // log10(x_max / x_min) / N
 
-        DUAL log_map_t(real start, real log_slope)
-            : start_(start), log_slope_(log_slope)
-        {
-        }
+        DUAL log_map_t(real start, real log_slope) : start_(start), log_slope_(log_slope) {}
 
         DUAL constexpr cell_interval_t operator()(std::int64_t ii) const
         {
             // calculate faces using powers
             // x_i = start * 10^(i * slope)
-            real x_l =
-                start_ * std::pow(10.0, static_cast<real>(ii) * log_slope_);
-            real x_r =
-                start_ * std::pow(10.0, static_cast<real>(ii + 1) * log_slope_);
+            real x_l = start_ * std::pow(10.0, static_cast<real>(ii) * log_slope_);
+            real x_r = start_ * std::pow(10.0, static_cast<real>(ii + 1) * log_slope_);
 
             // centroid for log spacing is often geometric mean: sqrt(a*b)
             // or volume-weighted centroid?
@@ -105,12 +101,10 @@ namespace simbi::geometry {
         DUAL constexpr std::int64_t index_at(real x) const
         {
             // i = log10(x / start) / slope
-            return static_cast<std::int64_t>(
-                std::floor(std::log10(x / start_) / log_slope_)
-            );
+            return static_cast<std::int64_t>(std::floor(std::log10(x / start_) / log_slope_));
         }
     };
 
-}   // namespace simbi::geometry
+} // namespace simbi::geometry
 
-#endif   // GRID_GEOMETRY_COORDINATE_MAP_HPP
+#endif // GRID_GEOMETRY_COORDINATE_MAP_HPP

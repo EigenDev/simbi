@@ -52,7 +52,6 @@
 
 #include "bimap.hpp"
 
-#include <cstddef>
 #include <cstdint>
 
 namespace simbi {

@@ -22,7 +22,7 @@
 #include <algorithm>
 #include <cstdint>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec::detail {
 
     // =============================================================================
     // serial dispatch (no threading, for debugging)
@@ -70,9 +70,9 @@ namespace simbi::xpu {
 
     template <typename Func>
     void cpu_dispatch_tiled_1d(
-        const grid::domain_t<1>&  domain,
-        const simbi::het::dim3_t& tile_size,
-        Func&&                    func
+        const grid::domain_t<1>& domain,
+        const core::dim3_t&      tile_size,
+        Func&&                   func
     )
     {
         const auto shape       = domain.shape();
@@ -91,9 +91,9 @@ namespace simbi::xpu {
 
     template <typename Func>
     void cpu_dispatch_tiled_2d(
-        const grid::domain_t<2>&  domain,
-        const simbi::het::dim3_t& tile_size,
-        Func&&                    func
+        const grid::domain_t<2>& domain,
+        const core::dim3_t&      tile_size,
+        Func&&                   func
     )
     {
         const auto shape       = domain.shape();
@@ -118,9 +118,9 @@ namespace simbi::xpu {
 
     template <typename Func>
     void cpu_dispatch_tiled_3d(
-        const grid::domain_t<3>&  domain,
-        const simbi::het::dim3_t& tile_size,
-        Func&&                    func
+        const grid::domain_t<3>& domain,
+        const core::dim3_t&      tile_size,
+        Func&&                   func
     )
     {
         const auto shape       = domain.shape();
@@ -156,7 +156,7 @@ namespace simbi::xpu {
     template <std::uint64_t Rank, typename Func>
     void cpu_dispatch(
         const grid::domain_t<Rank>& domain,
-        const simbi::het::dim3_t&   tile_size,
+        const core::dim3_t&         tile_size,
         bool                        use_serial,
         Func&&                      func
     )
@@ -282,4 +282,4 @@ namespace simbi::xpu {
         }
     }
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec::detail

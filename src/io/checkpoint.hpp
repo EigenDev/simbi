@@ -1,7 +1,7 @@
 #ifndef IO_CHECKPOINT_HPP
 #define IO_CHECKPOINT_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/components.hpp"
 #include "grid/mesh_config.hpp"
 #include "grid/skeleton.hpp"
@@ -10,7 +10,7 @@
 #include "serialization/skeleton_serial.hpp"
 #include "utility/helpers.hpp"
 #include "write_policy.hpp"
-#include "xpu/mem/unified_memory.hpp"
+#include "xpu/xpu.hpp"
 
 #include <H5Cpp.h>
 #include <cmath>

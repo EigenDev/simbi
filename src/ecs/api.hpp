@@ -1,7 +1,7 @@
 #ifndef ECS_INITIALIZATION_API_HPP
 #define ECS_INITIALIZATION_API_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "compute/numerics.hpp"
 #include "containers/vector.hpp"

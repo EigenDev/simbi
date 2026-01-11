@@ -21,16 +21,21 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <deque>
+#include <exception>
 #include <future>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec {
 
     // =============================================================================
     // arena memory allocator
@@ -376,4 +381,4 @@ namespace simbi::xpu {
         }
     } // namespace arena_futures
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec

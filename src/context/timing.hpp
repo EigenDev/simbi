@@ -21,7 +21,7 @@
 #ifndef TIMING_HPP
 #define TIMING_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "xpu/xpu.hpp"
 
 #include <algorithm>

@@ -2,7 +2,7 @@
 #define GRID_MESH_CONFIG_HPP
 
 #include "boundary.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "geometry/api.hpp"   // for geometry_config_t
 

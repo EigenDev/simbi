@@ -24,7 +24,7 @@
 // =============================================================================
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"
 #include "ecs/components.hpp"

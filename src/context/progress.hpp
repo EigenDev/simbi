@@ -1,7 +1,7 @@
 #ifndef PROGRESS_HPP
 #define PROGRESS_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "io/tabulate/table.hpp"
 
 #include <chrono>

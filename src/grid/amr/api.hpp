@@ -1,7 +1,7 @@
 #ifndef GRID_AMR_API_HPP
 #define GRID_AMR_API_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"

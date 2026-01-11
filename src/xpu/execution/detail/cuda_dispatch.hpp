@@ -19,6 +19,7 @@
 #pragma once
 
 #include "grid/domain.hpp"
+#include "runtime_config.hpp"
 
 #ifdef XPU_CUDA_AVAILABLE
 
@@ -26,7 +27,7 @@
 #include <cstdint>
 #include <cuda_runtime.h>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec::detail {
 
     // =============================================================================
     // launch configuration helpers
@@ -148,33 +149,27 @@ namespace simbi::xpu {
     template <typename Func>
     inline void cuda_dispatch_1d(const grid::domain_t<1>& domain, Func&& func, cudaStream_t stream)
     {
-        const auto     total_size = domain.size();
-        const auto     grid       = compute_launch_config_1d(total_size);
-        constexpr dim3 block(256, 1, 1);
-
-        dispatch_kernel_1d<<<grid, block, 0, stream>>>(domain, func);
+        const auto total_size = domain.size();
+        const auto grid       = compute_launch_config_1d(total_size);
+        dispatch_kernel_1d<<<grid, runtime::block_dims.to_dim3(), 0, stream>>>(domain, func);
     }
 
     // 2d dispatch
     template <typename Func>
     inline void cuda_dispatch_2d(const grid::domain_t<2>& domain, Func&& func, cudaStream_t stream)
     {
-        const auto     shape = domain.shape();
-        const auto     grid  = compute_launch_config_2d(shape[1], shape[0]);
-        constexpr dim3 block(16, 16, 1);
-
-        dispatch_kernel_2d<<<grid, block, 0, stream>>>(domain, func);
+        const auto shape = domain.shape();
+        const auto grid  = compute_launch_config_2d(shape[1], shape[0]);
+        dispatch_kernel_2d<<<grid, runtime::block_dims.to_dim3(), 0, stream>>>(domain, func);
     }
 
     // 3d dispatch
     template <typename Func>
     inline void cuda_dispatch_3d(const grid::domain_t<3>& domain, Func&& func, cudaStream_t stream)
     {
-        const auto     shape = domain.shape();
-        const auto     grid  = compute_launch_config_3d(shape[2], shape[1], shape[0]);
-        constexpr dim3 block(4, 4, 4);
-
-        dispatch_kernel_3d<<<grid, block, 0, stream>>>(domain, func);
+        const auto shape = domain.shape();
+        const auto grid  = compute_launch_config_3d(shape[2], shape[1], shape[0]);
+        dispatch_kernel_3d<<<grid, runtime::block_dims.to_dim3(), 0, stream>>>(domain, func);
     }
 #endif // __CUDACC__
 
@@ -197,11 +192,9 @@ namespace simbi::xpu {
         }
         else {
             // fallback for higher ranks - linearized dispatch
-            const auto     total_size = domain.size();
-            const auto     grid       = compute_launch_config_1d(total_size);
-            constexpr dim3 block(256, 1, 1);
-
-            dispatch_kernel_1d<<<grid, block, 0, stream>>>(domain, func);
+            const auto total_size = domain.size();
+            const auto grid       = compute_launch_config_1d(total_size);
+            dispatch_kernel_1d<<<grid, runtime::block_dims.to_dim3(), 0, stream>>>(domain, func);
         }
     }
 #else
@@ -460,6 +453,6 @@ namespace simbi::xpu {
     }
 #endif // __CUDACC__
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec::detail
 
 #endif // XPU_CUDA_AVAILABLE

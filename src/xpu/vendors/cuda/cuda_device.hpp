@@ -23,6 +23,8 @@
 #include "xpu/core/device_concepts.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -677,8 +679,8 @@ namespace simbi::xpu::vendors::cuda {
 
       private:
         int                 device_id_;
-        bool                initialized_ = false;
         mutable std::string device_name_cache_;
+        bool                initialized_ = false;
 
         // resource management
         std::vector<stream_handle_type> managed_streams_;
@@ -694,8 +696,8 @@ namespace simbi::xpu::vendors::cuda {
     // =============================================================================
 
     // verify that cuda_device_t satisfies hetero_device concept
-    static_assert(core::hetero_device<cuda_device_t>);
-    static_assert(core::async_memory_allocator<cuda_device_t>);
+    static_assert(core::hetero_device_c<cuda_device_t>);
+    static_assert(core::async_memory_allocator_c<cuda_device_t>);
 
     // =============================================================================
     // convenience aliases

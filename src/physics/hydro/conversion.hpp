@@ -1,8 +1,9 @@
 #ifndef PHYSICS_CONVERSION_HPP
 #define PHYSICS_CONVERSION_HPP
 
-#include "base/concepts.hpp"          // for is_hydro_conserved_c
-#include "compat.hpp"                 // for global::epsilon
+#include "base/concepts.hpp" // for is_hydro_conserved_c
+#include "build_config.hpp"  // for build::epsilon
+#include "decorators.hpp"
 #include "functional/monad/maybe.hpp" // for maybe_t, None
 #include "io/exceptions.hpp"          // for ErrorCode
 #include "physics/eos/ideal.hpp"      // for ideal_gas_eos_t
@@ -12,7 +13,6 @@
 
 #include <cmath>   // for abs, isfinite, sqrt
 #include <cstdint> // for std::uint64_t
-#include <iostream>
 
 namespace simbi::hydro::newtonian {
     using namespace eos;
@@ -37,7 +37,6 @@ namespace simbi::hydro::newtonian {
 } // namespace simbi::hydro::newtonian
 
 namespace simbi::hydro::srhd {
-    using namespace simbi::build::types;
     using namespace simbi::eos;
 
     template <
@@ -59,7 +58,7 @@ namespace simbi::hydro::srhd {
         // a slight tweak
         std::uint64_t iter = 0;
         real          peq  = std::abs(smag - d - tau);
-        const real    tol  = d * global::epsilon;
+        const real    tol  = d * build::epsilon;
         real          dp;
         do {
             // compute x_[k+1]
@@ -67,7 +66,7 @@ namespace simbi::hydro::srhd {
             dp                = f / g;
             peq -= dp;
 
-            if (iter >= constants::max_iterations || !std::isfinite(peq)) {
+            if (iter >= build::max_iterations || !std::isfinite(peq)) {
                 return simbi::None(ErrorCode::MAX_ITER | ErrorCode::NON_FINITE_ROOT);
             }
             iter++;
@@ -82,12 +81,7 @@ namespace simbi::hydro::srhd {
         const auto velocity = svec * inv_et;
         const auto w        = 1.0 / std::sqrt(1.0 - vecops::dot(velocity, velocity));
 
-        return primitive_t{
-            d / w,
-            velocity * (global::using_four_velocity ? w : 1.0),
-            peq,
-            dchi / d
-        };
+        return primitive_t{d / w, velocity * (build::use_four_velocity ? w : 1.0), peq, dchi / d};
     }
 
 } // namespace simbi::hydro::srhd
@@ -122,7 +116,7 @@ namespace simbi::hydro::rmhd {
         const auto rsq    = vecops::dot(rvec, rvec);
         const auto rmag   = std::sqrt(rsq);
         const auto hvec   = bfield * isqrtd;
-        const auto beesq  = vecops::dot(hvec, hvec) + global::epsilon;
+        const auto beesq  = vecops::dot(hvec, hvec) + build::epsilon;
         const auto rdb    = vecops::dot(rvec, hvec);
         const auto rdbsq  = rdb * rdb;
         // r-parallel Eq. (25.a)
@@ -156,9 +150,9 @@ namespace simbi::hydro::rmhd {
                 muu     = mu;
                 f_upper = ff;
             }
-            if (iter >= constants::max_iterations || !std::isfinite(ff)) {
+            if (iter >= build::max_iterations || !std::isfinite(ff)) {
                 return simbi::None([iter]() -> ErrorCode {
-                    if (iter >= constants::max_iterations) {
+                    if (iter >= build::max_iterations) {
                         return ErrorCode::MAX_ITER;
                     }
                     else {
@@ -167,7 +161,7 @@ namespace simbi::hydro::rmhd {
                 }());
             }
             iter++;
-        } while (std::abs(mul - muu) > global::epsilon && std::abs(ff) > global::epsilon);
+        } while (std::abs(mul - muu) > build::epsilon && std::abs(ff) > build::epsilon);
 
         if (!std::isfinite(mu)) {
             return simbi::None();
@@ -209,7 +203,7 @@ namespace simbi::hydro::rmhd {
         if (vel.norm() > 1.0) {
             return simbi::None(ErrorCode::SUPERLUMINAL_VELOCITY);
         }
-        if constexpr (global::using_four_velocity) {
+        if constexpr (build::use_four_velocity) {
             vel *= w;
         }
 

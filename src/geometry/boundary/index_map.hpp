@@ -1,8 +1,8 @@
 #ifndef GEOMETRY_BOUNDARY_MAPS_HPP
 #define GEOMETRY_BOUNDARY_MAPS_HPP
 
-#include "compat.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 
 #include <cstdint>
 

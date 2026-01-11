@@ -16,15 +16,17 @@
 
 #include "memory_space.hpp"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string_view>
 
 #ifdef XPU_CUDA_AVAILABLE
 #include <cuda_runtime.h>
 #endif
 
-namespace simbi::xpu {
+namespace simbi::xpu::mem {
 
     // =============================================================================
     // unified memory space
@@ -242,7 +244,7 @@ namespace simbi::xpu {
             cudaMemGetInfo(&free_mem, &total_mem);
             return free_mem;
 #else
-            return SIZE_MAX; // no practical limit for host memory
+            return std::numeric_limits<std::int64_t>::max(); // no practical limit for host memory
 #endif
         }
 
@@ -327,7 +329,7 @@ namespace simbi::xpu {
     // concept verification
     // =============================================================================
 
-    static_assert(memory_space<unified_memory_t>);
+    static_assert(memory_space_c<unified_memory_t>);
 
     // =============================================================================
     // convenience aliases
@@ -338,4 +340,4 @@ namespace simbi::xpu {
     template <typename T>
     using unified_buffer_t = block_t<unified_memory_t>;
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::mem

@@ -10,7 +10,7 @@
 // then passed to simulation_builder_t to construct the simulation.
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "utility/config_dict.hpp"
 #include "utility/enums.hpp"

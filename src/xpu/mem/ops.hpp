@@ -39,7 +39,7 @@ namespace simbi::xpu::mem {
             // host-accessible: direct memset
             std::memset(block.data(), 0, block.size());
         }
-        else if constexpr (std::is_same_v<MemorySpace, device_memory>) {
+        else if constexpr (std::is_same_v<MemorySpace, device_memory_t>) {
             // device memory: use device memset
             device_memory_t::memset(block.data(), 0, block.size());
         }
@@ -59,14 +59,14 @@ namespace simbi::xpu::mem {
         const auto count     = block.size() / sizeof(T);
         auto*      typed_ptr = block.template as<T>();
 
-        if constexpr (std::is_same_v<MemorySpace, host_memory> ||
-                      std::is_same_v<MemorySpace, unified_memory>) {
+        if constexpr (std::is_same_v<MemorySpace, host_memory_t> ||
+                      std::is_same_v<MemorySpace, unified_memory_t>) {
             // host-accessible: direct fill
             std::fill_n(typed_ptr, count, value);
         }
-        else if constexpr (std::is_same_v<MemorySpace, device_memory>) {
+        else if constexpr (std::is_same_v<MemorySpace, device_memory_t>) {
             // device memory: stage through host
-            auto  temp_block = memory_block_t<host_memory>(block.size());
+            auto  temp_block = memory_block_t<host_memory_t>(block.size());
             auto* temp_ptr   = temp_block.template as<T>();
 
             std::fill_n(temp_ptr, count, value);
@@ -87,12 +87,12 @@ namespace simbi::xpu::mem {
 
         const auto copy_size = std::min(src.size(), dst.size());
 
-        if constexpr (std::is_same_v<MemorySpace, host_memory> ||
-                      std::is_same_v<MemorySpace, unified_memory>) {
+        if constexpr (std::is_same_v<MemorySpace, host_memory_t> ||
+                      std::is_same_v<MemorySpace, unified_memory_t>) {
             // host-accessible: direct copy
             std::memcpy(dst.data(), src.data(), copy_size);
         }
-        else if constexpr (std::is_same_v<MemorySpace, device_memory>) {
+        else if constexpr (std::is_same_v<MemorySpace, device_memory_t>) {
             // device memory: device-to-device copy
             device_memory_t::memcpy_device_to_device(dst.data(), src.data(), copy_size);
         }

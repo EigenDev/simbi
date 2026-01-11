@@ -1,7 +1,8 @@
 #ifndef ISOTHERMAL_HPP
 #define ISOTHERMAL_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp" // for real type
+#include "decorators.hpp"   // for DEV
 
 #include <cmath> // for std::sqrt
 

@@ -2,7 +2,7 @@
 #define STATE_EXPRESSION_HPP
 
 #include "base/concepts.hpp"
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/store.hpp"
 #include "containers/vector.hpp"
 #include "dag/evaluator.hpp"

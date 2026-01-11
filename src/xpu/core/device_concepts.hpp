@@ -22,7 +22,9 @@
 #include <concepts>
 #include <cstddef>
 #include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 
 namespace simbi::xpu::core {
 
@@ -31,29 +33,29 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Handle>
-    concept device_handle = std::is_trivially_copyable_v<Handle> &&
-                            std::is_trivially_destructible_v<Handle> && !std::is_void_v<Handle>;
+    concept device_handle_c = std::is_trivially_copyable_v<Handle> &&
+                              std::is_trivially_destructible_v<Handle> && !std::is_void_v<Handle>;
 
     template <typename Handle>
-    concept memory_handle =
-        device_handle<Handle> && std::equality_comparable<Handle> && requires(Handle h) {
+    concept memory_handle_c =
+        device_handle_c<Handle> && std::equality_comparable<Handle> && requires(Handle h) {
             { static_cast<bool>(h) } -> std::convertible_to<bool>;
         }; // null check via explicit bool conversion
 
     template <typename Handle>
-    concept stream_handle = device_handle<Handle> && std::equality_comparable<Handle>;
+    concept stream_handle_c = device_handle_c<Handle> && std::equality_comparable<Handle>;
 
     template <typename Handle>
-    concept event_handle = device_handle<Handle> && std::equality_comparable<Handle>;
+    concept event_handle_c = device_handle_c<Handle> && std::equality_comparable<Handle>;
 
     // =============================================================================
     // memory allocation requirements
     // =============================================================================
 
     template <typename Device>
-    concept device_memory_allocator = requires(Device device, std::size_t bytes) {
+    concept device_memory_allocator_c = requires(Device device, std::size_t bytes) {
         typename Device::memory_handle_type;
-        requires memory_handle<typename Device::memory_handle_type>;
+        requires memory_handle_c<typename Device::memory_handle_type>;
 
         // synchronous allocation
         { device.allocate(bytes) } -> std::convertible_to<typename Device::memory_handle_type>;
@@ -70,8 +72,8 @@ namespace simbi::xpu::core {
     };
 
     template <typename Device>
-    concept async_memory_allocator =
-        device_memory_allocator<Device> && requires(Device device, std::size_t bytes) {
+    concept async_memory_allocator_c =
+        device_memory_allocator_c<Device> && requires(Device device, std::size_t bytes) {
             typename Device::stream_handle_type;
 
             // asynchronous allocation (cuda 11.2+, rocm 5.0+)
@@ -91,9 +93,9 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Device>
-    concept device_stream_manager = requires(Device device) {
+    concept device_stream_manager_c = requires(Device device) {
         typename Device::stream_handle_type;
-        requires stream_handle<typename Device::stream_handle_type>;
+        requires stream_handle_c<typename Device::stream_handle_type>;
 
         // stream creation/destruction
         { device.create_stream() } -> std::convertible_to<typename Device::stream_handle_type>;
@@ -118,9 +120,9 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Device>
-    concept device_event_manager = requires(Device device) {
+    concept device_event_manager_c = requires(Device device) {
         typename Device::event_handle_type;
-        requires event_handle<typename Device::event_handle_type>;
+        requires event_handle_c<typename Device::event_handle_type>;
 
         // event creation/destruction
         { device.create_event() } -> std::convertible_to<typename Device::event_handle_type>;
@@ -156,7 +158,7 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Device>
-    concept device_memory_transfer = requires(Device device) {
+    concept device_memory_transfer_c = requires(Device device) {
         typename Device::memory_handle_type;
         typename Device::stream_handle_type;
 
@@ -210,7 +212,7 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Device>
-    concept device_properties = requires(Device device) {
+    concept device_properties_c = requires(Device device) {
         // device identification
         { device.device_id() } -> std::convertible_to<int>;
         { device.device_name() } -> std::convertible_to<std::string_view>;
@@ -237,7 +239,7 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Device>
-    concept device_kernel_executor = requires(Device device) {
+    concept device_kernel_executor_c = requires(Device device) {
         typename Device::kernel_handle_type;
         typename Device::stream_handle_type;
         typename Device::event_handle_type;
@@ -259,22 +261,23 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Device>
-    concept hetero_device = device_memory_allocator<Device> && device_stream_manager<Device> &&
-                            device_event_manager<Device> && device_memory_transfer<Device> &&
-                            device_properties<Device> &&
-                            // kernel execution is optional for some device types
-                            std::copyable<Device> && std::destructible<Device>;
+    concept hetero_device_c = device_memory_allocator_c<Device> &&
+                              device_stream_manager_c<Device> && device_event_manager_c<Device> &&
+                              device_memory_transfer_c<Device> && device_properties_c<Device> &&
+                              // kernel execution is optional for some device types
+                              std::copyable<Device> && std::destructible<Device>;
 
     // optional advanced features
     template <typename Device>
-    concept advanced_hetero_device =
-        hetero_device<Device> && async_memory_allocator<Device> && device_kernel_executor<Device>;
+    concept advanced_hetero_device_c =
+        hetero_device_c<Device> && async_memory_allocator_c<Device> &&
+        device_kernel_executor_c<Device>;
 
     // =============================================================================
     // device type traits for compile-time optimization
     // =============================================================================
 
-    template <hetero_device Device>
+    template <hetero_device_c Device>
     struct device_traits
     {
         using device_type        = Device;
@@ -284,8 +287,8 @@ namespace simbi::xpu::core {
 
         static constexpr bool is_gpu_device         = Device::is_gpu_device;
         static constexpr bool is_cpu_device         = Device::is_cpu_device;
-        static constexpr bool supports_async_memory = async_memory_allocator<Device>;
-        static constexpr bool supports_kernels      = device_kernel_executor<Device>;
+        static constexpr bool supports_async_memory = async_memory_allocator_c<Device>;
+        static constexpr bool supports_kernels      = device_kernel_executor_c<Device>;
 
         // vendor identification for optimizations
         static constexpr std::string_view vendor = Device::vendor_name();
@@ -296,18 +299,18 @@ namespace simbi::xpu::core {
     // =============================================================================
 
     template <typename Device>
-    concept gpu_device = hetero_device<Device> && Device::is_gpu_device;
+    concept gpu_device_c = hetero_device_c<Device> && Device::is_gpu_device;
 
     template <typename Device>
-    concept cpu_device = hetero_device<Device> && Device::is_cpu_device;
+    concept cpu_device_c = hetero_device_c<Device> && Device::is_cpu_device;
 
     template <typename Device>
-    concept unified_memory_device = hetero_device<Device> && requires(Device device) {
+    concept unified_memory_device_c = hetero_device_c<Device> && requires(Device device) {
         { device.supports_unified_memory() } -> std::same_as<bool>;
     } && Device{}.supports_unified_memory();
 
     template <typename Device>
-    concept high_bandwidth_device = hetero_device<Device> && requires(Device device) {
+    concept high_bandwidth_device_c = hetero_device_c<Device> && requires(Device device) {
         { device.memory_bandwidth_gb_per_sec() } -> std::convertible_to<double>;
     };
 
@@ -315,7 +318,7 @@ namespace simbi::xpu::core {
     // compile-time device selection utilities
     // =============================================================================
 
-    template <hetero_device... Devices>
+    template <hetero_device_c... Devices>
     struct device_pack
     {
         static constexpr std::size_t count = sizeof...(Devices);
@@ -337,7 +340,7 @@ namespace simbi::xpu::core {
     // vendor-agnostic algorithm dispatch helpers
     // =============================================================================
 
-    template <hetero_device Device>
+    template <hetero_device_c Device>
     constexpr auto dispatch_by_vendor(Device /*device*/)
     {
         if constexpr (device_traits<Device>::vendor == "nvidia") {

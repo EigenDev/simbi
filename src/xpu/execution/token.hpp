@@ -25,19 +25,21 @@
 #include "xpu/device/detail/event_wrapper.hpp"
 
 #include <atomic>
+#include <concepts>
 #include <utility>
+#include <vector>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec {
 
     // forward declaration
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     class executor_t;
 
     // =============================================================================
     // token implementation
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     class token_t
     {
       public:
@@ -45,9 +47,9 @@ namespace simbi::xpu {
         using event_handle_type    = typename ExecutionSpace::event_handle_type;
 
       private:
-        detail::event_wrapper_t<ExecutionSpace> event_;
-        bool                                    owns_resource_ = true;
-        mutable std::atomic<bool>               is_ready_{false};
+        device::detail::event_wrapper_t<ExecutionSpace> event_;
+        bool                                            owns_resource_ = true;
+        mutable std::atomic<bool>                       is_ready_{false};
 
       public:
         // =============================================================================
@@ -55,7 +57,7 @@ namespace simbi::xpu {
         // =============================================================================
 
         // private constructor - use factory functions
-        explicit token_t(detail::event_wrapper_t<ExecutionSpace>&& event, bool owns = true)
+        explicit token_t(device::detail::event_wrapper_t<ExecutionSpace>&& event, bool owns = true)
             : event_(std::move(event)), owns_resource_(owns), is_ready_(false)
         {
         }
@@ -98,7 +100,7 @@ namespace simbi::xpu {
 
         static token_t create()
         {
-            auto event = detail::make_event<ExecutionSpace>();
+            auto event = device::detail::make_event<ExecutionSpace>();
             return token_t{std::move(event), true};
         }
 
@@ -310,19 +312,19 @@ namespace simbi::xpu {
     // free functions for token operations
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     token_t<ExecutionSpace> make_ready_token()
     {
         return token_t<ExecutionSpace>::immediate();
     }
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     token_t<ExecutionSpace> make_token()
     {
         return token_t<ExecutionSpace>::create();
     }
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     void wait_all(const std::vector<token_t<ExecutionSpace>>& tokens)
     {
         for (const auto& token : tokens) {
@@ -330,7 +332,7 @@ namespace simbi::xpu {
         }
     }
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     bool all_ready(const std::vector<token_t<ExecutionSpace>>& tokens)
     {
         for (const auto& token : tokens) {
@@ -351,4 +353,4 @@ namespace simbi::xpu {
     using cuda_token = token_t<cuda_space>;
 #endif
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec

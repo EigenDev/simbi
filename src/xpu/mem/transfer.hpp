@@ -47,9 +47,9 @@ namespace simbi::xpu::mem {
 
     template <typename T>
     void sync_device_to_host(
-        const memory_block_t<device_memory>& src,
-        memory_block_t<host_memory>&         dst,
-        std::size_t                          count
+        const memory_block_t<device_memory_t>& src,
+        memory_block_t<host_memory_t>&         dst,
+        std::size_t                            count
     )
     {
         device_memory_t::memcpy_to_host(
@@ -65,9 +65,9 @@ namespace simbi::xpu::mem {
 
     template <typename T>
     void sync_device_to_device(
-        const memory_block_t<device_memory>& src,
-        memory_block_t<device_memory>&       dst,
-        std::size_t                          count
+        const memory_block_t<device_memory_t>& src,
+        memory_block_t<device_memory_t>&       dst,
+        std::size_t                            count
     )
     {
         device_memory_t::memcpy_device_to_device(
@@ -83,9 +83,9 @@ namespace simbi::xpu::mem {
 
     template <typename T>
     void sync_unified_to_unified(
-        const memory_block_t<unified_memory>& src,
-        memory_block_t<unified_memory>&       dst,
-        std::size_t                           count
+        const memory_block_t<unified_memory_t>& src,
+        memory_block_t<unified_memory_t>&       dst,
+        std::size_t                             count
     )
     {
         std::memcpy(dst.template as<T>(), src.template as<T>(), count * sizeof(T));
@@ -93,9 +93,9 @@ namespace simbi::xpu::mem {
 
     template <typename T>
     void sync_unified_to_host(
-        const memory_block_t<unified_memory>& src,
-        memory_block_t<host_memory>&          dst,
-        std::size_t                           count
+        const memory_block_t<unified_memory_t>& src,
+        memory_block_t<host_memory_t>&          dst,
+        std::size_t                             count
     )
     {
         std::memcpy(dst.template as<T>(), src.template as<T>(), count * sizeof(T));
@@ -103,9 +103,9 @@ namespace simbi::xpu::mem {
 
     template <typename T>
     void sync_host_to_unified(
-        const memory_block_t<host_memory>& src,
-        memory_block_t<unified_memory>&    dst,
-        std::size_t                        count
+        const memory_block_t<host_memory_t>& src,
+        memory_block_t<unified_memory_t>&    dst,
+        std::size_t                          count
     )
     {
         std::memcpy(dst.template as<T>(), src.template as<T>(), count * sizeof(T));

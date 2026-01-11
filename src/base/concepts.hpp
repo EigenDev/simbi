@@ -1,7 +1,7 @@
 #pragma once
 
-#include "compat.hpp"
-#include "utility/enums.hpp"
+#include "build_config.hpp"  // for real type
+#include "utility/enums.hpp" // for regime_t
 
 #include <array>
 #include <concepts>

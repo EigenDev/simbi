@@ -20,7 +20,7 @@
 #include <new>
 #include <string_view>
 
-namespace simbi::xpu {
+namespace simbi::xpu::mem {
 
     // =============================================================================
     // host memory space
@@ -90,7 +90,7 @@ namespace simbi::xpu {
         // accessibility queries
         // =============================================================================
 
-        template <memory_space OtherSpace>
+        template <memory_space_c OtherSpace>
         static constexpr bool is_accessible_from()
         {
             // host memory is accessible from host spaces only
@@ -201,7 +201,7 @@ namespace simbi::xpu {
     };
 
     // static assertion to verify concept compliance
-    static_assert(memory_space<host_memory_t>);
+    static_assert(memory_space_c<host_memory_t>);
 
     // =============================================================================
     // convenience aliases
@@ -212,4 +212,4 @@ namespace simbi::xpu {
     template <typename T>
     using host_buffer_t = block_t<host_memory_t>;
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::mem

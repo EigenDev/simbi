@@ -17,7 +17,7 @@
 //   // ... or use blueprint_set_t::from_config(config) for all at once
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "ecs/blueprints.hpp"
 #include "utility/bimap.hpp"
 #include "utility/config_dict.hpp"

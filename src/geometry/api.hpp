@@ -1,7 +1,7 @@
 #ifndef GRID_GEOMETRY_API_HPP
 #define GRID_GEOMETRY_API_HPP
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "geometry/coordinate_map.hpp"
 #include "utility/bimap.hpp"

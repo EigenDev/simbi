@@ -1,15 +1,15 @@
 #ifndef GRID_AMR_FLUX_CORRECTION_HPP
 #define GRID_AMR_FLUX_CORRECTION_HPP
 
-#include "compat.hpp"
-#include "compute/computation.hpp"
+#include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
+#include "functional/fp.hpp"
 #include "grid/amr/restriction.hpp"
 #include "grid/connectivity.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
-#include "xpu/execution/execution_space.hpp"
-#include "xpu/execution/executor.hpp"
+#include "xpu/xpu.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -119,7 +119,7 @@ namespace simbi::grid::amr {
         }
 
         // zero all registers
-        template <xpu::execution_space ExecutionSpace>
+        template <xpu::execution_space_c ExecutionSpace>
         void zero_all(xpu::executor_t<ExecutionSpace>& exec)
         {
             for (auto& reg : registers_) {
@@ -134,7 +134,7 @@ namespace simbi::grid::amr {
         // ---------------------------------------------------------------------
 
         // coarse: R += -F * dt * area
-        template <xpu::execution_space ExecutionSpace, typename Geometry>
+        template <xpu::execution_space_c ExecutionSpace, typename Geometry>
         void accumulate_coarse(
             xpu::executor_t<ExecutionSpace>& exec,
             const field_type&                coarse_flux,
@@ -165,7 +165,7 @@ namespace simbi::grid::amr {
         }
 
         // fine: R += average(F * area) * dt
-        template <xpu::execution_space ExecutionSpace, typename Geometry>
+        template <xpu::execution_space_c ExecutionSpace, typename Geometry>
         void accumulate_fine(
             xpu::executor_t<ExecutionSpace>& exec,
             const field_type&                fine_flux,

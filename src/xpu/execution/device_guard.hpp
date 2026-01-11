@@ -16,13 +16,13 @@
 
 #include <cstdint>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec {
 
     // =============================================================================
     // device context guard
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     class device_guard_t
     {
       private:
@@ -75,4 +75,4 @@ namespace simbi::xpu {
         }
     };
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec

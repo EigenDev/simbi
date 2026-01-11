@@ -25,24 +25,30 @@
 
 #pragma once
 
-#include "compat.hpp"
 #include "cpu_space.hpp"
 #include "cuda_space.hpp"
+#include "decorators.hpp"
 #include "detail/cpu_dispatch.hpp"
 #include "device_guard.hpp"
 #include "execution_space.hpp"
 #include "grid/domain.hpp"
+#include "runtime_config.hpp"
+#include "xpu/core/types.hpp"
 #include "xpu/device/detail/stream_wrapper.hpp"
 
 #ifdef XPU_CUDA_AVAILABLE
 #include "detail/cuda_dispatch.hpp"
 #endif
 
+#include <concepts>
+#include <cstdint>
 #include <functional>
+#include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
 
-namespace simbi::xpu {
+namespace simbi::xpu::exec {
 
     // =============================================================================
     // reduction operators (global scope for cuda compatibility)
@@ -67,14 +73,14 @@ namespace simbi::xpu {
     };
 
     // forward declaration
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     class token_t;
 
     // =============================================================================
     // executor implementation
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     class executor_t
     {
       public:
@@ -83,9 +89,9 @@ namespace simbi::xpu {
         using token_type           = token_t<ExecutionSpace>;
 
       private:
-        detail::stream_wrapper_t<ExecutionSpace> stream_;
-        int                                      device_id_;
-        simbi::het::dim3_t                       tile_size_;
+        device::detail::stream_wrapper_t<ExecutionSpace> stream_;
+        int                                              device_id_;
+        core::dim3_t                                     tile_size_;
 
       public:
         // =============================================================================
@@ -262,40 +268,40 @@ namespace simbi::xpu {
         // =============================================================================
 
         // configuration accessors
-        void set_tile_size(const simbi::het::dim3_t& tile)
+        void set_tile_size(const core::dim3_t& tile)
         {
             tile_size_ = tile;
         }
 
-        simbi::het::dim3_t tile_size() const
+        core::dim3_t tile_size() const
         {
             return tile_size_;
         }
 
         // domain-adaptive tile size hint (hesi compatibility)
         template <std::uint64_t Rank>
-        simbi::het::dim3_t get_hint(const std::string& key, const grid::domain_t<Rank>& dom) const
+        core::dim3_t get_hint(const std::string& key, const grid::domain_t<Rank>& dom) const
         {
             if (key == "cpu_tile") {
                 if constexpr (Rank == 1) {
-                    return simbi::het::dim3_t{64, 1, 1};
+                    return core::dim3_t{64, 1, 1};
                 }
                 else if constexpr (Rank == 2) {
                     // thin slice detection: use 1d-like tiling
                     if (dom.shape()[0] < 16) {
-                        return simbi::het::dim3_t{64, 1, 1};
+                        return core::dim3_t{64, 1, 1};
                     }
-                    return simbi::het::dim3_t{16, 16, 1};
+                    return core::dim3_t{16, 16, 1};
                 }
                 else if constexpr (Rank == 3) {
                     // quasi-1d or quasi-2d detection
                     if (dom.shape()[0] < 16 && dom.shape()[1] < 16) {
-                        return simbi::het::dim3_t{64, 1, 1};
+                        return core::dim3_t{64, 1, 1};
                     }
                     else if (dom.shape()[0] < 16) {
-                        return simbi::het::dim3_t{16, 16, 1};
+                        return core::dim3_t{16, 16, 1};
                     }
-                    return simbi::het::dim3_t{8, 8, 8};
+                    return core::dim3_t{8, 8, 8};
                 }
             }
             return tile_size_; // fallback to configured tile
@@ -458,8 +464,8 @@ namespace simbi::xpu {
         template <std::uint64_t Rank, typename Func>
         void cpu_dispatch(const grid::domain_t<Rank>& domain, Func&& kernel)
         {
-            bool use_serial = !simbi::global::use_omp;
-            xpu::cpu_dispatch(domain, tile_size_, use_serial, std::forward<Func>(kernel));
+            bool use_serial = !runtime::use_omp;
+            detail::cpu_dispatch(domain, tile_size_, use_serial, std::forward<Func>(kernel));
         }
 
         // cuda dispatch implementation - inline wrapper to detail implementation
@@ -468,7 +474,7 @@ namespace simbi::xpu {
         cuda_dispatch(const grid::domain_t<Rank>& domain, Func&& kernel, stream_handle_type stream)
         {
 #ifdef XPU_CUDA_AVAILABLE
-            xpu::cuda_dispatch(domain, std::forward<Func>(kernel), stream);
+            detail::cuda_dispatch(domain, std::forward<Func>(kernel), stream);
 #else
             (void) domain;
             (void) kernel;
@@ -485,8 +491,8 @@ namespace simbi::xpu {
             ReduceOp&&                  reduce_op
         ) const
         {
-            bool use_serial = !simbi::global::use_omp;
-            return xpu::cpu_reduce(
+            bool use_serial = !runtime::use_omp;
+            return detail::cpu_reduce(
                 domain,
                 init_value,
                 std::forward<MapFunc>(map_func),
@@ -506,7 +512,7 @@ namespace simbi::xpu {
         ) const
         {
 #ifdef XPU_CUDA_AVAILABLE
-            return xpu::cuda_reduce(
+            return detail::cuda_reduce(
                 domain,
                 init_value,
                 std::forward<MapFunc>(map_func),
@@ -528,14 +534,14 @@ namespace simbi::xpu {
     // factory functions
     // =============================================================================
 
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     executor_t<ExecutionSpace> make_executor(std::int64_t device_id = 0)
     {
         return executor_t<ExecutionSpace>(device_id);
     }
 
     // create executor on specific cuda stream
-    template <execution_space ExecutionSpace>
+    template <execution_space_c ExecutionSpace>
     executor_t<ExecutionSpace>
     make_stream_executor(typename ExecutionSpace::stream_handle_type, std::int64_t device_id = 0)
         requires std::same_as<ExecutionSpace, cuda_space>
@@ -555,4 +561,4 @@ namespace simbi::xpu {
     using cuda_executor = executor_t<cuda_space>;
 #endif
 
-} // namespace simbi::xpu
+} // namespace simbi::xpu::exec

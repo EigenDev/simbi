@@ -29,7 +29,7 @@
 // per-partition, each on its own stream, enabling concurrent execution.
 // =============================================================================
 
-#include "compat.hpp"
+#include "build_config.hpp"
 #include "components.hpp"
 #include "entity.hpp"
 #include "geometry/block_geometry.hpp"

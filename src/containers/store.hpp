@@ -17,7 +17,7 @@
 #ifndef CONTAINERS_STORE_HPP
 #define CONTAINERS_STORE_HPP
 
-#include "compat.hpp"
+#include "decorators.hpp"
 #include "xpu/mem/memory_config.hpp"
 #include "xpu/xpu.hpp"
 
@@ -58,7 +58,7 @@ namespace simbi {
                 for (std::uint64_t ii = 0; ii < size; ++ii) {
                     data_ptr_[ii] = val;
                 }
-                xpu::mark_host_dirty_if_needed(buffer_);
+                xpu::mem::mark_host_dirty_if_needed(buffer_);
             }
         }
 
@@ -72,7 +72,7 @@ namespace simbi {
                 data_ptr_  = buffer_->template as<T>();
 
                 std::copy(values.begin(), values.end(), data_ptr_);
-                xpu::mark_host_dirty_if_needed(buffer_);
+                xpu::mem::mark_host_dirty_if_needed(buffer_);
             }
         }
 
@@ -91,7 +91,7 @@ namespace simbi {
         // mutable indexing (host-only)
         T& operator[](std::uint64_t idx)
         {
-            xpu::mark_host_dirty_if_needed(buffer_);
+            xpu::mem::mark_host_dirty_if_needed(buffer_);
             return data_ptr_[idx];
         }
 
@@ -105,7 +105,7 @@ namespace simbi {
         T* data()
         {
             if (buffer_) {
-                xpu::mark_host_dirty_if_needed(buffer_);
+                xpu::mem::mark_host_dirty_if_needed(buffer_);
             }
             return data_ptr_;
         }
@@ -143,7 +143,7 @@ namespace simbi {
             }
 
             data_ptr_[size_] = value;
-            xpu::mark_host_dirty_if_needed(buffer_);
+            xpu::mem::mark_host_dirty_if_needed(buffer_);
             ++size_;
         }
 
@@ -159,7 +159,7 @@ namespace simbi {
                 // copy existing data if any
                 if (buffer_ && size_ > 0) {
                     std::copy(data_ptr_, data_ptr_ + size_, new_ptr);
-                    xpu::mark_host_dirty_if_needed(new_buffer);
+                    xpu::mem::mark_host_dirty_if_needed(new_buffer);
                 }
 
                 buffer_   = std::move(new_buffer);
