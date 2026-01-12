@@ -17,6 +17,7 @@
 #include <vector>
 
 #if GPU_ENABLED
+#include "build_config.hpp"
 simbi::real gpu_theoretical_bw = 1.0;
 #endif
 
