@@ -1,9 +1,7 @@
 # Radiation module sources
 rad_src = files(
   'bindings/binding.cpp',
-  'src/rad_units.cpp',
-  'src/rad_units.hpp',
-  'src/units/units.hpp',
+  'src/rad.cpp',
 )
 # Create the Python extension for the radiation module
 py3.extension_module(
