@@ -1,260 +1,383 @@
-#include "../src/rad_units.hpp"
+// =============================================================================
+// binding.cpp
+//
+// pybind11 bindings for photon event generation and analysis.
+// provides python interface to modern event-based radiation system.
+//
+// bindings:
+//   - photon_event_t: event structure
+//   - sim_conditions_t: simulation parameters
+//   - quant_scales_t: quantity scales
+//   - generate_photon_events: event generation
+//   - monte_carlo_radiative_transfer: MCRT processing
+//   - write_photon_events: HDF5 output
+//   - read_photon_events: HDF5 input
+// =============================================================================
 
-#include <algorithm>
-#include <cstdint>
-#include <map>
-#include <pybind11/buffer_info.h>
-#include <pybind11/cast.h>
+#include "../src/photon_event_io.hpp"
+#include "../src/rad.hpp"
+
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
-#include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
-#include <string>
 #include <vector>
 
 namespace py = pybind11;
+using namespace simbi::afterglow;
 
-// python wrapper for the calc_fnu function
-void py_calc_fnu(
-    std::map<std::string, py::array_t<double>> fields,
-    py::array_t<double> tbin_edges,
-    py::array_t<double> flux_array,
-    std::map<std::string, py::array_t<double>> mesh,
-    std::map<std::string, double> qscales,
-    std::map<std::string, py::object> sim_info,
-    std::int64_t checkpoint_index,
-    std::int64_t data_dim
-)
+// =============================================================================
+// helper functions: python dict/array → c++ struct/vector conversion
+// =============================================================================
+
+std::vector<double> array_to_vector(const py::array_t<double>& arr)
 {
-    // extract field arrays
-    auto rho_array        = fields["rho"].request();
-    auto gamma_beta_array = fields["gamma_beta"].request();
-    auto pressure_array   = fields["p"].request();
-
-    // extract tbin_edges and flux arrays
-    auto tbin_req = tbin_edges.request();
-    auto flux_req = flux_array.request();
-
-    // extract mesh arrays
-    auto x1_req = mesh["x1"].request();
-    auto x2_req = mesh["x2"].request();
-    auto x3_req = mesh["x3"].request();
-
-    // convert numpy arrays to vectors
-    std::vector<double> rho(
-        static_cast<double*>(rho_array.ptr),
-        static_cast<double*>(rho_array.ptr) + rho_array.size
-    );
-    std::vector<double> gamma_beta(
-        static_cast<double*>(gamma_beta_array.ptr),
-        static_cast<double*>(gamma_beta_array.ptr) + gamma_beta_array.size
-    );
-    std::vector<double> pressure(
-        static_cast<double*>(pressure_array.ptr),
-        static_cast<double*>(pressure_array.ptr) + pressure_array.size
-    );
-
-    std::vector<double> tbin_vec(
-        static_cast<double*>(tbin_req.ptr),
-        static_cast<double*>(tbin_req.ptr) + tbin_req.size
-    );
-
-    std::vector<std::vector<double>> flattened_mesh = {
-      std::vector<double>(
-          static_cast<double*>(x1_req.ptr),
-          static_cast<double*>(x1_req.ptr) + x1_req.size
-      ),
-      std::vector<double>(
-          static_cast<double*>(x2_req.ptr),
-          static_cast<double*>(x2_req.ptr) + x2_req.size
-      ),
-      std::vector<double>(
-          static_cast<double*>(x3_req.ptr),
-          static_cast<double*>(x3_req.ptr) + x3_req.size
-      )
-    };
-
-    // set up the sim_conditions struct
-    sogbo_rad::sim_conditions sim_cond;
-    sim_cond.dt              = py::cast<double>(sim_info["dt"]);
-    sim_cond.current_time    = py::cast<double>(sim_info["current_time"]);
-    sim_cond.theta_obs       = py::cast<double>(sim_info["theta_obs"]);
-    sim_cond.adiabatic_index = py::cast<double>(sim_info["adiabatic_index"]);
-    sim_cond.z               = py::cast<double>(sim_info["z"]);
-    sim_cond.p               = py::cast<double>(sim_info["p"]);
-    sim_cond.eps_e           = py::cast<double>(sim_info["eps_e"]);
-    sim_cond.eps_b           = py::cast<double>(sim_info["eps_b"]);
-    sim_cond.d_L             = py::cast<double>(sim_info["d_L"]);
-
-    // extract frequencies
-    py::array freq_array     = py::cast<py::array>(sim_info["nus"]);
-    py::buffer_info freq_buf = freq_array.request();
-    double* freq_ptr         = static_cast<double*>(freq_buf.ptr);
-    sim_cond.nus = std::vector<double>(freq_ptr, freq_ptr + freq_buf.size);
-
-    // set up the quant_scales struct
-    sogbo_rad::quant_scales quant_scales;
-    quant_scales.time_scale   = qscales["time_scale"];
-    quant_scales.pre_scale    = qscales["pre_scale"];
-    quant_scales.rho_scale    = qscales["rho_scale"];
-    quant_scales.v_scale      = qscales["v_scale"];
-    quant_scales.length_scale = qscales["length_scale"];
-
-    // extract flux array for modification
-    double* flux_ptr = static_cast<double*>(flux_req.ptr);
-    std::vector<double> flux_vec(flux_ptr, flux_ptr + flux_req.size);
-
-    // call the C++ function
-    sogbo_rad::calc_fnu(
-        sim_cond,
-        quant_scales,
-        rho,
-        gamma_beta,
-        pressure,
-        flattened_mesh,
-        tbin_vec,
-        flux_vec,
-        checkpoint_index,
-        data_dim
-    );
-
-    // copy back the results
-    std::copy(flux_vec.begin(), flux_vec.end(), flux_ptr);
+    auto buf = arr.request();
+    auto ptr = static_cast<double*>(buf.ptr);
+    return std::vector<double>(ptr, ptr + buf.size);
 }
 
-// python wrapper for the log_events function
-void py_log_events(
-    std::map<std::string, py::array_t<double>> fields,
-    py::array_t<double> photon_distro,
-    py::array_t<double> x_mu,
-    std::map<std::string, py::array_t<double>> mesh,
-    std::map<std::string, double> qscales,
-    std::map<std::string, py::object> sim_info,
-    std::int64_t data_dim
+std::vector<std::vector<double>> dict_of_arrays_to_vectors(const py::dict& dict)
+{
+    std::vector<std::vector<double>> result;
+
+    // extract in order: x1, x2, x3
+    if (dict.contains("x1")) {
+        result.push_back(array_to_vector(dict["x1"].cast<py::array_t<double>>()));
+    }
+    if (dict.contains("x2")) {
+        result.push_back(array_to_vector(dict["x2"].cast<py::array_t<double>>()));
+    }
+    if (dict.contains("x3")) {
+        result.push_back(array_to_vector(dict["x3"].cast<py::array_t<double>>()));
+    }
+
+    return result;
+}
+
+sim_conditions_t dict_to_sim_conditions(const py::dict& d)
+{
+    sim_conditions_t s;
+    s.dt              = d["dt"].cast<double>();
+    s.theta_obs       = d["theta_obs"].cast<double>();
+    s.adiabatic_index = d["adiabatic_index"].cast<double>();
+    s.current_time    = d["current_time"].cast<double>();
+    s.p               = d["p"].cast<double>();
+    s.z               = d["z"].cast<double>();
+    s.eps_e           = d["eps_e"].cast<double>();
+    s.eps_b           = d["eps_b"].cast<double>();
+    s.d_L             = d["d_L"].cast<double>();
+
+    if (d.contains("nus")) {
+        py::list nus_list = d["nus"];
+        for (auto item : nus_list) {
+            s.nus.push_back(item.cast<double>());
+        }
+    }
+
+    if (d.contains("hydro_type")) {
+        std::string ht = d["hydro_type"].cast<std::string>();
+        s.hydro_type   = (ht == "SRMHD") ? hydro_type_t::SRMHD : hydro_type_t::SRHD;
+    }
+    else {
+        s.hydro_type = hydro_type_t::SRHD;
+    }
+
+    return s;
+}
+
+quant_scales_t dict_to_quant_scales(const py::dict& d)
+{
+    quant_scales_t q;
+    q.time_scale   = d["time_scale"].cast<double>();
+    q.pre_scale    = d["pre_scale"].cast<double>();
+    q.rho_scale    = d["rho_scale"].cast<double>();
+    q.v_scale      = d["v_scale"].cast<double>();
+    q.length_scale = d["length_scale"].cast<double>();
+    return q;
+}
+
+py::dict metadata_to_dict(const photon_event_metadata_t& meta)
+{
+    py::dict d;
+    d["dt"]              = meta.dt;
+    d["theta_obs"]       = meta.theta_obs;
+    d["adiabatic_index"] = meta.adiabatic_index;
+    d["current_time"]    = meta.current_time;
+    d["p"]               = meta.p;
+    d["z"]               = meta.z;
+    d["eps_e"]           = meta.eps_e;
+    d["eps_b"]           = meta.eps_b;
+    d["d_L"]             = meta.d_L;
+    d["time_scale"]      = meta.time_scale;
+    d["pre_scale"]       = meta.pre_scale;
+    d["rho_scale"]       = meta.rho_scale;
+    d["v_scale"]         = meta.v_scale;
+    d["length_scale"]    = meta.length_scale;
+    d["n_events"]        = meta.n_events;
+    d["data_dim"]        = meta.data_dim;
+    d["hydro_type"]      = static_cast<int>(meta.hydro_type);
+
+    py::list freq_list;
+    for (double nu : meta.frequencies) {
+        freq_list.append(nu);
+    }
+    d["frequencies"] = freq_list;
+
+    return d;
+}
+
+// =============================================================================
+// python wrapper functions
+// =============================================================================
+
+std::vector<std::vector<double>> extract_fields(const py::dict& fields_dict)
+{
+    std::vector<std::vector<double>> result;
+
+    // extract in order: rho, gamma_beta (or vr), pre (pressure)
+    if (fields_dict.contains("rho")) {
+        result.push_back(array_to_vector(fields_dict["rho"].cast<py::array_t<double>>()));
+    }
+    if (fields_dict.contains("gamma_beta")) {
+        result.push_back(array_to_vector(fields_dict["gamma_beta"].cast<py::array_t<double>>()));
+    }
+    else if (fields_dict.contains("vr")) {
+        result.push_back(array_to_vector(fields_dict["vr"].cast<py::array_t<double>>()));
+    }
+    if (fields_dict.contains("pre") || fields_dict.contains("p")) {
+        auto key = fields_dict.contains("pre") ? "pre" : "p";
+        result.push_back(array_to_vector(fields_dict[key].cast<py::array_t<double>>()));
+    }
+
+    return result;
+}
+
+py::list generate_photon_events_wrapper(
+    py::dict      sim_cond_dict,
+    py::dict      qscales_dict,
+    py::dict      fields_dict,
+    py::dict      mesh_dict,
+    std::int64_t  data_dim,
+    std::uint64_t max_events,
+    std::uint64_t photons_per_cell
 )
 {
-    // extract field arrays
-    auto rho_array        = fields["rho"].request();
-    auto gamma_beta_array = fields["gamma_beta"].request();
-    auto pressure_array   = fields["p"].request();
+    auto sim_cond = dict_to_sim_conditions(sim_cond_dict);
+    auto qscales  = dict_to_quant_scales(qscales_dict);
+    auto fields   = extract_fields(fields_dict);
+    auto mesh     = dict_of_arrays_to_vectors(mesh_dict);
 
-    // extract photon distro and four position arrays
-    auto photon_req = photon_distro.request();
-    auto xmu_req    = x_mu.request();
-
-    // extract mesh arrays
-    auto x1_req = mesh["x1"].request();
-    auto x2_req = mesh["x2"].request();
-    auto x3_req = mesh["x3"].request();
-
-    // convert numpy arrays to vectors
-    std::vector<std::vector<double>> flattened_fields = {
-      std::vector<double>(
-          static_cast<double*>(rho_array.ptr),
-          static_cast<double*>(rho_array.ptr) + rho_array.size
-      ),
-      std::vector<double>(
-          static_cast<double*>(gamma_beta_array.ptr),
-          static_cast<double*>(gamma_beta_array.ptr) + gamma_beta_array.size
-      ),
-      std::vector<double>(
-          static_cast<double*>(pressure_array.ptr),
-          static_cast<double*>(pressure_array.ptr) + pressure_array.size
-      )
-    };
-
-    std::vector<std::vector<double>> flattened_mesh = {
-      std::vector<double>(
-          static_cast<double*>(x1_req.ptr),
-          static_cast<double*>(x1_req.ptr) + x1_req.size
-      ),
-      std::vector<double>(
-          static_cast<double*>(x2_req.ptr),
-          static_cast<double*>(x2_req.ptr) + x2_req.size
-      ),
-      std::vector<double>(
-          static_cast<double*>(x3_req.ptr),
-          static_cast<double*>(x3_req.ptr) + x3_req.size
-      )
-    };
-
-    // set up the sim_conditions struct
-    sogbo_rad::sim_conditions sim_cond;
-    sim_cond.dt              = py::cast<double>(sim_info["dt"]);
-    sim_cond.current_time    = py::cast<double>(sim_info["current_time"]);
-    sim_cond.theta_obs       = py::cast<double>(sim_info["theta_obs"]);
-    sim_cond.adiabatic_index = py::cast<double>(sim_info["adiabatic_index"]);
-    sim_cond.z               = py::cast<double>(sim_info["z"]);
-    sim_cond.p               = py::cast<double>(sim_info["p"]);
-    sim_cond.eps_e           = py::cast<double>(sim_info["eps_e"]);
-    sim_cond.eps_b           = py::cast<double>(sim_info["eps_b"]);
-    sim_cond.d_L             = py::cast<double>(sim_info["d_L"]);
-
-    // extract frequencies
-    py::array freq_array     = py::cast<py::array>(sim_info["nus"]);
-    py::buffer_info freq_buf = freq_array.request();
-    double* freq_ptr         = static_cast<double*>(freq_buf.ptr);
-    sim_cond.nus = std::vector<double>(freq_ptr, freq_ptr + freq_buf.size);
-
-    // set up the quant_scales struct
-    sogbo_rad::quant_scales quant_scales;
-    quant_scales.time_scale   = qscales["time_scale"];
-    quant_scales.pre_scale    = qscales["pre_scale"];
-    quant_scales.rho_scale    = qscales["rho_scale"];
-    quant_scales.v_scale      = qscales["v_scale"];
-    quant_scales.length_scale = qscales["length_scale"];
-
-    // extract arrays for modification
-    double* photon_ptr = static_cast<double*>(photon_req.ptr);
-    double* xmu_ptr    = static_cast<double*>(xmu_req.ptr);
-    std::vector<double> photon_vec(photon_ptr, photon_ptr + photon_req.size);
-    std::vector<double> xmu_vec(xmu_ptr, xmu_ptr + xmu_req.size);
-
-    // call the C++ function
-    sogbo_rad::log_events(
+    auto events = generate_photon_events(
         sim_cond,
-        quant_scales,
-        flattened_fields,
-        flattened_mesh,
-        photon_vec,
-        xmu_vec,
-        data_dim
+        qscales,
+        fields,
+        mesh,
+        data_dim,
+        max_events,
+        photons_per_cell
     );
 
-    // copy back the results
-    std::copy(photon_vec.begin(), photon_vec.end(), photon_ptr);
-    std::copy(xmu_vec.begin(), xmu_vec.end(), xmu_ptr);
+    py::list result;
+    for (const auto& evt : events) {
+        result.append(evt);
+    }
+    return result;
 }
+
+void monte_carlo_radiative_transfer_wrapper(
+    py::list     events_list,
+    py::dict     sim_cond_dict,
+    py::dict     qscales_dict,
+    py::dict     fields_dict,
+    py::dict     mesh_dict,
+    std::int64_t data_dim,
+    bool         include_scattering,
+    bool         include_pair_production
+)
+{
+    std::vector<photon_event_t> events;
+    for (auto item : events_list) {
+        events.push_back(item.cast<photon_event_t>());
+    }
+
+    auto sim_cond = dict_to_sim_conditions(sim_cond_dict);
+    auto qscales  = dict_to_quant_scales(qscales_dict);
+    auto fields   = extract_fields(fields_dict);
+    auto mesh     = dict_of_arrays_to_vectors(mesh_dict);
+
+    monte_carlo_radiative_transfer(
+        events,
+        sim_cond,
+        qscales,
+        fields,
+        mesh,
+        data_dim,
+        include_scattering,
+        include_pair_production
+    );
+
+    for (size_t ii = 0; ii < events.size(); ++ii) {
+        events_list[ii] = events[ii];
+    }
+}
+
+void write_photon_events_wrapper(
+    const std::string& filename,
+    py::list           events_list,
+    py::dict           sim_cond_dict,
+    py::dict           qscales_dict
+)
+{
+    std::vector<photon_event_t> events;
+    for (auto item : events_list) {
+        events.push_back(item.cast<photon_event_t>());
+    }
+
+    auto sim_cond = dict_to_sim_conditions(sim_cond_dict);
+    auto qscales  = dict_to_quant_scales(qscales_dict);
+
+    write_photon_events(filename, events, sim_cond, qscales);
+}
+
+py::tuple read_photon_events_wrapper(const std::string& filename)
+{
+    auto [events, meta] = read_photon_events(filename);
+
+    py::list events_list;
+    for (const auto& evt : events) {
+        events_list.append(evt);
+    }
+
+    py::dict meta_dict = metadata_to_dict(meta);
+
+    return py::make_tuple(events_list, meta_dict);
+}
+
+py::dict read_photon_event_metadata_wrapper(const std::string& filename)
+{
+    auto meta = read_photon_event_metadata(filename);
+    return metadata_to_dict(meta);
+}
+
+// =============================================================================
+// module definition
+// =============================================================================
 
 PYBIND11_MODULE(rad_hydro, m)
 {
-    m.doc() = "Synchrotron radiation hydrodynamics module for post processing "
-              "simbi simulations";
+    m.doc() = "photon event generation and monte carlo radiative transfer for afterglow modeling";
 
+    // bind hydro_type enum
+    py::enum_<hydro_type_t>(m, "HydroType")
+        .value("SRHD", hydro_type_t::SRHD)
+        .value("SRMHD", hydro_type_t::SRMHD)
+        .export_values();
+
+    // bind photon_event_t structure
+    py::class_<photon_event_t>(m, "PhotonEvent")
+        .def(py::init<>())
+        .def_readwrite("t_emission", &photon_event_t::t_emission, "emission time [s]")
+        .def_readwrite("x", &photon_event_t::x, "x position [cm]")
+        .def_readwrite("y", &photon_event_t::y, "y position [cm]")
+        .def_readwrite("z", &photon_event_t::z, "z position [cm]")
+        .def_readwrite("energy", &photon_event_t::energy, "photon energy [erg]")
+        .def_readwrite("px", &photon_event_t::px, "x component of direction")
+        .def_readwrite("py", &photon_event_t::py, "y component of direction")
+        .def_readwrite("pz", &photon_event_t::pz, "z component of direction")
+        .def_readwrite("stokes_I", &photon_event_t::stokes_I, "stokes I parameter")
+        .def_readwrite("stokes_Q", &photon_event_t::stokes_Q, "stokes Q parameter")
+        .def_readwrite("stokes_U", &photon_event_t::stokes_U, "stokes U parameter")
+        .def_readwrite("stokes_V", &photon_event_t::stokes_V, "stokes V parameter")
+        .def_readwrite("doppler_factor", &photon_event_t::doppler_factor, "doppler boost factor")
+        .def_readwrite("lorentz_factor", &photon_event_t::lorentz_factor, "fluid lorentz factor")
+        .def_readwrite("optical_depth", &photon_event_t::optical_depth, "integrated optical depth")
+        .def_readwrite("cell_id", &photon_event_t::cell_id, "cell index")
+        .def_readwrite("absorbed", &photon_event_t::absorbed, "absorption flag")
+        .def_readwrite("n_scatter", &photon_event_t::n_scatter, "number of scattering events")
+        .def("__repr__", [](const photon_event_t& e) {
+            return "<PhotonEvent energy=" + std::to_string(e.energy) +
+                   " absorbed=" + std::to_string(e.absorbed) + ">";
+        });
+
+    // bind sim_conditions_t structure
+    py::class_<sim_conditions_t>(m, "SimConditions")
+        .def(py::init<>())
+        .def(py::init([](py::dict d) { return dict_to_sim_conditions(d); }))
+        .def_readwrite("dt", &sim_conditions_t::dt)
+        .def_readwrite("theta_obs", &sim_conditions_t::theta_obs)
+        .def_readwrite("adiabatic_index", &sim_conditions_t::adiabatic_index)
+        .def_readwrite("current_time", &sim_conditions_t::current_time)
+        .def_readwrite("p", &sim_conditions_t::p)
+        .def_readwrite("z", &sim_conditions_t::z)
+        .def_readwrite("eps_e", &sim_conditions_t::eps_e)
+        .def_readwrite("eps_b", &sim_conditions_t::eps_b)
+        .def_readwrite("d_L", &sim_conditions_t::d_L)
+        .def_readwrite("nus", &sim_conditions_t::nus)
+        .def_readwrite("hydro_type", &sim_conditions_t::hydro_type);
+
+    // bind quant_scales_t structure
+    py::class_<quant_scales_t>(m, "QuantScales")
+        .def(py::init<>())
+        .def(py::init([](py::dict d) { return dict_to_quant_scales(d); }))
+        .def_readwrite("time_scale", &quant_scales_t::time_scale)
+        .def_readwrite("pre_scale", &quant_scales_t::pre_scale)
+        .def_readwrite("rho_scale", &quant_scales_t::rho_scale)
+        .def_readwrite("v_scale", &quant_scales_t::v_scale)
+        .def_readwrite("length_scale", &quant_scales_t::length_scale);
+
+    // bind photon event generation function
     m.def(
-        "py_calc_fnu",
-        &py_calc_fnu,
-        "Calculate spectral flux from hydro data assuming synchotron spectrum",
-        py::arg("fields"),
-        py::arg("tbin_edges"),
-        py::arg("flux_array"),
-        py::arg("mesh"),
+        "generate_photon_events",
+        &generate_photon_events_wrapper,
+        py::arg("sim_cond"),
         py::arg("qscales"),
-        py::arg("sim_info"),
-        py::arg("checkpoint_index"),
-        py::arg("data_dim")
+        py::arg("fields"),
+        py::arg("mesh"),
+        py::arg("data_dim"),
+        py::arg("max_events")       = 1000000,
+        py::arg("photons_per_cell") = 0,
+        "generate photon events from hydrodynamic simulation data"
     );
 
+    // bind monte carlo radiative transfer function
     m.def(
-        "py_log_events",
-        &py_log_events,
-        "Log photon emission events from hydro data",
-        py::arg("fields"),
-        py::arg("photon_distro"),
-        py::arg("x_mu"),
-        py::arg("mesh"),
+        "monte_carlo_radiative_transfer",
+        &monte_carlo_radiative_transfer_wrapper,
+        py::arg("events"),
+        py::arg("sim_cond"),
         py::arg("qscales"),
-        py::arg("sim_info"),
-        py::arg("data_dim")
+        py::arg("fields"),
+        py::arg("mesh"),
+        py::arg("data_dim"),
+        py::arg("include_scattering")      = true,
+        py::arg("include_pair_production") = false,
+        "apply monte carlo radiative transfer to photon events (modifies in place)"
+    );
+
+    // bind HDF5 write function
+    m.def(
+        "write_photon_events",
+        &write_photon_events_wrapper,
+        py::arg("filename"),
+        py::arg("events"),
+        py::arg("sim_cond"),
+        py::arg("qscales"),
+        "write photon events to HDF5 file with compression"
+    );
+
+    // bind HDF5 read function
+    m.def(
+        "read_photon_events",
+        &read_photon_events_wrapper,
+        py::arg("filename"),
+        "read photon events from HDF5 file, returns (events, metadata)"
+    );
+
+    // bind metadata-only read function
+    m.def(
+        "read_photon_event_metadata",
+        &read_photon_event_metadata_wrapper,
+        py::arg("filename"),
+        "read metadata from HDF5 file without loading events"
     );
 }

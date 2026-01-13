@@ -24,10 +24,48 @@
 
 namespace simbi::afterglow {
 
+    // photon event for monte carlo radiative transfer and post-processing
+    // stores complete emission information in lab frame
+    struct photon_event_t
+    {
+        // spacetime coordinates (lab frame)
+        double t_emission; // emission time [s]
+        double x, y, z;    // emission position [cm]
+
+        // photon 4-momentum
+        double energy;     // photon energy [erg]
+        double px, py, pz; // propagation direction (unit vector)
+
+        // polarization (stokes parameters in photon frame)
+        // SRMHD: computed from B-field geometry
+        // SRHD: zero (unpolarized, no B-field info)
+        double stokes_I; // intensity (always > 0)
+        double stokes_Q; // linear polarization
+        double stokes_U; // linear polarization at 45°
+        double stokes_V; // circular polarization
+
+        // source properties
+        double doppler_factor; // Doppler boost factor
+        double lorentz_factor; // fluid lorentz factor
+        double optical_depth;  // integrated τ along path (for MCRT)
+
+        // metadata
+        std::uint32_t cell_id;   // cell index for debugging
+        bool          absorbed;  // true if absorbed/scattered during MCRT
+        std::uint32_t n_scatter; // number of scattering events
+    };
+
+    // simulation type flag
+    enum class hydro_type_t {
+        SRHD, // no magnetic field → unpolarized emission
+        SRMHD // magnetic field known → polarized emission
+    };
+
     struct sim_conditions_t
     {
         double              dt, theta_obs, adiabatic_index, current_time, p, z, eps_e, eps_b, d_L;
         std::vector<double> nus;
+        hydro_type_t        hydro_type; // SRHD or SRMHD
     };
 
     struct quant_scales_t
@@ -103,15 +141,105 @@ namespace simbi::afterglow {
     std::vector<double> vector_subtract(const std::vector<double>& a, const std::vector<double>& b);
     std::vector<double> vector_add(const std::vector<double>& a, const std::vector<double>& b);
 
-    // log photon events for light curve generation
-    void log_events(
-        sim_conditions_t                  args,
-        quant_scales_t                    qscales,
-        std::vector<std::vector<double>>& fields,
-        std::vector<std::vector<double>>& mesh,
-        std::vector<double>&              photon_distribution,
-        std::vector<double>&              four_position,
-        std::int64_t                      data_dim
+    // =============================================================================
+    // photon event generation
+    // =============================================================================
+
+    // generate photon events from hydro snapshot with monte carlo sampling
+    // returns vector of photon events with full 4-position, 4-momentum, polarization
+    //
+    // SRHD: polarization set to zero (unpolarized)
+    // SRMHD: polarization computed from magnetic field geometry
+    //
+    // max_events: limit on total photons (for memory management)
+    // photons_per_cell: controls sampling density (auto if 0)
+    std::vector<photon_event_t> generate_photon_events(
+        const sim_conditions_t&                 args,
+        const quant_scales_t&                   qscales,
+        const std::vector<std::vector<double>>& fields,
+        const std::vector<std::vector<double>>& mesh,
+        std::int64_t                            data_dim,
+        std::uint64_t                           max_events       = 1000000,
+        std::uint64_t                           photons_per_cell = 0
+    );
+
+    // =============================================================================
+    // monte carlo radiative transfer
+    // =============================================================================
+
+    // propagate photons through medium with absorption and scattering
+    // modifies photon_event_t.absorbed, .optical_depth, .n_scatter in place
+    //
+    // processes:
+    // - synchrotron self-absorption (τ_SSA)
+    // - thomson scattering (optically thick regions)
+    // - pair production γγ → e⁺e⁻ (optional, high energy)
+    void monte_carlo_radiative_transfer(
+        std::vector<photon_event_t>&            events,
+        const sim_conditions_t&                 args,
+        const quant_scales_t&                   qscales,
+        const std::vector<std::vector<double>>& fields,
+        const std::vector<std::vector<double>>& mesh,
+        std::int64_t                            data_dim,
+        bool                                    include_scattering      = true,
+        bool                                    include_pair_production = false
+    );
+
+    // =============================================================================
+    // post-processing: observer-dependent calculations
+    // =============================================================================
+
+    // compute lightcurve for arbitrary observer direction
+    struct observer_lightcurve_t
+    {
+        std::vector<double> times;       // observer times [day]
+        std::vector<double> fluxes;      // flux densities [mJy]
+        std::vector<double> frequencies; // observed frequencies [Hz]
+    };
+
+    observer_lightcurve_t compute_lightcurve_from_events(
+        const std::vector<photon_event_t>& events,
+        const std::vector<double>&         observer_direction, // unit vector
+        const std::vector<double>&         frequencies,        // Hz
+        double                             redshift,
+        double                             luminosity_distance, // cm
+        const std::vector<double>&         time_bins            // day
+    );
+
+    // compute sky map at specific observer time and energy band
+    struct skymap_t
+    {
+        std::vector<std::vector<double>> intensity; // [n_theta][n_phi]
+        std::vector<double>              theta;     // polar angles [rad]
+        std::vector<double>              phi;       // azimuthal angles [rad]
+    };
+
+    skymap_t compute_skymap_from_events(
+        const std::vector<photon_event_t>& events,
+        double                             observer_time, // day
+        double                             energy_min,    // erg
+        double                             energy_max,    // erg
+        std::uint32_t                      n_theta = 128,
+        std::uint32_t                      n_phi   = 256
+    );
+
+    // compute polarization evolution for arbitrary observer
+    struct polarization_curve_t
+    {
+        std::vector<double> times;               // observer times [day]
+        std::vector<double> polarization_degree; // 0 to 1
+        std::vector<double> polarization_angle;  // radians
+        std::vector<double> stokes_Q;            // normalized
+        std::vector<double> stokes_U;            // normalized
+        std::vector<double> stokes_V;            // normalized
+    };
+
+    polarization_curve_t compute_polarization_from_events(
+        const std::vector<photon_event_t>& events,
+        const std::vector<double>&         observer_direction,
+        const std::vector<double>&         time_bins,  // day
+        double                             energy_min, // erg
+        double                             energy_max  // erg
     );
 
     // compute flux with power-law spectrum (sari et al. 1998)

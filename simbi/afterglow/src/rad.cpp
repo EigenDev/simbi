@@ -215,6 +215,148 @@ namespace simbi::afterglow {
         return power_with_breaks;
     }
 
+    // =============================================================================
+    // monte carlo radiative transfer
+    // =============================================================================
+
+    // helper: compute synchrotron self-absorption optical depth
+    double compute_ssa_optical_depth(
+        double photon_energy, // erg
+        double n_e,           // electron density [cm^-3]
+        double bfield,        // magnetic field [gauss]
+        double path_length,   // cm
+        double p              // spectral index
+    )
+    {
+        // synchrotron self-absorption coefficient
+        // α_ν ∝ n_e B (ν_g/ν)^{(p+4)/2}
+
+        double nu_photon = photon_energy / constants::h_planck.value;
+        double nu_gyro   = constants::e_charge.value * bfield /
+                         (2.0 * std::numbers::pi * constants::m_e.value * constants::c_light.value);
+        double nu_ratio = nu_gyro / nu_photon;
+
+        if (nu_ratio < 1.0) {
+            return 0.0; // above synchrotron peak, SSA negligible
+        }
+
+        // SSA coefficient (simplified, CGS units: cm^-1)
+        // prefactor calibrated for typical GRB afterglow conditions
+        double alpha_ssa = 3.3e-10 * n_e * bfield * std::pow(nu_ratio, (p + 4.0) / 2.0);
+
+        return alpha_ssa * path_length;
+    }
+
+    // helper: compute thomson scattering optical depth
+    double compute_thomson_optical_depth(double n_e, double path_length)
+    {
+        // \tau_T = n_e \sigma_T L
+        return n_e * constants::sigma_thomson.value * path_length;
+    }
+
+    // helper: scatter photon (thomson scattering)
+    void
+    scatter_photon(photon_event_t& photon, std::mt19937& gen, std::uniform_real_distribution<>& dis)
+    {
+        // isotropic scattering in lab frame (simplified)
+        double phi       = 2.0 * std::numbers::pi * dis(gen);
+        double mu        = 2.0 * dis(gen) - 1.0;
+        double sin_theta = std::sqrt(1.0 - mu * mu);
+
+        photon.px = sin_theta * std::cos(phi);
+        photon.py = sin_theta * std::sin(phi);
+        photon.pz = mu;
+
+        // depolarize: each scatter reduces polarization
+        double depol_factor = std::exp(-1.0);
+        photon.stokes_Q *= depol_factor;
+        photon.stokes_U *= depol_factor;
+        photon.stokes_V *= depol_factor;
+
+        photon.n_scatter++;
+    }
+
+    void monte_carlo_radiative_transfer(
+        std::vector<photon_event_t>&            events,
+        const sim_conditions_t&                 args,
+        const quant_scales_t&                   qscales,
+        const std::vector<std::vector<double>>& fields,
+        const std::vector<std::vector<double>>& mesh,
+        std::int64_t                            data_dim [[maybe_unused]],
+        bool                                    include_scattering,
+        bool                                    include_pair_production
+    )
+    {
+        std::random_device               rd;
+        std::mt19937                     gen(rd());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+
+        const auto rho = fields[0];
+        const auto gb  = fields[1];
+        const auto pre = fields[2];
+
+        const auto x1 = mesh[0];
+
+        const double p     = args.p;
+        const double eps_b = args.eps_b;
+
+// process each photon in parallel
+#pragma omp parallel for
+        for (std::size_t i = 0; i < events.size(); i++) {
+            auto& photon = events[i];
+
+            // get source cell properties
+            std::uint32_t cell_id = photon.cell_id;
+
+            // compute physical properties at emission cell
+            const auto rho_einternal = pre[cell_id] * qscales.pre_scale /
+                                       (args.adiabatic_index - 1.0) * units::erg_per_cm3;
+            const auto bfield = calc_shock_bfield(rho_einternal, eps_b);
+            const auto n_e =
+                rho[cell_id] * qscales.rho_scale * units::g_per_cm3.value / constants::m_p.value;
+
+            // estimate path length through cell (approximate as ~10% of radius)
+            double path_length = x1[0] * qscales.length_scale * 0.1;
+
+            // compute optical depths
+            double tau_ssa = compute_ssa_optical_depth(photon.energy, n_e, bfield, path_length, p);
+
+            double tau_thomson = compute_thomson_optical_depth(n_e, path_length);
+            double tau_total   = tau_ssa + tau_thomson;
+
+            photon.optical_depth = tau_total;
+
+            // monte carlo absorption test
+            if (dis(gen) > std::exp(-tau_total)) {
+                photon.absorbed = true;
+
+                // check if scattered rather than absorbed
+                if (include_scattering && tau_thomson > 0.0) {
+                    double scatter_probability = tau_thomson / tau_total;
+                    if (dis(gen) < scatter_probability) {
+                        scatter_photon(photon, gen, dis);
+                        photon.absorbed = false; // photon survives after scatter
+                    }
+                }
+            }
+
+            // pair production (optional, high energy only)
+            if (include_pair_production) {
+                // γγ → e⁺e⁻ threshold: E > ~100 MeV
+                double threshold_energy = 1e-4; // erg (~60 MeV)
+                if (photon.energy > threshold_energy) {
+                    // simplified: mark as absorbed if above threshold
+                    // proper treatment would compute γγ opacity
+                    photon.absorbed = true;
+                }
+            }
+        }
+    }
+
+    // =============================================================================
+    // legacy interface
+    // =============================================================================
+
     void log_events(
         sim_conditions_t                  args,
         quant_scales_t                    qscales,
@@ -569,6 +711,140 @@ namespace simbi::afterglow {
         }
 
         // return flux_array;
+    }
+
+    std::vector<photon_event_t> generate_photon_events(
+        const sim_conditions_t&                 args,
+        const quant_scales_t&                   qscales,
+        const std::vector<std::vector<double>>& fields,
+        const std::vector<std::vector<double>>& mesh,
+        std::int64_t                            data_dim,
+        std::uint64_t                           max_events,
+        std::uint64_t                           photons_per_cell
+    )
+    {
+        std::vector<photon_event_t> events;
+        events.reserve(std::min(max_events, std::uint64_t(10000)));
+
+        std::random_device               rd;
+        std::mt19937                     gen(rd());
+        std::uniform_real_distribution<> dis(0.0, 1.0);
+
+        const auto rho = fields[0];
+        const auto gb  = fields[1];
+        const auto pre = fields[2];
+
+        const auto x1 = (mesh.size() > 0) ? mesh[0] : std::vector<double>{};
+        const auto x2 = (mesh.size() > 1) ? mesh[1] : std::vector<double>{};
+        const auto x3 = (mesh.size() > 2) ? mesh[2] : std::vector<double>{0.0};
+        const auto ni = x1.size();
+        const auto nj = x2.size();
+        const auto nk = (x3.size() > 0) ? x3.size() : 1;
+
+        const double p     = args.p;
+        const double eps_b = args.eps_b;
+        const double eps_e = args.eps_e;
+
+        const auto t_prime = args.current_time * qscales.time_scale * units::s;
+
+        const std::uint64_t total_cells = ni * nj * nk;
+        const std::uint64_t photons_target =
+            (photons_per_cell > 0) ? photons_per_cell
+                                   : std::max(std::uint64_t(10), max_events / total_cells);
+
+        std::uint64_t events_generated = 0;
+
+        for (std::size_t kk = 0; kk < nk; kk++) {
+            const double       sin_phi = std::sin(x3[kk]);
+            const double       cos_phi = std::cos(x3[kk]);
+            const std::int64_t kreal   = (data_dim > 2) * kk;
+
+            for (std::size_t jj = 0; jj < nj; jj++) {
+                const std::vector<double> rhat =
+                    {std::sin(x2[jj]) * cos_phi, std::sin(x2[jj]) * sin_phi, std::cos(x2[jj])};
+                const std::int64_t jreal = (data_dim > 1) * jj;
+
+                for (std::size_t ii = 0; ii < ni; ii++) {
+                    if (events_generated >= max_events) {
+                        goto done;
+                    }
+
+                    const auto central_idx = kreal * ni * nj + jreal * ni + ii;
+                    const auto beta        = calc_beta(gb[central_idx]);
+                    const auto w           = calc_lorentz_factor(gb[central_idx]);
+
+                    const auto rho_einternal = pre[central_idx] * qscales.pre_scale /
+                                               (args.adiabatic_index - 1.0) * units::erg_per_cm3;
+                    const auto bfield = calc_shock_bfield(rho_einternal, eps_b);
+                    const auto n_e_proper =
+                        rho[central_idx] * qscales.rho_scale * units::g_per_cm3 / constants::m_p;
+                    const auto nu_g = calc_gyration_frequency(bfield);
+                    const auto gamma_min =
+                        calc_minimum_lorentz(eps_e, rho_einternal, n_e_proper, p);
+
+                    const auto r_center = x1[ii] * qscales.length_scale * units::cm;
+
+                    for (std::uint64_t pp = 0; pp < photons_target; pp++) {
+                        if (events_generated >= max_events) {
+                            goto done;
+                        }
+
+                        photon_event_t evt;
+
+                        const double gamma_sample =
+                            gen_random_from_powerlaw(gamma_min, gamma_min * 10.0, p, dis(gen));
+                        const auto nu_c     = calc_nu(gamma_sample, nu_g);
+                        const auto E_photon = constants::h_planck * nu_c;
+
+                        const double              phi_prime  = 2.0 * std::numbers::pi * dis(gen);
+                        const double              mu_prime   = 2.0 * dis(gen) - 1.0;
+                        const std::vector<double> nhat_prime = {
+                            std::sin(std::acos(mu_prime)) * std::cos(phi_prime),
+                            std::sin(std::acos(mu_prime)) * std::sin(phi_prime),
+                            mu_prime
+                        };
+
+                        const double mu_rhat_prime = vector_dotproduct(rhat, nhat_prime);
+                        const double mu_rhat_beam =
+                            (mu_rhat_prime + beta) / (1.0 + beta * mu_rhat_prime);
+                        const double rot_angle = std::acos(mu_rhat_prime) - std::acos(mu_rhat_beam);
+                        const auto   nhat_beamed = scale_vector(nhat_prime, std::cos(rot_angle));
+
+                        evt.t_emission = t_prime.value;
+                        evt.x          = r_center.value * rhat[0];
+                        evt.y          = r_center.value * rhat[1];
+                        evt.z          = r_center.value * rhat[2];
+
+                        evt.energy = E_photon.value;
+                        evt.px     = nhat_beamed[0];
+                        evt.py     = nhat_beamed[1];
+                        evt.pz     = nhat_beamed[2];
+
+                        evt.stokes_I = evt.energy;
+                        evt.stokes_Q = 0.0;
+                        evt.stokes_U = 0.0;
+                        evt.stokes_V = 0.0;
+
+                        evt.doppler_factor = calc_delta_doppler(
+                            w,
+                            {beta * rhat[0], beta * rhat[1], beta * rhat[2]},
+                            nhat_beamed
+                        );
+                        evt.lorentz_factor = w;
+                        evt.optical_depth  = 0.0;
+                        evt.cell_id        = static_cast<std::uint32_t>(central_idx);
+                        evt.absorbed       = false;
+                        evt.n_scatter      = 0;
+
+                        events.push_back(evt);
+                        events_generated++;
+                    }
+                }
+            }
+        }
+
+    done:
+        return events;
     }
 
 } // namespace simbi::afterglow
