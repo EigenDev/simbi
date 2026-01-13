@@ -27,6 +27,7 @@
 #include "utility/enums.hpp"
 
 #include <cstdint>
+#include <iostream>
 #include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
@@ -174,8 +175,7 @@ namespace simbi::ecs::creation {
             auto full_domain   = part.allocated_domain;
             auto active_domain = part.owned_domain;
 
-            auto        motion = sim.motion_state();
-            const auto& mesh   = sim.mesh(lvl);
+            const auto& mesh = sim.mesh(lvl);
 
             // initialize primitives from a host-local generator and then clone
             // to the partition locality. create host-local prims explicitly so
@@ -204,10 +204,11 @@ namespace simbi::ecs::creation {
 
                 // interpolate face-centered B to cell-centered for conserved
                 // state
+                auto motion = sim.motion_state();
                 ecs::with_block_geometry<Sim::coord_system>(
                     mesh,
                     motion,
-                    [&exec, face_domains, active_domain, fields](const auto& block_geo) {
+                    [&](const auto& block_geo) {
                         auto bavg = interpolate_face_to_cell_magnetic(
                             fields.bfield,
                             block_geo,
@@ -221,34 +222,28 @@ namespace simbi::ecs::creation {
             }
 
             // convert primitives to conserved
-            // for moving mesh: store volume-normalized extensive variables to conserve mass
+            // primitives are always intensive (rho, v, p)
+            // conserved: extensive if moving (mass, momentum, energy), intensive if static
+            auto motion = sim.motion_state();
 
-            if (motion.is_moving) {
-                // store Q = \rho * scale_factor (mass per comoving volume)
-                // physical volume: V_phys(t) = scale_factor(geometry, a) * V_comoving
-                // this conserves total mass as mesh expands
-                std::cout << "Initializing moving mesh conserved variables..." << std::endl;
-                std::cin.get();
-                ecs::with_block_geometry<Sim::coord_system>(
-                    mesh,
-                    motion,
-                    [&exec, gamma, active_domain, fields](const auto& block_geo) {
-                        auto cons  = fields.cons[active_domain];
-                        auto prims = fields.prim[active_domain];
-                        cons       = prims.map(numerics::to_conserved_t{gamma})
-                                   .enum_map([&block_geo](auto coord, auto u) {
-                                       const auto dv = block_geo.volume(coord);
-                                       return u * dv;
-                                   })
-                                   .with(exec);
-                    }
-                );
-            }
-            else {
-                // static mesh: store intensive conserved variables
-                fields.cons[active_domain] =
-                    fields.prim[active_domain].map(numerics::to_conserved_t{gamma}).with(exec);
-            }
+            ecs::with_block_geometry<Sim::coord_system>(mesh, motion, [&](const auto& block_geo) {
+                if (motion.enabled) {
+                    // extensive: multiply by cell volume
+                    fields.cons[active_domain] =
+                        fields.prim[active_domain]
+                            .map(numerics::to_conserved_t{gamma})
+                            .enum_map([&block_geo](const auto& coord, const auto& u) {
+                                const real cell_vol = block_geo.volume(coord);
+                                return u * cell_vol;
+                            })
+                            .with(exec);
+                }
+                else {
+                    // static mesh: intensive conserved
+                    fields.cons[active_domain] =
+                        fields.prim[active_domain].map(numerics::to_conserved_t{gamma}).with(exec);
+                }
+            });
         }
 
         // -------------------------------------------------------------------------
@@ -314,26 +309,35 @@ namespace simbi::ecs::creation {
             }
 
             // convert prolonged primitives to conserved
-            // for moving mesh: use extensive variables just like in initialize_level
-            auto motion = sim.motion_state();
+            // same logic as initialize_level: use per-cell volumes
+            auto  motion     = sim.motion_state();
+            auto& child_mesh = sim.mesh(lvl);
+            auto& child_part = sim.partition(lvl, 0);
 
-            if (motion.is_moving) {
-                // get volume scaling factor for this geometry and dimensionality
-                const auto& meta = sim.metadata();
-                const real  volume_factor =
-                    geometry::get_scaling_factor<Sim::rank>(meta.coord_system, motion.a);
-
-                // store Ũ = ρ * scale_factor (mass per comoving volume)
-                child_fields.cons =
-                    child_fields.prim.map(numerics::to_conserved_t{gamma})
-                        .map([volume_factor](const auto& u) { return u * volume_factor; })
-                        .with(exec);
-            }
-            else {
-                // static mesh: store intensive conserved variables
-                child_fields.cons =
-                    child_fields.prim.map(numerics::to_conserved_t{gamma}).with(exec);
-            }
+            ecs::with_block_geometry<Sim::coord_system>(
+                child_mesh,
+                motion,
+                [&](const auto& block_geo) {
+                    if (motion.enabled) {
+                        // extensive: multiply by cell volume
+                        child_fields.cons[child_part.owned_domain] =
+                            child_fields.prim[child_part.owned_domain]
+                                .map(numerics::to_conserved_t{gamma})
+                                .enum_map([&block_geo](const auto& coord, const auto& u) {
+                                    const real cell_vol = block_geo.volume(coord);
+                                    return u * cell_vol;
+                                })
+                                .with(exec);
+                    }
+                    else {
+                        // static mesh: intensive conserved
+                        child_fields.cons[child_part.owned_domain] =
+                            child_fields.prim[child_part.owned_domain]
+                                .map(numerics::to_conserved_t{gamma})
+                                .with(exec);
+                    }
+                }
+            );
         }
     };
 

@@ -460,6 +460,14 @@ namespace simbi::ecs::builders {
             }
 
             sim.registry.add(sim.global, std::move(meta));
+
+            // motion config
+            if (mesh_bp_.moving_mesh) {
+                mesh_motion_config_t motion_cfg;
+                motion_cfg.homologous = mesh_bp_.homologous_expansion;
+                // functions set from python binding layer
+                sim.registry.add(sim.global, std::move(motion_cfg));
+            }
         }
 
         // -------------------------------------------------------------------------

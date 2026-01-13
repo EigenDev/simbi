@@ -76,18 +76,6 @@ namespace simbi::cfd {
                 const auto al = geometry.face_area(coord, dir);
                 const auto ar = geometry.face_area(coord_plus, dir);
 
-                if constexpr (rank == 1) {
-                    if (coord[0] == 1) {
-                        std::cout << "al: " << al << " ar: " << ar << std::endl;
-                        std::cout << "fl: " << fl << " fr: " << fr << std::endl;
-                        std::cout << "a(t): " << geometry.motion.a << std::endl;
-                        std::cout << "dArea: " << ar - al << std::endl;
-                        std::cout << "a(t)^2: " << geometry.motion.a * geometry.motion.a
-                                  << std::endl;
-                        std::cin.get();
-                    }
-                }
-
                 divergence = divergence + (fr * ar - fl * al) / dv;
             }
 

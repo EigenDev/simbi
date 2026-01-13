@@ -475,7 +475,7 @@ namespace simbi::ecs {
             real a    = scale_factor ? scale_factor(time) : 1.0;
             real adot = scale_factor_derivative ? scale_factor_derivative(time) : 0.0;
             return geometry::motion_state_t{
-                .is_moving     = true,
+                .enabled       = true,
                 .is_homologous = homologous,
                 .a             = a,
                 .a_dot         = adot
@@ -486,7 +486,7 @@ namespace simbi::ecs {
         static geometry::motion_state_t static_mesh()
         {
             return geometry::motion_state_t{
-                .is_moving     = false,
+                .enabled       = false,
                 .is_homologous = false,
                 .a             = 1.0,
                 .a_dot         = 0.0

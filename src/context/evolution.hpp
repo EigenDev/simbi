@@ -221,7 +221,7 @@ namespace simbi::evolution {
                     accumulate_coarse_flux_system_t{}(sim, lvl, fine_level, dt_coarse);
                 }
 
-                // euler_system_t<Ops>{ops}(sim, block_geo, lvl);
+                euler_system_t<Ops>{ops}(sim, block_geo, lvl);
             });
 
             if (lvl < sim.num_levels() - 1) {
@@ -389,7 +389,7 @@ namespace simbi::evolution {
             timestep_system_t{}(sim);
 
             if (meta.timestepping == timestepping_t::RK2) {
-                // advance_level_rk2(0);
+                advance_level_rk2(0);
             }
             else if (meta.timestepping == timestepping_t::EULER) {
                 advance_level_euler(0);

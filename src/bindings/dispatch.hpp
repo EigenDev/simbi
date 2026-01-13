@@ -159,6 +159,16 @@ namespace simbi::dispatch {
 
             auto sim = builder.build();
 
+            // configure moving mesh BEFORE field initialization
+            // field_initializer needs motion_state() to compute cell volumes
+            if (blueprints.mesh.moving_mesh) {
+                mesh_motion_config_t motion_config;
+                motion_config.scale_factor            = scale_factor;
+                motion_config.scale_factor_derivative = scale_factor_derivative;
+                motion_config.homologous              = blueprints.mesh.homologous_expansion;
+                sim.registry.add(sim.global, std::move(motion_config));
+            }
+
             // initialize fields from generators
             using sim_t = decltype(sim);
             // if restart file is provided, skip initialization
@@ -169,15 +179,6 @@ namespace simbi::dispatch {
                     bfield_gens,
                     blueprints.physics.gamma
                 );
-            }
-
-            // configure moving mesh if enabled
-            if (blueprints.mesh.moving_mesh) {
-                mesh_motion_config_t motion_config;
-                motion_config.scale_factor            = scale_factor;
-                motion_config.scale_factor_derivative = scale_factor_derivative;
-                motion_config.homologous              = blueprints.mesh.homologous_expansion;
-                sim.registry.add(sim.global, std::move(motion_config));
             }
 
             // create operations bundle

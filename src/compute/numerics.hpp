@@ -61,8 +61,6 @@ namespace simbi::numerics {
                       operator()(auto coord, const Cons& cons) const
         {
             const auto dvscale = block_geo.volume_scaling(coord);
-            std::cout << "coord: " << coord << " dvscale: " << dvscale << "cons[rho]: " << cons.den
-                      << std::endl;
             return hydro::to_primitive(cons, gamma, dvscale);
         }
     };

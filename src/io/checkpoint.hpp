@@ -126,7 +126,7 @@ namespace simbi::io {
                 auto motion_snapshot = motion_cfg.snapshot(sim.metadata().time);
 
                 auto motion_group = file.createGroup("motion_state");
-                write_attribute(motion_group, "is_moving", motion_snapshot.is_moving);
+                write_attribute(motion_group, "enabled", motion_snapshot.enabled);
                 write_attribute(motion_group, "is_homologous", motion_snapshot.is_homologous);
                 write_attribute(motion_group, "a", motion_snapshot.a);
                 write_attribute(motion_group, "a_dot", motion_snapshot.a_dot);

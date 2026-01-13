@@ -50,9 +50,6 @@ namespace simbi::io {
             // geometry config
             write_geometry_config(g, mesh.geometry, policy);
 
-            // motion config
-            write_motion_config(g, mesh.motion, policy);
-
             // boundaries
             write_boundaries(g, mesh.boundaries, policy);
         }
@@ -76,9 +73,6 @@ namespace simbi::io {
 
             // geometry config
             mesh.geometry = read_geometry_config(g);
-
-            // motion config
-            mesh.motion = read_motion_config(g);
 
             // boundaries
             mesh.boundaries = read_boundaries(g);
@@ -156,31 +150,6 @@ namespace simbi::io {
             }
 
             return geo;
-        }
-
-        static void write_motion_config(
-            H5::Group&                   parent,
-            const grid::motion_config_t& motion,
-            const write_policy_t& /*policy*/
-        )
-        {
-            auto g = parent.createGroup("motion");
-
-            write_attribute(g, "enabled", motion.enabled);
-            write_attribute(g, "homologous", motion.homologous);
-            write_attribute(g, "scale_factor_0", motion.scale_factor_0);
-        }
-
-        static grid::motion_config_t read_motion_config(const H5::Group& parent)
-        {
-            auto g = parent.openGroup("motion");
-
-            grid::motion_config_t motion;
-            motion.enabled        = read_attribute<bool>(g, "enabled");
-            motion.homologous     = read_attribute<bool>(g, "homologous");
-            motion.scale_factor_0 = read_attribute<real>(g, "scale_factor_0");
-
-            return motion;
         }
 
         static void write_boundaries(

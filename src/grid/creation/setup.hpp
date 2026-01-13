@@ -71,9 +71,9 @@ namespace simbi::grid::creation {
             // resolution per block
             config.geometry.block_size_cells = bp.active_resolution;
 
-            // motion
-            config.motion.enabled    = bp.moving_mesh;
-            config.motion.homologous = bp.homologous_expansion;
+            // note: motion is NOT part of mesh_config anymore
+            // it's handled separately as mesh_motion_config_t ECS component
+            // set by simulation_builder_t based on bp.moving_mesh flag
 
             return config;
         }

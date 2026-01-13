@@ -55,7 +55,7 @@ namespace simbi::geometry {
     // -------------------------------------------------------------------------
     struct motion_state_t
     {
-        bool is_moving;
+        bool enabled;
         bool is_homologous;
         real a;     // scale factor
         real a_dot; // expansion rate
@@ -63,17 +63,17 @@ namespace simbi::geometry {
         // helpers for physical vs comoving conversion
         DUAL real physical_len(real comoving_len) const
         {
-            return is_moving ? comoving_len * a : comoving_len;
+            return enabled ? comoving_len * a : comoving_len;
         }
 
         DUAL real comoving_len(real physical_len) const
         {
-            return is_moving ? physical_len / a : physical_len;
+            return enabled ? physical_len / a : physical_len;
         }
 
         DUAL real grid_velocity(real coord) const
         {
-            if (!is_moving) {
+            if (!enabled) {
                 return 0.0;
             }
             if (is_homologous) {
@@ -85,7 +85,7 @@ namespace simbi::geometry {
         static motion_state_t static_mesh()
         {
             return geometry::motion_state_t{
-                .is_moving     = false,
+                .enabled       = false,
                 .is_homologous = false,
                 .a             = 1.0,
                 .a_dot         = 0.0
@@ -114,7 +114,7 @@ namespace simbi::geometry {
         DUAL auto volume(const iarray<Rank>& idx) const
         {
             real v_comoving = metric.volume(idx);
-            if (!motion.is_moving) {
+            if (!motion.enabled) {
                 return v_comoving;
             }
 
@@ -142,9 +142,10 @@ namespace simbi::geometry {
         template <std::uint64_t Rank>
         DUAL auto volume_scaling(const iarray<Rank>& idx) const
         {
-            if (!motion.is_moving) {
+            if (!motion.enabled) {
                 return 1.0;
             }
+
             return volume(idx);
         }
 
@@ -152,7 +153,7 @@ namespace simbi::geometry {
         DUAL auto face_area(const iarray<Rank>& idx, std::size_t dim) const
         {
             real area_comoving = metric.face_area(idx, dim);
-            if (!motion.is_moving) {
+            if (!motion.enabled) {
                 return area_comoving;
             }
 
@@ -201,7 +202,7 @@ namespace simbi::geometry {
         DUAL auto physical_centroid(const iarray<Rank>& idx) const
         {
             auto coords = metric.centroid(idx);
-            if (motion.is_moving) {
+            if (motion.enabled) {
                 for (std::size_t dd = 0; dd < Rank; ++dd) {
                     coords[dd] *= motion.a;
                 }
@@ -212,13 +213,13 @@ namespace simbi::geometry {
         // physical scale: multiply comoving value by a(t)
         DUAL real to_physical(real comoving_value) const
         {
-            return motion.is_moving ? comoving_value * motion.a : comoving_value;
+            return motion.enabled ? comoving_value * motion.a : comoving_value;
         }
 
         // comoving scale: divide physical value by a(t)
         DUAL real to_comoving(real physical_value) const
         {
-            return motion.is_moving ? physical_value / motion.a : physical_value;
+            return motion.enabled ? physical_value / motion.a : physical_value;
         }
 
         // ---------------------------------------------------------------------
@@ -244,7 +245,7 @@ namespace simbi::geometry {
 
             // if mesh is expanding homologously, physical length scales with
             // a(t) ds_physical = a(t) * h_comoving * dx
-            if (motion.is_moving) {
+            if (motion.enabled) {
                 for (std::size_t dd = 0; dd < Rank; ++dd) {
                     h[dd] *= motion.a;
                 }
@@ -259,7 +260,7 @@ namespace simbi::geometry {
         template <std::uint64_t Rank>
         DUAL real face_grid_velocity(const iarray<Rank>& idx, std::size_t dim) const
         {
-            if (!motion.is_moving) {
+            if (!motion.enabled) {
                 return 0.0;
             }
 
