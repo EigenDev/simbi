@@ -21,7 +21,6 @@ sources = files(
   'io/display/table.cpp',
   'io/display/terminal.cpp',
   'io/exceptions.cpp',
-  'io/tabulate/table.cpp',
   'physics/em/contact.cpp',
   'physics/em/zero.cpp',
   'physics/ib/factory.cpp',
