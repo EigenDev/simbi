@@ -22,12 +22,12 @@ class MeshAdapter:
         self._coords_cache = {}
 
     def _generate_coords(self, axis: int) -> NDArray:
-        """generate vertex coordinates for an axis."""
+        """generate vertex coordinates for an axis (physical coordinates)."""
         if axis in self._coords_cache:
             return self._coords_cache[axis]
 
-        # get root bounds and hypothetical full-domain cell count
-        root_xmin, root_xmax = self._mesh.dims[axis]
+        # get comoving bounds and hypothetical full-domain cell count
+        comoving_xmin, comoving_xmax = self._mesh.dims[axis]
         global_cells = self._mesh.global_cells[axis]
         spacing_type = self._mesh.spacing_types[axis]
 
@@ -40,26 +40,29 @@ class MeshAdapter:
             # compute actual number of cells in this patch
             ncells = end_idx - start_idx
 
-            # compute patch physical bounds from global coordinates
-            dx = (root_xmax - root_xmin) / global_cells
-            xmin = root_xmin + start_idx * dx
-            xmax = root_xmin + end_idx * dx
+            # compute patch comoving bounds from global coordinates
+            dx = (comoving_xmax - comoving_xmin) / global_cells
+            xmin = comoving_xmin + start_idx * dx
+            xmax = comoving_xmin + end_idx * dx
         else:
-            # base level: use root bounds and global cells
-            xmin, xmax = root_xmin, root_xmax
+            # base level: use comoving bounds and global cells
+            xmin, xmax = comoving_xmin, comoving_xmax
             ncells = global_cells
 
-        # generate coordinates based on spacing type
+        # generate comoving coordinates based on spacing type
         if spacing_type == "linear":
-            coords = np.linspace(xmin, xmax, ncells + 1)
+            coords_comoving = np.linspace(xmin, xmax, ncells + 1)
         elif spacing_type == "log":
-            coords = np.logspace(np.log10(xmin), np.log10(xmax), ncells + 1)
+            coords_comoving = np.logspace(np.log10(xmin), np.log10(xmax), ncells + 1)
         else:
             # default to linear
-            coords = np.linspace(xmin, xmax, ncells + 1)
+            coords_comoving = np.linspace(xmin, xmax, ncells + 1)
 
-        self._coords_cache[axis] = coords
-        return coords
+        # apply scale factor for moving mesh: r_phys = a(t) * r_comoving
+        coords_physical = coords_comoving * self._mesh.scale_factor_a
+
+        self._coords_cache[axis] = coords_physical
+        return coords_physical
 
     @property
     def x1v(self) -> NDArray:

@@ -19,13 +19,16 @@
 #include "compute/numerics.hpp"
 #include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
+#include "dag/express_t.hpp"
+#include "decorators.hpp"
 #include "ecs/components.hpp"
 #include "ecs/geometry_visitor.hpp"
 #include "functional/fp.hpp"
-#include "geometry/block_geometry.hpp"
+#include "geometry/api.hpp"
 #include "geometry/boundary/driver.hpp"
 #include "grid/amr/api.hpp"
 #include "grid/connectivity.hpp"
+#include "grid/mesh_config.hpp"
 #include "io/exceptions.hpp"
 #include "physics/em/api.hpp"
 #include "physics/hydro/boundary_policy.hpp"
@@ -40,23 +43,11 @@
 #include <memory>
 #include <numbers>
 #include <stdexcept>
+#include <type_traits>
 
 namespace simbi::ecs {
 
     using namespace simbi::cfd;
-
-    // =========================================================================
-    // helper: get motion state for current time
-    // =========================================================================
-    template <typename Sim>
-    geometry::motion_state_t get_motion_state(const Sim& sim)
-    {
-        if (sim.registry.template has<mesh_motion_config_t>(sim.global)) {
-            const auto& motion = sim.registry.template get<mesh_motion_config_t>(sim.global);
-            return motion.snapshot(sim.metadata().time);
-        }
-        return mesh_motion_config_t::static_mesh();
-    }
 
     // =========================================================================
     // body effects system
@@ -196,7 +187,7 @@ namespace simbi::ecs {
         void compute_level_dt(Sim& sim, std::uint64_t lvl) const
         {
             auto& meta   = sim.metadata();
-            auto  motion = get_motion_state(sim);
+            auto  motion = sim.motion_state();
 
             meta.level_dts[lvl] = numerics::compute_level_timestep(sim, lvl, motion);
         }
@@ -300,16 +291,41 @@ namespace simbi::ecs {
     // =========================================================================
     struct c2p_system_t
     {
-        template <typename Sim>
-        void operator()(Sim& sim, std::uint64_t lvl) const
+        template <typename Sim, typename BlocklGeometry>
+        void operator()(Sim& sim, std::uint64_t lvl, BlocklGeometry block_geo) const
         {
             using namespace numerics;
             real gamma = sim.metadata().gamma;
+
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
-                fields.prim  = fields.cons.map(to_primitive_t{gamma}).with(exec);
+
+                fields.prim = fields.cons.enum_map(to_primitive_t{gamma, block_geo}).with(exec);
             }
+        }
+    };
+
+    // =========================================================================
+    // update mesh motion state
+    // evaluates a(t) and a_dot(t) at the new time
+    // =========================================================================
+    struct update_mesh_motion_system_t
+    {
+        template <typename Sim>
+        void operator()(Sim& sim) const
+        {
+            auto&      meta  = sim.metadata();
+            const real t_new = meta.time;
+            for (std::uint64_t ii = 0; ii < sim.num_levels(); ii++) {
+                auto& mesh_cfg = sim.mesh(ii);
+                update_mesh_properties(mesh_cfg, t_new);
+            }
+        }
+
+        template <typename MeshConfig>
+        void update_mesh_properties(MeshConfig& mesh_cfg, real t_new) const
+        {
         }
     };
 
@@ -418,12 +434,10 @@ namespace simbi::ecs {
             constexpr std::uint64_t Rank   = Sim::rank;
             constexpr bool          is_mhd = Sim::is_mhd;
 
-            // create boundary policy for this physics
             auto& mesh_cfg = sim.mesh(lvl);
             auto& geo      = mesh_cfg.geometry;
 
             // extract theta bounds for spherical coordinate handling
-            // theta is x2 (logical), which is at array index Rank-2
             real theta_min = 0.0;
             real theta_max = std::numbers::pi;
             if constexpr (Rank >= 2) {
@@ -437,17 +451,106 @@ namespace simbi::ecs {
             auto policy =
                 hydro::make_boundary_policy<is_mhd, Rank>(geo.metric, theta_min, theta_max);
 
-            // simple context (no dynamic expressions for now)
-            geometry::simple_context_t context;
+            // check if any boundary has dynamic expressions
+            auto&      sources      = sim.sources();
+            const real current_time = sim.metadata().time;
+            bool       has_dynamic  = false;
+
+            for (std::uint64_t ii = 0; ii < 2 * Rank; ++ii) {
+                if (sources.bc_sources[ii].enabled) {
+                    has_dynamic = true;
+                    break;
+                }
+            }
 
             auto& decomp = sim.decomposition(lvl);
 
+            // dispatch based on whether we have dynamic expressions
+            if (has_dynamic) {
+                apply_with_dynamic_context(
+                    sim,
+                    lvl,
+                    mesh_cfg,
+                    policy,
+                    decomp,
+                    sources,
+                    current_time
+                );
+            }
+            else {
+                // simple static context
+                geometry::simple_context_t context;
+
+                for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                    auto& fields = sim.partition_hydro(lvl, pp);
+                    auto& part   = sim.partition(lvl, pp);
+                    auto& exec   = sim.partition_executor(lvl, pp);
+
+                    geometry::boundary_driver_t::apply_boundaries(
+                        fields.cons,
+                        part.block.id,
+                        decomp.skeleton,
+                        mesh_cfg,
+                        policy,
+                        context,
+                        exec
+                    );
+                }
+            }
+        }
+
+        template <typename Sim, typename Policy, typename Decomp, typename Sources>
+        void apply_with_dynamic_context(
+            Sim&                                  sim,
+            std::uint64_t                         lvl,
+            const grid::mesh_config_t<Sim::rank>& mesh_cfg,
+            const Policy&                         policy,
+            const Decomp&                         decomp,
+            const Sources&                        sources,
+            real                                  time
+        ) const
+        {
+            constexpr std::uint64_t Rank = Sim::rank;
+            auto&                   geo  = mesh_cfg.geometry;
+
+            // build geometry service for dynamic context
+            geometry::geometry_service_t<Rank> geo_service{
+                geo,
+                mesh_cfg.global_cells / mesh_cfg.block_size
+            };
+
+            // find first enabled expression
+            const auto* vm_ptr = find_first_enabled_vm<Rank>(sources);
+            if (!vm_ptr) {
+                return;
+            }
+
+            // map metric_type_t to metric_kind_t
+            geometry::metric_kind_t metric_kind;
+            switch (geo.metric) {
+                case geometry::metric_type_t::cartesian:
+                    metric_kind = geometry::metric_kind_t::cartesian;
+                    break;
+                case geometry::metric_type_t::spherical:
+                    metric_kind = geometry::metric_kind_t::spherical;
+                    break;
+                case geometry::metric_type_t::cylindrical:
+                    metric_kind = geometry::metric_kind_t::cylindrical;
+                    break;
+                default:
+                    metric_kind = geometry::metric_kind_t::cartesian;
+                    break;
+            }
+
+            // create dynamic context with metric kind
+            auto context = geometry::dynamic_context_t(metric_kind, geo_service, *vm_ptr, time);
+
+            // apply to all partitions
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
                 auto& part   = sim.partition(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
 
-                // apply boundaries using the driver
                 geometry::boundary_driver_t::apply_boundaries(
                     fields.cons,
                     part.block.id,
@@ -458,6 +561,17 @@ namespace simbi::ecs {
                     exec
                 );
             }
+        }
+
+        template <std::uint64_t Rank>
+        const state::expression_t<Rank>* find_first_enabled_vm(const sources_t<Rank>& sources) const
+        {
+            for (std::uint64_t ii = 0; ii < 2 * Rank; ++ii) {
+                if (sources.bc_sources[ii].enabled) {
+                    return &sources.bc_sources[ii];
+                }
+            }
+            return nullptr;
         }
     };
 
@@ -549,7 +663,6 @@ namespace simbi::ecs {
                 auto& exec   = sim.partition_executor(lvl, pp);
 
                 if (!sim.has_workspace(lvl, pp)) {
-                    sim.create_workspace(lvl, pp);
                 }
                 auto& ws = sim.workspace(lvl, pp);
 
@@ -585,7 +698,7 @@ namespace simbi::ecs {
                 auto& part   = sim.partition(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
 
-                // godunov operator L(u)
+                // godunov operator L(u) returns intensive rates
                 auto ell = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
 
                 auto be = body_effects_system_t<Sim::rank>{}(
@@ -596,7 +709,8 @@ namespace simbi::ecs {
                     meta.level_dts[lvl]
                 );
 
-                // u^{n+1} = u^n + dt * L(u^n) + dt * B(u^n)
+                // moving mesh: \tilde{U}^{n+1} = \tilde{U}^n + dt * a^3 * L(u^n)
+                // static mesh: U^{n+1} = U^n + dt * L(u^n)
                 auto u_view = fields.cons[part.owned_domain];
                 u_view      = u_view.zip(ell, numerics::euler_step_t{dt})
                              .zip(be, numerics::euler_step_t{dt})
@@ -632,6 +746,7 @@ namespace simbi::ecs {
             auto&      meta    = sim.metadata();
             auto&      sources = sim.sources();
             const auto dt      = meta.level_dts[lvl];
+
             if constexpr (Sim::is_mhd) {
                 compute_efield_system_t{}(sim, lvl);
             }
@@ -650,14 +765,14 @@ namespace simbi::ecs {
                 // store u^n
                 ws.u_n = fields.cons.map(fp::identity).with(exec);
 
-                // compute L(u^n)
+                // compute L(u^n) returns intensive rates
                 auto k1 = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
 
                 auto be = body_effects_system_t<Sim::rank>{
                     .update_diagnostics = false
                 }(sim, block_geo, lvl, pp, meta.level_dts[lvl]);
 
-                // u* = u^n + dt * L(u^n)
+                // u* = u^n + dt * a^3 * L(u^n) for moving mesh
                 auto u_star = fields.cons[part.owned_domain];
                 u_star      = u_star.zip(k1, numerics::euler_step_t{dt})
                              .zip(be, numerics::euler_step_t{dt})
@@ -676,7 +791,7 @@ namespace simbi::ecs {
     // =========================================================================
     // rk2 stage 2 functor
     // =========================================================================
-    template <std::uint64_t Rank, typename UStarComp, typename K2Comp, typename BEComp>
+    template <typename UStarComp, typename K2Comp, typename BEComp>
     struct rk2_final_stage_t
     {
         UStarComp u_star;
@@ -684,14 +799,20 @@ namespace simbi::ecs {
         BEComp    be;
         real      dt;
 
-        template <typename ConsT>
+        template <std::uint64_t Rank, typename ConsT>
         DEV ConsT operator()(const iarray<Rank>& coord, const ConsT& u) const
         {
             using namespace simbi::structs;
+            // rk2: u^{n+1} = 0.5*u^n + 0.5*(u* + dt*a^3*L(u*))
             return u | scale_gas(0.5) | add_gas(0.5 * u_star(coord)) |
                    add_gas(0.5 * dt * k2(coord)) | add_gas(0.5 * dt * be(coord));
         }
     };
+
+    // CTAD constructor
+    template <typename UStarComp, typename K2Comp, typename BEComp>
+    rk2_final_stage_t(UStarComp u_star, K2Comp k2, BEComp be, real dt)
+        -> rk2_final_stage_t<UStarComp, K2Comp, BEComp>;
 
     // =========================================================================
     // rk2 stage 2 system
@@ -721,18 +842,17 @@ namespace simbi::ecs {
                 auto& ws     = sim.workspace(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
 
-                // compute L(u*)
+                // compute L(u*) returns intensive rates
                 auto k2 = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
                 auto be = body_effects_system_t<Sim::rank>{
                     .update_diagnostics = true
                 }(sim, block_geo, lvl, pp, meta.level_dts[lvl]);
 
-                // u^{n+1} = 0.5 * u^n + 0.5 * (u* + dt * L(u*))
+                // u^{n+1} = 0.5 * u^n + 0.5 * (u* + dt * a^3 * L(u*))
                 auto u_n    = ws.u_n[part.owned_domain];
                 auto u_star = fields.cons[part.owned_domain];
 
-                rk2_final_stage_t<Sim::rank, decltype(u_star), decltype(k2), decltype(be)>
-                    rk2_combine{u_star, k2, be, dt};
+                rk2_final_stage_t rk2_combine{u_star, k2, be, dt};
 
                 u_n = u_n.enum_map(rk2_combine).with(exec);
 
@@ -1024,7 +1144,7 @@ namespace simbi::ecs {
 
             auto& flux_regs = sim.flux_register(fine_lvl);
             auto& mesh_cfg  = sim.mesh(coarse_lvl);
-            auto  motion    = get_motion_state(sim);
+            auto  motion    = sim.motion_state();
 
             // build geometry for coarse level
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
@@ -1084,7 +1204,7 @@ namespace simbi::ecs {
 
             const auto coarse_lvl = fine_lvl - 1;
             auto&      mesh_cfg   = sim.mesh(fine_lvl);
-            auto       motion     = get_motion_state(sim);
+            auto       motion     = sim.motion_state();
 
             // build geometry for fine level
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
@@ -1151,7 +1271,7 @@ namespace simbi::ecs {
 
             const auto coarse_lvl = fine_lvl - 1;
             auto&      mesh_cfg   = sim.mesh(coarse_lvl);
-            auto       motion     = get_motion_state(sim);
+            auto       motion     = sim.motion_state();
 
             // build geometry and apply correction
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {

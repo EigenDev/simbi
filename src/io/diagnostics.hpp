@@ -29,7 +29,7 @@ namespace simbi::diagnostics {
     void diagnose_cons2prim_failure(Sim& sim, Table& table)
     {
         const auto gamma  = sim.metadata().gamma;
-        auto       motion = ecs::get_motion_state(sim);
+        auto       motion = sim.motion_state();
 
         // scan all levels and partitions to find the failing zone
         for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {

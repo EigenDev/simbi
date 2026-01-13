@@ -17,8 +17,10 @@
 #include "build_config.hpp"
 #include "compute/numerics.hpp"
 #include "containers/vector.hpp"
+#include "ecs/geometry_visitor.hpp"
 #include "ecs/systems.hpp"
 #include "functional/fp.hpp"
+#include "geometry/volume_scaling.hpp"
 #include "grid/amr/prolongation.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
@@ -172,6 +174,9 @@ namespace simbi::ecs::creation {
             auto full_domain   = part.allocated_domain;
             auto active_domain = part.owned_domain;
 
+            auto        motion = sim.motion_state();
+            const auto& mesh   = sim.mesh(lvl);
+
             // initialize primitives from a host-local generator and then clone
             // to the partition locality. create host-local prims explicitly so
             // initialize primitives from generator (uses unified memory)
@@ -185,14 +190,6 @@ namespace simbi::ecs::creation {
                 for (std::uint64_t dir = 0; dir < Rank; ++dir) {
                     auto staggered_domain = active_domain;
                     staggered_domain.fin[dir] += 1;
-                    // staggered is extended by 1 in
-                    // transverse directions
-                    // for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    //     if (dd != dir) {
-                    //         staggered_domain.start[dd] -= 1;
-                    //         staggered_domain.fin[dd] += 1;
-                    //     }
-                    // }
 
                     auto staggered_active = active_domain;
                     staggered_active.fin[dir] += 1;
@@ -207,8 +204,6 @@ namespace simbi::ecs::creation {
 
                 // interpolate face-centered B to cell-centered for conserved
                 // state
-                auto& mesh   = sim.mesh(lvl);
-                auto  motion = ecs::get_motion_state(sim);
                 ecs::with_block_geometry<Sim::coord_system>(
                     mesh,
                     motion,
@@ -226,8 +221,34 @@ namespace simbi::ecs::creation {
             }
 
             // convert primitives to conserved
-            fields.cons[active_domain] =
-                fields.prim[active_domain].map(numerics::to_conserved_t{gamma}).with(exec);
+            // for moving mesh: store volume-normalized extensive variables to conserve mass
+
+            if (motion.is_moving) {
+                // store Q = \rho * scale_factor (mass per comoving volume)
+                // physical volume: V_phys(t) = scale_factor(geometry, a) * V_comoving
+                // this conserves total mass as mesh expands
+                std::cout << "Initializing moving mesh conserved variables..." << std::endl;
+                std::cin.get();
+                ecs::with_block_geometry<Sim::coord_system>(
+                    mesh,
+                    motion,
+                    [&exec, gamma, active_domain, fields](const auto& block_geo) {
+                        auto cons  = fields.cons[active_domain];
+                        auto prims = fields.prim[active_domain];
+                        cons       = prims.map(numerics::to_conserved_t{gamma})
+                                   .enum_map([&block_geo](auto coord, auto u) {
+                                       const auto dv = block_geo.volume(coord);
+                                       return u * dv;
+                                   })
+                                   .with(exec);
+                    }
+                );
+            }
+            else {
+                // static mesh: store intensive conserved variables
+                fields.cons[active_domain] =
+                    fields.prim[active_domain].map(numerics::to_conserved_t{gamma}).with(exec);
+            }
         }
 
         // -------------------------------------------------------------------------
@@ -274,7 +295,7 @@ namespace simbi::ecs::creation {
                 // state
                 auto& child_part = sim.partition(lvl, 0);
                 auto& child_mesh = sim.mesh(lvl);
-                auto  motion     = ecs::get_motion_state(sim);
+                auto  motion     = sim.motion_state();
                 auto& exec       = sim.partition_executor(lvl, 0);
                 ecs::with_block_geometry<Sim::coord_system>(
                     child_mesh,
@@ -293,7 +314,26 @@ namespace simbi::ecs::creation {
             }
 
             // convert prolonged primitives to conserved
-            child_fields.cons = child_fields.prim.map(numerics::to_conserved_t{gamma}).with(exec);
+            // for moving mesh: use extensive variables just like in initialize_level
+            auto motion = sim.motion_state();
+
+            if (motion.is_moving) {
+                // get volume scaling factor for this geometry and dimensionality
+                const auto& meta = sim.metadata();
+                const real  volume_factor =
+                    geometry::get_scaling_factor<Sim::rank>(meta.coord_system, motion.a);
+
+                // store Ũ = ρ * scale_factor (mass per comoving volume)
+                child_fields.cons =
+                    child_fields.prim.map(numerics::to_conserved_t{gamma})
+                        .map([volume_factor](const auto& u) { return u * volume_factor; })
+                        .with(exec);
+            }
+            else {
+                // static mesh: store intensive conserved variables
+                child_fields.cons =
+                    child_fields.prim.map(numerics::to_conserved_t{gamma}).with(exec);
+            }
         }
     };
 

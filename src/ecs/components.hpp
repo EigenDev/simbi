@@ -42,11 +42,13 @@
 #include "grid/skeleton.hpp"
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
+#include "platform.hpp"
 #include "utility/enums.hpp"
 #include "xpu/comm/types.hpp"
 #include "xpu/xpu.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <type_traits>

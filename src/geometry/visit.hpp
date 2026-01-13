@@ -12,13 +12,10 @@ namespace simbi::geometry {
     // this generates the combinatorial explosion of kernels (uniform-uniform,
     // uniform-log, etc) so the compiler can optimize each one perfectly.
     template <std::uint64_t Rank, typename GeoService, typename Visitor>
-    void visit_block_geometry(
-        const GeoService& service,
-        const grid::patch_id_t& id,
-        Visitor&& visitor
-    )
+    void
+    visit_block_geometry(const GeoService& service, const grid::patch_id_t& id, Visitor&& visitor)
     {
-        // 1. create the variants for each dimension
+        // create the variants for each dimension
         auto map0 = service.create_map(0, id.coords[0], id.level);
 
         if constexpr (Rank == 1) {
@@ -26,11 +23,7 @@ namespace simbi::geometry {
         }
         else if constexpr (Rank == 2) {
             auto map1 = service.create_map(1, id.coords[1], id.level);
-            std::visit(
-                [&](auto&& m0, auto&& m1) { visitor(m0, m1); },
-                map0,
-                map1
-            );
+            std::visit([&](auto&& m0, auto&& m1) { visitor(m0, m1); }, map0, map1);
         }
         else {
             auto map1 = service.create_map(1, id.coords[1], id.level);
@@ -44,6 +37,6 @@ namespace simbi::geometry {
         }
     }
 
-}   // namespace simbi::geometry
+} // namespace simbi::geometry
 
 #endif

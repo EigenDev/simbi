@@ -3,7 +3,6 @@
 #include "decorators.hpp"
 #include "geometry/boundary/driver.hpp"
 #include "geometry/coordinate_map.hpp"
-#include "geometry/metrics.hpp"
 #include "grid/block_info.hpp"
 #include "grid/boundary.hpp"
 #include "grid/connectivity.hpp"
@@ -52,7 +51,6 @@ struct test_policy_t
 
 int main()
 {
-    using test_metric_t = cartesian_metric_t<uniform_map_t>;
     std::cout << "testing dynamic boundaries..." << std::endl;
 
     domain_t<1> alloc(iarray<1>{-1}, iarray<1>{5});
@@ -83,7 +81,7 @@ int main()
     config.global_cells = {4};
 
     double            time = 2.0;
-    dynamic_context_t ctx(use_metric<test_metric_t>, mock_geo_service_t{}, mock_vm_t{}, time);
+    dynamic_context_t ctx(metric_kind_t::cartesian, mock_geo_service_t{}, mock_vm_t{}, time);
 
     boundary_driver_t::apply_boundaries(u, block.id, skeleton, config, test_policy_t{}, ctx, exec);
 

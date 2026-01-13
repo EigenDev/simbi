@@ -20,7 +20,7 @@ namespace simbi::hydro::newtonian {
     template <
         concepts::is_hydro_conserved_c conserved_t,
         typename EoS = ideal_gas_eos_t<conserved_t::regime>>
-    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
+    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma, real dv = 1.0)
         -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
@@ -32,7 +32,7 @@ namespace simbi::hydro::newtonian {
         if (prim.pre <= 0.0 || !std::isfinite(prim.pre)) {
             return None(ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE);
         }
-        return prim;
+        return prim / dv;
     }
 } // namespace simbi::hydro::newtonian
 
@@ -42,7 +42,7 @@ namespace simbi::hydro::srhd {
     template <
         concepts::is_hydro_conserved_c conserved_t,
         typename EoS = ideal_gas_eos_t<conserved_t::regime>>
-    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
+    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma, real dv = 1.0)
         -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
@@ -80,8 +80,9 @@ namespace simbi::hydro::srhd {
         const auto inv_et   = 1.0 / (tau + d + peq);
         const auto velocity = svec * inv_et;
         const auto w        = 1.0 / std::sqrt(1.0 - vecops::dot(velocity, velocity));
+        const auto vel      = build::use_four_velocity ? velocity * w : velocity;
 
-        return primitive_t{d / w, velocity * (build::use_four_velocity ? w : 1.0), peq, dchi / d};
+        return primitive_t{d / w, vel, peq, dchi / d} / dv;
     }
 
 } // namespace simbi::hydro::srhd
@@ -92,7 +93,7 @@ namespace simbi::hydro::rmhd {
     using namespace simbi::helpers;
 
     template <is_mhd_conserved_c conserved_t, typename EoS = ideal_gas_eos_t<conserved_t::regime>>
-    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
+    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma, real dv = 1.0)
         -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
@@ -207,22 +208,22 @@ namespace simbi::hydro::rmhd {
             vel *= w;
         }
 
-        return primitive_t{rhohat, vel, pg, bfield, dchi / d};
+        return primitive_t{rhohat, vel, pg, bfield, dchi / d} / dv;
     }
 } // namespace simbi::hydro::rmhd
 
 namespace simbi::hydro {
     template <is_hydro_conserved_c conserved_t>
-    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma)
+    DEV constexpr auto to_primitive(const conserved_t& cons, real gamma, real dv = 1.0)
     {
         if constexpr (conserved_t::regime == regime_t::NEWTONIAN) {
-            return newtonian::to_primitive(cons, gamma);
+            return newtonian::to_primitive(cons, gamma, dv);
         }
         else if constexpr (conserved_t::regime == regime_t::SRHD) {
-            return srhd::to_primitive(cons, gamma);
+            return srhd::to_primitive(cons, gamma, dv);
         }
         else if constexpr (conserved_t::regime == regime_t::RMHD) {
-            return rmhd::to_primitive(cons, gamma);
+            return rmhd::to_primitive(cons, gamma, dv);
         }
         else {
             // lambda trick for nvcc compatibility

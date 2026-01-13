@@ -202,12 +202,12 @@ namespace simbi::evolution {
         {
             using namespace ecs;
             auto& meta     = sim.metadata();
-            auto  motion   = get_motion_state(sim);
+            auto  motion   = sim.motion_state();
             auto& mesh_cfg = sim.mesh(lvl);
 
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 ghost_fill_system_t{}(sim, lvl);
-                c2p_system_t{}(sim, lvl);
+                c2p_system_t{}(sim, lvl, block_geo);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl);
@@ -221,7 +221,7 @@ namespace simbi::evolution {
                     accumulate_coarse_flux_system_t{}(sim, lvl, fine_level, dt_coarse);
                 }
 
-                euler_system_t<Ops>{ops}(sim, block_geo, lvl);
+                // euler_system_t<Ops>{ops}(sim, block_geo, lvl);
             });
 
             if (lvl < sim.num_levels() - 1) {
@@ -266,13 +266,13 @@ namespace simbi::evolution {
             using namespace ecs;
             auto&      meta     = sim.metadata();
             auto&      mesh_cfg = sim.mesh(lvl);
-            auto       motion   = get_motion_state(sim);
+            auto       motion   = sim.motion_state();
             const auto dt       = meta.level_dts[lvl];
 
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 // === STAGE 1: u^n -> u* ===
                 ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
-                c2p_system_t{}(sim, lvl);
+                c2p_system_t{}(sim, lvl, block_geo);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u^n)
@@ -305,7 +305,7 @@ namespace simbi::evolution {
 
                 // === STAGE 2: u* -> u^{n+1} ===
                 ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
-                c2p_system_t{}(sim, lvl);
+                c2p_system_t{}(sim, lvl, block_geo);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u*)
@@ -364,7 +364,13 @@ namespace simbi::evolution {
             using namespace ecs;
             for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
                 ghost_fill_system_t{}(sim, lvl);
-                c2p_system_t{}(sim, lvl);
+                auto& mesh_cfg = sim.mesh(lvl);
+                auto  motion   = sim.motion_state();
+                with_block_geometry<Sim::coord_system>(
+                    mesh_cfg,
+                    motion,
+                    [&](const auto& block_geo) { c2p_system_t{}(sim, lvl, block_geo); }
+                );
                 if (sim.has_refinement()) {
                     init_flux_registers_system_t{}(sim, lvl);
                 }
@@ -383,7 +389,7 @@ namespace simbi::evolution {
             timestep_system_t{}(sim);
 
             if (meta.timestepping == timestepping_t::RK2) {
-                advance_level_rk2(0);
+                // advance_level_rk2(0);
             }
             else if (meta.timestepping == timestepping_t::EULER) {
                 advance_level_euler(0);

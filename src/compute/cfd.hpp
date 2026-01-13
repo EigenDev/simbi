@@ -24,6 +24,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <type_traits>
 
 namespace simbi::cfd {
@@ -61,7 +62,7 @@ namespace simbi::cfd {
         DEV constexpr auto operator()(iarray<rank> coord) const
         {
             conserved_t divergence{};
-            const auto  dv = geometry.volume(coord);
+            const auto  dv = geometry.volume(coord) / geometry.volume_scaling(coord);
 
             for (std::uint64_t dir = 0; dir < rank; ++dir) {
                 const auto offset     = unit_vectors::array_offset<rank>(dir);
@@ -74,6 +75,18 @@ namespace simbi::cfd {
                 // face areas from geometry
                 const auto al = geometry.face_area(coord, dir);
                 const auto ar = geometry.face_area(coord_plus, dir);
+
+                if constexpr (rank == 1) {
+                    if (coord[0] == 1) {
+                        std::cout << "al: " << al << " ar: " << ar << std::endl;
+                        std::cout << "fl: " << fl << " fr: " << fr << std::endl;
+                        std::cout << "a(t): " << geometry.motion.a << std::endl;
+                        std::cout << "dArea: " << ar - al << std::endl;
+                        std::cout << "a(t)^2: " << geometry.motion.a * geometry.motion.a
+                                  << std::endl;
+                        std::cin.get();
+                    }
+                }
 
                 divergence = divergence + (fr * ar - fl * al) / dv;
             }
@@ -128,8 +141,9 @@ namespace simbi::cfd {
 
             const auto position  = geometry.centroid(coord);
             const auto primitive = prims(coord);
+            const auto volscale  = geometry.volume_scaling(coord);
 
-            return gravity_source->apply(position, primitive, time, gamma);
+            return gravity_source->apply(position, primitive, time, gamma) * volscale;
         }
     };
 
@@ -179,8 +193,9 @@ namespace simbi::cfd {
 
             const auto position  = geometry.centroid(coord);
             const auto conserved = cons(coord);
+            const auto volscale  = geometry.volume_scaling(coord);
 
-            return hydro_source->apply(position, conserved, time);
+            return hydro_source->apply(position, conserved, time) * volscale;
         }
     };
 
@@ -218,22 +233,23 @@ namespace simbi::cfd {
         DEV constexpr auto operator()(iarray<rank> coord) const
         {
             const auto primitive = prims(coord);
+            const auto volscale  = geometry.volume_scaling(coord);
 
             // delegate to geometry's metric for source term computation
-            return geometry.geomtric_source_factors(primitive, gamma, coord);
+            return geometry.geomtric_source_factors(primitive, gamma, coord) * volscale;
         }
     };
 
     template <typename PrimField, typename Geometry>
     auto geometric_sources(
-        const PrimField&                       prims,
+        const PrimField&                       prim,
         const grid::domain_t<PrimField::rank>& domain,
         const Geometry&                        geometry,
         real                                   gamma
     )
     {
         return compute::computation_t{
-            geometric_source_op_t<PrimField, Geometry>{prims, geometry, gamma},
+            geometric_source_op_t<PrimField, Geometry>{prim, geometry, gamma},
             domain
         };
     }

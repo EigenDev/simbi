@@ -3,6 +3,7 @@
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -10,7 +11,7 @@
 #include <numbers>
 
 namespace simbi::geometry {
-    struct dummy_map
+    struct dummy_map_t
     {
         DUAL constexpr real width(int) const
         {
@@ -40,7 +41,7 @@ namespace simbi::geometry {
     // cartesian metric
     // orthogonal, flat. dv = dx * dy * dz
     // =========================================================================
-    template <typename Map1, typename Map2 = dummy_map, typename Map3 = dummy_map>
+    template <typename Map1, typename Map2 = dummy_map_t, typename Map3 = dummy_map_t>
     struct cartesian_metric_t
     {
         Map1 x1_map;
@@ -53,17 +54,17 @@ namespace simbi::geometry {
         }
 
         DUAL constexpr cartesian_metric_t(Map1 m1, Map2 m2)
-            : x1_map(m1), x2_map(m2), x3_map(dummy_map{})
+            : x1_map(m1), x2_map(m2), x3_map(dummy_map_t{})
         {
         }
 
         DUAL constexpr cartesian_metric_t(Map1 m1)
-            : x1_map(m1), x2_map(dummy_map{}), x3_map(dummy_map{})
+            : x1_map(m1), x2_map(dummy_map_t{}), x3_map(dummy_map_t{})
         {
         }
 
         template <std::uint64_t Rank>
-        DUAL constexpr auto scale_factors(const simbi::vector_t<int64_t, Rank>& /*idx*/) const
+        DUAL constexpr auto scale_factors(const iarray<Rank>& /*idx*/) const
         {
             vector_t<real, Rank> h;
             h.fill(1.0);
@@ -72,7 +73,7 @@ namespace simbi::geometry {
 
         // coordinate-space cell widths (dx, dy, dz)
         template <std::uint64_t Rank>
-        DUAL constexpr auto cell_widths(const simbi::vector_t<int64_t, Rank>& idx) const
+        DUAL constexpr auto cell_widths(const iarray<Rank>& idx) const
         {
             vector_t<real, Rank> w;
             w[Rank - 1] = x1_map(idx[Rank - 1]).width;
@@ -86,8 +87,7 @@ namespace simbi::geometry {
         }
 
         template <std::uint64_t Rank>
-        DUAL constexpr real
-        face_position(const simbi::vector_t<int64_t, Rank>& idx, std::size_t dim) const
+        DUAL constexpr real face_position(const iarray<Rank>& idx, std::size_t dim) const
         {
             constexpr std::uint64_t x1i = Rank - 1;
             constexpr std::uint64_t x2i = Rank - 2;
@@ -187,7 +187,7 @@ namespace simbi::geometry {
     // spherical metric (r, theta, phi)
     // dv = r^2 sin(theta) dr dtheta dphi
     // =========================================================================
-    template <typename MapR, typename MapTheta = dummy_map, typename MapPhi = dummy_map>
+    template <typename MapR, typename MapTheta = dummy_map_t, typename MapPhi = dummy_map_t>
     struct spherical_metric_t
     {
         MapR     r_map;
@@ -195,12 +195,12 @@ namespace simbi::geometry {
         MapPhi   phi_map;
 
         DUAL constexpr spherical_metric_t(MapR mr)
-            : r_map(mr), theta_map(dummy_map{}), phi_map(dummy_map{})
+            : r_map(mr), theta_map(dummy_map_t{}), phi_map(dummy_map_t{})
         {
         }
 
         DUAL constexpr spherical_metric_t(MapR mr, MapTheta mt)
-            : r_map(mr), theta_map(mt), phi_map(dummy_map{})
+            : r_map(mr), theta_map(mt), phi_map(dummy_map_t{})
         {
         }
 
@@ -210,7 +210,7 @@ namespace simbi::geometry {
         }
 
         template <std::uint64_t Rank>
-        DUAL constexpr auto scale_factors(const simbi::vector_t<int64_t, Rank>& idx) const
+        DUAL constexpr auto scale_factors(const iarray<Rank>& idx) const
         {
             constexpr std::uint64_t x1i = Rank - 1;
             constexpr std::uint64_t x2i = Rank - 2;
@@ -236,7 +236,7 @@ namespace simbi::geometry {
 
         // coordinate-space cell widths (dr, dtheta, dphi)
         template <std::uint64_t Rank>
-        DUAL constexpr auto cell_widths(const simbi::vector_t<int64_t, Rank>& idx) const
+        DUAL constexpr auto cell_widths(const iarray<Rank>& idx) const
         {
             constexpr std::uint64_t x1i = Rank - 1;
             constexpr std::uint64_t x2i = Rank - 2;
@@ -253,8 +253,7 @@ namespace simbi::geometry {
         }
 
         template <std::uint64_t Rank>
-        DUAL constexpr real
-        face_position(const simbi::vector_t<int64_t, Rank>& idx, std::size_t dim) const
+        DUAL constexpr real face_position(const iarray<Rank>& idx, std::size_t dim) const
         {
             constexpr std::uint64_t x1i = Rank - 1;
             constexpr std::uint64_t x2i = Rank - 2;
@@ -418,8 +417,8 @@ namespace simbi::geometry {
     };
     template <
         typename MapR,
-        typename MapPhi  = dummy_map,
-        typename MapZ    = dummy_map,
+        typename MapPhi  = dummy_map_t,
+        typename MapZ    = dummy_map_t,
         typename CylType = full_cylindrical_tag>
     struct cylindrical_metric_t
     {
@@ -429,12 +428,12 @@ namespace simbi::geometry {
         using cyl_type = CylType;
 
         DUAL constexpr cylindrical_metric_t(MapR mr)
-            : r_map(mr), phi_map(dummy_map{}), z_map(dummy_map{})
+            : r_map(mr), phi_map(dummy_map_t{}), z_map(dummy_map_t{})
         {
         }
 
         DUAL constexpr cylindrical_metric_t(MapR mr, MapPhi mp)
-            : r_map(mr), phi_map(mp), z_map(dummy_map{})
+            : r_map(mr), phi_map(mp), z_map(dummy_map_t{})
         {
         }
 
@@ -444,7 +443,7 @@ namespace simbi::geometry {
         }
 
         template <std::uint64_t Rank>
-        DUAL constexpr auto scale_factors(const simbi::vector_t<int64_t, Rank>& idx) const
+        DUAL constexpr auto scale_factors(const iarray<Rank>& idx) const
         {
             constexpr std::uint64_t x1i = Rank - 1;
             constexpr std::uint64_t x2i = Rank - 2;
@@ -466,7 +465,7 @@ namespace simbi::geometry {
 
         // coordinate-space cell widths (dr, dphi, dz)
         template <std::uint64_t Rank>
-        DUAL constexpr auto cell_widths(const simbi::vector_t<int64_t, Rank>& idx) const
+        DUAL constexpr auto cell_widths(const iarray<Rank>& idx) const
         {
             constexpr std::uint64_t x1i = Rank - 1;
             constexpr std::uint64_t x2i = Rank - 2;
@@ -488,8 +487,7 @@ namespace simbi::geometry {
         }
 
         template <std::uint64_t Rank>
-        DUAL constexpr real
-        face_position(const simbi::vector_t<int64_t, Rank>& idx, std::size_t dim) const
+        DUAL constexpr real face_position(const iarray<Rank>& idx, std::size_t dim) const
         {
             constexpr std::uint64_t x1i = Rank - 1;
             constexpr std::uint64_t x2i = Rank - 2;

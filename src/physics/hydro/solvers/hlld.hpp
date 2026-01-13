@@ -223,6 +223,7 @@ namespace simbi::hydro::rmhd {
             // Iteratively solve for the pressure
             //------------------------------------
             //------------ initial pressure guess
+            // TODO: pass in real volume scaling for this
             const auto maybe_prim = to_primitive(hll_state, gamma);
             if (!maybe_prim.has_value()) {
                 return hll_flux - hll_state * vface;

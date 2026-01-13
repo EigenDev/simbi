@@ -8,11 +8,8 @@
 #include "grid/field.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/write_policy.hpp"
-#include "physics/hydro/physics.hpp"
 
-#include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -32,10 +29,12 @@ namespace simbi::io {
         {
             auto g = parent.createGroup(std::string(group_name));
 
-            // write primitive field with domain
+            // write primitive field with domain (always intensive)
             write_primitives(g, fields.prim, policy);
 
             // write conserved field with domain
+            // note: when mesh is moving, conserved vars are extensive (M = ρ*V)
+            // user must convert in post-processing if needed
             write_conserved(g, fields.cons, policy);
 
             // write magnetic fields if present (mhd)

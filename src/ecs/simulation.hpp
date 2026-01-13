@@ -270,37 +270,18 @@ namespace simbi::ecs {
             return registry.has<flux_register_component_t<conserved_t, Rank>>(levels[lvl]);
         }
 
-        // -------------------------------------------------------------------------
-        // with_geometry
-        //
-        // invokes a callback with the block geometry for a level.
-        // uses visitor pattern to handle log/uniform coordinate maps.
-        //
-        // usage:
-        //   sim.with_geometry(lvl, motion, [&](const auto& geo) {
-        //       // geo is block_geometry_t<Metric>
-        //       auto h = geo.scale_factors(coord);
-        //   });
-        // -------------------------------------------------------------------------
-        template <typename Func>
-        decltype(auto)
-        with_geometry(std::uint64_t lvl, const geometry::motion_state_t& motion, Func&& func)
+        bool has_mesh_motion() const
         {
-            return ecs::with_block_geometry<coord_system>(
-                level_mesh(lvl).config,
-                motion,
-                std::forward<Func>(func)
-            );
+            return registry.has<mesh_motion_config_t>(global);
         }
 
-        template <typename Func>
-        decltype(auto) with_geometry(std::uint64_t lvl, Func&& func)
+        auto motion_state() const
         {
-            return with_geometry(
-                lvl,
-                mesh_motion_config_t::static_mesh(),
-                std::forward<Func>(func)
-            );
+            if (has_mesh_motion()) {
+                const auto& motion_cfg = registry.get<mesh_motion_config_t>(global);
+                return motion_cfg.snapshot(metadata().time);
+            }
+            return mesh_motion_config_t::static_mesh();
         }
 
         // -------------------------------------------------------------------------

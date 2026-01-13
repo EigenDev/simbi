@@ -112,6 +112,9 @@ class MeshGeometry:
     spacing_types: tuple[str, ...]  # ["linear", "log", ...]
     metric: str  # "cartesian", "spherical", etc.
     halo_radius: int
+    coordinate_system: str = "physical"  # "physical" or "comoving"
+    scale_factor_a: float = 1.0  # a(t) for moving mesh
+    scale_factor_adot: float = 0.0  # da/dt for moving mesh
 
     @property
     def ndim(self) -> int:
@@ -346,7 +349,7 @@ def read_partition(
     )
 
 
-def read_mesh_geometry(mesh_group: h5py.Group) -> Result[MeshGeometry, str]:
+def read_mesh_geometry(mesh_group: h5py.Group, level_group: h5py.Group = None) -> Result[MeshGeometry, str]:
     """read mesh configuration."""
     try:
         global_cells = tuple(mesh_group["global_cells"][()])
@@ -382,6 +385,22 @@ def read_mesh_geometry(mesh_group: h5py.Group) -> Result[MeshGeometry, str]:
                 else str(spacing_type_val)
             )
 
+        # read motion state from level group if present
+        coordinate_system = "physical"
+        scale_factor_a = 1.0
+        scale_factor_adot = 0.0
+
+        if level_group is not None:
+            coord_sys_val = level_group.attrs.get("coordinate_system")
+            if coord_sys_val:
+                coordinate_system = (
+                    coord_sys_val.decode("utf-8")
+                    if isinstance(coord_sys_val, bytes)
+                    else str(coord_sys_val)
+                )
+            scale_factor_a = float(level_group.attrs.get("scale_factor_a", 1.0))
+            scale_factor_adot = float(level_group.attrs.get("scale_factor_adot", 0.0))
+
         return Ok(
             MeshGeometry(
                 dims=tuple(dims),
@@ -389,6 +408,9 @@ def read_mesh_geometry(mesh_group: h5py.Group) -> Result[MeshGeometry, str]:
                 spacing_types=tuple(spacing_types),
                 metric=metric,
                 halo_radius=halo_radius,
+                coordinate_system=coordinate_system,
+                scale_factor_a=scale_factor_a,
+                scale_factor_adot=scale_factor_adot,
             )
         )
     except Exception as e:
@@ -403,7 +425,7 @@ def read_level(
     if "mesh" not in level_group:
         return Err(f"no mesh in level_{level_id}")
 
-    mesh_result = read_mesh_geometry(level_group["mesh"])
+    mesh_result = read_mesh_geometry(level_group["mesh"], level_group)
     if mesh_result.is_err():
         return Err(
             f"failed to read mesh for level_{level_id}: {mesh_result.error}"

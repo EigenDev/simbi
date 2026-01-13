@@ -4,6 +4,7 @@
 #include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "geometry/boundary/index_map.hpp"
+#include "geometry/metrics.hpp"
 #include "geometry/visit.hpp"
 #include "grid/boundary.hpp"
 #include "grid/connectivity.hpp"
@@ -22,8 +23,15 @@ namespace simbi::geometry {
     // for simple runs without dynamic boundaries
     struct simple_context_t
     {
-        using metric_type                 = void; // not needed
+        // no dynamic expressions, just static boundary policies
         static constexpr bool has_dynamic = false;
+    };
+
+    // metric kind tag for dynamic context
+    enum class metric_kind_t {
+        cartesian,
+        spherical,
+        cylindrical
     };
 
     // helper tag for CTAD
@@ -36,37 +44,36 @@ namespace simbi::geometry {
     template <typename Metric>
     constexpr use_metric_t<Metric> use_metric{};
 
-    // for full physics runs
-    template <typename Metric, typename GeoService, typename VM>
+    // for full physics runs - simplified version using metric kind
+    template <typename GeoService, typename VM>
     struct dynamic_context_t
     {
-        using metric_type                 = Metric; // e.g., spherical_metric_t
         using vm_type                     = VM;
         static constexpr bool has_dynamic = true;
 
+        metric_kind_t     metric_kind;
         const GeoService& geo_service;
         const VM&         vm;
         real              time;
 
-        // constructor required for CTAD to strip the tag
         constexpr dynamic_context_t(
-            use_metric_t<Metric>,
+            metric_kind_t     mk,
             const GeoService& g,
             const VM&         v,
             const real        t
         )
-            : geo_service(g), vm(v), time(t)
+            : metric_kind(mk), geo_service(g), vm(v), time(t)
         {
         }
     };
 
-    template <typename Metric, typename GeoService, typename VM>
-    dynamic_context_t(use_metric_t<Metric>, const GeoService&, const VM&, real)
-        -> dynamic_context_t<Metric, GeoService, VM>;
+    template <typename GeoService, typename VM>
+    dynamic_context_t(metric_kind_t, const GeoService&, const VM&, real)
+        -> dynamic_context_t<GeoService, VM>;
 
     template <typename T>
-    concept is_dynamic_context_c = requires {
-        typename T::metric_type;
+    concept is_dynamic_context_c = requires(T t) {
+        { t.metric_kind } -> std::convertible_to<metric_kind_t>;
         requires T::has_dynamic == true;
     };
 
@@ -300,22 +307,42 @@ namespace simbi::geometry {
                             context.geo_service,
                             id,
                             [&](const auto&... maps) {
-                                auto block_geo = typename Context::metric_type(maps...);
+                                auto process_with_metric = [&](auto&& metric) {
+                                    auto dyn_op = dynamic_boundary_op_t<
+                                        T,
+                                        std::decay_t<decltype(metric)>,
+                                        typename Context::vm_type,
+                                        Rank>{metric, context.vm, context.time};
 
-                                auto dyn_op = dynamic_boundary_op_t<
-                                    T,
-                                    decltype(block_geo),
-                                    typename Context::vm_type,
-                                    Rank>{block_geo, context.vm, context.time};
+                                    std::int64_t edge = (primary_side == grid::side_t::left)
+                                                            ? geometry.start[primary_dd]
+                                                            : geometry.fin[primary_dd] - 1;
 
-                                std::int64_t edge = (primary_side == grid::side_t::left)
-                                                        ? geometry.start[primary_dd]
-                                                        : geometry.fin[primary_dd] - 1;
+                                    auto clamp = clamp_map_t<Rank>{primary_dd, edge, edge + 1};
 
-                                auto clamp = clamp_map_t<Rank>{primary_dd, edge, edge + 1};
+                                    field[ghost.domain] =
+                                        field[ghost.domain].remap(clamp).enum_map(dyn_op).with(
+                                            exec
+                                        );
+                                };
 
-                                field[ghost.domain] =
-                                    field[ghost.domain].remap(clamp).enum_map(dyn_op).with(exec);
+                                switch (context.metric_kind) {
+                                    case metric_kind_t::cartesian: {
+                                        auto metric = cartesian_metric_t{maps...};
+                                        process_with_metric(metric);
+                                        break;
+                                    }
+                                    case metric_kind_t::spherical: {
+                                        auto metric = spherical_metric_t{maps...};
+                                        process_with_metric(metric);
+                                        break;
+                                    }
+                                    case metric_kind_t::cylindrical: {
+                                        auto metric = cylindrical_metric_t{maps...};
+                                        process_with_metric(metric);
+                                        break;
+                                    }
+                                }
                             }
                         );
                     }

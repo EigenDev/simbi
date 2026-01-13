@@ -3,6 +3,7 @@
 
 #include "build_config.hpp"
 #include "ecs/components.hpp"
+#include "geometry/block_geometry.hpp"
 #include "grid/mesh_config.hpp"
 #include "grid/skeleton.hpp"
 #include "h5_serializable.hpp"
@@ -117,6 +118,19 @@ namespace simbi::io {
                 sim.metadata(),
                 policy
             );
+
+            // write motion state snapshot if mesh is moving
+            if (sim.registry.template has<ecs::mesh_motion_config_t>(sim.global)) {
+                const auto& motion_cfg =
+                    sim.registry.template get<ecs::mesh_motion_config_t>(sim.global);
+                auto motion_snapshot = motion_cfg.snapshot(sim.metadata().time);
+
+                auto motion_group = file.createGroup("motion_state");
+                write_attribute(motion_group, "is_moving", motion_snapshot.is_moving);
+                write_attribute(motion_group, "is_homologous", motion_snapshot.is_homologous);
+                write_attribute(motion_group, "a", motion_snapshot.a);
+                write_attribute(motion_group, "a_dot", motion_snapshot.a_dot);
+            }
         }
 
         void write_hierarchy_info(H5::H5File& file) const
@@ -146,6 +160,31 @@ namespace simbi::io {
             auto mesh_cfg = sim.mesh(lvl);
 
             h5_serializable<grid::mesh_config_t<Sim::rank>>::write(level_group, mesh_cfg, policy);
+
+            // annotate mesh interpretation for moving meshes
+            if (sim.registry.template has<ecs::mesh_motion_config_t>(sim.global)) {
+                const auto& motion_cfg =
+                    sim.registry.template get<ecs::mesh_motion_config_t>(sim.global);
+                auto motion_snapshot = motion_cfg.snapshot(sim.metadata().time);
+
+                // add motion metadata to level group
+                write_attribute(level_group, "coordinate_system", std::string("comoving"));
+                write_attribute(level_group, "scale_factor_a", motion_snapshot.a);
+                write_attribute(level_group, "scale_factor_adot", motion_snapshot.a_dot);
+                write_attribute(
+                    level_group,
+                    "mesh_interpretation",
+                    std::string("mesh bounds are comoving; physical = a(t) * comoving")
+                );
+            }
+            else {
+                write_attribute(level_group, "coordinate_system", std::string("physical"));
+                write_attribute(
+                    level_group,
+                    "mesh_interpretation",
+                    std::string("mesh bounds are physical (static mesh)")
+                );
+            }
 
             // write skeleton (topology with boundary metadata)
             const auto& skeleton = sim.decomposition(lvl).skeleton;
@@ -292,6 +331,15 @@ namespace simbi::io {
 
             // read metadata
             auto meta = h5_serializable<ecs::simulation_metadata_t<Sim::rank>>::read(file);
+
+            // read motion state snapshot if present (user must re-provide callbacks)
+            // this is informational - the actual motion_config_t with callbacks
+            // will be set by the user when constructing the restarted simulation
+            if (group_exists(file, "motion_state")) {
+                auto motion_group = file.openGroup("motion_state");
+                // optionally validate motion state matches expected initial conditions
+                // but actual motion_config_t callbacks must come from user config
+            }
 
             // read hierarchy info
             auto hierarchy_group = file.openGroup("hierarchy");

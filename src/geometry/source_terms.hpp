@@ -4,6 +4,7 @@
 #include "base/concepts.hpp"
 #include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "geometry/metrics.hpp"
 #include "physics/hydro/physics.hpp"
 
@@ -136,6 +137,54 @@ namespace simbi::geometry {
         }
 
         return cons_t{};
+    }
+
+    // -------------------------------------------------------------------------
+    // mesh motion source term
+    // accounts for volume change in moving mesh for homologous expansion
+    //
+    // for homologous expansion r_phys = a(t) * r_comoving:
+    //   - 1D spherical: V ~ r³ → dV/dt / V = 3H
+    //   - 1D cylindrical: V ~ r² → dV/dt / V = 2H
+    //   - 1D cartesian: V ~ r → dV/dt / V = H
+    //   - 2D/3D: depends on how many dims expand
+    //
+    // where H = a_dot / a is the hubble parameter
+    // source term: S = -u * (dV/dt) / V
+    // -------------------------------------------------------------------------
+    template <typename conserved_t, typename metric_t>
+    DUAL conserved_t mesh_motion_source_term(const conserved_t& u, real a, real a_dot)
+    {
+        if (a_dot == 0.0 || a == 0.0) {
+            return conserved_t{};
+        }
+
+        // hubble parameter: H = a_dot / a
+        const real H = a_dot / a;
+
+        // dimension factor depends on coordinate system
+        real dim_factor = 3.0; // default: full 3D or spherical 1D
+
+        if constexpr (is_spherical_c<metric_t>) {
+            // spherical: V ~ r³ regardless of dimension
+            dim_factor = 3.0;
+        }
+        else if constexpr (is_cylindrical_c<metric_t>) {
+            // cylindrical 1D: V ~ r²; 2D: V ~ r²z; 3D: V ~ r²z
+            constexpr std::uint64_t rank = conserved_t::rank;
+            dim_factor                   = (rank == 1) ? 2.0 : 3.0;
+        }
+        else if constexpr (is_cartesian_c<metric_t>) {
+            // cartesian: dimension = number of expanding directions
+            constexpr std::uint64_t rank = conserved_t::rank;
+            dim_factor                   = static_cast<real>(rank);
+        }
+
+        // volume change rate: dV/dt / V = dim_factor * H
+        const real volume_rate = dim_factor * H;
+
+        // source term: S = -u * (dV/dt) / V
+        return u * (-volume_rate);
     }
 
 } // namespace simbi::geometry

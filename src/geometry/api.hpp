@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 #include <variant>
 #include <vector>
 
@@ -27,15 +28,17 @@ namespace simbi::geometry {
         cylindrical
     };
 
-    struct dimension_config_t {
+    struct dimension_config_t
+    {
         map_type_t type;
-        real start;
-        real end;
+        real       start;
+        real       end;
     };
 
     template <std::size_t Rank>
-    struct geometry_config_t {
-        metric_type_t metric;
+    struct geometry_config_t
+    {
+        metric_type_t                   metric;
         std::vector<dimension_config_t> dims;
 
         // we need to know the "resolution" of a block
@@ -54,16 +57,13 @@ namespace simbi::geometry {
     // the service
     // -------------------------------------------------------------------------
     template <std::size_t Rank>
-    struct geometry_service_t {
+    struct geometry_service_t
+    {
         geometry_config_t<Rank> config_;
-        iarray<Rank> root_blocks_;
+        iarray<Rank>            root_blocks_;
 
         // construct a specific map for a dimension, level, and coordinate
-        any_map_t create_map(
-            std::size_t dim,
-            std::int64_t topo_coord,
-            std::int64_t level
-        ) const
+        any_map_t create_map(std::size_t dim, std::int64_t topo_coord, std::int64_t level) const
         {
             const auto& dconf = config_.dims[dim];
 
@@ -77,18 +77,18 @@ namespace simbi::geometry {
             std::int64_t total_blocks = root_blocks_[dim] * level_factor;
 
             // calculate the physical width of this specific block
-            real block_width_phys =
-                global_len / static_cast<real>(total_blocks);
+            real block_width_phys = global_len / static_cast<real>(total_blocks);
 
             // calculate the physical start of this specific block
-            real block_start_phys =
-                dconf.start + static_cast<real>(topo_coord) * block_width_phys;
+            real block_start_phys = dconf.start + static_cast<real>(topo_coord) * block_width_phys;
 
             // calculate cell spacing info
             std::int64_t n_cells = config_.block_size_cells[dim];
 
             if (dconf.type == map_type_t::uniform) {
                 real dx = block_width_phys / static_cast<real>(n_cells);
+                std::cout << "uniform dx: " << dx << "\n";
+                std::cin.get();
                 return uniform_map_t(block_start_phys, dx);
             }
             else {
@@ -104,8 +104,10 @@ namespace simbi::geometry {
                     // usually log grids start at > 0
                 }
 
-                real log_slope = std::log10(end_phys / block_start_phys) /
-                                 static_cast<real>(n_cells);
+                real log_slope =
+                    std::log10(end_phys / block_start_phys) / static_cast<real>(n_cells);
+                std::cout << "log_slope: " << log_slope << "\n";
+                std::cin.get();
                 return log_map_t(block_start_phys, log_slope);
             }
         }
@@ -117,7 +119,7 @@ namespace simbi::geometry {
         // instantiate the kernel *inside* the visit.
     };
 
-}   // namespace simbi::geometry
+} // namespace simbi::geometry
 
 namespace simbi {
     REGISTER_ENUM_BIMAP(
@@ -132,6 +134,6 @@ namespace simbi {
         {geometry::metric_type_t::spherical, "spherical"},
         {geometry::metric_type_t::cylindrical, "cylindrical"}
     );
-}   // namespace simbi
+} // namespace simbi
 
 #endif

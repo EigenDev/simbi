@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <iostream>
 #include <limits>
 
 namespace simbi::numerics {
@@ -49,14 +50,20 @@ namespace simbi::numerics {
         }
     };
 
+    template <typename T>
     struct to_primitive_t
     {
         real gamma;
+        T    block_geo;
 
         template <typename Cons>
-        constexpr DEV maybe_t<typename Cons::counterpart_t> operator()(const Cons& cons) const
+        constexpr DEV maybe_t<typename Cons::counterpart_t>
+                      operator()(auto coord, const Cons& cons) const
         {
-            return hydro::to_primitive(cons, gamma);
+            const auto dvscale = block_geo.volume_scaling(coord);
+            std::cout << "coord: " << coord << " dvscale: " << dvscale << "cons[rho]: " << cons.den
+                      << std::endl;
+            return hydro::to_primitive(cons, gamma, dvscale);
         }
     };
 
@@ -65,6 +72,8 @@ namespace simbi::numerics {
     // =========================================================================
 
     // forward euler step: u^{n+1} = u^n + dt * L(u^n)
+    // for moving mesh: dudt is intensive, volume_scale converts to extensive rate
+    // extensive: \tilde{U}^{n+1} = \tilde{U}^n + dt * a^3 * L(u^n)
     struct euler_step_t
     {
         real dt;
@@ -131,8 +140,13 @@ namespace simbi::numerics {
                 const auto ehat = unit_vectors::ehat<Rank>(dd);
                 const auto ws   = hydro::wave_speeds(p, ehat, gamma);
 
-                // max signal speed in this direction
-                const real s_max = helpers::my_max(std::abs(ws.left), std::abs(ws.right));
+                // get grid velocity for moving mesh
+                const real v_grid = geometry.face_grid_velocity(coord, dd);
+
+                // effective wave speeds include mesh motion
+                const real s_left_eff  = std::abs(ws.left - v_grid);
+                const real s_right_eff = std::abs(ws.right - v_grid);
+                const real s_max       = helpers::my_max(s_left_eff, s_right_eff);
 
                 // physical cell width = scale_factor * coordinate_width
                 const real dx = h[dd] * cell_widths[dd];

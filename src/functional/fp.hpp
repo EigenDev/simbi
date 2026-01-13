@@ -235,6 +235,16 @@ namespace simbi::fp {
     // =========================================================================
     // basic operators
     // =========================================================================
+    template <typename Scalar>
+    struct scale_op_t
+    {
+        Scalar scalar;
+        template <typename A>
+        constexpr DUAL auto operator()(A&& a) const
+        {
+            return std::forward<A>(a) * scalar;
+        }
+    };
 
     struct add_op_t
     {
