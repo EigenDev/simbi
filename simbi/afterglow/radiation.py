@@ -297,17 +297,34 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
         }
 
         for idx, file in enumerate(files):
-            fields, setup, mesh = util.read_file(file)
-            # Generate a pseudo mesh if computing off-axis afterglows
+            data = read_simulation(file)
+
+            # extract fields as dict[str, array]
+            fields = {
+                name: data.get_field(name)
+                for name in data.available_fields()
+            }
+
+            # build mesh dict from mesh adapter
+            mesh = {
+                "x1": 0.5 * (data.mesh.x1v[:-1] + data.mesh.x1v[1:]),
+            }
+            if data.metadata.dimensions >= 2:
+                mesh["x2"] = 0.5 * (data.mesh.x2v[:-1] + data.mesh.x2v[1:])
+            if data.metadata.dimensions >= 3:
+                mesh["x3"] = 0.5 * (data.mesh.x3v[:-1] + data.mesh.x3v[1:])
+
+            # generate a pseudo mesh if computing off-axis afterglows
             generate_pseudo_mesh(
                 args,
                 mesh,
                 full_sphere=True,
                 full_threed=False,
             )
-            sim_info["dt"] = setup["dt"]
-            sim_info["adiabatic_index"] = setup["adiabatic_index"]
-            sim_info["current_time"] = setup["time"]
+
+            sim_info["dt"] = data.metadata.dt
+            sim_info["adiabatic_index"] = data.metadata.gamma
+            sim_info["current_time"] = data.metadata.time
             t1 = pytime.time()
             if args.mode == "fnu":
                 py_calc_fnu(
