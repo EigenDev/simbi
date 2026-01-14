@@ -20,15 +20,6 @@ project(
   },
 )
 
-# common project arguments
-add_project_arguments(
-  [
-    '-Wno-nested-anon-types',
-    '-Wno-gnu-anonymous-struct',
-  ],
-  language: 'cpp',
-)
-
 # python and pybind11 setup
 py3 = import('python').find_installation('python3', required: true)
 py_install_dir = meson.current_source_dir() / 'simbi' / 'libs'
