@@ -143,7 +143,7 @@ namespace simbi::geometry {
 
                     // physics policy already flipped velocity: result[vel_idx] = -edge_val[vel_idx]
                     // now add 2*v_wall for moving mirror
-                    result[vel_idx] += 2.0 * v_wall * 0.0;
+                    result[vel_idx] += 2.0 * v_wall;
                 }
             }
 
