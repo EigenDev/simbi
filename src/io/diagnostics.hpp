@@ -15,7 +15,6 @@
 // =============================================================================
 
 #include "ecs/geometry_visitor.hpp"
-#include "ecs/systems.hpp"
 #include "io/exceptions.hpp"
 #include "physics/hydro/conversion.hpp"
 
@@ -35,8 +34,9 @@ namespace simbi::diagnostics {
         for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto&       fields = sim.partition_hydro(lvl, pp);
+                auto&       part   = sim.partition(lvl, pp);
                 const auto& mesh   = sim.mesh(lvl);
-                const auto  domain = fields.cons.domain();
+                const auto  domain = part.owned_domain; // only scan active cells
 
                 // use geometry visitor to get physical coordinates
                 ecs::with_block_geometry<Sim::coord_system>(
@@ -50,7 +50,7 @@ namespace simbi::diagnostics {
 
                             if (!maybe_prim.has_value()) {
                                 // found the failure - extract all context
-                                auto pos = block_geo.centroid(coord);
+                                auto pos = block_geo.labframe_centroid(coord);
 
                                 std::ostringstream oss;
                                 oss << "cons2prim failure detected\n";

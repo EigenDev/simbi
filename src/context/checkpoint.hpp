@@ -63,9 +63,6 @@ namespace simbi::checkpoint {
             sim.in_failure_state
         );
 
-        progress.table.post_info("[Writing checkpoint to path: " + filename + "]");
-        progress.table.print();
-
         io::write_checkpoint(sim, filename, policy);
 
         // update prev_checkpoint_time after successful write

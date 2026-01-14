@@ -437,8 +437,8 @@ namespace simbi::em {
             }
             else {
                 // volume-average for non-Cartesian geometries
-                auto al = geometry.face_area(cminus, dir);
-                auto ar = geometry.face_area(cplus, dir);
+                auto al = geometry.labframe_face_area(cminus, dir);
+                auto ar = geometry.labframe_face_area(cplus, dir);
                 return (bface(cminus) * al + bface(cplus) * ar) / (al + ar);
             }
         }

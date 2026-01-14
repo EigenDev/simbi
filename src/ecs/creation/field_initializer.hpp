@@ -18,16 +18,13 @@
 #include "compute/numerics.hpp"
 #include "containers/vector.hpp"
 #include "ecs/geometry_visitor.hpp"
-#include "ecs/systems.hpp"
 #include "functional/fp.hpp"
-#include "geometry/volume_scaling.hpp"
 #include "grid/amr/prolongation.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
 #include "utility/enums.hpp"
 
 #include <cstdint>
-#include <iostream>
 #include <pybind11/cast.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
@@ -233,7 +230,7 @@ namespace simbi::ecs::creation {
                         fields.prim[active_domain]
                             .map(numerics::to_conserved_t{gamma})
                             .enum_map([&block_geo](const auto& coord, const auto& u) {
-                                const real cell_vol = block_geo.volume(coord);
+                                const real cell_vol = block_geo.labframe_volume(coord);
                                 return u * cell_vol;
                             })
                             .with(exec);
@@ -324,7 +321,7 @@ namespace simbi::ecs::creation {
                             child_fields.prim[child_part.owned_domain]
                                 .map(numerics::to_conserved_t{gamma})
                                 .enum_map([&block_geo](const auto& coord, const auto& u) {
-                                    const real cell_vol = block_geo.volume(coord);
+                                    const real cell_vol = block_geo.labframe_volume(coord);
                                     return u * cell_vol;
                                 })
                                 .with(exec);

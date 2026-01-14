@@ -107,11 +107,27 @@ namespace simbi::geometry {
         DUAL block_geometry_t(Metric m, motion_state_t s) : metric(m), motion(s) {}
 
         // ---------------------------------------------------------------------
-        // metric forwarding (comoving coordinates)
+        // comoving geometry (always returns metric values directly)
         // ---------------------------------------------------------------------
 
         template <std::uint64_t Rank>
-        DUAL auto volume(const iarray<Rank>& idx) const
+        DUAL auto comoving_volume(const iarray<Rank>& idx) const
+        {
+            return metric.volume(idx);
+        }
+
+        template <std::uint64_t Rank>
+        DUAL auto comoving_face_area(const iarray<Rank>& idx, std::size_t dim) const
+        {
+            return metric.face_area(idx, dim);
+        }
+
+        // ---------------------------------------------------------------------
+        // physical geometry (scaled by a(t) factors for moving mesh)
+        // ---------------------------------------------------------------------
+
+        template <std::uint64_t Rank>
+        DUAL auto labframe_volume(const iarray<Rank>& idx) const
         {
             real v_comoving = metric.volume(idx);
             if (!motion.enabled) {
@@ -140,17 +156,7 @@ namespace simbi::geometry {
         }
 
         template <std::uint64_t Rank>
-        DUAL auto volume_scaling(const iarray<Rank>& idx) const
-        {
-            if (!motion.enabled) {
-                return 1.0;
-            }
-
-            return volume(idx);
-        }
-
-        template <std::uint64_t Rank>
-        DUAL auto face_area(const iarray<Rank>& idx, std::size_t dim) const
+        DUAL auto labframe_face_area(const iarray<Rank>& idx, std::size_t dim) const
         {
             real area_comoving = metric.face_area(idx, dim);
             if (!motion.enabled) {
@@ -191,15 +197,32 @@ namespace simbi::geometry {
             return area_comoving * a_factor;
         }
 
+        // ---------------------------------------------------------------------
+        // convenience: extensive scaling factor for moving mesh
+        // ---------------------------------------------------------------------
+
         template <std::uint64_t Rank>
-        DUAL auto centroid(const iarray<Rank>& idx) const
+        DUAL auto extensive_scaling(const iarray<Rank>& idx) const
+        {
+            if (!motion.enabled) {
+                return 1.0;
+            }
+            return labframe_volume(idx);
+        }
+
+        // ---------------------------------------------------------------------
+        // coordinate helpers
+        // ---------------------------------------------------------------------
+
+        template <std::uint64_t Rank>
+        DUAL auto comoving_centroid(const iarray<Rank>& idx) const
         {
             return metric.centroid(idx);
         }
 
         // physical centroid: comoving coords scaled by a(t)
         template <std::uint64_t Rank>
-        DUAL auto physical_centroid(const iarray<Rank>& idx) const
+        DUAL auto labframe_centroid(const iarray<Rank>& idx) const
         {
             auto coords = metric.centroid(idx);
             if (motion.enabled) {
@@ -226,12 +249,13 @@ namespace simbi::geometry {
         // geometric source term helpers
         // returns the geometric source terms {g_1, g_2, g_3} needed for
         // momentum source update in curvilinear coordinates
+        // uses comoving metric for intensive rate calculation
         // ---------------------------------------------------------------------
         template <std::uint64_t Rank, is_hydro_primitive_c prim_t>
         DUAL auto
         geomtric_source_factors(const prim_t& prims, real gamma, const iarray<Rank>& idx) const
         {
-            return geometric_source_terms(prims, gamma, idx, metric);
+            return geometric_source_terms(prims, gamma, idx, *this);
         }
 
         // ---------------------------------------------------------------------

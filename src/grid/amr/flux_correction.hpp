@@ -38,11 +38,11 @@ namespace simbi::grid::amr {
             // compute face area at the interface
             real area;
             if (side == side_t::left) {
-                area = geometry.face_area(coord, dim);
+                area = geometry.labframe_face_area(coord, dim);
             }
             else {
                 auto rc = coord + unit_vectors::array_offset<Rank>(dim);
-                area    = geometry.face_area(rc, dim);
+                area    = geometry.labframe_face_area(rc, dim);
             }
             return curr + f * (-dt * area);
         }
@@ -64,11 +64,11 @@ namespace simbi::grid::amr {
             // compute face area at fine resolution
             real area;
             if (side == side_t::left) {
-                area = geometry.face_area(fine_coord, dim);
+                area = geometry.labframe_face_area(fine_coord, dim);
             }
             else {
                 auto rc = fine_coord + unit_vectors::array_offset<Rank>(dim);
-                area    = geometry.face_area(rc, dim);
+                area    = geometry.labframe_face_area(rc, dim);
             }
             return f * area;
         }

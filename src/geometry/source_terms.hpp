@@ -20,12 +20,12 @@ namespace simbi::geometry {
     // computes the non-conservative updates required for curvilinear coords
     // e.g. spherical: adds (rho*v_theta^2 + 2*p)/r to radial momentum
     // -------------------------------------------------------------------------
-    template <is_hydro_primitive_c prim_t, typename metric_t, std::uint64_t Rank>
+    template <is_hydro_primitive_c prim_t, typename block_geo_t, std::uint64_t Rank>
     DUAL typename prim_t::counterpart_t geometric_source_terms(
         const prim_t&       prim,
         real                gamma,
         const iarray<Rank>& idx,
-        const metric_t&     metric
+        const block_geo_t&  block_geo
     )
     {
         using namespace hydro;
@@ -34,13 +34,13 @@ namespace simbi::geometry {
 
         // cartesian (flat space)
         // no source terms. compiler optimizes this function away completely.
-        if constexpr (is_cartesian_c<metric_t>) {
+        if constexpr (is_cartesian_c<typename block_geo_t::metric_type>) {
             return cons_t{};
         }
         // spherical (r, theta, phi)
-        else if constexpr (is_spherical_c<metric_t>) {
+        else if constexpr (is_spherical_c<typename block_geo_t::metric_type>) {
             // retrieve coordinates
-            auto centroid = metric.centroid(idx);
+            auto centroid = block_geo.labframe_centroid(idx);
             real r        = centroid[0];
             real theta    = [=]() {
                 if constexpr (Rank > 1) {
@@ -75,17 +75,17 @@ namespace simbi::geometry {
             // radial momentum: (rho(vt^2 + vp^2) + 2P) / r
             // the '2P/r' comes from the area expansion dA/dr
             const auto rs = unit_vectors::array_offset<rank>(rank - 1);
-            const auto aL = metric.face_area(idx /**/, rank - 1);
-            const auto aR = metric.face_area(idx + rs, rank - 1);
-            const auto dv = metric.volume(idx);
+            const auto aL = block_geo.labframe_face_area(idx /**/, rank - 1);
+            const auto aR = block_geo.labframe_face_area(idx + rs, rank - 1);
+            const auto dv = block_geo.labframe_volume(idx);
             src.mom[0]    = pt * (aR - aL) / dv + wgam2 * (v2 * v2 + v3 * v3) / r -
                          (bmu[2] * bmu[2] + bmu[3] * bmu[3]) / r;
 
             // theta momentum
             if constexpr (Rank > 1) {
                 const auto ts = unit_vectors::array_offset<rank>(rank - 2);
-                const auto aL = metric.face_area(idx /**/, rank - 2);
-                const auto aR = metric.face_area(idx + ts, rank - 2);
+                const auto aL = block_geo.labframe_face_area(idx /**/, rank - 2);
+                const auto aR = block_geo.labframe_face_area(idx + ts, rank - 2);
                 src.mom[1]    = pt * (aR - aL) / dv - wgam2 * (v2 * v1 - v3 * v3 * cot) / r +
                              (bmu[2] * bmu[1] - bmu[3] * bmu[3] * cot) / r;
             }
@@ -100,8 +100,8 @@ namespace simbi::geometry {
         }
 
         // cylindrical (r, phi, z)
-        else if constexpr (is_cylindrical_c<metric_t>) {
-            auto centroid = metric.centroid(idx);
+        else if constexpr (is_cylindrical_c<typename block_geo_t::metric_type>) {
+            auto centroid = block_geo.labframe_centroid(idx);
             real r        = centroid[0];
             if (r < build::epsilon) {
                 return cons_t{};
@@ -119,7 +119,7 @@ namespace simbi::geometry {
             cons_t src{};
 
             // radial momentum
-            using cyl_type = typename metric_t::cyl_type;
+            using cyl_type = typename block_geo_t::metric_type::cyl_type;
             if constexpr (std::is_same_v<cyl_type, axis_cylindrical_tag>) {
                 src.mom[0] = (pt - bmu[1] * bmu[1]) / r;
             }

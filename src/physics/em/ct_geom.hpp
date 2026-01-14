@@ -86,7 +86,7 @@ namespace simbi::em {
         const Geometry&                       geo
     )
     {
-        const auto position = geo.centroid(face_coord);
+        const auto position = geo.labframe_centroid(face_coord);
         const real r        = position[0];
         const real theta    = position[1];
 
@@ -167,7 +167,7 @@ namespace simbi::em {
         const Geometry&                       geo
     )
     {
-        const auto position = geo.centroid(face_coord);
+        const auto position = geo.labframe_centroid(face_coord);
         const real r        = position[0];
 
         if constexpr (MagComp == magnetic_comp_t::I) { // Br

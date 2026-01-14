@@ -32,7 +32,7 @@ namespace simbi::body::expr {
         template <typename Body, typename Coord>
         constexpr DEV auto operator()(const Body& body, Coord coord) const
         {
-            const auto cell_pos = geometry.metric.to_cartesian(geometry.centroid(coord));
+            const auto cell_pos = geometry.metric.to_cartesian(geometry.labframe_centroid(coord));
 
             // gravitational physics (all in cartesian)
             const auto r_vec = cell_pos - body.position;
@@ -63,7 +63,7 @@ namespace simbi::body::expr {
                 conserved_t{0.0, dp_dt, dE_dt},
                 body_delta_t<Rank>{
                     .idx          = body.idx,
-                    .force_delta  = -force_cart * geometry.volume(coord),
+                    .force_delta  = -force_cart * geometry.labframe_volume(coord),
                     .torque_delta = {},
                     .mass_delta   = 0.0
                 }
@@ -128,12 +128,12 @@ namespace simbi::body::expr {
         ) const
         {
             using namespace simbi::helpers;
-            const auto cell_pos = geometry.metric.to_cartesian(geometry.centroid(coord));
+            const auto cell_pos = geometry.metric.to_cartesian(geometry.labframe_centroid(coord));
             const auto r_vec    = cell_pos - body.position;
             const auto r_mag    = r_vec.norm();
             const auto r_acc    = accretion_radius(body);
             const auto sr_param = sink_rate(body);
-            const auto dv       = geometry.volume(coord);
+            const auto dv       = geometry.labframe_volume(coord);
 
             // quick exit if outside accretion radius (kernel drops to ~1e-3 at 2*r_acc)
             if (r_mag > 2.0 * r_acc) {
@@ -274,7 +274,7 @@ namespace simbi::body::expr {
         constexpr DEV auto operator()(const Body& body, Coord coord) const
         {
             using namespace simbi::helpers;
-            const auto cell_pos = geometry.metric.to_cartesian(geometry.centroid(coord));
+            const auto cell_pos = geometry.metric.to_cartesian(geometry.labframe_centroid(coord));
             const auto min_cw   = min_cell_width(coord);
 
             const auto r_vec    = cell_pos - body.position;
@@ -341,7 +341,7 @@ namespace simbi::body::expr {
 
             // calculate energy change
             const auto dE_dt  = vecops::dot(prim.vel, dp_dt);
-            const auto dv     = geometry.volume(coord);
+            const auto dv     = geometry.labframe_volume(coord);
             auto       torque = [&]() -> vector_t<real, 3> {
                 if constexpr (Rank == 3) {
                     return vecops::cross(r_vec, dp_dt) * dv;

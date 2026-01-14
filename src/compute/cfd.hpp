@@ -24,7 +24,6 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <type_traits>
 
 namespace simbi::cfd {
@@ -38,9 +37,12 @@ namespace simbi::cfd {
     // =========================================================================
     template <typename G, std::uint64_t Rank>
     concept block_geometry_c = requires(const G& geo, const iarray<Rank>& idx, std::size_t dim) {
-        { geo.volume(idx) } -> std::convertible_to<real>;
-        { geo.face_area(idx, dim) } -> std::convertible_to<real>;
-        { geo.centroid(idx) } -> std::convertible_to<vector_t<real, Rank>>;
+        { geo.comoving_volume(idx) } -> std::convertible_to<real>;
+        { geo.comoving_face_area(idx, dim) } -> std::convertible_to<real>;
+        { geo.labframe_volume(idx) } -> std::convertible_to<real>;
+        { geo.labframe_face_area(idx) } -> std::convertible_to<real>;
+        { geo.comoving_centroid(idx) } -> std::convertible_to<vector_t<real, Rank>>;
+        { geo.labframe_centroid(idx) } -> std::convertible_to<vector_t<real, Rank>>;
         { geo.scale_factors(idx) } -> std::convertible_to<vector_t<real, Rank>>;
     };
 
@@ -62,7 +64,9 @@ namespace simbi::cfd {
         DEV constexpr auto operator()(iarray<rank> coord) const
         {
             conserved_t divergence{};
-            const auto  dv = geometry.volume(coord) / geometry.volume_scaling(coord);
+
+            // use lab frame geometry for intensive rate calculation
+            const auto v_lab = geometry.labframe_volume(coord);
 
             for (std::uint64_t dir = 0; dir < rank; ++dir) {
                 const auto offset     = unit_vectors::array_offset<rank>(dir);
@@ -72,13 +76,15 @@ namespace simbi::cfd {
                 const auto fl = fluxes[dir](coord);
                 const auto fr = fluxes[dir](coord_plus);
 
-                // face areas from geometry
-                const auto al = geometry.face_area(coord, dir);
-                const auto ar = geometry.face_area(coord_plus, dir);
+                const auto al = geometry.labframe_face_area(coord, dir);
+                const auto ar = geometry.labframe_face_area(coord_plus, dir);
 
-                divergence = divergence + (fr * ar - fl * al) / dv;
+                divergence = divergence + (fr * ar - fl * al) / v_lab;
             }
 
+            std::cout << "Divergence at coord " << coord << " is " << divergence << std::endl;
+
+            // return intensive rate
             return divergence * (-1.0);
         }
     };
@@ -127,11 +133,11 @@ namespace simbi::cfd {
                 return conserved_t{};
             }
 
-            const auto position  = geometry.centroid(coord);
+            const auto position  = geometry.labframe_centroid(coord);
             const auto primitive = prims(coord);
-            const auto volscale  = geometry.volume_scaling(coord);
 
-            return gravity_source->apply(position, primitive, time, gamma) * volscale;
+            // return intensive rate
+            return gravity_source->apply(position, primitive, time, gamma);
         }
     };
 
@@ -179,11 +185,11 @@ namespace simbi::cfd {
                 return conserved_t{};
             }
 
-            const auto position  = geometry.centroid(coord);
+            const auto position  = geometry.labframe_centroid(coord);
             const auto conserved = cons(coord);
-            const auto volscale  = geometry.volume_scaling(coord);
 
-            return hydro_source->apply(position, conserved, time) * volscale;
+            // return intensive rate
+            return hydro_source->apply(position, conserved, time);
         }
     };
 
@@ -221,10 +227,9 @@ namespace simbi::cfd {
         DEV constexpr auto operator()(iarray<rank> coord) const
         {
             const auto primitive = prims(coord);
-            const auto volscale  = geometry.volume_scaling(coord);
 
-            // delegate to geometry's metric for source term computation
-            return geometry.geomtric_source_factors(primitive, gamma, coord) * volscale;
+            // return intensive rate
+            return geometry.geomtric_source_factors(primitive, gamma, coord);
         }
     };
 
@@ -273,7 +278,7 @@ namespace simbi::cfd {
             const auto nhat = unit_vectors::ehat<rank>(dir);
 
             // face grid velocity (moving mesh)
-            const auto vface = geometry.face_grid_velocity(coord, dir);
+            const auto vface = geometry.face_grid_velocity(coord, dir) * 0.0;
 
             // solve riemann problem
             auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);
@@ -417,23 +422,30 @@ namespace simbi::cfd {
             active_face_domains[dd].fin[dd] += 1;
         }
 
-        return flux_divergence(state.flux, active_domain, active_face_domains, geometry) +
-               gravity_sources(
-                   state.prim[active_domain],
-                   active_domain,
-                   geometry,
-                   &sources.gravity_source,
-                   meta.time,
-                   meta.gamma
-               ) +
-               hydro_sources(
-                   state.cons[active_domain],
-                   active_domain,
-                   geometry,
-                   &sources.hydro_source,
-                   meta.time
-               ) +
-               geometric_sources(state.prim[active_domain], active_domain, geometry, meta.gamma);
+        // all operators return intensive rates, convert to extensive at the end
+        auto intensive_rate =
+            flux_divergence(state.flux, active_domain, active_face_domains, geometry) +
+            gravity_sources(
+                state.prim[active_domain],
+                active_domain,
+                geometry,
+                &sources.gravity_source,
+                meta.time,
+                meta.gamma
+            ) +
+            hydro_sources(
+                state.cons[active_domain],
+                active_domain,
+                geometry,
+                &sources.hydro_source,
+                meta.time
+            ) +
+            geometric_sources(state.prim[active_domain], active_domain, geometry, meta.gamma);
+
+        // convert to extensive for moving mesh
+        return intensive_rate.enum_map([&geometry](const auto& coord, const auto& rate) {
+            return rate * geometry.extensive_scaling(coord);
+        });
     }
 
     // =========================================================================

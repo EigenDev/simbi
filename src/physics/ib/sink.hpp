@@ -112,7 +112,7 @@ namespace simbi::body {
         {
             using namespace simbi::hydro;
 
-            const auto cell_pos = block_geo.centroid(coord);
+            const auto cell_pos = block_geo.labframe_centroid(coord);
             const auto r_mag    = (cell_pos - body_position).norm();
 
             // gaussian weight
@@ -141,7 +141,7 @@ namespace simbi::body {
             const auto rho   = labframe_density(prim);
             const auto v_vec = prim.vel;
             const auto cs    = sound_speed(prim, gamma);
-            const auto mass  = block_geo.volume(coord) * rho;
+            const auto mass  = block_geo.labframe_volume(coord) * rho;
 
             return weighted_sums_t<Rank>{
                 .weighted_density = weight * rho,

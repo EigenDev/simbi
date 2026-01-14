@@ -10,6 +10,8 @@
 #include "physics/hydro/wave_speeds.hpp"
 #include "utility/enums.hpp"
 
+#include <iostream>
+
 namespace simbi::hydro {
     using namespace simbi::em;
     template <is_hydro_primitive_c primitive_t>
@@ -31,11 +33,11 @@ namespace simbi::hydro {
         auto net_flux = [&]() {
             if (sL >= vface) {
                 // left state is supersonic
-                return fL - uR * vface;
+                return fL - uL * vface;
             }
             else if (sR <= vface) {
                 // right state is supersonic
-                return fR - uL * vface;
+                return fR - uR * vface;
             }
             else {
                 // intermediate state

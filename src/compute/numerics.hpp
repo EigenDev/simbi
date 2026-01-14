@@ -30,7 +30,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
 #include <limits>
 
 namespace simbi::numerics {
@@ -60,7 +59,7 @@ namespace simbi::numerics {
         constexpr DEV maybe_t<typename Cons::counterpart_t>
                       operator()(auto coord, const Cons& cons) const
         {
-            const auto dvscale = block_geo.volume_scaling(coord);
+            const auto dvscale = block_geo.extensive_scaling(coord);
             return hydro::to_primitive(cons, gamma, dvscale);
         }
     };

@@ -33,7 +33,7 @@ namespace simbi::grid::amr {
         {
             using namespace structs;
             const auto& [u, dfa] = p;
-            real inv_vol         = 1.0 / geometry.volume(coord);
+            real inv_vol         = 1.0 / geometry.labframe_volume(coord);
             return u | add_gas(dfa * inv_vol);
         }
     };

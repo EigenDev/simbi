@@ -312,29 +312,6 @@ namespace simbi::ecs {
     };
 
     // =========================================================================
-    // update mesh motion state
-    // evaluates a(t) and a_dot(t) at the new time
-    // =========================================================================
-    struct update_mesh_motion_system_t
-    {
-        template <typename Sim>
-        void operator()(Sim& sim) const
-        {
-            auto&      meta  = sim.metadata();
-            const real t_new = meta.time;
-            for (std::uint64_t ii = 0; ii < sim.num_levels(); ii++) {
-                auto& mesh_cfg = sim.mesh(ii);
-                update_mesh_properties(mesh_cfg, t_new);
-            }
-        }
-
-        template <typename MeshConfig>
-        void update_mesh_properties(MeshConfig& mesh_cfg, real t_new) const
-        {
-        }
-    };
-
-    // =========================================================================
     // boundary condition system
     // uses geometry/boundary/driver.hpp for physical boundaries
     // =========================================================================
@@ -730,8 +707,9 @@ namespace simbi::ecs {
                 // moving mesh: \tilde{U}^{n+1} = \tilde{U}^n + dt * a^3 * L(u^n)
                 // static mesh: U^{n+1} = U^n + dt * L(u^n)
                 auto u_view = fields.cons[part.owned_domain];
-                u_view      = u_view.zip(ell, numerics::euler_step_t{dt})
-                             .zip(be, numerics::euler_step_t{dt})
+                u_view      = u_view
+                             .zip(ell, numerics::euler_step_t{dt})
+                             // .zip(be, numerics::euler_step_t{dt})
                              .with(exec);
 
                 if constexpr (Sim::is_mhd) {
