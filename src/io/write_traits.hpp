@@ -11,7 +11,8 @@ namespace simbi::io {
 
     // specialization for double
     template <>
-    struct h5_pred_type<double> {
+    struct h5_pred_type<double>
+    {
         static const H5::PredType& value()
         {
             return H5::PredType::NATIVE_DOUBLE;
@@ -20,7 +21,8 @@ namespace simbi::io {
 
     // spec for float
     template <>
-    struct h5_pred_type<float> {
+    struct h5_pred_type<float>
+    {
         static const H5::PredType& value()
         {
             return H5::PredType::NATIVE_FLOAT;
@@ -29,7 +31,8 @@ namespace simbi::io {
 
     // spec for uint64_t
     template <>
-    struct h5_pred_type<std::uint64_t> {
+    struct h5_pred_type<std::uint64_t>
+    {
         static const H5::PredType& value()
         {
             return H5::PredType::NATIVE_UINT64;
@@ -38,7 +41,8 @@ namespace simbi::io {
 
     // spec for int64_t
     template <>
-    struct h5_pred_type<std::int64_t> {
+    struct h5_pred_type<std::int64_t>
+    {
         static const H5::PredType& value()
         {
             return H5::PredType::NATIVE_INT64;
@@ -47,36 +51,42 @@ namespace simbi::io {
 
     // spec for int
     template <>
-    struct h5_pred_type<int> {
-        static const H5::PredType& value() { return H5::PredType::NATIVE_INT; }
+    struct h5_pred_type<int>
+    {
+        static const H5::PredType& value()
+        {
+            return H5::PredType::NATIVE_INT;
+        }
     };
 
     // spec for bool
     template <>
-    struct h5_pred_type<bool> {
+    struct h5_pred_type<bool>
+    {
         static const H5::PredType& value()
         {
             return H5::PredType::NATIVE_HBOOL;
         }
     };
 
-#ifdef __clang__
-    template <>
-    struct h5_pred_type<std::size_t> {
-        static const H5::PredType& value()
-        {
-            return H5::PredType::NATIVE_UINT64;
-        }
-    };
-#endif
+    // #ifdef __clang__
+    //     template <>
+    //     struct h5_pred_type<std::size_t> {
+    //         static const H5::PredType& value()
+    //         {
+    //             return H5::PredType::NATIVE_UINT64;
+    //         }
+    //     };
+    // #endif
 
     template <>
-    struct h5_pred_type<std::uint32_t> {
+    struct h5_pred_type<std::uint32_t>
+    {
         static const H5::PredType& value()
         {
             return H5::PredType::NATIVE_UINT32;
         }
     };
-}   // namespace simbi::io
+} // namespace simbi::io
 
 #endif

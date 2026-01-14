@@ -413,6 +413,7 @@ namespace simbi::ecs {
         template <typename Sim>
         void apply_physical_bcs(Sim& sim, std::uint64_t lvl) const
         {
+            using namespace hydro;
             constexpr std::uint64_t Rank   = Sim::rank;
             constexpr bool          is_mhd = Sim::is_mhd;
 
@@ -431,8 +432,7 @@ namespace simbi::ecs {
                 }
             }
 
-            auto policy =
-                hydro::make_boundary_policy<is_mhd, Rank>(geo.metric, theta_min, theta_max);
+            auto policy = make_boundary_policy<is_mhd, Rank>(geo.metric, theta_min, theta_max);
 
             // check if any boundary has dynamic expressions
             auto&      sources      = sim.sources();

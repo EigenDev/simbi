@@ -143,7 +143,7 @@ namespace simbi::geometry {
 
                     // physics policy already flipped velocity: result[vel_idx] = -edge_val[vel_idx]
                     // now add 2*v_wall for moving mirror
-                    result[vel_idx] += 2.0 * v_wall;
+                    result[vel_idx] += 2.0 * v_wall * 0.0;
                 }
             }
 
@@ -451,13 +451,6 @@ namespace simbi::geometry {
                 };
 
                 field[ghost.domain] = field[ghost.domain].remap(map).enum_map(phys_op).with(exec);
-                // field[ghost.domain] = field[ghost.domain]
-                //                           .enum_map([](auto coord, auto c) {
-                //                               std::cout << "ghost coord: " << coord
-                //                                         << " value: " << c << "\n";
-                //                               return c;
-                //                           })
-                //                           .with(exec);
             }
         }
     };

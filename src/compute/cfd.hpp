@@ -82,8 +82,6 @@ namespace simbi::cfd {
                 divergence = divergence + (fr * ar - fl * al) / v_lab;
             }
 
-            std::cout << "Divergence at coord " << coord << " is " << divergence << std::endl;
-
             // return intensive rate
             return divergence * (-1.0);
         }
@@ -278,7 +276,7 @@ namespace simbi::cfd {
             const auto nhat = unit_vectors::ehat<rank>(dir);
 
             // face grid velocity (moving mesh)
-            const auto vface = geometry.face_grid_velocity(coord, dir) * 0.0;
+            const auto vface = geometry.face_grid_velocity(coord, dir);
 
             // solve riemann problem
             auto flux = ops.flux(pl, pr, nhat, vface, gamma, shock_smoother);

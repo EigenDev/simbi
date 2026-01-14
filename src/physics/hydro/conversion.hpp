@@ -25,14 +25,15 @@ namespace simbi::hydro::newtonian {
     {
         using primitive_t = typename conserved_t::counterpart_t;
         primitive_t prim;
-        prim.rho = cons.den;
-        prim.vel = cons.mom / cons.den;
-        prim.pre = pressure_from_conserved(cons, gamma);
+        const auto  u = cons / dv;
+        prim.rho      = u.den;
+        prim.vel      = u.mom / u.den;
+        prim.pre      = pressure_from_conserved(u, gamma);
 
         if (prim.pre <= 0.0 || !std::isfinite(prim.pre)) {
             return None(ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE);
         }
-        return prim / dv;
+        return prim;
     }
 } // namespace simbi::hydro::newtonian
 
@@ -46,10 +47,11 @@ namespace simbi::hydro::srhd {
         -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
-        const auto& d     = cons.den;
-        const auto& svec  = cons.mom;
-        const auto& tau   = cons.nrg;
-        const auto& dchi  = cons.chi;
+        const auto  u     = cons / dv;
+        const auto& d     = u.den;
+        const auto& svec  = u.mom;
+        const auto& tau   = u.nrg;
+        const auto& dchi  = u.chi;
         const auto  smag  = svec.norm();
 
         // Perform modified Newton Raphson based on
@@ -82,7 +84,7 @@ namespace simbi::hydro::srhd {
         const auto w        = 1.0 / std::sqrt(1.0 - vecops::dot(velocity, velocity));
         const auto vel      = build::use_four_velocity ? velocity * w : velocity;
 
-        return primitive_t{d / w, vel, peq, dchi / d} / dv;
+        return primitive_t{d / w, vel, peq, dchi / d};
     }
 
 } // namespace simbi::hydro::srhd
@@ -97,11 +99,12 @@ namespace simbi::hydro::rmhd {
         -> maybe_t<typename conserved_t::counterpart_t>
     {
         using primitive_t = typename conserved_t::counterpart_t;
-        const auto d      = cons.den;
-        const auto mom    = cons.mom;
-        const auto tau    = cons.nrg;
-        const auto bfield = cons.mag;
-        const auto dchi   = cons.chi;
+        const auto u      = cons / dv;
+        const auto d      = u.den;
+        const auto mom    = u.mom;
+        const auto tau    = u.nrg;
+        const auto bfield = u.mag;
+        const auto dchi   = u.chi;
 
         //==================================================================
         // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
@@ -208,7 +211,7 @@ namespace simbi::hydro::rmhd {
             vel *= w;
         }
 
-        return primitive_t{rhohat, vel, pg, bfield, dchi / d} / dv;
+        return primitive_t{rhohat, vel, pg, bfield, dchi / d};
     }
 } // namespace simbi::hydro::rmhd
 

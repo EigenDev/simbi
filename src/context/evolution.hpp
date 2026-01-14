@@ -207,8 +207,8 @@ namespace simbi::evolution {
 
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 c2p_system_t{}(sim, lvl, block_geo);
-                // ghost_fill_system_t{}(sim, lvl);
-                // sink_cache_system_t{}(sim);
+                ghost_fill_system_t{}(sim, lvl);
+                sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl);
 

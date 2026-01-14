@@ -135,14 +135,18 @@ namespace simbi::numerics {
 
             for (std::uint64_t dd = 0; dd < Rank; ++dd) {
                 const auto ehat = unit_vectors::ehat<Rank>(dd);
-                const auto ws   = hydro::wave_speeds(p, ehat, gamma);
-
                 // get grid velocity for moving mesh
-                const real v_grid = geometry.face_grid_velocity(coord, dd);
+                const auto offset = unit_vectors::array_offset<Rank>(dd);
+                const real vfaceL = geometry.face_grid_velocity(coord, dd);
+                const real vfaceR = geometry.face_grid_velocity(coord + offset, dd);
+                // use average face velocity as cell-centered grid velocity
+                const real v_c = 0.5 * (vfaceL + vfaceR);
+
+                const auto ws = hydro::wave_speeds(p, ehat, gamma);
 
                 // effective wave speeds include mesh motion
-                const real s_left_eff  = std::abs(ws.left - v_grid);
-                const real s_right_eff = std::abs(ws.right - v_grid);
+                const real s_left_eff  = std::abs(ws.left - v_c);
+                const real s_right_eff = std::abs(ws.right - v_c);
                 const real s_max       = helpers::my_max(s_left_eff, s_right_eff);
 
                 // physical cell width = scale_factor * coordinate_width
@@ -152,7 +156,6 @@ namespace simbi::numerics {
                     min_dt = helpers::my_min(min_dt, cfl * dx / s_max);
                 }
             }
-
             return min_dt;
         };
 
