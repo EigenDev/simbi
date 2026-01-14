@@ -9,6 +9,7 @@
 #include "dag/exp_load.hpp"
 #include "dag/expression.hpp"
 #include "dag/linearizer.hpp"
+#include "decorators.hpp"
 #include "physics/hydro/physics.hpp"
 #include "utility/config_dict.hpp"
 #include "xpu/mem/managed.hpp"
@@ -71,8 +72,7 @@ namespace simbi::state {
         {
             using conserved_t = typename primitive_t::counterpart_t;
             if (!enabled) {
-                return conserved_t{}; // return zeroed
-                                      // conserved state
+                return conserved_t{};
             }
 
             vector_t<real, Rank> local_vector{0.0};
@@ -94,7 +94,7 @@ namespace simbi::state {
                 local_vector.data()
             );
 
-            // this is a specialziation for gravity sources
+            // gravity source specialization
             const auto den   = hydro::labframe_density(prim);
             const auto dp_dt = den * local_vector;
             const auto v_old = prim.vel;
@@ -119,6 +119,38 @@ namespace simbi::state {
                     0.0    // chi source term is zero
                 };
             }
+        }
+
+        // boundary condition variant: evaluates expression to primitive state directly
+        // used for dynamic inflow boundaries where we set state values, not apply sources
+        template <concepts::is_hydro_primitive_c primitive_t>
+        DEV primitive_t
+        apply(const vector_t<real, Rank> coords, const primitive_t& edge_state, real time) const
+        {
+            if (!enabled) {
+                return edge_state;
+            }
+
+            primitive_t       result{};
+            vector_t<real, 3> local_coords{0.0, 0.0, 0.0};
+            for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+                local_coords[ii] = coords[ii];
+            }
+
+            expression::evaluate_linear_expr(
+                linear_instructions.data(),
+                linear_instructions.size(),
+                output_indices_mapped.data(),
+                output_indices.size(),
+                local_coords[0],
+                local_coords[1],
+                local_coords[2],
+                time,
+                edge_state.data(),
+                result.data()
+            );
+
+            return result;
         }
 
         static expression_t from_config(const config_dict_t& config)

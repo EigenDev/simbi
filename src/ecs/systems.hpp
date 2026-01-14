@@ -287,7 +287,8 @@ namespace simbi::ecs {
     };
 
     // =========================================================================
-    // conservative to primitive recovery
+    // conservative to primitive recovery (interior cells only)
+    // ghost cells are filled directly in primitive space by ghost_fill_system_t
     // =========================================================================
     struct c2p_system_t
     {
@@ -299,9 +300,13 @@ namespace simbi::ecs {
 
             for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
                 auto& fields = sim.partition_hydro(lvl, pp);
+                auto& part   = sim.partition(lvl, pp);
                 auto& exec   = sim.partition_executor(lvl, pp);
 
-                fields.prim = fields.cons.enum_map(to_primitive_t{gamma, block_geo}).with(exec);
+                auto prim_interior = fields.prim[part.owned_domain];
+                prim_interior      = fields.cons[part.owned_domain]
+                                    .enum_map(to_primitive_t{gamma, block_geo})
+                                    .with(exec);
             }
         }
     };
@@ -345,11 +350,11 @@ namespace simbi::ecs {
         void operator()(Sim& sim, std::uint64_t lvl) const
         {
             if (lvl == 0) {
-                // base level: apply physical bcs
+                // base level: apply physical bcs on primitives
                 apply_physical_bcs(sim, lvl);
             }
             else {
-                // refined levels: prolongate from coarser
+                // refined levels: prolongate from coarser (still uses cons for AMR)
                 prolongate_from_coarse(sim, lvl);
             }
 
@@ -487,7 +492,7 @@ namespace simbi::ecs {
                     auto& exec   = sim.partition_executor(lvl, pp);
 
                     geometry::boundary_driver_t::apply_boundaries(
-                        fields.cons,
+                        fields.prim,
                         part.block.id,
                         decomp.skeleton,
                         mesh_cfg,
@@ -552,7 +557,7 @@ namespace simbi::ecs {
                 auto& exec   = sim.partition_executor(lvl, pp);
 
                 geometry::boundary_driver_t::apply_boundaries(
-                    fields.cons,
+                    fields.prim,
                     part.block.id,
                     decomp.skeleton,
                     mesh_cfg,

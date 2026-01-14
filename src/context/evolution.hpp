@@ -206,8 +206,8 @@ namespace simbi::evolution {
             auto& mesh_cfg = sim.mesh(lvl);
 
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
-                ghost_fill_system_t{}(sim, lvl);
                 c2p_system_t{}(sim, lvl, block_geo);
+                ghost_fill_system_t{}(sim, lvl);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl);
@@ -271,8 +271,8 @@ namespace simbi::evolution {
 
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 // === STAGE 1: u^n -> u* ===
-                ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
                 c2p_system_t{}(sim, lvl, block_geo);
+                ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u^n)
@@ -304,8 +304,8 @@ namespace simbi::evolution {
                 }
 
                 // === STAGE 2: u* -> u^{n+1} ===
-                ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
                 c2p_system_t{}(sim, lvl, block_geo);
+                ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u*)
@@ -363,13 +363,15 @@ namespace simbi::evolution {
         {
             using namespace ecs;
             for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
-                ghost_fill_system_t{}(sim, lvl);
                 auto& mesh_cfg = sim.mesh(lvl);
                 auto  motion   = sim.motion_state();
                 with_block_geometry<Sim::coord_system>(
                     mesh_cfg,
                     motion,
-                    [&](const auto& block_geo) { c2p_system_t{}(sim, lvl, block_geo); }
+                    [&](const auto& block_geo) {
+                        c2p_system_t{}(sim, lvl, block_geo);
+                        ghost_fill_system_t{}(sim, lvl);
+                    }
                 );
                 if (sim.has_refinement()) {
                     init_flux_registers_system_t{}(sim, lvl);
