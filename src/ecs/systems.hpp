@@ -441,6 +441,7 @@ namespace simbi::ecs {
 
             auto& mesh_cfg = sim.mesh(lvl);
             auto& geo      = mesh_cfg.geometry;
+            auto  motion   = sim.motion_state();
 
             // extract theta bounds for spherical coordinate handling
             real theta_min = 0.0;
@@ -470,41 +471,51 @@ namespace simbi::ecs {
 
             auto& decomp = sim.decomposition(lvl);
 
-            // dispatch based on whether we have dynamic expressions
-            if (has_dynamic) {
-                apply_with_dynamic_context(
-                    sim,
-                    lvl,
-                    mesh_cfg,
-                    policy,
-                    decomp,
-                    sources,
-                    current_time
-                );
-            }
-            else {
-                // simple static context
-                geometry::simple_context_t context;
-
-                for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
-                    auto& fields = sim.partition_hydro(lvl, pp);
-                    auto& part   = sim.partition(lvl, pp);
-                    auto& exec   = sim.partition_executor(lvl, pp);
-
-                    geometry::boundary_driver_t::apply_boundaries(
-                        fields.prim,
-                        part.block.id,
-                        decomp.skeleton,
+            // build block geometry for moving mesh support
+            with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
+                // dispatch based on whether we have dynamic expressions
+                if (has_dynamic) {
+                    apply_with_dynamic_context(
+                        sim,
+                        lvl,
                         mesh_cfg,
                         policy,
-                        context,
-                        exec
+                        decomp,
+                        sources,
+                        current_time,
+                        block_geo
                     );
                 }
-            }
+                else {
+                    // simple static context
+                    geometry::simple_context_t context;
+
+                    for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                        auto& fields = sim.partition_hydro(lvl, pp);
+                        auto& part   = sim.partition(lvl, pp);
+                        auto& exec   = sim.partition_executor(lvl, pp);
+
+                        geometry::boundary_driver_t::apply_boundaries(
+                            fields.prim,
+                            part.block.id,
+                            decomp.skeleton,
+                            mesh_cfg,
+                            policy,
+                            context,
+                            block_geo,
+                            exec
+                        );
+                    }
+                }
+            });
         }
 
-        template <typename Sim, typename Policy, typename Decomp, typename Sources>
+        template <
+            typename Sim,
+            typename Policy,
+            typename Decomp,
+            typename Sources,
+            typename BlockGeo>
         void apply_with_dynamic_context(
             Sim&                                  sim,
             std::uint64_t                         lvl,
@@ -512,7 +523,8 @@ namespace simbi::ecs {
             const Policy&                         policy,
             const Decomp&                         decomp,
             const Sources&                        sources,
-            real                                  time
+            real                                  time,
+            const BlockGeo&                       block_geo
         ) const
         {
             constexpr std::uint64_t Rank = Sim::rank;
@@ -563,6 +575,7 @@ namespace simbi::ecs {
                     mesh_cfg,
                     policy,
                     context,
+                    block_geo,
                     exec
                 );
             }

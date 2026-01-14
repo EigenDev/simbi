@@ -1,6 +1,8 @@
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
+#include "geometry/block_geometry.hpp"
 #include "geometry/boundary/driver.hpp"
+#include "geometry/metrics.hpp"
 #include "grid/block_info.hpp"
 #include "grid/boundary.hpp"
 #include "grid/connectivity.hpp"
@@ -67,6 +69,11 @@ int main()
     mesh_config_t<2> config;
     config.global_cells = {4, 4};
 
+    // create static mesh geometry
+    auto metric    = geometry::cartesian_metric_t{geometry::dummy_map_t{}, geometry::dummy_map_t{}};
+    auto motion    = geometry::motion_state_t::static_mesh();
+    auto block_geo = geometry::block_geometry(metric, motion);
+
     // apply boundaries
     geometry::boundary_driver_t::apply_boundaries(
         u,
@@ -75,6 +82,7 @@ int main()
         config,
         reflect_policy_t{},
         geometry::simple_context_t{},
+        block_geo,
         exec
     );
 

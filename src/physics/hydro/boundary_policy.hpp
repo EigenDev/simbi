@@ -41,10 +41,14 @@ namespace simbi::hydro {
     // =========================================================================
     // hydro_boundary_policy_t
     //
-    // transforms primitive/conserved states at boundaries.
-    // reflecting: flip normal velocity component
-    // outflow: copy (no change)
+    // transforms primitive states at boundaries for moving mesh.
+    //
+    // reflecting: v_ghost = -v_edge + 2*v_wall (moving mirror formula)
+    // outflow: copy state (preserves peculiar velocity automatically since both use same v_grid)
     // periodic: copy (index remapping handles position)
+    //
+    // for moving mesh, this policy is wrapped by geometry-aware operator that
+    // provides face velocity for reflection.
     // =========================================================================
     template <std::uint64_t Rank>
     struct hydro_boundary_policy_t

@@ -1,8 +1,10 @@
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
 #include "decorators.hpp"
+#include "geometry/block_geometry.hpp"
 #include "geometry/boundary/driver.hpp"
 #include "geometry/coordinate_map.hpp"
+#include "geometry/metrics.hpp"
 #include "grid/block_info.hpp"
 #include "grid/boundary.hpp"
 #include "grid/connectivity.hpp"
@@ -80,10 +82,24 @@ int main()
     mesh_config_t<1> config;
     config.global_cells = {4};
 
+    // create static mesh geometry
+    auto metric    = geometry::cartesian_metric_t{geometry::dummy_map_t{}};
+    auto motion    = geometry::motion_state_t::static_mesh();
+    auto block_geo = geometry::block_geometry(metric, motion);
+
     double            time = 2.0;
     dynamic_context_t ctx(metric_kind_t::cartesian, mock_geo_service_t{}, mock_vm_t{}, time);
 
-    boundary_driver_t::apply_boundaries(u, block.id, skeleton, config, test_policy_t{}, ctx, exec);
+    boundary_driver_t::apply_boundaries(
+        u,
+        block.id,
+        skeleton,
+        config,
+        test_policy_t{},
+        ctx,
+        block_geo,
+        exec
+    );
 
     double ghost = u.view()({-1});
     assert(std::abs(ghost - 99.0) < 1e-9);
