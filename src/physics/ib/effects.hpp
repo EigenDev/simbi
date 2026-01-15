@@ -223,14 +223,7 @@ namespace simbi::body::expr {
 
             // force and torque from momentum removal
             const auto force_delta  = -mom_dot * dv;
-            const auto torque_delta = [&]() -> vector_t<real, 3> {
-                if constexpr (Rank > 2) {
-                    return vecops::cross(r_vec, force_delta);
-                }
-                else {
-                    return vector_t<real, 3>{};
-                }
-            }();
+            const auto torque_delta = vecops::cross(r_vec, force_delta);
 
             return std::make_pair(
                 conserved_t{-den_dot, -mom_dot, -nrg_dot},
@@ -342,17 +335,7 @@ namespace simbi::body::expr {
             // calculate energy change
             const auto dE_dt  = vecops::dot(prim.vel, dp_dt);
             const auto dv     = geometry.labframe_volume(coord);
-            auto       torque = [&]() -> vector_t<real, 3> {
-                if constexpr (Rank == 3) {
-                    return vecops::cross(r_vec, dp_dt) * dv;
-                }
-                else if constexpr (Rank == 2) {
-                    return vector_t<real, 3>{0, 0, r_vec[0] * dp_dt[1] - r_vec[1] * dp_dt[0]};
-                }
-                else {
-                    return vector_t<real, 3>{};
-                }
-            }();
+            auto       torque = vecops::cross(r_vec, dp_dt) * dv;
 
             return std::make_pair(
                 conserved_t{0.0, dp_dt, dE_dt},

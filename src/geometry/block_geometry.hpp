@@ -190,8 +190,10 @@ namespace simbi::geometry {
             else {
                 // cartesian: area ~ a^(Rank-1)
                 a_factor = motion.a;
-                for (std::uint64_t ii = 1; ii < Rank - 1; ++ii) {
-                    a_factor *= motion.a;
+                if constexpr (Rank > 2) {
+                    for (std::uint64_t ii = 1; ii < Rank - 1; ++ii) {
+                        a_factor *= motion.a;
+                    }
                 }
             }
             return area_comoving * a_factor;

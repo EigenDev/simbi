@@ -34,7 +34,7 @@ namespace simbi {
         using namespace simbi::concepts;
         // dot product
         template <vector_like_c Vec1, vector_like_c Vec2>
-        DUAL constexpr auto dot(const Vec1& a, const Vec2& b)
+        DEV constexpr auto dot(const Vec1& a, const Vec2& b)
         {
             using T        = typename Vec1::value_type;
             using U        = typename Vec2::value_type;
@@ -49,14 +49,14 @@ namespace simbi {
 
         // norm
         template <vector_like_c Vec>
-        DUAL constexpr auto norm(const Vec& vec)
+        DEV constexpr auto norm(const Vec& vec)
         {
             return std::sqrt(dot(vec, vec));
         }
 
         // normalize
         template <vector_like_c Vec>
-        DUAL constexpr auto normalize(const Vec& vec)
+        DEV constexpr auto normalize(const Vec& vec)
         {
             using result_t = detail::promote_t<typename Vec::value_type, real>;
             const auto n   = norm(vec);
@@ -72,10 +72,12 @@ namespace simbi {
 
         // cross product
         template <vector_like_c Vec1, vector_like_c Vec2>
-        DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
+        DEV constexpr auto cross(const Vec1& a, const Vec2& b)
             requires(Vec1::rank == 3 && Vec2::rank == 3)
         {
-            using T = decltype(a[0] * b[0]);
+            // using T = decltype(a[0] * b[0]);
+            // common type
+            using T = detail::promote_t<typename Vec1::value_type, typename Vec2::value_type>;
             return vector_t<T, 3>{
                 a[1] * b[2] - a[2] * b[1],
                 a[2] * b[0] - a[0] * b[2],
@@ -85,18 +87,29 @@ namespace simbi {
 
         // cross product magnitude for Dim = 2
         template <vector_like_c Vec1, vector_like_c Vec2>
-        DUAL constexpr auto cross(const Vec1& a, const Vec2& b)
+        DEV constexpr auto cross(const Vec1& a, const Vec2& b)
             requires(Vec1::rank == 2 && Vec2::rank == 2)
         {
-            using T = decltype(a[0] * b[0]);
+            // using T = decltype(a[0] * b[0]);
+            using T = detail::promote_t<typename Vec1::value_type, typename Vec2::value_type>;
             return vector_t<T, 3>{T{0.0}, T{0.0}, a[0] * b[1] - b[0] * a[1]};
+        }
+
+        // cross product on Dim = 1 (returns zero vector)
+        template <vector_like_c Vec1, vector_like_c Vec2>
+        DEV constexpr auto cross(const Vec1&, const Vec2&)
+            requires(Vec1::rank == 1 && Vec2::rank == 1)
+        {
+            using T = detail::promote_t<typename Vec1::value_type, typename Vec2::value_type>;
+            return vector_t<T, 3>{T{0.0}, T{0.0}, T{0.0}};
         }
 
         // cross product component
         template <vector_like_c Vec1, vector_like_c Vec2>
-        DUAL constexpr auto cross_component(const Vec1& a, const Vec2& b, std::uint64_t ehat)
+        DEV constexpr auto cross_component(const Vec1& a, const Vec2& b, std::uint64_t ehat)
         {
-            using T = decltype(a[0] * b[0]);
+            // using T = decltype(a[0] * b[0]);
+            using T = detail::promote_t<typename Vec1::value_type, typename Vec2::value_type>;
             if (ehat == 1) {
                 return a[1] * b[2] - a[2] * b[1];
             }

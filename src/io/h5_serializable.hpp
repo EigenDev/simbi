@@ -20,56 +20,56 @@ namespace simbi::io {
     // primary template - types are not serializable by default
     // =========================================================================
     template <typename T, typename = void>
-    struct h5_serializable : std::false_type {
+    struct h5_serializable : std::false_type
+    {
     };
 
     // =========================================================================
     // concept for checking if a type is h5-serializable
     // =========================================================================
     template <typename T>
-    concept serializable_c =
-        requires(H5::Group& g, const T& val, const write_policy_t& policy) {
-            { h5_serializable<T>::write(g, val, policy) };
-            { h5_serializable<T>::read(g) } -> std::same_as<T>;
-            {
-                h5_serializable<T>::group_name
-            } -> std::convertible_to<std::string_view>;
-        };
+    concept serializable_c = requires(H5::Group& g, const T& val, const write_policy_t& policy) {
+        { h5_serializable<T>::write(g, val, policy) };
+        { h5_serializable<T>::read(g) } -> std::same_as<T>;
+        { h5_serializable<T>::group_name } -> std::convertible_to<std::string_view>;
+    };
 
     // =========================================================================
     // dataset helpers
     // =========================================================================
+    template <typename T>
+    auto get_h5_dtype(const write_policy_t& policy)
+    {
+        if constexpr (std::is_floating_point_v<T>) {
+            return policy.data_type();
+        }
+        else {
+            return h5_pred_type<T>::value();
+        }
+    }
 
     // write a vector as a dataset with policy-controlled precision/compression
     template <typename T>
     void write_dataset(
-        H5::Group& group,
-        const std::string& name,
-        const std::vector<T>& data,
+        H5::Group&                  group,
+        const std::string&          name,
+        const std::vector<T>&       data,
         const std::vector<hsize_t>& dims,
-        const write_policy_t& policy
+        const write_policy_t&       policy
     )
     {
         H5::DataSpace space(static_cast<int>(dims.size()), dims.data());
-        auto plist = policy.creation_props(dims);
+        auto          plist = policy.creation_props(dims);
 
         // for floating-point types, respect precision policy
         // for integer types, use native type
-        auto dtype = []<typename U>(const write_policy_t& p) {
-            if constexpr (std::is_floating_point_v<U>) {
-                return p.data_type();
-            }
-            else {
-                return h5_pred_type<U>::value();
-            }
-        }.template operator()<T>(policy);
+        auto dtype = get_h5_dtype<T>(policy);
 
         auto dataset = group.createDataSet(name, dtype, space, plist);
 
         // handle precision downsampling for floating-point
         if constexpr (std::is_floating_point_v<T>) {
-            if (policy.precision == precision_t::float32 &&
-                std::is_same_v<T, double>) {
+            if (policy.precision == precision_t::float32 && std::is_same_v<T, double>) {
                 std::vector<float> temp(data.begin(), data.end());
                 dataset.write(temp.data(), H5::PredType::NATIVE_FLOAT);
                 return;
@@ -81,14 +81,14 @@ namespace simbi::io {
     // write a scalar as a dataset
     template <typename T>
     void write_scalar_dataset(
-        H5::Group& group,
-        const std::string& name,
-        T value,
+        H5::Group&            group,
+        const std::string&    name,
+        T                     value,
         const write_policy_t& policy
     )
     {
         std::vector<hsize_t> dims{1};
-        std::vector<T> data{value};
+        std::vector<T>       data{value};
         write_dataset(group, name, data, dims, policy);
     }
 
@@ -99,7 +99,7 @@ namespace simbi::io {
         auto dataset = group.openDataSet(name);
         auto space   = dataset.getSpace();
 
-        int ndims = space.getSimpleExtentNdims();
+        int                  ndims = space.getSimpleExtentNdims();
         std::vector<hsize_t> dims(ndims);
         space.getSimpleExtentDims(dims.data());
 
@@ -129,21 +129,16 @@ namespace simbi::io {
     void write_attribute(H5::Group& group, const std::string& name, T value)
     {
         H5::DataSpace scalar_space(H5S_SCALAR);
-        auto attr =
-            group.createAttribute(name, h5_pred_type<T>::value(), scalar_space);
+        auto          attr = group.createAttribute(name, h5_pred_type<T>::value(), scalar_space);
         attr.write(h5_pred_type<T>::value(), &value);
     }
 
     // specialization for strings
-    inline void write_attribute(
-        H5::Group& group,
-        const std::string& name,
-        const std::string& value
-    )
+    inline void write_attribute(H5::Group& group, const std::string& name, const std::string& value)
     {
-        H5::StrType str_type(H5::PredType::C_S1, value.size() + 1);
+        H5::StrType   str_type(H5::PredType::C_S1, value.size() + 1);
         H5::DataSpace scalar_space(H5S_SCALAR);
-        auto attr = group.createAttribute(name, str_type, scalar_space);
+        auto          attr = group.createAttribute(name, str_type, scalar_space);
         attr.write(str_type, value.c_str());
     }
 
@@ -151,19 +146,18 @@ namespace simbi::io {
     T read_attribute(const H5::Group& group, const std::string& name)
     {
         auto attr = group.openAttribute(name);
-        T value;
+        T    value;
         attr.read(h5_pred_type<T>::value(), &value);
         return value;
     }
 
     // specialization for strings
     template <>
-    inline std::string
-    read_attribute<std::string>(const H5::Group& group, const std::string& name)
+    inline std::string read_attribute<std::string>(const H5::Group& group, const std::string& name)
     {
-        auto attr       = group.openAttribute(name);
-        auto str_type   = attr.getStrType();
-        std::size_t len = str_type.getSize();
+        auto        attr     = group.openAttribute(name);
+        auto        str_type = attr.getStrType();
+        std::size_t len      = str_type.getSize();
 
         std::string value;
         value.resize(len);
@@ -182,26 +176,26 @@ namespace simbi::io {
 
     template <typename T, std::size_t N>
     void write_array(
-        H5::Group& group,
+        H5::Group&         group,
         const std::string& name,
         const T (&arr)[N],
         const write_policy_t& policy
     )
     {
-        std::vector<T> data(arr, arr + N);
+        std::vector<T>       data(arr, arr + N);
         std::vector<hsize_t> dims{N};
         write_dataset(group, name, data, dims, policy);
     }
 
     template <typename T, std::size_t N>
     void write_array(
-        H5::Group& group,
-        const std::string& name,
+        H5::Group&              group,
+        const std::string&      name,
         const std::array<T, N>& arr,
-        const write_policy_t& policy
+        const write_policy_t&   policy
     )
     {
-        std::vector<T> data(arr.begin(), arr.end());
+        std::vector<T>       data(arr.begin(), arr.end());
         std::vector<hsize_t> dims{N};
         write_dataset(group, name, data, dims, policy);
     }
@@ -209,7 +203,7 @@ namespace simbi::io {
     template <typename T, std::size_t N>
     std::array<T, N> read_array(const H5::Group& group, const std::string& name)
     {
-        auto data = read_dataset<T>(group, name);
+        auto             data = read_dataset<T>(group, name);
         std::array<T, N> arr{};
         for (std::size_t ii = 0; ii < N && ii < data.size(); ++ii) {
             arr[ii] = data[ii];
@@ -221,8 +215,7 @@ namespace simbi::io {
     // group helpers
     // =========================================================================
 
-    inline H5::Group
-    create_or_open_group(H5::Group& parent, const std::string& name)
+    inline H5::Group create_or_open_group(H5::Group& parent, const std::string& name)
     {
         if (parent.nameExists(name)) {
             return parent.openGroup(name);
@@ -235,6 +228,6 @@ namespace simbi::io {
         return parent.nameExists(name);
     }
 
-}   // namespace simbi::io
+} // namespace simbi::io
 
-#endif   // IO_H5_SERIALIZABLE_HPP
+#endif // IO_H5_SERIALIZABLE_HPP

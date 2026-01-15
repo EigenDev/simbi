@@ -376,9 +376,20 @@ namespace simbi::helpers {
     }
 
     template <typename T>
+    DUAL bool safe_less_equal(T a, T b)
+    {
+        return a < b || approx_equal(a, b);
+    }
+
+    template <typename T>
     DUAL bool safe_greater_than(T a, T b)
     {
         return a > b && !approx_equal(a, b);
+    }
+    template <typename T>
+    DUAL bool safe_greater_equal(T a, T b)
+    {
+        return a > b || approx_equal(a, b);
     }
 
     std::string get_color_code(color_t color);

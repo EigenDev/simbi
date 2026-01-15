@@ -155,14 +155,9 @@ namespace simbi::hydro::rmhd {
                 f_upper = ff;
             }
             if (iter >= build::max_iterations || !std::isfinite(ff)) {
-                return simbi::None([iter]() -> ErrorCode {
-                    if (iter >= build::max_iterations) {
-                        return ErrorCode::MAX_ITER;
-                    }
-                    else {
-                        return ErrorCode::NON_FINITE_ROOT;
-                    }
-                }());
+                return simbi::None(
+                    iter >= build::max_iterations ? ErrorCode::MAX_ITER : ErrorCode::NON_FINITE_ROOT
+                );
             }
             iter++;
         } while (std::abs(mul - muu) > build::epsilon && std::abs(ff) > build::epsilon);

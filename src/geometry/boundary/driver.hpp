@@ -92,7 +92,7 @@ namespace simbi::geometry {
         Blockgeometry_t geometry;
 
         // vm: the compiled dag expression (handle to managed memory)
-        Expression vm;
+        const Expression& vm;
 
         // simulation time
         real time;
