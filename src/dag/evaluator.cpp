@@ -1,4 +1,5 @@
 #include "evaluator.hpp"
+
 #include "build_config.hpp"
 #include "containers/store.hpp"
 #include "dag/expression.hpp"
@@ -12,8 +13,8 @@
 
 // Error handling macro - customize behavior based on compile flags
 #ifdef EXPR_STRICT_ERROR_CHECKING
-#define HANDLE_ERROR(msg)                                                      \
-    printf("[ExprError] %s\n", msg);                                           \
+#define HANDLE_ERROR(msg)                                                                          \
+    printf("[ExprError] %s\n", msg);                                                               \
     return NAN;
 #else
 #define HANDLE_ERROR(msg) return 0.0;
@@ -34,7 +35,7 @@ namespace simbi::expression {
 
     std::int64_t get_max_register(const store_t<LinearExprInstr>& instructions)
     {
-        std::int64_t max_reg = 4;   // start with input registers
+        std::int64_t max_reg = 4; // start with input registers
 
         for (size_t ii = 0; ii < instructions.size(); ii++) {
             const auto& instr = instructions[ii];
@@ -42,9 +43,9 @@ namespace simbi::expression {
 
             // also check operands for completeness
             if (instr.op != ExprOp::CONSTANT && instr.op != ExprOp::PARAMETER) {
-                max_reg = std::max(max_reg, instr.register_operands.operand1);
-                max_reg = std::max(max_reg, instr.register_operands.operand2);
-                max_reg = std::max(max_reg, instr.register_operands.operand3);
+                max_reg = std::max(max_reg, instr.payload.register_operands.operand1);
+                max_reg = std::max(max_reg, instr.payload.register_operands.operand2);
+                max_reg = std::max(max_reg, instr.payload.register_operands.operand3);
             }
         }
 
@@ -53,23 +54,23 @@ namespace simbi::expression {
 
     DEV void evaluate_linear_expr(
         const LinearExprInstr* instructions,
-        std::uint64_t instruction_count,
-        const std::int64_t* mapped_output_indices,
-        std::uint64_t output_count,
+        std::uint64_t          instruction_count,
+        const std::int64_t*    mapped_output_indices,
+        std::uint64_t          output_count,
         // std::int64_treg_count,
-        real x1,
-        real x2,
-        real x3,
-        real t,
+        real        x1,
+        real        x2,
+        real        x3,
+        real        t,
         const real* parameters,
-        real* outputs
+        real*       outputs
     )
     {
         // create register bank
         // use a fixed size array for performance
         // [TODO]: play around with this size
-        constexpr std::int64_t MAX_REGISTERS = 256;
-        real registers[MAX_REGISTERS]        = {0.0};
+        constexpr std::int64_t MAX_REGISTERS            = 256;
+        real                   registers[MAX_REGISTERS] = {0.0};
 
         // init input registers
         registers[0] = x1;
@@ -79,66 +80,69 @@ namespace simbi::expression {
 
         // execute each instruction in reverse order
         for (std::uint64_t ii = 0; ii < instruction_count; ii++) {
-            const auto& instr             = instructions[ii];
+            const auto&        instr      = instructions[ii];
             const std::int64_t result_reg = instr.result_register;
 
             // make sure reg index is valid
             if (result_reg < 0 || result_reg >= MAX_REGISTERS) {
-                continue;   // this should never happen
+                continue; // this should never happen
             }
 
             switch (instr.op) {
                 case ExprOp::CONSTANT:
-                    registers[result_reg] = instr.constant_eval;
+                    registers[result_reg] = instr.payload.constant_eval;
                     break;
 
-                case ExprOp::VARIABLE_X1: registers[result_reg] = x1; break;
-                case ExprOp::VARIABLE_X2: registers[result_reg] = x2; break;
-                case ExprOp::VARIABLE_X3: registers[result_reg] = x3; break;
-                case ExprOp::VARIABLE_T: registers[result_reg] = t; break;
+                case ExprOp::VARIABLE_X1:
+                    registers[result_reg] = x1;
+                    break;
+                case ExprOp::VARIABLE_X2:
+                    registers[result_reg] = x2;
+                    break;
+                case ExprOp::VARIABLE_X3:
+                    registers[result_reg] = x3;
+                    break;
+                case ExprOp::VARIABLE_T:
+                    registers[result_reg] = t;
+                    break;
 
                 case ExprOp::PARAMETER:
-                    registers[result_reg] = parameters[instr.parameter_idx];
+                    registers[result_reg] = parameters[instr.payload.parameter_idx];
                     break;
 
                 case ExprOp::ADD:
-                    registers[result_reg] =
-                        registers[instr.register_operands.operand1] +
-                        registers[instr.register_operands.operand2];
+                    registers[result_reg] = registers[instr.payload.register_operands.operand1] +
+                                            registers[instr.payload.register_operands.operand2];
                     break;
 
                 case ExprOp::SUBTRACT:
-                    registers[result_reg] =
-                        registers[instr.register_operands.operand1] -
-                        registers[instr.register_operands.operand2];
+                    registers[result_reg] = registers[instr.payload.register_operands.operand1] -
+                                            registers[instr.payload.register_operands.operand2];
                     break;
 
                 case ExprOp::MULTIPLY:
-                    registers[result_reg] =
-                        registers[instr.register_operands.operand1] *
-                        registers[instr.register_operands.operand2];
+                    registers[result_reg] = registers[instr.payload.register_operands.operand1] *
+                                            registers[instr.payload.register_operands.operand2];
                     break;
                 case ExprOp::DIVIDE: {
-                    real denominator =
-                        registers[instr.register_operands.operand2];
+                    real denominator = registers[instr.payload.register_operands.operand2];
                     if (denominator == 0.0) {
                         printf(
                             "[ExprError] Division by zero in instruction "
                             "%" PRIu64 "\n",
                             ii
                         );
-                        registers[result_reg] = 0.0;   // handle gracefully
+                        registers[result_reg] = 0.0; // handle gracefully
                         break;
                     }
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] /
-                        denominator;
+                        registers[instr.payload.register_operands.operand1] / denominator;
                     break;
                 }
 
                 case ExprOp::POWER: {
-                    real base     = registers[instr.register_operands.operand1];
-                    real exponent = registers[instr.register_operands.operand2];
+                    real base     = registers[instr.payload.register_operands.operand1];
+                    real exponent = registers[instr.payload.register_operands.operand2];
                     // handle potential domain errors
                     if (base == 0.0 && exponent < 0.0) {
                         printf(
@@ -159,51 +163,50 @@ namespace simbi::expression {
                 }
 
                 case ExprOp::NEG:
-                    registers[result_reg] =
-                        -registers[instr.register_operands.operand1];
+                    registers[result_reg] = -registers[instr.payload.register_operands.operand1];
                     break;
                 case ExprOp::LT:
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] <
-                                registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1] <
+                                registers[instr.payload.register_operands.operand2]
                             ? 1.0
                             : 0.0;
                     break;
                 case ExprOp::GT:
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] >
-                                registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1] >
+                                registers[instr.payload.register_operands.operand2]
                             ? 1.0
                             : 0.0;
                     break;
                 case ExprOp::EQ:
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] ==
-                                registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1] ==
+                                registers[instr.payload.register_operands.operand2]
                             ? 1.0
                             : 0.0;
                     break;
                 case ExprOp::LE:
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] <=
-                                registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1] <=
+                                registers[instr.payload.register_operands.operand2]
                             ? 1.0
                             : 0.0;
                     break;
                 case ExprOp::GE:
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] >=
-                                registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1] >=
+                                registers[instr.payload.register_operands.operand2]
                             ? 1.0
                             : 0.0;
                     break;
                 case ExprOp::AND:
                     registers[result_reg] =
                         static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
+                            registers[instr.payload.register_operands.operand1]
                         ) &&
                                 static_cast<std::int64_t>(
-                                    registers[instr.register_operands.operand2]
+                                    registers[instr.payload.register_operands.operand2]
                                 )
                             ? 1.0
                             : 0.0;
@@ -211,246 +214,237 @@ namespace simbi::expression {
                 case ExprOp::OR:
                     registers[result_reg] =
                         static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
+                            registers[instr.payload.register_operands.operand1]
                         ) ||
                                 static_cast<std::int64_t>(
-                                    registers[instr.register_operands.operand2]
+                                    registers[instr.payload.register_operands.operand2]
                                 )
                             ? 1.0
                             : 0.0;
                     break;
 
                 case ExprOp::NOT:
-                    registers[result_reg] =
-                        !static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        )
-                            ? 1.0
-                            : 0.0;
+                    registers[result_reg] = !static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            )
+                                                ? 1.0
+                                                : 0.0;
                     break;
                 case ExprOp::LOG:
                     registers[result_reg] =
-                        std::log(registers[instr.register_operands.operand1]);
+                        std::log(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::LOG10:
                     registers[result_reg] =
-                        std::log10(registers[instr.register_operands.operand1]);
+                        std::log10(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ABS:
                     registers[result_reg] =
-                        std::abs(registers[instr.register_operands.operand1]);
+                        std::abs(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::SIN:
                     registers[result_reg] =
-                        std::sin(registers[instr.register_operands.operand1]);
+                        std::sin(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::COS:
                     registers[result_reg] =
-                        std::cos(registers[instr.register_operands.operand1]);
+                        std::cos(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::TAN:
                     registers[result_reg] =
-                        std::tan(registers[instr.register_operands.operand1]);
+                        std::tan(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ASIN:
                     registers[result_reg] =
-                        std::asin(registers[instr.register_operands.operand1]);
+                        std::asin(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ACOS:
                     registers[result_reg] =
-                        std::acos(registers[instr.register_operands.operand1]);
+                        std::acos(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ATAN:
                     registers[result_reg] =
-                        std::atan(registers[instr.register_operands.operand1]);
+                        std::atan(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ATAN2:
                     registers[result_reg] = std::atan2(
-                        registers[instr.register_operands.operand1],
-                        registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1],
+                        registers[instr.payload.register_operands.operand2]
                     );
                     break;
                 case ExprOp::EXP:
                     registers[result_reg] =
-                        std::exp(registers[instr.register_operands.operand1]);
+                        std::exp(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::SQRT:
                     registers[result_reg] =
-                        std::sqrt(registers[instr.register_operands.operand1]);
+                        std::sqrt(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::MIN:
                     registers[result_reg] = std::min(
-                        registers[instr.register_operands.operand1],
-                        registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1],
+                        registers[instr.payload.register_operands.operand2]
                     );
                     break;
                 case ExprOp::MAX:
                     registers[result_reg] = std::max(
-                        registers[instr.register_operands.operand1],
-                        registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1],
+                        registers[instr.payload.register_operands.operand2]
                     );
                     break;
                 case ExprOp::MOD:
                     registers[result_reg] = std::fmod(
-                        registers[instr.register_operands.operand1],
-                        registers[instr.register_operands.operand2]
+                        registers[instr.payload.register_operands.operand1],
+                        registers[instr.payload.register_operands.operand2]
                     );
                     break;
                 case ExprOp::SINH:
                     registers[result_reg] =
-                        std::sinh(registers[instr.register_operands.operand1]);
+                        std::sinh(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::COSH:
                     registers[result_reg] =
-                        std::cosh(registers[instr.register_operands.operand1]);
+                        std::cosh(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::TANH:
                     registers[result_reg] =
-                        std::tanh(registers[instr.register_operands.operand1]);
+                        std::tanh(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ASINH:
                     registers[result_reg] =
-                        std::asinh(registers[instr.register_operands.operand1]);
+                        std::asinh(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ACOSH:
                     registers[result_reg] =
-                        std::acosh(registers[instr.register_operands.operand1]);
+                        std::acosh(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::ATANH:
                     registers[result_reg] =
-                        std::atanh(registers[instr.register_operands.operand1]);
+                        std::atanh(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::SGN:
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] > 0.0
+                        registers[instr.payload.register_operands.operand1] > 0.0
                             ? 1.0
-                            : (registers[instr.register_operands.operand1] < 0.0
-                                   ? -1.0
-                                   : 0.0);
+                            : (registers[instr.payload.register_operands.operand1] < 0.0 ? -1.0
+                                                                                         : 0.0);
                     break;
                 case ExprOp::FLOOR:
                     registers[result_reg] =
-                        std::floor(registers[instr.register_operands.operand1]);
+                        std::floor(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::CEIL:
                     registers[result_reg] =
-                        std::ceil(registers[instr.register_operands.operand1]);
+                        std::ceil(registers[instr.payload.register_operands.operand1]);
                     break;
                 case ExprOp::BITWISE_AND:
-                    registers[result_reg] =
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        ) &
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand2]
-                        );
+                    registers[result_reg] = static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            ) &
+                                            static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand2]
+                                            );
                     break;
                 case ExprOp::BITWISE_OR:
-                    registers[result_reg] =
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        ) |
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand2]
-                        );
+                    registers[result_reg] = static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            ) |
+                                            static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand2]
+                                            );
                     break;
                 case ExprOp::BITWISE_XOR:
-                    registers[result_reg] =
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        ) ^
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand2]
-                        );
+                    registers[result_reg] = static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            ) ^
+                                            static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand2]
+                                            );
                     break;
                 case ExprOp::BITWISE_NOT:
                     registers[result_reg] = ~static_cast<std::int64_t>(
-                        registers[instr.register_operands.operand1]
+                        registers[instr.payload.register_operands.operand1]
                     );
                     break;
                 case ExprOp::BITWISE_LEFT_SHIFT:
                     registers[result_reg] =
                         static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
+                            registers[instr.payload.register_operands.operand1]
                         )
                         << static_cast<std::int64_t>(
-                               registers[instr.register_operands.operand2]
+                               registers[instr.payload.register_operands.operand2]
                            );
                     break;
                 case ExprOp::BITWISE_RIGHT_SHIFT:
-                    registers[result_reg] =
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        ) >>
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand2]
-                        );
+                    registers[result_reg] = static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            ) >>
+                                            static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand2]
+                                            );
                     break;
                 case ExprOp::LOGICAL_AND:
-                    registers[result_reg] =
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        ) &&
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand2]
-                        );
+                    registers[result_reg] = static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            ) &&
+                                            static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand2]
+                                            );
                     break;
                 case ExprOp::LOGICAL_OR:
-                    registers[result_reg] =
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        ) ||
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand2]
-                        );
+                    registers[result_reg] = static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            ) ||
+                                            static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand2]
+                                            );
                     break;
                 case ExprOp::LOGICAL_NOT:
                     registers[result_reg] = !static_cast<std::int64_t>(
-                        registers[instr.register_operands.operand1]
+                        registers[instr.payload.register_operands.operand1]
                     );
                     break;
                 case ExprOp::LOGICAL_XOR:
-                    registers[result_reg] =
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand1]
-                        ) ^
-                        static_cast<std::int64_t>(
-                            registers[instr.register_operands.operand2]
-                        );
+                    registers[result_reg] = static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand1]
+                                            ) ^
+                                            static_cast<std::int64_t>(
+                                                registers[instr.payload.register_operands.operand2]
+                                            );
                     break;
                 case ExprOp::LOGICAL_NAND:
                     registers[result_reg] =
                         !(static_cast<std::int64_t>(
-                              registers[instr.register_operands.operand1]
+                              registers[instr.payload.register_operands.operand1]
                           ) &&
                           static_cast<std::int64_t>(
-                              registers[instr.register_operands.operand2]
+                              registers[instr.payload.register_operands.operand2]
                           ));
                     break;
                 case ExprOp::LOGICAL_NOR:
                     registers[result_reg] =
                         !(static_cast<std::int64_t>(
-                              registers[instr.register_operands.operand1]
+                              registers[instr.payload.register_operands.operand1]
                           ) ||
                           static_cast<std::int64_t>(
-                              registers[instr.register_operands.operand2]
+                              registers[instr.payload.register_operands.operand2]
                           ));
                     break;
                 case ExprOp::LOGICAL_XNOR:
                     registers[result_reg] =
                         !(static_cast<std::int64_t>(
-                              registers[instr.register_operands.operand1]
+                              registers[instr.payload.register_operands.operand1]
                           ) ^
                           static_cast<std::int64_t>(
-                              registers[instr.register_operands.operand2]
+                              registers[instr.payload.register_operands.operand2]
                           ));
                     break;
 
                 case ExprOp::IF_THEN_ELSE:
                     registers[result_reg] =
-                        registers[instr.register_operands.operand1] != 0.0
-                            ? registers[instr.register_operands.operand2]
-                            : registers[instr.register_operands.operand3];
+                        registers[instr.payload.register_operands.operand1] != 0.0
+                            ? registers[instr.payload.register_operands.operand2]
+                            : registers[instr.payload.register_operands.operand3];
                     break;
             }
         }
@@ -462,19 +456,19 @@ namespace simbi::expression {
                 outputs[ii] = registers[reg_idx];
             }
             else {
-                outputs[ii] = 0.0;   // fallback for invalid register
+                outputs[ii] = 0.0; // fallback for invalid register
             }
         }
     }
 
     DEV real evaluate_expr(
         const ExprNode* nodes,
-        std::int64_t node_idx,
-        real x1,
-        real x2,
-        real x3,
-        real t,
-        const real* parameters
+        std::int64_t    node_idx,
+        real            x1,
+        real            x2,
+        real            x3,
+        real            t,
+        const real*     parameters
     )
     {
         // bounds check
@@ -486,108 +480,57 @@ namespace simbi::expression {
 
         switch (node.op) {
             // constants and variables
-            case ExprOp::CONSTANT: return node.value;
+            case ExprOp::CONSTANT:
+                return node.data.value;
 
-            case ExprOp::VARIABLE_X1: return x1;
+            case ExprOp::VARIABLE_X1:
+                return x1;
 
-            case ExprOp::VARIABLE_X2: return x2;
+            case ExprOp::VARIABLE_X2:
+                return x2;
 
-            case ExprOp::VARIABLE_X3: return x3;
+            case ExprOp::VARIABLE_X3:
+                return x3;
 
-            case ExprOp::VARIABLE_T: return t;
+            case ExprOp::VARIABLE_T:
+                return t;
 
             case ExprOp::PARAMETER:
                 if (parameters == nullptr) {
                     HANDLE_ERROR("Parameter array is null");
                 }
-                return parameters[node.param_idx];
+                return parameters[node.data.param_idx];
 
             // binary arithmetic operations
             case ExprOp::ADD: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left + right;
             }
 
             case ExprOp::SUBTRACT: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left - right;
             }
 
             case ExprOp::MULTIPLY: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left * right;
             }
 
             case ExprOp::DIVIDE: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 if (right == 0.0) {
                     HANDLE_ERROR("Division by zero");
                 }
@@ -595,24 +538,10 @@ namespace simbi::expression {
             }
 
             case ExprOp::POWER: {
-                real base = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real exponent = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real base =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real exponent =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 // handle potential domain errors
                 if (base == 0.0 && exponent < 0.0) {
                     HANDLE_ERROR("Zero raised to negative power");
@@ -625,258 +554,104 @@ namespace simbi::expression {
 
             // unary operations
             case ExprOp::NEG: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return -value;
             }
 
             // comparison operations - return 1.0 for true, 0.0 for false
             case ExprOp::LT: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left < right ? 1.0 : 0.0;
             }
 
             case ExprOp::GT: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left > right ? 1.0 : 0.0;
             }
 
             case ExprOp::EQ: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left == right ? 1.0 : 0.0;
             }
 
             case ExprOp::LE: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left <= right ? 1.0 : 0.0;
             }
 
             case ExprOp::GE: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left >= right ? 1.0 : 0.0;
             }
 
             // logical operations
             case ExprOp::AND: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 // short-circuit evaluation
                 if (left == 0.0) {
                     return 0.0;
                 }
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return (left != 0.0 && right != 0.0) ? 1.0 : 0.0;
             }
 
             case ExprOp::OR: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 // short-circuit evaluation
                 if (left != 0.0) {
                     return 1.0;
                 }
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return (left != 0.0 || right != 0.0) ? 1.0 : 0.0;
             }
 
             case ExprOp::NOT: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return value == 0.0 ? 1.0 : 0.0;
             }
 
             // min/max functions
             case ExprOp::MIN: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left < right ? left : right;
             }
 
             case ExprOp::MAX: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return left > right ? left : right;
             }
             case ExprOp::MOD: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 if (right == 0.0) {
                     HANDLE_ERROR("Division by zero in modulo operation");
                 }
@@ -885,135 +660,63 @@ namespace simbi::expression {
 
             // math functions
             case ExprOp::SIN: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::sin(value);
             }
 
             case ExprOp::COS: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::cos(value);
             }
 
             case ExprOp::TAN: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::tan(value);
             }
 
             case ExprOp::SINH: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::sinh(value);
             }
             case ExprOp::COSH: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::cosh(value);
             }
             case ExprOp::TANH: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::tanh(value);
             }
             case ExprOp::ASINH: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::asinh(value);
             }
             case ExprOp::ACOSH: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 if (value < 1.0) {
                     HANDLE_ERROR("Arc hyperbolic cosine argument out of range");
                 }
                 return std::acosh(value);
             }
             case ExprOp::ATANH: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 if (value <= -1.0 || value >= 1.0) {
-                    HANDLE_ERROR(
-                        "Arc hyperbolic tangent argument out of range"
-                    );
+                    HANDLE_ERROR("Arc hyperbolic tangent argument out of range");
                 }
                 return std::atanh(value);
             }
 
             case ExprOp::LOG: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 if (value <= 0.0) {
                     HANDLE_ERROR("Log of non-positive number");
                 }
@@ -1021,15 +724,8 @@ namespace simbi::expression {
             }
 
             case ExprOp::LOG10: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 if (value <= 0.0) {
                     HANDLE_ERROR("Log10 of non-positive number");
                 }
@@ -1037,41 +733,20 @@ namespace simbi::expression {
             }
 
             case ExprOp::EXP: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::exp(value);
             }
 
             case ExprOp::ABS: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::abs(value);
             }
 
             case ExprOp::SQRT: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 if (value < 0.0) {
                     HANDLE_ERROR("Square root of negative number");
                 }
@@ -1079,15 +754,8 @@ namespace simbi::expression {
             }
 
             case ExprOp::ASIN: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 if (value < -1.0 || value > 1.0) {
                     HANDLE_ERROR("Arc sine argument out of range");
                 }
@@ -1095,15 +763,8 @@ namespace simbi::expression {
             }
 
             case ExprOp::ACOS: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 if (value < -1.0 || value > 1.0) {
                     HANDLE_ERROR("Arc cosine argument out of range");
                 }
@@ -1111,92 +772,41 @@ namespace simbi::expression {
             }
 
             case ExprOp::ATAN: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::atan(value);
             }
 
             case ExprOp::ATAN2: {
-                real y = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real x = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real y = evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real x = evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return std::atan2(y, x);
             }
 
             case ExprOp::SGN: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return helpers::sgn(value);
             }
             case ExprOp::FLOOR: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::floor(value);
             }
             case ExprOp::CEIL: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return std::ceil(value);
             }
 
             // conditional operation
             case ExprOp::IF_THEN_ELSE: {
-                real condition = evaluate_expr(
-                    nodes,
-                    node.ternary.condition,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real condition =
+                    evaluate_expr(nodes, node.data.ternary.condition, x1, x2, x3, t, parameters);
                 if (condition != 0.0) {
                     return evaluate_expr(
                         nodes,
-                        node.ternary.then_expr,
+                        node.data.ternary.then_expr,
                         x1,
                         x2,
                         x3,
@@ -1207,7 +817,7 @@ namespace simbi::expression {
                 else {
                     return evaluate_expr(
                         nodes,
-                        node.ternary.else_expr,
+                        node.data.ternary.else_expr,
                         x1,
                         x2,
                         x3,
@@ -1219,284 +829,111 @@ namespace simbi::expression {
 
             // bitwise operations
             case ExprOp::BITWISE_AND: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                return static_cast<std::int64_t>(left) &
-                       static_cast<std::int64_t>(right);
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
+                return static_cast<std::int64_t>(left) & static_cast<std::int64_t>(right);
             }
 
             case ExprOp::BITWISE_OR: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                return static_cast<std::int64_t>(left) |
-                       static_cast<std::int64_t>(right);
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
+                return static_cast<std::int64_t>(left) | static_cast<std::int64_t>(right);
             }
 
             case ExprOp::BITWISE_XOR: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                return static_cast<std::int64_t>(left) ^
-                       static_cast<std::int64_t>(right);
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
+                return static_cast<std::int64_t>(left) ^ static_cast<std::int64_t>(right);
             }
 
             case ExprOp::BITWISE_NOT: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return ~static_cast<std::int64_t>(value);
             }
 
             case ExprOp::BITWISE_LEFT_SHIFT: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                return static_cast<std::int64_t>(left)
-                       << static_cast<std::int64_t>(right);
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
+                return static_cast<std::int64_t>(left) << static_cast<std::int64_t>(right);
             }
 
             case ExprOp::BITWISE_RIGHT_SHIFT: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                return static_cast<std::int64_t>(left) >>
-                       static_cast<std::int64_t>(right);
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
+                return static_cast<std::int64_t>(left) >> static_cast<std::int64_t>(right);
             }
 
             // logical operations
             case ExprOp::LOGICAL_AND: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 // short-circuit evaluation
                 if (left == 0.0) {
                     return 0.0;
                 }
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return (left != 0.0 && right != 0.0) ? 1.0 : 0.0;
             }
 
             case ExprOp::LOGICAL_OR: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 // short-circuit evaluation
                 if (left != 0.0) {
                     return 1.0;
                 }
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return (left != 0.0 || right != 0.0) ? 1.0 : 0.0;
             }
 
             case ExprOp::LOGICAL_NOT: {
-                real value = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real value =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
                 return value == 0.0 ? 1.0 : 0.0;
             }
 
             case ExprOp::LOGICAL_XOR: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return (left != 0.0) ^ (right != 0.0) ? 1.0 : 0.0;
             }
 
             case ExprOp::LOGICAL_NAND: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return !(left != 0.0 && right != 0.0) ? 1.0 : 0.0;
             }
 
             case ExprOp::LOGICAL_NOR: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return !(left != 0.0 || right != 0.0) ? 1.0 : 0.0;
             }
 
             case ExprOp::LOGICAL_XNOR: {
-                real left = evaluate_expr(
-                    nodes,
-                    node.children.left,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
-                real right = evaluate_expr(
-                    nodes,
-                    node.children.right,
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                real left =
+                    evaluate_expr(nodes, node.data.children.left, x1, x2, x3, t, parameters);
+                real right =
+                    evaluate_expr(nodes, node.data.children.right, x1, x2, x3, t, parameters);
                 return !(left != 0.0) == !(right != 0.0) ? 1.0 : 0.0;
             }
 
@@ -1511,12 +948,12 @@ namespace simbi::expression {
     // this avoids stack overflow for deeply nested expressions
     DEV real evaluate_expr_nonrecursive(
         const ExprNode* nodes,
-        std::int64_t node_idx,
-        real x1,
-        real x2,
-        real x3,
-        real t,
-        const real* parameters
+        std::int64_t    node_idx,
+        real            x1,
+        real            x2,
+        real            x3,
+        real            t,
+        const real*     parameters
     )
     {
         // define constants for memory limits
@@ -1534,19 +971,20 @@ namespace simbi::expression {
         bool in_progress[MAX_NODES] = {false};
 
         // stack entry structure with a clearer design
-        struct StackEntry {
-            std::int64_t node_idx;   // Index of the node being evaluated
+        struct StackEntry
+        {
+            std::int64_t node_idx; // Index of the node being evaluated
             /// 0. inital, 1. evaluating children, 2. computing result
-            std::int64_t phase;                // current phase of evaluation
-            std::int64_t children_needed;      // number of children required
-            std::int64_t children_evaluated;   // number of children already
-                                               // evaluated
+            std::int64_t phase;              // current phase of evaluation
+            std::int64_t children_needed;    // number of children required
+            std::int64_t children_evaluated; // number of children already
+                                             // evaluated
             // values of evaluated children (max 3 for ternary ops)
             real child_values[3];
         };
 
         // initialize stack with root node
-        StackEntry stack[MAX_STACK];
+        StackEntry   stack[MAX_STACK];
         std::int64_t stack_size = 0;
 
         // check node index validity
@@ -1581,7 +1019,7 @@ namespace simbi::expression {
 
                 // pass result to parent if stack isn't empty
                 if (stack_size > 0) {
-                    StackEntry& parent = stack[stack_size - 1];
+                    StackEntry& parent                               = stack[stack_size - 1];
                     parent.child_values[parent.children_evaluated++] = result;
                     // parent is now in child evaluation phase
                     parent.phase = 1;
@@ -1596,32 +1034,38 @@ namespace simbi::expression {
                 process_next = false;
 
                 switch (entry.phase) {
-                    case 0: {   // initial processing phase
+                    case 0: { // initial processing phase
                         // simple cases - constants and variables
-                        if (node.op == ExprOp::CONSTANT ||
-                            node.op == ExprOp::VARIABLE_X1 ||
-                            node.op == ExprOp::VARIABLE_X2 ||
-                            node.op == ExprOp::VARIABLE_X3 ||
-                            node.op == ExprOp::VARIABLE_T ||
-                            node.op == ExprOp::PARAMETER) {
+                        if (node.op == ExprOp::CONSTANT || node.op == ExprOp::VARIABLE_X1 ||
+                            node.op == ExprOp::VARIABLE_X2 || node.op == ExprOp::VARIABLE_X3 ||
+                            node.op == ExprOp::VARIABLE_T || node.op == ExprOp::PARAMETER) {
 
                             // determine value based on operation type
                             real value = 0.0;
                             switch (node.op) {
                                 case ExprOp::CONSTANT:
-                                    value = node.value;
+                                    value = node.data.value;
                                     break;
-                                case ExprOp::VARIABLE_X1: value = x1; break;
-                                case ExprOp::VARIABLE_X2: value = x2; break;
-                                case ExprOp::VARIABLE_X3: value = x3; break;
-                                case ExprOp::VARIABLE_T: value = t; break;
+                                case ExprOp::VARIABLE_X1:
+                                    value = x1;
+                                    break;
+                                case ExprOp::VARIABLE_X2:
+                                    value = x2;
+                                    break;
+                                case ExprOp::VARIABLE_X3:
+                                    value = x3;
+                                    break;
+                                case ExprOp::VARIABLE_T:
+                                    value = t;
+                                    break;
                                 case ExprOp::PARAMETER:
                                     if (parameters == nullptr) {
                                         HANDLE_ERROR("Parameter array is null");
                                     }
-                                    value = parameters[node.param_idx];
+                                    value = parameters[node.data.param_idx];
                                     break;
-                                default: break;
+                                default:
+                                    break;
                             }
 
                             // cache result and pop from stack
@@ -1633,9 +1077,7 @@ namespace simbi::expression {
                             // pass value to parent if stack isn't empty
                             if (stack_size > 0) {
                                 StackEntry& parent = stack[stack_size - 1];
-                                parent
-                                    .child_values[parent.children_evaluated++] =
-                                    value;
+                                parent.child_values[parent.children_evaluated++] = value;
                             }
                         }
                         else {
@@ -1647,7 +1089,7 @@ namespace simbi::expression {
                         }
                     } break;
 
-                    case 1: {   // child evaluation phase
+                    case 1: { // child evaluation phase
                         // determine children needed based on operation type
                         if (entry.children_needed == 0) {
                             // first time in this phase - figure out how many
@@ -1732,33 +1174,33 @@ namespace simbi::expression {
                             // determine which child to evaluate next
                             if (entry.children_needed == 1) {
                                 // unary op - we need the left child
-                                child_idx = node.children.left;
+                                child_idx = node.data.children.left;
                             }
                             else if (entry.children_needed == 2) {
                                 // binary op - need both left and right
                                 if (entry.children_evaluated == 0) {
                                     // process left child first
-                                    child_idx = node.children.left;
+                                    child_idx = node.data.children.left;
                                 }
                                 else {
                                     // then process right child
-                                    child_idx = node.children.right;
+                                    child_idx = node.data.children.right;
                                 }
                             }
                             else if (entry.children_needed == 3) {
                                 // ternary op (if-then-else)
                                 if (entry.children_evaluated == 0) {
                                     // first evaluate condition
-                                    child_idx = node.ternary.condition;
+                                    child_idx = node.data.ternary.condition;
                                 }
                                 else if (entry.children_evaluated == 1) {
                                     // then evaluate either then or else branch
                                     // based on condition
                                     if (entry.child_values[0] != 0.0) {
-                                        child_idx = node.ternary.then_expr;
+                                        child_idx = node.data.ternary.then_expr;
                                     }
                                     else {
-                                        child_idx = node.ternary.else_expr;
+                                        child_idx = node.data.ternary.else_expr;
                                     }
                                 }
                             }
@@ -1779,16 +1221,13 @@ namespace simbi::expression {
                             // check if child is currently being evaluated
                             // (would cause circular dependency)
                             else if (in_progress[child_idx]) {
-                                HANDLE_ERROR(
-                                    "Circular dependency in expression"
-                                );
+                                HANDLE_ERROR("Circular dependency in expression");
                             }
                             else {
                                 // push child onto stack
                                 in_progress[child_idx] = true;
-                                stack[stack_size++] =
-                                    {child_idx, 0, 0, 0, {0.0, 0.0, 0.0}};
-                                need_more_children = true;
+                                stack[stack_size++]    = {child_idx, 0, 0, 0, {0.0, 0.0, 0.0}};
+                                need_more_children     = true;
                             }
                         }
 
@@ -1801,161 +1240,105 @@ namespace simbi::expression {
                         }
                     } break;
 
-                    case 2: {   // result computation phase
+                    case 2: { // result computation phase
                         // calculate result based on operation type
                         real result = 0.0;
 
                         switch (node.op) {
                             // process each operation type...
                             case ExprOp::ADD:
-                                result = entry.child_values[0] +
-                                         entry.child_values[1];
+                                result = entry.child_values[0] + entry.child_values[1];
                                 break;
                             case ExprOp::SUBTRACT:
-                                result = entry.child_values[0] -
-                                         entry.child_values[1];
+                                result = entry.child_values[0] - entry.child_values[1];
                                 break;
                             case ExprOp::MULTIPLY:
-                                result = entry.child_values[0] *
-                                         entry.child_values[1];
+                                result = entry.child_values[0] * entry.child_values[1];
                                 break;
                             case ExprOp::DIVIDE:
                                 if (entry.child_values[1] == 0.0) {
                                     HANDLE_ERROR("Division by zero");
                                 }
-                                result = entry.child_values[0] /
-                                         entry.child_values[1];
+                                result = entry.child_values[0] / entry.child_values[1];
                                 break;
                             case ExprOp::POWER:
                                 if (entry.child_values[0] < 0.0 &&
                                     entry.child_values[1] !=
-                                        static_cast<std::int64_t>(
-                                            entry.child_values[1]
-                                        )) {
+                                        static_cast<std::int64_t>(entry.child_values[1])) {
                                     HANDLE_ERROR(
                                         "Negative base with non-integer "
                                         "exponent"
                                     );
                                 }
-                                result = std::pow(
-                                    entry.child_values[0],
-                                    entry.child_values[1]
-                                );
+                                result = std::pow(entry.child_values[0], entry.child_values[1]);
                                 break;
                             case ExprOp::NEG:
                                 result = -entry.child_values[0];
                                 break;
                             case ExprOp::MIN:
-                                result = std::min(
-                                    entry.child_values[0],
-                                    entry.child_values[1]
-                                );
+                                result = std::min(entry.child_values[0], entry.child_values[1]);
                                 break;
                             case ExprOp::MAX:
-                                result = std::max(
-                                    entry.child_values[0],
-                                    entry.child_values[1]
-                                );
+                                result = std::max(entry.child_values[0], entry.child_values[1]);
                                 break;
                             case ExprOp::MOD:
                                 if (entry.child_values[1] == 0.0) {
                                     HANDLE_ERROR("Division by zero");
                                 }
-                                result = std::fmod(
-                                    entry.child_values[0],
-                                    entry.child_values[1]
-                                );
+                                result = std::fmod(entry.child_values[0], entry.child_values[1]);
                                 break;
                             case ExprOp::LT:
-                                result = entry.child_values[0] <
-                                                 entry.child_values[1]
-                                             ? 1.0
-                                             : 0.0;
+                                result = entry.child_values[0] < entry.child_values[1] ? 1.0 : 0.0;
                                 break;
                             case ExprOp::LE:
-                                result = entry.child_values[0] <=
-                                                 entry.child_values[1]
-                                             ? 1.0
-                                             : 0.0;
+                                result = entry.child_values[0] <= entry.child_values[1] ? 1.0 : 0.0;
                                 break;
                             case ExprOp::GT:
-                                result = entry.child_values[0] >
-                                                 entry.child_values[1]
-                                             ? 1.0
-                                             : 0.0;
+                                result = entry.child_values[0] > entry.child_values[1] ? 1.0 : 0.0;
                                 break;
                             case ExprOp::GE:
-                                result = entry.child_values[0] >=
-                                                 entry.child_values[1]
-                                             ? 1.0
-                                             : 0.0;
+                                result = entry.child_values[0] >= entry.child_values[1] ? 1.0 : 0.0;
                                 break;
                             case ExprOp::EQ:
-                                result = entry.child_values[0] ==
-                                                 entry.child_values[1]
-                                             ? 1.0
-                                             : 0.0;
+                                result = entry.child_values[0] == entry.child_values[1] ? 1.0 : 0.0;
                                 break;
                             case ExprOp::AND:
-                                result = entry.child_values[0] != 0.0 &&
-                                                 entry.child_values[1] != 0.0
-                                             ? 1.0
-                                             : 0.0;
+                                result =
+                                    entry.child_values[0] != 0.0 && entry.child_values[1] != 0.0
+                                        ? 1.0
+                                        : 0.0;
                                 break;
                             case ExprOp::OR:
-                                result = entry.child_values[0] != 0.0 ||
-                                                 entry.child_values[1] != 0.0
-                                             ? 1.0
-                                             : 0.0;
+                                result =
+                                    entry.child_values[0] != 0.0 || entry.child_values[1] != 0.0
+                                        ? 1.0
+                                        : 0.0;
                                 break;
                             case ExprOp::NOT:
-                                result =
-                                    entry.child_values[0] == 0.0 ? 1.0 : 0.0;
+                                result = entry.child_values[0] == 0.0 ? 1.0 : 0.0;
                                 break;
                             case ExprOp::BITWISE_AND:
-                                result = static_cast<std::int64_t>(
-                                             entry.child_values[0]
-                                         ) &
-                                         static_cast<std::int64_t>(
-                                             entry.child_values[1]
-                                         );
+                                result = static_cast<std::int64_t>(entry.child_values[0]) &
+                                         static_cast<std::int64_t>(entry.child_values[1]);
                                 break;
                             case ExprOp::BITWISE_OR:
-                                result = static_cast<std::int64_t>(
-                                             entry.child_values[0]
-                                         ) |
-                                         static_cast<std::int64_t>(
-                                             entry.child_values[1]
-                                         );
+                                result = static_cast<std::int64_t>(entry.child_values[0]) |
+                                         static_cast<std::int64_t>(entry.child_values[1]);
                                 break;
                             case ExprOp::BITWISE_XOR:
-                                result = static_cast<std::int64_t>(
-                                             entry.child_values[0]
-                                         ) ^
-                                         static_cast<std::int64_t>(
-                                             entry.child_values[1]
-                                         );
+                                result = static_cast<std::int64_t>(entry.child_values[0]) ^
+                                         static_cast<std::int64_t>(entry.child_values[1]);
                                 break;
                             case ExprOp::BITWISE_NOT:
-                                result = ~static_cast<std::int64_t>(
-                                    entry.child_values[0]
-                                );
+                                result = ~static_cast<std::int64_t>(entry.child_values[0]);
                                 break;
                             case ExprOp::BITWISE_LEFT_SHIFT:
-                                result = static_cast<std::int64_t>(
-                                             entry.child_values[0]
-                                         )
-                                         << static_cast<std::int64_t>(
-                                                entry.child_values[1]
-                                            );
+                                result = static_cast<std::int64_t>(entry.child_values[0])
+                                         << static_cast<std::int64_t>(entry.child_values[1]);
                                 break;
                             case ExprOp::BITWISE_RIGHT_SHIFT:
-                                result = static_cast<std::int64_t>(
-                                             entry.child_values[0]
-                                         ) >>
-                                         static_cast<std::int64_t>(
-                                             entry.child_values[1]
-                                         );
+                                result = static_cast<std::int64_t>(entry.child_values[0]) >>
+                                         static_cast<std::int64_t>(entry.child_values[1]);
                                 break;
                             case ExprOp::IF_THEN_ELSE:
                                 if (entry.child_values[0] != 0.0) {
@@ -1984,20 +1367,14 @@ namespace simbi::expression {
                                 result = std::tanh(entry.child_values[0]);
                                 break;
                             case ExprOp::ASIN:
-                                if (entry.child_values[0] < -1.0 ||
-                                    entry.child_values[0] > 1.0) {
-                                    HANDLE_ERROR(
-                                        "Arc sine argument out of range"
-                                    );
+                                if (entry.child_values[0] < -1.0 || entry.child_values[0] > 1.0) {
+                                    HANDLE_ERROR("Arc sine argument out of range");
                                 }
                                 result = std::asin(entry.child_values[0]);
                                 break;
                             case ExprOp::ACOS:
-                                if (entry.child_values[0] < -1.0 ||
-                                    entry.child_values[0] > 1.0) {
-                                    HANDLE_ERROR(
-                                        "Arc cosine argument out of range"
-                                    );
+                                if (entry.child_values[0] < -1.0 || entry.child_values[0] > 1.0) {
+                                    HANDLE_ERROR("Arc cosine argument out of range");
                                 }
                                 result = std::acos(entry.child_values[0]);
                                 break;
@@ -2005,10 +1382,7 @@ namespace simbi::expression {
                                 result = std::atan(entry.child_values[0]);
                                 break;
                             case ExprOp::ATAN2:
-                                result = std::atan2(
-                                    entry.child_values[0],
-                                    entry.child_values[1]
-                                );
+                                result = std::atan2(entry.child_values[0], entry.child_values[1]);
                                 break;
                             case ExprOp::ASINH:
                                 result = std::asinh(entry.child_values[0]);
@@ -2023,8 +1397,7 @@ namespace simbi::expression {
                                 result = std::acosh(entry.child_values[0]);
                                 break;
                             case ExprOp::ATANH:
-                                if (entry.child_values[0] <= -1.0 ||
-                                    entry.child_values[0] >= 1.0) {
+                                if (entry.child_values[0] <= -1.0 || entry.child_values[0] >= 1.0) {
                                     HANDLE_ERROR(
                                         "Arc hyperbolic tangent argument "
                                         "out of range"
@@ -2090,8 +1463,7 @@ namespace simbi::expression {
                         // pass result to parent if stack isn't empty
                         if (stack_size > 0) {
                             StackEntry& parent = stack[stack_size - 1];
-                            parent.child_values[parent.children_evaluated++] =
-                                result;
+                            parent.child_values[parent.children_evaluated++] = result;
                         }
                     } break;
                 }
@@ -2105,14 +1477,14 @@ namespace simbi::expression {
     // batch evaluation for multiple points
     DEV void evaluate_expr_batch(
         const ExprNode* nodes,
-        std::int64_t root_idx,
-        const real* x1_values,
-        const real* x2_values,
-        const real* x3_values,
-        real t,
-        const real* parameters,
-        real* results,
-        std::int64_t count
+        std::int64_t    root_idx,
+        const real*     x1_values,
+        const real*     x2_values,
+        const real*     x3_values,
+        real            t,
+        const real*     parameters,
+        real*           results,
+        std::int64_t    count
     )
     {
         for (std::int64_t ii = 0; ii < count; ++ii) {
@@ -2130,43 +1502,28 @@ namespace simbi::expression {
 
     // evaluate a vector of expressions
     DEV void evaluate_expr_vector(
-        const ExprNode* nodes,
+        const ExprNode*     nodes,
         const std::int64_t* root_indices,
-        std::int64_t num_components,
-        real x1,
-        real x2,
-        real x3,
-        real t,
-        const real* parameters,
-        real* results
+        std::int64_t        num_components,
+        real                x1,
+        real                x2,
+        real                x3,
+        real                t,
+        const real*         parameters,
+        real*               results
     )
     {
         for (std::int64_t ii = 0; ii < num_components; ++ii) {
             if constexpr (platform::is_gpu) {
                 // gpu version uses non-recursive evaluation
                 // this avoids stack overflow issues
-                results[ii] = evaluate_expr_nonrecursive(
-                    nodes,
-                    root_indices[ii],
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                results[ii] =
+                    evaluate_expr_nonrecursive(nodes, root_indices[ii], x1, x2, x3, t, parameters);
             }
             else {
-                results[ii] = evaluate_expr(
-                    nodes,
-                    root_indices[ii],
-                    x1,
-                    x2,
-                    x3,
-                    t,
-                    parameters
-                );
+                results[ii] = evaluate_expr(nodes, root_indices[ii], x1, x2, x3, t, parameters);
             }
         }
     }
 
-}   // namespace simbi::expression
+} // namespace simbi::expression

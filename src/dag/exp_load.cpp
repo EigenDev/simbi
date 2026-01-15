@@ -113,27 +113,29 @@ namespace simbi::expression {
 
                 // Handle different node types
                 if (op_str == "CONSTANT") {
-                    node.value = expr_node.at("value").template get<real>();
+                    node.data.value = expr_node.at("value").template get<real>();
                 }
                 else if (op_str.find("VARIABLE_") == 0) {
                     // Variables don't need additional data
                 }
                 else if (op_str == "PARAMETER") {
-                    node.param_idx = expr_node.at("param_idx").template get<std::int64_t>();
+                    node.data.param_idx = expr_node.at("param_idx").template get<std::int64_t>();
                 }
                 else if (op_str == "IF_THEN_ELSE") {
-                    node.ternary.condition = expr_node.at("condition").template get<std::int64_t>();
-                    node.ternary.then_expr = expr_node.at("true_case").template get<std::int64_t>();
-                    node.ternary.else_expr =
+                    node.data.ternary.condition =
+                        expr_node.at("condition").template get<std::int64_t>();
+                    node.data.ternary.then_expr =
+                        expr_node.at("true_case").template get<std::int64_t>();
+                    node.data.ternary.else_expr =
                         expr_node.at("false_case").template get<std::int64_t>();
                 }
                 else {
                     // Binary/unary operations
                     if (expr_node.contains("left")) {
-                        node.children.left = expr_node.at("left").template get<std::int64_t>();
+                        node.data.children.left = expr_node.at("left").template get<std::int64_t>();
 
                         if (expr_node.contains("right")) {
-                            node.children.right =
+                            node.data.children.right =
                                 expr_node.at("right").template get<std::int64_t>();
                         }
                     }
