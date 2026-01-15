@@ -69,15 +69,16 @@ namespace simbi::io {
         }
     };
 
-    // #ifdef __clang__
-    //     template <>
-    //     struct h5_pred_type<std::size_t> {
-    //         static const H5::PredType& value()
-    //         {
-    //             return H5::PredType::NATIVE_UINT64;
-    //         }
-    //     };
-    // #endif
+#ifdef __APPLE__
+    template <>
+    struct h5_pred_type<std::size_t>
+    {
+        static const H5::PredType& value()
+        {
+            return H5::PredType::NATIVE_UINT64;
+        }
+    };
+#endif
 
     template <>
     struct h5_pred_type<std::uint32_t>
