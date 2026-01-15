@@ -62,7 +62,7 @@ class UniformSphere(SimbiProblem):
     boundary_conditions: Annotated[
         list[BoundaryCondition],
         ProblemParam(
-            [BoundaryCondition.REFLECTING, BoundaryCondition.OUTFLOW],
+            [BoundaryCondition.OUTFLOW, BoundaryCondition.OUTFLOW],
             description="boundary conditions",
         ),
     ]
