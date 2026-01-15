@@ -335,7 +335,7 @@ namespace simbi::hydro::srhd {
 
             // calculate intermediate state
             const auto [a_star, p_star] = contact_props(uL, uR, fL, fR, nhat, aL, aR);
-            const bool on_left          = (vface <= a_star);
+            const bool on_left          = safe_less_than(vface, a_star);
 
             const auto& prim = on_left ? primL : primR;
             const auto& u    = on_left ? uL : uR;
@@ -353,7 +353,7 @@ namespace simbi::hydro::srhd {
         }();
 
         // upwind the scalar concentration
-        if (net_flux.den < 0.0) {
+        if (safe_less_than(net_flux.den, 0.0)) {
             net_flux.chi = primR.chi * net_flux.den;
         }
         else {

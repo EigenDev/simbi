@@ -11,6 +11,7 @@ from .functional.helpers import (
     calc_any_mean,
     calc_cell_volume,
     calc_centroid,
+    calc_dlogt,
     compute_num_polar_zones,
     find_nearest,
 )
@@ -85,6 +86,7 @@ __all__ = [
     "compute_num_polar_zones",
     "calc_centroid",
     "calc_any_mean",
+    "calc_dlogt",
     # optional
     "py_calc_fnu",
     "py_log_events",

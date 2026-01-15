@@ -16,6 +16,7 @@ namespace simbi::checkpoint {
         real          checkpoint_time;
         real          checkpoint_interval;
         real          dlogt;
+        real          tstart;
         std::uint64_t checkpoint_index;
 
         bool should_checkpoint(real current_time) const
@@ -23,7 +24,7 @@ namespace simbi::checkpoint {
             return current_time >= checkpoint_time;
         }
 
-        void advance(real time)
+        void advance(real time, std::uint64_t n)
         {
             // set the initial time interval based on the current time,
             // advanced by the checkpoint interval to the nearest place
@@ -32,7 +33,7 @@ namespace simbi::checkpoint {
             // interval. if the checkpoint interval is 0 then the interval
             // is set to the current time.
             if (dlogt != 0) {
-                checkpoint_time = time * std::pow(10.0, std::floor(std::log10(time) + dlogt));
+                checkpoint_time = tstart * std::pow(10.0, (n + 1) * dlogt);
             }
             else {
                 static auto round_place = 1.0 / checkpoint_interval;

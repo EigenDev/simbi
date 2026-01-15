@@ -3,6 +3,7 @@
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "geometry/boundary/index_map.hpp"
 #include "geometry/metrics.hpp"
 #include "geometry/visit.hpp"
@@ -14,9 +15,12 @@
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
 #include "index_map.hpp"
+#include "io/exceptions.hpp"
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace simbi::geometry {
 
@@ -115,11 +119,13 @@ namespace simbi::geometry {
     // physics boundary functor
     // applies physics policy to boundary values, accounting for mesh motion
     // -------------------------------------------------------------------------
-    template <typename T, std::uint64_t Rank, typename Policy, typename Geometry>
+    template <typename T, std::uint64_t Rank, typename Policy, typename BlockGeo>
     struct physics_boundary_t
     {
         Policy                physics_policy;
-        Geometry              geometry;
+        BlockGeo              geometry;
+        iarray<Rank>          real_start;
+        iarray<Rank>          real_end;
         std::uint64_t         dim;
         grid::side_t          side;
         grid::boundary_type_t bc_type;
@@ -137,9 +143,17 @@ namespace simbi::geometry {
                 if (bc_type == grid::boundary_type_t::reflect && geometry.motion.enabled) {
                     const std::uint64_t logical_dim = Rank - 1 - dim;
                     const std::uint64_t vel_idx     = velocity_offset + logical_dim;
+                    auto                face_coord  = ghost_coord;
+                    // set face coordinate at the boundary face
+                    if (side == grid::side_t::left) {
+                        face_coord[dim] = real_start[dim];
+                    }
+                    else {
+                        face_coord[dim] = real_end[dim] - 1;
+                    }
 
                     // face position (at the boundary between edge and ghost)
-                    const real v_wall = geometry.face_grid_velocity(ghost_coord, dim);
+                    const real v_wall = geometry.face_grid_velocity(face_coord, dim);
 
                     // physics policy already flipped velocity: result[vel_idx] = -edge_val[vel_idx]
                     // now add 2*v_wall for moving mirror
@@ -294,6 +308,8 @@ namespace simbi::geometry {
                         auto phys_op = physics_boundary_t<T, Rank, Policy, BlockGeo>{
                             physics_policy,
                             block_geo,
+                            geometry.start,
+                            geometry.fin,
                             primary_dd,
                             primary_side,
                             primary_bc_type
@@ -318,6 +334,8 @@ namespace simbi::geometry {
                     auto phys_op = physics_boundary_t<T, Rank, Policy, BlockGeo>{
                         physics_policy,
                         block_geo,
+                        geometry.start,
+                        geometry.fin,
                         primary_dd,
                         primary_side,
                         primary_bc_type
@@ -387,6 +405,8 @@ namespace simbi::geometry {
                         auto phys_op = physics_boundary_t<T, Rank, Policy, BlockGeo>{
                             physics_policy,
                             block_geo,
+                            geometry.start,
+                            geometry.fin,
                             primary_dd,
                             primary_side,
                             primary_bc_type
@@ -445,6 +465,8 @@ namespace simbi::geometry {
                 auto phys_op = physics_boundary_t<T, Rank, Policy, BlockGeo>{
                     physics_policy,
                     block_geo,
+                    geometry.start,
+                    geometry.fin,
                     primary_dd,
                     primary_side,
                     primary_bc_type

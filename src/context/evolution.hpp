@@ -59,6 +59,7 @@ namespace simbi::evolution {
                     .checkpoint_time     = meta.checkpoint_interval,
                     .checkpoint_interval = meta.checkpoint_interval,
                     .dlogt               = meta.dlogt,
+                    .tstart              = meta.time,
                     .checkpoint_index    = meta.checkpoint_index
                 },
             .should_stop = false
@@ -91,7 +92,7 @@ namespace simbi::evolution {
             throw;
         }
 
-        state.schedule.advance(meta.time);
+        state.schedule.advance(meta.time, meta.checkpoint_index);
         meta.advance_schedule(state.schedule);
 
         while (meta.time < meta.tend && !state.should_stop) {
@@ -119,7 +120,7 @@ namespace simbi::evolution {
 
                 if (state.schedule.should_checkpoint(meta.time)) {
                     checkpoint::save(sim, state.progress);
-                    state.schedule.advance(meta.time);
+                    state.schedule.advance(meta.time, meta.checkpoint_index);
                     meta.advance_schedule(state.schedule);
                 }
 
