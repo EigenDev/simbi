@@ -23,7 +23,6 @@
 //       .build();
 // =============================================================================
 
-#include "build_config.hpp"
 #include "containers/vector.hpp"
 #include "dag/express_t.hpp"
 #include "decomposition.hpp"
@@ -33,13 +32,10 @@
 #include "ecs/entity.hpp"
 #include "ecs/simulation.hpp"
 #include "geometry/api.hpp"
-#include "grid/block_info.hpp"
 #include "grid/boundary.hpp"
 #include "grid/creation/topology.hpp"
 #include "grid/domain.hpp"
-#include "grid/field.hpp"
 #include "grid/mesh_config.hpp"
-#include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
 #include "io/h5_serializable.hpp"
 #include "io/serialization/all.hpp"
