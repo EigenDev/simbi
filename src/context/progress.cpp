@@ -1,7 +1,6 @@
 #include "progress.hpp"
 
 #include "build_config.hpp"
-#include "io/console/statistics.hpp"
 #include "io/display/table.hpp"
 #include "utility/enums.hpp"
 
@@ -33,11 +32,9 @@ namespace simbi::progress {
 
     progress_state_t initialize(regime_t regime)
     {
-        // breathing room after python output
-        std::cout << std::string(3, '\n');
-        statistics::display_system_info();
-
-        display::table_t table(regime_display_name(regime), true);
+        std::cout << std::string(45, '\n');
+        // create unified table with system info + benchmark sections
+        display::table_t table(regime_display_name(regime), true, true);
         table.set_header({"Iteration", "Time", "dt", "Speed", "Elapsed", "ETA"});
         table.update_row({"0", "0.0", "0.0", "0.0", "00:00:00", "00:00:00"});
         table.set_progress(0);

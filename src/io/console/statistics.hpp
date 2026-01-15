@@ -43,8 +43,7 @@ namespace simbi {
     namespace statistics {
 
         // formatter for memory sizes (bytes -> KB, MB, GB, etc.)
-        inline std::string
-        format_bytes(size_t bytes, std::int64_t precision = 2)
+        inline std::string format_bytes(size_t bytes, std::int64_t precision = 2)
         {
             constexpr double kb = 1024.0;
             constexpr double mb = kb * kb;
@@ -73,25 +72,48 @@ namespace simbi {
             return oss.str();
         }
 
+        // structure to hold cpu information
+        struct cpu_info_t
+        {
+            std::string  model_name;
+            std::int64_t num_cores;
+            std::int64_t num_threads;
+            double       frequency_mhz;
+            size_t       l1_cache_size;
+            size_t       l2_cache_size;
+            size_t       l3_cache_size;
+
+            static cpu_info_t gather();
+        };
+
+        // structure to hold os information
+        struct os_info_t
+        {
+            std::string name;
+            std::string version;
+
+            static os_info_t gather();
+        };
+
         // structure to hold system memory information
-        struct MemoryStats {
-            size_t total_physical;       // total physical memory
-            size_t available_physical;   // available physical memory
-            size_t used_physical;        // used physical memory
-            double percent_used;         // percentage of physical memory used
+        struct memory_stats_t
+        {
+            size_t total_physical;     // total physical memory
+            size_t available_physical; // available physical memory
+            size_t used_physical;      // used physical memory
+            double percent_used;       // percentage of physical memory used
 
-            size_t total_virtual;       // total virtual memory (swap)
-            size_t available_virtual;   // available virtual memory
-            size_t used_virtual;        // used virtual memory
+            size_t total_virtual;     // total virtual memory (swap)
+            size_t available_virtual; // available virtual memory
+            size_t used_virtual;      // used virtual memory
 
-            size_t
-                process_physical;     // physical memory used by current process
-            size_t process_virtual;   // virtual memory used by current process
+            size_t process_physical; // physical memory used by current process
+            size_t process_virtual;  // virtual memory used by current process
 
             // get current memory statistics
-            static MemoryStats current()
+            static memory_stats_t current()
             {
-                MemoryStats stats{};
+                memory_stats_t stats{};
 
 #if defined(PLATFORM_WINDOWS)
                 // windows implementation
@@ -101,14 +123,12 @@ namespace simbi {
 
                 stats.total_physical     = mem_info.ullTotalPhys;
                 stats.available_physical = mem_info.ullAvailPhys;
-                stats.used_physical =
-                    stats.total_physical - stats.available_physical;
-                stats.percent_used = mem_info.dwMemoryLoad;
+                stats.used_physical      = stats.total_physical - stats.available_physical;
+                stats.percent_used       = mem_info.dwMemoryLoad;
 
                 stats.total_virtual     = mem_info.ullTotalPageFile;
                 stats.available_virtual = mem_info.ullAvailPageFile;
-                stats.used_virtual =
-                    stats.total_virtual - stats.available_virtual;
+                stats.used_virtual      = stats.total_virtual - stats.available_virtual;
 
                 // process memory info
                 PROCESS_MEMORY_COUNTERS_EX pmc;
@@ -125,9 +145,8 @@ namespace simbi {
                 // macos implementation
                 // system memory
                 int64_t total_mem = 0;
-                size_t len        = sizeof(total_mem);
-                if (sysctlbyname("hw.memsize", &total_mem, &len, NULL, 0) ==
-                    0) {
+                size_t  len       = sizeof(total_mem);
+                if (sysctlbyname("hw.memsize", &total_mem, &len, NULL, 0) == 0) {
                     stats.total_physical = total_mem;
                 }
 
@@ -139,21 +158,16 @@ namespace simbi {
                         (host_info64_t) &vm_stats,
                         &count
                     ) == KERN_SUCCESS) {
-                    stats.available_physical =
-                        vm_stats.free_count * vm_page_size;
-                    stats.used_physical =
-                        stats.total_physical - stats.available_physical;
+                    stats.available_physical = vm_stats.free_count * vm_page_size;
+                    stats.used_physical      = stats.total_physical - stats.available_physical;
                     stats.percent_used =
-                        (static_cast<double>(stats.used_physical) /
-                         stats.total_physical) *
-                        100.0;
+                        (static_cast<double>(stats.used_physical) / stats.total_physical) * 100.0;
                 }
 
                 // virtual memory (swap)
                 xsw_usage swap_usage;
                 len = sizeof(swap_usage);
-                if (sysctlbyname("vm.swapusage", &swap_usage, &len, NULL, 0) ==
-                    0) {
+                if (sysctlbyname("vm.swapusage", &swap_usage, &len, NULL, 0) == 0) {
                     stats.total_virtual     = swap_usage.xsu_total;
                     stats.used_virtual      = swap_usage.xsu_used;
                     stats.available_virtual = swap_usage.xsu_avail;
@@ -176,42 +190,28 @@ namespace simbi {
                 // linux implementation
                 struct sysinfo sys_info;
                 if (sysinfo(&sys_info) == 0) {
-                    stats.total_physical =
-                        sys_info.totalram * sys_info.mem_unit;
-                    stats.available_physical =
-                        sys_info.freeram * sys_info.mem_unit;
-                    stats.used_physical =
-                        stats.total_physical - stats.available_physical;
+                    stats.total_physical     = sys_info.totalram * sys_info.mem_unit;
+                    stats.available_physical = sys_info.freeram * sys_info.mem_unit;
+                    stats.used_physical      = stats.total_physical - stats.available_physical;
                     stats.percent_used =
-                        (static_cast<double>(stats.used_physical) /
-                         stats.total_physical) *
-                        100.0;
+                        (static_cast<double>(stats.used_physical) / stats.total_physical) * 100.0;
 
-                    stats.total_virtual =
-                        sys_info.totalswap * sys_info.mem_unit;
-                    stats.available_virtual =
-                        sys_info.freeswap * sys_info.mem_unit;
-                    stats.used_virtual =
-                        stats.total_virtual - stats.available_virtual;
+                    stats.total_virtual     = sys_info.totalswap * sys_info.mem_unit;
+                    stats.available_virtual = sys_info.freeswap * sys_info.mem_unit;
+                    stats.used_virtual      = stats.total_virtual - stats.available_virtual;
                 }
 
                 // process memory
                 std::ifstream status_file("/proc/self/status");
-                std::string line;
+                std::string   line;
                 while (std::getline(status_file, line)) {
                     if (line.find("VmRSS:") != std::string::npos) {
                         stats.process_physical =
-                            std::stoull(
-                                line.substr(line.find_first_of("0123456789"))
-                            ) *
-                            1024;
+                            std::stoull(line.substr(line.find_first_of("0123456789"))) * 1024;
                     }
                     else if (line.find("VmSize:") != std::string::npos) {
                         stats.process_virtual =
-                            std::stoull(
-                                line.substr(line.find_first_of("0123456789"))
-                            ) *
-                            1024;
+                            std::stoull(line.substr(line.find_first_of("0123456789"))) * 1024;
                     }
                 }
 #endif
@@ -220,10 +220,7 @@ namespace simbi {
             }
         };
 
-        // display system information using PrettyTable
-        void display_system_info();
+    } // namespace statistics
+} // namespace simbi
 
-    }   // namespace statistics
-}   // namespace simbi
-
-#endif   // STATISTICS_HPP
+#endif // STATISTICS_HPP

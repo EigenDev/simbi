@@ -16,7 +16,6 @@
 //   table.refresh();
 // =============================================================================
 
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -37,7 +36,7 @@ namespace simbi::display {
         std::unique_ptr<impl_t> impl;
 
       public:
-        table_t(const std::string& title, bool dynamic_mode);
+        table_t(const std::string& title, bool dynamic_mode, bool show_system_info = false);
         ~table_t();
 
         // non-copyable, movable

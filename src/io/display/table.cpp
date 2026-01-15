@@ -1,5 +1,6 @@
 #include "table.hpp"
 
+#include "io/console/statistics.hpp"
 #include "renderer.hpp"
 #include "terminal.hpp"
 
@@ -26,18 +27,110 @@ namespace simbi::display {
     {
         std::string title;
         bool        dynamic_mode;
+        bool        show_system_info;
 
-        std::vector<std::string> headers;
-        std::vector<std::string> data_row;
-        std::int64_t             progress_percent;
+        std::vector<std::vector<std::string>> static_info_rows;
+        std::vector<std::string>              headers;
+        std::vector<std::string>              data_row;
+        std::int64_t                          progress_percent;
 
         std::deque<message_t> messages;
 
-        renderer_t renderer;
+        renderer_t sys_info_renderer;
+        renderer_t benchmark_renderer;
 
-        impl_t(const std::string& t, bool dynamic)
-            : title(t), dynamic_mode(dynamic), progress_percent(0)
+        impl_t(const std::string& t, bool dynamic, bool sys_info)
+            : title(t), dynamic_mode(dynamic), show_system_info(sys_info), progress_percent(0)
         {
+            if (show_system_info) {
+                gather_system_info();
+            }
+        }
+
+        void gather_system_info()
+        {
+#if GPU_ENABLED
+            using namespace xpu::vendors::cuda;
+#endif
+            using namespace statistics;
+
+            cpu_info_t     cpu_info  = cpu_info_t::gather();
+            os_info_t      os_info   = os_info_t::gather();
+            memory_stats_t mem_stats = memory_stats_t::current();
+
+            // build system info rows (3-column format: category, property, value)
+            static_info_rows.push_back({"CPU", "Model", cpu_info.model_name});
+            static_info_rows.push_back({"", "Cores", std::to_string(cpu_info.num_cores)});
+            static_info_rows.push_back({"", "Threads", std::to_string(cpu_info.num_threads)});
+
+            if (cpu_info.frequency_mhz > 0) {
+                std::ostringstream freq_str;
+                freq_str
+                    << (cpu_info.frequency_mhz >= 1000
+                            ? std::to_string(static_cast<int>(cpu_info.frequency_mhz / 1000)) +
+                                  " GHz"
+                            : std::to_string(static_cast<int>(cpu_info.frequency_mhz)) + " MHz");
+                static_info_rows.push_back({"", "Frequency", freq_str.str()});
+            }
+
+            if (cpu_info.l3_cache_size > 0) {
+                static_info_rows.push_back({"", "L3 Cache", format_bytes(cpu_info.l3_cache_size)});
+            }
+
+            // os info
+            std::string os_version = os_info.name;
+            if (!os_info.version.empty()) {
+                os_version += " " + os_info.version;
+            }
+            static_info_rows.push_back({"System", "OS", os_version});
+
+            // memory info
+            std::ostringstream ram_usage;
+            ram_usage << std::fixed << std::setprecision(1) << mem_stats.percent_used << "%";
+            static_info_rows.push_back(
+                {"Memory",
+                 "System RAM",
+                 format_bytes(mem_stats.total_physical) + " (" +
+                     format_bytes(mem_stats.used_physical) + " used, " + ram_usage.str() + ")"}
+            );
+
+            static_info_rows.push_back({"", "Process", format_bytes(mem_stats.process_physical)});
+
+            if (mem_stats.total_virtual > 0) {
+                double swap_percent =
+                    (static_cast<double>(mem_stats.used_virtual) / mem_stats.total_virtual) * 100.0;
+                std::ostringstream swap_str;
+                swap_str << std::fixed << std::setprecision(1) << swap_percent << "%";
+                static_info_rows.push_back(
+                    {"",
+                     "Swap",
+                     format_bytes(mem_stats.total_virtual) + " (" +
+                         format_bytes(mem_stats.used_virtual) + " used, " + swap_str.str() + ")"}
+                );
+            }
+
+#if GPU_ENABLED
+            auto dev_count = get_device_count();
+            if (dev_count > 0) {
+                auto props = get_properties(0);
+                static_info_rows.push_back({"GPU", "Device", props.name});
+                static_info_rows.push_back(
+                    {"",
+                     "Compute",
+                     std::to_string(props.compute_capability_major) + "." +
+                         std::to_string(props.compute_capability_minor)}
+                );
+                static_info_rows.push_back({"", "Memory", format_bytes(props.total_memory)});
+
+                int mem_clock_rate = 0;
+                cudaDeviceGetAttribute(&mem_clock_rate, cudaDevAttrMemoryClockRate, 0);
+                std::ostringstream bandwidth;
+                bandwidth << std::fixed << std::setprecision(1)
+                          << (2.0 * mem_clock_rate * (props.memory_bus_width_bits / 8) / 1.0e6)
+                          << " GB/s";
+                static_info_rows.push_back({"", "Bandwidth", bandwidth.str()});
+            }
+#endif
         }
 
         // calculate how many messages we can display based on terminal height
@@ -46,18 +139,27 @@ namespace simbi::display {
             std::int64_t height = terminal_t::height();
 
             // reserve space for:
-            // - table (title + header + separator + data + progress + borders): 8 lines
-            // - message board (title + borders): 3 lines
+            // - main title box: 2 lines
+            // - system info (if present): title + header + separator + rows + bottom: variable
+            // - benchmark section: title + header + separator + data + progress + bottom: 7 lines
+            // - message board: title + bottom border: 2 lines
             // - bottom margin: 2 lines
-            std::int64_t reserved               = 13;
+
+            std::int64_t reserved = 2 + 7 + 2 + 2; // 13 lines base
+
+            if (show_system_info && !static_info_rows.empty()) {
+                // system info: title + header + separator + rows + bottom
+                reserved += 2 + 1 + static_info_rows.size() + 1 + 1; // +1 for spacing
+            }
+
             std::int64_t available_for_messages = height - reserved;
 
             // clamp to reasonable range
             if (available_for_messages < 3) {
-                return 3; // minimum: always show at least 3 messages
+                return 3;
             }
-            if (available_for_messages > 20) {
-                return 20; // maximum: don't let message board dominate
+            if (available_for_messages > 10) {
+                return 10; // max 10 to prevent excessive scrolling
             }
 
             return available_for_messages;
@@ -67,8 +169,15 @@ namespace simbi::display {
         {
             std::int64_t term_width = terminal_t::width();
 
-            // recalculate layout based on current terminal size
-            renderer.calculate_layout(headers, data_row, term_width);
+            // recalculate layouts independently for each section
+            if (!static_info_rows.empty()) {
+                sys_info_renderer.calculate_layout(
+                    {"Category", "Property", "Value"},
+                    static_info_rows[0],
+                    term_width
+                );
+            }
+            benchmark_renderer.calculate_layout(headers, data_row, term_width);
 
             std::ostringstream buf;
 
@@ -77,8 +186,8 @@ namespace simbi::display {
                 buf << ansi::CLEAR_SCREEN << ansi::HIDE_CURSOR;
             }
 
-            // render main table
-            render_simulation_table(buf);
+            // render unified table (system info + benchmark)
+            render_unified_table(buf);
 
             // render message board if we have messages
             if (!messages.empty()) {
@@ -90,31 +199,44 @@ namespace simbi::display {
             std::cout << buf.str() << std::flush;
         }
 
-        void render_simulation_table(std::ostream& os)
+        void render_unified_table(std::ostream& os)
         {
-            // title with decorative border
-            renderer.render_title(os, title, renderer.total_width());
+            // main title box
+            benchmark_renderer.render_title(os, title, benchmark_renderer.total_width());
+            benchmark_renderer.render_border_bottom(os);
+            os << "\n";
 
-            // header row
-            renderer.render_row(os, headers, true);
+            // system info section (if enabled)
+            if (show_system_info && !static_info_rows.empty()) {
+                sys_info_renderer
+                    .render_title(os, "SYSTEM INFORMATION", sys_info_renderer.total_width());
 
-            // separator
-            renderer.render_separator(os);
+                std::vector<std::string> sys_headers = {"Category", "Property", "Value"};
+                sys_info_renderer.render_row(os, sys_headers, true);
+                sys_info_renderer.render_separator(os);
 
-            // data row
-            renderer.render_row(os, data_row, false);
+                for (const auto& row : static_info_rows) {
+                    sys_info_renderer.render_row(os, row, false);
+                }
 
-            // progress bar
-            renderer.render_progress_bar(os, progress_percent, renderer.total_width());
+                sys_info_renderer.render_border_bottom(os);
+                os << "\n";
+            }
 
-            // bottom border
-            renderer.render_border_bottom(os);
+            // benchmark section
+            benchmark_renderer.render_title(os, "BENCHMARKS", benchmark_renderer.total_width());
+            benchmark_renderer.render_row(os, headers, true);
+            benchmark_renderer.render_separator(os);
+            benchmark_renderer.render_row(os, data_row, false);
+            benchmark_renderer
+                .render_progress_bar(os, progress_percent, benchmark_renderer.total_width());
+            benchmark_renderer.render_border_bottom(os);
         }
 
         void render_message_board(std::ostream& os)
         {
             std::int64_t max_msgs    = max_messages();
-            std::int64_t width       = renderer.total_width();
+            std::int64_t width       = benchmark_renderer.total_width();
             std::int64_t inner_width = width - 4; // account for borders and padding
 
             // only show most recent messages
@@ -124,7 +246,7 @@ namespace simbi::display {
             }
 
             // title
-            renderer.render_title(os, "Messages", width);
+            benchmark_renderer.render_title(os, "Messages", width);
 
             // render messages
             for (std::int64_t ii = start_idx; ii < static_cast<std::int64_t>(messages.size());
@@ -160,7 +282,7 @@ namespace simbi::display {
             }
 
             // bottom border
-            renderer.render_border_bottom(os);
+            benchmark_renderer.render_border_bottom(os);
         }
 
         std::string format_timestamp(const std::chrono::system_clock::time_point& tp) const
@@ -206,8 +328,8 @@ namespace simbi::display {
         }
     };
 
-    table_t::table_t(const std::string& title, bool dynamic_mode)
-        : impl(std::make_unique<impl_t>(title, dynamic_mode))
+    table_t::table_t(const std::string& title, bool dynamic_mode, bool show_system_info)
+        : impl(std::make_unique<impl_t>(title, dynamic_mode, show_system_info))
     {
     }
 

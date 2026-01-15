@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 
 namespace simbi::evolution {
     template <typename Sim>
