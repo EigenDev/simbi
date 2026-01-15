@@ -10,6 +10,8 @@ science
 movies/
 deprecated/
 scripts/
+simbi/**/*.md
+src/**/*.md
 simbi/tools/extras/*
 version.py
 Doxyfile
@@ -32,10 +34,9 @@ gitrepo_home.txt
 *.sh
 *.json
 *.lock
-#*.md
 *.txt
 !meson_build_options.txt
-!README.md
+!./README.md
 
 # Automatically added by dev.py
 build*/
