@@ -17,6 +17,7 @@
 #include "build_config.hpp"
 #include "compute/numerics.hpp"
 #include "containers/vector.hpp"
+#include "decorators.hpp"
 #include "ecs/geometry_visitor.hpp"
 #include "functional/fp.hpp"
 #include "grid/amr/prolongation.hpp"
@@ -107,6 +108,18 @@ namespace simbi::ecs::creation {
             PrimField p = prim;
             p.mag       = bavg;
             return p;
+        }
+    };
+
+    template <typename BlockGeo>
+    struct extensive_converter_t
+    {
+        BlockGeo block_geo;
+        template <typename ConservedField, std::uint64_t Rank>
+        DEV ConservedField operator()(iarray<Rank> coord, const ConservedField& cons) const
+        {
+            const auto cell_vol = block_geo.labframe_volume(coord);
+            return cons * cell_vol;
         }
     };
 
@@ -226,14 +239,10 @@ namespace simbi::ecs::creation {
             ecs::with_block_geometry<Sim::coord_system>(mesh, motion, [&](const auto& block_geo) {
                 if (motion.enabled) {
                     // extensive: multiply by cell volume
-                    fields.cons[active_domain] =
-                        fields.prim[active_domain]
-                            .map(numerics::to_conserved_t{gamma})
-                            .enum_map([&block_geo](const auto& coord, const auto& u) {
-                                const real cell_vol = block_geo.labframe_volume(coord);
-                                return u * cell_vol;
-                            })
-                            .with(exec);
+                    fields.cons[active_domain] = fields.prim[active_domain]
+                                                     .map(numerics::to_conserved_t{gamma})
+                                                     .enum_map(extensive_converter_t{block_geo})
+                                                     .with(exec);
                 }
                 else {
                     // static mesh: intensive conserved
@@ -320,10 +329,7 @@ namespace simbi::ecs::creation {
                         child_fields.cons[child_part.owned_domain] =
                             child_fields.prim[child_part.owned_domain]
                                 .map(numerics::to_conserved_t{gamma})
-                                .enum_map([&block_geo](const auto& coord, const auto& u) {
-                                    const real cell_vol = block_geo.labframe_volume(coord);
-                                    return u * cell_vol;
-                                })
+                                .enum_map(extensive_converter_t{block_geo})
                                 .with(exec);
                     }
                     else {

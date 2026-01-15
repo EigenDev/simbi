@@ -394,6 +394,18 @@ namespace simbi::cfd {
         };
     }
 
+    template <typename BlockGeo>
+    struct maybe_extensive_converter_t
+    {
+        BlockGeo geometry;
+
+        template <typename conserved_t, std::uint64_t rank>
+        DEV constexpr conserved_t operator()(iarray<rank> coord, const conserved_t& rate) const
+        {
+            return rate * geometry.extensive_scaling(coord);
+        }
+    };
+
     // =========================================================================
     // godunov operator (complete RHS)
     // =========================================================================
@@ -441,9 +453,7 @@ namespace simbi::cfd {
             geometric_sources(state.prim[active_domain], active_domain, geometry, meta.gamma);
 
         // convert to extensive for moving mesh
-        return intensive_rate.enum_map([&geometry](const auto& coord, const auto& rate) {
-            return rate * geometry.extensive_scaling(coord);
-        });
+        return intensive_rate.enum_map(maybe_extensive_converter_t{geometry});
     }
 
     // =========================================================================
