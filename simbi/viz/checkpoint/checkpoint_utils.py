@@ -60,6 +60,7 @@ def extract_timestep(filename: str | Path) -> float:
 
     handles various naming conventions:
     - 128.chkpt.0042.h5 → 42.0
+    - 128.chkpt.1_000_000.h5 → 1000000.0
     - sim_t100.5.h5 → 100.5
     - checkpoint_001.h5 → 1.0
 
@@ -74,15 +75,15 @@ def extract_timestep(filename: str | Path) -> float:
     """
     name = Path(filename).name
 
-    # try standard simbi format: chkpt.NNNN.h5 or chkpt.NNN.NNN.h5
-    match = re.search(r"chkpt\.(\d+(?:\.\d+)?)", name)
+    # try standard simbi format: chkpt.NNNN.h5 (supports underscore separators)
+    match = re.search(r"chkpt\.(\d[\d_]*(?:\.\d[\d_]*)?)", name)
     if match:
-        return float(match.group(1))
+        return float(match.group(1).replace("_", ""))
 
-    # try generic: any sequence of digits (possibly with decimal)
-    match = re.search(r"(\d+(?:\.\d+)?)", name)
+    # try generic: any sequence of digits (possibly with decimal/underscores)
+    match = re.search(r"(\d[\d_]*(?:\.\d[\d_]*)?)", name)
     if match:
-        return float(match.group(1))
+        return float(match.group(1).replace("_", ""))
 
     return 0.0
 

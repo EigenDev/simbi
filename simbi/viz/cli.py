@@ -9,7 +9,9 @@ import argparse
 import warnings
 from typing import Optional
 
-from simbi.viz.checkpoint.checkpoint_utils import glob_checkpoints
+from simbi.viz.checkpoint.checkpoint_utils import (
+    glob_checkpoints,
+)
 
 VALID_PLOT_TYPES = ["line", "multidim", "coordinate_bin", "time_series"]
 
@@ -74,6 +76,46 @@ def nullable_string(val: str) -> Optional[str]:
     return val if val else None
 
 
+def timestep_converter(val: str) -> float:
+    """
+    parse timestep value with underscore separators.
+    e.g., '1_000_000' -> 1000000.0
+    """
+    return float(val.replace("_", ""))
+
+
+def filter_files(
+    files: list,
+    tmin: float | None = None,
+    tmax: float | None = None,
+    stride: int = 1,
+) -> list:
+    """
+    filter file list by timestep range and stride.
+    call this after parsing to apply --tmin, --tmax, --stride.
+    """
+    if not files:
+        return files
+
+    # filter by timestep range
+    if tmin is not None or tmax is not None:
+        filtered = []
+        for f in files:
+            ts = extract_timestep(f.name)
+            if tmin is not None and ts < tmin:
+                continue
+            if tmax is not None and ts > tmax:
+                continue
+            filtered.append(f)
+        files = filtered
+
+    # apply stride
+    if stride > 1:
+        files = files[::stride]
+
+    return files
+
+
 def time_scale_converter(val: str) -> Optional[float]:
     """
     Parse time scale value, supporting 'pi' and 'e' constants.
@@ -117,6 +159,28 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--fields", nargs="+", default=["rho"], help="field(s) to visualize"
+    )
+
+    # =========================================================================
+    # file filtering
+    # =========================================================================
+    parser.add_argument(
+        "--tmin",
+        type=timestep_converter,
+        default=None,
+        help="minimum timestep to include (supports underscores: 1_000_000)",
+    )
+    parser.add_argument(
+        "--tmax",
+        type=timestep_converter,
+        default=None,
+        help="maximum timestep to include (supports underscores: 1_000_000)",
+    )
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="use every Nth file (default: 1 = all files)",
     )
 
     # =========================================================================
