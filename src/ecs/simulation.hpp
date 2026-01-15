@@ -56,7 +56,7 @@ namespace simbi::ecs {
         using eos_t       = EoS;
 
         using fields_t    = partition_fields_t<conserved_t, primitive_t, Rank>;
-        using workspace_t = partition_workspace_t<conserved_t, Rank>;
+        using workspace_t = partition_workspace_t<conserved_t, primitive_t, Rank>;
         using decomp_t    = level_decomposition_t<Rank>;
 
         // =========================================================================
@@ -395,6 +395,7 @@ namespace simbi::ecs {
             // allocate workspace on same device as fields
             workspace_t ws;
             ws.u_n    = grid::field_t<conserved_t, Rank>(part.allocated_domain);
+            ws.prim_n = grid::field_t<primitive_t, Rank>(part.allocated_domain);
             ws.u_star = grid::field_t<conserved_t, Rank>(part.allocated_domain);
 
             if constexpr (is_mhd) {

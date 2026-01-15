@@ -238,11 +238,14 @@ namespace simbi::ecs {
     // scratch space for runge-kutta time integration on a single partition.
     // stores the initial state and intermediate stages.
     // -----------------------------------------------------------------------------
-    template <typename Conserved, std::uint64_t Rank>
+    template <typename Conserved, typename Primitive, std::uint64_t Rank>
     struct partition_workspace_t
     {
-        // state at the beginning of the timestep
+        // conserved state at the beginning of the timestep
         grid::field_t<Conserved, Rank> u_n;
+
+        // primitive state at the beginning of the timestep (for AMR prolongation)
+        grid::field_t<Primitive, Rank> prim_n;
 
         // efield at beginning of the timestep
         vector_t<grid::field_t<real, Rank>, Rank> e_n;

@@ -371,36 +371,37 @@ namespace simbi::ecs {
                 const bool do_interpolation = alpha >= 0.0 && sim.has_workspace(coarse_lvl, cp);
 
                 if (do_interpolation) {
-                    // interpolate between u_n and current state
+                    // interpolate between prim_n and current primitives
                     auto& coarse_ws = sim.workspace(coarse_lvl, cp);
-                    auto  u_interp =
-                        coarse_ws.u_n.zip(coarse_fields.cons, numerics::time_interpolate_t{alpha})
+                    auto  prim_interp =
+                        coarse_ws.prim_n
+                            .zip(coarse_fields.prim, numerics::time_interpolate_t{alpha})
                             .with(exec);
 
                     grid::amr::fill_fine_ghosts(
-                        fine_fields.cons,
-                        u_interp,
+                        fine_fields.prim,
+                        prim_interp,
                         fine_part.owned_domain,
                         ratio,
                         exec
                     );
                 }
                 else if (use_coarse_u_n && sim.has_workspace(coarse_lvl, cp)) {
-                    // use stored u^n from workspace
+                    // use stored prim^n from workspace
                     auto& coarse_ws = sim.workspace(coarse_lvl, cp);
                     grid::amr::fill_fine_ghosts(
-                        fine_fields.cons,
-                        coarse_ws.u_n,
+                        fine_fields.prim,
+                        coarse_ws.prim_n,
                         fine_part.owned_domain,
                         ratio,
                         exec
                     );
                 }
                 else {
-                    // use current state in cons
+                    // use current primitives
                     grid::amr::fill_fine_ghosts(
-                        fine_fields.cons,
-                        coarse_fields.cons,
+                        fine_fields.prim,
+                        coarse_fields.prim,
                         fine_part.owned_domain,
                         ratio,
                         exec
@@ -646,7 +647,7 @@ namespace simbi::ecs {
     // =========================================================================
 
     // =========================================================================
-    // snapshot u^n before subcycling (needed for time interpolation)
+    // snapshot u^n and prim^n before subcycling (needed for time interpolation)
     // =========================================================================
     struct snapshot_u_n_system_t
     {
@@ -658,11 +659,13 @@ namespace simbi::ecs {
                 auto& exec   = sim.partition_executor(lvl, pp);
 
                 if (!sim.has_workspace(lvl, pp)) {
+                    sim.create_workspace(lvl, pp);
                 }
                 auto& ws = sim.workspace(lvl, pp);
 
-                // store u^n for time interpolation
-                ws.u_n = fields.cons.map(fp::identity).with(exec);
+                // store u^n and prim^n for time interpolation
+                ws.u_n    = fields.cons.map(fp::identity).with(exec);
+                ws.prim_n = fields.prim.map(fp::identity).with(exec);
             }
         }
     };
@@ -707,9 +710,8 @@ namespace simbi::ecs {
                 // moving mesh: \tilde{U}^{n+1} = \tilde{U}^n + dt * a^3 * L(u^n)
                 // static mesh: U^{n+1} = U^n + dt * L(u^n)
                 auto u_view = fields.cons[part.owned_domain];
-                u_view      = u_view
-                             .zip(ell, numerics::euler_step_t{dt})
-                             // .zip(be, numerics::euler_step_t{dt})
+                u_view      = u_view.zip(ell, numerics::euler_step_t{dt})
+                             .zip(be, numerics::euler_step_t{dt})
                              .with(exec);
 
                 if constexpr (Sim::is_mhd) {
@@ -758,8 +760,9 @@ namespace simbi::ecs {
                 }
                 auto& ws = sim.workspace(lvl, pp);
 
-                // store u^n
-                ws.u_n = fields.cons.map(fp::identity).with(exec);
+                // store u^n and prim^n (prim^n needed for AMR ghost fills)
+                ws.u_n    = fields.cons.map(fp::identity).with(exec);
+                ws.prim_n = fields.prim.map(fp::identity).with(exec);
 
                 // compute L(u^n) returns intensive rates
                 auto k1 = cfd::godunov_op(fields, part.owned_domain, block_geo, meta, sources);
