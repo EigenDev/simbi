@@ -13,14 +13,9 @@ cpu_test_list = [
   ['smr_fuller_test', 'test_smr.cpp', 'SMR Fuller Functionality Check'],
   ['reduction_test', 'test_reduction.cpp', 'Reduction Operations Check'],
   ['ecs_amr_build_test', 'test_ecs_amr.cpp', 'ECS AMR Build Check'],
-  # [
-  #   'volume_scaling_test',
-  #   'test_volume_scaling.cpp',
-  #   'Volume Scaling System Check',
-  # ],
 ]
 
-gpu_test_list = []
+gpu_test_list = [['memory_layout_test', 'test_memory_layout.cpp', 'AoS vs SoA test on GPUs']]
 
 # cpu tests
 foreach test_pair : cpu_test_list + gpu_test_list
