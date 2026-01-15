@@ -99,12 +99,20 @@ def apply_slicing(
             field.values, field.domain, plan
         )
 
+        # preserve spacing_types through the slice
+        sliced_spacing_types = None
+        if field.spacing_types and plan.final_domain_indices:
+            sliced_spacing_types = [
+                field.spacing_types[i] for i in plan.final_domain_indices
+            ]
+
         # create a new FieldData object with the sliced data
         sliced_fields.append(
             FieldData(
                 name=field.name,
                 values=sliced_values,
                 domain=list(sliced_domain),
+                spacing_types=sliced_spacing_types,
                 axis_names=plan.final_axis_names,
                 time=field.time,
             )

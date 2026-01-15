@@ -224,11 +224,16 @@ def prepare_field_level(
     if effective_dim == 2:
         axis_names = ["x1", "x2"]
 
+    # extract spacing types for non-singleton axes
+    mesh_spacing_types = mesh.spacing_types
+    spacing_types = [mesh_spacing_types[i] for i in non_singleton_axes]
+
     # return dimensionally-reduced data for quasi-1D/2D
     return FieldData(
         name=name,
         values=values,
         domain=list(full_domain),
+        spacing_types=spacing_types,
         axis_names=axis_names,
         coord_system=CoordSystem(data.metadata.coord_system),
         time=data.metadata.time,
@@ -381,6 +386,7 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
         time=base_field.time,
         values=composited_values,
         domain=base_field.domain,
+        spacing_types=base_field.spacing_types,
         axis_names=base_field.axis_names,
         coord_system=base_field.coord_system,
     )

@@ -140,6 +140,7 @@ def create_time_series_data(
                 name=name,
                 values=values_array,
                 domain=[time_array],
+                spacing_types=["linear"],
                 axis_names=[f"$t${time_units}"],
                 body_names=field_body_names,
             )
@@ -160,6 +161,7 @@ def create_time_series_data(
                             name=r"$\langle \dot{M} \rangle_{\rm tot}$ (orbital)",
                             values=ma_total_mdot,
                             domain=[ma_times],
+                            spacing_types=["linear"],
                         )
                     )
 

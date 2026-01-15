@@ -218,21 +218,25 @@ def _calculate_momentum_terms(
             name="term_advection",
             values=term_advection,
             domain=[bin_centers],
+            spacing_types=["linear"],
         ),
         FieldData(
             name="term_pressure",
             values=term_pressure,
             domain=[bin_centers],
+            spacing_types=["linear"],
         ),
         FieldData(
             name="term_gravity",
             values=term_gravity,
             domain=[bin_centers],
+            spacing_types=["linear"],
         ),
         FieldData(
             name="term_residual",
             values=term_residual,
             domain=[bin_centers],
+            spacing_types=["linear"],
         ),
     ]
 
@@ -261,7 +265,7 @@ def _calculate_coordinate_profile(
 
     name = field_name + "_vs_r"
     return FieldData(
-        name=name, values=mean_val, domain=[bin_centers], time=time
+        name=name, values=mean_val, domain=[bin_centers], spacing_types=["linear"], time=time
     )
 
 
@@ -310,6 +314,7 @@ def _calculate_mass_flux_profile(
         name=label,
         values=mass_flux_profile,
         domain=[bin_centers],
+        spacing_types=["linear"],
         time=time,
     )
 

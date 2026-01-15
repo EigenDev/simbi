@@ -123,6 +123,8 @@ class FieldData(BaseModel):
         domain: Sequence of coordinate arrays, one for each dimension
                (e.g., [x_coords, y_coords] for a 2D field). for 1D fields
                domain will commonly be a single array of bin centers.
+        spacing_types: optional tuple of spacing types ("linear", "log") per dimension
+                      used for correct cell center computation
         coord_system: optional CoordSystem hint for formatting (polar/cartesian)
         axis_names: optional human-readable axis names to use as xlabel/ylabel
         body_names: optional list of body identifiers present in the data
@@ -131,6 +133,7 @@ class FieldData(BaseModel):
     name: str
     values: Array
     domain: Sequence[Array] | Array
+    spacing_types: Optional[Sequence[str]] = None
     time: Optional[float] = None
     coord_system: Optional[CoordSystem] = None
     axis_names: Optional[Sequence[str]] = None

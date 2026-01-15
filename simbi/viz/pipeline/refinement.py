@@ -217,9 +217,14 @@ def prepare_composite_field(
         )
 
     # Return the full-dimensional data
+    # use base level mesh for spacing types
+    base_mesh = data.level_mesh(0)
+    spacing_types = list(base_mesh.spacing_types)
+
     return FieldData(
         name=field_name,
         values=values,
         domain=list(data_order_domain),
+        spacing_types=spacing_types,
         time=data.metadata.time,
     )

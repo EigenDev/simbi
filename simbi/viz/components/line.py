@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from pydantic import ValidationInfo, field_validator
 
+from simbi.functional import calc_any_mean
 from simbi.viz.utility import get_field_str
 
 from ..config import FigureConfig
@@ -117,7 +118,13 @@ class LinePlotComponent(Component):
 
         # domain contains vertices (edges), convert to cell centers for line plots
         x_vertices = data.domain[0]
-        x_data = 0.5 * (x_vertices[1:] + x_vertices[:-1])
+
+        # use correct cell center calculation based on spacing type
+        spacing_type = "linear"
+        if data.spacing_types and len(data.spacing_types) > 0:
+            spacing_type = data.spacing_types[0]
+
+        x_data = calc_any_mean(x_vertices, spacing_type)
         y_data = data.values
 
         line_style = _create_line_style(self.props)
@@ -138,6 +145,9 @@ class LinePlotComponent(Component):
             # Animation update: set new data and style
             _update_line_data(self._line, x_data, y_data)
             _update_line_style(self._line, line_style, level_label)
+
+        # update x-axis limits for moving mesh animations
+        ax.set_xlim(x_data.min(), x_data.max())
 
         return RenderResult(
             artists={"line": self._line}, metadata={"label": level_label}
