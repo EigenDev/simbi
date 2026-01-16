@@ -373,6 +373,7 @@ namespace simbi::ecs {
         real checkpoint_time;      // next scheduled checkpoint time
         real prev_checkpoint_time; // last checkpoint time
         real ambient_sound_speed;  // for vacuum/floor handling
+        real initial_time;         // start time from original initial conditions
 
         // === integer tracking ===
         std::uint64_t iteration;        // current iteration count

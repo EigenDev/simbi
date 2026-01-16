@@ -34,6 +34,11 @@ namespace simbi::checkpoint {
             // is set to the current time.
             if (dlogt != 0) {
                 checkpoint_time = tstart * std::pow(10.0, (n + 1) * dlogt);
+                std::cout << "tstart: " << tstart << "\n";
+                std::cout << "dlogt: " << dlogt << "\n";
+                std::cout << "n: " << n << "\n";
+                std::cout << "checkpoint time: " << checkpoint_time << std::endl;
+                std::cin.get();
             }
             else {
                 static auto round_place = 1.0 / checkpoint_interval;

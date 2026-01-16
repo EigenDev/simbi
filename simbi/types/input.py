@@ -197,6 +197,7 @@ class Metadata:
     # time control
     time: float
     dt: float
+    dlogt: float
     tend: float
     iteration: int
     checkpoint_index: int
@@ -228,6 +229,7 @@ class Metadata:
     x2_spacing: str = "linear"
     x3_spacing: str = "linear"
     boundary_conditions: tuple[str, ...] = ()
+    initial_time: float = 0.0  # start time from original initial conditions
 
     # amr fields
     level_dts: tuple[float, ...] = ()

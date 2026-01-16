@@ -60,7 +60,7 @@ namespace simbi::evolution {
                     .checkpoint_time     = meta.checkpoint_interval,
                     .checkpoint_interval = meta.checkpoint_interval,
                     .dlogt               = meta.dlogt,
-                    .tstart              = meta.time,
+                    .tstart              = meta.initial_time,
                     .checkpoint_index    = meta.checkpoint_index
                 },
             .should_stop = false

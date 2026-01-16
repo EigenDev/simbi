@@ -482,6 +482,7 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 # time
                 time=float(attrs["time"]),
                 dt=float(attrs["dt"]),
+                dlogt=float(attrs["dlogt"]),
                 tend=float(attrs["tend"]),
                 iteration=int(attrs["iteration"]),
                 checkpoint_index=int(attrs["checkpoint_index"]),
@@ -510,6 +511,7 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 x2_spacing=decode_str(attrs.get("x2_spacing", "linear")),
                 x3_spacing=decode_str(attrs.get("x3_spacing", "linear")),
                 boundary_conditions=bcs,
+                initial_time=float(attrs.get("initial_time", attrs["time"])),
             )
         )
     except Exception as e:

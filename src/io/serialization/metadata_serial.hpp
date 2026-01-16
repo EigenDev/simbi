@@ -64,6 +64,7 @@ namespace simbi::io {
             write_attribute(g, "checkpoint_time", meta.checkpoint_time);
             write_attribute(g, "prev_checkpoint_time", meta.prev_checkpoint_time);
             write_attribute(g, "ambient_sound_speed", meta.ambient_sound_speed);
+            write_attribute(g, "initial_time", meta.initial_time);
 
             // int tracking
             write_attribute(g, "iteration", meta.iteration);
@@ -137,6 +138,14 @@ namespace simbi::io {
             meta.checkpoint_time      = read_attribute<real>(g, "checkpoint_time");
             meta.prev_checkpoint_time = read_attribute<real>(g, "prev_checkpoint_time");
             meta.ambient_sound_speed  = read_attribute<real>(g, "ambient_sound_speed");
+
+            // initial_time: backward compat with older checkpoints that lack it
+            if (attribute_exists(g, "initial_time")) {
+                meta.initial_time = read_attribute<real>(g, "initial_time");
+            }
+            else {
+                meta.initial_time = meta.time;
+            }
 
             // int tracking
             meta.iteration        = read_attribute<std::uint64_t>(g, "iteration");
