@@ -36,7 +36,8 @@ SIMBI is a finite volume code for astrophysical fluid simulations. Results from 
 - Immersed boundary method (Peskin 2002) for solid objects in the computational domain
 - Adaptive mesh refinement with Berger-Colella subcycling
 - Entity-component-system architecture for partition-aware multi-device execution
-- Python configuration system with automatic CLI generation
+- Type-safe Python configuration with automatic CLI generation
+- Afterglow radiation transport and observables
 
 ---
 
@@ -62,23 +63,20 @@ Run the Marti & Müller relativistic shock tube test:
 
 **CPU:**
 ```bash
-# install with virtual environment
-CC=gcc CXX=g++ python dev.py install --create-venv yes
-
-# activate environment
-source .simbi-venv/bin/activate
+# install
+CC=gcc CXX=g++ python dev.py install
 
 # run test problem
-simbi run marti_muller --mode cpu --resolution 400
+simbi run marti-muller --mode cpu --resolution 400
 
 # visualize
 simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
 ```
 
-**GPU (NVIDIA V100, compute capability 7.0):**
+**GPU (auto-detects architecture):**
 ```bash
-CC=gcc CXX=g++ python dev.py install --gpu-compilation --dev-arch 70
-simbi run marti_muller --mode gpu --resolution 1024
+CC=gcc CXX=g++ python dev.py install --gpu
+simbi run marti-muller --mode gpu --resolution 1024
 ```
 
 ---
@@ -97,93 +95,280 @@ simbi run marti_muller --mode gpu --resolution 1024
 - Latest stable compiler
 - Python 3.11+
 - 32+ GB RAM for large 3D simulations
-- Ubuntu 20.04+
 
 ### Dependencies
 
-- **Build**: Meson, Ninja
-- **Libraries**: pybind11, HDF5
-- **Python**: mypy, halo, pydantic, rich
-
-**UV Package Manager (optional):**
-```bash
-curl -sSf https://install.astral.sh | sh
-# or
-pip install uv
-```
-
-UV provides faster dependency resolution. SIMBI automatically uses it when available.
+- **Build**: Meson ≥ 1.4.0, Ninja
+- **Libraries**: pybind11, HDF5, OpenMP
+- **Python**: pydantic, rich, hdf5
 
 ### Installation Commands
 
-**Standard:**
+**Standard (editable install):**
 ```bash
-CC=gcc CXX=g++ python dev.py install --create-venv yes
+CC=gcc CXX=g++ python dev.py install -e
 ```
 
 **With visualization tools:**
 ```bash
-CC=gcc CXX=g++ python dev.py install --visual-extras --create-venv yes
+CC=gcc CXX=g++ python dev.py install --visual-extras
 ```
 
-**GPU compilation (NVIDIA):**
+**GPU compilation (NVIDIA, auto-detects architecture):**
+```bash
+CC=gcc CXX=g++ python dev.py install --gpu
+```
+
+**GPU compilation (explicit architecture):**
 ```bash
 # V100 (compute capability 7.0)
-CC=gcc CXX=g++ python dev.py install --gpu-compilation --dev-arch 70
+CC=gcc CXX=g++ python dev.py install --gpu --device-arch sm_70
 
 # A100 (compute capability 8.0)
-CC=gcc CXX=g++ python dev.py install --gpu-compilation --dev-arch 80
+CC=gcc CXX=g++ python dev.py install --gpu --device-arch sm_80
 ```
 
 **GPU compilation (AMD):**
 ```bash
 # MI100 (gfx908)
-CC=gcc CXX=g++ python dev.py install --gpu-compilation --gpu-platform hip --dev-arch gfx908
+CC=gcc CXX=g++ python dev.py install --gpu --device-arch gfx908
 ```
 
-**Environment activation:**
+### Advanced Build Options
+
+| Option | Description |
+|--------|-------------|
+| `--precision single\|double` | Floating point precision (default: double) |
+| `--column-major` | Use column-major data layout |
+| `--four-velocity` | Use four-velocity as primitive variable |
+| `--unified-memory` | CUDA unified memory (default: device memory) |
+| `--build-tests` | Build test suite |
+| `--linker mold\|lld\|gold\|bfd` | Select linker (auto-detects fastest) |
+| `--gpu-jobs N` | Parallel jobs for GPU compilation |
+| `--timeout N` | Build timeout in seconds |
+| `--reconfigure` | Force meson reconfiguration |
+
+**Clean and rebuild:**
 ```bash
-source <installation_path>/.venv/bin/activate
+python dev.py clean --all
+python dev.py install --gpu
 ```
 
 ---
 
 ## Usage
 
+### CLI Commands
+
+SIMBI provides three main commands:
+
+```bash
+simbi run        # run simulations
+simbi plot       # visualize checkpoint data
+simbi afterglow  # radiation transport and observables
+```
+
 ### Running Simulations
 
 ```bash
 # basic usage
-simbi run marti_muller --mode gpu --resolution 400 --adiabatic-index 1.4
+simbi run marti-muller --mode gpu --resolution 400
+
+# list available parameters for a problem
+simbi run <problem> --info
+
+# list all available problem configs
+simbi run --configs
 
 # custom config path
-simbi run simbi_configs/examples/marti_muller.py --mode cpu --resolution 1024
+simbi run simbi_configs/examples/kh.py --mode cpu --resolution 512
 
-# with uv
-uv run simbi run marti_muller --mode gpu --resolution 512
-
-# view available parameters
-simbi run <problem> --info
+# resume from checkpoint
+simbi run <problem> --checkpoint data/checkpoint.h5
 ```
 
 **Common options:**
-- `--mode` → cpu/gpu execution
-- `--resolution` → grid resolution
-- `--adiabatic-index` → ratio of specific heats
+- `--mode cpu|gpu` - execution mode
+- `--resolution N` or `--resolution N M` or `--resolution N M K` - grid resolution
+- `--adiabatic-index` - ratio of specific heats
+- `--end-time` - simulation end time
+- `--data-directory` - output directory
 
 ### Visualization
 
 ```bash
-simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
-uv run simbi plot data/checkpoint.h5 --setup "Physics Setup" --field rho v p
+# plot checkpoint fields
+simbi plot data/checkpoint.h5 --setup "Problem Name" --field rho v p
+
+# plot with body diagnostics
+simbi plot data/checkpoint.h5 --bodies
+
+# create animation
+simbi plot data/*.h5 --animate --field rho
+
+# generate example config
+simbi plot --generate-config
 ```
 
-### Creating Custom Simulations
+### Afterglow Analysis
+
+Generate synthetic observables from simulation data:
 
 ```bash
-simbi generate --name my_simulation
-# edit simbi_configs/my_simulation.py
-simbi run my_simulation --mode gpu
+# generate photon events from hydro snapshots
+simbi afterglow generate data/*.h5 --output events.h5 --max-events 1000000
+
+# compute observer lightcurve
+simbi afterglow lightcurve events.h5 --observer-angle 0.1 --frequencies 1e9 1e14 1e18
+
+# generate sky intensity map
+simbi afterglow skymap events.h5 --observer-time 1e5
+
+# compute polarization evolution
+simbi afterglow polarization events.h5 --observer-angle 0.1
+
+# generate spectrum
+simbi afterglow spectrum events.h5 --observer-time 1e5
+```
+
+---
+
+## Configuration System
+
+SIMBI uses type-safe configuration with automatic CLI generation. Problems inherit from `SimbiProblem` and use `ProblemParam` for field metadata.
+
+### Basic Structure
+
+```python
+from pathlib import Path
+from typing import Annotated
+
+from simbi import ProblemParam, SimbiProblem
+from simbi.types import (
+    BoundaryCondition,
+    CoordSystem,
+    Regime,
+    Solver,
+)
+
+class KelvinHelmholtz(SimbiProblem):
+    """kelvin-helmholtz instability in newtonian fluid."""
+
+    # physics parameters
+    adiabatic_index: Annotated[
+        float, ProblemParam(5.0 / 3.0, description="adiabatic index")
+    ]
+    rhoL: Annotated[float, ProblemParam(2.0, description="density in central layer")]
+    rhoR: Annotated[float, ProblemParam(1.0, description="density in outer regions")]
+
+    # domain configuration
+    resolution: Annotated[
+        tuple[int, int],
+        ProblemParam((256, 256), cli=True, description="grid resolution"),
+    ]
+    bounds: Annotated[
+        list[tuple[float, float]],
+        ProblemParam([(-0.5, 0.5), (-0.5, 0.5)], description="domain boundaries"),
+    ]
+    coord_system: Annotated[
+        CoordSystem, ProblemParam(CoordSystem.CARTESIAN, description="coordinate system")
+    ]
+    regime: Annotated[Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")]
+
+    # numerics
+    boundary_conditions: Annotated[
+        BoundaryCondition, ProblemParam(BoundaryCondition.PERIODIC)
+    ]
+    solver: Annotated[Solver, ProblemParam(Solver.HLLC, description="riemann solver")]
+
+    # simulation control
+    data_directory: Annotated[
+        Path,
+        ProblemParam(Path("data/kh"), cli=True, checkpoint_safe=True),
+    ]
+    end_time: Annotated[
+        float, ProblemParam(20.0, cli=True, checkpoint_safe=True)
+    ]
+
+    def initial_primitive_state(self):
+        """generate initial conditions."""
+        def gas_state():
+            nx, ny = self.resolution
+            for jj in range(ny):
+                for ii in range(nx):
+                    # compute y coordinate
+                    y = self.bounds[1][0] + jj * (self.bounds[1][1] - self.bounds[1][0]) / ny
+                    if abs(y) < 0.25:
+                        yield (self.rhoL, 0.5, 0.0, 2.5)  # rho, vx, vy, p
+                    else:
+                        yield (self.rhoR, -0.5, 0.0, 2.5)
+        return gas_state
+```
+
+### ProblemParam Options
+
+| Option | Description |
+|--------|-------------|
+| `cli=True` | Expose as CLI argument |
+| `checkpoint_safe=True` | Can override when resuming from checkpoint |
+| `description="..."` | Help text for CLI |
+| `ge=`, `le=`, `gt=`, `lt=` | Validation constraints |
+
+### Source Terms
+
+Add gravity or custom hydro sources via expression graphs:
+
+```python
+import simbi
+
+@computed_field
+@property
+def gravity_source_expressions(self):
+    graph = simbi.Expr.Graph()
+    x_comp = simbi.Expr.constant(0.0, graph)
+    y_comp = simbi.Expr.constant(-0.1, graph)  # constant downward gravity
+    terms = graph.compile([x_comp, y_comp])
+    return terms.serialize()
+```
+
+### Immersed Bodies
+
+Define solid objects in the computational domain:
+
+```python
+from simbi.types import ImmersedBodyConfig, BodyCapability, GravitationalProperties
+
+@computed_field
+@property
+def immersed_bodies(self) -> list[ImmersedBodyConfig]:
+    return [
+        ImmersedBodyConfig(
+            name="central_mass",
+            capabilities=[BodyCapability.GRAVITATIONAL],
+            gravitational=GravitationalProperties(
+                mass=1.0,
+                softening_length=0.01,
+            ),
+            position=(0.0, 0.0),
+            velocity=(0.0, 0.0),
+        )
+    ]
+```
+
+### Dynamic Mesh Motion
+
+For expanding or contracting domains:
+
+```python
+@computed_field
+@property
+def scale_factor(self):
+    return lambda time: 1.0 + 0.1 * time
+
+@computed_field
+@property
+def scale_factor_derivative(self):
+    return lambda time: 0.1
 ```
 
 ---
@@ -192,106 +377,67 @@ simbi run my_simulation --mode gpu
 
 ### Regimes
 
-**SRMHD** - Special Relativistic Magnetohydrodynamics
-- AGN jets, pulsar wind nebulae, magnetic reconnection
+| Regime | Description | Use Cases |
+|--------|-------------|-----------|
+| `SRMHD` | Special Relativistic Magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
+| `SRHD` | Special Relativistic Hydrodynamics | Gamma-ray bursts, relativistic shocks, stellar explosions |
+| `NEWTONIAN` | Classical Hydrodynamics | Stellar winds, ISM dynamics, classical turbulence |
 
-**SRHD** - Special Relativistic Hydrodynamics
-- Gamma-ray bursts, relativistic shocks, stellar explosions
+### Coordinate Systems
 
-**Classical** - Newtonian Hydrodynamics
-- Stellar winds, ISM dynamics, classical turbulence
-
-### Configuration
-
-SIMBI uses type-safe configuration with automatic CLI generation:
-
-```python
-from pathlib import Path
-from simbi.core.config.base_config import SimbiBaseConfig
-from simbi.core.config.fields import SimbiField
-from simbi.core.types.input import Regime, Solver
-
-class KelvinHelmholtz(SimbiBaseConfig):
-    """kelvin-helmholtz instability in newtonian fluid"""
-
-    resolution: tuple[int, int] = SimbiField(
-        (256, 256), description="number of zones in x and y"
-    )
-    bounds: list[tuple[float, float]] = SimbiField(
-        [(-0.5, 0.5), (-0.5, 0.5)], description="domain boundaries"
-    )
-    regime: Regime = SimbiField(Regime.CLASSICAL, description="physics regime")
-    solver: Solver = SimbiField(Solver.HLLC, description="riemann solver")
-    adiabatic_index: float = SimbiField(5.0/3.0, description="ratio of specific heats")
-    rhoL: float = SimbiField(2.0, description="density in central layer")
-    rhoR: float = SimbiField(1.0, description="density in outer regions")
-    end_time: float = SimbiField(20.0, description="end time")
-    data_directory: Path = SimbiField(Path("data/kh_config"), description="output directory")
-
-    def initial_primitive_state(self):
-        """generate initial conditions"""
-        def gas_state():
-            # yields (rho, vx, vy, p) for each grid cell
-            pass
-        return gas_state
-```
-
-**Dynamic meshes:**
-```python
-@computed_field
-@property
-def scale_factor(self) -> Callable[float, float]:
-    return lambda time: 1.0 + 0.1 * time
-```
-
-**Source terms:**
-```python
-@computed_field
-@property
-def gravity_source_expressions(self):
-    graph = simbi.Expr.Graph()
-    x_comp = simbi.Expr.constant(0.0, graph)
-    y_comp = simbi.Expr.constant(-0.1, graph)
-    terms = graph.compile([x_comp, y_comp])
-    return terms.serialize()
-```
-
-**Immersed boundaries:**
-```python
-@computed_field
-@property
-def body_system(self) -> BodySystemConfig:
-    # define solid objects in computational domain
-    # based on peskin (2002) immersed boundary method
-    pass
-```
+- `CARTESIAN` - x, y, z
+- `SPHERICAL` - r, θ, φ
+- `CYLINDRICAL` - r, φ, z
+- `AXIS_CYLINDRICAL` - cylindrical with axis symmetry
+- `PLANAR_CYLINDRICAL` - 2D cylindrical in r-z plane
 
 ### Numerical Methods
 
 **Riemann Solvers:**
 - `HLLE` - HLL solver with entropy fix
-- `HLLC` - HLL Contact solver for hydrodynamics
+- `HLLC` - HLL Contact solver (hydrodynamics)
 - `HLLD` - HLL Discontinuities solver (magnetohydrodynamics)
 
-**Coordinate Systems:**
-- Cartesian, Spherical, Cylindrical, Axis-cylindrical, Planar-cylindrical
-
 **Grid Spacing:**
-- Linear (uniform)
-- Logarithmic
+- `LINEAR` - uniform spacing
+- `LOGARITHMIC` - log spacing (useful for spherical)
 
 **Boundary Conditions:**
-- PERIODIC, REFLECTING, OUTFLOW, DYNAMIC
+- `PERIODIC` - wrap around
+- `REFLECTING` - mirror symmetry
+- `OUTFLOW` - zero gradient
+- `DYNAMIC` - user-defined expressions
 
 **Time Integration:**
-- Forward Euler
-- RK2 (Berger-Colella for AMR)
+- `EULER` - Forward Euler
+- `RK2` - Second-order Runge-Kutta (Berger-Colella for AMR)
 
-**Adaptive Mesh Refinement:**
-- Berger-Colella subcycling
-- Flux correction at coarse-fine boundaries
-- Restriction and prolongation operators
-- Three subcycling modes: NONE, STANDARD, MANUAL, ADAPTIVE
+**Additional Options:**
+- `plm_theta` - PLM reconstruction parameter (0-2, default 1.5)
+- `use_quirk_smoothing` - Quirk's carbuncle fix
+- `use_fleischmann_limiter` - Low-Mach fix for HLLC
+
+### Static Mesh Refinement
+
+```python
+# enable refinement
+refinement_enabled: Annotated[bool, ProblemParam(True)]
+refinement_max_levels: Annotated[int, ProblemParam(3)]
+refinement_regions: Annotated[
+    list[list[tuple[float, float]]],
+    ProblemParam([[(-0.1, 0.1), (-0.1, 0.1)], [(-0.05, 0.05), (-0.05, 0.05)]]),
+]
+refinement_ratios: Annotated[list[int], ProblemParam([2, 2])]
+refinement_subcycling_mode: Annotated[
+    SubCycleMode, ProblemParam(SubCycleMode.STANDARD)
+]
+```
+
+**Subcycling Modes:**
+- `NONE` - all levels advance with same timestep
+- `STANDARD` - subcycle by refinement ratio
+- `MANUAL` - user-specified substeps per level
+- `ADAPTIVE` - (not yet implemented)
 
 ---
 
@@ -301,28 +447,52 @@ def body_system(self) -> BodySystemConfig:
 
 SIMBI uses an ECS architecture for partition-aware multi-device execution:
 
-**Core Components:**
-- `simulation_t<Rank, Regime, CoordSystem>` - Top-level simulation state
-- `partition_t<Rank>` - Device assignment + execution stream for one domain partition
-- `level_decomposition_t<Rank>` - All partitions + halo graph for one AMR level
-- `partition_fields_t` - Hydro fields (cons, prim, flux, bfield, efield) for one partition
+**Components:**
+- `simulation_t<Rank, Regime, CoordSystem>` - top-level simulation state
+- `partition_t<Rank>` - device assignment + execution stream for one domain partition
+- `level_decomposition_t<Rank>` - all partitions + halo graph for one AMR level
+- `partition_fields_t` - hydro fields (cons, prim, flux, bfield, efield) for one partition
 - `flux_register_component_t` - AMR flux correction registers
 
 **Systems:**
-- `timestep_system_t` - Compute CFL-limited timesteps with subcycling
-- `ghost_fill_system_t` - Fill ghost cells via physical BCs or coarse grid prolongation
-- `c2p_system_t` - Conservative to primitive variable conversion
-- `flux_system_t` - Compute numerical fluxes via Riemann solver
-- `euler_system_t` / `rk2_stage1_system_t` / `rk2_stage2_system_t` - Time integration
-- `restriction_system_t` - Inject fine grid interior to coarse grid
-- `prolongation_system_t` - Interpolate coarse grid to fine grid boundaries
-- `reflux_system_t` - Apply flux correction at AMR boundaries
-- `body_effects_system_t` - Immersed boundary forces and diagnostics
+- `timestep_system_t` - compute CFL-limited timesteps with subcycling
+- `ghost_fill_system_t` - fill ghost cells via physical BCs or coarse grid prolongation
+- `c2p_system_t` - conservative to primitive variable conversion
+- `flux_system_t` - compute numerical fluxes via Riemann solver
+- `euler_system_t` / `rk2_stage1_system_t` / `rk2_stage2_system_t` - time integration
+- `restriction_system_t` - inject fine grid interior to coarse grid
+- `prolongation_system_t` - interpolate coarse grid to fine grid boundaries
+- `reflux_system_t` - apply flux correction at AMR boundaries
+- `body_effects_system_t` - immersed boundary forces and diagnostics
 
-Each system operates on partitions, using per-partition executors for async kernel dispatch.
+Each system operates on partitions using per-partition executors for async kernel dispatch.
 
-**Geometry Handling:**
-Geometry operations use `with_block_geometry<CoordSystem>()` to dispatch specialized implementations per coordinate system at compile time.
+---
+
+## Example Configurations
+
+SIMBI includes ~24 example configurations in `simbi_configs/examples/`:
+
+| Example | Description |
+|---------|-------------|
+| `sod.py` | Newtonian shock tube |
+| `marti_muller.py` | SRHD shock tube (1D, 3D variants) |
+| `kh.py` | Kelvin-Helmholtz instability |
+| `rt.py` | Rayleigh-Taylor instability (with gravity) |
+| `sedov.py` | Sedov-Taylor explosion (spherical) |
+| `thermal_bomb.py` | Thermal bomb (2D, 3D variants) |
+| `magnetic_blast.py` | MHD blast wave |
+| `magnetic_shock_tube.py` | 1D MHD shock |
+| `orszag_tang.py` | SRMHD Orszag-Tang vortex |
+| `kepler.py` | Keplerian disk with central mass |
+| `uniform_sphere.py` | Uniform sphere with immersed body |
+| `quad_shocktube.py` | 2D multi-region shock |
+
+Run any example:
+```bash
+simbi run sedov --mode gpu --resolution 256
+simbi run kepler --mode cpu --resolution 128 128
+```
 
 ---
 
@@ -379,16 +549,16 @@ Report bugs and request features at [GitHub Issues](https://github.com/EigenDev/
 
 Installation problems:
 ```bash
-gcc --version  # check ≥ 8
+gcc --version   # check ≥ 8
 python --version  # check ≥ 3.10
-nvidia-smi  # verify GPU (NVIDIA)
-rocm-smi    # verify GPU (AMD)
+nvidia-smi      # verify GPU (NVIDIA)
+rocm-smi        # verify GPU (AMD)
 ```
 
 Runtime issues:
 ```bash
-source .simbi-venv/bin/activate  # activate environment
 simbi run <problem> --info  # check available options
+simbi run --configs         # list available problems
 ```
 
 ---
