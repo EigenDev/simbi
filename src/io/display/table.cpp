@@ -1,5 +1,11 @@
 #include "table.hpp"
 
+#if CUDA_ENABLED
+#include "xpu/vendors/cuda/device_queries.hpp"
+#elif HIP_ENABLED
+#include "xpu/vendors/hip/device_queries.hpp"
+#endif
+
 #include "io/console/statistics.hpp"
 #include "renderer.hpp"
 #include "terminal.hpp"
@@ -49,8 +55,10 @@ namespace simbi::display {
 
         void gather_system_info()
         {
-#if GPU_ENABLED
+#if CUDA_ENABLED
             using namespace xpu::vendors::cuda;
+#elif HIP_ENABLED
+            using namespace xpu::vendors::hip;
 #endif
             using namespace statistics;
 
