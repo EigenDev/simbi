@@ -391,6 +391,7 @@ namespace simbi::ecs::builders {
 
             // execution
             meta.time                 = exec_bp_.start_time;
+            meta.initial_time         = exec_bp_.start_time;
             meta.tend                 = exec_bp_.end_time;
             meta.checkpoint_interval  = exec_bp_.checkpoint_interval;
             meta.dlogt                = exec_bp_.dlogt;
