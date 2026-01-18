@@ -437,8 +437,8 @@ namespace simbi::xpu::exec::detail {
             );
             cudaStreamSynchronize(stream);
 
-            cudaFreeAsync(d_block_results, stream);
-            cudaFreeAsync(d_final_result, stream);
+            cudaFree(d_block_results);
+            cudaFree(d_final_result);
 
             return final_result;
         }
