@@ -62,15 +62,7 @@ namespace simbi::xpu::device::detail {
         ~event_wrapper_t()
         {
             if (owns_resource_) {
-                if constexpr (requires { ExecutionSpace::destroy_event(handle_); }) {
-                    ExecutionSpace::destroy_event(handle_);
-                }
-                else if constexpr (requires { handle_ != event_handle_type{}; }) {
-                    // fallback for spaces without explicit destroy
-                    if (handle_ != event_handle_type{}) {
-                        // space-specific cleanup would go here
-                    }
-                }
+                ExecutionSpace::destroy_event(handle_);
             }
         }
 
@@ -85,9 +77,7 @@ namespace simbi::xpu::device::detail {
         {
             if (this != &other) {
                 if (owns_resource_) {
-                    if constexpr (requires { ExecutionSpace::destroy_event(handle_); }) {
-                        ExecutionSpace::destroy_event(handle_);
-                    }
+                    ExecutionSpace::destroy_event(handle_);
                 }
                 handle_        = std::exchange(other.handle_, {});
                 owns_resource_ = std::exchange(other.owns_resource_, false);
@@ -105,13 +95,7 @@ namespace simbi::xpu::device::detail {
 
         void record(stream_handle_type stream)
         {
-            if constexpr (requires { ExecutionSpace::record_event(handle_, stream); }) {
-                ExecutionSpace::record_event(handle_, stream);
-            }
-            else {
-                // fallback for spaces without explicit record
-                // cpu spaces typically don't need event recording
-            }
+            ExecutionSpace::record_event(handle_, stream);
         }
 
         void record(const stream_wrapper_t<ExecutionSpace>& stream)
@@ -121,26 +105,12 @@ namespace simbi::xpu::device::detail {
 
         void wait() const
         {
-            if constexpr (requires { ExecutionSpace::wait_for_event(handle_); }) {
-                ExecutionSpace::wait_for_event(handle_);
-            }
-            else if constexpr (requires { ExecutionSpace::synchronize_event(handle_); }) {
-                ExecutionSpace::synchronize_event(handle_);
-            }
-            else {
-                // fallback: no-op for spaces without event sync
-            }
+            ExecutionSpace::synchronize_event(handle_);
         }
 
         void wait_on(stream_handle_type stream) const
         {
-            if constexpr (requires { ExecutionSpace::stream_wait_event(stream, handle_); }) {
-                ExecutionSpace::stream_wait_event(stream, handle_);
-            }
-            else {
-                // fallback: just wait for event completion
-                wait();
-            }
+            ExecutionSpace::stream_wait_event(stream, handle_);
         }
 
         void wait_on(const stream_wrapper_t<ExecutionSpace>& stream) const
@@ -150,13 +120,7 @@ namespace simbi::xpu::device::detail {
 
         bool ready() const
         {
-            if constexpr (requires { ExecutionSpace::is_event_ready(handle_); }) {
-                return ExecutionSpace::is_event_ready(handle_);
-            }
-            else {
-                // fallback: assume ready if no query method
-                return true;
-            }
+            return ExecutionSpace::is_event_ready(handle_);
         }
 
         void sync() const
@@ -211,9 +175,7 @@ namespace simbi::xpu::device::detail {
         void reset(event_handle_type new_handle = {}, bool owns = true)
         {
             if (owns_resource_ && handle_) {
-                if constexpr (requires { ExecutionSpace::destroy_event(handle_); }) {
-                    ExecutionSpace::destroy_event(handle_);
-                }
+                ExecutionSpace::destroy_event(handle_);
             }
             handle_        = new_handle;
             owns_resource_ = owns;

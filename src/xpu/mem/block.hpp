@@ -2,8 +2,6 @@
 // block.hpp
 //
 // simple raii memory ownership for xpu framework.
-// one job: allocate and free memory. no coherency, no sharing, no complexity.
-// follows hesi pattern of minimal, focused components.
 //
 // usage:
 //   memory_block_t<device_memory> block(1024);

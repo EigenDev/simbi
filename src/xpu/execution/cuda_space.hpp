@@ -181,7 +181,7 @@ namespace simbi::xpu::exec {
 
         static void set_device(std::int64_t device_id)
         {
-            cudaSetDevice(device_id);
+            cudaSetDevice(static_cast<int>(device_id));
         }
 
         static int get_device()
@@ -248,6 +248,15 @@ namespace simbi::xpu::exec {
             }
         }
 
+        static bool is_stream_ready(stream_handle_type stream)
+        {
+            if (stream == nullptr) {
+                return true;
+            }
+            cudaError_t status = cudaStreamQuery(stream);
+            return status == cudaSuccess;
+        }
+
         // =============================================================================
         // event management
         // =============================================================================
@@ -259,21 +268,49 @@ namespace simbi::xpu::exec {
             return event;
         }
 
+        static void destroy_event(event_handle_type event)
+        {
+            if (event != nullptr) {
+                cudaEventDestroy(event);
+            }
+        }
+
+        static void record_event(event_handle_type event, stream_handle_type stream)
+        {
+            if (event != nullptr && stream != nullptr) {
+                cudaEventRecord(event, stream);
+            }
+        }
+
         static event_handle_type record_event(stream_handle_type stream)
         {
             auto event = create_event();
-            cudaEventRecord(event, stream);
+            record_event(event, stream);
             return event;
         }
 
-        static void wait_for_event(const event_handle_type& event)
+        static bool is_event_ready(event_handle_type event)
+        {
+            if (event == nullptr) {
+                return true;
+            }
+            cudaError_t status = cudaEventQuery(event);
+            return status == cudaSuccess;
+        }
+
+        static void wait_for_event(event_handle_type event)
         {
             if (event != nullptr) {
                 cudaEventSynchronize(event);
             }
         }
 
-        static void stream_wait_event(stream_handle_type stream, const event_handle_type& event)
+        static void synchronize_event(event_handle_type event)
+        {
+            wait_for_event(event);
+        }
+
+        static void stream_wait_event(stream_handle_type stream, event_handle_type event)
         {
             if (stream != nullptr && event != nullptr) {
                 cudaStreamWaitEvent(stream, event, 0);
@@ -515,16 +552,30 @@ namespace simbi::xpu::exec {
 
         static void record_event(event_handle_type, stream_handle_type) {}
 
-        static void wait_event(event_handle_type, stream_handle_type) {}
-
-        static bool query_event(event_handle_type)
+        static bool is_event_ready(event_handle_type)
         {
             return true;
         }
 
+        static void synchronize_event(event_handle_type) {}
+
+        static void wait_for_event(event_handle_type) {}
+
+        static void stream_wait_event(stream_handle_type, event_handle_type) {}
+
+        static event_handle_type record_event(stream_handle_type)
+        {
+            return nullptr;
+        }
+
         static void synchronize_stream(stream_handle_type) {}
 
-        static void synchronize_event(event_handle_type) {}
+        static bool is_stream_ready(stream_handle_type)
+        {
+            return true;
+        }
+
+        static void set_device(std::int64_t) {}
 
         static void* allocate(std::size_t)
         {

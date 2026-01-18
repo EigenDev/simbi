@@ -1,7 +1,7 @@
 // =============================================================================
 // mem.hpp
 //
-// main header for xpu memory management - hesi style modular design.
+// main header for xpu memory management
 // includes all memory components as separate, focused modules.
 // each module has one job and does it well.
 //
@@ -23,7 +23,7 @@
 #include "memory_space.hpp"
 #include "unified_memory.hpp"
 
-// core memory components - modular hesi style
+// core memory components -
 #include "block.hpp"    // memory_block_t - simple raii ownership
 #include "handle.hpp"   // shared_handle_t - reference counting + coherency
 #include "ops.hpp"      // fill, zero, copy operations

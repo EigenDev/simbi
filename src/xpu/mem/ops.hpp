@@ -3,7 +3,6 @@
 //
 // simple memory operations for xpu framework.
 // one job: fill, zero, copy operations. no complex transfers, no async.
-// follows hesi pattern of minimal, focused components.
 //
 // usage:
 //   zero_memory(block);

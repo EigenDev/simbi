@@ -51,9 +51,7 @@ namespace simbi::xpu::device::detail {
 
         explicit stream_wrapper_t(std::int64_t device_id = 0) : device_id_(device_id)
         {
-            if constexpr (requires { ExecutionSpace::set_device(device_id); }) {
-                ExecutionSpace::set_device(device_id);
-            }
+            ExecutionSpace::set_device(device_id);
             handle_ = ExecutionSpace::create_stream();
         }
 
@@ -105,13 +103,7 @@ namespace simbi::xpu::device::detail {
 
         bool ready() const
         {
-            if constexpr (requires { ExecutionSpace::is_stream_ready(handle_); }) {
-                return ExecutionSpace::is_stream_ready(handle_);
-            }
-            else {
-                // fallback: assume ready if no query method
-                return true;
-            }
+            return ExecutionSpace::is_stream_ready(handle_);
         }
 
         void wait() const

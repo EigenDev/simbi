@@ -42,7 +42,7 @@
 #include "mem/unified_memory.hpp"
 #include "mem/view.hpp"
 
-// new hesi-style memory system
+//
 #include "mem/mem.hpp"
 
 // communication layer (multi-device coordination)

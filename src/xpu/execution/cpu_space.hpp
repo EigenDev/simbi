@@ -151,6 +151,16 @@ namespace simbi::xpu::exec {
             // no-op for cpu - all work is synchronous within thread
         }
 
+        static bool is_stream_ready(stream_handle_type /* stream */)
+        {
+            return true; // cpu streams are always ready
+        }
+
+        static void set_device(std::int64_t /* device_id */)
+        {
+            // no-op for cpu - only one device
+        }
+
         // =============================================================================
         // event management
         // =============================================================================
@@ -163,14 +173,34 @@ namespace simbi::xpu::exec {
             return event_handle_type{std::move(future)};
         }
 
-        static void wait_for_event(const event_handle_type& event)
+        static void destroy_event(event_handle_type /* event */)
+        {
+            // no-op for cpu - future destructor handles cleanup
+        }
+
+        static void record_event(event_handle_type /* event */, stream_handle_type /* stream */)
+        {
+            // no-op for cpu - events are immediately ready
+        }
+
+        static bool is_event_ready(event_handle_type /* event */)
+        {
+            return true; // cpu events are always immediately ready
+        }
+
+        static void synchronize_event(event_handle_type event)
+        {
+            wait_for_event(event);
+        }
+
+        static void wait_for_event(event_handle_type event)
         {
             // delegate to vendor device implementation
             device_type device;
             device.synchronize_event(event);
         }
 
-        static void stream_wait_event(stream_handle_type stream, const event_handle_type& event)
+        static void stream_wait_event(stream_handle_type stream, event_handle_type event)
         {
             // delegate to vendor device implementation
             device_type device;

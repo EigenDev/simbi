@@ -3,7 +3,6 @@
 //
 // explicit memory transfer operations between memory spaces.
 // one job: sync data between host, device, and unified memory.
-// follows hesi pattern of minimal, focused components.
 //
 // usage:
 //   sync_host_to_device(host_block, device_block);

@@ -2,13 +2,11 @@
 // executor.hpp
 //
 // phase 2/3 spec-compliant executor implementation for xpu framework.
-// provides type-safe executor with execution space parameter, preserving
-// hesi async semantics while using clean xpu abstractions.
+// provides type-safe executor with execution space parameter.
 //
 // design principles:
 //   - template on execution space for compile-time dispatch
 //   - direct stream management (no arena internally)
-//   - hesi-compatible api with submit/then/sync semantics
 //   - phase 3: domain-based dispatch for parallel algorithms
 //   - raii stream lifetime
 //
@@ -108,7 +106,7 @@ namespace simbi::xpu::exec {
             // raii: stream wrapper handles cleanup
         }
 
-        // move-only (preserves hesi semantics)
+        // move-only
         executor_t(executor_t&& other) noexcept
             : stream_(std::move(other.stream_)), device_id_(other.device_id_),
               tile_size_(other.tile_size_)
@@ -125,12 +123,12 @@ namespace simbi::xpu::exec {
             return *this;
         }
 
-        // no copy (hesi semantics)
+        // no copy
         executor_t(const executor_t&)            = delete;
         executor_t& operator=(const executor_t&) = delete;
 
         // =============================================================================
-        // async execution api (preserving hesi semantics)
+        // async execution api
         // =============================================================================
 
         template <typename Kernel, typename... Args>
@@ -278,7 +276,7 @@ namespace simbi::xpu::exec {
             return tile_size_;
         }
 
-        // domain-adaptive tile size hint (hesi compatibility)
+        // domain-adaptive tile size hint
         template <std::uint64_t Rank>
         core::dim3_t get_hint(const std::string& key, const grid::domain_t<Rank>& dom) const
         {

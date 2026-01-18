@@ -3,7 +3,6 @@
 //
 // reference-counted shared handle with explicit coherency tracking.
 // one job: manage shared ownership and track dirty state.
-// follows hesi pattern of minimal, focused components.
 //
 // usage:
 //   auto handle = shared_handle_t<float>::make(42.0f);

@@ -2,13 +2,11 @@
 // token.hpp
 //
 // phase 2 spec-compliant token implementation for xpu framework.
-// provides type-safe async operation tokens with execution space parameter,
-// preserving hesi async semantics while using clean xpu abstractions.
+// provides type-safe async operation tokens with execution space parameter
 //
 // design principles:
 //   - template on execution space for compile-time dispatch
 //   - direct event handle management (no futures internally)
-//   - hesi-compatible api with record/wait/sync semantics
 //   - raii resource management for events
 //
 // usage:
@@ -67,7 +65,7 @@ namespace simbi::xpu::exec {
 
         ~token_t() = default;
 
-        // move-only (preserves hesi semantics)
+        // move-only
         token_t(token_t&& other) noexcept
             : event_(std::move(other.event_)),
               owns_resource_(std::exchange(other.owns_resource_, false)),
@@ -90,12 +88,12 @@ namespace simbi::xpu::exec {
             return *this;
         }
 
-        // no copy (hesi semantics)
+        // no copy
         token_t(const token_t&)            = delete;
         token_t& operator=(const token_t&) = delete;
 
         // =============================================================================
-        // factory functions (preserve hesi semantics)
+        // factory functions
         // =============================================================================
 
         static token_t create()
@@ -110,7 +108,7 @@ namespace simbi::xpu::exec {
         }
 
         // =============================================================================
-        // async operations (preserve hesi semantics)
+        // async operations
         // =============================================================================
 
         void record(const executor_t<ExecutionSpace>& exec)
