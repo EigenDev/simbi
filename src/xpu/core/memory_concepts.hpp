@@ -16,7 +16,6 @@
 //   template<memory_space Space>
 //   class arena_allocator { /* high-perf allocation */ };
 // =============================================================================
-
 #pragma once
 
 #include <concepts>
@@ -30,9 +29,7 @@
 
 namespace simbi::xpu::core {
 
-    // =============================================================================
-    // memory alignment constants
-    // =============================================================================
+    
 
     static constexpr std::size_t cache_line_size      = 64;
     static constexpr std::size_t gpu_memory_alignment = 256;
@@ -43,9 +40,7 @@ namespace simbi::xpu::core {
     concept trivially_transferable_c = std::is_trivially_copyable_v<T> && !std::is_pointer_v<T> &&
                                        !std::has_virtual_destructor_v<T>;
 
-    // =============================================================================
-    // memory space concept
-    // =============================================================================
+    
 
     template <typename Space>
     concept memory_space_c = requires {
@@ -80,9 +75,7 @@ namespace simbi::xpu::core {
         { Space::memory_bandwidth_gb_per_sec() } -> std::convertible_to<double>;
     };
 
-    // =============================================================================
-    // memory allocator concepts
-    // =============================================================================
+    
 
     template <typename Allocator, typename T>
     concept memory_allocator = requires(Allocator alloc, std::size_t n, T* ptr) {
@@ -131,9 +124,7 @@ namespace simbi::xpu::core {
         { alloc.bucket_size(std::declval<std::size_t>()) } -> std::convertible_to<std::size_t>;
     };
 
-    // =============================================================================
-    // arena allocator concepts for massive simulations
-    // =============================================================================
+    
 
     template <typename Arena>
     concept memory_arena = requires(Arena arena, std::size_t bytes) {
@@ -173,9 +164,7 @@ namespace simbi::xpu::core {
             { arena.current_device() } -> std::convertible_to<int>;
         };
 
-    // =============================================================================
-    // memory transfer concepts
-    // =============================================================================
+    
 
     template <typename Transfer>
     concept memory_transfer_engine = requires(Transfer engine) {
@@ -234,9 +223,7 @@ namespace simbi::xpu::core {
             { engine.peer_bandwidth_gb_per_sec(src_dev, dst_dev) } -> std::convertible_to<double>;
         };
 
-    // =============================================================================
-    // memory pattern concepts for optimization
-    // =============================================================================
+    
 
     template <typename Pattern>
     concept memory_access_pattern = requires {
@@ -299,9 +286,7 @@ namespace simbi::xpu::core {
         }
     };
 
-    // =============================================================================
-    // memory layout concepts for data structures
-    // =============================================================================
+    
 
     template <typename Layout>
     concept memory_layout = requires {
@@ -333,9 +318,7 @@ namespace simbi::xpu::core {
         static constexpr bool        is_vectorizable = (std::is_arithmetic_v<Fields> && ...);
     };
 
-    // =============================================================================
-    // cache-aware concepts for massive simulations
-    // =============================================================================
+    
 
     template <typename CachePolicy>
     concept cache_policy = requires {
@@ -359,9 +342,7 @@ namespace simbi::xpu::core {
         static constexpr int  cache_level       = 3; // bypass to l3/memory
     };
 
-    // =============================================================================
-    // composite memory management concept
-    // =============================================================================
+    
 
     template <typename Manager>
     concept hetero_memory_manager = requires(Manager mgr) {
@@ -386,9 +367,7 @@ namespace simbi::xpu::core {
         { mgr.memory_topology() } -> std::convertible_to<std::string_view>;
     };
 
-    // =============================================================================
-    // compile-time memory optimization utilities
-    // =============================================================================
+    
 
     template <memory_space_c Source, memory_space_c Destination>
     constexpr bool requires_transfer = !std::same_as<Source, Destination>;
@@ -423,9 +402,7 @@ namespace simbi::xpu::core {
                (high_bandwidth_space_c<Source> || high_bandwidth_space_c<Destination>);
     }
 
-    // =============================================================================
-    // memory safety concepts for production use
-    // =============================================================================
+    
 
     template <typename Ptr>
     concept safe_memory_pointer = std::is_pointer_v<Ptr> && requires(Ptr ptr) {

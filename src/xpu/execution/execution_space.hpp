@@ -15,7 +15,6 @@
 //   template<execution_space Space>
 //   auto parallel_algorithm(Space space) { /* works with any space */ };
 // =============================================================================
-
 #pragma once
 
 #include "xpu/core/device_concepts.hpp"

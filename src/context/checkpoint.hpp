@@ -1,5 +1,19 @@
-#ifndef CHECKPOINT_HPP
-#define CHECKPOINT_HPP
+// =============================================================================
+// checkpoint.hpp
+//
+// utilities for managing and saving simulation checkpoints.
+// this file defines the `checkpoint_schedule_t` struct for determining when
+// to save checkpoints (supporting both linear and logarithmic intervals) and
+// the main `save` function that orchestrates writing checkpoint files.
+//
+// usage:
+//   checkpoint_schedule_t schedule = { ... };
+//   if (schedule.should_checkpoint(current_time)) {
+//     checkpoint::save(sim, progress);
+//     schedule.advance(current_time, n);
+//   }
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "io/checkpoint.hpp"
@@ -80,5 +94,3 @@ namespace simbi::checkpoint {
     }
 
 } // namespace simbi::checkpoint
-
-#endif

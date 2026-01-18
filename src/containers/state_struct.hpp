@@ -1,5 +1,20 @@
-#ifndef STATE_STRUCTS_HPP
-#define STATE_STRUCTS_HPP
+// =============================================================================
+// state_struct.hpp
+//
+// defines the core data structures for physical quantities.
+// this file contains the definitions for the fundamental pod-like structs that
+// hold simulation state variables, such as `primitive_t`, `conserved_t`,
+// `mhd_primitive_t`, and `mhd_conserved_t`. they are templated on physics
+// regime, rank, and equation of state.
+//
+// usage:
+//   using prim_t = structs::primitive_t<srhd, 1, ideal_eos>;
+//   prim_t q;
+//   q.rho = 1.0;
+//   q.vel[0] = 0.5;
+//   q.pre = 2.5;
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -30,19 +45,26 @@ namespace simbi::structs {
 
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
-    struct primitive_t {
-        static constexpr std::uint64_t rank = Rank;
-        static constexpr regime_t regime    = R;
-        static constexpr std::uint64_t nmem = Rank + 3;   // rho, vel, pre, chi
-        using counterpart_t                 = conserved_t<R, Rank, EoS>;
-        using eos_t                         = EoS;
-        real rho{0.0};
+    struct primitive_t
+    {
+        static constexpr std::uint64_t rank   = Rank;
+        static constexpr regime_t      regime = R;
+        static constexpr std::uint64_t nmem   = Rank + 3; // rho, vel, pre, chi
+        using counterpart_t                   = conserved_t<R, Rank, EoS>;
+        using eos_t                           = EoS;
+        real                 rho{0.0};
         vector_t<real, Rank> vel{0.0};
-        real pre{0.0};
-        real chi{0.0};
+        real                 pre{0.0};
+        real                 chi{0.0};
 
-        DEV constexpr real* data() noexcept { return &rho; }
-        DEV constexpr const real* data() const noexcept { return &rho; }
+        DEV constexpr real* data() noexcept
+        {
+            return &rho;
+        }
+        DEV constexpr const real* data() const noexcept
+        {
+            return &rho;
+        }
 
         DEV constexpr real& operator[](std::uint64_t idx) noexcept
         {
@@ -79,19 +101,26 @@ namespace simbi::structs {
 
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
-    struct conserved_t {
-        static constexpr std::uint64_t rank = Rank;
-        static constexpr regime_t regime    = R;
-        static constexpr std::uint64_t nmem = Rank + 3;   // den, mom, nrg, chi
-        using counterpart_t                 = primitive_t<R, Rank, EoS>;
-        using eos_t                         = EoS;
-        real den{0.0};
+    struct conserved_t
+    {
+        static constexpr std::uint64_t rank   = Rank;
+        static constexpr regime_t      regime = R;
+        static constexpr std::uint64_t nmem   = Rank + 3; // den, mom, nrg, chi
+        using counterpart_t                   = primitive_t<R, Rank, EoS>;
+        using eos_t                           = EoS;
+        real                 den{0.0};
         vector_t<real, Rank> mom{0.0};
-        real nrg{0.0};
-        real chi{0.0};
+        real                 nrg{0.0};
+        real                 chi{0.0};
 
-        DEV constexpr real* data() noexcept { return &den; }
-        DEV constexpr const real* data() const noexcept { return &den; }
+        DEV constexpr real* data() noexcept
+        {
+            return &den;
+        }
+        DEV constexpr const real* data() const noexcept
+        {
+            return &den;
+        }
 
         DEV constexpr auto total_energy() const noexcept -> real
         {
@@ -138,21 +167,28 @@ namespace simbi::structs {
 
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::MHD || R == regime_t::RMHD)
-    struct mhd_primitive_t {
-        static constexpr std::uint64_t rank = Rank;
-        static constexpr regime_t regime    = R;
+    struct mhd_primitive_t
+    {
+        static constexpr std::uint64_t rank   = Rank;
+        static constexpr regime_t      regime = R;
         // rho, vel, pre, mag, chi
         static constexpr std::uint64_t nmem = 2 * Rank + 3;
         using counterpart_t                 = mhd_conserved_t<R, Rank, EoS>;
         using eos_t                         = EoS;
-        real rho{0.0};
+        real                 rho{0.0};
         vector_t<real, Rank> vel{0.0};
-        real pre{0.0};
+        real                 pre{0.0};
         vector_t<real, Rank> mag{0.0};
-        real chi{0.0};
+        real                 chi{0.0};
 
-        DEV constexpr real* data() noexcept { return &rho; }
-        DEV constexpr const real* data() const noexcept { return &rho; }
+        DEV constexpr real* data() noexcept
+        {
+            return &rho;
+        }
+        DEV constexpr const real* data() const noexcept
+        {
+            return &rho;
+        }
 
         DEV constexpr real& operator[](std::uint64_t idx) noexcept
         {
@@ -193,28 +229,41 @@ namespace simbi::structs {
         }
 
         // dummy accesor for the Alfven speed
-        DEV constexpr real& alfven() noexcept { return chi; }
-        DEV constexpr const real& alfven() const noexcept { return chi; }
+        DEV constexpr real& alfven() noexcept
+        {
+            return chi;
+        }
+        DEV constexpr const real& alfven() const noexcept
+        {
+            return chi;
+        }
     };
 
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::MHD || R == regime_t::RMHD)
-    struct mhd_conserved_t {
-        static constexpr std::uint64_t rank = Rank;
-        static constexpr regime_t regime    = R;
+    struct mhd_conserved_t
+    {
+        static constexpr std::uint64_t rank   = Rank;
+        static constexpr regime_t      regime = R;
         // den, mom, nrg, mag, chi
         static constexpr std::uint64_t nmem = 2 * Rank + 3;
         using counterpart_t                 = mhd_primitive_t<R, Rank, EoS>;
         using eos_t                         = EoS;
 
-        real den{0.0};
+        real                 den{0.0};
         vector_t<real, Rank> mom{0.0};
-        real nrg{0.0};
+        real                 nrg{0.0};
         vector_t<real, Rank> mag{0.0};
-        real chi{0.0};
+        real                 chi{0.0};
 
-        DEV constexpr real* data() noexcept { return &den; }
-        DEV constexpr const real* data() const noexcept { return &den; }
+        DEV constexpr real* data() noexcept
+        {
+            return &den;
+        }
+        DEV constexpr const real* data() const noexcept
+        {
+            return &den;
+        }
 
         DEV constexpr auto total_energy() const noexcept -> real
         {
@@ -269,8 +318,7 @@ namespace simbi::structs {
     // for future debugging and logging
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
-    std::ostream&
-    operator<<(std::ostream& os, const primitive_t<R, Rank, EoS>& p)
+    std::ostream& operator<<(std::ostream& os, const primitive_t<R, Rank, EoS>& p)
     {
         // os << "Primitive State (Regime: " << serialize(R) << ", Rank: " <<
         // Rank
@@ -283,8 +331,7 @@ namespace simbi::structs {
 
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::NEWTONIAN || R == regime_t::SRHD)
-    std::ostream&
-    operator<<(std::ostream& os, const conserved_t<R, Rank, EoS>& c)
+    std::ostream& operator<<(std::ostream& os, const conserved_t<R, Rank, EoS>& c)
     {
         // os << "Conserved State (Regime: " << serialize(R) << ", Rank: " <<
         // Rank
@@ -296,8 +343,7 @@ namespace simbi::structs {
 
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::MHD || R == regime_t::RMHD)
-    std::ostream&
-    operator<<(std::ostream& os, const mhd_primitive_t<R, Rank, EoS>& p)
+    std::ostream& operator<<(std::ostream& os, const mhd_primitive_t<R, Rank, EoS>& p)
     {
         // os << "MHD Primitive State (Regime: " << serialize(R)
         //    << ", Rank: " << Rank << "):";
@@ -308,8 +354,7 @@ namespace simbi::structs {
 
     template <regime_t R, std::uint64_t Rank, typename EoS>
         requires(R == regime_t::MHD || R == regime_t::RMHD)
-    std::ostream&
-    operator<<(std::ostream& os, const mhd_conserved_t<R, Rank, EoS>& c)
+    std::ostream& operator<<(std::ostream& os, const mhd_conserved_t<R, Rank, EoS>& c)
     {
         // os << "MHD Primitive State (Regime: " << serialize(R)
         //    << ", Rank: " << Rank << "):";
@@ -398,6 +443,4 @@ namespace simbi::structs {
         return !(a == b);
     }
 
-}   // namespace simbi::structs
-
-#endif   // STATE_VALUE_HPP
+} // namespace simbi::structs

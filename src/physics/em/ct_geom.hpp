@@ -1,5 +1,12 @@
-#ifndef GEOMETRY_NCT_GEOM_HPP
-#define GEOMETRY_NCT_GEOM_HPP
+// =============================================================================
+// ct_geom.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -12,10 +19,7 @@
 
 namespace simbi::em {
 
-    // ========================================================================
-    // discrete curl for constrained transport (geometry-based)
-    // computes -dB/dt = curl(E) using face/edge EMFs
-    // ========================================================================
+    
 
     // cartesian discrete curl
     template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
@@ -234,9 +238,7 @@ namespace simbi::em {
         }
     }
 
-    // ========================================================================
-    // unified discrete curl dispatcher
-    // ========================================================================
+    
     template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
     DEV real discrete_curl(
         const vector_t<vector_t<real, 2>, 2>& edge_emfs,
@@ -263,4 +265,4 @@ namespace simbi::em {
 
 } // namespace simbi::em
 
-#endif // GEOMETRY_NCT_GEOM_HPP
+

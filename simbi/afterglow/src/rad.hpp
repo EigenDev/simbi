@@ -13,9 +13,7 @@
 //   auto power = calc_total_synch_power(gamma, u_b, beta);
 //
 // =============================================================================
-
-#ifndef AFTERGLOW_RAD_HPP
-#define AFTERGLOW_RAD_HPP
+#pragma once
 
 #include "units.hpp"
 
@@ -141,9 +139,7 @@ namespace simbi::afterglow {
     std::vector<double> vector_subtract(const std::vector<double>& a, const std::vector<double>& b);
     std::vector<double> vector_add(const std::vector<double>& a, const std::vector<double>& b);
 
-    // =============================================================================
-    // photon event generation
-    // =============================================================================
+    
 
     // generate photon events from hydro snapshot with monte carlo sampling
     // returns vector of photon events with full 4-position, 4-momentum, polarization
@@ -163,9 +159,7 @@ namespace simbi::afterglow {
         std::uint64_t                           photons_per_cell = 0
     );
 
-    // =============================================================================
-    // monte carlo radiative transfer
-    // =============================================================================
+    
 
     // propagate photons through medium with absorption and scattering
     // modifies photon_event_t.absorbed, .optical_depth, .n_scatter in place
@@ -185,9 +179,7 @@ namespace simbi::afterglow {
         bool                                    include_pair_production = false
     );
 
-    // =============================================================================
-    // post-processing: observer-dependent calculations
-    // =============================================================================
+    
 
     // compute lightcurve for arbitrary observer direction
     struct observer_lightcurve_t
@@ -266,5 +258,3 @@ namespace simbi::afterglow {
     );
 
 } // namespace simbi::afterglow
-
-#endif // SIMBI_AFTERGLOW_RAD_HPP

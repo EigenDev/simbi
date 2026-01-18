@@ -1,6 +1,3 @@
-#ifndef HYDRO_DISPATCH_HPP
-#define HYDRO_DISPATCH_HPP
-
 // =============================================================================
 // dispatch.hpp
 //
@@ -19,6 +16,7 @@
 //           // ops is cfd_operations_t<R, D, S, Rec, EoS>
 //       });
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "compute/cfd_ops.hpp"
@@ -46,9 +44,7 @@
 namespace py = pybind11;
 namespace simbi::dispatch {
 
-    // =============================================================================
-    // validity concept - defines which template combinations are supported
-    // =============================================================================
+    
 
     template <regime_t R, std::uint64_t D, geometry_t G, solver_t S, reconstruction_t Rec>
     concept valid_combination =
@@ -79,9 +75,7 @@ namespace simbi::dispatch {
         // exclude unimplemented regimes
         (R != regime_t::MHD);
 
-    // =============================================================================
-    // error handling
-    // =============================================================================
+    
 
     class configuration_error : public std::runtime_error
     {
@@ -107,9 +101,7 @@ namespace simbi::dispatch {
         }
     };
 
-    // =============================================================================
-    // dispatch implementation
-    // =============================================================================
+    
 
     namespace detail {
 
@@ -586,9 +578,7 @@ namespace simbi::dispatch {
 
     } // namespace detail
 
-    // =============================================================================
-    // main entry point
-    // =============================================================================
+    
 
     /**
      * create hydro state and call visitor with it.
@@ -648,5 +638,3 @@ namespace simbi::dispatch {
     }
 
 } // namespace simbi::dispatch
-
-#endif // HYDRO_DISPATCH_HPP

@@ -1,5 +1,12 @@
-#ifndef GRID_MESH_CONFIG_HPP
-#define GRID_MESH_CONFIG_HPP
+// =============================================================================
+// mesh_config.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "boundary.hpp"
 #include "containers/vector.hpp"
@@ -40,4 +47,4 @@ namespace simbi::grid {
 
 } // namespace simbi::grid
 
-#endif // GRID_MESH_CONFIG_HPP
+

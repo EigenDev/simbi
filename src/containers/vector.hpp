@@ -1,5 +1,18 @@
-#ifndef VECTOR_HPP
-#define VECTOR_HPP
+// =============================================================================
+// vector.hpp
+//
+// defines a fixed-size, stack-allocated vector for high-performance computing.
+// this file provides `vector_t`, a template class for small, fixed-size
+// vectors suitable for both cpu and gpu code. it also includes a rich set of
+// vector operations (`vecops`) for tasks like dot products, cross products,
+// and coordinate transformations.
+//
+// usage:
+//   vector_t<real, 3> v1{1.0, 2.0, 3.0};
+//   auto v2 = v1 * 2.0;
+//   real dp = vecops::dot(v1, v2);
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -853,4 +866,3 @@ namespace std {
         return v[I];
     }
 } // namespace std
-#endif

@@ -1,5 +1,12 @@
-#ifndef GRID_CREATION_SETUP_HPP
-#define GRID_CREATION_SETUP_HPP
+// =============================================================================
+// setup.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "ecs/blueprints.hpp"
@@ -137,4 +144,4 @@ namespace simbi::grid::creation {
 
 } // namespace simbi::grid::creation
 
-#endif // GRID_CREATION_SETUP_HPP
+

@@ -1,5 +1,12 @@
-#ifndef STATISTICS_HPP
-#define STATISTICS_HPP
+// =============================================================================
+// statistics.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -223,4 +230,4 @@ namespace simbi {
     } // namespace statistics
 } // namespace simbi
 
-#endif // STATISTICS_HPP
+

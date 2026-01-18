@@ -1,6 +1,3 @@
-#ifndef ECS_CREATION_BLUEPRINT_EXTRACTOR_HPP
-#define ECS_CREATION_BLUEPRINT_EXTRACTOR_HPP
-
 // =============================================================================
 // blueprint_extractor.hpp
 //
@@ -16,6 +13,7 @@
 //   auto phys_bp = blueprint_extractor_t<2>::physics(config);
 //   // ... or use blueprint_set_t::from_config(config) for all at once
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "ecs/blueprints.hpp"
@@ -36,9 +34,7 @@
 
 namespace simbi::ecs::creation {
 
-    // =============================================================================
-    // validation helpers
-    // =============================================================================
+    
 
     inline void require(bool condition, const std::string& msg)
     {
@@ -63,9 +59,7 @@ namespace simbi::ecs::creation {
         return config::try_read<T>(config, key).unwrap_or(default_value);
     }
 
-    // =============================================================================
-    // blueprint_extractor_t
-    // =============================================================================
+    
 
     template <std::uint64_t Rank>
     struct blueprint_extractor_t
@@ -503,9 +497,7 @@ namespace simbi::ecs::creation {
         }
     };
 
-    // =============================================================================
-    // helper: infer dimensionality from config
-    // =============================================================================
+    
 
     inline std::uint64_t infer_dimensionality(const config_dict_t& config)
     {
@@ -552,5 +544,3 @@ namespace simbi::ecs {
         return set;
     }
 } // namespace simbi::ecs
-
-#endif // ECS_CREATION_BLUEPRINT_EXTRACTOR_HPP

@@ -1,5 +1,12 @@
-#ifndef CONFIG_DICT_HPP
-#define CONFIG_DICT_HPP
+// =============================================================================
+// config_dict.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"      // for real type
 #include "containers/vector.hpp" // for vector_t
@@ -378,4 +385,3 @@ namespace simbi {
         }
     } // namespace config
 } // namespace simbi
-#endif

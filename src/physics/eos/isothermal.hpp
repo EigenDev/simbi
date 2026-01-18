@@ -1,5 +1,12 @@
-#ifndef ISOTHERMAL_HPP
-#define ISOTHERMAL_HPP
+// =============================================================================
+// isothermal.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp" // for real type
 #include "decorators.hpp"   // for DEV
@@ -29,4 +36,4 @@ namespace simbi::eos {
     };
 } // namespace simbi::eos
 
-#endif
+

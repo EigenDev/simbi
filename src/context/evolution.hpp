@@ -1,6 +1,3 @@
-#ifndef EVOLUTION_HPP
-#define EVOLUTION_HPP
-
 // =============================================================================
 // evolution.hpp
 //
@@ -12,6 +9,7 @@
 //   - zone counting accounts for multiple partitions
 //   - pipeline uses partition-aware systems
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "checkpoint.hpp"
@@ -33,9 +31,7 @@ namespace simbi::evolution {
     template <typename Sim>
     std::uint64_t count_weighted_zones(const Sim& sim);
 
-    // =========================================================================
-    // evolution state
-    // =========================================================================
+    
     struct evolution_state_t
     {
         timing::timing_stats_t            stats;
@@ -44,9 +40,7 @@ namespace simbi::evolution {
         bool                              should_stop{false};
     };
 
-    // =========================================================================
-    // initialization
-    // =========================================================================
+    
     template <typename Sim>
     evolution_state_t initialize(Sim& sim)
     {
@@ -67,9 +61,7 @@ namespace simbi::evolution {
         };
     }
 
-    // =========================================================================
-    // main evolution loop
-    // =========================================================================
+    
     template <typename Sim, typename PhysicsStep>
     void run(Sim& sim, PhysicsStep&& step, evolution_state_t& state)
     {
@@ -160,9 +152,7 @@ namespace simbi::evolution {
         }
     }
 
-    // =========================================================================
-    // zone counting helper
-    // =========================================================================
+    
     template <typename Sim>
     std::uint64_t count_weighted_zones(const Sim& sim)
     {
@@ -186,10 +176,7 @@ namespace simbi::evolution {
         return total;
     }
 
-    // =========================================================================
-    // hydro pipeline
-    // orchestrates the time integration with amr subcycling
-    // =========================================================================
+    
     template <typename Sim, typename Ops>
     struct hydro_pipeline_t
     {
@@ -260,9 +247,7 @@ namespace simbi::evolution {
             synchronize_system_t{}(sim, lvl);
         }
 
-        // =============================================================================
-        // rk2 driver (berger-colella)
-        // =============================================================================
+        
         void advance_level_rk2(std::uint64_t lvl) const
         {
             using namespace ecs;
@@ -411,5 +396,3 @@ namespace simbi::evolution {
     };
 
 } // namespace simbi::evolution
-
-#endif // EVOLUTION_HPP

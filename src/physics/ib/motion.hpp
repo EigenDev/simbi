@@ -1,5 +1,12 @@
-#ifndef BODY_MOTION_HPP
-#define BODY_MOTION_HPP
+// =============================================================================
+// motion.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "collection.hpp"
 #include "containers/vector.hpp"
@@ -66,4 +73,4 @@ namespace simbi::body {
         }
     }
 }   // namespace simbi::body
-#endif
+

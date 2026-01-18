@@ -1,5 +1,12 @@
-#ifndef IO_SERIAL_BODY_HPP
-#define IO_SERIAL_BODY_HPP
+// =============================================================================
+// body_serial.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "io/h5_serializable.hpp"
@@ -17,9 +24,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // h5_serializable specialization for body_collection_t
-    // =========================================================================
+    
     template <std::uint64_t Rank, std::uint64_t MaxBodies>
     struct h5_serializable<body::body_collection_t<Rank, MaxBodies>> {
         using collection_t = body::body_collection_t<Rank, MaxBodies>;
@@ -342,4 +347,4 @@ namespace simbi::io {
 
 }   // namespace simbi::io
 
-#endif   // IO_SERIAL_BODY_HPP
+

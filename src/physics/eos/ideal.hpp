@@ -1,5 +1,12 @@
-#ifndef EOS_IDEAL_HPP
-#define EOS_IDEAL_HPP
+// =============================================================================
+// ideal.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "decorators.hpp"
@@ -33,4 +40,4 @@ namespace simbi::eos {
     };
 } // namespace simbi::eos
 
-#endif
+

@@ -1,5 +1,12 @@
-#ifndef GRID_AMR_RESTRICTION_HPP
-#define GRID_AMR_RESTRICTION_HPP
+// =============================================================================
+// restriction.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "compute/computation.hpp"
@@ -205,4 +212,4 @@ namespace simbi::grid::amr {
 
 } // namespace simbi::grid::amr
 
-#endif // GRID_AMR_RESTRICTION_HPP
+

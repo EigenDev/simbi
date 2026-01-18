@@ -1,5 +1,12 @@
-#ifndef BODY_COLLECTION_HPP
-#define BODY_COLLECTION_HPP
+// =============================================================================
+// collection.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "body.hpp"
 #include "build_config.hpp"
@@ -34,9 +41,7 @@ namespace simbi::body {
         // [TODO]: revisit later
         >;
 
-    // ========================================================================
-    // binary system parameters
-    // ========================================================================
+    
 
     struct binary_parameters_t
     {
@@ -437,4 +442,4 @@ namespace simbi::body {
     } // namespace collection_ops
 } // namespace simbi::body
 
-#endif
+

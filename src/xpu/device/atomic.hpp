@@ -16,9 +16,7 @@
 //       xpu::atomic_max(&max_value, local_val);
 //   }
 // =============================================================================
-
-#ifndef XPU_DEVICE_ATOMIC_HPP
-#define XPU_DEVICE_ATOMIC_HPP
+#pragma once
 
 #include "decorators.hpp"
 
@@ -176,4 +174,5 @@ namespace simbi::xpu::device {
 
 } // namespace simbi::xpu::device
 
-#endif
+
+

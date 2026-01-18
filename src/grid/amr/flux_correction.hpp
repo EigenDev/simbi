@@ -1,5 +1,12 @@
-#ifndef GRID_AMR_FLUX_CORRECTION_HPP
-#define GRID_AMR_FLUX_CORRECTION_HPP
+// =============================================================================
+// flux_correction.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -204,4 +211,4 @@ namespace simbi::grid::amr {
 
 } // namespace simbi::grid::amr
 
-#endif // GRID_AMR_FLUX_CORRECTION_HPP
+

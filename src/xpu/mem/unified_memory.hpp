@@ -1,17 +1,11 @@
 // =============================================================================
 // unified_memory.hpp
 //
-// unified memory space implementation with clean cuda/cpu separation.
-// when cuda available: uses cudaMallocManaged for true unified memory.
-// when cuda unavailable: uses host allocation (already "unified" with one memory space).
-//
-// design: cpu fallback degrades gracefully without preprocessor spaghetti.
+// [TODO: Add description]
 //
 // usage:
-//   auto buffer = shared_buffer_t<float, unified_memory_t>(1024);
-//   // works with or without cuda
+//   [TODO: Add usage example]
 // =============================================================================
-
 #pragma once
 
 #include "memory_space.hpp"
@@ -28,15 +22,11 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // unified memory space
-    // =============================================================================
+    
 
     struct unified_memory_t
     {
-        // =============================================================================
-        // memory_space concept requirements
-        // =============================================================================
+        
 
         using pointer_type       = void*;
         using const_pointer_type = const void*;
@@ -63,9 +53,7 @@ namespace simbi::xpu::mem {
             return 16.0; // conservative estimate for pcie gen3
         }
 
-        // =============================================================================
-        // allocation
-        // =============================================================================
+        
 
         static void* allocate(std::size_t size)
         {
@@ -109,9 +97,7 @@ namespace simbi::xpu::mem {
             stats::record_deallocation(size);
         }
 
-        // =============================================================================
-        // memory operations
-        // =============================================================================
+        
 
         static void memset(void* ptr, int value, std::size_t size)
         {
@@ -123,9 +109,7 @@ namespace simbi::xpu::mem {
             std::memcpy(dest, src, size);
         }
 
-        // =============================================================================
-        // accessibility queries
-        // =============================================================================
+        
 
         template <typename MemorySpace>
         static constexpr bool is_accessible_from()
@@ -133,9 +117,7 @@ namespace simbi::xpu::mem {
             return true; // unified memory accessible from all spaces
         }
 
-        // =============================================================================
-        // cuda-specific operations (only when cuda available)
-        // =============================================================================
+        
 
 #ifdef XPU_CUDA_AVAILABLE
         static void prefetch_to_device(void* ptr, std::size_t size, std::int64_t device_id = -1)
@@ -209,9 +191,7 @@ namespace simbi::xpu::mem {
         }
 #endif // XPU_CUDA_AVAILABLE
 
-        // =============================================================================
-        // synchronization
-        // =============================================================================
+        
 
         static void synchronize()
         {
@@ -221,9 +201,7 @@ namespace simbi::xpu::mem {
             // no-op for cpu-only
         }
 
-        // =============================================================================
-        // memory info queries
-        // =============================================================================
+        
 
         static bool is_managed_pointer(const void* ptr)
         {
@@ -268,9 +246,7 @@ namespace simbi::xpu::mem {
             return 64; // cache line alignment
         }
 
-        // =============================================================================
-        // statistics
-        // =============================================================================
+        
 
         struct stats
         {
@@ -299,17 +275,13 @@ namespace simbi::xpu::mem {
         };
     };
 
-    // =============================================================================
-    // static member initialization
-    // =============================================================================
+    
 
     inline std::size_t unified_memory_t::stats::total_allocated   = 0;
     inline std::size_t unified_memory_t::stats::total_deallocated = 0;
     inline std::size_t unified_memory_t::stats::current_usage     = 0;
 
-    // =============================================================================
-    // default memory space selection
-    // =============================================================================
+    
 
     template <bool has_cuda>
     struct default_memory_space_selector
@@ -325,15 +297,11 @@ namespace simbi::xpu::mem {
     };
 #endif
 
-    // =============================================================================
-    // concept verification
-    // =============================================================================
+    
 
     static_assert(memory_space_c<unified_memory_t>);
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
+    
 
     using unified_block_t = block_t<unified_memory_t>;
 
@@ -341,3 +309,4 @@ namespace simbi::xpu::mem {
     using unified_buffer_t = block_t<unified_memory_t>;
 
 } // namespace simbi::xpu::mem
+

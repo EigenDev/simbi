@@ -1,5 +1,12 @@
-#ifndef GRID_DOMAIN_HPP
-#define GRID_DOMAIN_HPP
+// =============================================================================
+// domain.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "decorators.hpp"
@@ -190,5 +197,3 @@ namespace simbi::grid {
     }
 
 } // namespace simbi::grid
-
-#endif // GRID_DOMAIN_HPP

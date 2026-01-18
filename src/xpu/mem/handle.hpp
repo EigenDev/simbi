@@ -9,7 +9,6 @@
 //   handle.mark_host_dirty();
 //   if (handle.needs_device_sync()) sync_to_device(handle);
 // =============================================================================
-
 #pragma once
 
 #include <atomic>
@@ -17,9 +16,7 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // control block - data + reference count + coherency metadata
-    // =============================================================================
+    
 
     template <typename T>
     struct control_block_t
@@ -63,9 +60,7 @@ namespace simbi::xpu::mem {
         }
     };
 
-    // =============================================================================
-    // shared handle - reference counted pointer with explicit coherency
-    // =============================================================================
+    
 
     template <typename T>
     class shared_handle_t
@@ -215,9 +210,7 @@ namespace simbi::xpu::mem {
         }
     };
 
-    // =============================================================================
-    // factory function
-    // =============================================================================
+    
 
     template <typename T, typename... Args>
     shared_handle_t<T> make_shared(Args&&... args)

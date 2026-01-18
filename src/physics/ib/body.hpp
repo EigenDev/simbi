@@ -1,5 +1,12 @@
-#ifndef BODY_HPP
-#define BODY_HPP
+// =============================================================================
+// body.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -478,4 +485,4 @@ namespace simbi::body {
 
 } // namespace simbi::body
 
-#endif
+

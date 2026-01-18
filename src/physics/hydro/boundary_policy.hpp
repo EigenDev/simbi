@@ -1,6 +1,3 @@
-#ifndef PHYSICS_HYDRO_BOUNDARY_POLICY_HPP
-#define PHYSICS_HYDRO_BOUNDARY_POLICY_HPP
-
 // =============================================================================
 // boundary_policy.hpp
 //
@@ -24,6 +21,7 @@
 //   theta boundaries at other values (e.g., pi/2) are true walls
 //   reflecting at walls only flips v_theta (normal component)
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "decorators.hpp"
@@ -38,18 +36,7 @@
 
 namespace simbi::hydro {
 
-    // =========================================================================
-    // hydro_boundary_policy_t
-    //
-    // transforms primitive states at boundaries for moving mesh.
-    //
-    // reflecting: v_ghost = -v_edge + 2*v_wall (moving mirror formula)
-    // outflow: copy state (preserves peculiar velocity automatically since both use same v_grid)
-    // periodic: copy (index remapping handles position)
-    //
-    // for moving mesh, this policy is wrapped by geometry-aware operator that
-    // provides face velocity for reflection.
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct hydro_boundary_policy_t
     {
@@ -130,11 +117,7 @@ namespace simbi::hydro {
         }
     };
 
-    // =========================================================================
-    // mhd_boundary_policy_t
-    //
-    // extends hydro policy with magnetic field handling
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct mhd_boundary_policy_t
     {
@@ -227,9 +210,7 @@ namespace simbi::hydro {
         }
     };
 
-    // =========================================================================
-    // factory to select policy based on regime
-    // =========================================================================
+    
     template <bool IsMHD, std::uint64_t Rank>
     auto make_boundary_policy(
         geometry::metric_type_t metric    = geometry::metric_type_t::cartesian,
@@ -247,4 +228,4 @@ namespace simbi::hydro {
 
 } // namespace simbi::hydro
 
-#endif // PHYSICS_HYDRO_BOUNDARY_POLICY_HPP
+

@@ -1,5 +1,19 @@
-#ifndef PROGRESS_HPP
-#define PROGRESS_HPP
+// =============================================================================
+// progress.hpp
+//
+// utilities for displaying simulation progress to the console.
+// this file defines the `progress_state_t` struct to hold display-related
+// state and provides functions for initializing, updating, and finalizing
+// a formatted progress table during a simulation run.
+//
+// usage:
+//   auto state = progress::initialize(regime);
+//   // ... in loop ...
+//   progress::update(state, iter, time, dt, tend, speed);
+//   // ... after loop ...
+//   progress::finalize(state, success);
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "io/display/table.hpp"
@@ -38,5 +52,3 @@ namespace simbi::progress {
     void finalize(progress_state_t& state, bool successful_sim);
 
 } // namespace simbi::progress
-
-#endif

@@ -1,5 +1,12 @@
-#ifndef IO_SERIAL_METADATA_HPP
-#define IO_SERIAL_METADATA_HPP
+// =============================================================================
+// metadata_serial.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "ecs/components.hpp"
@@ -18,9 +25,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // helper for reading enums with backward compatibility
-    // =========================================================================
+    
     template <typename EnumType>
     EnumType read_enum_attribute(const H5::Group& g, const std::string& name)
     {
@@ -35,9 +40,7 @@ namespace simbi::io {
         }
     }
 
-    // =========================================================================
-    // h5_serializable specialization for simulation_metadata_t
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct h5_serializable<ecs::simulation_metadata_t<Rank>>
     {
@@ -254,4 +257,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif // IO_SERIAL_METADATA_HPP
+

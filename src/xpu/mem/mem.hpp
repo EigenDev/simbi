@@ -1,19 +1,11 @@
 // =============================================================================
 // mem.hpp
 //
-// main header for xpu memory management
-// includes all memory components as separate, focused modules.
-// each module has one job and does it well.
+// [TODO: Add description]
 //
 // usage:
-//   #include <xpu/mem/mem.hpp>
-//   using namespace simbi::xpu::mem;
-//
-//   auto block = memory_block_t<device_memory>(1000);
-//   auto handle = shared_handle_t<float>::make(42.0f);
-//   sync_host_to_device<float>(host_block, device_block, count);
+//   [TODO: Add usage example]
 // =============================================================================
-
 #pragma once
 
 // memory space definitions
@@ -32,9 +24,7 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
+    
 
     using host_memory_block_t    = memory_block_t<host_memory>;
     using device_memory_block_t  = memory_block_t<device_memory>;
@@ -42,3 +32,4 @@ namespace simbi::xpu::mem {
     using sim_memory_block_t     = memory_block_t<sim_memory_space>;
 
 } // namespace simbi::xpu::mem
+

@@ -17,9 +17,7 @@
 //   auto totals = diag->consolidate();  // host code
 //   diag->reset();
 // =============================================================================
-
-#ifndef BODY_DIAGNOSTICS_HPP
-#define BODY_DIAGNOSTICS_HPP
+#pragma once
 
 #include "body_delta.hpp"
 #include "containers/vector.hpp"
@@ -37,9 +35,7 @@
 #include <vector>
 
 namespace simbi::body {
-    // =============================================================================
-    // cpu implementation - thread_local accumulators
-    // =============================================================================
+    
 
     template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     class cpu_diagnostics_t
@@ -110,9 +106,7 @@ namespace simbi::body {
     template <std::uint64_t Rank, std::uint64_t MaxBodies>
     thread_local bool cpu_diagnostics_t<Rank, MaxBodies>::registered = false;
 
-    // =============================================================================
-    // gpu implementation - block-level accumulators via xpu unified memory
-    // =============================================================================
+    
 
     template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     class gpu_diagnostics_t : public managed_t
@@ -208,9 +202,7 @@ namespace simbi::body {
         }
     };
 
-    // =============================================================================
-    // factory function - compile-time dispatch based on platform
-    // =============================================================================
+    
 
     template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     auto create_diagnostics_accumulator(int grid_size = 1024)
@@ -226,4 +218,4 @@ namespace simbi::body {
 
 } // namespace simbi::body
 
-#endif
+

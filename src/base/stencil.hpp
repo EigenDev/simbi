@@ -1,12 +1,17 @@
 // =============================================================================
 // stencil.hpp
 //
-// [TODO: Add description of what this file does]
+// compile-time generation of stencil patterns for finite-volume methods.
+// this file defines `stencil_t`, a struct that computes the relative
+// coordinates of cell neighbors required for various reconstruction schemes
+// (e.g., pcm, plm). the patterns are generated at compile time for efficiency.
 //
 // usage:
-//   [TODO: Add usage example]
+//   constexpr auto pattern = stencil_t<rank, rec_t>::left_pattern(direction);
+//   for (const auto& offset : pattern) {
+//     // use offset to access neighbor data
+//   }
 // =============================================================================
-
 #pragma once
 
 #include "base/concepts.hpp"

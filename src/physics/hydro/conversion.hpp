@@ -1,5 +1,12 @@
-#ifndef PHYSICS_CONVERSION_HPP
-#define PHYSICS_CONVERSION_HPP
+// =============================================================================
+// conversion.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp" // for is_hydro_conserved_c
 #include "build_config.hpp"  // for build::epsilon
@@ -106,11 +113,7 @@ namespace simbi::hydro::rmhd {
         const auto bfield = u.mag;
         const auto dchi   = u.chi;
 
-        //==================================================================
-        // ATTEMPT TO RECOVER PRIMITIVES USING KASTAUN ET AL. 2021
-        // Jim Stone of the Institute for Advanced Study referenced this
-        // paper to me. I'm thankful for that.
-        //==================================================================
+        
 
         //======= rescale the variables Eqs. (22) - (25)
         const auto invd   = 1.0 / d;
@@ -236,4 +239,4 @@ namespace simbi::hydro {
     }
 
 } // namespace simbi::hydro
-#endif
+

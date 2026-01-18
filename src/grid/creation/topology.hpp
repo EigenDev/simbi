@@ -1,5 +1,12 @@
-#ifndef GRID_CREATION_TOPOLOGY_BUILDER_HPP
-#define GRID_CREATION_TOPOLOGY_BUILDER_HPP
+// =============================================================================
+// topology.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -139,4 +146,4 @@ namespace simbi::grid::creation {
 
 } // namespace simbi::grid::creation
 
-#endif
+

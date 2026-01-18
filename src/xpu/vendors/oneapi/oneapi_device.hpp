@@ -20,7 +20,6 @@
 //   auto queue = device.create_queue();
 //   auto ptr = device.allocate_usm(1024);
 // =============================================================================
-
 #pragma once
 
 #include "xpu/core/device_concepts.hpp"
@@ -39,9 +38,7 @@
 
 namespace simbi::xpu::vendors::oneapi {
 
-    // =============================================================================
-    // oneapi device handles
-    // =============================================================================
+    
 
     struct oneapi_memory_handle_t
     {
@@ -86,9 +83,7 @@ namespace simbi::xpu::vendors::oneapi {
         }
     };
 
-    // =============================================================================
-    // oneapi device implementation (placeholder)
-    // =============================================================================
+    
 
     class oneapi_device_t
     {
@@ -373,9 +368,7 @@ namespace simbi::xpu::vendors::oneapi {
         std::int64_t device_id_;
     };
 
-    // =============================================================================
-    // concept verification
-    // =============================================================================
+    
 
     // verify that oneapi_device_t satisfies hetero_device concept
     // (commented out because implementation is incomplete)
@@ -383,9 +376,7 @@ namespace simbi::xpu::vendors::oneapi {
 
 } // namespace simbi::xpu::vendors::oneapi
 
-// =============================================================================
-// implementation notes for future development
-// =============================================================================
+
 
 /*
 when implementing oneapi support:
@@ -458,3 +449,4 @@ example usage after implementation:
     // data is accessible from both host and device
     float result = shared_ptr[0]; // direct host access
 */
+

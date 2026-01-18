@@ -1,5 +1,12 @@
-#ifndef GRID_CARTESIAN_BUILDER_HPP
-#define GRID_CARTESIAN_BUILDER_HPP
+// =============================================================================
+// cartesian_builder.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "block_info.hpp"
 #include "boundary.hpp"
@@ -94,4 +101,4 @@ namespace simbi::grid {
 
 }   // namespace simbi::grid
 
-#endif   // GRID_CARTESIAN_BUILDER_HPP
+

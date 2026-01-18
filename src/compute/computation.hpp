@@ -1,5 +1,20 @@
-#ifndef COMPUTATION_HPP
-#define COMPUTATION_HPP
+// =============================================================================
+// computation.hpp
+//
+// defines the core `computation_t` class for lazy evaluation.
+// this file provides the foundational template for building composable,
+// lazy computation graphs. a `computation_t` object encapsulates a function
+// and the domain over which it operates, allowing for the construction of
+// complex expressions that are only evaluated when and where needed.
+//
+// usage:
+//   auto comp1 = computation(domain, [](auto coord) { return Sin(coord[0]); });
+//   auto comp2 = computation(domain, [](auto coord) { return Cos(coord[1]); });
+//   auto result_comp = comp1 + comp2; // builds a new computation graph
+//   //...
+//   auto result_field = result_comp.with(executor); // evaluation
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "decorators.hpp"
@@ -383,5 +398,3 @@ namespace simbi::compute {
     inline constexpr bool is_computation_v = detail::is_computation<std::decay_t<T>>::value;
 
 } // namespace simbi::compute
-
-#endif // COMPUTATION_HPP

@@ -16,7 +16,6 @@
 //   event.record(stream);
 //   event.wait();
 // =============================================================================
-
 #pragma once
 
 #include "stream_wrapper.hpp"

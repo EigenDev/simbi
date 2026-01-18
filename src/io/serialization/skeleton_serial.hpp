@@ -1,6 +1,3 @@
-#ifndef IO_SERIAL_SKELETON_HPP
-#define IO_SERIAL_SKELETON_HPP
-
 // =============================================================================
 // skeleton_serial.hpp
 //
@@ -13,6 +10,7 @@
 //   - block_info_t<Rank>: complete block descriptor
 //   - skeleton_t<Rank>: full topology map
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "grid/block_info.hpp"
@@ -31,9 +29,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // h5_serializable specialization for patch_id_t
-    // =========================================================================
+    
     template <>
     struct h5_serializable<grid::patch_id_t>
     {
@@ -67,9 +63,7 @@ namespace simbi::io {
         }
     };
 
-    // =========================================================================
-    // h5_serializable specialization for connection_t
-    // =========================================================================
+    
     template <>
     struct h5_serializable<grid::connection_t>
     {
@@ -125,9 +119,7 @@ namespace simbi::io {
         }
     };
 
-    // =========================================================================
-    // h5_serializable specialization for block_info_t<Rank>
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct h5_serializable<grid::block_info_t<Rank>>
     {
@@ -195,9 +187,7 @@ namespace simbi::io {
         }
     };
 
-    // =========================================================================
-    // h5_serializable specialization for skeleton_t<Rank>
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct h5_serializable<grid::skeleton_t<Rank>>
     {
@@ -240,4 +230,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif // IO_SERIAL_SKELETON_HPP
+

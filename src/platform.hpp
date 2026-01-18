@@ -7,9 +7,7 @@
 //   if constexpr (platform::is_cuda) { /* cuda-specific */ }
 //   constexpr auto ws = platform::warp_size;
 // =============================================================================
-
-#ifndef SIMBI_PLATFORM_HPP
-#define SIMBI_PLATFORM_HPP
+#pragma once
 
 #include <cstdint>
 
@@ -65,5 +63,3 @@ namespace simbi::platform {
                                               : type::cpu;
 
 } // namespace simbi::platform
-
-#endif

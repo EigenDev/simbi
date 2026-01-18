@@ -16,9 +16,7 @@
 //
 //   auto [loaded_events, meta] = read_photon_events("output.h5");
 // =============================================================================
-
-#ifndef SIMBI_AFTERGLOW_PHOTON_EVENT_IO_HPP
-#define SIMBI_AFTERGLOW_PHOTON_EVENT_IO_HPP
+#pragma once
 
 #include "rad.hpp"
 
@@ -91,5 +89,3 @@ namespace simbi::afterglow {
     read_photon_events_filtered(const std::string& filename, FilterFunc filter);
 
 } // namespace simbi::afterglow
-
-#endif // SIMBI_AFTERGLOW_PHOTON_EVENT_IO_HPP

@@ -1,5 +1,12 @@
-#ifndef PHYSICS_EM_API_HPP
-#define PHYSICS_EM_API_HPP
+// =============================================================================
+// api.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "compute/computation.hpp"
@@ -17,9 +24,7 @@
 
 namespace simbi::em {
 
-    // =========================================================================
-    // mhd energy update functors
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct update_magnetic_energy_t
     {
@@ -248,9 +253,7 @@ namespace simbi::em {
         return compute::computation_t{ez_stencil_t<FluxField, PrimField>{fluxes, prims}, domain};
     }
 
-    // =========================================================================
-    // magnetic field updates from stored e-fields
-    // =========================================================================
+    
 
     // bx face[k,j,i] at physical {k, j, i-1/2}
     // needs ey and ez edges bounding this face
@@ -370,9 +373,7 @@ namespace simbi::em {
         };
     }
 
-    // =========================================================================
-    // public interface
-    // =========================================================================
+    
 
     template <
         typename Executor,
@@ -411,9 +412,7 @@ namespace simbi::em {
         e3         = e3_op.map(fp::identity).with(exec);
     }
 
-    // =========================================================================
-    // interpolate face-centered b to cell centers
-    // =========================================================================
+    
     template <typename Bfield, typename Geometry>
     struct interpolate_magnetic_op_t
     {
@@ -565,4 +564,4 @@ namespace simbi::em {
 
 } // namespace simbi::em
 
-#endif // PHYSICS_EM_NEW_API_HPP
+

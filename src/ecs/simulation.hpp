@@ -1,8 +1,5 @@
-#ifndef ECS_SIMULATION_HPP
-#define ECS_SIMULATION_HPP
-
 // =============================================================================
-// nsimulation.hpp
+// simulation.hpp
 //
 // multi-device simulation state container.
 //
@@ -28,6 +25,7 @@
 // the multi-device api exposes partitions explicitly. kernels are launched
 // per-partition, each on its own stream, enabling concurrent execution.
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "components.hpp"
@@ -47,9 +45,7 @@ namespace simbi::ecs {
     template <regime_t R, std::uint64_t Rank, geometry_t G, typename EoS>
     struct simulation_t
     {
-        // =========================================================================
-        // type aliases
-        // =========================================================================
+        
 
         using conserved_t = typename vtraits<R, Rank, EoS>::conserved_type;
         using primitive_t = typename vtraits<R, Rank, EoS>::primitive_type;
@@ -59,9 +55,7 @@ namespace simbi::ecs {
         using workspace_t = partition_workspace_t<conserved_t, primitive_t, Rank>;
         using decomp_t    = level_decomposition_t<Rank>;
 
-        // =========================================================================
-        // compile-time constants
-        // =========================================================================
+        
 
         static constexpr std::uint64_t     rank         = Rank;
         static constexpr regime_t          regime       = R;
@@ -69,9 +63,7 @@ namespace simbi::ecs {
         static constexpr bool              is_mhd = (R == regime_t::MHD || R == regime_t::RMHD);
         static constexpr auto              nvars  = is_mhd ? 9 : Rank + 3;
 
-        // =========================================================================
-        // core state
-        // =========================================================================
+        
 
         // ecs registry holding all components
         registry_t registry;
@@ -90,9 +82,7 @@ namespace simbi::ecs {
         bool in_failure_state{false};
         bool was_interrupted{false};
 
-        // =========================================================================
-        // level queries
-        // =========================================================================
+        
 
         std::uint64_t num_levels() const
         {
@@ -104,9 +94,7 @@ namespace simbi::ecs {
             return num_levels() > 1;
         }
 
-        // =========================================================================
-        // global component accessors
-        // =========================================================================
+        
 
         auto& metadata()
         {
@@ -128,9 +116,7 @@ namespace simbi::ecs {
             return registry.get<sources_t<Rank>>(global);
         }
 
-        // =========================================================================
-        // level component accessors
-        // =========================================================================
+        
 
         auto& level_info(std::uint64_t lvl)
         {
@@ -167,9 +153,7 @@ namespace simbi::ecs {
             return registry.get<level_mesh_t<Rank>>(levels[lvl]);
         }
 
-        // =========================================================================
-        // decomposition accessors (multi-device api)
-        // =========================================================================
+        
 
         // -------------------------------------------------------------------------
         // decomposition
@@ -299,9 +283,7 @@ namespace simbi::ecs {
             return level_mesh(lvl).config;
         }
 
-        // =========================================================================
-        // halo exchange
-        // =========================================================================
+        
 
         // -------------------------------------------------------------------------
         // exchange_halos
@@ -362,9 +344,7 @@ namespace simbi::ecs {
             }
         }
 
-        // =========================================================================
-        // workspace management
-        // =========================================================================
+        
 
         // -------------------------------------------------------------------------
         // has_workspace
@@ -424,9 +404,7 @@ namespace simbi::ecs {
             return registry.get<workspace_t>(decomp.partition_entities[part_id]);
         }
 
-        // =========================================================================
-        // immersed bodies (optional)
-        // =========================================================================
+        
 
         bool has_bodies() const
         {
@@ -455,5 +433,3 @@ namespace simbi::ecs {
     };
 
 } // namespace simbi::ecs
-
-#endif

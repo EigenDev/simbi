@@ -1,15 +1,11 @@
 // =============================================================================
 // ops.hpp
 //
-// simple memory operations for xpu framework.
-// one job: fill, zero, copy operations. no complex transfers, no async.
+// [TODO: Add description]
 //
 // usage:
-//   zero_memory(block);
-//   fill_memory(block, value);
-//   copy_memory(src_block, dst_block);
+//   [TODO: Add usage example]
 // =============================================================================
-
 #pragma once
 
 #include "block.hpp"
@@ -22,9 +18,7 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // zero operations
-    // =============================================================================
+    
 
     template <typename MemorySpace>
     void zero_memory(memory_block_t<MemorySpace>& block)
@@ -44,9 +38,7 @@ namespace simbi::xpu::mem {
         }
     }
 
-    // =============================================================================
-    // fill operations
-    // =============================================================================
+    
 
     template <typename T, typename MemorySpace>
     void fill_memory(memory_block_t<MemorySpace>& block, const T& value)
@@ -73,9 +65,7 @@ namespace simbi::xpu::mem {
         }
     }
 
-    // =============================================================================
-    // copy operations - same memory space only
-    // =============================================================================
+    
 
     template <typename T, typename MemorySpace>
     void copy_memory(const memory_block_t<MemorySpace>& src, memory_block_t<MemorySpace>& dst)
@@ -98,3 +88,4 @@ namespace simbi::xpu::mem {
     }
 
 } // namespace simbi::xpu::mem
+

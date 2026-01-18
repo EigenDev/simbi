@@ -1,5 +1,12 @@
-#ifndef DRIVER_HPP
-#define DRIVER_HPP
+// =============================================================================
+// driver.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include <pybind11/functional.h>
 #include <pybind11/numpy.h>
@@ -18,4 +25,4 @@ namespace simbi::driver {
         py::function adot_func
     );
 }   // namespace simbi::driver
-#endif
+

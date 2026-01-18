@@ -1,5 +1,12 @@
-#ifndef GRID_DECOMPOSITION_HPP
-#define GRID_DECOMPOSITION_HPP
+// =============================================================================
+// decomposition.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "domain.hpp"
@@ -111,4 +118,4 @@ namespace simbi::grid {
 
 } // namespace simbi::grid
 
-#endif // GRID_DECOMPOSITION_HPP
+

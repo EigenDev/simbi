@@ -1,5 +1,16 @@
-#ifndef EXP_LOAD_HPP
-#define EXP_LOAD_HPP
+// =============================================================================
+// exp_load.hpp
+//
+// provides functions to load expression dags from configuration data.
+// this file declares functions responsible for parsing a `config_dict_t`
+// (typically from a json object) and constructing an in-memory representation
+// of an expression dag, including the expression nodes, parameters, and
+// output indices.
+//
+// usage:
+//   auto [nodes, outputs, params] = load_expression_data(config);
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/store.hpp"
@@ -20,7 +31,5 @@ namespace simbi::expression {
     ExprOp string_to_expr_op(const std::string& op);
 
     store_t<std::int64_t> get_output_indices(const config_dict_t& expr_data);
-    store_t<real> get_parameters(const config_dict_t& expr_data);
-}   // namespace simbi::expression
-
-#endif   // EXP_LOAD_HPP
+    store_t<real>         get_parameters(const config_dict_t& expr_data);
+} // namespace simbi::expression

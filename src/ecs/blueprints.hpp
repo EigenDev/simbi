@@ -1,6 +1,3 @@
-#ifndef ECS_BLUEPRINTS_HPP
-#define ECS_BLUEPRINTS_HPP
-
 // =============================================================================
 // blueprints.hpp
 //
@@ -9,6 +6,7 @@
 // blueprints are extracted from config_dict_t via blueprint_extractor_t,
 // then passed to simulation_builder_t to construct the simulation.
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -23,9 +21,7 @@
 
 namespace simbi::ecs {
 
-    // =============================================================================
-    // individual blueprints
-    // =============================================================================
+    
 
     // -----------------------------------------------------------------------------
     // mesh_blueprint_t
@@ -238,12 +234,7 @@ namespace simbi::ecs {
         std::int64_t halo_width;
     };
 
-    // =============================================================================
-    // blueprint_set_t
-    //
-    // container holding all blueprints for a simulation.
-    // used to pass configuration through the dispatch chain.
-    // =============================================================================
+    
     template <std::uint64_t Rank>
     struct blueprint_set_t
     {
@@ -271,5 +262,3 @@ namespace simbi::ecs {
     };
 
 } // namespace simbi::ecs
-
-#endif // ECS_BLUEPRINTS_HPP

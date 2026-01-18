@@ -16,7 +16,6 @@
 //   stream.sync();
 //   auto handle = stream.native_handle();
 // =============================================================================
-
 #pragma once
 
 #include "xpu/execution/execution_space.hpp"

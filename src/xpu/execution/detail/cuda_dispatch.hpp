@@ -15,7 +15,6 @@
 //   // internal use only - called from executor_t::dispatch()
 //   cuda_dispatch(domain, [=] __device__ (auto idx) { /* work */ }, stream);
 // =============================================================================
-
 #pragma once
 
 #include "grid/domain.hpp"

@@ -1,5 +1,12 @@
-#ifndef GRID_FIELD_HPP
-#define GRID_FIELD_HPP
+// =============================================================================
+// field.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
@@ -566,4 +573,4 @@ namespace simbi::grid {
 
 } // namespace simbi::grid
 
-#endif // GRID_FIELD_HPP
+

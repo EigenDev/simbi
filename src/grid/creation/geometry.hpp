@@ -1,5 +1,12 @@
-#ifndef GRID_CREATION_GEOMETRY_BUILDER_HPP
-#define GRID_CREATION_GEOMETRY_BUILDER_HPP
+// =============================================================================
+// geometry.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "ecs/blueprints.hpp"
@@ -93,4 +100,4 @@ namespace simbi::grid::creation {
 
 } // namespace simbi::grid::creation
 
-#endif
+

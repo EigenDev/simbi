@@ -1,5 +1,12 @@
-#ifndef IO_WRITE_POLICY_HPP
-#define IO_WRITE_POLICY_HPP
+// =============================================================================
+// write_policy.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "write_traits.hpp"
@@ -53,4 +60,4 @@ namespace simbi::io {
 
 }   // namespace simbi::io
 
-#endif   // IO_WRITE_POLICY_HPP
+

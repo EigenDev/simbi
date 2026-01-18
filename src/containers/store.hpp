@@ -13,9 +13,7 @@
 //   nodes.add(node);  // grows dynamically
 //   // then use as const ref with configured memory access
 // =============================================================================
-
-#ifndef CONTAINERS_STORE_HPP
-#define CONTAINERS_STORE_HPP
+#pragma once
 
 #include "decorators.hpp"
 #include "xpu/mem/memory_config.hpp"
@@ -176,5 +174,3 @@ namespace simbi {
     };
 
 } // namespace simbi
-
-#endif // CONTAINERS_STORE_HPP

@@ -1,5 +1,12 @@
-#ifndef GRID_PATCH_ID_HPP
-#define GRID_PATCH_ID_HPP
+// =============================================================================
+// patch_id.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "functional/fp.hpp"
@@ -80,4 +87,4 @@ namespace simbi::grid {
 
 }   // namespace simbi::grid
 
-#endif   // SIMBI_GRID_PATCH_ID_HPP
+

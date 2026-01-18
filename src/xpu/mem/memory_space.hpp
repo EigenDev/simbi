@@ -1,18 +1,11 @@
 // =============================================================================
 // memory_space.hpp
 //
-// compile-time memory space concept and trait definitions.
-// memory spaces define where data resides and how it can be accessed.
-// each space provides:
-//   - allocation and deallocation functions
-//   - accessibility queries between spaces
-//   - transfer capabilities and constraints
+// [TODO: Add description]
 //
 // usage:
-//   auto buffer = allocate<host_memory>(size);
-//   shared_buffer_t<float, unified_memory> data(n);
+//   [TODO: Add usage example]
 // =============================================================================
-
 #pragma once
 
 #include "xpu/core/memory_concepts.hpp"
@@ -23,15 +16,11 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // memory space concept - defined in core/memory_concepts.hpp
-    // =============================================================================
+    
 
     using core::memory_space_c;
 
-    // =============================================================================
-    // memory space traits
-    // =============================================================================
+    
 
     template <memory_space_c Space>
     struct memory_space_traits
@@ -53,9 +42,7 @@ namespace simbi::xpu::mem {
         }
     };
 
-    // =============================================================================
-    // memory allocation block
-    // =============================================================================
+    
 
     template <memory_space_c Space>
     struct block_t
@@ -112,9 +99,7 @@ namespace simbi::xpu::mem {
         }
     };
 
-    // =============================================================================
-    // space compatibility utilities
-    // =============================================================================
+    
 
     template <memory_space_c SourceSpace, memory_space_c DestSpace>
     constexpr bool can_access_directly()
@@ -146,9 +131,7 @@ namespace simbi::xpu::mem {
         return Space::is_device_accessible && !Space::is_host_accessible;
     }
 
-    // =============================================================================
-    // allocation helpers
-    // =============================================================================
+    
 
     template <memory_space_c Space, typename T>
     block_t<Space> allocate(std::size_t count)
@@ -171,19 +154,16 @@ namespace simbi::xpu::mem {
         return block_t<Space>(ptr, size);
     }
 
-    // =============================================================================
-    // forward declarations for memory space implementations
-    // =============================================================================
+    
 
     struct host_memory;
     struct device_memory;
     struct unified_memory;
 
-    // =============================================================================
-    // default memory space selection
-    // =============================================================================
+    
 
     template <bool gpu_available = false>
     struct default_memory_space_selector;
 
 } // namespace simbi::xpu::mem
+

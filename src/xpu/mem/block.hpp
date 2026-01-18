@@ -8,7 +8,6 @@
 //   auto* ptr = block.template as<float>();
 //   // automatically freed on destruction
 // =============================================================================
-
 #pragma once
 
 #include <cstddef>
@@ -16,9 +15,7 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // memory block - simple raii ownership
-    // =============================================================================
+    
 
     template <typename MemorySpace>
     class memory_block_t
@@ -132,9 +129,7 @@ namespace simbi::xpu::mem {
         }
     };
 
-    // =============================================================================
-    // factory function
-    // =============================================================================
+    
 
     template <typename T, typename MemorySpace>
     memory_block_t<MemorySpace> make_block(std::size_t count, std::int64_t device_id = 0)

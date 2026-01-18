@@ -1,5 +1,12 @@
-#ifndef PHYSICS_CONTACT_PROPERTIES
-#define PHYSICS_CONTACT_PROPERTIES
+// =============================================================================
+// contact_properties.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp" // for is_hydro_primitive_c, is_hydro_conserved_c, is_srhd_c, is_relativistic_c
 #include "build_config.hpp"      // for real type
@@ -142,4 +149,4 @@ namespace simbi::hydro {
     }
 
 } // namespace simbi::hydro
-#endif
+

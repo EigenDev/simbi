@@ -12,7 +12,6 @@
 //   parallel_for<cpu_space>(range, kernel);
 //   executor_t<default_space> exec;
 // =============================================================================
-
 #pragma once
 
 // core c++20 concepts and framework

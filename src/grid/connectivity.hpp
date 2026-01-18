@@ -1,5 +1,12 @@
-#ifndef GRID_CONNECTIVITY_HPP
-#define GRID_CONNECTIVITY_HPP
+// =============================================================================
+// connectivity.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "boundary.hpp"
 #include "patch_id.hpp"
@@ -151,4 +158,4 @@ namespace simbi::grid {
 
 } // namespace simbi::grid
 
-#endif // GRID_CONNECTIVITY_HPP
+

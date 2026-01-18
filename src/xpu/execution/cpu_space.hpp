@@ -10,7 +10,6 @@
 //   executor_t<cpu_space> exec;
 //   auto token = exec.submit([]() { /* work */ });
 // =============================================================================
-
 #pragma once
 
 #include "utility/threading.hpp"

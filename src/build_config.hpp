@@ -8,9 +8,7 @@
 //   if constexpr (build::column_major) { /* ... */ }
 //   constexpr auto eps = build::epsilon;
 // =============================================================================
-
-#ifndef SIMBI_BUILD_CONFIG_HPP
-#define SIMBI_BUILD_CONFIG_HPP
+#pragma once
 
 #include "build_options.hpp"
 
@@ -61,5 +59,3 @@ namespace simbi::build {
 namespace simbi {
     using real = build::real;
 }
-
-#endif

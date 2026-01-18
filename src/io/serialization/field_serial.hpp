@@ -1,5 +1,12 @@
-#ifndef IO_SERIAL_FIELD_HPP
-#define IO_SERIAL_FIELD_HPP
+// =============================================================================
+// field_serial.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "grid/domain.hpp"
@@ -14,10 +21,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // field serialization helpers
-    // handles domain + data as a unit, preserving ghost zone information
-    // =========================================================================
+    
 
     // -------------------------------------------------------------------------
     // write a scalar field (field_t<real, Rank>)
@@ -230,4 +234,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif // IO_SERIAL_FIELD_HPP
+

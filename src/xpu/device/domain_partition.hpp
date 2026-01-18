@@ -15,7 +15,6 @@
 //   auto parts = xpu::partition_uniform(domain, num_gpus);
 //   auto parts = xpu::partition_along_axis<0>(domain, num_gpus);
 // =============================================================================
-
 #pragma once
 
 #include "containers/vector.hpp"

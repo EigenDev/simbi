@@ -1,5 +1,12 @@
-#ifndef IO_TYPE_TRAITS_HPP
-#define IO_TYPE_TRAITS_HPP
+// =============================================================================
+// write_traits.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include <H5Cpp.h>
 #include <cstddef>
@@ -90,4 +97,4 @@ namespace simbi::io {
     };
 } // namespace simbi::io
 
-#endif
+

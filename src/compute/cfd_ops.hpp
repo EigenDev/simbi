@@ -1,5 +1,18 @@
-#ifndef CFD_OPERATIONS_HPP
-#define CFD_OPERATIONS_HPP
+// =============================================================================
+// cfd_ops.hpp
+//
+// bundles cfd operations based on runtime/compile-time configuration.
+// the cfd_operations_t struct acts as a dispatcher, providing the correct
+// flux solver and reconstruction methods based on template parameters that
+// specify the physics regime, numerical solver, and reconstruction scheme.
+//
+// usage:
+//   using ops_t = cfd_operations_t<rmhd, hllc, plm, ideal_eos>;
+//   ops_t ops;
+//   auto flux = ops.flux(q_l, q_r, ...);
+//   auto [r_l, r_r] = ops.reconstruct(stencil, theta);
+// =============================================================================
+#pragma once
 
 #include "base/stencil_view.hpp"
 #include "build_config.hpp"
@@ -102,5 +115,3 @@ namespace simbi::cfd {
     };
 
 } // namespace simbi::cfd
-
-#endif // CFD_OPERATIONS_HPP

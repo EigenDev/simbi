@@ -1,5 +1,12 @@
-#ifndef GRID_BOUNDARY_POLICY_HPP
-#define GRID_BOUNDARY_POLICY_HPP
+// =============================================================================
+// policy.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "decorators.hpp"
 #include "grid/boundary.hpp"
@@ -45,4 +52,4 @@ namespace simbi::grid {
 
 } // namespace simbi::grid
 
-#endif // GRID_BOUNDARY_POLICY_HPP
+

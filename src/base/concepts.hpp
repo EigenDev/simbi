@@ -1,3 +1,19 @@
+// =============================================================================
+// concepts.hpp
+//
+// custom concepts for compile-time validation and type constraints.
+// these concepts enforce properties of arithmetic types, state variables
+// (hydro, mhd, relativistic), and other core data structures used in the
+// simulation code.
+//
+// usage:
+//   template <concepts::arithmetic t>
+//   void my_function(t value);
+//
+//   if constexpr (concepts::is_relativistic_c<state_t>) {
+//     // ... relativistic logic
+//   }
+// =============================================================================
 #pragma once
 
 #include "build_config.hpp"  // for real type
@@ -15,9 +31,7 @@ namespace simbi {
 } // namespace simbi
 
 namespace simbi::concepts {
-    // =============================================================================
-    // Core Concepts
-    // ============================================================================
+    
     template <typename T>
     concept Arithmetic = std::integral<T> || std::floating_point<T>;
 
@@ -113,9 +127,7 @@ namespace simbi::concepts {
         { T::handle_type };
     };
 
-    // =============================================================================
-    // computation protocol concepts
-    // =============================================================================
+    
 
     // helper concepts for detection (prefixed to avoid conflicts with
     // traits.hpp)

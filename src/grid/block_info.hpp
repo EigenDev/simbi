@@ -1,5 +1,12 @@
-#ifndef GRID_BLOCK_INFO_HPP
-#define GRID_BLOCK_INFO_HPP
+// =============================================================================
+// block_info.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "boundary.hpp"
 #include "connectivity.hpp"
@@ -90,4 +97,4 @@ namespace simbi::grid {
 
 }   // namespace simbi::grid
 
-#endif   // GRID_BLOCK_INFO_HPP
+

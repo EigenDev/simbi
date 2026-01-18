@@ -1,5 +1,12 @@
-#ifndef CT_ZERO_HPP
-#define CT_ZERO_HPP
+// =============================================================================
+// zero.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -14,4 +21,4 @@ namespace simbi::em {
     DEV real
     ct_zero_formula(const vector_t<real, 4>& face_e_fields, const vector_t<real, 4>& cell_e_fields);
 } // namespace simbi::em
-#endif // CT_ZERO_HPP
+

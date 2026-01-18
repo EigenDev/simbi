@@ -1,5 +1,12 @@
-#ifndef GRID_AMR_API_HPP
-#define GRID_AMR_API_HPP
+// =============================================================================
+// api.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "compute/computation.hpp"
@@ -175,4 +182,4 @@ namespace simbi::grid::amr {
 
 } // namespace simbi::grid::amr
 
-#endif // GRID_AMR_API_HPP
+

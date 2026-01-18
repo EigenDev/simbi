@@ -12,9 +12,7 @@
 //   rank_id_t dst{0, 1};
 //   transfer_sync(src, src_ptr, dst, dst_ptr, bytes);
 // =============================================================================
-
-#ifndef XPU_COMM_HPP
-#define XPU_COMM_HPP
+#pragma once
 
 #include "transfer.hpp"
 #include "types.hpp"
@@ -23,4 +21,5 @@ namespace simbi::xpu::comm {
     // all types and functions are already in the namespace
     // this header just provides convenient single-include access
 }
-#endif // XPU_COMM_HPP
+
+

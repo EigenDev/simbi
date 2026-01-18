@@ -1,5 +1,12 @@
-#ifndef SINK_HPP
-#define SINK_HPP
+// =============================================================================
+// sink.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "body.hpp"
 #include "build_config.hpp"
@@ -256,4 +263,4 @@ namespace simbi::body {
     }
 } // namespace simbi::body
 
-#endif
+

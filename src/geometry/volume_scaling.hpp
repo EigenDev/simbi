@@ -15,9 +15,7 @@
 //   real factor = scaler.scaling_factor(motion.a);
 //   U_ext = U_int * factor;
 // =============================================================================
-
-#ifndef GEOMETRY_VOLUME_SCALING_HPP
-#define GEOMETRY_VOLUME_SCALING_HPP
+#pragma once
 
 #include "build_config.hpp"
 #include "decorators.hpp"
@@ -27,9 +25,7 @@
 
 namespace simbi::geometry {
 
-    // =========================================================================
-    // volume scaling dispatch
-    // =========================================================================
+    
 
     template <geometry_t G, std::uint64_t Rank>
     struct volume_scaler_t
@@ -138,9 +134,7 @@ namespace simbi::geometry {
         }
     };
 
-    // =========================================================================
-    // convenience functions for dynamic dispatch
-    // =========================================================================
+    
 
     // get scaling factor at runtime based on geometry enum
     template <std::uint64_t Rank>
@@ -182,9 +176,7 @@ namespace simbi::geometry {
         }
     }
 
-    // =========================================================================
-    // functor for converting intensive → extensive
-    // =========================================================================
+    
 
     template <geometry_t G, std::uint64_t Rank>
     struct to_extensive_t
@@ -200,9 +192,7 @@ namespace simbi::geometry {
         }
     };
 
-    // =========================================================================
-    // functor for converting extensive → intensive
-    // =========================================================================
+    
 
     template <geometry_t G, std::uint64_t Rank>
     struct to_intensive_t
@@ -218,9 +208,7 @@ namespace simbi::geometry {
         }
     };
 
-    // =========================================================================
-    // validation helpers
-    // =========================================================================
+    
 
     // check if geometry and rank combination is valid
     constexpr bool is_valid_geometry_rank(geometry_t geom, std::uint64_t rank)
@@ -243,4 +231,4 @@ namespace simbi::geometry {
 
 } // namespace simbi::geometry
 
-#endif
+

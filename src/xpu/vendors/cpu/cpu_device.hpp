@@ -17,7 +17,6 @@
 //   auto stream = device.create_stream();
 //   auto ptr = device.allocate(1024);
 // =============================================================================
-
 #pragma once
 
 #include "utility/threading.hpp"
@@ -34,9 +33,7 @@
 
 namespace simbi::xpu::vendors::cpu {
 
-    // =============================================================================
-    // cpu device handles
-    // =============================================================================
+    
 
     struct cpu_memory_handle_t
     {
@@ -115,9 +112,7 @@ namespace simbi::xpu::vendors::cpu {
         }
     };
 
-    // =============================================================================
-    // cpu device implementation
-    // =============================================================================
+    
 
     class cpu_device_t
     {
@@ -148,9 +143,7 @@ namespace simbi::xpu::vendors::cpu {
         cpu_device_t(cpu_device_t&&)                 = default;
         cpu_device_t& operator=(cpu_device_t&&)      = default;
 
-        // =============================================================================
-        // memory allocation (device_memory_allocator concept)
-        // =============================================================================
+        
 
         memory_handle_type allocate(std::size_t bytes)
         {
@@ -186,9 +179,7 @@ namespace simbi::xpu::vendors::cpu {
             return true; // cpu memory always accessible from host
         }
 
-        // =============================================================================
-        // stream management (device_stream_manager concept)
-        // =============================================================================
+        
 
         stream_handle_type create_stream()
         {
@@ -215,9 +206,7 @@ namespace simbi::xpu::vendors::cpu {
             return stream_handle_type{std::this_thread::get_id()};
         }
 
-        // =============================================================================
-        // event management (device_event_manager concept)
-        // =============================================================================
+        
 
         event_handle_type create_event()
         {
@@ -255,9 +244,7 @@ namespace simbi::xpu::vendors::cpu {
             (void) event;
         }
 
-        // =============================================================================
-        // memory transfer (device_memory_transfer concept)
-        // =============================================================================
+        
 
         void copy_host_to_device(const void* src, memory_handle_type dst, std::size_t bytes)
         {
@@ -301,9 +288,7 @@ namespace simbi::xpu::vendors::cpu {
             copy_device_to_host(src, dst, bytes); // cpu copies are synchronous
         }
 
-        // =============================================================================
-        // device properties (device_properties concept)
-        // =============================================================================
+        
 
         std::int64_t device_id() const
         {
@@ -368,3 +353,4 @@ namespace simbi::xpu::vendors::cpu {
     };
 
 } // namespace simbi::xpu::vendors::cpu
+

@@ -1,6 +1,3 @@
-#ifndef COMPONENTS_HPP
-#define COMPONENTS_HPP
-
 // =============================================================================
 // components.hpp
 //
@@ -24,6 +21,7 @@
 //   - het::comm::rank_id_t → xpu::comm::rank_id_t
 //   - executor stored by value, owns its resources (modern c++ pattern)
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -56,10 +54,7 @@
 
 namespace simbi::ecs {
 
-    // =============================================================================
-    // partition components
-    // these describe how a single device's piece of the domain is configured
-    // =============================================================================
+    
 
     // -----------------------------------------------------------------------------
     // partition_t
@@ -195,10 +190,7 @@ namespace simbi::ecs {
         }
     };
 
-    // =============================================================================
-    // field components
-    // these hold the actual simulation data for each partition
-    // =============================================================================
+    
 
     // -----------------------------------------------------------------------------
     // partition_fields_t
@@ -254,10 +246,7 @@ namespace simbi::ecs {
         grid::field_t<Conserved, Rank> u_star;
     };
 
-    // =============================================================================
-    // geometry components
-    // these describe the physical coordinate system for each partition
-    // =============================================================================
+    
 
     // -----------------------------------------------------------------------------
     // partition_geometry_t
@@ -274,10 +263,7 @@ namespace simbi::ecs {
         grid::mesh_config_t<Rank> config;
     };
 
-    // =============================================================================
-    // level-wide components
-    // these are shared across all partitions of a level
-    // =============================================================================
+    
 
     // -----------------------------------------------------------------------------
     // level_info_t
@@ -346,10 +332,7 @@ namespace simbi::ecs {
         bool initialized{false};
     };
 
-    // =============================================================================
-    // global simulation components
-    // these are attached to the global entity, shared across all levels
-    // =============================================================================
+    
 
     // -----------------------------------------------------------------------------
     // simulation_metadata_t
@@ -513,10 +496,7 @@ namespace simbi::ecs {
         std::unique_ptr<diag_t> diagnostics;
     };
 
-    // =============================================================================
-    // backward compatibility aliases
-    // these allow gradual migration from single-device code
-    // =============================================================================
+    
 
     // the old hydro_fields_t is now partition_fields_t
     template <typename Conserved, typename Primitive, std::uint64_t Rank>
@@ -527,5 +507,3 @@ namespace simbi::ecs {
     using mesh_geometry_t = partition_geometry_t<Rank, G>;
 
 } // namespace simbi::ecs
-
-#endif

@@ -1,5 +1,12 @@
-#ifndef PHYSICS_WAVE_SPEEDS_HPP
-#define PHYSICS_WAVE_SPEEDS_HPP
+// =============================================================================
+// wave_speeds.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"       // for real type, build::
@@ -429,4 +436,4 @@ namespace simbi::hydro {
     }
 } // namespace simbi::hydro
 
-#endif // PHYSICS_WAVE_SPEEDS_HPP
+

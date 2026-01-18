@@ -1,5 +1,12 @@
-#ifndef GEOMETRY_BLOCK_GEOMETRY_HPP
-#define GEOMETRY_BLOCK_GEOMETRY_HPP
+// =============================================================================
+// block_geometry.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -13,9 +20,7 @@
 
 namespace simbi::geometry {
 
-    // =========================================================================
-    // moving mesh coordinate system
-    // =========================================================================
+    
     //
     // simbi uses a **comoving coordinate system** fgeometry:hor moving meshes:
     //
@@ -314,4 +319,4 @@ namespace simbi::geometry {
 
 } // namespace simbi::geometry
 
-#endif // GRID_GEOMETRY_BLOCK_GEOMETRY_HPP
+

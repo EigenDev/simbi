@@ -1,5 +1,17 @@
-#ifndef STATE_EXPRESSION_HPP
-#define STATE_EXPRESSION_HPP
+// =============================================================================
+// express_t.hpp
+//
+// encapsulates a full, evaluatable expression for use in the simulation.
+// this file defines `expression_t`, a class that bundles together all the
+// components of a mathematical expression: the dag, parameters, and the
+// linearized instruction sequence for the vm. it provides `apply` methods
+// to evaluate the expression as a source term or boundary condition.
+//
+// usage:
+//   auto expr = expression_t::from_config(config);
+//   conserved_t source = expr.apply(coords, prim_state, time, gamma);
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -179,5 +191,3 @@ namespace simbi::state {
     };
 
 } // namespace simbi::state
-
-#endif

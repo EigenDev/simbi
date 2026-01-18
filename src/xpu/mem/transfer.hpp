@@ -1,15 +1,11 @@
 // =============================================================================
 // transfer.hpp
 //
-// explicit memory transfer operations between memory spaces.
-// one job: sync data between host, device, and unified memory.
+// [TODO: Add description]
 //
 // usage:
-//   sync_host_to_device(host_block, device_block);
-//   sync_device_to_host(device_block, host_block);
-//   sync_unified_to_host(unified_block, host_block);
+//   [TODO: Add usage example]
 // =============================================================================
-
 #pragma once
 
 #include "block.hpp"
@@ -22,9 +18,7 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // host to device transfers
-    // =============================================================================
+    
 
     template <typename T>
     void sync_host_to_device(
@@ -40,9 +34,7 @@ namespace simbi::xpu::mem {
         );
     }
 
-    // =============================================================================
-    // device to host transfers
-    // =============================================================================
+    
 
     template <typename T>
     void sync_device_to_host(
@@ -58,9 +50,7 @@ namespace simbi::xpu::mem {
         );
     }
 
-    // =============================================================================
-    // device to device transfers
-    // =============================================================================
+    
 
     template <typename T>
     void sync_device_to_device(
@@ -76,9 +66,7 @@ namespace simbi::xpu::mem {
         );
     }
 
-    // =============================================================================
-    // unified memory transfers - direct copy (already unified)
-    // =============================================================================
+    
 
     template <typename T>
     void sync_unified_to_unified(
@@ -110,9 +98,7 @@ namespace simbi::xpu::mem {
         std::memcpy(dst.template as<T>(), src.template as<T>(), count * sizeof(T));
     }
 
-    // =============================================================================
-    // convenience wrappers - auto-detect count from block size
-    // =============================================================================
+    
 
     template <typename T, typename SrcSpace, typename DstSpace>
     void sync_memory(const memory_block_t<SrcSpace>& src, memory_block_t<DstSpace>& dst)
@@ -153,3 +139,4 @@ namespace simbi::xpu::mem {
     }
 
 } // namespace simbi::xpu::mem
+

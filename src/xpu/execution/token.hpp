@@ -14,7 +14,6 @@
 //   token.record(executor);
 //   token.wait();
 // =============================================================================
-
 #pragma once
 
 #include "cpu_space.hpp"

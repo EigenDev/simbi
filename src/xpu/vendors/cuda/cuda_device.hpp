@@ -17,7 +17,6 @@
 //   auto stream = device.create_stream();
 //   auto ptr = device.allocate(1024);
 // =============================================================================
-
 #pragma once
 
 #include "xpu/core/device_concepts.hpp"
@@ -37,9 +36,7 @@
 
 namespace simbi::xpu::vendors::cuda {
 
-    // =============================================================================
-    // cuda device handles - trivially copyable for concept compliance
-    // =============================================================================
+    
 
     struct cuda_memory_handle_t
     {
@@ -172,9 +169,7 @@ namespace simbi::xpu::vendors::cuda {
         }
     };
 
-    // =============================================================================
-    // cuda device implementation
-    // =============================================================================
+    
 
     class cuda_device_t
     {
@@ -228,9 +223,7 @@ namespace simbi::xpu::vendors::cuda {
         cuda_device_t(cuda_device_t&&)                 = default;
         cuda_device_t& operator=(cuda_device_t&&)      = default;
 
-        // =============================================================================
-        // device information (device_properties concept)
-        // =============================================================================
+        
 
         std::int64_t device_id() const noexcept
         {
@@ -347,9 +340,7 @@ namespace simbi::xpu::vendors::cuda {
             return true; // cuda supports async memory operations
         }
 
-        // =============================================================================
-        // memory allocation (device_memory_allocator concept)
-        // =============================================================================
+        
 
         memory_handle_type allocate(std::size_t bytes)
         {
@@ -421,9 +412,7 @@ namespace simbi::xpu::vendors::cuda {
             return false; // device memory not host accessible by default
         }
 
-        // =============================================================================
-        // stream management (device_stream_manager concept)
-        // =============================================================================
+        
 
         stream_handle_type create_stream()
         {
@@ -493,9 +482,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
         }
 
-        // =============================================================================
-        // event management (device_event_manager concept)
-        // =============================================================================
+        
 
         event_handle_type create_event()
         {
@@ -580,9 +567,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
         }
 
-        // =============================================================================
-        // memory transfer (device_memory_transfer concept)
-        // =============================================================================
+        
 
         void copy_host_to_device(const void* src, memory_handle_type dst, std::size_t bytes)
         {
@@ -652,9 +637,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
         }
 
-        // =============================================================================
-        // kernel execution (device_kernel_executor concept)
-        // =============================================================================
+        
 
         template <typename... Args>
         event_handle_type launch_kernel(
@@ -693,18 +676,15 @@ namespace simbi::xpu::vendors::cuda {
 #endif
     };
 
-    // =============================================================================
-    // concept verification
-    // =============================================================================
+    
 
     // verify that cuda_device_t satisfies hetero_device concept
     static_assert(core::hetero_device_c<cuda_device_t>);
     static_assert(core::async_memory_allocator_c<cuda_device_t>);
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
+    
 
     using nvidia_device_t = cuda_device_t;
 
 } // namespace simbi::xpu::vendors::cuda
+

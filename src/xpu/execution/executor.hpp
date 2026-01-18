@@ -20,7 +20,6 @@
 //   exec.dispatch(domain, [=](auto idx) { /* work */ });
 //   exec.sync();
 // =============================================================================
-
 #pragma once
 
 #include "cpu_space.hpp"

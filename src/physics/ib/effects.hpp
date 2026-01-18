@@ -1,5 +1,12 @@
-#ifndef BODY_EXPR_NEFFECTS_HPP
-#define BODY_EXPR_NEFFECTS_HPP
+// =============================================================================
+// effects.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "body.hpp"
@@ -17,9 +24,7 @@
 namespace simbi::body::expr {
     using namespace simbi::hydro;
 
-    // ========================================================================
-    // gravitational effect operation (geometry-based)
-    // ========================================================================
+    
     template <typename Primitive, typename Geometry>
     struct grav_op_t
     {
@@ -71,9 +76,7 @@ namespace simbi::body::expr {
         }
     };
 
-    // ========================================================================
-    // accretion effect operation (geometry-based)
-    // ========================================================================
+    
     template <typename Primitive, typename Geometry>
     struct accretion_op_t
     {
@@ -237,9 +240,7 @@ namespace simbi::body::expr {
         }
     };
 
-    // ========================================================================
-    // rigid body effect operation (geometry-based)
-    // ========================================================================
+    
     template <typename Primitive, typename Geometry>
     struct rigid_op_t
     {
@@ -349,9 +350,7 @@ namespace simbi::body::expr {
         }
     };
 
-    // ========================================================================
-    // factory helpers
-    // ========================================================================
+    
     template <typename Primitive, typename Geometry>
     DEV auto make_grav_op(const Primitive& prim, const Geometry& geo)
     {
@@ -372,4 +371,4 @@ namespace simbi::body::expr {
 
 } // namespace simbi::body::expr
 
-#endif // BODY_EXPR_NEFFECTS_HPP
+

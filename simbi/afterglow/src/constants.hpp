@@ -1,10 +1,16 @@
+// =============================================================================
+// constants.hpp
+//
+// [TODO: Add description]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
+
 /*
 A header file where physical constants will live (in CGS)
 */
-
-#ifndef CONSTANTS_HPP
-#define CONSTANTS_HPP
-
 #include "units.hpp"
 
 namespace simbi::afterglow::constants {
@@ -30,5 +36,3 @@ namespace simbi::afterglow::constants {
     constexpr auto rydB          = 2.1798741e-11 * units::erg;
     constexpr auto sigma_thomson = 6.6524e-25 * units::cm2;
 } // namespace simbi::afterglow::constants
-
-#endif

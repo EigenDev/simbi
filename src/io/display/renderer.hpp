@@ -1,6 +1,3 @@
-#ifndef DISPLAY_RENDERER_HPP
-#define DISPLAY_RENDERER_HPP
-
 // =============================================================================
 // renderer.hpp
 //
@@ -18,6 +15,7 @@
 //   r.calculate_layout(headers, data, terminal_width);
 //   r.render_table(stream, headers, data);
 // =============================================================================
+#pragma once
 
 #include <cstdint>
 #include <sstream>
@@ -109,4 +107,4 @@ namespace simbi::display {
 
 } // namespace simbi::display
 
-#endif // DISPLAY_RENDERER_HPP
+

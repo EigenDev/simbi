@@ -1,12 +1,17 @@
 // =============================================================================
 // stencil_view.hpp
 //
-// [TODO: Add description of what this file does]
+// provides a view into a data field for stencil-based operations.
+// the `stencil_view_t` class template allows for the extraction of neighbor
+// cell data ("stencils") at a given face, which is essential for higher-order
+// reconstruction methods. it also includes the reconstruction implementation.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto stencil = stencils::make_stencil<rec_t>(field, coord, dir);
+//   auto [left_vals, right_vals] = stencil.neighbor_values();
+//   auto q_l = stencils::reconstruct_left<rec_t>(left_vals);
+//   auto q_r = stencils::reconstruct_right<rec_t>(right_vals);
 // =============================================================================
-
 #pragma once
 
 #include "base/stencil.hpp"

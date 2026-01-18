@@ -1,6 +1,3 @@
-#ifndef ECS_CREATION_FIELD_INITIALIZER_HPP
-#define ECS_CREATION_FIELD_INITIALIZER_HPP
-
 // =============================================================================
 // field_initializer.hpp
 //
@@ -12,6 +9,7 @@
 //   auto sim = simulation_builder_t<...>{}.configure(...).build();
 //   field_initializer_t<Sim>::initialize(sim, prim_gen, bfield_gens, gamma);
 // =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -35,9 +33,7 @@ namespace py = pybind11;
 
 namespace simbi::ecs::creation {
 
-    // =============================================================================
-    // python generator to field conversion
-    // =============================================================================
+    
 
     template <typename T, std::uint64_t Rank>
     T py_value_to_state(py::handle obj)
@@ -123,9 +119,7 @@ namespace simbi::ecs::creation {
         }
     };
 
-    // =============================================================================
-    // field_initializer_t
-    // =============================================================================
+    
 
     template <typename Sim>
     struct field_initializer_t
@@ -345,5 +339,3 @@ namespace simbi::ecs::creation {
     };
 
 } // namespace simbi::ecs::creation
-
-#endif // ECS_CREATION_FIELD_INITIALIZER_HPP

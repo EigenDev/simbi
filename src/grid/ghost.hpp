@@ -1,5 +1,12 @@
-#ifndef GHOST_ANALYSIS_HPP
-#define GHOST_ANALYSIS_HPP
+// =============================================================================
+// ghost.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "algebra.hpp"
 #include "containers/vector.hpp"
@@ -116,4 +123,4 @@ namespace simbi::grid::boundary {
 
 }   // namespace simbi::grid::boundary
 
-#endif
+

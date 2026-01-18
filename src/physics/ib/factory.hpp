@@ -1,5 +1,12 @@
-#ifndef BODY_FACTORY_HPP
-#define BODY_FACTORY_HPP
+// =============================================================================
+// factory.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "body.hpp"
 #include "build_config.hpp"
@@ -19,9 +26,7 @@
 namespace simbi::body::factory {
     using namespace simbi::config;
 
-    // ========================================================================
-    // capability detection from config
-    // ========================================================================
+    
 
     namespace detail {
 
@@ -87,9 +92,7 @@ namespace simbi::body::factory {
         }
     } // namespace detail
 
-    // ========================================================================
-    // body creation functions - compile-time dispatch
-    // ========================================================================
+    
 
     template <std::uint64_t Rank>
     auto create_body_from_config(std::uint64_t idx, const config_dict_t& props)
@@ -159,9 +162,7 @@ namespace simbi::body::factory {
         }
     }
 
-    // ========================================================================
-    // collection creation from blueprint
-    // ========================================================================
+    
 
     template <std::uint64_t Rank>
     auto create_collection_from_bodies(const std::vector<config_dict_t>& body_configs)
@@ -260,9 +261,7 @@ namespace simbi::body::factory {
             .with_system_config(binary_params);
     }
 
-    // ========================================================================
-    // main factory function - creates collection from blueprint_set
-    // ========================================================================
+    
 
     template <std::uint64_t Rank>
     auto create_body_collection(
@@ -300,4 +299,4 @@ namespace simbi::body::factory {
 
 } // namespace simbi::body::factory
 
-#endif
+

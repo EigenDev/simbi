@@ -1,5 +1,12 @@
-#ifndef IO_CHECKPOINT_HPP
-#define IO_CHECKPOINT_HPP
+// =============================================================================
+// checkpoint.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "ecs/components.hpp"
@@ -22,9 +29,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // checkpoint filename utilities
-    // =========================================================================
+    
     inline std::string compute_checkpoint_filename(
         const std::string& data_dir,
         real               checkpoint_id,
@@ -69,9 +74,7 @@ namespace simbi::io {
         return data_directory + string_format("%d.chkpt." + tnow + ".h5", checkpoint_zones);
     }
 
-    // =========================================================================
-    // checkpoint writer
-    // =========================================================================
+    
     template <typename Sim>
     struct checkpoint_writer_t
     {
@@ -316,9 +319,7 @@ namespace simbi::io {
         }
     };
 
-    // =========================================================================
-    // checkpoint reader
-    // =========================================================================
+    
     template <typename Sim>
     struct checkpoint_reader_t
     {
@@ -428,9 +429,7 @@ namespace simbi::io {
         }
     };
 
-    // =========================================================================
-    // convenience functions
-    // =========================================================================
+    
 
     template <typename Sim>
     void
@@ -447,4 +446,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif // IO_CHECKPOINT_HPP
+

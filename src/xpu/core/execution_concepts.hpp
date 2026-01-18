@@ -10,7 +10,6 @@
 //   template<execution_space Space>
 //   void parallel_algorithm(domain_t<3> domain) { /* dispatch at compile time */ }
 // =============================================================================
-
 #pragma once
 
 #include <concepts>
@@ -21,9 +20,7 @@
 
 namespace simbi::xpu::core {
 
-    // =============================================================================
-    // execution space concept - what can execute parallel work
-    // =============================================================================
+    
 
     template <typename Space>
     concept execution_space_c = requires {

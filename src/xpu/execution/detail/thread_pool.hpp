@@ -8,7 +8,6 @@
 //   - tasks are submitted as std::function objects.
 //   - returns std::future to track task completion.
 // =============================================================================
-
 #pragma once
 
 #include <condition_variable>

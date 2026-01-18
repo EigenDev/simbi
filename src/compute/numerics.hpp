@@ -1,6 +1,3 @@
-#ifndef COMPUTE_NUMERICS_HPP
-#define COMPUTE_NUMERICS_HPP
-
 // =============================================================================
 // numerics.hpp
 //
@@ -12,6 +9,7 @@
 //   cons_field = prim_field.map(to_conserved_t{gamma}).with(exec);
 //   prim_field = cons_field.map(to_primitive_t{gamma}).with(exec);
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/state_ops.hpp"
@@ -34,9 +32,7 @@
 
 namespace simbi::numerics {
 
-    // =========================================================================
-    // conserved <-> primitive conversion functors
-    // =========================================================================
+    
 
     struct to_conserved_t
     {
@@ -64,9 +60,7 @@ namespace simbi::numerics {
         }
     };
 
-    // =========================================================================
-    // time-stepping functors
-    // =========================================================================
+    
 
     // forward euler step: u^{n+1} = u^n + dt * L(u^n)
     // for moving mesh: dudt is intensive, volume_scale converts to extensive rate
@@ -97,12 +91,7 @@ namespace simbi::numerics {
         }
     };
 
-    // =========================================================================
-    // compute_partition_timestep
-    //
-    // computes minimum dt over a partition's owned domain using proper
-    // geometry. block_geometry provides scale factors and coordinate maps.
-    // =========================================================================
+    
     template <
         typename PrimField,
         typename Geometry,
@@ -162,12 +151,7 @@ namespace simbi::numerics {
         return exec.reduce(domain, std::numeric_limits<real>::max(), kernel, fp::min_op);
     }
 
-    // =========================================================================
-    // compute_level_timestep
-    //
-    // computes minimum dt across all partitions of a level.
-    // uses proper curvilinear geometry from mesh config.
-    // =========================================================================
+    
     template <typename Sim>
     real compute_level_timestep(Sim& sim, std::uint64_t lvl, const geometry::motion_state_t& motion)
     {
@@ -200,5 +184,3 @@ namespace simbi::numerics {
     }
 
 } // namespace simbi::numerics
-
-#endif // COMPUTE_NUMERICS_HPP

@@ -1,5 +1,12 @@
-#ifndef XPU_VIEW_HPP
-#define XPU_VIEW_HPP
+// =============================================================================
+// view.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "decorators.hpp"
@@ -61,4 +68,5 @@ namespace simbi::xpu::mem {
 
 } // namespace simbi::xpu::mem
 
-#endif // XPU_VIEW_HPP
+
+

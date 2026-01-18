@@ -14,7 +14,6 @@
 //   if (rank.is_local()) { /* single-node */ }
 //   if (same_device(rank1, rank2)) { /* no copy needed */ }
 // =============================================================================
-
 #pragma once
 
 #include "xpu/mem/device_memory.hpp"

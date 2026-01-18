@@ -1,5 +1,12 @@
-#ifndef RESULT_HPP
-#define RESULT_HPP
+// =============================================================================
+// result.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include <optional>
 #include <string>
@@ -8,7 +15,8 @@
 #include <variant>
 
 namespace simbi {
-    struct Error {
+    struct Error
+    {
         std::string message;
         explicit Error(std::string msg) : message(std::move(msg)) {}
     };
@@ -34,10 +42,7 @@ namespace simbi {
         }
 
         // copy ctor
-        result_t(const result_t& other)
-            : success_(other.success_), data_(other.data_)
-        {
-        }
+        result_t(const result_t& other) : success_(other.success_), data_(other.data_) {}
 
         // move assignment
         result_t& operator=(result_t&& other) noexcept
@@ -65,9 +70,7 @@ namespace simbi {
         auto map(Func f) const -> result_t<std::invoke_result_t<Func, T>>
         {
             if (success_) {
-                return result_t<std::invoke_result_t<Func, T>>::ok(
-                    f(std::get<T>(data_))
-                );
+                return result_t<std::invoke_result_t<Func, T>>::ok(f(std::get<T>(data_)));
             }
             else {
                 return result_t<std::invoke_result_t<Func, T>>::error(
@@ -84,15 +87,19 @@ namespace simbi {
                 return f(std::get<T>(data_));
             }
             else {
-                return std::invoke_result_t<Func, T>::error(
-                    std::get<Error>(data_).message
-                );
+                return std::invoke_result_t<Func, T>::error(std::get<Error>(data_).message);
             }
         }
 
         // accessors
-        bool is_ok() const { return success_; }
-        const T& value() const { return std::get<T>(data_); }
+        bool is_ok() const
+        {
+            return success_;
+        }
+        const T& value() const
+        {
+            return std::get<T>(data_);
+        }
         const std::string& error() const
         {
             return std::get<Error>(data_).message;
@@ -102,7 +109,7 @@ namespace simbi {
     template <>
     class result_t<void>
     {
-        bool success_;
+        bool                 success_;
         std::optional<Error> error_;
 
       public:
@@ -121,8 +128,14 @@ namespace simbi {
             return result_t<void>(false, Error(std::move(msg)));
         }
 
-        bool is_ok() const { return success_; }
-        const std::string& error() const { return error_->message; }
+        bool is_ok() const
+        {
+            return success_;
+        }
+        const std::string& error() const
+        {
+            return error_->message;
+        }
 
         // and_then for void results
         template <typename Func>
@@ -137,6 +150,4 @@ namespace simbi {
             }
         }
     };
-}   // namespace simbi
-
-#endif
+} // namespace simbi

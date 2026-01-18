@@ -1,5 +1,12 @@
-#ifndef CONFIG_CONVERTER_HPP
-#define CONFIG_CONVERTER_HPP
+// =============================================================================
+// config_converter.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "utility/config_dict.hpp"
 
@@ -18,4 +25,4 @@ namespace simbi {
     void register_config_converters(py::module_& m);
 
 }   // namespace simbi
-#endif
+

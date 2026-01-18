@@ -1,5 +1,12 @@
-#ifndef PHYSICS_HYDRO_SOURCE_TERMS_HPP
-#define PHYSICS_HYDRO_SOURCE_TERMS_HPP
+// =============================================================================
+// source_terms.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -189,4 +196,4 @@ namespace simbi::geometry {
 
 } // namespace simbi::geometry
 
-#endif
+

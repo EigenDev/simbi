@@ -17,9 +17,7 @@
 //     // ... work ...
 //   } // automatically records timing
 // =============================================================================
-
-#ifndef TIMING_HPP
-#define TIMING_HPP
+#pragma once
 
 #include "build_config.hpp"
 #include "xpu/xpu.hpp"
@@ -127,5 +125,3 @@ namespace simbi::timing {
     };
 
 } // namespace simbi::timing
-
-#endif // TIMING_HPP

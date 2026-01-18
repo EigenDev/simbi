@@ -1,5 +1,12 @@
-#ifndef GEOMETRY_BOUNDARY_MAPS_HPP
-#define GEOMETRY_BOUNDARY_MAPS_HPP
+// =============================================================================
+// index_map.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "decorators.hpp"
@@ -222,4 +229,4 @@ namespace simbi::geometry {
 
 } // namespace simbi::geometry
 
-#endif // GRID_BOUNDARY_MAPS_HPP
+

@@ -1,5 +1,12 @@
-#ifndef XPU_TYPES_HPP
-#define XPU_TYPES_HPP
+// =============================================================================
+// types.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include <cstdint>
 
@@ -87,4 +94,5 @@ namespace simbi::xpu::core {
 
 } // namespace simbi::xpu::core
 
-#endif // HETERO_TYPES_HPP
+
+

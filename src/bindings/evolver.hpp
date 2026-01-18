@@ -1,5 +1,12 @@
-#ifndef BINDINGS_STATE_HPP
-#define BINDINGS_STATE_HPP
+// =============================================================================
+// evolver.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "utility/config_dict.hpp"
@@ -27,4 +34,4 @@ namespace simbi::hydrostate {
     );
 } // namespace simbi::hydrostate
 
-#endif
+

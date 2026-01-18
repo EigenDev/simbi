@@ -16,7 +16,6 @@
 //   ./dev.py build --gpu --unified-memory  # uses unified_memory
 //   ./dev.py build --gpu                   # uses device_memory (default)
 // =============================================================================
-
 #pragma once
 
 #include "build_options.hpp"
@@ -25,9 +24,7 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // memory space selection based on build configuration
-    // =============================================================================
+    
 
 #ifdef UNIFIED_MEMORY
     // development/debugging builds: unified memory for simplicity
@@ -41,9 +38,7 @@ namespace simbi::xpu::mem {
     constexpr const char* memory_space_name   = "device_memory";
 #endif
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
+    
 
     // primary memory space for simulation data
     using simulation_memory = sim_memory_space;
@@ -52,9 +47,7 @@ namespace simbi::xpu::mem {
     using production_memory  = device_memory_t;
     using development_memory = unified_memory_t;
 
-    // =============================================================================
-    // compile-time feature detection
-    // =============================================================================
+    
 
     constexpr bool is_unified_memory_build()
     {
@@ -66,9 +59,7 @@ namespace simbi::xpu::mem {
         return !uses_unified_memory;
     }
 
-    // =============================================================================
-    // conditional dirty tracking for memory coherency
-    // =============================================================================
+    
 
     // mark data as dirty on host (no-op for unified memory)
     template <typename Handle>

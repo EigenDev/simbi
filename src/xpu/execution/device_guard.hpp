@@ -9,7 +9,6 @@
 //   // ... work on device 1
 //   // guard destructor restores previous device
 // =============================================================================
-
 #pragma once
 
 #include "execution_space.hpp"

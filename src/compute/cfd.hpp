@@ -1,12 +1,18 @@
-#ifndef CFD_OPS_HPP
-#define CFD_OPS_HPP
-
 // =============================================================================
 // cfd.hpp
 //
-// cfd operations using block_geometry_t instead of mesh_config.
-// all operations are lazy computations that compose with the field algebra.
+// high-level cfd operations expressed as lazy, composable computations.
+// this file provides functions to build computation graphs for key cfd steps
+// like flux divergence, source terms (gravity, geometric), and the complete
+// godunov operator rhs.
+//
+// usage:
+//   auto fluxes = cfd::compute_fluxes(prims, ...);
+//   auto divergence = cfd::flux_divergence(fluxes, ...);
+//   auto sources = cfd::gravity_sources(...) + cfd::geometric_sources(...);
+//   auto rhs = divergence + sources;
 // =============================================================================
+#pragma once
 
 #include "base/stencil_view.hpp"
 #include "build_config.hpp"
@@ -31,10 +37,7 @@ namespace simbi::cfd {
     using namespace body::expr;
     using namespace body;
 
-    // =========================================================================
-    // geometry concept
-    // any type that provides the required geometric operations
-    // =========================================================================
+    
     template <typename G, std::uint64_t Rank>
     concept block_geometry_c = requires(const G& geo, const iarray<Rank>& idx, std::size_t dim) {
         { geo.comoving_volume(idx) } -> std::convertible_to<real>;
@@ -46,9 +49,7 @@ namespace simbi::cfd {
         { geo.scale_factors(idx) } -> std::convertible_to<vector_t<real, Rank>>;
     };
 
-    // =========================================================================
-    // flux divergence
-    // =========================================================================
+    
     template <typename Fluxes, typename Geometry>
     struct flux_divergence_op_t
     {
@@ -107,9 +108,7 @@ namespace simbi::cfd {
         };
     }
 
-    // =========================================================================
-    // gravity source terms
-    // =========================================================================
+    
     template <typename GravitySource, typename PrimField, typename Geometry>
     struct gravity_source_op_t
     {
@@ -161,9 +160,7 @@ namespace simbi::cfd {
         };
     }
 
-    // =========================================================================
-    // hydro source terms
-    // =========================================================================
+    
     template <typename HydroSource, typename ConsField, typename Geometry>
     struct hydro_source_op_t
     {
@@ -206,9 +203,7 @@ namespace simbi::cfd {
         };
     }
 
-    // =========================================================================
-    // geometric source terms (curvilinear coordinates)
-    // =========================================================================
+    
     template <typename PrimField, typename Geometry>
     struct geometric_source_op_t
     {
@@ -245,9 +240,7 @@ namespace simbi::cfd {
         };
     }
 
-    // =========================================================================
-    // flux computation at interfaces
-    // =========================================================================
+    
     template <typename PrimField, typename Geometry, typename CfdOps>
     struct compute_fluxes_op_t
     {
@@ -406,9 +399,7 @@ namespace simbi::cfd {
         }
     };
 
-    // =========================================================================
-    // godunov operator (complete RHS)
-    // =========================================================================
+    
     template <
         typename HydroState,
         typename Geometry,
@@ -456,9 +447,7 @@ namespace simbi::cfd {
         return intensive_rate.enum_map(maybe_extensive_converter_t{geometry});
     }
 
-    // =========================================================================
-    // body effects operator
-    // =========================================================================
+    
     template <typename Bodies, typename PrimField, typename Geometry, typename Diagnostics>
     struct body_effects_op_t
     {
@@ -537,9 +526,7 @@ namespace simbi::cfd {
         }
     };
 
-    // =========================================================================
-    // body effects computation
-    // =========================================================================
+    
     template <typename PrimField, typename Geometry, typename Bodies, typename Diagnostics>
     auto body_effects(
         const PrimField&                       prims,
@@ -558,5 +545,3 @@ namespace simbi::cfd {
     }
 
 } // namespace simbi::cfd
-
-#endif // CFD_OPS_HPP

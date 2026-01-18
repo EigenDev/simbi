@@ -20,7 +20,6 @@
 //   auto stream = device.create_stream();
 //   auto ptr = device.allocate(1024);
 // =============================================================================
-
 #pragma once
 
 #include "xpu/core/device_concepts.hpp"
@@ -38,9 +37,7 @@
 
 namespace simbi::xpu::vendors::rocm {
 
-    // =============================================================================
-    // rocm device handles
-    // =============================================================================
+    
 
     struct rocm_memory_handle_t
     {
@@ -85,9 +82,7 @@ namespace simbi::xpu::vendors::rocm {
         }
     };
 
-    // =============================================================================
-    // rocm device implementation (placeholder)
-    // =============================================================================
+    
 
     class rocm_device_t
     {
@@ -333,9 +328,7 @@ namespace simbi::xpu::vendors::rocm {
         std::int64_t device_id_;
     };
 
-    // =============================================================================
-    // concept verification
-    // =============================================================================
+    
 
     // verify that rocm_device_t satisfies hetero_device concept
     // (commented out because implementation is incomplete)
@@ -343,9 +336,7 @@ namespace simbi::xpu::vendors::rocm {
 
 } // namespace simbi::xpu::vendors::rocm
 
-// =============================================================================
-// implementation notes for future development
-// =============================================================================
+
 
 /*
 when implementing rocm support:
@@ -411,3 +402,4 @@ example usage after implementation:
 
     device.synchronize_stream(stream);
 */
+

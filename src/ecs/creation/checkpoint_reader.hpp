@@ -1,6 +1,3 @@
-#ifndef ECS_CREATION_CHECKPOINT_READER_HPP
-#define ECS_CREATION_CHECKPOINT_READER_HPP
-
 // =============================================================================
 // checkpoint_reader.hpp
 //
@@ -23,6 +20,7 @@
 //       part_group, block, locality
 //   );
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "ecs/components.hpp"
@@ -44,9 +42,7 @@
 
 namespace simbi::ecs::creation {
 
-    // =============================================================================
-    // checkpoint format version
-    // =============================================================================
+    
 
     // current checkpoint format version this code understands
     constexpr const char* CHECKPOINT_FORMAT_VERSION = "2.0";
@@ -90,9 +86,7 @@ namespace simbi::ecs::creation {
         }
     }
 
-    // =============================================================================
-    // validation helpers
-    // =============================================================================
+    
 
     template <std::uint64_t Rank>
     void validate_partition_domains(
@@ -129,9 +123,7 @@ namespace simbi::ecs::creation {
         }
     }
 
-    // =============================================================================
-    // checkpoint_reader_t
-    // =============================================================================
+    
 
     template <regime_t R, typename Conserved, typename Primitive, std::uint64_t Rank>
     struct checkpoint_reader_t
@@ -281,5 +273,3 @@ namespace simbi::ecs::creation {
     };
 
 } // namespace simbi::ecs::creation
-
-#endif // ECS_CREATION_CHECKPOINT_READER_HPP

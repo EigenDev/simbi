@@ -1,6 +1,3 @@
-#ifndef IO_DIAGNOSTICS_HPP
-#define IO_DIAGNOSTICS_HPP
-
 // =============================================================================
 // diagnostics.hpp
 //
@@ -13,6 +10,7 @@
 //       throw;
 //   }
 // =============================================================================
+#pragma once
 
 #include "ecs/geometry_visitor.hpp"
 #include "io/exceptions.hpp"
@@ -77,4 +75,4 @@ namespace simbi::diagnostics {
 
 } // namespace simbi::diagnostics
 
-#endif // IO_DIAGNOSTICS_HPP
+

@@ -16,7 +16,6 @@
 //   auto stream = cuda_space::create_stream();
 //   cuda_space::synchronize_stream(stream);
 // =============================================================================
-
 #pragma once
 
 #include "xpu/core/device_concepts.hpp"

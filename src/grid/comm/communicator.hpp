@@ -1,5 +1,12 @@
-#ifndef GRID_COMM_COMMUNICATOR_HPP
-#define GRID_COMM_COMMUNICATOR_HPP
+// =============================================================================
+// communicator.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
@@ -102,4 +109,4 @@ namespace simbi::grid::comm {
 
 } // namespace simbi::grid::comm
 
-#endif
+

@@ -1,5 +1,12 @@
-#ifndef IO_SERIAL_DOMAIN_HPP
-#define IO_SERIAL_DOMAIN_HPP
+// =============================================================================
+// domain_serial.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "grid/domain.hpp"
 #include "io/h5_serializable.hpp"
@@ -12,9 +19,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // h5_serializable specialization for domain_t
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct h5_serializable<grid::domain_t<Rank>> {
         static constexpr std::string_view group_name = "domain";
@@ -101,4 +106,4 @@ namespace simbi::io {
 
 }   // namespace simbi::io
 
-#endif   // IO_SERIAL_DOMAIN_HPP
+

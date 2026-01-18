@@ -13,7 +13,6 @@
 // usage:
 //   cpu_dispatch(domain, tile_size, use_serial, [](auto idx) { /* work */ });
 // =============================================================================
-
 #pragma once
 
 #include "grid/domain.hpp"

@@ -1,5 +1,12 @@
-#ifndef GRID_SKELETON_HPP
-#define GRID_SKELETON_HPP
+// =============================================================================
+// skeleton.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "block_info.hpp"
 #include "domain.hpp"
@@ -90,4 +97,4 @@ namespace simbi::grid {
 
 }   // namespace simbi::grid
 
-#endif   // GRID_SKELETON_HPP
+

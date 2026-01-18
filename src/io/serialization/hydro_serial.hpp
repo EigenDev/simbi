@@ -1,5 +1,12 @@
-#ifndef IO_SERIAL_HYDRO_HPP
-#define IO_SERIAL_HYDRO_HPP
+// =============================================================================
+// hydro_serial.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -15,9 +22,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // h5_serializable specialization for partition_fields_t
-    // =========================================================================
+    
     template <typename Conserved, typename Primitive, std::uint64_t Rank>
     struct h5_serializable<ecs::partition_fields_t<Conserved, Primitive, Rank>>
     {
@@ -283,4 +288,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif // IO_SERIAL_HYDRO_HPP
+

@@ -15,9 +15,7 @@
 //   int count = xpu::vendors::cuda::get_device_count();
 //   auto props = xpu::vendors::cuda::get_properties(0);
 // =============================================================================
-
-#ifndef XPU_VENDORS_CUDA_DEVICE_QUERIES_HPP
-#define XPU_VENDORS_CUDA_DEVICE_QUERIES_HPP
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -29,9 +27,7 @@
 
 namespace simbi::xpu::vendors::cuda {
 
-    // =========================================================================
-    // device properties structure
-    // =========================================================================
+    
     struct device_properties_t
     {
         std::string  name;
@@ -54,9 +50,7 @@ namespace simbi::xpu::vendors::cuda {
         bool         ecc_enabled;
     };
 
-    // =========================================================================
-    // device count query
-    // =========================================================================
+    
     inline int get_device_count()
     {
 #ifdef XPU_CUDA_AVAILABLE
@@ -71,9 +65,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
     }
 
-    // =========================================================================
-    // current device query
-    // =========================================================================
+    
     inline int get_current_device()
     {
 #ifdef XPU_CUDA_AVAILABLE
@@ -88,9 +80,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
     }
 
-    // =========================================================================
-    // set active device
-    // =========================================================================
+    
     inline bool set_device(std::int64_t device_id)
     {
 #ifdef XPU_CUDA_AVAILABLE
@@ -102,9 +92,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
     }
 
-    // =========================================================================
-    // device properties query (cuda 12+ compatible)
-    // =========================================================================
+    
     inline device_properties_t get_properties(std::int64_t device_id)
     {
         device_properties_t props{};
@@ -156,9 +144,7 @@ namespace simbi::xpu::vendors::cuda {
         return props;
     }
 
-    // =========================================================================
-    // memory info query
-    // =========================================================================
+    
     struct memory_info_t
     {
         std::size_t free_bytes;
@@ -187,9 +173,7 @@ namespace simbi::xpu::vendors::cuda {
         return info;
     }
 
-    // =========================================================================
-    // device synchronization
-    // =========================================================================
+    
     inline bool synchronize(std::int64_t device_id)
     {
 #ifdef XPU_CUDA_AVAILABLE
@@ -216,9 +200,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
     }
 
-    // =========================================================================
-    // peer-to-peer access query
-    // =========================================================================
+    
     inline bool can_access_peer(std::int64_t device_id, int peer_device_id)
     {
 #ifdef XPU_CUDA_AVAILABLE
@@ -232,9 +214,7 @@ namespace simbi::xpu::vendors::cuda {
 #endif
     }
 
-    // =========================================================================
-    // enable peer-to-peer access
-    // =========================================================================
+    
     inline bool enable_peer_access(std::int64_t device_id, int peer_device_id)
     {
 #ifdef XPU_CUDA_AVAILABLE
@@ -265,4 +245,5 @@ namespace simbi::xpu::vendors::cuda {
 
 } // namespace simbi::xpu::vendors::cuda
 
-#endif // XPU_VENDORS_CUDA_DEVICE_QUERIES_HPP
+
+

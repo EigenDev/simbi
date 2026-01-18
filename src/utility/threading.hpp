@@ -9,9 +9,7 @@
 //   auto max_threads = threading::hardware_concurrency();
 //   threading::set_thread_affinity(cpu_id);
 // =============================================================================
-
-#ifndef UTILITY_THREADING_HPP
-#define UTILITY_THREADING_HPP
+#pragma once
 
 #include <algorithm>
 #include <cstddef>
@@ -20,9 +18,7 @@
 
 namespace simbi::threading {
 
-    // =========================================================================
-    // hardware queries using standard library
-    // =========================================================================
+    
 
     // get maximum available hardware threads
     inline std::size_t hardware_concurrency() noexcept
@@ -44,9 +40,7 @@ namespace simbi::threading {
         return std::clamp(requested, std::size_t{1}, max_threads);
     }
 
-    // =========================================================================
-    // thread identification
-    // =========================================================================
+    
 
     // get current thread id as size_t (for indexing)
     inline std::size_t current_thread_index() noexcept
@@ -62,5 +56,3 @@ namespace simbi::threading {
     }
 
 } // namespace simbi::threading
-
-#endif // UTILITY_THREADING_HPP

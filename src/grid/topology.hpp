@@ -1,5 +1,12 @@
-#ifndef GRID_MESH_TOPLOGY_HPP
-#define GRID_MESH_TOPLOGY_HPP
+// =============================================================================
+// topology.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "field.hpp"
 #include "patch_id.hpp"
@@ -117,4 +124,4 @@ namespace simbi::grid {
 
 } // namespace simbi::grid
 
-#endif // GRID_MESH_TOPLOGY_HPP
+

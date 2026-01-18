@@ -1,54 +1,12 @@
-/**
- *=============================================================================
- *           SIMBI - Special Relativistic Magnetohydrodynamics Code
- *=============================================================================
- *
- * @file            body_delta.hpp
- * @brief           body_delta_t class for representing changes in body
- *properties
- * @details
- *
- * @version         0.8.0
- * @date            2025-05-11
- * @author          Marcus DuPont
- * @email           marcus.dupont@princeton.edu
- *
- *==============================================================================
- * @build           Requirements & Dependencies
- *==============================================================================
- * @requires        C++20
- * @depends         CUDA >= 11.0, HDF5 >= 1.12, OpenMP >= 4.5
- * @platform        Linux, MacOS
- * @parallel        GPU (CUDA, HIP), CPU (OpenMP)
- *
- *==============================================================================
- * @documentation   Reference & Notes
- *==============================================================================
- * @usage
- * @note
- * @warning
- * @todo
- * @bug
- * @performance
- *
- *==============================================================================
- * @testing        Quality Assurance
- *==============================================================================
- * @test
- * @benchmark
- * @validation
- *
- *==============================================================================
- * @history        Version History
- *==============================================================================
- * 2025-05-11      v0.8.0      Initial implementation
- *
- *==============================================================================
- * @copyright (C) 2025 Marcus DuPont. All rights reserved.
- *==============================================================================
- */
-#ifndef BODY_DELTA_HPP
-#define BODY_DELTA_HPP
+// =============================================================================
+// body_delta.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp" // for vector_t
@@ -93,4 +51,4 @@ namespace simbi::body {
     };
 } // namespace simbi::body
 
-#endif
+

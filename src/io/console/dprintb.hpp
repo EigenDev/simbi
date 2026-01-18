@@ -21,9 +21,7 @@
 //   {:.2e}      - 2 decimal places, scientific
 //   {:>10.3e}   - combined: right align, width 10, 3 decimals, scientific
 // =============================================================================
-
-#ifndef PRINTB_HPP
-#define PRINTB_HPP
+#pragma once
 
 #include "utility/enums.hpp"
 #include "utility/helpers.hpp"
@@ -212,4 +210,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif
+

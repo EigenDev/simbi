@@ -1,5 +1,12 @@
-#ifndef GRID_GEOMETRY_API_HPP
-#define GRID_GEOMETRY_API_HPP
+// =============================================================================
+// api.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -136,4 +143,4 @@ namespace simbi {
     );
 } // namespace simbi
 
-#endif
+

@@ -1,5 +1,12 @@
-#ifndef PHYSICS_EM_HPP
-#define PHYSICS_EM_HPP
+// =============================================================================
+// electromagnetism.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "containers/vector.hpp"
@@ -27,4 +34,4 @@ namespace simbi::em {
     }
 
 } // namespace simbi::em
-#endif
+

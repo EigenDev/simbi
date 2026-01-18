@@ -1,5 +1,12 @@
-#ifndef UTILITY_BIMAP_HPP
-#define UTILITY_BIMAP_HPP
+// =============================================================================
+// bimap.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include <algorithm>
 #include <array>
@@ -153,5 +160,3 @@ namespace simbi {
             data{{__VA_ARGS__}};                                               \
         static constexpr auto map = EnumBiMap<EnumType, data.size()>{data};    \
     };
-
-#endif

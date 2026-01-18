@@ -1,12 +1,10 @@
-#ifndef ECS_GEOMETRY_VISITOR_HPP
-#define ECS_GEOMETRY_VISITOR_HPP
-
 // =============================================================================
 // geometry_visitor.hpp
 //
 // visitor pattern for building block geometry from mesh config.
 // handles log/uniform coordinate map variants at runtime.
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "geometry/api.hpp"
@@ -22,18 +20,7 @@
 
 namespace simbi::ecs {
 
-    // =========================================================================
-    // with_block_geometry
-    //
-    // builds block geometry from mesh config and invokes callback.
-    // G is known at compile time from the simulation template.
-    // uses visitor pattern to handle log/uniform map variants.
-    //
-    // usage:
-    //   with_block_geometry<G>(mesh_cfg, motion, [&](const auto& geo) {
-    //       auto h = geo.scale_factors(coord);
-    //   });
-    // =========================================================================
+    
     template <geometry_t G, std::uint64_t Rank, typename Func>
     decltype(auto) with_block_geometry(
         const grid::mesh_config_t<Rank>& mesh_cfg,
@@ -172,5 +159,3 @@ namespace simbi::ecs {
     }
 
 } // namespace simbi::ecs
-
-#endif // ECS_GEOMETRY_VISITOR_HPP

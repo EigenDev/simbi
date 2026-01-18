@@ -1,5 +1,12 @@
-#ifndef GRID_BOUNDARY_HPP
-#define GRID_BOUNDARY_HPP
+// =============================================================================
+// boundary.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "utility/bimap.hpp"
@@ -104,4 +111,4 @@ namespace simbi {
     }
 } // namespace simbi
 
-#endif // GRID_BOUNDARY_HPP
+

@@ -1,6 +1,12 @@
-
-#ifndef DOMAIN_ALGEBRA_HPP
-#define DOMAIN_ALGEBRA_HPP
+// =============================================================================
+// algebra.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "domain.hpp"
@@ -343,4 +349,4 @@ namespace simbi::grid::domain_algebra {
 
 } // namespace simbi::grid::domain_algebra
 
-#endif
+

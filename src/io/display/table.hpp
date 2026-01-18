@@ -1,6 +1,3 @@
-#ifndef DISPLAY_TABLE_HPP
-#define DISPLAY_TABLE_HPP
-
 // =============================================================================
 // table.hpp
 //
@@ -15,6 +12,7 @@
 //   table.post_info("Checkpoint saved");
 //   table.refresh();
 // =============================================================================
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -65,4 +63,4 @@ namespace simbi::display {
 
 } // namespace simbi::display
 
-#endif // DISPLAY_TABLE_HPP
+

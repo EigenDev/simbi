@@ -17,7 +17,6 @@
 //   auto future = arena.submit([](){ return 42; });
 //   future.wait();
 // =============================================================================
-
 #pragma once
 
 #include <atomic>

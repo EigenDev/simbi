@@ -1,5 +1,12 @@
-#ifndef HYDRO_HLLD_HPP
-#define HYDRO_HLLD_HPP
+// =============================================================================
+// hlld.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"     // for is_hydro_primitive_c, is_mhd_primitive_c
 #include "build_config.hpp"      // for build::epsilon
@@ -360,5 +367,3 @@ namespace simbi::hydro::rmhd {
         return net_flux;
     };
 } // namespace simbi::hydro::rmhd
-
-#endif // HYDRO_HLLD_HPP

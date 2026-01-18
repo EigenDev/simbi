@@ -1,6 +1,3 @@
-#ifndef ECS_BUILDERS_SIMULATION_BUILDER_HPP
-#define ECS_BUILDERS_SIMULATION_BUILDER_HPP
-
 // =============================================================================
 // sim.hpp
 //
@@ -22,6 +19,7 @@
 //       .configure_decomposition(decomp_bp)  // optional, defaults to single
 //       .build();
 // =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "dag/express_t.hpp"
@@ -61,9 +59,7 @@ namespace simbi::ecs::builders {
         using conserved_t = typename sim_t::conserved_t;
         using primitive_t = typename sim_t::primitive_t;
 
-        // =========================================================================
-        // blueprint storage
-        // =========================================================================
+        
 
         mesh_blueprint_t<Rank> mesh_bp_;
         physics_blueprint_t    phys_bp_;
@@ -87,9 +83,7 @@ namespace simbi::ecs::builders {
         // default is device 0 (works for both cpu and gpu)
         std::int64_t base_device_id_ = 0;
 
-        // =========================================================================
-        // configuration methods (fluent interface)
-        // =========================================================================
+        
 
         auto& configure_mesh(const mesh_blueprint_t<Rank>& bp)
         {
@@ -178,9 +172,7 @@ namespace simbi::ecs::builders {
             return *this;
         }
 
-        // =========================================================================
-        // build
-        // =========================================================================
+        
 
         sim_t build()
         {
@@ -667,5 +659,3 @@ namespace simbi::ecs::builders {
     };
 
 } // namespace simbi::ecs::builders
-
-#endif

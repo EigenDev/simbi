@@ -1,5 +1,17 @@
-#ifndef STATE_OPS_HPP
-#define STATE_OPS_HPP
+// =============================================================================
+// state_ops.hpp
+//
+// provides generic operations on physical state structs.
+// this file defines a trait-based system (`state_traits`) and operator
+// overloads (`+`, `*`, `|`, etc.) to create a small domain-specific language
+// (dsl) for manipulating hydro and mhd state variables (e.g., primitive,
+// conserved) in a generic, composable way.
+//
+// usage:
+//   auto new_state = old_state | structs::scale_gas(0.5) | structs::add_gas(other_state);
+//   auto sum = state1 + state2;
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -532,5 +544,3 @@ namespace simbi::structs {
     }
 
 } // namespace simbi::structs
-
-#endif // STATE_OPS_HPP

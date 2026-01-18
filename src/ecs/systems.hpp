@@ -1,18 +1,16 @@
-#ifndef SYSTEMS_HPP
-#define SYSTEMS_HPP
-
 // =============================================================================
 // systems.hpp
 //
 // ecs systems for partition-aware multi-device simulations.
 // each system operates on partitions, using executors for kernel dispatch.
 //
-// key changes from systems.hpp:
+// key changes from previous system design:
 //   - uses partition_hydro(lvl, part) instead of hydro(lvl)
 //   - uses partition_executor(lvl, part) for kernel dispatch
 //   - uses grid/amr/* for amr operations
 //   - geometry uses motion_state_t snapshots
 // =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "compute/cfd.hpp"
@@ -49,13 +47,6 @@ namespace simbi::ecs {
 
     using namespace simbi::cfd;
 
-    // =========================================================================
-    // body effects system
-    //
-    // computes gravity and accretion effects for a single partition.
-    // caller loops over partitions. returns source term for integration.
-    // only finest level at body position gets real diagnostics.
-    // =========================================================================
     template <std::uint64_t Rank>
     struct body_effects_system_t
     {
@@ -157,10 +148,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // timestep system
-    // computes dt for all levels, applies subcycling logic
-    // =========================================================================
     struct timestep_system_t
     {
         template <typename Sim>
@@ -286,10 +273,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // conservative to primitive recovery (interior cells only)
-    // ghost cells are filled directly in primitive space by ghost_fill_system_t
-    // =========================================================================
     struct c2p_system_t
     {
         template <typename Sim, typename BlocklGeometry>
@@ -311,10 +294,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // boundary condition system
-    // uses geometry/boundary/driver.hpp for physical boundaries
-    // =========================================================================
     struct ghost_fill_system_t
     {
         // if true, prolongate from workspace.u_n instead of cons
@@ -571,11 +550,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // compute electric fields system
-    // computes edge-centered E-fields from fluxes and primitives
-    // and stores them in partition_fields.efield
-    // =========================================================================
     struct compute_efield_system_t
     {
         template <typename Sim>
@@ -599,9 +573,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // flux computation system
-    // =========================================================================
     struct flux_system_t
     {
         template <typename Sim, typename Ops, typename Geometry>
@@ -642,13 +613,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // zero flux buffer for a level (before subcycling)
-    // =========================================================================
-
-    // =========================================================================
-    // snapshot u^n and prim^n before subcycling (needed for time interpolation)
-    // =========================================================================
     struct snapshot_u_n_system_t
     {
         template <typename Sim>
@@ -670,9 +634,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // euler time integration
-    // =========================================================================
     template <typename Ops>
     struct euler_system_t
     {
@@ -728,9 +689,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // rk2 stage 1: u^n -> u*
-    // =========================================================================
     template <typename Ops>
     struct rk2_stage1_system_t
     {
@@ -787,9 +745,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // rk2 stage 2 functor
-    // =========================================================================
     template <typename UStarComp, typename K2Comp, typename BEComp>
     struct rk2_final_stage_t
     {
@@ -813,9 +768,6 @@ namespace simbi::ecs {
     rk2_final_stage_t(UStarComp u_star, K2Comp k2, BEComp be, real dt)
         -> rk2_final_stage_t<UStarComp, K2Comp, BEComp>;
 
-    // =========================================================================
-    // rk2 stage 2 system
-    // =========================================================================
     template <typename Ops>
     struct rk2_stage2_system_t
     {
@@ -879,10 +831,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // restriction (fine -> coarse)
-    // averages fine cells onto overlapping coarse cells
-    // =========================================================================
     struct restriction_system_t
     {
         template <typename Sim>
@@ -965,10 +913,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // prolongation (coarse -> fine ghosts)
-    // fills fine level ghost cells by interpolating from coarse
-    // =========================================================================
     struct prolongation_system_t
     {
         template <typename Sim>
@@ -1026,9 +970,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // synchronize all partitions of a level
-    // =========================================================================
     struct synchronize_system_t
     {
         template <typename Sim>
@@ -1041,10 +982,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // flux register initialization
-    // creates flux registers for coarse-fine boundaries
-    // =========================================================================
     struct init_flux_registers_system_t
     {
         template <typename Sim>
@@ -1094,10 +1031,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // zero flux registers
-    // must be called at the start of each coarse timestep
-    // =========================================================================
     struct zero_flux_registers_system_t
     {
         template <typename Sim>
@@ -1122,10 +1055,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // flux register accumulation (coarse side)
-    // accumulates -F_coarse * dt into registers
-    // =========================================================================
     struct accumulate_coarse_flux_system_t
     {
         template <typename Sim>
@@ -1179,10 +1108,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // flux register accumulation (fine side)
-    // accumulates +average(F_fine) * dt into registers
-    // =========================================================================
     struct accumulate_fine_flux_system_t
     {
         template <typename Sim>
@@ -1247,11 +1172,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =========================================================================
-    // reflux system
-    // applies accumulated flux mismatch to coarse level conserved variables
-    // call after fine level completes all subcycles
-    // =========================================================================
     struct reflux_system_t
     {
         template <typename Sim>
@@ -1289,9 +1209,6 @@ namespace simbi::ecs {
         }
     };
 
-    // =======================================================================
-    // sink cache system`
-    // =======================================================================
     struct sink_cache_system_t
     {
         template <typename Sim>
@@ -1302,5 +1219,3 @@ namespace simbi::ecs {
     };
 
 } // namespace simbi::ecs
-
-#endif // SYSTEMS_HPP

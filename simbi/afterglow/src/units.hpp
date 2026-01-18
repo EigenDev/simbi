@@ -23,9 +23,7 @@
 //   - scalar multiply/divide: preserves dimensions
 //
 // =============================================================================
-
-#ifndef SIMBI_AFTERGLOW_UNITS_HPP
-#define SIMBI_AFTERGLOW_UNITS_HPP
+#pragma once
 
 #include <cmath>
 #include <ostream>
@@ -187,9 +185,7 @@ namespace simbi::afterglow {
         }
     };
 
-    // =============================================================================
-    // fundamental dimensions (cgs units)
-    // =============================================================================
+    
 
     using mass_t        = quantity_t<1, 0, 0, 0, 0>; // gram
     using length_t      = quantity_t<0, 1, 0, 0, 0>; // centimeter
@@ -224,9 +220,7 @@ namespace simbi::afterglow {
     using emissivity_t          = quantity_t<1, -1, -2, 0, 0>; // erg/cm/s
     using spectral_emissivity_t = quantity_t<1, -1, -2, 0, 0>; // erg/cm/s (same as emissivity)
 
-    // =============================================================================
-    // common unit literals (cgs)
-    // =============================================================================
+    
 
     namespace literals {
         // fundamental
@@ -286,9 +280,7 @@ namespace simbi::afterglow {
         }
     } // namespace literals
 
-    // =============================================================================
-    // unit conversions (define base units, derive others)
-    // =============================================================================
+    
 
     // mass
     constexpr double kg_to_g    = 1e3;
@@ -322,9 +314,7 @@ namespace simbi::afterglow {
     constexpr spectral_flux_t jansky      = spectral_flux_t{jy_to_cgs};
     constexpr spectral_flux_t millijansky = spectral_flux_t{mjy_to_cgs};
 
-    // =============================================================================
-    // unit constants (simple multipliers for clean code)
-    // =============================================================================
+    
 
     namespace units {
         // base units
@@ -347,9 +337,7 @@ namespace simbi::afterglow {
         constexpr spectral_flux_t  jy{jy_to_cgs};    // jansky
     } // namespace units
 
-    // =============================================================================
-    // math functions preserving dimensions
-    // =============================================================================
+    
 
     // sqrt: halve all dimensions
     template <int M, int L, int T, int Q, int K>
@@ -376,9 +364,7 @@ namespace simbi::afterglow {
         return quantity_t<M, L, T, Q, K>{std::abs(q.value)};
     }
 
-    // =============================================================================
-    // output streaming
-    // =============================================================================
+    
 
     template <int M, int L, int T, int Q, int K>
     std::ostream& operator<<(std::ostream& os, quantity_t<M, L, T, Q, K> q)
@@ -413,5 +399,3 @@ namespace simbi::afterglow {
     }
 
 } // namespace simbi::afterglow
-
-#endif // SIMBI_AFTERGLOW_UNITS_HPP

@@ -1,6 +1,3 @@
-#ifndef DISPLAY_TERMINAL_HPP
-#define DISPLAY_TERMINAL_HPP
-
 // =============================================================================
 // terminal.hpp
 //
@@ -12,6 +9,7 @@
 //   std::int64_t w = terminal_t::width();
 //   std::cout << color::header() << "Title" << color::reset();
 // =============================================================================
+#pragma once
 
 #include <cstdint>
 #include <string>
@@ -110,4 +108,4 @@ namespace simbi::display {
 
 } // namespace simbi::display
 
-#endif // DISPLAY_TERMINAL_HPP
+

@@ -10,9 +10,7 @@
 // initialization:
 //   runtime::initialize(); // reads environment variables
 // =============================================================================
-
-#ifndef SIMBI_RUNTIME_CONFIG_HPP
-#define SIMBI_RUNTIME_CONFIG_HPP
+#pragma once
 
 #include <cstdint>
 #include <cstdlib>
@@ -62,5 +60,3 @@ namespace simbi::runtime {
     }
 
 } // namespace simbi::runtime
-
-#endif

@@ -1,5 +1,12 @@
-#ifndef FP_TOOLKIT_HPP
-#define FP_TOOLKIT_HPP
+// =============================================================================
+// fp.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "decorators.hpp"
 
@@ -18,12 +25,7 @@ namespace simbi::fp {
     template <typename T, std::uint64_t Rank>
     struct vector_t;
 
-    // =========================================================================
-    // lambda lifting
-    //
-    // provides a wrapper to make __device__ lambdas more robust for nvcc's
-    // type deduction by giving them a "cleaner" type.
-    // =========================================================================
+    
 
     template <typename L>
     struct lifted_lambda_t
@@ -45,9 +47,7 @@ namespace simbi::fp {
         return lifted_lambda_t<L>{lambda};
     }
 
-    // =========================================================================
-    // common device functors
-    // =========================================================================
+    
 
     // pair creation
     struct make_pair_t
@@ -111,9 +111,7 @@ namespace simbi::fp {
         return scalar_add_t<S>{scalar};
     }
 
-    // =========================================================================
-    // core composition
-    // =========================================================================
+    
 
     template <typename F, typename G>
     struct compose_t
@@ -153,9 +151,7 @@ namespace simbi::fp {
         }
     }
 
-    // =========================================================================
-    // partial application
-    // =========================================================================
+    
 
     template <typename F, typename... BoundArgs>
     struct partial_t
@@ -184,9 +180,7 @@ namespace simbi::fp {
         return partial_t<F, BoundArgs...>{f, std::make_tuple(args...)};
     }
 
-    // =========================================================================
-    // conditional selection
-    // =========================================================================
+    
 
     template <typename Pred, typename A, typename B>
     struct select_t
@@ -208,9 +202,7 @@ namespace simbi::fp {
         return select_t<Pred, A, B>{pred, a, b};
     }
 
-    // =========================================================================
-    // zip operations
-    // =========================================================================
+    
 
     template <typename F, typename G, typename BinaryOp>
     struct zip_t
@@ -232,9 +224,7 @@ namespace simbi::fp {
         return zip_t<F, G, BinaryOp>{f, g, op};
     }
 
-    // =========================================================================
-    // basic operators
-    // =========================================================================
+    
     template <typename Scalar>
     struct scale_op_t
     {
@@ -337,9 +327,7 @@ namespace simbi::fp {
     inline constexpr negate_op_t   negate_op{};
     inline constexpr average_op_t  average_op{};
 
-    // =========================================================================
-    // coordinate transforms
-    // =========================================================================
+    
 
     template <std::uint64_t Rank>
     struct offset_transform_t
@@ -359,9 +347,7 @@ namespace simbi::fp {
         return offset_transform_t<Rank>{offset};
     }
 
-    // =========================================================================
-    // domain predicates
-    // =========================================================================
+    
 
     template <std::uint64_t Rank>
     struct domain_predicate_t
@@ -399,9 +385,7 @@ namespace simbi::fp {
         return contains_op_t<Rank>{domain};
     }
 
-    // =========================================================================
-    // utilities
-    // =========================================================================
+    
 
     struct identity_t
     {
@@ -432,9 +416,7 @@ namespace simbi::fp {
         return constant_t<T>{std::move(value)};
     }
 
-    // =========================================================================
-    // folds and reductions (simplified)
-    // =========================================================================
+    
 
     template <typename Range, typename BinaryOp>
     constexpr DUAL auto fold(Range&& range, BinaryOp op)
@@ -463,5 +445,3 @@ namespace simbi::fp {
     }
 
 } // namespace simbi::fp
-
-#endif // FP_TOOLKIT_HPP

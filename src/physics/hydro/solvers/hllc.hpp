@@ -1,5 +1,12 @@
-#ifndef HYDRO_HLLC_HPP
-#define HYDRO_HLLC_HPP
+// =============================================================================
+// hllc.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"     // for is_hydro_primitive_c
 #include "build_config.hpp"      // for real type
@@ -197,9 +204,7 @@ namespace simbi::hydro {
 
 } // namespace simbi::hydro
 
-// ==========================================================================
-// NEWTONIAN HLLC FLUX
-// ==========================================================================
+
 namespace simbi::hydro::newtonian {
     using namespace simbi::concepts;
     template <is_hydro_primitive_c primitive_t>
@@ -294,9 +299,7 @@ namespace simbi::hydro::newtonian {
     }
 } // namespace simbi::hydro::newtonian
 
-// ==========================================================================
-// SRHD HLLC FLUX
-// =========================================================================
+
 namespace simbi::hydro::srhd {
     using namespace simbi::concepts;
 
@@ -532,5 +535,3 @@ namespace simbi::hydro {
         }
     }
 } // namespace simbi::hydro
-
-#endif

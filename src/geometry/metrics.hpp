@@ -1,5 +1,12 @@
-#ifndef SIMBI_GEOMETRY_METRIC_HPP
-#define SIMBI_GEOMETRY_METRIC_HPP
+// =============================================================================
+// metrics.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -37,10 +44,6 @@ namespace simbi::geometry {
         }
     };
 
-    // =========================================================================
-    // cartesian metric
-    // orthogonal, flat. dv = dx * dy * dz
-    // =========================================================================
     template <typename Map1, typename Map2 = dummy_map_t, typename Map3 = dummy_map_t>
     struct cartesian_metric_t
     {
@@ -183,10 +186,6 @@ namespace simbi::geometry {
         }
     };
 
-    // =========================================================================
-    // spherical metric (r, theta, phi)
-    // dv = r^2 sin(theta) dr dtheta dphi
-    // =========================================================================
     template <typename MapR, typename MapTheta = dummy_map_t, typename MapPhi = dummy_map_t>
     struct spherical_metric_t
     {
@@ -402,10 +401,6 @@ namespace simbi::geometry {
         }
     };
 
-    // =========================================================================
-    // cylindrical metric (r, phi, z)
-    // dv = r dr dphi dz
-    // =========================================================================
     struct full_cylindrical_tag
     {
     };
@@ -690,5 +685,3 @@ namespace simbi::geometry {
     cylindrical_metric_t(MR, MPhi, MZ) -> cylindrical_metric_t<MR, MPhi, MZ>;
 
 } // namespace simbi::geometry
-
-#endif // SIMBI_GEOMETRY_METRIC_HPP

@@ -17,9 +17,7 @@
 //       int idx = xpu::get_global_thread_id();
 //   }
 // =============================================================================
-
-#ifndef XPU_DEVICE_GRID_HPP
-#define XPU_DEVICE_GRID_HPP
+#pragma once
 
 #include "decorators.hpp"
 
@@ -284,4 +282,5 @@ namespace simbi::xpu::device {
 
 } // namespace simbi::xpu::device
 
-#endif
+
+

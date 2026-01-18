@@ -1,5 +1,16 @@
-#ifndef EXPRESSION_HPP
-#define EXPRESSION_HPP
+// =============================================================================
+// expression.hpp
+//
+// defines the core data structures for the expression dag.
+// this file contains the `exprnode` struct and the `exprop` enum, which form
+// the building blocks of a directed acyclic graph (dag) representing a
+// mathematical expression. it also defines `linearexprinstr` for a
+// virtual machine-style representation of the expression.
+//
+// usage:
+//   exprnode node = exprnode::binary(exprop::add, child1_idx, child2_idx);
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 
@@ -180,5 +191,3 @@ namespace simbi::expression {
     };
 
 } // namespace simbi::expression
-
-#endif

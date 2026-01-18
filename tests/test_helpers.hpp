@@ -1,5 +1,12 @@
-#ifndef SIMBI_TEST_HELPERS_HPP
-#define SIMBI_TEST_HELPERS_HPP
+// =============================================================================
+// test_helpers.hpp
+//
+// [TODO: Add description]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 // lightweight test helpers to adapt lambdas into computable functors
 // these allow legacy tests to continue using lambda-style computations
@@ -54,5 +61,3 @@ namespace test_helpers {
     }
 
 } // namespace test_helpers
-
-#endif // SIMBI_TEST_HELPERS_HPP

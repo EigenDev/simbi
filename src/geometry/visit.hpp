@@ -1,5 +1,12 @@
-#ifndef GRID_GEOMETRY_VISIT_HPP
-#define GRID_GEOMETRY_VISIT_HPP
+// =============================================================================
+// visit.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "grid/patch_id.hpp"
 
@@ -39,4 +46,4 @@ namespace simbi::geometry {
 
 } // namespace simbi::geometry
 
-#endif
+

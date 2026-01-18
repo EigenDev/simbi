@@ -1,6 +1,3 @@
-#ifndef ECS_CREATION_DECOMPOSITION_HPP
-#define ECS_CREATION_DECOMPOSITION_HPP
-
 // =============================================================================
 // decomposition.hpp
 //
@@ -22,6 +19,7 @@
 //       locality            // where to allocate (host or device)
 //   );
 // =============================================================================
+#pragma once
 
 #include "base/concepts.hpp"
 #include "build_config.hpp"
@@ -539,5 +537,3 @@ namespace simbi::ecs::creation {
     };
 
 } // namespace simbi::ecs::creation
-
-#endif // ECS_CREATION_DECOMPOSITION_HPP

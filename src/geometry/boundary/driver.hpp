@@ -1,5 +1,12 @@
-#ifndef GRID_BOUNDARY_DRIVER_HPP
-#define GRID_BOUNDARY_DRIVER_HPP
+// =============================================================================
+// driver.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -479,4 +486,4 @@ namespace simbi::geometry {
 
 } // namespace simbi::geometry
 
-#endif // GRID_BOUNDARY_DRIVER_HPP
+

@@ -1,5 +1,12 @@
-#ifndef GRID_EXCHANGE_PATTERN_HPP
-#define GRID_EXCHANGE_PATTERN_HPP
+// =============================================================================
+// exchange_pattern.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "connectivity.hpp"
 #include "domain.hpp"
@@ -157,4 +164,4 @@ namespace simbi::grid {
 
 }   // namespace simbi::grid
 
-#endif
+

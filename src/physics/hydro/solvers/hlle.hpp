@@ -1,5 +1,12 @@
-#ifndef HYDRO_HLLE_HPP
-#define HYDRO_HLLE_HPP
+// =============================================================================
+// hlle.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 // HLLE is the same for all regimes, so it can be defined here
 #include "base/concepts.hpp"
@@ -58,5 +65,3 @@ namespace simbi::hydro {
         return net_flux;
     }
 } // namespace simbi::hydro
-
-#endif

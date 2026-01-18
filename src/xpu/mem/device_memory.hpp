@@ -10,7 +10,6 @@
 //   shared_buffer_t<int, device_memory_t> buffer(n);
 //   bool accessible = device_memory_t::is_accessible_from<host_memory>();
 // =============================================================================
-
 #pragma once
 
 #include "memory_space.hpp"
@@ -27,23 +26,17 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // device memory space
-    // =============================================================================
+    
 
     struct device_memory_t
     {
-        // =============================================================================
-        // type requirements for memory_space concept
-        // =============================================================================
+        
 
         using pointer_type       = void*;
         using const_pointer_type = const void*;
         using size_type          = std::size_t;
 
-        // =============================================================================
-        // compile-time properties
-        // =============================================================================
+        
 
         static constexpr std::string_view space_name()
         {
@@ -66,9 +59,7 @@ namespace simbi::xpu::mem {
             return 300.0; // typical for mid-range gpus
         }
 
-        // =============================================================================
-        // allocation and deallocation
-        // =============================================================================
+        
 
         static void* allocate(std::size_t size)
         {
@@ -120,9 +111,7 @@ namespace simbi::xpu::mem {
 #endif
         }
 
-        // =============================================================================
-        // accessibility queries
-        // =============================================================================
+        
 
         template <memory_space_c OtherSpace>
         static constexpr bool is_accessible_from()
@@ -145,9 +134,7 @@ namespace simbi::xpu::mem {
             return true; // unified memory can access device
         }
 
-        // =============================================================================
-        // memory operations
-        // =============================================================================
+        
 
         static void memset(void* ptr, int value, std::size_t size)
         {
@@ -185,9 +172,7 @@ namespace simbi::xpu::mem {
 #endif
         }
 
-        // =============================================================================
-        // peer-to-peer memory operations (multi-gpu)
-        // =============================================================================
+        
 
         // enable peer access between two devices
         static bool enable_peer_access(int src_device, int dst_device)
@@ -287,9 +272,7 @@ namespace simbi::xpu::mem {
             return err == cudaSuccess;
         }
 
-        // =============================================================================
-        // async memory operations
-        // =============================================================================
+        
 
         static void memcpy_from_host_async(
             void*        dest,
@@ -318,9 +301,7 @@ namespace simbi::xpu::mem {
         }
 #endif // XPU_CUDA_AVAILABLE
 
-        // =============================================================================
-        // device management
-        // =============================================================================
+        
 
         static int get_current_device()
         {
@@ -365,9 +346,7 @@ namespace simbi::xpu::mem {
 #endif
         }
 
-        // =============================================================================
-        // performance hints
-        // =============================================================================
+        
 
         struct allocation_hints
         {
@@ -377,9 +356,7 @@ namespace simbi::xpu::mem {
             static constexpr std::size_t preferred_alignment        = 256; // gpu alignment
         };
 
-        // =============================================================================
-        // debug and introspection
-        // =============================================================================
+        
 
         static bool is_valid_pointer(const void* ptr)
         {
@@ -398,9 +375,7 @@ namespace simbi::xpu::mem {
             return allocation_hints::preferred_alignment;
         }
 
-        // =============================================================================
-        // statistics (for debugging and monitoring)
-        // =============================================================================
+        
 
         struct stats
         {
@@ -429,9 +404,7 @@ namespace simbi::xpu::mem {
         };
     };
 
-    // =============================================================================
-    // static member definitions
-    // =============================================================================
+    
 
     inline std::size_t device_memory_t::stats::total_allocated   = 0;
     inline std::size_t device_memory_t::stats::total_deallocated = 0;
@@ -440,9 +413,7 @@ namespace simbi::xpu::mem {
     // static assertion to verify concept compliance
     static_assert(memory_space_c<device_memory_t>);
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
+    
 
     using device_block_t = block_t<device_memory_t>;
 

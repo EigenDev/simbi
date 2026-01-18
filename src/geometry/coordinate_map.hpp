@@ -1,5 +1,12 @@
-#ifndef GEOMETRY_COORDINATE_MAP_HPP
-#define GEOMETRY_COORDINATE_MAP_HPP
+// =============================================================================
+// coordinate_map.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "decorators.hpp"
@@ -107,4 +114,4 @@ namespace simbi::geometry {
 
 } // namespace simbi::geometry
 
-#endif // GRID_GEOMETRY_COORDINATE_MAP_HPP
+

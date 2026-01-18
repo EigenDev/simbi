@@ -1,5 +1,12 @@
-#ifndef IO_H5_SERIALIZABLE_HPP
-#define IO_H5_SERIALIZABLE_HPP
+// =============================================================================
+// h5_serializable.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "write_policy.hpp"
@@ -16,17 +23,13 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // primary template - types are not serializable by default
-    // =========================================================================
+    
     template <typename T, typename = void>
     struct h5_serializable : std::false_type
     {
     };
 
-    // =========================================================================
-    // concept for checking if a type is h5-serializable
-    // =========================================================================
+    
     template <typename T>
     concept serializable_c = requires(H5::Group& g, const T& val, const write_policy_t& policy) {
         { h5_serializable<T>::write(g, val, policy) };
@@ -34,9 +37,7 @@ namespace simbi::io {
         { h5_serializable<T>::group_name } -> std::convertible_to<std::string_view>;
     };
 
-    // =========================================================================
-    // dataset helpers
-    // =========================================================================
+    
     template <typename T>
     auto get_h5_dtype(const write_policy_t& policy)
     {
@@ -121,9 +122,7 @@ namespace simbi::io {
         return data.empty() ? T{} : data[0];
     }
 
-    // =========================================================================
-    // attribute helpers
-    // =========================================================================
+    
 
     template <typename T>
     void write_attribute(H5::Group& group, const std::string& name, T value)
@@ -170,9 +169,7 @@ namespace simbi::io {
         return value;
     }
 
-    // =========================================================================
-    // array helpers (fixed-size vectors)
-    // =========================================================================
+    
 
     template <typename T, std::size_t N>
     void write_array(
@@ -211,9 +208,7 @@ namespace simbi::io {
         return arr;
     }
 
-    // =========================================================================
-    // group helpers
-    // =========================================================================
+    
 
     inline H5::Group create_or_open_group(H5::Group& parent, const std::string& name)
     {
@@ -230,4 +225,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif // IO_H5_SERIALIZABLE_HPP
+

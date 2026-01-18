@@ -1,5 +1,12 @@
-#ifndef PHYSICS_HPP
-#define PHYSICS_HPP
+// =============================================================================
+// physics.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "base/concepts.hpp" // for is_hydro_primitive_c, is_mhd_primitive_c, is_rmhd_c, is_srhd_c, is_hydro_conserved_c
 #include "build_config.hpp"                // for build::use_four_velocity
@@ -347,4 +354,4 @@ namespace simbi::hydro {
         return (gamma - 1.0) * (cons.nrg - 0.5 * cons.den * vecops::dot(vel, vel));
     }
 } // namespace simbi::hydro
-#endif // PHYSICS_HPP
+

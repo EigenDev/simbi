@@ -1,5 +1,12 @@
-#ifndef IO_SERIAL_MESH_HPP
-#define IO_SERIAL_MESH_HPP
+// =============================================================================
+// mesh_serial.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "geometry/api.hpp"
@@ -18,9 +25,7 @@
 
 namespace simbi::io {
 
-    // =========================================================================
-    // h5_serializable specialization for mesh_config_t
-    // =========================================================================
+    
     template <std::uint64_t Rank>
     struct h5_serializable<grid::mesh_config_t<Rank>>
     {
@@ -190,4 +195,4 @@ namespace simbi::io {
 
 } // namespace simbi::io
 
-#endif // IO_SERIAL_MESH_HPP
+

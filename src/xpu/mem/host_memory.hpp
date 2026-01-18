@@ -1,16 +1,11 @@
 // =============================================================================
 // host_memory.hpp
 //
-// host memory space implementation using standard allocators.
-// provides cpu-accessible memory allocation and management.
-// implements memory_space concept for host-side data storage.
+// [TODO: Add description]
 //
 // usage:
-//   auto block = allocate<host_memory, float>(1000);
-//   shared_buffer_t<int, host_memory> buffer(n);
-//   bool accessible = host_memory::is_accessible_from<device_memory>();
+//   [TODO: Add usage example]
 // =============================================================================
-
 #pragma once
 
 #include "memory_space.hpp"
@@ -22,23 +17,17 @@
 
 namespace simbi::xpu::mem {
 
-    // =============================================================================
-    // host memory space
-    // =============================================================================
+    
 
     struct host_memory_t
     {
-        // =============================================================================
-        // type requirements for memory_space concept
-        // =============================================================================
+        
 
         using pointer_type       = void*;
         using const_pointer_type = const void*;
         using size_type          = std::size_t;
 
-        // =============================================================================
-        // compile-time properties
-        // =============================================================================
+        
 
         static constexpr std::string_view space_name()
         {
@@ -60,9 +49,7 @@ namespace simbi::xpu::mem {
             return 30.0; // typical ddr4 bandwidth
         }
 
-        // =============================================================================
-        // allocation interface
-        // =============================================================================
+        
 
         static void* allocate(std::size_t size)
         {
@@ -86,9 +73,7 @@ namespace simbi::xpu::mem {
             }
         }
 
-        // =============================================================================
-        // accessibility queries
-        // =============================================================================
+        
 
         template <memory_space_c OtherSpace>
         static constexpr bool is_accessible_from()
@@ -111,9 +96,7 @@ namespace simbi::xpu::mem {
             return true; // unified memory can access host
         }
 
-        // =============================================================================
-        // memory operations
-        // =============================================================================
+        
 
         static void memset(void* ptr, int value, std::size_t size)
         {
@@ -125,9 +108,7 @@ namespace simbi::xpu::mem {
             std::memcpy(dest, src, size);
         }
 
-        // =============================================================================
-        // performance hints
-        // =============================================================================
+        
 
         struct allocation_hints
         {
@@ -137,9 +118,7 @@ namespace simbi::xpu::mem {
             static constexpr std::size_t preferred_alignment        = 64;
         };
 
-        // =============================================================================
-        // debug and introspection
-        // =============================================================================
+        
 
         static bool is_valid_pointer(const void* ptr)
         {
@@ -151,9 +130,7 @@ namespace simbi::xpu::mem {
             return allocation_hints::preferred_alignment;
         }
 
-        // =============================================================================
-        // statistics (optional, for debugging)
-        // =============================================================================
+        
 
         struct stats
         {
@@ -182,17 +159,13 @@ namespace simbi::xpu::mem {
         };
     };
 
-    // =============================================================================
-    // static member definitions
-    // =============================================================================
+    
 
     inline std::size_t host_memory_t::stats::total_allocated   = 0;
     inline std::size_t host_memory_t::stats::total_deallocated = 0;
     inline std::size_t host_memory_t::stats::current_usage     = 0;
 
-    // =============================================================================
-    // default memory space specialization when cuda not available
-    // =============================================================================
+    
 
     template <>
     struct default_memory_space_selector<false>
@@ -203,9 +176,7 @@ namespace simbi::xpu::mem {
     // static assertion to verify concept compliance
     static_assert(memory_space_c<host_memory_t>);
 
-    // =============================================================================
-    // convenience aliases
-    // =============================================================================
+    
 
     using host_block_t = block_t<host_memory_t>;
 
@@ -213,3 +184,4 @@ namespace simbi::xpu::mem {
     using host_buffer_t = block_t<host_memory_t>;
 
 } // namespace simbi::xpu::mem
+

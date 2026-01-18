@@ -1,5 +1,12 @@
-#ifndef GRID_AMR_GEOMETRY_HPP
-#define GRID_AMR_GEOMETRY_HPP
+// =============================================================================
+// geometry.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "containers/vector.hpp"
 #include "grid/domain.hpp"
@@ -87,4 +94,4 @@ namespace simbi::grid::amr {
 
 }   // namespace simbi::grid::amr
 
-#endif   // GRID_AMR_GEOMETRY_HPP
+

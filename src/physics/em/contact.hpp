@@ -1,5 +1,12 @@
-#ifndef CT_CONTACT_HPP
-#define CT_CONTACT_HPP
+// =============================================================================
+// contact.hpp
+//
+// [TODO: Add description of what this file does]
+//
+// usage:
+//   [TODO: Add usage example]
+// =============================================================================
+#pragma once
 
 #include "build_config.hpp"
 #include "containers/vector.hpp"
@@ -16,4 +23,4 @@ namespace simbi::em {
         const vector_t<real, 4>& density_fluxes
     );
 } // namespace simbi::em
-#endif // CT_CONTACT_HPP
+
