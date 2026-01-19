@@ -24,7 +24,7 @@ git push --no-verify
 ### enabling tests in build
 
 ```bash
-./dev.py build --tests
+./dev.py build --build-tests
 ```
 
 or with meson directly:
