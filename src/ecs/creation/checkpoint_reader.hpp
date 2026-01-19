@@ -1,7 +1,7 @@
 // =============================================================================
 // checkpoint_reader.hpp
 //
-// production-grade checkpoint reconstruction utilities.
+// checkpoint reconstruction utilities.
 //
 // responsibilities:
 //   1. read partition topology from hdf5
@@ -41,8 +41,6 @@
 #include <vector>
 
 namespace simbi::ecs::creation {
-
-    
 
     // current checkpoint format version this code understands
     constexpr const char* CHECKPOINT_FORMAT_VERSION = "2.0";
@@ -86,8 +84,6 @@ namespace simbi::ecs::creation {
         }
     }
 
-    
-
     template <std::uint64_t Rank>
     void validate_partition_domains(
         const grid::domain_t<Rank>& owned,
@@ -122,8 +118,6 @@ namespace simbi::ecs::creation {
             }
         }
     }
-
-    
 
     template <regime_t R, typename Conserved, typename Primitive, std::uint64_t Rank>
     struct checkpoint_reader_t

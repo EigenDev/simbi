@@ -1,7 +1,7 @@
 // =============================================================================
 // executor_arena.hpp
 //
-// production-grade executor arena providing bounded resource management for
+// executor arena providing bounded resource management for
 // async operations. replaces unbounded std::async with controlled thread pool
 // and arena allocation to prevent resource exhaustion.
 //

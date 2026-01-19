@@ -59,8 +59,6 @@ namespace simbi::ecs::builders {
         using conserved_t = typename sim_t::conserved_t;
         using primitive_t = typename sim_t::primitive_t;
 
-        
-
         mesh_blueprint_t<Rank> mesh_bp_;
         physics_blueprint_t    phys_bp_;
         execution_blueprint_t  exec_bp_;
@@ -82,8 +80,6 @@ namespace simbi::ecs::builders {
         // base device id for partition allocation
         // default is device 0 (works for both cpu and gpu)
         std::int64_t base_device_id_ = 0;
-
-        
 
         auto& configure_mesh(const mesh_blueprint_t<Rank>& bp)
         {
@@ -171,8 +167,6 @@ namespace simbi::ecs::builders {
             base_device_id_ = device_id;
             return *this;
         }
-
-        
 
         sim_t build()
         {
@@ -276,8 +270,7 @@ namespace simbi::ecs::builders {
         // -------------------------------------------------------------------------
         // build_level_from_checkpoint
         //
-        // loads a single level's data from checkpoint using production-grade
-        // checkpoint_reader_t for validation and reconstruction.
+        // loads a single level's data from checkpoint
         // -------------------------------------------------------------------------
         void build_level_from_checkpoint(sim_t& sim, const H5::H5File& file, std::uint64_t lvl)
         {
@@ -311,7 +304,6 @@ namespace simbi::ecs::builders {
             for (std::uint64_t pp = 0; pp < num_partitions; ++pp) {
                 auto part_group = level_group.openGroup("partition_" + std::to_string(pp));
 
-                // use production-grade checkpoint reader for reconstruction
                 auto [part, fields] =
                     reader_t::read_partition(part_group, block, base_device_id_, pp);
 
