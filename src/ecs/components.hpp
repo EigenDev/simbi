@@ -14,12 +14,6 @@
 //   - halo_link_t:           single send/recv pair between partitions
 //   - level_decomposition_t: all partitions + halo graph for one level
 //   - partition_fields_t:    hydro fields for one partition
-//
-// migration notes (hesi → xpu):
-//   - partition_t.stream → partition_t.executor (executor owns stream)
-//   - partition_t.device_id removed (query executor.device_id() if needed)
-//   - het::comm::rank_id_t → xpu::comm::rank_id_t
-//   - executor stored by value, owns its resources (modern c++ pattern)
 // =============================================================================
 #pragma once
 
@@ -53,8 +47,6 @@
 #include <vector>
 
 namespace simbi::ecs {
-
-    
 
     // -----------------------------------------------------------------------------
     // partition_t
@@ -190,8 +182,6 @@ namespace simbi::ecs {
         }
     };
 
-    
-
     // -----------------------------------------------------------------------------
     // partition_fields_t
     //
@@ -246,8 +236,6 @@ namespace simbi::ecs {
         grid::field_t<Conserved, Rank> u_star;
     };
 
-    
-
     // -----------------------------------------------------------------------------
     // partition_geometry_t
     //
@@ -262,8 +250,6 @@ namespace simbi::ecs {
     {
         grid::mesh_config_t<Rank> config;
     };
-
-    
 
     // -----------------------------------------------------------------------------
     // level_info_t
@@ -331,8 +317,6 @@ namespace simbi::ecs {
         // whether registers have been initialized
         bool initialized{false};
     };
-
-    
 
     // -----------------------------------------------------------------------------
     // simulation_metadata_t
@@ -495,8 +479,6 @@ namespace simbi::ecs {
             body::cpu_diagnostics_t<Rank>>;
         std::unique_ptr<diag_t> diagnostics;
     };
-
-    
 
     // the old hydro_fields_t is now partition_fields_t
     template <typename Conserved, typename Primitive, std::uint64_t Rank>
