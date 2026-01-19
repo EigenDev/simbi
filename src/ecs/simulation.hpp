@@ -11,7 +11,7 @@
 //     - communicator (inter-partition data movement)
 //
 // access patterns:
-//   single-device (backward compat):
+//   single-device :
 //     sim.hydro(level)        -> fields for level (partition 0)
 //     sim.mesh(level)         -> mesh config for level (partition 0)
 //

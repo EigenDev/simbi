@@ -522,7 +522,7 @@ namespace simbi::ecs::builders {
                     primitive_t>(skeleton, *decomp_bp_, mesh_bp_, phys_bp_, sim.registry);
             }
             else {
-                // single-device path (backward compatible)
+                // single-device path
                 decomp = creation::decomposition_builder_t<Rank>::template build_single_device<
                     conserved_t,
                     primitive_t>(skeleton, mesh_bp_, phys_bp_, sim.registry);
