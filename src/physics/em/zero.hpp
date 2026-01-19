@@ -1,10 +1,13 @@
 // =============================================================================
 // zero.hpp
 //
-// [TODO: Add description of what this file does]
+// constrained transport (ct) "zero" scheme.
+// implements the ct "zero" algorithm from gardiner & stone (2005), a simpler
+// method for computing edge-centered electric fields for divergence-free
+// mhd, compared to the more complex contact algorithm.
 //
 // usage:
-//   [TODO: Add usage example]
+//   real ex = ct_zero_formula(face_fields, cell_fields);
 // =============================================================================
 #pragma once
 
@@ -21,4 +24,3 @@ namespace simbi::em {
     DEV real
     ct_zero_formula(const vector_t<real, 4>& face_e_fields, const vector_t<real, 4>& cell_e_fields);
 } // namespace simbi::em
-

@@ -1,10 +1,16 @@
 // =============================================================================
 // mesh_config.hpp
 //
-// [TODO: Add description of what this file does]
+// configuration container for a single grid level.
+// defines `mesh_config_t`, a struct that holds all configuration data for a
+// single level of the grid, including its topological properties (cell counts,
+// block size), geometric properties (coordinate maps, metric), and boundary
+// conditions.
 //
 // usage:
-//   [TODO: Add usage example]
+//   mesh_config_t<3> config;
+//   config.global_cells = {128, 128, 128};
+//   config.boundaries.set_left(0, boundary_type_t::periodic);
 // =============================================================================
 #pragma once
 
@@ -46,5 +52,3 @@ namespace simbi::grid {
     };
 
 } // namespace simbi::grid
-
-

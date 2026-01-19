@@ -1,10 +1,15 @@
 // =============================================================================
 // memory_space.hpp
 //
-// [TODO: Add description]
+// concept definitions for abstracting over memory systems.
+// defines the `memory_space_c` concept, which specifies the requirements for
+// any memory system (e.g., host, device, unified) to be used within the xpu
+// framework. it also provides traits and helpers for compile-time introspection
+// of memory space properties.
 //
 // usage:
-//   [TODO: Add usage example]
+//   template <memory_space_c Space>
+//   void my_allocator() { ... }
 // =============================================================================
 #pragma once
 
@@ -16,11 +21,7 @@
 
 namespace simbi::xpu::mem {
 
-    
-
     using core::memory_space_c;
-
-    
 
     template <memory_space_c Space>
     struct memory_space_traits
@@ -41,8 +42,6 @@ namespace simbi::xpu::mem {
             return Space::template is_accessible_from<OtherSpace>();
         }
     };
-
-    
 
     template <memory_space_c Space>
     struct block_t
@@ -99,8 +98,6 @@ namespace simbi::xpu::mem {
         }
     };
 
-    
-
     template <memory_space_c SourceSpace, memory_space_c DestSpace>
     constexpr bool can_access_directly()
     {
@@ -131,8 +128,6 @@ namespace simbi::xpu::mem {
         return Space::is_device_accessible && !Space::is_host_accessible;
     }
 
-    
-
     template <memory_space_c Space, typename T>
     block_t<Space> allocate(std::size_t count)
     {
@@ -154,16 +149,11 @@ namespace simbi::xpu::mem {
         return block_t<Space>(ptr, size);
     }
 
-    
-
     struct host_memory;
     struct device_memory;
     struct unified_memory;
-
-    
 
     template <bool gpu_available = false>
     struct default_memory_space_selector;
 
 } // namespace simbi::xpu::mem
-

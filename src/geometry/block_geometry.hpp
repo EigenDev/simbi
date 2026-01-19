@@ -1,10 +1,17 @@
 // =============================================================================
 // block_geometry.hpp
 //
-// [TODO: Add description of what this file does]
+// provides geometric information for a single grid block.
+// this file defines `block_geometry_t`, which composes a specific metric
+// (cartesian, spherical, etc.) with a `motion_state_t` to provide physical
+// geometry information (volumes, areas, centroids) for a block, handling
+// conversions between comoving and physical coordinates for moving meshes.
 //
 // usage:
-//   [TODO: Add usage example]
+//   with_block_geometry(mesh_cfg, motion, [&](const auto& geo) {
+//       auto vol = geo.labframe_volume(idx);
+//       auto pos = geo.labframe_centroid(idx);
+//   });
 // =============================================================================
 #pragma once
 
@@ -20,7 +27,6 @@
 
 namespace simbi::geometry {
 
-    
     //
     // simbi uses a **comoving coordinate system** fgeometry:hor moving meshes:
     //
@@ -318,5 +324,3 @@ namespace simbi::geometry {
     }
 
 } // namespace simbi::geometry
-
-

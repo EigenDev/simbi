@@ -1,10 +1,15 @@
 // =============================================================================
 // hydro_serial.hpp
 //
-// [TODO: Add description of what this file does]
+// hdf5 serialization for hydrodynamic fields.
+// provides the `h5_serializable` specialization for
+// `ecs::partition_fields_t`, which contains the primitive and conserved state
+// fields (and magnetic fields for mhd). it handles writing each component of
+// the state vectors as a separate dataset.
 //
 // usage:
-//   [TODO: Add usage example]
+//   h5_serializable<partition_fields_t<...>>::write(group, fields, policy);
+//   auto fields = h5_serializable<partition_fields_t<...>>::read(group);
 // =============================================================================
 #pragma once
 
@@ -22,7 +27,6 @@
 
 namespace simbi::io {
 
-    
     template <typename Conserved, typename Primitive, std::uint64_t Rank>
     struct h5_serializable<ecs::partition_fields_t<Conserved, Primitive, Rank>>
     {
@@ -287,5 +291,3 @@ namespace simbi::io {
     };
 
 } // namespace simbi::io
-
-

@@ -1,10 +1,15 @@
 // =============================================================================
 // collection.hpp
 //
-// [TODO: Add description of what this file does]
+// a container for managing collections of immersed boundary bodies.
+// defines `body_collection_t`, which holds a variant-based array of `body_t`
+// objects. it provides a high-level interface for adding bodies, accessing
+// system-wide parameters (e.g., for binaries), and visiting bodies with
+// specific capabilities.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto collection = make_body_collection<3>().add(body1).add(body2);
+//   collection.visit_gravitational([](const auto& body) { ... });
 // =============================================================================
 #pragma once
 
@@ -40,8 +45,6 @@ namespace simbi::body {
         // add more combinations as needed (maybe...)
         // [TODO]: revisit later
         >;
-
-    
 
     struct binary_parameters_t
     {
@@ -441,5 +444,3 @@ namespace simbi::body {
         }
     } // namespace collection_ops
 } // namespace simbi::body
-
-

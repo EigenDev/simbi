@@ -1,10 +1,14 @@
 // =============================================================================
 // geometry.hpp
 //
-// [TODO: Add description of what this file does]
+// amr geometry and coordinate transformation utilities.
+// defines `geometry_calculator_t`, a service class that converts a block's
+// topological identifier (`patch_id_t`) into its corresponding domain in global
+// integer coordinates for a given amr level.
 //
 // usage:
-//   [TODO: Add usage example]
+//   geometry_calculator_t calculator(block_size);
+//   domain_t<3> block_domain = calculator.get_domain(patch_id);
 // =============================================================================
 #pragma once
 
@@ -20,7 +24,8 @@ namespace simbi::grid::amr {
     // geometry calculator
     // converts topological IDs into global integer coordinates
     // -------------------------------------------------------------------------
-    struct geometry_calculator_t {
+    struct geometry_calculator_t
+    {
         // root configuration
         // we assume root blocks have a fixed size (e.g., 128^3)
         vector_t<std::int64_t, 3> block_size_;
@@ -62,8 +67,8 @@ namespace simbi::grid::amr {
         template <std::uint64_t Rank>
         constexpr domain_t<Rank> map_domain(
             const domain_t<Rank>& src_domain,
-            std::int64_t src_level,
-            std::int64_t dst_level
+            std::int64_t          src_level,
+            std::int64_t          dst_level
         ) const
         {
             if (src_level == dst_level) {
@@ -92,6 +97,4 @@ namespace simbi::grid::amr {
         }
     };
 
-}   // namespace simbi::grid::amr
-
-
+} // namespace simbi::grid::amr

@@ -1,10 +1,15 @@
 // =============================================================================
 // api.hpp
 //
-// [TODO: Add description of what this file does]
+// public api for adaptive mesh refinement (amr) operations.
+// provides the main entry points for amr, including `fill_fine_ghosts`
+// (prolongation), `restrict_to_coarse` (restriction), and
+// `apply_flux_correction` (refluxing). these functions operate on fields and
+// handle the underlying computational details.
 //
 // usage:
-//   [TODO: Add usage example]
+//   amr::fill_fine_ghosts(fine_field, coarse_field, ...);
+//   amr::restrict_to_coarse(coarse_field, fine_field, ...);
 // =============================================================================
 #pragma once
 
@@ -181,5 +186,3 @@ namespace simbi::grid::amr {
     }
 
 } // namespace simbi::grid::amr
-
-

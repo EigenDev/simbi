@@ -1,10 +1,14 @@
 // =============================================================================
 // evolver.hpp
 //
-// [TODO: Add description of what this file does]
+// high-level simulation dispatcher.
+// this file contains the `dispatch_simulation` function, which takes a
+// runtime configuration and calls the main simulation driver templated on the
+// appropriate physics and geometry.
 //
 // usage:
-//   [TODO: Add usage example]
+//   // called internally by driver::run_simulation
+//   hydrostate::dispatch_simulation(config, ...);
 // =============================================================================
 #pragma once
 
@@ -33,5 +37,3 @@ namespace simbi::hydrostate {
         std::function<real(real)> const& scale_factor_derivative
     );
 } // namespace simbi::hydrostate
-
-

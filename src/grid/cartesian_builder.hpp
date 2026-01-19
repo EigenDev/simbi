@@ -1,10 +1,14 @@
 // =============================================================================
 // cartesian_builder.hpp
 //
-// [TODO: Add description of what this file does]
+// builds a grid skeleton for cartesian decompositions.
+// defines `cartesian_builder_t`, a stateless service class that constructs
+// a `skeleton_t` by partitioning a global domain according to a specified
+// topology, creating `block_info_t` for each partition and setting up neighbor
+// connectivity.
 //
 // usage:
-//   [TODO: Add usage example]
+//   cartesian_builder_t::build(skeleton, global_domain, topo, rank, bcs);
 // =============================================================================
 #pragma once
 
@@ -21,20 +25,20 @@
 namespace simbi::grid {
 
     // a stateless service class that builds skeletons for cartesian grids
-    struct cartesian_builder_t {
+    struct cartesian_builder_t
+    {
 
         template <std::uint64_t Rank>
         static void build(
-            skeleton_t<Rank>& skeleton,
-            const domain_t<Rank>& global_domain,
-            const topology_t& topo,
-            std::uint64_t my_rank,
+            skeleton_t<Rank>&           skeleton,
+            const domain_t<Rank>&       global_domain,
+            const topology_t&           topo,
+            std::uint64_t               my_rank,
             const boundary_set_t<Rank>& global_bcs
         )
         {
             // decompose geometry
-            domain_t<Rank> local_geom =
-                decomposer_t::decompose(global_domain, topo, my_rank);
+            domain_t<Rank> local_geom = decomposer_t::decompose(global_domain, topo, my_rank);
 
             // construct identity
             patch_id_t my_id;
@@ -64,11 +68,7 @@ namespace simbi::grid {
                         info.connect(dd, side_t::left, neighbor);
                     }
                     else {
-                        info.set_boundary(
-                            dd,
-                            side_t::left,
-                            global_bcs.left(dd)
-                        );
+                        info.set_boundary(dd, side_t::left, global_bcs.left(dd));
                     }
                 }
 
@@ -85,11 +85,7 @@ namespace simbi::grid {
                         info.connect(dd, side_t::right, neighbor);
                     }
                     else {
-                        info.set_boundary(
-                            dd,
-                            side_t::right,
-                            global_bcs.right(dd)
-                        );
+                        info.set_boundary(dd, side_t::right, global_bcs.right(dd));
                     }
                 }
             }
@@ -99,6 +95,4 @@ namespace simbi::grid {
         }
     };
 
-}   // namespace simbi::grid
-
-
+} // namespace simbi::grid

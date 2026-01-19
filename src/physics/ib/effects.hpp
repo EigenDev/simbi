@@ -1,10 +1,14 @@
 // =============================================================================
 // effects.hpp
 //
-// [TODO: Add description of what this file does]
+// functors for calculating the effects of immersed bodies on the fluid.
+// provides `grav_op_t`, `accretion_op_t`, and `rigid_op_t` as functors that
+// compute the source terms (e.g., momentum, energy) and diagnostic deltas
+// (force, torque) resulting from the interaction between an immersed body
+// and the fluid in a given grid cell.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto grav_effect = make_grav_op(prim, geo)(body, coord);
 // =============================================================================
 #pragma once
 
@@ -24,7 +28,6 @@
 namespace simbi::body::expr {
     using namespace simbi::hydro;
 
-    
     template <typename Primitive, typename Geometry>
     struct grav_op_t
     {
@@ -76,7 +79,6 @@ namespace simbi::body::expr {
         }
     };
 
-    
     template <typename Primitive, typename Geometry>
     struct accretion_op_t
     {
@@ -240,7 +242,6 @@ namespace simbi::body::expr {
         }
     };
 
-    
     template <typename Primitive, typename Geometry>
     struct rigid_op_t
     {
@@ -350,7 +351,6 @@ namespace simbi::body::expr {
         }
     };
 
-    
     template <typename Primitive, typename Geometry>
     DEV auto make_grav_op(const Primitive& prim, const Geometry& geo)
     {
@@ -370,5 +370,3 @@ namespace simbi::body::expr {
     }
 
 } // namespace simbi::body::expr
-
-

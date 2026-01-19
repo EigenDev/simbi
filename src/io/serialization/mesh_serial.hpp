@@ -1,10 +1,14 @@
 // =============================================================================
 // mesh_serial.hpp
 //
-// [TODO: Add description of what this file does]
+// hdf5 serialization for mesh configurations.
+// provides the `h5_serializable` specialization for `grid::mesh_config_t`,
+// handling the serialization of all mesh properties, including topology
+// (cell counts), geometry configuration, and boundary conditions.
 //
 // usage:
-//   [TODO: Add usage example]
+//   h5_serializable<mesh_config_t<3>>::write(group, config, policy);
+//   auto config = h5_serializable<mesh_config_t<3>>::read(group);
 // =============================================================================
 #pragma once
 
@@ -25,7 +29,6 @@
 
 namespace simbi::io {
 
-    
     template <std::uint64_t Rank>
     struct h5_serializable<grid::mesh_config_t<Rank>>
     {
@@ -194,5 +197,3 @@ namespace simbi::io {
     };
 
 } // namespace simbi::io
-
-

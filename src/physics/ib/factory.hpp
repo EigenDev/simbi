@@ -1,10 +1,14 @@
 // =============================================================================
 // factory.hpp
 //
-// [TODO: Add description of what this file does]
+// factory functions for creating immersed boundary bodies.
+// provides functions to construct body objects and collections from
+// configuration data (`config_dict_t` and blueprints). it handles dispatching
+// to the correct body type based on specified capabilities and calculating
+// orbital kinematics for binary systems.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto collection = create_body_collection<3>(bodies_bp, grav_sys_bp);
 // =============================================================================
 #pragma once
 
@@ -25,8 +29,6 @@
 
 namespace simbi::body::factory {
     using namespace simbi::config;
-
-    
 
     namespace detail {
 
@@ -91,8 +93,6 @@ namespace simbi::body::factory {
             }
         }
     } // namespace detail
-
-    
 
     template <std::uint64_t Rank>
     auto create_body_from_config(std::uint64_t idx, const config_dict_t& props)
@@ -161,8 +161,6 @@ namespace simbi::body::factory {
             throw std::runtime_error("unknown body type: " + body_type);
         }
     }
-
-    
 
     template <std::uint64_t Rank>
     auto create_collection_from_bodies(const std::vector<config_dict_t>& body_configs)
@@ -261,8 +259,6 @@ namespace simbi::body::factory {
             .with_system_config(binary_params);
     }
 
-    
-
     template <std::uint64_t Rank>
     auto create_body_collection(
         const ecs::bodies_blueprint_t&                              bodies_bp,
@@ -298,5 +294,3 @@ namespace simbi::body::factory {
     }
 
 } // namespace simbi::body::factory
-
-

@@ -1,10 +1,14 @@
 // =============================================================================
 // isothermal.hpp
 //
-// [TODO: Add description of what this file does]
+// isothermal gas equation of state (eos).
+// defines `isothermal_gas_eos_t`, a struct that implements the equation of
+// state for an isothermal gas, where pressure is proportional to density,
+// and provides methods to compute the sound speed and enthalpy.
 //
 // usage:
-//   [TODO: Add usage example]
+//   isothermal_gas_eos_t eos;
+//   real cs = eos.sound_speed(rho, p);
 // =============================================================================
 #pragma once
 
@@ -35,5 +39,3 @@ namespace simbi::eos {
         }
     };
 } // namespace simbi::eos
-
-

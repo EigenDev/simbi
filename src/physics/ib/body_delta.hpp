@@ -1,10 +1,16 @@
 // =============================================================================
 // body_delta.hpp
 //
-// [TODO: Add description of what this file does]
+// struct for accumulating changes to immersed bodies.
+// defines `body_delta_t`, a data structure used to accumulate instantaneous
+// and time-integrated changes to a body's state (e.g., force, torque,
+// accreted mass) within a single timestep across multiple threads or device
+// blocks.
 //
 // usage:
-//   [TODO: Add usage example]
+//   body_delta_t delta;
+//   delta.force_delta += local_force;
+//   diagnostics->accumulate_delta(delta);
 // =============================================================================
 #pragma once
 
@@ -50,5 +56,3 @@ namespace simbi::body {
         }
     };
 } // namespace simbi::body
-
-

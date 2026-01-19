@@ -1,10 +1,15 @@
 // =============================================================================
 // types.hpp
 //
-// [TODO: Add description of what this file does]
+// core data types and enums for the xpu framework.
+// defines fundamental enums like `backend_type_t` and `memory_type_t`, as well
+// as structs like `locality_t` and `dim3_t` that are used throughout the
+// heterogeneous computing abstraction layer to manage devices and execution
+// configurations.
 //
 // usage:
-//   [TODO: Add usage example]
+//   locality_t loc{backend_type_t::cuda, 0};
+//   dim3_t block_dim(256, 1, 1);
 // =============================================================================
 #pragma once
 
@@ -93,6 +98,3 @@ namespace simbi::xpu::core {
     };
 
 } // namespace simbi::xpu::core
-
-
-

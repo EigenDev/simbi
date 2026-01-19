@@ -1,10 +1,16 @@
 // =============================================================================
 // driver.hpp
 //
-// [TODO: Add description of what this file does]
+// main driver for applying boundary conditions.
+// this file provides `boundary_driver_t`, which orchestrates the application
+// of boundary conditions to a field. it handles physical boundaries (reflect,
+// outflow, periodic), inter-partition boundaries, and dynamic,
+// expression-based boundaries by dispatching to appropriate mappers.
 //
 // usage:
-//   [TODO: Add usage example]
+//   boundary_driver_t::apply_boundaries(
+//       field, id, skeleton, config, policy, context, block_geo, exec
+//   );
 // =============================================================================
 #pragma once
 
@@ -485,5 +491,3 @@ namespace simbi::geometry {
     };
 
 } // namespace simbi::geometry
-
-

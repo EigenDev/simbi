@@ -1,10 +1,14 @@
 // =============================================================================
 // transfer.hpp
 //
-// [TODO: Add description]
+// functions for transferring data between different memory spaces.
+// provides a set of `sync_*` functions for moving data between host, device,
+// and unified memory blocks. the main `sync_memory` function dispatches to the
+// correct transfer implementation based on the source and destination memory
+// spaces at compile time.
 //
 // usage:
-//   [TODO: Add usage example]
+//   sync_memory<float>(host_block, device_block);
 // =============================================================================
 #pragma once
 
@@ -17,8 +21,6 @@
 #include <type_traits>
 
 namespace simbi::xpu::mem {
-
-    
 
     template <typename T>
     void sync_host_to_device(
@@ -34,8 +36,6 @@ namespace simbi::xpu::mem {
         );
     }
 
-    
-
     template <typename T>
     void sync_device_to_host(
         const memory_block_t<device_memory_t>& src,
@@ -50,8 +50,6 @@ namespace simbi::xpu::mem {
         );
     }
 
-    
-
     template <typename T>
     void sync_device_to_device(
         const memory_block_t<device_memory_t>& src,
@@ -65,8 +63,6 @@ namespace simbi::xpu::mem {
             count * sizeof(T)
         );
     }
-
-    
 
     template <typename T>
     void sync_unified_to_unified(
@@ -97,8 +93,6 @@ namespace simbi::xpu::mem {
     {
         std::memcpy(dst.template as<T>(), src.template as<T>(), count * sizeof(T));
     }
-
-    
 
     template <typename T, typename SrcSpace, typename DstSpace>
     void sync_memory(const memory_block_t<SrcSpace>& src, memory_block_t<DstSpace>& dst)
@@ -139,4 +133,3 @@ namespace simbi::xpu::mem {
     }
 
 } // namespace simbi::xpu::mem
-

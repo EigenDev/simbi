@@ -1,10 +1,14 @@
 // =============================================================================
 // source_terms.hpp
 //
-// [TODO: Add description of what this file does]
+// computes geometric source terms for curvilinear coordinates.
+// this file provides the implementation for non-conservative source terms
+// that arise from the grid geometry in curvilinear coordinate systems, such as
+// spherical or cylindrical coordinates, which are necessary for correct momentum
+// and energy evolution.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto sources = geometric_source_terms(prims, gamma, idx, block_geo);
 // =============================================================================
 #pragma once
 
@@ -195,5 +199,3 @@ namespace simbi::geometry {
     }
 
 } // namespace simbi::geometry
-
-

@@ -1,10 +1,14 @@
 // =============================================================================
 // communicator.hpp
 //
-// [TODO: Add description of what this file does]
+// orchestrates halo exchanges between grid partitions.
+// defines `communicator_t`, a service responsible for performing halo
+// exchanges based on a pre-computed `exchange_pattern`. it handles various
+// data transfer strategies, including direct peer-to-peer copies for conforming
+// grids and amr-aware prolongation/restriction for coarse-fine boundaries.
 //
 // usage:
-//   [TODO: Add usage example]
+//   communicator_t::exchange_halos(pattern, patches, get_exec);
 // =============================================================================
 #pragma once
 
@@ -108,5 +112,3 @@ namespace simbi::grid::comm {
     };
 
 } // namespace simbi::grid::comm
-
-

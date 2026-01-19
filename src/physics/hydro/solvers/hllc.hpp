@@ -1,10 +1,14 @@
 // =============================================================================
 // hllc.hpp
 //
-// [TODO: Add description of what this file does]
+// the hllc approximate riemann solver for hydrodynamics.
+// provides implementations of the hllc (harten-lax-van leer-contact)
+// approximate riemann solver for newtonian, srhd, and rmhd regimes. it
+// includes an adaptive dissipation controller (fleischmann et al. 2020)
+// to reduce numerical dissipation in low-mach-number flows.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto flux = hydro::hllc_flux(primL, primR, nhat, vface, gamma);
 // =============================================================================
 #pragma once
 
@@ -204,7 +208,6 @@ namespace simbi::hydro {
 
 } // namespace simbi::hydro
 
-
 namespace simbi::hydro::newtonian {
     using namespace simbi::concepts;
     template <is_hydro_primitive_c primitive_t>
@@ -298,7 +301,6 @@ namespace simbi::hydro::newtonian {
         return net_flux;
     }
 } // namespace simbi::hydro::newtonian
-
 
 namespace simbi::hydro::srhd {
     using namespace simbi::concepts;

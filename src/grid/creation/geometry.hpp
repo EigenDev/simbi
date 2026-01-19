@@ -1,10 +1,13 @@
 // =============================================================================
 // geometry.hpp
 //
-// [TODO: Add description of what this file does]
+// builds coordinate maps for all blocks in a grid hierarchy.
+// defines `geometry_builder_t`, a service that iterates through a grid
+// hierarchy and constructs the appropriate coordinate maps (e.g., uniform, log)
+// for each block based on the simulation's mesh blueprint.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto all_maps = geometry_builder_t<Rank>::build_maps(hierarchy, root_bp);
 // =============================================================================
 #pragma once
 
@@ -99,5 +102,3 @@ namespace simbi::grid::creation {
     };
 
 } // namespace simbi::grid::creation
-
-

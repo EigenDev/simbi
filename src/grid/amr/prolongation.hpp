@@ -1,10 +1,14 @@
 // =============================================================================
 // prolongation.hpp
 //
-// [TODO: Add description of what this file does]
+// amr prolongation (coarse-to-fine interpolation) kernels.
+// provides functors for different prolongation strategies, including constant
+// (`prolong_constant_t`), linear (`prolong_linear_t`), and parabolic
+// (`prolong_parabolic_t`), which are used to interpolate data from a coarse
+// grid to a fine grid's ghost cells.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto interpolated_comp = prolong<2>(coarse_computation, ratio);
 // =============================================================================
 #pragma once
 
@@ -419,5 +423,3 @@ namespace simbi::grid::amr {
     }
 
 } // namespace simbi::grid::amr
-
-

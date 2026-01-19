@@ -1,10 +1,14 @@
 // =============================================================================
 // body_serial.hpp
 //
-// [TODO: Add description of what this file does]
+// hdf5 serialization for immersed boundary bodies.
+// provides the `h5_serializable` specialization for `body::body_collection_t`
+// and its constituent body types. handles serialization of core properties,
+// capabilities, and system-level parameters (e.g., for binary systems).
 //
 // usage:
-//   [TODO: Add usage example]
+//   h5_serializable<body_collection_t>::write(group, bodies, policy);
+//   auto bodies = h5_serializable<body_collection_t>::read(group);
 // =============================================================================
 #pragma once
 
@@ -24,17 +28,14 @@
 
 namespace simbi::io {
 
-    
     template <std::uint64_t Rank, std::uint64_t MaxBodies>
-    struct h5_serializable<body::body_collection_t<Rank, MaxBodies>> {
-        using collection_t = body::body_collection_t<Rank, MaxBodies>;
+    struct h5_serializable<body::body_collection_t<Rank, MaxBodies>>
+    {
+        using collection_t                           = body::body_collection_t<Rank, MaxBodies>;
         static constexpr std::string_view group_name = "bodies";
 
-        static void write(
-            H5::Group& parent,
-            const collection_t& bodies,
-            const write_policy_t& policy
-        )
+        static void
+        write(H5::Group& parent, const collection_t& bodies, const write_policy_t& policy)
         {
             auto g = parent.createGroup(std::string(group_name));
 
@@ -52,9 +53,7 @@ namespace simbi::io {
             for (std::size_t ii = 0; ii < bodies.size_; ++ii) {
                 auto body_group = g.createGroup("body_" + std::to_string(ii));
                 std::visit(
-                    [&](const auto& body) {
-                        write_body(body_group, body, policy);
-                    },
+                    [&](const auto& body) { write_body(body_group, body, policy); },
                     bodies.bodies_[ii]
                 );
             }
@@ -65,10 +64,9 @@ namespace simbi::io {
             auto g = parent.openGroup(std::string(group_name));
 
             collection_t bodies;
-            bodies.size_        = read_attribute<std::size_t>(g, "count");
-            bodies.system_name_ = read_attribute<std::string>(g, "system_name");
-            bodies.reference_frame_ =
-                read_attribute<std::string>(g, "reference_frame");
+            bodies.size_            = read_attribute<std::size_t>(g, "count");
+            bodies.system_name_     = read_attribute<std::string>(g, "system_name");
+            bodies.reference_frame_ = read_attribute<std::string>(g, "reference_frame");
 
             // binary parameters
             if (group_exists(g, "binary_params")) {
@@ -89,7 +87,7 @@ namespace simbi::io {
         // binary parameters
         // ---------------------------------------------------------------------
         static void write_binary_params(
-            H5::Group& parent,
+            H5::Group&                       parent,
             const body::binary_parameters_t& params,
             const write_policy_t& /*policy*/
         )
@@ -105,21 +103,18 @@ namespace simbi::io {
             write_attribute(g, "prescribed_motion", params.prescribed_motion);
         }
 
-        static body::binary_parameters_t
-        read_binary_params(const H5::Group& parent)
+        static body::binary_parameters_t read_binary_params(const H5::Group& parent)
         {
             auto g = parent.openGroup("binary_params");
 
             body::binary_parameters_t params;
-            params.total_mass     = read_attribute<real>(g, "total_mass");
-            params.semi_major     = read_attribute<real>(g, "semi_major");
-            params.eccentricity   = read_attribute<real>(g, "eccentricity");
-            params.mass_ratio     = read_attribute<real>(g, "mass_ratio");
-            params.orbital_period = read_attribute<real>(g, "orbital_period");
-            params.is_circular_orbit =
-                read_attribute<bool>(g, "is_circular_orbit");
-            params.prescribed_motion =
-                read_attribute<bool>(g, "prescribed_motion");
+            params.total_mass        = read_attribute<real>(g, "total_mass");
+            params.semi_major        = read_attribute<real>(g, "semi_major");
+            params.eccentricity      = read_attribute<real>(g, "eccentricity");
+            params.mass_ratio        = read_attribute<real>(g, "mass_ratio");
+            params.orbital_period    = read_attribute<real>(g, "orbital_period");
+            params.is_circular_orbit = read_attribute<bool>(g, "is_circular_orbit");
+            params.prescribed_motion = read_attribute<bool>(g, "prescribed_motion");
 
             return params;
         }
@@ -128,8 +123,7 @@ namespace simbi::io {
         // generic body serialization
         // ---------------------------------------------------------------------
         template <typename Body>
-        static void
-        write_body(H5::Group& g, const Body& body, const write_policy_t& policy)
+        static void write_body(H5::Group& g, const Body& body, const write_policy_t& policy)
         {
             // core properties
             write_attribute(g, "idx", body.idx);
@@ -158,7 +152,7 @@ namespace simbi::io {
 
         template <typename Body>
         static void write_capability_data(
-            H5::Group& g,
+            H5::Group&  g,
             const Body& body,
             const write_policy_t& /*policy*/
         )
@@ -176,11 +170,7 @@ namespace simbi::io {
                 auto ca   = g.createGroup("accretion");
                 write_attribute(ca, "sink_rate", accr.sink_rate);
                 write_attribute(ca, "accretion_radius", accr.accretion_radius);
-                write_attribute(
-                    ca,
-                    "total_accreted_mass",
-                    accr.total_accreted_mass
-                );
+                write_attribute(ca, "total_accreted_mass", accr.total_accreted_mass);
                 write_attribute(ca, "accretion_rate", accr.accretion_rate);
                 write_attribute(ca, "sink_delta", accr.sink_delta);
             }
@@ -215,15 +205,10 @@ namespace simbi::io {
             auto caps = read_attribute<std::uint32_t>(g, "capabilities");
 
             // determine body type from capabilities
-            bool has_grav = (caps & static_cast<std::uint32_t>(
-                                        body_capability_t::GRAVITATIONAL
-                                    )) != 0;
-            bool has_accr =
-                (caps &
-                 static_cast<std::uint32_t>(body_capability_t::ACCRETION)) != 0;
-            bool has_rigid =
-                (caps & static_cast<std::uint32_t>(body_capability_t::RIGID)) !=
-                0;
+            bool has_grav =
+                (caps & static_cast<std::uint32_t>(body_capability_t::GRAVITATIONAL)) != 0;
+            bool has_accr  = (caps & static_cast<std::uint32_t>(body_capability_t::ACCRETION)) != 0;
+            bool has_rigid = (caps & static_cast<std::uint32_t>(body_capability_t::RIGID)) != 0;
 
             // match to known body types
             if (has_grav && has_accr) {
@@ -282,69 +267,51 @@ namespace simbi::io {
 
             if constexpr (Body::template has_capability_v<gravitational_tag>) {
                 if (group_exists(g, "gravitational")) {
-                    auto cg = g.openGroup("gravitational");
-                    auto& grav =
-                        std::get<body::grav_component_t>(body.capabilities);
-                    grav.softening_length =
-                        read_attribute<real>(cg, "softening_length");
+                    auto  cg              = g.openGroup("gravitational");
+                    auto& grav            = std::get<body::grav_component_t>(body.capabilities);
+                    grav.softening_length = read_attribute<real>(cg, "softening_length");
                 }
             }
 
             if constexpr (Body::template has_capability_v<accretion_tag>) {
                 if (group_exists(g, "accretion")) {
-                    auto ca    = g.openGroup("accretion");
-                    auto& accr = std::get<body::accretion_component_t>(
-                        body.capabilities
-                    );
+                    auto  ca       = g.openGroup("accretion");
+                    auto& accr     = std::get<body::accretion_component_t>(body.capabilities);
                     accr.sink_rate = read_attribute<real>(ca, "sink_rate");
-                    accr.accretion_radius =
-                        read_attribute<real>(ca, "accretion_radius");
-                    accr.total_accreted_mass =
-                        read_attribute<real>(ca, "total_accreted_mass");
-                    accr.accretion_rate =
-                        read_attribute<real>(ca, "accretion_rate");
-                    accr.sink_delta = read_attribute<real>(ca, "sink_delta");
+                    accr.accretion_radius    = read_attribute<real>(ca, "accretion_radius");
+                    accr.total_accreted_mass = read_attribute<real>(ca, "total_accreted_mass");
+                    accr.accretion_rate      = read_attribute<real>(ca, "accretion_rate");
+                    accr.sink_delta          = read_attribute<real>(ca, "sink_delta");
                 }
             }
 
             if constexpr (Body::template has_capability_v<rigid_tag>) {
                 if (group_exists(g, "rigid")) {
-                    auto cr = g.openGroup("rigid");
-                    auto& rigid =
-                        std::get<body::rigid_component_t>(body.capabilities);
-                    rigid.inertia = read_attribute<real>(cr, "inertia");
-                    rigid.apply_no_slip =
-                        read_attribute<bool>(cr, "apply_no_slip");
+                    auto  cr            = g.openGroup("rigid");
+                    auto& rigid         = std::get<body::rigid_component_t>(body.capabilities);
+                    rigid.inertia       = read_attribute<real>(cr, "inertia");
+                    rigid.apply_no_slip = read_attribute<bool>(cr, "apply_no_slip");
                 }
             }
 
             if constexpr (Body::template has_capability_v<elastic_tag>) {
                 if (group_exists(g, "elastic")) {
-                    auto ce = g.openGroup("elastic");
-                    auto& elastic =
-                        std::get<body::elastic_component_t>(body.capabilities);
-                    elastic.elastic_modulus =
-                        read_attribute<real>(ce, "elastic_modulus");
-                    elastic.poisson_ratio =
-                        read_attribute<real>(ce, "poisson_ratio");
+                    auto  ce      = g.openGroup("elastic");
+                    auto& elastic = std::get<body::elastic_component_t>(body.capabilities);
+                    elastic.elastic_modulus = read_attribute<real>(ce, "elastic_modulus");
+                    elastic.poisson_ratio   = read_attribute<real>(ce, "poisson_ratio");
                 }
             }
 
             if constexpr (Body::template has_capability_v<deformable_tag>) {
                 if (group_exists(g, "deformable")) {
-                    auto cd      = g.openGroup("deformable");
-                    auto& deform = std::get<body::deformable_component_t>(
-                        body.capabilities
-                    );
-                    deform.yield_stress =
-                        read_attribute<real>(cd, "yield_stress");
-                    deform.plastic_strain =
-                        read_attribute<real>(cd, "plastic_strain");
+                    auto  cd            = g.openGroup("deformable");
+                    auto& deform        = std::get<body::deformable_component_t>(body.capabilities);
+                    deform.yield_stress = read_attribute<real>(cd, "yield_stress");
+                    deform.plastic_strain = read_attribute<real>(cd, "plastic_strain");
                 }
             }
         }
     };
 
-}   // namespace simbi::io
-
-
+} // namespace simbi::io

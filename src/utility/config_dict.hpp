@@ -1,10 +1,15 @@
 // =============================================================================
 // config_dict.hpp
 //
-// [TODO: Add description of what this file does]
+// a variant-based dictionary for hierarchical configuration data.
+// defines `config_dict_t` (a map) and `config_value_t` (a variant) to create
+// a flexible, type-safe system for storing configuration parameters read from
+// python. it provides helpers for type-safe reading of values.
 //
 // usage:
-//   [TODO: Add usage example]
+//   config_dict_t config = ...;
+//   auto maybe_val = config::try_read<double>(config, "my_param");
+//   if (maybe_val.has_value()) { ... }
 // =============================================================================
 #pragma once
 

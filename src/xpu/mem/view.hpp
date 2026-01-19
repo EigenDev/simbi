@@ -1,10 +1,15 @@
 // =============================================================================
 // view.hpp
 //
-// [TODO: Add description of what this file does]
+// a non-owning, lightweight reference to a memory region.
+// defines `view_t`, which provides a window into a block of memory with
+// support for multi-dimensional indexing via strides. it is a key component of
+// the lazy computation framework, allowing expressions to operate on data
+// without taking ownership.
 //
 // usage:
-//   [TODO: Add usage example]
+//   view_t<float, 2> my_view(ptr, shape, start, strides);
+//   float val = my_view({i, j});
 // =============================================================================
 #pragma once
 
@@ -67,6 +72,3 @@ namespace simbi::xpu::mem {
     };
 
 } // namespace simbi::xpu::mem
-
-
-

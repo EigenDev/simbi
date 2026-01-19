@@ -1,10 +1,16 @@
 // =============================================================================
 // result.hpp
 //
-// [TODO: Add description of what this file does]
+// a monadic `result` type for error handling.
+// represents the outcome of an operation that can either succeed with a value
+// or fail with an error. provides a clean and expressive way to handle errors
+// without exceptions.
 //
 // usage:
-//   [TODO: Add usage example]
+//   result_t<double> safe_sqrt(double x) {
+//     if (x < 0) return result_t<double>::error("negative input");
+//     return result_t<double>::ok(std::sqrt(x));
+//   }
 // =============================================================================
 #pragma once
 

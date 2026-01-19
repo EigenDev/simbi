@@ -1,10 +1,14 @@
 // =============================================================================
 // topology.hpp
 //
-// [TODO: Add description of what this file does]
+// manages the collection of grid patches (blocks).
+// defines `mesh_topology_t`, a class that holds and manages all the field
+// patches (blocks) for a given mesh, providing an interface to add, remove,
+// and access them.
 //
 // usage:
-//   [TODO: Add usage example]
+//   mesh_topology_t<float, 3> topology;
+//   topology.add_patch(id, std::make_unique<field_t<...>>(...));
 // =============================================================================
 #pragma once
 
@@ -123,5 +127,3 @@ namespace simbi::grid {
     };
 
 } // namespace simbi::grid
-
-

@@ -1,10 +1,14 @@
 // =============================================================================
 // api.hpp
 //
-// [TODO: Add description of what this file does]
+// public api for the geometry service.
+// defines configuration types (`geometry_config_t`, `dimension_config_t`) and
+// the `geometry_service_t`, which is responsible for creating coordinate
+// maps for different parts of the grid based on the simulation's geometry.
 //
 // usage:
-//   [TODO: Add usage example]
+//   geometry_service_t<2> service{config};
+//   auto map_variant = service.create_map(dim, topo_coord, level);
 // =============================================================================
 #pragma once
 
@@ -142,5 +146,3 @@ namespace simbi {
         {geometry::metric_type_t::cylindrical, "cylindrical"}
     );
 } // namespace simbi
-
-

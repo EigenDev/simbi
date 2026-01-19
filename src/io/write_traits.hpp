@@ -1,10 +1,15 @@
 // =============================================================================
 // write_traits.hpp
 //
-// [TODO: Add description of what this file does]
+// type traits for mapping c++ types to hdf5 native types.
+// provides `h5_pred_type`, a type trait that is specialized for various c++
+// fundamental types (double, float, int, etc.) to map them to the
+// corresponding hdf5 native predicate types (`h5::predtype`) used for i/o
+// operations.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto h5_type = h5_pred_type<double>::value();
+//   dataset.write(h5_type, &my_double);
 // =============================================================================
 #pragma once
 
@@ -96,5 +101,3 @@ namespace simbi::io {
         }
     };
 } // namespace simbi::io
-
-

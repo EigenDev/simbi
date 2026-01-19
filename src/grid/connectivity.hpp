@@ -1,10 +1,15 @@
 // =============================================================================
 // connectivity.hpp
 //
-// [TODO: Add description of what this file does]
+// defines types for describing grid block connectivity.
+// this file contains `face_id_t` for identifying block faces and
+// `connection_t`, a struct that describes the state of a face, indicating
+// whether it connects to a neighbor (internal partition) or is a physical
+// boundary.
 //
 // usage:
-//   [TODO: Add usage example]
+//   connection_t conn = connection_t::internal(neighbor_id);
+//   if (conn.is_connected()) { ... }
 // =============================================================================
 #pragma once
 
@@ -157,5 +162,3 @@ namespace simbi::grid {
     }
 
 } // namespace simbi::grid
-
-

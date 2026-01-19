@@ -1,10 +1,16 @@
 // =============================================================================
 // statistics.hpp
 //
-// [TODO: Add description of what this file does]
+// utilities for gathering and displaying system statistics.
+// provides cross-platform functions to gather information about the cpu,
+// operating system, and memory usage. includes helpers for formatting byte
+// sizes into human-readable strings.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto cpu_info = cpu_info_t::gather();
+//   std::cout << "cores: " << cpu_info.num_cores << std::endl;
+//   auto mem_stats = memory_stats_t::current();
+//   std::cout << "ram used: " << format_bytes(mem_stats.used_physical);
 // =============================================================================
 #pragma once
 
@@ -229,5 +235,3 @@ namespace simbi {
 
     } // namespace statistics
 } // namespace simbi
-
-

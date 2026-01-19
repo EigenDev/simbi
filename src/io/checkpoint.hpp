@@ -1,10 +1,14 @@
 // =============================================================================
 // checkpoint.hpp
 //
-// [TODO: Add description of what this file does]
+// utilities for saving and loading simulation state.
+// provides `checkpoint_writer_t` and `checkpoint_reader_t` to handle the
+// serialization of the entire simulation state (metadata, grid hierarchy,
+// fields, bodies) to and from hdf5 files, enabling simulation restarts.
 //
 // usage:
-//   [TODO: Add usage example]
+//   write_checkpoint(sim, "my_checkpoint.h5");
+//   auto restarted_sim = load_checkpoint<sim_t>("my_checkpoint.h5");
 // =============================================================================
 #pragma once
 
@@ -29,7 +33,6 @@
 
 namespace simbi::io {
 
-    
     inline std::string compute_checkpoint_filename(
         const std::string& data_dir,
         real               checkpoint_id,
@@ -74,7 +77,6 @@ namespace simbi::io {
         return data_directory + string_format("%d.chkpt." + tnow + ".h5", checkpoint_zones);
     }
 
-    
     template <typename Sim>
     struct checkpoint_writer_t
     {
@@ -319,7 +321,6 @@ namespace simbi::io {
         }
     };
 
-    
     template <typename Sim>
     struct checkpoint_reader_t
     {
@@ -429,8 +430,6 @@ namespace simbi::io {
         }
     };
 
-    
-
     template <typename Sim>
     void
     write_checkpoint(const Sim& sim, const std::string& filename, const write_policy_t& policy = {})
@@ -445,5 +444,3 @@ namespace simbi::io {
     }
 
 } // namespace simbi::io
-
-

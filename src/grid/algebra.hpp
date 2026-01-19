@@ -1,10 +1,15 @@
 // =============================================================================
 // algebra.hpp
 //
-// [TODO: Add description of what this file does]
+// set-theoretic algebraic operations on grid domains.
+// provides a collection of functions for performing set-like operations on
+// `domain_t` objects, such as `intersection`, `union_of`, `difference`,
+// `expand`, and `contract`. these are fundamental for amr and domain
+// decomposition logic.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto overlap = domain_algebra::intersection(domain1, domain2);
+//   auto expanded_domain = domain_algebra::expand(domain, {1, 1, 1});
 // =============================================================================
 #pragma once
 
@@ -348,5 +353,3 @@ namespace simbi::grid::domain_algebra {
     // }a
 
 } // namespace simbi::grid::domain_algebra
-
-

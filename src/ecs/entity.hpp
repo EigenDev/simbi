@@ -1,10 +1,17 @@
 // =============================================================================
 // entity.hpp
 //
-// [TODO: Add description of what this file does]
+// a minimal, type-erased entity-component-system (ecs) framework.
+// this file provides `entity_t` (a unique id) and `registry_t`, which
+// manages the association of components (plain data structs) with entities.
+// it supports creating entities, adding/removing components, and creating
+// views to iterate over entities with specific components.
 //
 // usage:
-//   [TODO: Add usage example]
+//   registry_t registry;
+//   entity_t entity = registry.create();
+//   registry.add<position>(entity, {1.0, 2.0});
+//   auto& pos = registry.get<position>(entity);
 // =============================================================================
 #pragma once
 
@@ -17,107 +24,96 @@
 #include <vector>        // for std::vector
 
 namespace simbi::ecs {
-    /**
-     * Here lies an extremely minimal Entity-Component-System (ECS) framework.
-     * Entities are represented by unique IDs (entity_t), and components
-     * are stored in a type-erased manner using std::any within a registry.
-     * The registry allows for adding, retrieving, checking, and removing
-     * components associated with entities. It also provides simple
-     * viewing capabilities to iterate over entities possessing specific
-     * components.
-     */
+    using entity_t = std::uint64_t;
 
-using entity_t = std::uint64_t;
-
-class registry_t
-{
-    std::uint64_t next_id_{0};
-
-    // type_index -> (entity_id -> shared_ptr<void>)
-    std::unordered_map<std::type_index, std::unordered_map<entity_t, std::shared_ptr<void>>>
-        storage_;
-
-  public:
-    entity_t create()
+    class registry_t
     {
-        return next_id_++;
-    }
+        std::uint64_t next_id_{0};
 
-    template <typename T>
-    void add(entity_t entity, T component)
-    {
-        auto type = std::type_index(typeid(T));
+        // type_index -> (entity_id -> shared_ptr<void>)
+        std::unordered_map<std::type_index, std::unordered_map<entity_t, std::shared_ptr<void>>>
+            storage_;
 
-        // shared_ptr with custom deleter that knows the real type
-        storage_[type][entity] = std::shared_ptr<void>(new T(std::move(component)), [](void* ptr) {
-            delete static_cast<T*>(ptr);
-        });
-    }
-
-    template <typename T>
-    T& get(entity_t entity)
-    {
-        auto  type = std::type_index(typeid(T));
-        void* ptr  = storage_[type].at(entity).get();
-        return *static_cast<T*>(ptr);
-    }
-
-    template <typename T>
-    const T& get(entity_t entity) const
-    {
-        auto  type = std::type_index(typeid(T));
-        void* ptr  = storage_.at(type).at(entity).get();
-        return *static_cast<const T*>(ptr);
-    }
-
-    template <typename T>
-    bool has(entity_t entity) const
-    {
-        auto type = std::type_index(typeid(T));
-        auto it   = storage_.find(type);
-        if (it == storage_.end()) {
-            return false;
+      public:
+        entity_t create()
+        {
+            return next_id_++;
         }
-        return it->second.contains(entity);
-    }
 
-    template <typename T>
-    void remove(entity_t entity)
-    {
-        auto type = std::type_index(typeid(T));
-        storage_[type].erase(entity);
-    }
+        template <typename T>
+        void add(entity_t entity, T component)
+        {
+            auto type = std::type_index(typeid(T));
 
-    template <typename T>
-    auto view()
-    {
-        auto                                 type = std::type_index(typeid(T));
-        std::vector<std::pair<entity_t, T*>> result;
+            // shared_ptr with custom deleter that knows the real type
+            storage_[type][entity] =
+                std::shared_ptr<void>(new T(std::move(component)), [](void* ptr) {
+                    delete static_cast<T*>(ptr);
+                });
+        }
 
-        if (storage_.contains(type)) {
-            for (auto& [entity, ptr] : storage_[type]) {
-                result.emplace_back(entity, static_cast<T*>(ptr.get()));
+        template <typename T>
+        T& get(entity_t entity)
+        {
+            auto  type = std::type_index(typeid(T));
+            void* ptr  = storage_[type].at(entity).get();
+            return *static_cast<T*>(ptr);
+        }
+
+        template <typename T>
+        const T& get(entity_t entity) const
+        {
+            auto  type = std::type_index(typeid(T));
+            void* ptr  = storage_.at(type).at(entity).get();
+            return *static_cast<const T*>(ptr);
+        }
+
+        template <typename T>
+        bool has(entity_t entity) const
+        {
+            auto type = std::type_index(typeid(T));
+            auto it   = storage_.find(type);
+            if (it == storage_.end()) {
+                return false;
             }
+            return it->second.contains(entity);
         }
 
-        return result;
-    }
+        template <typename T>
+        void remove(entity_t entity)
+        {
+            auto type = std::type_index(typeid(T));
+            storage_[type].erase(entity);
+        }
 
-    template <typename T, typename U>
-    auto view()
-    {
-        std::vector<std::tuple<entity_t, T*, U*>> result;
+        template <typename T>
+        auto view()
+        {
+            auto                                 type = std::type_index(typeid(T));
+            std::vector<std::pair<entity_t, T*>> result;
 
-        for (auto [entity, t_ptr] : view<T>()) {
-            if (has<U>(entity)) {
-                result.emplace_back(entity, t_ptr, &get<U>(entity));
+            if (storage_.contains(type)) {
+                for (auto& [entity, ptr] : storage_[type]) {
+                    result.emplace_back(entity, static_cast<T*>(ptr.get()));
+                }
             }
+
+            return result;
         }
 
-        return result;
-    }
-};
+        template <typename T, typename U>
+        auto view()
+        {
+            std::vector<std::tuple<entity_t, T*, U*>> result;
+
+            for (auto [entity, t_ptr] : view<T>()) {
+                if (has<U>(entity)) {
+                    result.emplace_back(entity, t_ptr, &get<U>(entity));
+                }
+            }
+
+            return result;
+        }
+    };
 
 } // namespace simbi::ecs
-
-

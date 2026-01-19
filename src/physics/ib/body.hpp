@@ -1,10 +1,15 @@
 // =============================================================================
 // body.hpp
 //
-// [TODO: Add description of what this file does]
+// defines the core data structures for immersed boundary bodies.
+// this file provides `body_t`, a struct that represents a physical object
+// embedded in the simulation grid. it uses a component-based design with
+// concepts to enable different physical capabilities like gravity, accretion,
+// and rigid body dynamics.
 //
 // usage:
-//   [TODO: Add usage example]
+//   using black_hole = body_t<3, grav_component_t, accretion_component_t>;
+//   auto bh = make_black_hole(id, pos, vel, ...);
 // =============================================================================
 #pragma once
 
@@ -484,5 +489,3 @@ namespace simbi::body {
     // [TODO] add more properties as needed
 
 } // namespace simbi::body
-
-

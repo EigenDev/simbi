@@ -1,10 +1,14 @@
 // =============================================================================
 // patch_id.hpp
 //
-// [TODO: Add description of what this file does]
+// unique identifier for a grid block (patch).
+// defines `patch_id_t`, a struct that serves as a unique key for a block
+// within an amr/fmr grid hierarchy, composed of a level index and a
+// multi-dimensional coordinate. provides comparison and hashing for use in maps.
 //
 // usage:
-//   [TODO: Add usage example]
+//   patch_id_t id{1, {0, 1, 0}}; // level 1, block (0,1,0)
+//   std::map<patch_id_t, data_t> my_map;
 // =============================================================================
 #pragma once
 
@@ -20,7 +24,8 @@ namespace simbi::grid {
     // -------------------------------------------------------------------------
     // patch id: unique key for a block in the amr / fmr hierarchy
     // -------------------------------------------------------------------------
-    struct patch_id_t {
+    struct patch_id_t
+    {
         // refinement Level (0 = Coarsest)
         std::int64_t level = 0;
 
@@ -70,21 +75,19 @@ namespace simbi::grid {
     // -------------------------------------------------------------------------
     // hashing (for std::unordered_map)
     // -------------------------------------------------------------------------
-    struct patch_id_hasher {
+    struct patch_id_hasher
+    {
         std::size_t operator()(const patch_id_t& id) const
         {
             // standard hash combine pattern
             std::size_t h = std::hash<std::int64_t>{}(id.level);
 
             for (std::int64_t ii = 0; ii < 3; ++ii) {
-                h ^= std::hash<std::int64_t>{}(id.coords[ii]) + 0x9e3779b9 +
-                     (h << 6) + (h >> 2);
+                h ^= std::hash<std::int64_t>{}(id.coords[ii]) + 0x9e3779b9 + (h << 6) + (h >> 2);
             }
 
             return h;
         }
     };
 
-}   // namespace simbi::grid
-
-
+} // namespace simbi::grid

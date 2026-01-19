@@ -1,10 +1,15 @@
 // =============================================================================
 // metadata_serial.hpp
 //
-// [TODO: Add description of what this file does]
+// hdf5 serialization for simulation metadata.
+// provides the `h5_serializable` specialization for `ecs::simulation_metadata_t`,
+// which handles writing and reading all global simulation parameters, such as
+// numeric parameters, timing information, configuration enums, and file paths,
+// to and from an hdf5 file.
 //
 // usage:
-//   [TODO: Add usage example]
+//   h5_serializable<simulation_metadata_t<3>>::write(group, meta, policy);
+//   auto meta = h5_serializable<simulation_metadata_t<3>>::read(group);
 // =============================================================================
 #pragma once
 
@@ -25,7 +30,6 @@
 
 namespace simbi::io {
 
-    
     template <typename EnumType>
     EnumType read_enum_attribute(const H5::Group& g, const std::string& name)
     {
@@ -40,7 +44,6 @@ namespace simbi::io {
         }
     }
 
-    
     template <std::uint64_t Rank>
     struct h5_serializable<ecs::simulation_metadata_t<Rank>>
     {
@@ -256,5 +259,3 @@ namespace simbi::io {
     };
 
 } // namespace simbi::io
-
-

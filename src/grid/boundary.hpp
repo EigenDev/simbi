@@ -1,10 +1,14 @@
 // =============================================================================
 // boundary.hpp
 //
-// [TODO: Add description of what this file does]
+// defines types for specifying and managing grid boundaries.
+// contains enums like `boundary_type_t` (periodic, outflow, reflect) and
+// `grid_location_t`, as well as structs like `boundary_set_t` for holding the
+// boundary conditions for all faces of a domain.
 //
 // usage:
-//   [TODO: Add usage example]
+//   boundary_set_t<3> bcs;
+//   bcs.set_left(0, boundary_type_t::periodic);
 // =============================================================================
 #pragma once
 
@@ -110,5 +114,3 @@ namespace simbi {
         return os;
     }
 } // namespace simbi
-
-

@@ -35,7 +35,7 @@
 #include "grid/field.hpp"
 #include "hydro_state_types.hpp"
 #include "utility/enums.hpp"
-#include "xpu/xpu.hpp"
+#include "xpu/comm/transfer.hpp"
 
 #include <cstdint>
 #include <vector>
@@ -45,7 +45,6 @@ namespace simbi::ecs {
     template <regime_t R, std::uint64_t Rank, geometry_t G, typename EoS>
     struct simulation_t
     {
-        
 
         using conserved_t = typename vtraits<R, Rank, EoS>::conserved_type;
         using primitive_t = typename vtraits<R, Rank, EoS>::primitive_type;
@@ -55,15 +54,11 @@ namespace simbi::ecs {
         using workspace_t = partition_workspace_t<conserved_t, primitive_t, Rank>;
         using decomp_t    = level_decomposition_t<Rank>;
 
-        
-
         static constexpr std::uint64_t     rank         = Rank;
         static constexpr regime_t          regime       = R;
         static constexpr simbi::geometry_t coord_system = G;
         static constexpr bool              is_mhd = (R == regime_t::MHD || R == regime_t::RMHD);
         static constexpr auto              nvars  = is_mhd ? 9 : Rank + 3;
-
-        
 
         // ecs registry holding all components
         registry_t registry;
@@ -82,8 +77,6 @@ namespace simbi::ecs {
         bool in_failure_state{false};
         bool was_interrupted{false};
 
-        
-
         std::uint64_t num_levels() const
         {
             return levels.size();
@@ -93,8 +86,6 @@ namespace simbi::ecs {
         {
             return num_levels() > 1;
         }
-
-        
 
         auto& metadata()
         {
@@ -115,8 +106,6 @@ namespace simbi::ecs {
         {
             return registry.get<sources_t<Rank>>(global);
         }
-
-        
 
         auto& level_info(std::uint64_t lvl)
         {
@@ -152,8 +141,6 @@ namespace simbi::ecs {
         {
             return registry.get<level_mesh_t<Rank>>(levels[lvl]);
         }
-
-        
 
         // -------------------------------------------------------------------------
         // decomposition
@@ -283,8 +270,6 @@ namespace simbi::ecs {
             return level_mesh(lvl).config;
         }
 
-        
-
         // -------------------------------------------------------------------------
         // exchange_halos
         //
@@ -344,8 +329,6 @@ namespace simbi::ecs {
             }
         }
 
-        
-
         // -------------------------------------------------------------------------
         // has_workspace
         //
@@ -403,8 +386,6 @@ namespace simbi::ecs {
             const auto& decomp = decomposition(lvl);
             return registry.get<workspace_t>(decomp.partition_entities[part_id]);
         }
-
-        
 
         bool has_bodies() const
         {

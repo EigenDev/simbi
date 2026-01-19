@@ -1,10 +1,14 @@
 // =============================================================================
 // setup.hpp
 //
-// [TODO: Add description of what this file does]
+// initial grid and skeleton construction from blueprints.
+// this file provides `mesh_setup_t` to convert a `mesh_blueprint_t` into a
+// `mesh_config_t`, and `skeleton_builder_t` to create the initial root-level
+// grid topology (`skeleton_t`) from a mesh configuration.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto mesh_cfg = mesh_setup_t<Rank>::create_config(mesh_bp);
+//   auto skeleton = skeleton_builder_t<Rank>::build_single_block(mesh_cfg);
 // =============================================================================
 #pragma once
 
@@ -143,5 +147,3 @@ namespace simbi::grid::creation {
     };
 
 } // namespace simbi::grid::creation
-
-

@@ -1,10 +1,14 @@
 // =============================================================================
 // ct_geom.hpp
 //
-// [TODO: Add description of what this file does]
+// discrete curl operators for constrained transport mhd.
+// provides implementations of the discrete curl operator for cartesian,
+// spherical, and cylindrical coordinate systems. these are used to compute the
+// magnetic field update from edge-centered electric fields, ensuring the
+// divergence-free constraint is maintained.
 //
 // usage:
-//   [TODO: Add usage example]
+//   real bx = discrete_curl<magnetic_comp_t::I>(emfs, coord, geo);
 // =============================================================================
 #pragma once
 
@@ -18,8 +22,6 @@
 #include <cstdint>
 
 namespace simbi::em {
-
-    
 
     // cartesian discrete curl
     template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
@@ -238,7 +240,6 @@ namespace simbi::em {
         }
     }
 
-    
     template <magnetic_comp_t MagComp, std::uint64_t Rank, typename Geometry>
     DEV real discrete_curl(
         const vector_t<vector_t<real, 2>, 2>& edge_emfs,
@@ -264,5 +265,3 @@ namespace simbi::em {
     }
 
 } // namespace simbi::em
-
-

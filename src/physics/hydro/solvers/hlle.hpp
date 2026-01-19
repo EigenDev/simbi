@@ -1,10 +1,13 @@
 // =============================================================================
 // hlle.hpp
 //
-// [TODO: Add description of what this file does]
+// the hlle approximate riemann solver.
+// provides a generic implementation of the hlle (harten-lax-van leer-eymard)
+// approximate riemann solver, which is applicable across all supported physics
+// regimes (newtonian, srhd, rmhd).
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto flux = hydro::hlle_flux(primL, primR, nhat, vface, gamma);
 // =============================================================================
 #pragma once
 

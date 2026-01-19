@@ -1,10 +1,14 @@
 // =============================================================================
 // coordinate_map.hpp
 //
-// [TODO: Add description of what this file does]
+// defines mappings from grid indices to physical coordinates.
+// this file provides `uniform_map_t` and `log_map_t`, which are functors
+// that translate a discrete grid index `i` into a physical coordinate `x`,
+// handling both linearly and logarithmically spaced grids.
 //
 // usage:
-//   [TODO: Add usage example]
+//   uniform_map_t mapper(0.0, 0.1); // start=0.0, dx=0.1
+//   real x = mapper.center(10); // get center of 11th cell
 // =============================================================================
 #pragma once
 
@@ -113,5 +117,3 @@ namespace simbi::geometry {
     };
 
 } // namespace simbi::geometry
-
-

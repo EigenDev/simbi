@@ -1,10 +1,13 @@
 // =============================================================================
 // electromagnetism.hpp
 //
-// [TODO: Add description of what this file does]
+// core helper functions for electromagnetic quantities.
+// provides utility functions for mhd simulations, such as `electric_field`
+// which computes the e-field from primitive variables, and
+// `shift_electric_field` for transforming flux quantities.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto E = electric_field(prim_state);
 // =============================================================================
 #pragma once
 
@@ -34,4 +37,3 @@ namespace simbi::em {
     }
 
 } // namespace simbi::em
-

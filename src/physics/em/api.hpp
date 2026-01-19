@@ -1,10 +1,15 @@
 // =============================================================================
 // api.hpp
 //
-// [TODO: Add description of what this file does]
+// public api for the electromagnetism (em) module.
+// provides high-level functions for mhd, such as `compute_edge_efields` to
+// calculate electric fields using constrained transport, and
+// `update_magnetic_fields` to evolve the magnetic field in a divergence-free
+// manner.
 //
 // usage:
-//   [TODO: Add usage example]
+//   em::compute_edge_efields(exec, state, ...);
+//   em::update_magnetic_fields(exec, state, ...);
 // =============================================================================
 #pragma once
 
@@ -24,7 +29,6 @@
 
 namespace simbi::em {
 
-    
     template <std::uint64_t Rank>
     struct update_magnetic_energy_t
     {
@@ -253,8 +257,6 @@ namespace simbi::em {
         return compute::computation_t{ez_stencil_t<FluxField, PrimField>{fluxes, prims}, domain};
     }
 
-    
-
     // bx face[k,j,i] at physical {k, j, i-1/2}
     // needs ey and ez edges bounding this face
     template <typename EField, typename Geometry>
@@ -373,8 +375,6 @@ namespace simbi::em {
         };
     }
 
-    
-
     template <
         typename Executor,
         typename HydroState,
@@ -412,7 +412,6 @@ namespace simbi::em {
         e3         = e3_op.map(fp::identity).with(exec);
     }
 
-    
     template <typename Bfield, typename Geometry>
     struct interpolate_magnetic_op_t
     {
@@ -563,5 +562,3 @@ namespace simbi::em {
     }
 
 } // namespace simbi::em
-
-

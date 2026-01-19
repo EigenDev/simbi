@@ -1,10 +1,17 @@
 // =============================================================================
 // policy.hpp
 //
-// [TODO: Add description of what this file does]
+// defines the concept for boundary condition policies.
+// this file specifies the `boundary_policy_c` concept that physics modules
+// must satisfy to handle boundary conditions. it also provides a
+// `default_boundary_policy_t` that performs a simple copy.
 //
 // usage:
-//   [TODO: Add usage example]
+//   struct my_policy {
+//     template <typename T>
+//     T apply(const T& val, ...) const { ... }
+//   };
+//   static_assert(boundary_policy_c<my_type, my_policy>);
 // =============================================================================
 #pragma once
 
@@ -51,5 +58,3 @@ namespace simbi::grid {
     };
 
 } // namespace simbi::grid
-
-

@@ -1,10 +1,16 @@
 // =============================================================================
 // visit.hpp
 //
-// [TODO: Add description of what this file does]
+// visitor pattern implementation for geometry services.
+// provides `visit_block_geometry`, a function that uses `std::visit` to
+// unpack a variant of coordinate maps (`any_map_t`) and invoke a callable
+// with the fully-resolved map types, enabling compile-time optimization
+// for different geometric configurations.
 //
 // usage:
-//   [TODO: Add usage example]
+//   visit_block_geometry<2>(service, id, [&](auto&& map0, auto&& map1) {
+//     // use fully-resolved map0 and map1
+//   });
 // =============================================================================
 #pragma once
 
@@ -45,5 +51,3 @@ namespace simbi::geometry {
     }
 
 } // namespace simbi::geometry
-
-

@@ -1,10 +1,13 @@
 // =============================================================================
 // traits.hpp
 //
-// [TODO: Add description of what this file does]
+// custom type traits for compile-time introspection.
+// this file provides custom type traits, such as `is_maybe` and `is_maybe_v`,
+// which can be used to check if a given type is a specialization of the
+// `maybe_t` template at compile time.
 //
 // usage:
-//   [TODO: Add usage example]
+//   if constexpr (is_maybe_v<my_type>) { ... }
 // =============================================================================
 #pragma once
 

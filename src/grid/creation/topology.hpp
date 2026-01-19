@@ -1,10 +1,13 @@
 // =============================================================================
 // topology.hpp
 //
-// [TODO: Add description of what this file does]
+// constructs the amr grid hierarchy from blueprints.
+// this file defines `topology_builder_t`, a service responsible for building
+// the complete amr hierarchy as a vector of `skeleton_t` objects, one for each
+// refinement level, based on the root mesh and amr blueprints.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto hierarchy = topology_builder_t<Rank>::build_hierarchy(mesh_bp, amr_bp);
 // =============================================================================
 #pragma once
 
@@ -145,5 +148,3 @@ namespace simbi::grid::creation {
     };
 
 } // namespace simbi::grid::creation
-
-

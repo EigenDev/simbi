@@ -1,10 +1,15 @@
 // =============================================================================
 // ops.hpp
 //
-// [TODO: Add description]
+// generic memory operations for different memory spaces.
+// provides functions like `zero_memory`, `fill_memory`, and `copy_memory` that
+// are templated on the memory space, allowing them to work correctly for
+// host, device, or unified memory by dispatching to the appropriate backend
+// (e.g., `memset` vs. `cudaMemset`).
 //
 // usage:
-//   [TODO: Add usage example]
+//   zero_memory(my_device_block);
+//   fill_memory(my_host_block, 42);
 // =============================================================================
 #pragma once
 
@@ -17,8 +22,6 @@
 #include <cstring>
 
 namespace simbi::xpu::mem {
-
-    
 
     template <typename MemorySpace>
     void zero_memory(memory_block_t<MemorySpace>& block)
@@ -37,8 +40,6 @@ namespace simbi::xpu::mem {
             device_memory_t::memset(block.data(), 0, block.size());
         }
     }
-
-    
 
     template <typename T, typename MemorySpace>
     void fill_memory(memory_block_t<MemorySpace>& block, const T& value)
@@ -65,8 +66,6 @@ namespace simbi::xpu::mem {
         }
     }
 
-    
-
     template <typename T, typename MemorySpace>
     void copy_memory(const memory_block_t<MemorySpace>& src, memory_block_t<MemorySpace>& dst)
     {
@@ -88,4 +87,3 @@ namespace simbi::xpu::mem {
     }
 
 } // namespace simbi::xpu::mem
-

@@ -1,10 +1,13 @@
 // =============================================================================
 // contact_properties.hpp
 //
-// [TODO: Add description of what this file does]
+// defines and calculates properties of contact discontinuities.
+// provides the `contact_properties_t` struct to store the speed and pressure
+// of a contact wave in a riemann problem, and the `contact_props` function
+// to compute these values from the hll-intermediate state.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto [a_star, p_star] = contact_props(uL, uR, fL, fR, nhat, aL, aR);
 // =============================================================================
 #pragma once
 
@@ -149,4 +152,3 @@ namespace simbi::hydro {
     }
 
 } // namespace simbi::hydro
-

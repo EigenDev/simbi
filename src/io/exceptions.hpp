@@ -1,10 +1,14 @@
 // =============================================================================
 // exceptions.hpp
 //
-// [TODO: Add description]
+// custom exception types and error-handling utilities.
+// defines custom exceptions like `InterruptException` and
+// `SimulationFailureException`, as well as the `ErrorCode` enum and related
+// helpers for structured error reporting throughout the simulation code.
 //
 // usage:
-//   [TODO: Add usage example]
+//   if (error) throw InterruptException(1);
+//   if (cons2prim_failed) return None(ErrorCode::NEGATIVE_PRESSURE);
 // =============================================================================
 #pragma once
 

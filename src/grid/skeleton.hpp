@@ -1,10 +1,15 @@
 // =============================================================================
 // skeleton.hpp
 //
-// [TODO: Add description of what this file does]
+// container for the grid's topological layout.
+// defines `skeleton_t`, a class that manages the overall topology of the grid
+// by storing a collection of `block_info_t` objects. it provides an interface
+// to access and iterate over the blocks that make up a grid level.
 //
 // usage:
-//   [TODO: Add usage example]
+//   skeleton_t<3> skeleton;
+//   skeleton.add_block(some_block_info);
+//   const auto* block = skeleton.get_block(some_id);
 // =============================================================================
 #pragma once
 
@@ -39,7 +44,10 @@ namespace simbi::grid {
             blocks_.insert_or_assign(info.id, info);
         }
 
-        void remove_block(const patch_id_t& id) { blocks_.erase(id); }
+        void remove_block(const patch_id_t& id)
+        {
+            blocks_.erase(id);
+        }
 
         // ---------------------------------------------------------------------
         // access / query
@@ -66,10 +74,22 @@ namespace simbi::grid {
         }
 
         // iterators for "for each block" loops
-        auto begin() const { return blocks_.begin(); }
-        auto end() const { return blocks_.end(); }
-        std::size_t size() const { return blocks_.size(); }
-        bool empty() const { return blocks_.empty(); }
+        auto begin() const
+        {
+            return blocks_.begin();
+        }
+        auto end() const
+        {
+            return blocks_.end();
+        }
+        std::size_t size() const
+        {
+            return blocks_.size();
+        }
+        bool empty() const
+        {
+            return blocks_.empty();
+        }
 
         // ---------------------------------------------------------------------
         // global properties
@@ -86,15 +106,12 @@ namespace simbi::grid {
             domain_t<Rank> box = blocks_.begin()->second.geometry;
             for (const auto& [id, block] : blocks_) {
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    box.start[dd] =
-                        std::min(box.start[dd], block.geometry.start[dd]);
-                    box.fin[dd] = std::max(box.fin[dd], block.geometry.fin[dd]);
+                    box.start[dd] = std::min(box.start[dd], block.geometry.start[dd]);
+                    box.fin[dd]   = std::max(box.fin[dd], block.geometry.fin[dd]);
                 }
             }
             return box;
         }
     };
 
-}   // namespace simbi::grid
-
-
+} // namespace simbi::grid

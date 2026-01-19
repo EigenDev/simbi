@@ -1,10 +1,16 @@
 // =============================================================================
 // maybe.hpp
 //
-// [TODO: Add description of what this file does]
+// a simple, monadic `maybe` type for optional values.
+// provides a robust and expressive way to handle values that may or may not be
+// present, avoiding the pitfalls of null pointers. supports `map`, `and_then`,
+// and `unwrap_or` operations.
 //
 // usage:
-//   [TODO: Add usage example]
+//   maybe_t<int> safe_divide(int a, int b) {
+//     return (b == 0) ? Nothing : maybe_t{a / b};
+//   }
+//   int result = safe_divide(10, 2).unwrap_or(0);
 // =============================================================================
 #pragma once
 

@@ -1,10 +1,16 @@
 // =============================================================================
 // flux_correction.hpp
 //
-// [TODO: Add description of what this file does]
+// amr flux correction (refluxing) implementation.
+// defines the `flux_register_t` class, which accumulates flux differences at
+// coarse-fine boundaries. also provides the `coarse_flux_accumulate_t` and
+// `fine_flux_area_t` functors used to perform the refluxing operation,
+// ensuring conservation across AMR levels.
 //
 // usage:
-//   [TODO: Add usage example]
+//   flux_register.accumulate_coarse(...);
+//   flux_register.accumulate_fine(...);
+//   apply_flux_correction(coarse_field, flux_register, ...);
 // =============================================================================
 #pragma once
 
@@ -210,5 +216,3 @@ namespace simbi::grid::amr {
     };
 
 } // namespace simbi::grid::amr
-
-

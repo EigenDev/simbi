@@ -1,10 +1,15 @@
 // =============================================================================
 // metrics.hpp
 //
-// [TODO: Add description of what this file does]
+// metric implementations for different coordinate systems.
+// provides structs (`cartesian_metric_t`, `spherical_metric_t`, etc.) that
+// implement the logic for computing geometric quantities like cell volume,
+// face area, and coordinate scale factors for various coordinate systems.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto metric = cartesian_metric_t(x_map, y_map);
+//   real vol = metric.volume({i, j});
+//   auto h = metric.scale_factors({i, j});
 // =============================================================================
 #pragma once
 

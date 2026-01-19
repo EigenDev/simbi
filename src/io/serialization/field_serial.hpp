@@ -1,10 +1,16 @@
 // =============================================================================
 // field_serial.hpp
 //
-// [TODO: Add description of what this file does]
+// hdf5 serialization helpers for grid fields.
+// provides utilities for serializing `grid::field_t` objects. it includes
+// functions to write scalar fields and component-wise writers/readers for
+// struct-based fields, which are used to build the full serialization logic
+// for primitive and conserved state variables.
 //
 // usage:
-//   [TODO: Add usage example]
+//   write_scalar_field(group, "my_field", field, policy);
+//   write_struct_field(group, "my_struct_field", field, policy)
+//       .component("rho", [](const auto& s) { return s.rho; });
 // =============================================================================
 #pragma once
 
@@ -20,8 +26,6 @@
 #include <vector>
 
 namespace simbi::io {
-
-    
 
     // -------------------------------------------------------------------------
     // write a scalar field (field_t<real, Rank>)
@@ -233,5 +237,3 @@ namespace simbi::io {
     }
 
 } // namespace simbi::io
-
-

@@ -1,10 +1,15 @@
 // =============================================================================
 // index_map.hpp
 //
-// [TODO: Add description of what this file does]
+// coordinate mapping functors for boundary conditions.
+// this file provides various structs (`clamp_map_t`, `mirror_map_t`,
+// `periodic_map_t`, etc.) that are used as functors to remap out-of-bounds
+// ghost cell coordinates to valid interior coordinates, forming the core
+// mechanism for applying boundary conditions on the grid.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto map = clamp_map_t<1>{0, 0, 100};
+//   auto remapped_computation = field.remap(map);
 // =============================================================================
 #pragma once
 
@@ -228,5 +233,3 @@ namespace simbi::geometry {
     };
 
 } // namespace simbi::geometry
-
-

@@ -1,10 +1,14 @@
 // =============================================================================
 // motion.hpp
 //
-// [TODO: Add description of what this file does]
+// evolves the positions and velocities of immersed bodies.
+// provides the `evolve_bodies` function, which is responsible for updating
+// the kinematic state of bodies in the simulation, particularly for orbital
+// systems like binaries where bodies follow a prescribed or computed path.
 //
 // usage:
-//   [TODO: Add usage example]
+//   // called inside the main time integration loop
+//   body::evolve_bodies(sim);
 // =============================================================================
 #pragma once
 
@@ -22,18 +26,18 @@ namespace simbi::body {
             return;
         }
         else {
-            constexpr auto Rank = SimState::rank;
-            auto& bodies        = state.bodies();
+            constexpr auto Rank   = SimState::rank;
+            auto&          bodies = state.bodies();
             if (bodies.name() != "binary_system") {
                 return;
             }
 
             if (bodies.reference_frame() == "corotating") {
-                return;   // nothing to do, already in rotating frame
+                return; // nothing to do, already in rotating frame
             }
 
             if (bodies.reference_frame() == "stationary") {
-                return;   // nothing to do, static frame
+                return; // nothing to do, static frame
             }
 
             const auto binary_params = bodies.binary_params();
@@ -46,9 +50,7 @@ namespace simbi::body {
             auto new_coll = make_body_collection<Rank>();
 
             if (bodies.binary_params_) {
-                new_coll = std::move(new_coll).with_system_config(
-                    bodies.binary_params()
-                );
+                new_coll = std::move(new_coll).with_system_config(bodies.binary_params());
             }
 
             if (!bodies.system_name_.empty()) {
@@ -57,13 +59,11 @@ namespace simbi::body {
 
             auto updated_body_variants =
                 bodies |
-                collection_ops::map_bodies(
-                    [omega, dt](const auto& body) -> body_variant_t<Rank> {
-                        auto pos = vecops::rotate(body.position, omega * dt);
-                        auto vel = vecops::rotate(body.velocity, omega * dt);
-                        return at_position(with_velocity(body, vel), pos);
-                    }
-                );
+                collection_ops::map_bodies([omega, dt](const auto& body) -> body_variant_t<Rank> {
+                    auto pos = vecops::rotate(body.position, omega * dt);
+                    auto vel = vecops::rotate(body.velocity, omega * dt);
+                    return at_position(with_velocity(body, vel), pos);
+                });
 
             for (std::size_t ii = 0; ii < bodies.size(); ++ii) {
                 new_coll = std::move(new_coll).add(updated_body_variants[ii]);
@@ -72,5 +72,4 @@ namespace simbi::body {
             bodies = std::move(new_coll);
         }
     }
-}   // namespace simbi::body
-
+} // namespace simbi::body

@@ -1,10 +1,17 @@
 // =============================================================================
 // domain.hpp
 //
-// [TODO: Add description of what this file does]
+// defines the core `domain_t` struct for representing grid regions.
+// `domain_t` represents a half-open interval [start, end) in a
+// multi-dimensional index space. it is a fundamental building block for all
+// grid-based operations, including field allocation, iteration, and
+// decomposition.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto domain = domain_t<2>{{0, 0}, {100, 200}};
+//   for (const auto& coord : domain) {
+//     // ...
+//   }
 // =============================================================================
 #pragma once
 

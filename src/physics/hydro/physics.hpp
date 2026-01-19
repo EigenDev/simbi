@@ -1,10 +1,15 @@
 // =============================================================================
 // physics.hpp
 //
-// [TODO: Add description of what this file does]
+// fundamental physics calculations for hydro- and mhd.
+// provides a collection of core functions for computing physical quantities
+// from the primitive state variables, such as lorentz factor, sound speed,
+// enthalpy, pressure, and the conserved state variables and fluxes.
 //
 // usage:
-//   [TODO: Add usage example]
+//   real w = lorentz_factor(prim);
+//   real cs = sound_speed(prim, gamma);
+//   conserved_t u = to_conserved(prim, gamma);
 // =============================================================================
 #pragma once
 
@@ -354,4 +359,3 @@ namespace simbi::hydro {
         return (gamma - 1.0) * (cons.nrg - 0.5 * cons.den * vecops::dot(vel, vel));
     }
 } // namespace simbi::hydro
-

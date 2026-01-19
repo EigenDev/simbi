@@ -1,10 +1,14 @@
 // =============================================================================
 // ideal.hpp
 //
-// [TODO: Add description of what this file does]
+// ideal gas equation of state (eos).
+// defines `ideal_gas_eos_t`, a struct that implements the equation of state
+// for an ideal gas, providing methods to compute sound speed, enthalpy, and
+// specific internal energy. it is templated on the physics regime.
 //
 // usage:
-//   [TODO: Add usage example]
+//   ideal_gas_eos_t<regime_t::SRHD> eos{gamma};
+//   real cs = eos.sound_speed(rho, p);
 // =============================================================================
 #pragma once
 
@@ -39,5 +43,3 @@ namespace simbi::eos {
         }
     };
 } // namespace simbi::eos
-
-

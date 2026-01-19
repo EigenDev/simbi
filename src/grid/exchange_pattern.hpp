@@ -1,10 +1,14 @@
 // =============================================================================
 // exchange_pattern.hpp
 //
-// [TODO: Add description of what this file does]
+// builds the halo exchange pattern for a decomposed grid.
+// defines `exchange_builder_t`, a service that constructs a vector of
+// `transfer_op_t` objects. each object describes a required data transfer
+// (halo exchange) between neighboring grid blocks based on the grid's
+// `skeleton_t`.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto pattern = exchange_builder_t::create(skeleton, halo_width, geo_calc);
 // =============================================================================
 #pragma once
 
@@ -20,23 +24,25 @@
 namespace simbi::grid {
 
     template <std::uint64_t Rank>
-    struct transfer_op_t {
-        patch_id_t src_id;
-        patch_id_t dst_id;
-        std::int64_t dim;
-        side_t side;
+    struct transfer_op_t
+    {
+        patch_id_t     src_id;
+        patch_id_t     dst_id;
+        std::int64_t   dim;
+        side_t         side;
         domain_t<Rank> send_box;
         domain_t<Rank> recv_box;
     };
 
-    struct exchange_builder_t {
+    struct exchange_builder_t
+    {
 
         template <std::uint64_t Rank>
         static domain_t<Rank> compute_halo_slice(
             const domain_t<Rank>& geom,
-            std::int64_t dim,
-            side_t side,
-            std::int64_t halo_width
+            std::int64_t          dim,
+            side_t                side,
+            std::int64_t          halo_width
         )
         {
             // ... (same as before) ...
@@ -54,9 +60,9 @@ namespace simbi::grid {
 
         template <std::uint64_t Rank>
         static std::vector<transfer_op_t<Rank>> create(
-            const skeleton_t<Rank>& skeleton,
-            std::int64_t halo_width,
-            const amr::geometry_calculator_t& geo_calc   // NEW dependency
+            const skeleton_t<Rank>&           skeleton,
+            std::int64_t                      halo_width,
+            const amr::geometry_calculator_t& geo_calc // NEW dependency
         )
         {
             std::vector<transfer_op_t<Rank>> ops;
@@ -73,8 +79,7 @@ namespace simbi::grid {
                         }
 
                         // my full face slice (in my level coords)
-                        auto my_slice =
-                            compute_halo_slice(info.geometry, d, s, halo_width);
+                        auto my_slice = compute_halo_slice(info.geometry, d, s, halo_width);
 
                         for (const auto& neighbor_id : conn.neighbors) {
                             transfer_op_t<Rank> op;
@@ -84,8 +89,7 @@ namespace simbi::grid {
                             op.side   = s;
 
                             // calculate neighbor's geometric bounds
-                            auto neighbor_geom_native =
-                                geo_calc.get_domain<Rank>(neighbor_id);
+                            auto neighbor_geom_native = geo_calc.get_domain<Rank>(neighbor_id);
 
                             // map neighbor to my level
                             // this allows us to intersect in a common
@@ -117,18 +121,14 @@ namespace simbi::grid {
                             domain_t<Rank> valid_send = my_slice;
                             for (std::uint64_t i = 0; i < Rank; ++i) {
                                 if (i == d) {
-                                    continue;   // skip normal direction
+                                    continue; // skip normal direction
                                 }
 
                                 // clip transverse dimensions
-                                valid_send.start[i] = std::max(
-                                    valid_send.start[i],
-                                    neighbor_geom_projected.start[i]
-                                );
-                                valid_send.fin[i] = std::min(
-                                    valid_send.fin[i],
-                                    neighbor_geom_projected.fin[i]
-                                );
+                                valid_send.start[i] =
+                                    std::max(valid_send.start[i], neighbor_geom_projected.start[i]);
+                                valid_send.fin[i] =
+                                    std::min(valid_send.fin[i], neighbor_geom_projected.fin[i]);
                             }
 
                             op.send_box = valid_send;
@@ -136,11 +136,8 @@ namespace simbi::grid {
                             // note: recv_box calculation requires mapping back
                             // to dest level for now, we leave it to the
                             // communicator or calc it here:
-                            op.recv_box = geo_calc.map_domain(
-                                valid_send,
-                                my_id.level,
-                                neighbor_id.level
-                            );
+                            op.recv_box =
+                                geo_calc.map_domain(valid_send, my_id.level, neighbor_id.level);
 
                             // shift recv_box to ghost position?
                             // handled by the logic of "who receives".
@@ -162,6 +159,4 @@ namespace simbi::grid {
         }
     };
 
-}   // namespace simbi::grid
-
-
+} // namespace simbi::grid

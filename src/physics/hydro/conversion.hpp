@@ -1,10 +1,15 @@
 // =============================================================================
 // conversion.hpp
 //
-// [TODO: Add description of what this file does]
+// functions for converting between primitive and conserved variables.
+// provides `to_primitive` and `to_conserved` function implementations for
+// different physics regimes (newtonian, srhd, rmhd), which are essential for
+// the finite-volume update scheme. includes robust root-finding algorithms
+// for relativistic conversions.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto prim = to_primitive(cons, gamma);
+//   auto cons = to_conserved(prim, gamma);
 // =============================================================================
 #pragma once
 
@@ -112,8 +117,6 @@ namespace simbi::hydro::rmhd {
         const auto tau    = u.nrg;
         const auto bfield = u.mag;
         const auto dchi   = u.chi;
-
-        
 
         //======= rescale the variables Eqs. (22) - (25)
         const auto invd   = 1.0 / d;
@@ -239,4 +242,3 @@ namespace simbi::hydro {
     }
 
 } // namespace simbi::hydro
-

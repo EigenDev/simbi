@@ -1,10 +1,16 @@
 // =============================================================================
 // write_policy.hpp
 //
-// [TODO: Add description of what this file does]
+// defines policies for writing data to hdf5 files.
+// provides `write_policy_t`, a struct that controls how datasets are written,
+// allowing for configuration of data precision (e.g., float32, float64) and
+// compression settings to manage the size and performance of output files.
 //
 // usage:
-//   [TODO: Add usage example]
+//   write_policy_t policy;
+//   policy.precision = precision_t::float32;
+//   policy.compress = true;
+//   h5_serializable<T>::write(group, data, policy);
 // =============================================================================
 #pragma once
 
@@ -22,25 +28,28 @@ namespace simbi::io {
         float64
     };
 
-    struct write_policy_t {
-        precision_t precision = precision_t::native;
-        bool compress         = false;
-        int compression_level = 6;   // 0-9, only used if compress=true
-        bool chunked          = true;
+    struct write_policy_t
+    {
+        precision_t precision         = precision_t::native;
+        bool        compress          = false;
+        int         compression_level = 6; // 0-9, only used if compress=true
+        bool        chunked           = true;
 
         // get hdf5 data type based on precision setting
         H5::DataType data_type() const
         {
             switch (precision) {
-                case precision_t::float32: return H5::PredType::NATIVE_FLOAT;
-                case precision_t::float64: return H5::PredType::NATIVE_DOUBLE;
-                default: return h5_pred_type<real>::value();
+                case precision_t::float32:
+                    return H5::PredType::NATIVE_FLOAT;
+                case precision_t::float64:
+                    return H5::PredType::NATIVE_DOUBLE;
+                default:
+                    return h5_pred_type<real>::value();
             }
         }
 
         // configure dataset creation property list
-        H5::DSetCreatPropList
-        creation_props(const std::vector<hsize_t>& dims) const
+        H5::DSetCreatPropList creation_props(const std::vector<hsize_t>& dims) const
         {
             H5::DSetCreatPropList plist;
 
@@ -58,6 +67,4 @@ namespace simbi::io {
         }
     };
 
-}   // namespace simbi::io
-
-
+} // namespace simbi::io

@@ -1,10 +1,17 @@
 // =============================================================================
 // block_info.hpp
 //
-// [TODO: Add description of what this file does]
+// descriptor for a single grid block (patch).
+// defines `block_info_t`, a struct that holds all metadata for a single
+// block in the grid hierarchy, including its unique `patch_id_t`, its
+// geometric domain, and its face connectivity to neighboring blocks or
+// physical boundaries.
 //
 // usage:
-//   [TODO: Add usage example]
+//   block_info_t block;
+//   block.id = ...;
+//   block.geometry = ...;
+//   block.connect(0, side_t::left, neighbor_id);
 // =============================================================================
 #pragma once
 
@@ -20,7 +27,8 @@
 
 namespace simbi::grid {
     template <std::uint64_t Rank>
-    struct block_info_t {
+    struct block_info_t
+    {
         // identity
         patch_id_t id;
 
@@ -77,8 +85,7 @@ namespace simbi::grid {
         for (std::uint64_t d = 0; d < Rank; ++d) {
             for (auto side : {side_t::left, side_t::right}) {
                 const auto& conn = block.get_face(d, side);
-                os << "  Dim " << d << " "
-                   << ((side == side_t::left) ? "Left" : "Right") << ": ";
+                os << "  Dim " << d << " " << ((side == side_t::left) ? "Left" : "Right") << ": ";
                 if (conn.is_connected()) {
                     os << "Connected to ";
                     for (const auto& neighbor : conn.neighbors) {
@@ -95,6 +102,4 @@ namespace simbi::grid {
         return os;
     }
 
-}   // namespace simbi::grid
-
-
+} // namespace simbi::grid

@@ -1,10 +1,14 @@
 // =============================================================================
 // restriction.hpp
 //
-// [TODO: Add description of what this file does]
+// amr restriction (fine-to-coarse data transfer) kernels.
+// provides functors for different restriction strategies, such as conservative
+// averaging (`restrict_average_t`) and simple injection
+// (`restrict_injection_t`), used to transfer data from a fine grid to an
+// underlying coarse grid.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto restricted_comp = restrict(fine_computation, ratio);
 // =============================================================================
 #pragma once
 
@@ -211,5 +215,3 @@ namespace simbi::grid::amr {
     }
 
 } // namespace simbi::grid::amr
-
-

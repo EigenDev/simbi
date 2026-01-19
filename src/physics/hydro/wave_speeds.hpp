@@ -1,10 +1,13 @@
 // =============================================================================
 // wave_speeds.hpp
 //
-// [TODO: Add description of what this file does]
+// functions for calculating characteristic wave speeds.
+// provides `wave_speeds` and `extremal_speeds` functions for calculating the
+// minimum and maximum characteristic wave speeds (signal velocities) for a
+// riemann problem in different physics regimes (newtonian, srhd, rmhd).
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto [sL, sR] = extremal_speeds(primL, primR, nhat, gamma);
 // =============================================================================
 #pragma once
 
@@ -435,5 +438,3 @@ namespace simbi::hydro {
         }
     }
 } // namespace simbi::hydro
-
-

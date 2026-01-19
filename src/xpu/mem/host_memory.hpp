@@ -1,10 +1,14 @@
 // =============================================================================
 // host_memory.hpp
 //
-// [TODO: Add description]
+// memory space implementation for standard host (cpu) memory.
+// defines `host_memory_t`, which implements the `memory_space` concept for
+// standard, cache-aligned cpu ram. it uses `std::aligned_alloc` and
+// `std::free` for memory management.
 //
 // usage:
-//   [TODO: Add usage example]
+//   using host_block = block_t<host_memory_t>;
+//   host_block my_block(1024);
 // =============================================================================
 #pragma once
 
@@ -17,17 +21,12 @@
 
 namespace simbi::xpu::mem {
 
-    
-
     struct host_memory_t
     {
-        
 
         using pointer_type       = void*;
         using const_pointer_type = const void*;
         using size_type          = std::size_t;
-
-        
 
         static constexpr std::string_view space_name()
         {
@@ -48,8 +47,6 @@ namespace simbi::xpu::mem {
         {
             return 30.0; // typical ddr4 bandwidth
         }
-
-        
 
         static void* allocate(std::size_t size)
         {
@@ -73,8 +70,6 @@ namespace simbi::xpu::mem {
             }
         }
 
-        
-
         template <memory_space_c OtherSpace>
         static constexpr bool is_accessible_from()
         {
@@ -96,8 +91,6 @@ namespace simbi::xpu::mem {
             return true; // unified memory can access host
         }
 
-        
-
         static void memset(void* ptr, int value, std::size_t size)
         {
             std::memset(ptr, value, size);
@@ -108,8 +101,6 @@ namespace simbi::xpu::mem {
             std::memcpy(dest, src, size);
         }
 
-        
-
         struct allocation_hints
         {
             static constexpr bool        supports_concurrent_access = true;
@@ -117,8 +108,6 @@ namespace simbi::xpu::mem {
             static constexpr bool        requires_explicit_sync     = false;
             static constexpr std::size_t preferred_alignment        = 64;
         };
-
-        
 
         static bool is_valid_pointer(const void* ptr)
         {
@@ -129,8 +118,6 @@ namespace simbi::xpu::mem {
         {
             return allocation_hints::preferred_alignment;
         }
-
-        
 
         struct stats
         {
@@ -159,13 +146,9 @@ namespace simbi::xpu::mem {
         };
     };
 
-    
-
     inline std::size_t host_memory_t::stats::total_allocated   = 0;
     inline std::size_t host_memory_t::stats::total_deallocated = 0;
     inline std::size_t host_memory_t::stats::current_usage     = 0;
-
-    
 
     template <>
     struct default_memory_space_selector<false>
@@ -176,12 +159,9 @@ namespace simbi::xpu::mem {
     // static assertion to verify concept compliance
     static_assert(memory_space_c<host_memory_t>);
 
-    
-
     using host_block_t = block_t<host_memory_t>;
 
     template <typename T>
     using host_buffer_t = block_t<host_memory_t>;
 
 } // namespace simbi::xpu::mem
-

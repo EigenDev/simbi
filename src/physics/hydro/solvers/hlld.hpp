@@ -1,10 +1,13 @@
 // =============================================================================
 // hlld.hpp
 //
-// [TODO: Add description of what this file does]
+// the hlld approximate riemann solver for relativistic mhd.
+// provides the implementation of the hll-davis (hlld) approximate riemann
+// solver, a five-wave solver that is particularly effective for resolving
+// discontinuities in relativistic magnetohydrodynamics.
 //
 // usage:
-//   [TODO: Add usage example]
+//   auto flux = hydro::rmhd::hlld_flux(primL, primR, nhat, vface, gamma);
 // =============================================================================
 #pragma once
 

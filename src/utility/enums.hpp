@@ -1,10 +1,14 @@
 // =============================================================================
 // enums.hpp
 //
-// [TODO: Add description]
+// defines various enumerations used throughout the simulation code.
+// this file contains enums for configuring physics regimes, numerical methods,
+// coordinate systems, boundary conditions, and more. it also uses the
+// `REGISTER_ENUM_BIMAP` macro to provide string conversions for serialization.
 //
 // usage:
-//   [TODO: Add usage example]
+//   regime_t my_regime = regime_t::SRHD;
+//   std::string s = serialize(my_regime); // "srhd"
 // =============================================================================
 #pragma once
 

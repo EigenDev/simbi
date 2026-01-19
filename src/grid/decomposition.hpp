@@ -1,10 +1,14 @@
 // =============================================================================
 // decomposition.hpp
 //
-// [TODO: Add description of what this file does]
+// utilities for domain decomposition across multiple processes.
+// defines `topology_t` to describe the logical arrangement of processes
+// (e.g., a 2x2x1 grid) and `decomposer_t`, a factory that slices a global
+// domain into a local domain for a specific rank based on the topology.
 //
 // usage:
-//   [TODO: Add usage example]
+//   topology_t topo{{2, 2, 1}};
+//   domain_t<3> my_domain = decomposer_t::decompose(global, topo, my_rank);
 // =============================================================================
 #pragma once
 
@@ -117,5 +121,3 @@ namespace simbi::grid {
     };
 
 } // namespace simbi::grid
-
-

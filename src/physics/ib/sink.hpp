@@ -1,10 +1,15 @@
 // =============================================================================
 // sink.hpp
 //
-// [TODO: Add description of what this file does]
+// utilities for calculating sink properties for accreting bodies.
+// this file provides `compute_sink_properties` to calculate quantities like
+// the bondi-hoyle accretion rate, and `update_sink_cache` to manage a cache
+// of these properties for use in the main simulation loop.
 //
 // usage:
-//   [TODO: Add usage example]
+//   update_sink_cache(sim);
+//   // ... in accretion kernel ...
+//   mdot = sim.bodies().sink_cache->at(body_idx).mdot;
 // =============================================================================
 #pragma once
 
@@ -262,5 +267,3 @@ namespace simbi::body {
         });
     }
 } // namespace simbi::body
-
-

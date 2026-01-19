@@ -1,10 +1,15 @@
 // =============================================================================
 // managed.hpp
 //
-// [TODO: Add description]
+// base class for unified memory (managed) allocations.
+// defines `managed_t`, a class that overrides `operator new` and
+// `operator delete` to use cuda/hip managed memory allocation when the gpu
+// backend is enabled. classes inheriting from `managed_t` will be allocated
+// in memory accessible by both cpu and gpu.
 //
 // usage:
-//   [TODO: Add usage example]
+//   class my_class : public managed_t { ... };
+//   auto* instance = new my_class(); // allocated in managed memory
 // =============================================================================
 #pragma once
 
@@ -13,7 +18,7 @@
 #include <cstddef> // for size_t
 
 namespace simbi {
-    
+
     /**
      * @brief
      * A custom implementation of managed memory that can be used

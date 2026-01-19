@@ -1,10 +1,16 @@
 // =============================================================================
 // field.hpp
 //
-// [TODO: Add description of what this file does]
+// defines the core `field_t` and `field_view_t` classes.
+// `field_t` is the primary data container for grid-based quantities, managing
+// memory ownership. `field_view_t` provides a non-owning reference to a region
+// of a field and is the key component enabling the lazy computation and
+// expression template framework.
 //
 // usage:
-//   [TODO: Add usage example]
+//   field_t<float, 2> my_field(domain);
+//   auto view = my_field[subdomain];
+//   view = some_computation.with(executor);
 // =============================================================================
 #pragma once
 
@@ -572,5 +578,3 @@ namespace simbi::grid {
     }
 
 } // namespace simbi::grid
-
-

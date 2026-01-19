@@ -1,10 +1,18 @@
 // =============================================================================
 // h5_serializable.hpp
 //
-// [TODO: Add description of what this file does]
+// defines the trait and concept for hdf5 serialization.
+// provides the `h5_serializable` struct, which acts as a trait to be
+// specialized for types that can be written to and read from hdf5 files. it
+// also defines the `serializable_c` concept and various helper functions for
+// reading and writing datasets and attributes.
 //
 // usage:
-//   [TODO: Add usage example]
+//   template <>
+//   struct h5_serializable<my_type> {
+//     static void write(...) { ... }
+//     static my_type read(...) { ... }
+//   };
 // =============================================================================
 #pragma once
 
@@ -23,13 +31,11 @@
 
 namespace simbi::io {
 
-    
     template <typename T, typename = void>
     struct h5_serializable : std::false_type
     {
     };
 
-    
     template <typename T>
     concept serializable_c = requires(H5::Group& g, const T& val, const write_policy_t& policy) {
         { h5_serializable<T>::write(g, val, policy) };
@@ -37,7 +43,6 @@ namespace simbi::io {
         { h5_serializable<T>::group_name } -> std::convertible_to<std::string_view>;
     };
 
-    
     template <typename T>
     auto get_h5_dtype(const write_policy_t& policy)
     {
@@ -122,8 +127,6 @@ namespace simbi::io {
         return data.empty() ? T{} : data[0];
     }
 
-    
-
     template <typename T>
     void write_attribute(H5::Group& group, const std::string& name, T value)
     {
@@ -169,8 +172,6 @@ namespace simbi::io {
         return value;
     }
 
-    
-
     template <typename T, std::size_t N>
     void write_array(
         H5::Group&         group,
@@ -208,8 +209,6 @@ namespace simbi::io {
         return arr;
     }
 
-    
-
     inline H5::Group create_or_open_group(H5::Group& parent, const std::string& name)
     {
         if (parent.nameExists(name)) {
@@ -224,5 +223,3 @@ namespace simbi::io {
     }
 
 } // namespace simbi::io
-
-
