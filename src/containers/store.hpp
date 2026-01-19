@@ -5,7 +5,6 @@
 // thin wrapper around shared_handle_t<block_t> that adds:
 //   - add() for dynamic growth during parsing
 //   - constructor from std::vector
-//   - compatibility with existing simbi store_t api
 //
 // usage:
 //   store_t<ExprNode> nodes;
