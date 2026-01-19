@@ -4,11 +4,6 @@
 // ecs systems for partition-aware multi-device simulations.
 // each system operates on partitions, using executors for kernel dispatch.
 //
-// key changes from previous system design:
-//   - uses partition_hydro(lvl, part) instead of hydro(lvl)
-//   - uses partition_executor(lvl, part) for kernel dispatch
-//   - uses grid/amr/* for amr operations
-//   - geometry uses motion_state_t snapshots
 // =============================================================================
 #pragma once
 

@@ -4,10 +4,6 @@
 // evolution driver for partition-aware multi-device simulations.
 // uses nsystems.hpp and ntiming.hpp infrastructure.
 //
-// key changes from evolution.hpp:
-//   - timer requires executor (from partition 0)
-//   - zone counting accounts for multiple partitions
-//   - pipeline uses partition-aware systems
 // =============================================================================
 #pragma once
 
@@ -31,7 +27,6 @@ namespace simbi::evolution {
     template <typename Sim>
     std::uint64_t count_weighted_zones(const Sim& sim);
 
-    
     struct evolution_state_t
     {
         timing::timing_stats_t            stats;
@@ -40,7 +35,6 @@ namespace simbi::evolution {
         bool                              should_stop{false};
     };
 
-    
     template <typename Sim>
     evolution_state_t initialize(Sim& sim)
     {
@@ -61,7 +55,6 @@ namespace simbi::evolution {
         };
     }
 
-    
     template <typename Sim, typename PhysicsStep>
     void run(Sim& sim, PhysicsStep&& step, evolution_state_t& state)
     {
@@ -152,7 +145,6 @@ namespace simbi::evolution {
         }
     }
 
-    
     template <typename Sim>
     std::uint64_t count_weighted_zones(const Sim& sim)
     {
@@ -176,7 +168,6 @@ namespace simbi::evolution {
         return total;
     }
 
-    
     template <typename Sim, typename Ops>
     struct hydro_pipeline_t
     {
@@ -247,7 +238,6 @@ namespace simbi::evolution {
             synchronize_system_t{}(sim, lvl);
         }
 
-        
         void advance_level_rk2(std::uint64_t lvl) const
         {
             using namespace ecs;
