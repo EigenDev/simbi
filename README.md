@@ -485,7 +485,7 @@ SIMBI includes ~24 example configurations in `simbi_configs/examples/`:
 | `magnetic_shock_tube.py` | 1D MHD shock |
 | `orszag_tang.py` | SRMHD Orszag-Tang vortex |
 | `kepler.py` | Keplerian disk with central mass |
-| `uniform_sphere.py` | Uniform sphere with immersed body |
+| `uniform_sphere.py` | Uniform sphere with homologous mesh expansion |
 | `quad_shocktube.py` | 2D multi-region shock |
 
 Run any example:
