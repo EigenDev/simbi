@@ -333,7 +333,7 @@ def gravity_source_expressions(self):
 
 ### Immersed Bodies
 
-Define solid objects in the computational domain:
+Define objects in the computational domain:
 
 ```python
 from simbi.types import ImmersedBodyConfig, BodyCapability, GravitationalProperties
