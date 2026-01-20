@@ -50,17 +50,19 @@ namespace simbi::diagnostics {
                                 // found the failure - extract all context
                                 auto pos = block_geo.labframe_centroid(coord);
 
-                                std::ostringstream oss;
-                                oss << "cons2prim failure detected\n";
-                                oss << "  level: " << lvl << ", partition: " << pp << "\n";
-                                oss << "  index: " << format_coord(coord) << "\n";
-                                oss << "  position: " << format_position(pos) << "\n";
-                                oss << "  error: "
-                                    << helpers::error_code_to_string(maybe_prim.error_code())
-                                    << "\n";
-                                oss << "  " << format_conserved(cons);
+                                // post each line separately to avoid breaking the message board
+                                std::ostringstream header;
+                                header << "cons2prim failure at level " << lvl << ", partition "
+                                       << pp << ", index " << format_coord(coord);
+                                table.post_error(header.str());
 
-                                table.post_error(oss.str());
+                                std::ostringstream detail;
+                                detail << "  position: " << format_position(pos) << ", error: "
+                                       << helpers::error_code_to_string(maybe_prim.error_code());
+                                table.post_error(detail.str());
+
+                                table.post_error("  " + format_conserved(cons));
+
                                 return;
                             }
                         }
@@ -74,5 +76,3 @@ namespace simbi::diagnostics {
     }
 
 } // namespace simbi::diagnostics
-
-
