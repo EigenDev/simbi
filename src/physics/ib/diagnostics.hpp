@@ -35,7 +35,6 @@
 #include <vector>
 
 namespace simbi::body {
-    
 
     template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     class cpu_diagnostics_t
@@ -106,8 +105,6 @@ namespace simbi::body {
     template <std::uint64_t Rank, std::uint64_t MaxBodies>
     thread_local bool cpu_diagnostics_t<Rank, MaxBodies>::registered = false;
 
-    
-
     template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
     class gpu_diagnostics_t : public managed_t
     {
@@ -116,7 +113,7 @@ namespace simbi::body {
         std::int64_t                                    num_blocks;
 
       public:
-        explicit gpu_diagnostics_t(int grid_size)
+        explicit gpu_diagnostics_t(std::int64_t grid_size)
             : block_accumulators(
                   xpu::mem::make_block<body_delta_t<Rank>, xpu::unified_memory_t>(
                       grid_size * MaxBodies
@@ -202,10 +199,8 @@ namespace simbi::body {
         }
     };
 
-    
-
     template <std::uint64_t Rank, std::uint64_t MaxBodies = 2>
-    auto create_diagnostics_accumulator(int grid_size = 1024)
+    auto create_diagnostics_accumulator(std::int64_t grid_size = 1024)
     {
         if constexpr (platform::is_gpu) {
             return std::make_unique<gpu_diagnostics_t<Rank, MaxBodies>>(grid_size);
@@ -217,5 +212,3 @@ namespace simbi::body {
     }
 
 } // namespace simbi::body
-
-

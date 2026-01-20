@@ -32,6 +32,7 @@
 #include "geometry/api.hpp"
 #include "grid/boundary.hpp"
 #include "grid/creation/topology.hpp"
+#include "grid/decomposition.hpp"
 #include "grid/domain.hpp"
 #include "grid/mesh_config.hpp"
 #include "grid/skeleton.hpp"
@@ -41,6 +42,7 @@
 #include "physics/ib/collection.hpp"
 #include "physics/ib/diagnostics.hpp"
 #include "physics/ib/factory.hpp"
+#include "runtime_config.hpp"
 #include "utility/bimap.hpp"
 #include "utility/enums.hpp"
 
@@ -49,6 +51,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace simbi::ecs::builders {
 
@@ -253,9 +256,26 @@ namespace simbi::ecs::builders {
                 using collection_t = body::body_collection_t<Rank>;
                 auto bodies        = io::h5_serializable<collection_t>::read(file);
                 sim.registry.add(sim.global, immersed_bodies_t<Rank>{std::move(bodies)});
+
+                const auto   threads    = runtime::block_dims.total_threads();
+                std::int64_t max_blocks = 0;
+                for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                    const auto&   mesh_cfg    = sim.mesh(lvl);
+                    std::uint64_t total_cells = 1;
+                    for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                        total_cells *= mesh_cfg.global_cells[dd];
+                    }
+                    auto blocks = static_cast<std::int64_t>((total_cells + threads - 1) / threads);
+                    if (blocks > max_blocks) {
+                        max_blocks = blocks;
+                    }
+                }
+
                 sim.registry.add(
                     sim.global,
-                    body_info_t<Rank>{.diagnostics = body::create_diagnostics_accumulator<Rank>()}
+                    body_info_t<Rank>{
+                        .diagnostics = body::create_diagnostics_accumulator<Rank>(max_blocks)
+                    }
                 );
             }
 
@@ -494,9 +514,27 @@ namespace simbi::ecs::builders {
 
             if (collection.has_value()) {
                 sim.registry.add(sim.global, immersed_bodies_t<Rank>{std::move(*collection)});
+
+                // compute grid size from level with most blocks
+                const auto   threads    = runtime::block_dims.total_threads();
+                std::int64_t max_blocks = 0;
+                for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
+                    const auto&   mesh_cfg    = sim.mesh(lvl);
+                    std::uint64_t total_cells = 1;
+                    for (std::uint64_t dd = 0; dd < Rank; ++dd) {
+                        total_cells *= mesh_cfg.global_cells[dd];
+                    }
+                    auto blocks = static_cast<std::int64_t>((total_cells + threads - 1) / threads);
+                    if (blocks > max_blocks) {
+                        max_blocks = blocks;
+                    }
+                }
+
                 sim.registry.add(
                     sim.global,
-                    body_info_t<Rank>{.diagnostics = body::create_diagnostics_accumulator<Rank>()}
+                    body_info_t<Rank>{
+                        .diagnostics = body::create_diagnostics_accumulator<Rank>(max_blocks)
+                    }
                 );
             }
         }
