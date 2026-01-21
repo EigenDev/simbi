@@ -33,6 +33,9 @@ gitrepo_home.txt
 *.log
 *.sh
 *.json
+*.html
+*.svg
+target/
 *.lock
 *.txt
 !meson_build_options.txt

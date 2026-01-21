@@ -1,0 +1,326 @@
+// =============================================================================
+// simulation.rs
+//
+// the top-level simulation container. owns all state:
+//   - metadata (timing, parameters)
+//   - levels (amr hierarchy)
+//   - registry (optional heterogeneous storage)
+//
+// this is the "game engine" core. systems operate on this struct.
+// =============================================================================
+
+use crate::level::{decompose_1d, Level, LevelInfo, MeshConfig};
+use crate::metadata::Metadata;
+use crate::partition::Partition;
+use crate::registry::Registry;
+
+// =============================================================================
+// simulation
+// =============================================================================
+
+#[derive(Debug)]
+pub struct Simulation<const RANK: usize> {
+    // global metadata
+    pub metadata: Metadata<RANK>,
+    // amr level hierarchy (index 0 = coarsest)
+    pub levels: Vec<Level<RANK>>,
+    // optional heterogeneous storage for extra components
+    pub registry: Registry,
+}
+
+impl<const RANK: usize> Simulation<RANK> {
+    pub fn new(metadata: Metadata<RANK>) -> Self {
+        Self {
+            metadata,
+            levels: Vec::new(),
+            registry: Registry::new(),
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // level management
+    // -------------------------------------------------------------------------
+
+    pub fn add_level(&mut self, level: Level<RANK>) {
+        self.levels.push(level);
+    }
+
+    pub fn num_levels(&self) -> usize {
+        self.levels.len()
+    }
+
+    pub fn level(&self, idx: usize) -> &Level<RANK> {
+        &self.levels[idx]
+    }
+
+    pub fn level_mut(&mut self, idx: usize) -> &mut Level<RANK> {
+        &mut self.levels[idx]
+    }
+
+    // -------------------------------------------------------------------------
+    // partition access (convenience methods)
+    // -------------------------------------------------------------------------
+
+    pub fn num_partitions(&self, level: usize) -> usize {
+        self.levels[level].num_partitions()
+    }
+
+    pub fn partition(&self, level: usize, partition: usize) -> &Partition<RANK> {
+        self.levels[level].partition(partition)
+    }
+
+    pub fn partition_mut(&mut self, level: usize, partition: usize) -> &mut Partition<RANK> {
+        self.levels[level].partition_mut(partition)
+    }
+
+    // -------------------------------------------------------------------------
+    // total cell counts
+    // -------------------------------------------------------------------------
+
+    pub fn total_cells(&self) -> usize {
+        self.levels.iter().map(|l| l.total_owned_cells()).sum()
+    }
+
+    // -------------------------------------------------------------------------
+    // iteration helpers for systems
+    // -------------------------------------------------------------------------
+
+    pub fn for_each_partition<F>(&self, level: usize, mut f: F)
+    where
+        F: FnMut(usize, &Partition<RANK>),
+    {
+        for pp in 0..self.num_partitions(level) {
+            f(pp, self.partition(level, pp));
+        }
+    }
+
+    pub fn for_each_partition_mut<F>(&mut self, level: usize, mut f: F)
+    where
+        F: FnMut(usize, &mut Partition<RANK>),
+    {
+        for pp in 0..self.levels[level].partitions.len() {
+            f(pp, &mut self.levels[level].partitions[pp]);
+        }
+    }
+
+    pub fn for_each_level<F>(&self, mut f: F)
+    where
+        F: FnMut(usize, &Level<RANK>),
+    {
+        for ll in 0..self.num_levels() {
+            f(ll, self.level(ll));
+        }
+    }
+
+    pub fn for_each_level_mut<F>(&mut self, mut f: F)
+    where
+        F: FnMut(usize, &mut Level<RANK>),
+    {
+        for ll in 0..self.levels.len() {
+            f(ll, &mut self.levels[ll]);
+        }
+    }
+}
+
+// =============================================================================
+// builder for common setups
+// =============================================================================
+
+pub struct SimulationBuilder<const RANK: usize> {
+    metadata: Metadata<RANK>,
+    mesh: Option<MeshConfig<RANK>>,
+    n_partitions: usize,
+    nghosts: [usize; RANK],
+}
+
+impl<const RANK: usize> SimulationBuilder<RANK> {
+    pub fn new(metadata: Metadata<RANK>) -> Self {
+        Self {
+            metadata,
+            mesh: None,
+            n_partitions: 1,
+            nghosts: [2; RANK],
+        }
+    }
+
+    pub fn mesh(mut self, mesh: MeshConfig<RANK>) -> Self {
+        self.mesh = Some(mesh);
+        self
+    }
+
+    pub fn partitions(mut self, n: usize) -> Self {
+        self.n_partitions = n;
+        self
+    }
+
+    pub fn nghosts(mut self, ng: [usize; RANK]) -> Self {
+        self.nghosts = ng;
+        self
+    }
+
+    pub fn build(self) -> Simulation<RANK> {
+        let mesh = self.mesh.expect("mesh configuration required");
+        let mut sim = Simulation::new(self.metadata);
+
+        if self.n_partitions == 1 {
+            // single partition (no decomposition)
+            let level = Level::single_partition(mesh, self.nghosts, 0);
+            sim.add_level(level);
+        } else {
+            // decompose along first dimension
+            let decomp = decompose_1d(&mesh, self.n_partitions, 0, self.nghosts);
+            let mut level = Level::new(LevelInfo::coarsest(), mesh);
+
+            for (pp, (domain, links)) in decomp.into_iter().enumerate() {
+                level.add_partition(domain, self.nghosts, pp);
+                for link in links {
+                    level.add_halo_link(link);
+                }
+            }
+
+            sim.add_level(level);
+        }
+
+        sim
+    }
+}
+
+// =============================================================================
+// convenience constructors
+// =============================================================================
+
+impl Simulation<1> {
+    pub fn simple_1d(x_min: f64, x_max: f64, n_cells: usize, gamma: f64, tend: f64) -> Self {
+        let metadata = Metadata::new(gamma, tend);
+        let mesh = MeshConfig::new([x_min], [x_max], [n_cells]);
+
+        SimulationBuilder::new(metadata)
+            .mesh(mesh)
+            .nghosts([2])
+            .build()
+    }
+}
+
+impl Simulation<2> {
+    pub fn simple_2d(
+        x_min: [f64; 2],
+        x_max: [f64; 2],
+        n_cells: [usize; 2],
+        gamma: f64,
+        tend: f64,
+    ) -> Self {
+        let metadata = Metadata::new(gamma, tend);
+        let mesh = MeshConfig::new(x_min, x_max, n_cells);
+
+        SimulationBuilder::new(metadata)
+            .mesh(mesh)
+            .nghosts([2, 2])
+            .build()
+    }
+}
+
+impl Simulation<3> {
+    pub fn simple_3d(
+        x_min: [f64; 3],
+        x_max: [f64; 3],
+        n_cells: [usize; 3],
+        gamma: f64,
+        tend: f64,
+    ) -> Self {
+        let metadata = Metadata::new(gamma, tend);
+        let mesh = MeshConfig::new(x_min, x_max, n_cells);
+
+        SimulationBuilder::new(metadata)
+            .mesh(mesh)
+            .nghosts([2, 2, 2])
+            .build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simulation_creation() {
+        let sim = Simulation::<1>::simple_1d(0.0, 1.0, 100, 1.4, 0.5);
+
+        assert_eq!(sim.num_levels(), 1);
+        assert_eq!(sim.num_partitions(0), 1);
+        assert_eq!(sim.partition(0, 0).owned_size(), 100);
+        assert_eq!(sim.metadata.gamma, 1.4);
+        assert_eq!(sim.metadata.tend, 0.5);
+    }
+
+    #[test]
+    fn simulation_2d() {
+        let sim = Simulation::<2>::simple_2d([0.0, 0.0], [1.0, 1.0], [50, 50], 1.4, 1.0);
+
+        assert_eq!(sim.num_levels(), 1);
+        assert_eq!(sim.partition(0, 0).owned_size(), 2500);
+    }
+
+    #[test]
+    fn simulation_with_decomposition() {
+        let metadata = Metadata::<1>::new(1.4, 0.5);
+        let mesh = MeshConfig::new([0.0], [1.0], [100]);
+
+        let sim = SimulationBuilder::new(metadata)
+            .mesh(mesh)
+            .partitions(4)
+            .nghosts([2])
+            .build();
+
+        assert_eq!(sim.num_levels(), 1);
+        assert_eq!(sim.num_partitions(0), 4);
+
+        // total owned cells should equal original
+        let total: usize = (0..4).map(|pp| sim.partition(0, pp).owned_size()).sum();
+        assert_eq!(total, 100);
+    }
+
+    #[test]
+    fn simulation_for_each() {
+        let sim = Simulation::<1>::simple_1d(0.0, 1.0, 100, 1.4, 0.5);
+
+        let mut count = 0;
+        sim.for_each_partition(0, |_pp, _part| {
+            count += 1;
+        });
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn simulation_field_access() {
+        let mut sim = Simulation::<1>::simple_1d(0.0, 1.0, 100, 1.4, 0.5);
+
+        // modify fields
+        sim.partition_mut(0, 0).fields.rho[0] = 1.5;
+
+        // verify
+        assert_eq!(sim.partition(0, 0).fields.rho[0], 1.5);
+    }
+
+    #[test]
+    fn simulation_registry_usage() {
+        let mut sim = Simulation::<1>::simple_1d(0.0, 1.0, 100, 1.4, 0.5);
+
+        #[derive(Debug, PartialEq)]
+        struct GravitySource {
+            mass: f64,
+            position: f64,
+        }
+
+        let entity = crate::Entity::new();
+        sim.registry.insert(
+            entity,
+            GravitySource {
+                mass: 1.0,
+                position: 0.5,
+            },
+        );
+
+        let source: &GravitySource = sim.registry.get(entity).unwrap();
+        assert_eq!(source.mass, 1.0);
+    }
+}

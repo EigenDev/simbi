@@ -1,0 +1,15 @@
+[package]
+name = "containers"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "containers"
+path = "src/lib.rs"
+
+[dependencies]
+
+[dev-dependencies]

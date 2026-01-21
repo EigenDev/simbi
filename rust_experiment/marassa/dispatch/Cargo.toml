@@ -1,0 +1,19 @@
+[package]
+name = "dispatch"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "dispatch"
+path = "src/lib.rs"
+
+[dependencies]
+config = { workspace = true }
+sim = { workspace = true }
+utility = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]

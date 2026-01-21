@@ -1,0 +1,19 @@
+[package]
+name = "marassa"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "marassa"
+path = "src/main.rs"
+
+[dependencies]
+config = { workspace = true }
+dispatch = { workspace = true }
+thiserror = { workspace = true }
+clap = { version = "4.5", features = ["derive"] }
+
+[dev-dependencies]
