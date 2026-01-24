@@ -512,6 +512,7 @@ namespace simbi::grid {
             },
             std::plus<std::size_t>{}
         );
+        exec.sync();
 
         if (nerrors > 0) {
             throw exception::SimulationFailureException();
@@ -552,6 +553,7 @@ namespace simbi::grid {
         // dispatch kernel over domain
         auto functor = assign_t<T, Rank, Expression>{dest, expr};
         exec.dispatch(domain, functor);
+        exec.sync();
     }
 
     template <
