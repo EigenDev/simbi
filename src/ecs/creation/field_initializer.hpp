@@ -33,8 +33,6 @@ namespace py = pybind11;
 
 namespace simbi::ecs::creation {
 
-    
-
     template <typename T, std::uint64_t Rank>
     T py_value_to_state(py::handle obj)
     {
@@ -118,8 +116,6 @@ namespace simbi::ecs::creation {
             return cons * cell_vol;
         }
     };
-
-    
 
     template <typename Sim>
     struct field_initializer_t

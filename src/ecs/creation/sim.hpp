@@ -515,18 +515,21 @@ namespace simbi::ecs::builders {
             if (collection.has_value()) {
                 sim.registry.add(sim.global, immersed_bodies_t<Rank>{std::move(*collection)});
 
-                // compute grid size from level with most blocks
+                // compute grid size from level with most actual cells
+                // use owned_domain.size() which gives the real cell count in
+                // the refined region, not global_cells which is the hypothetical
+                // full-domain resolution (causes massive over-allocation for FMR)
                 const auto   threads    = runtime::block_dims.total_threads();
                 std::int64_t max_blocks = 0;
                 for (std::uint64_t lvl = 0; lvl < sim.num_levels(); ++lvl) {
-                    const auto&   mesh_cfg    = sim.mesh(lvl);
-                    std::uint64_t total_cells = 1;
-                    for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                        total_cells *= mesh_cfg.global_cells[dd];
-                    }
-                    auto blocks = static_cast<std::int64_t>((total_cells + threads - 1) / threads);
-                    if (blocks > max_blocks) {
-                        max_blocks = blocks;
+                    for (std::uint64_t pp = 0; pp < sim.num_partitions(lvl); ++pp) {
+                        const auto&   part        = sim.partition(lvl, pp);
+                        std::uint64_t total_cells = part.owned_domain.size();
+                        auto          blocks =
+                            static_cast<std::int64_t>((total_cells + threads - 1) / threads);
+                        if (blocks > max_blocks) {
+                            max_blocks = blocks;
+                        }
                     }
                 }
 
