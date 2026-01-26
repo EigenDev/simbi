@@ -93,6 +93,11 @@ namespace simbi::body {
                     (*acc)[ii].idx = ii;
                 }
             }
+
+            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                base_offset[ii]     = {};
+                base_offset[ii].idx = ii;
+            }
         }
 
         void restore_deltas(const std::vector<body_delta_t<Rank>>& deltas)
@@ -189,15 +194,18 @@ namespace simbi::body {
 
         void reset()
         {
-            // synchronize via xpu
             xpu::synchronize();
 
-            // clear unified memory buffer via cached pointer
             for (std::int64_t block = 0; block < num_blocks; ++block) {
                 for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
                     data_ptr_[block * MaxBodies + ii]     = {};
                     data_ptr_[block * MaxBodies + ii].idx = ii;
                 }
+            }
+
+            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                base_offset[ii]     = {};
+                base_offset[ii].idx = ii;
             }
         }
 
