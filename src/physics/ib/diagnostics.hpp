@@ -41,12 +41,18 @@ namespace simbi::body {
     {
         mutable std::vector<vector_t<body_delta_t<Rank>, MaxBodies>*> registered_accumulators;
         mutable std::mutex                                            registration_mutex;
+        vector_t<body_delta_t<Rank>, MaxBodies>                       base_offset{};
 
         thread_local static vector_t<body_delta_t<Rank>, MaxBodies> thread_data;
         thread_local static bool                                    registered;
 
       public:
-        cpu_diagnostics_t() = default;
+        cpu_diagnostics_t()
+        {
+            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                base_offset[ii].idx = ii;
+            }
+        }
 
         void accumulate_delta(const body_delta_t<Rank>& delta)
         {
@@ -66,10 +72,7 @@ namespace simbi::body {
         {
             std::lock_guard lock(registration_mutex);
 
-            vector_t<body_delta_t<Rank>, MaxBodies> result{};
-            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
-                result[ii].idx = ii;
-            }
+            vector_t<body_delta_t<Rank>, MaxBodies> result = base_offset;
 
             for (auto* acc : registered_accumulators) {
                 for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
@@ -92,9 +95,14 @@ namespace simbi::body {
             }
         }
 
-        void restore_deltas(const std::vector<body_delta_t<Rank>>&)
+        void restore_deltas(const std::vector<body_delta_t<Rank>>& deltas)
         {
-            // no-op for cpu - no persistent state
+            std::lock_guard lock(registration_mutex);
+            for (std::size_t ii = 0;
+                 ii < std::min(deltas.size(), static_cast<std::size_t>(MaxBodies));
+                 ++ii) {
+                base_offset[ii] = deltas[ii];
+            }
         }
     };
 
@@ -111,6 +119,7 @@ namespace simbi::body {
         xpu::mem::memory_block_t<xpu::unified_memory_t> block_accumulators;
         body_delta_t<Rank>*                             data_ptr_;
         std::int64_t                                    num_blocks;
+        vector_t<body_delta_t<Rank>, MaxBodies>         base_offset{};
 
       public:
         explicit gpu_diagnostics_t(std::int64_t grid_size)
@@ -121,7 +130,10 @@ namespace simbi::body {
               ),
               data_ptr_(block_accumulators.template as<body_delta_t<Rank>>()), num_blocks(grid_size)
         {
-            // initialize via unified memory (accessible from host)
+            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
+                base_offset[ii].idx = ii;
+            }
+
             for (std::int64_t block = 0; block < num_blocks; ++block) {
                 for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
                     data_ptr_[block * MaxBodies + ii]     = {};
@@ -163,12 +175,8 @@ namespace simbi::body {
         {
             xpu::synchronize();
 
-            vector_t<body_delta_t<Rank>, MaxBodies> result{};
-            for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
-                result[ii].idx = ii;
-            }
+            vector_t<body_delta_t<Rank>, MaxBodies> result = base_offset;
 
-            // access data_ptr_ directly after sync
             for (std::int64_t block = 0; block < num_blocks; ++block) {
                 for (std::uint64_t ii = 0; ii < MaxBodies; ++ii) {
                     const auto& delta = data_ptr_[block * MaxBodies + ii];
@@ -193,9 +201,14 @@ namespace simbi::body {
             }
         }
 
-        void restore_deltas(const std::vector<body_delta_t<Rank>>&)
+        void restore_deltas(const std::vector<body_delta_t<Rank>>& deltas)
         {
-            // no-op for gpu - no persistent state
+            xpu::synchronize();
+            for (std::size_t ii = 0;
+                 ii < std::min(deltas.size(), static_cast<std::size_t>(MaxBodies));
+                 ++ii) {
+                base_offset[ii] = deltas[ii];
+            }
         }
     };
 

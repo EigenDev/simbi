@@ -271,11 +271,38 @@ namespace simbi::ecs::builders {
                     }
                 }
 
+                auto diagnostics = body::create_diagnostics_accumulator<Rank>(max_blocks);
+
+                // restore diagnostic deltas for continuity
+                if (io::group_exists(file, "diagnostic_deltas")) {
+                    auto g     = file.openGroup("diagnostic_deltas");
+                    auto count = io::read_attribute<std::uint64_t>(g, "count");
+
+                    std::vector<body::body_delta_t<Rank>> deltas(count);
+
+                    for (std::size_t ii = 0; ii < count; ++ii) {
+                        auto dg = g.openGroup("delta_" + std::to_string(ii));
+
+                        deltas[ii].idx        = io::read_attribute<std::uint64_t>(dg, "idx");
+                        deltas[ii].mass_delta = io::read_attribute<real>(dg, "mass_delta");
+
+                        auto force  = io::read_dataset<real>(dg, "force_delta");
+                        auto torque = io::read_dataset<real>(dg, "torque_delta");
+
+                        for (std::size_t dd = 0; dd < Rank; ++dd) {
+                            deltas[ii].force_delta[dd] = force[dd];
+                        }
+                        for (std::size_t dd = 0; dd < 3; ++dd) {
+                            deltas[ii].torque_delta[dd] = torque[dd];
+                        }
+                    }
+
+                    diagnostics->restore_deltas(deltas);
+                }
+
                 sim.registry.add(
                     sim.global,
-                    body_info_t<Rank>{
-                        .diagnostics = body::create_diagnostics_accumulator<Rank>(max_blocks)
-                    }
+                    body_info_t<Rank>{.diagnostics = std::move(diagnostics)}
                 );
             }
 
