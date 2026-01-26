@@ -11,6 +11,8 @@ from rich.style import Style
 from rich.table import Table
 from rich.text import Text
 
+from simbi.core.memory_estimator import estimate_memory
+
 from .summary import SimulationParameterSummary
 
 # table width is computed at runtime from the console size; see self.table_width
@@ -263,23 +265,45 @@ class RichSimulationSummary:
         """create a visually appealing panel for simulation statistics"""
         stats_table = Table(box=box.SIMPLE_HEAD, width=self.table_width)
 
-        # add memory usage with visual indicators
         stats_table.add_column("Statistic", style=self.styles["statistics"])
         stats_table.add_column("Value", style=self.styles["statistics"])
         stats_table.add_column("Visual", justify="left")
 
-        # format memory usage with unit conversion
         memory_gb = stats.get("estimated_memory_gb", 0)
         memory_text = f"{memory_gb:.2f} GB"
-
-        # create a visual indicator for memory usage
         memory_usage_visual = self._create_memory_usage_bar(memory_gb)
 
         stats_table.add_row(
             "Estimated Memory Usage", memory_text, memory_usage_visual
         )
 
-        # add cell metrics
+        if "halo_width" in stats:
+            stats_table.add_row(
+                "Ghost Zone Width",
+                f"{stats['halo_width']} cells",
+                "",
+            )
+
+        if "ghost_overhead_percent" in stats:
+            overhead = stats["ghost_overhead_percent"]
+            overhead_text = f"{overhead:.1f}%"
+            if overhead > 50:
+                overhead_text = f"[yellow]{overhead_text}[/yellow]"
+            stats_table.add_row("Ghost Cell Overhead", overhead_text, "")
+
+        if "memory_breakdown" in stats:
+            breakdown = stats["memory_breakdown"]
+            breakdown_parts = []
+            for cat, gb in sorted(breakdown.items(), key=lambda x: -x[1]):
+                if gb > 0.001:
+                    breakdown_parts.append(f"{cat}: {gb:.3f}")
+            if breakdown_parts:
+                stats_table.add_row(
+                    "Memory Breakdown (GB)",
+                    ", ".join(breakdown_parts),
+                    "",
+                )
+
         if "cells_per_dim" in stats:
             cells = stats["cells_per_dim"]
             stats_table.add_row(
@@ -288,14 +312,12 @@ class RichSimulationSummary:
                 "",
             )
 
-        # add performance estimate if available
         if "performance_estimate" in stats:
             perf = stats["performance_estimate"]
             stats_table.add_row(
                 "Estimated Performance", f"{perf} cell updates/s", ""
             )
 
-        # add timestep info
         if "dt" in stats and "tmax" in stats:
             steps = math.ceil(stats["tmax"] / stats["dt"])
             stats_table.add_row("Estimated Timesteps", f"{steps:,}", "")
@@ -382,22 +404,15 @@ class RichSimulationSummary:
                 )
                 tables.append(table)
 
-        # compute statistics
+        # compute statistics using accurate memory estimator
         stats: dict[str, int | float | Sequence[Any]] = {}
         ni, nj, nk = params["resolution"]
-        nzones = math.prod(params["resolution"])
-        ncons = 1
-        nprims = 1
-        nfluxes = params["dimensionality"]
-        nvars = params["dimensionality"] + 3  # dens, vec, edens, chi
-        if params["is_mhd"]:
-            nvars = 9  # dens, vec(3), B(3), edens, chi
 
-        zbytes = 8 * nvars * nzones
-        memory_bytes = (ncons + nprims + nfluxes) * zbytes
-        if params["timestepping"] == "rk2":
-            memory_bytes += 2 * ncons * zbytes
-        stats["estimated_memory_gb"] = memory_bytes / 1024**3
+        mem_estimate = estimate_memory(params)
+        stats["estimated_memory_gb"] = mem_estimate.total_gb
+        stats["ghost_overhead_percent"] = mem_estimate.ghost_overhead_percent
+        stats["halo_width"] = mem_estimate.halo_width
+        stats["memory_breakdown"] = mem_estimate.breakdown()
         stats["cells_per_dim"] = (ni, nj, nk)
         if params.get("gpu_block_dims") is not None:
             stats["gpu_block_dims"] = tuple(params["gpu_block_dims"])
