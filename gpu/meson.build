@@ -24,7 +24,6 @@ if cuda.found()
     '-L/opt/cuda/lib64',
     '-lcudart',
     '-lcudadevrt',
-    '-lcuda',
   ]
 elif hip.found()
   gpu_dep = hip
