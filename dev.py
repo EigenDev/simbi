@@ -223,11 +223,9 @@ def build_command(args):
         if args.build_tests:
             setup_cmd.append("-Dbuild_tests=true")
 
-        # build optimization based on system capabilities
-        if capabilities["memory_gb"] >= 16:
-            setup_cmd.append(
-                "-Db_lto=true"
-            )  # enable lto for high memory systems
+        # lto configuration
+        if args.lto:
+            setup_cmd.append("-Db_lto=true")
 
         if args.reconfigure:
             setup_cmd.append("--reconfigure")
@@ -500,6 +498,11 @@ def main():
         type=int,
         help="build timeout in seconds (default: 1800 for gpu, 600 for cpu)",
     )
+    build_parser.add_argument(
+        "--lto",
+        action=argparse.BooleanOptionalAction,
+        help="disable link-time optimization",
+    )
     build_parser.set_defaults(func=build_command)
 
     # install command
@@ -560,6 +563,11 @@ def main():
         "--timeout",
         type=int,
         help="build timeout in seconds (default: 1800 for gpu, 600 for cpu)",
+    )
+    install_parser.add_argument(
+        "--lto",
+        action=argparse.BooleanOptionalAction,
+        help="disable link-time optimization",
     )
     install_parser.add_argument(
         "--editable", "-e", action="store_true", help="editable install"

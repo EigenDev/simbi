@@ -16,7 +16,6 @@ project(
     'warning_level': '3',
     'buildtype': 'release',
     'optimization': '3',
-    'b_lto': true,
   },
 )
 
