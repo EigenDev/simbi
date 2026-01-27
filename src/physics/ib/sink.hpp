@@ -130,6 +130,7 @@ namespace simbi::body {
             // gaussian weight
             const auto weight = [&]() {
                 if constexpr (Rank == 2) {
+                    // Ditmman and Ryan 2020 weight function
                     if (is_binary) {
                         const auto r_norm = r_mag / r_acc;
                         return std::exp(-0.25 * std::pow(r_norm, 4));
@@ -139,6 +140,7 @@ namespace simbi::body {
                     return std::exp(-r_norm * r_norm);
                 }
                 else {
+                    // Krumholz et al. 2004 weight function
                     const auto r_k    = 0.5 * r_acc;
                     const auto r_norm = r_mag / r_k;
                     return std::exp(-r_norm * r_norm);
