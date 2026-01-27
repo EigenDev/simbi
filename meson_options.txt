@@ -49,3 +49,11 @@ option(
     value: false,
     description: 'Use CUDA unified memory instead of device memory (dev/debug builds)'
 )
+
+option(
+    'state_layout',
+    type: 'combo',
+    choices: ['aos', 'soa'],
+    value: 'aos',
+    description: 'Memory layout for state fields (aos=array-of-structs, soa=struct-of-arrays)'
+)

@@ -46,6 +46,18 @@ namespace simbi::build {
     inline constexpr bool unified_memory = false;
 #endif
 
+    // state field memory layout
+    enum class state_layout {
+        aos,
+        soa
+    };
+
+#if STATE_LAYOUT_SOA
+    inline constexpr state_layout default_state_layout = state_layout::soa;
+#else
+    inline constexpr state_layout default_state_layout = state_layout::aos;
+#endif
+
 #if DEBUG_MODE
     inline constexpr bool debug_mode = true;
 #else

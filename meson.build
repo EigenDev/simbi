@@ -33,6 +33,7 @@ conf_data = configuration_data()
 foreach opt : ['four_velocity', 'column_major', 'unified_memory']
   conf_data.set10(opt.to_upper(), get_option(opt))
 endforeach
+conf_data.set10('STATE_LAYOUT_SOA', get_option('state_layout') == 'soa')
 conf_data.set10('FLOAT_PRECISION', get_option('precision') == 'single')
 conf_data.set(
   'BUILD_DATE',
@@ -104,6 +105,7 @@ summary(
     'Precision': get_option('precision'),
     'Column Major': get_option('column_major'),
     'Four Velocity Prim': get_option('four_velocity'),
+    'State Layout': get_option('state_layout').to_upper(),
     'GPU Compilation': get_option('gpu_compilation'),
     'Build Tests': get_option('build_tests'),
     'Compiler': cc.get_id() + ' ' + cc.version(),

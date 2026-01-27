@@ -20,4 +20,7 @@
 // Memory configuration
 #mesondefine UNIFIED_MEMORY
 
+// State field memory layout (0 = AoS, 1 = SoA)
+#mesondefine STATE_LAYOUT_SOA
+
 #endif   // BUILD_OPTIONS_HPP
