@@ -47,15 +47,15 @@ namespace simbi::build {
 #endif
 
     // state field memory layout
-    enum class state_layout {
+    enum class state_layout_t {
         aos,
         soa
     };
 
 #if STATE_LAYOUT_SOA
-    inline constexpr state_layout default_state_layout = state_layout::soa;
+    inline constexpr state_layout_t default_layout = state_layout_t::soa;
 #else
-    inline constexpr state_layout default_state_layout = state_layout::aos;
+    inline constexpr state_layout_t default_layout = state_layout_t::aos;
 #endif
 
 #if DEBUG_MODE

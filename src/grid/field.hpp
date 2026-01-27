@@ -14,6 +14,7 @@
 // =============================================================================
 #pragma once
 
+#include "build_config.hpp"
 #include "compute/computation.hpp"
 #include "containers/vector.hpp"
 #include "decorators.hpp"
@@ -55,7 +56,7 @@ namespace simbi::grid {
     // a lightweight, non-owning reference to a field region
     // this is the proxy object that enables u = expr.with(exec)
     // -------------------------------------------------------------------------
-    template <typename T, std::uint64_t Rank>
+    template <typename T, std::uint64_t Rank, build::state_layout_t Layout = build::default_layout>
     struct field_view_t : public xpu::view_t<T, Rank>
     {
         using value_type                    = T;
@@ -185,7 +186,7 @@ namespace simbi::grid {
     //   - slice: shallow copy with new logical domain
     //   - commit: pointer update
     // -------------------------------------------------------------------------
-    template <typename T, std::uint64_t Rank>
+    template <typename T, std::uint64_t Rank, build::state_layout_t Layout = build::default_layout>
     class field_t
     {
       public:
