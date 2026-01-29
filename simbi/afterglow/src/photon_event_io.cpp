@@ -357,16 +357,6 @@ namespace simbi::afterglow {
         return {events, meta};
     }
 
-    void append_photon_events(
-        [[maybe_unused]] const std::string&                 filename,
-        [[maybe_unused]] const std::vector<photon_event_t>& new_events
-    )
-    {
-        // appending to HDF5 requires reading, combining, and rewriting
-        // not implemented yet
-        throw std::runtime_error("append_photon_events not yet implemented");
-    }
-
     photon_event_metadata_t read_photon_event_metadata(const std::string& filename)
     {
         H5::H5File file(filename, H5F_ACC_RDONLY);

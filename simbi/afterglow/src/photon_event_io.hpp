@@ -32,27 +32,26 @@ namespace simbi::afterglow {
     struct photon_event_metadata_t
     {
         // simulation parameters
-        double dt;
-        double theta_obs;
-        double adiabatic_index;
-        double current_time;
-        double p;
-        double z;
-        double eps_e;
-        double eps_b;
-        double d_L;
+        double dt              = 0.0;
+        double theta_obs       = 0.0;
+        double adiabatic_index = 4.0 / 3.0;
+        double current_time    = 0.0;
+        double p               = 2.5;
+        double z               = 0.0;
+        double eps_e           = 0.1;
+        double eps_b           = 0.01;
+        double d_L             = 1e28;
 
         // scales
-        double time_scale;
-        double pre_scale;
-        double rho_scale;
-        double v_scale;
-        double length_scale;
+        double time_scale   = 1.0;
+        double pre_scale    = 1.0;
+        double rho_scale    = 1.0;
+        double v_scale      = 1.0;
+        double length_scale = 1.0;
 
         // data info
-        std::uint64_t n_events;
-        std::int64_t  data_dim;
-        hydro_type_t  hydro_type;
+        std::uint64_t n_events   = 0;
+        hydro_type_t  hydro_type = hydro_type_t::SRHD;
 
         // frequencies (stored separately as array)
         std::vector<double> frequencies;
@@ -72,20 +71,7 @@ namespace simbi::afterglow {
     std::pair<std::vector<photon_event_t>, photon_event_metadata_t>
     read_photon_events(const std::string& filename);
 
-    // append events to existing HDF5 file
-    // useful for streaming large simulations
-    void append_photon_events(
-        const std::string&                 filename,
-        const std::vector<photon_event_t>& new_events
-    );
-
     // query metadata without loading full dataset
     photon_event_metadata_t read_photon_event_metadata(const std::string& filename);
-
-    // read subset of events matching filter criteria
-    // filter function: bool(const photon_event_t&)
-    template <typename FilterFunc>
-    std::vector<photon_event_t>
-    read_photon_events_filtered(const std::string& filename, FilterFunc filter);
 
 } // namespace simbi::afterglow

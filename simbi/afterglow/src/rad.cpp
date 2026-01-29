@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iostream>
 #include <numbers>
 #include <random>
 #include <vector>
@@ -42,16 +43,17 @@ namespace simbi::afterglow {
     {
         return std::sqrt(1.0 + gamma_beta * gamma_beta);
     }
-    double calc_shock_bfield(energy_density_t rho_e, double eps_b)
+    magnetic_field_t calc_shock_bfield(energy_density_t rho_e, double eps_b)
     {
-        return std::sqrt((8.0 * std::numbers::pi * eps_b * rho_e).value);
+        auto b_squared = 8.0 * std::numbers::pi * eps_b * rho_e;
+        return sqrt(b_squared);
     }
 
-    frequency_t calc_gyration_frequency(double bfield)
+    frequency_t calc_gyration_frequency(magnetic_field_t bfield)
     {
         auto frequency_for_unit_field = (3.0 / 4.0 / std::numbers::pi) * (constants::e_charge) /
                                         (constants::m_e * constants::c_light);
-        return frequency_for_unit_field.value * bfield;
+        return frequency_for_unit_field * bfield;
     }
 
     power_t calc_total_synch_power(double lorentz_factor, energy_density_t ub, double beta)
@@ -90,7 +92,7 @@ namespace simbi::afterglow {
         return std::pow(ag + (bg - ag) * random_number, (1.0 / g));
     }
 
-    double vector_magnitude(const std::vector<double> a)
+    double vector_magnitude(const std::vector<double>& a)
     {
         double mag = 0;
         for (const auto val : a) {
@@ -118,26 +120,26 @@ namespace simbi::afterglow {
         return nu_g * gamma_e * gamma_e;
     }
 
-    double calc_critical_lorentz(double bfield, time_t time_emitter)
+    double calc_critical_lorentz(magnetic_field_t bfield, time_t time_emitter)
     {
         auto numerator   = 6.0 * std::numbers::pi * constants::m_e * constants::c_light;
-        auto denominator = constants::sigma_thomson * time_emitter;
-        return (numerator / denominator).value / (bfield * bfield);
+        auto denominator = constants::sigma_thomson * bfield * bfield * time_emitter;
+        return (numerator / denominator);
     }
-    energy_t calc_max_power_per_frequency(double bfield)
+    energy_t calc_max_power_per_frequency(magnetic_field_t bfield)
     {
         auto coeff =
             (constants::m_e * constants::c_light * constants::c_light * constants::sigma_thomson) /
             (3.0 * constants::e_charge);
-        return energy_t{coeff.value * bfield};
+        return coeff * bfield;
     }
-    spectral_emissivity_t calc_emissivity(double bfield, number_density_t n, double p)
+    spectral_emissivity_t calc_emissivity(magnetic_field_t bfield, number_density_t n, double p)
     {
         double coeff =
             (9.6323 / 8.0 / std::numbers::pi) * (p - 1.0) / (3.0 * p - 1.0) * std::sqrt(3.0);
-        double e_cubed = std::pow(constants::e_charge.value, 3);
-        double denom   = constants::m_e.value * pow<2>(constants::c_light).value;
-        return spectral_emissivity_t{coeff * e_cubed / denom * n.value * bfield};
+        auto e_cubed = pow<3>(constants::e_charge);
+        auto denom   = constants::m_e * pow<2>(constants::c_light);
+        return coeff * e_cubed / denom * n * bfield;
     }
     double
     calc_minimum_lorentz(double eps_e, energy_density_t e_thermal, number_density_t n, double p)
@@ -149,23 +151,23 @@ namespace simbi::afterglow {
     std::vector<double> vector_multiply(const std::vector<double>& a, const std::vector<double>& b)
     {
         std::vector<double> v(a.size());
-        std::transform(a.begin() + 1, a.end(), b.begin() + 1, v.begin(), std::multiplies<double>());
+        std::transform(a.begin(), a.end(), b.begin(), v.begin(), std::multiplies<double>());
         return v;
-    };
+    }
 
     std::vector<double> vector_subtract(const std::vector<double>& a, const std::vector<double>& b)
     {
         std::vector<double> v(a.size());
-        std::transform(a.begin() + 1, a.end(), b.begin() + 1, v.begin(), std::minus<double>());
+        std::transform(a.begin(), a.end(), b.begin(), v.begin(), std::minus<double>());
         return v;
-    };
+    }
 
     std::vector<double> vector_add(const std::vector<double>& a, const std::vector<double>& b)
     {
         std::vector<double> v(a.size());
-        std::transform(a.begin() + 1, a.end(), b.begin() + 1, v.begin(), std::plus<double>());
+        std::transform(a.begin(), a.end(), b.begin(), v.begin(), std::plus<double>());
         return v;
-    };
+    }
 
     std::vector<double> scale_vector(const std::vector<double>& a, double scalar)
     {
@@ -221,37 +223,38 @@ namespace simbi::afterglow {
 
     // helper: compute synchrotron self-absorption optical depth
     double compute_ssa_optical_depth(
-        double photon_energy, // erg
-        double n_e,           // electron density [cm^-3]
-        double bfield,        // magnetic field [gauss]
-        double path_length,   // cm
-        double p              // spectral index
+        energy_t         photon_energy, // erg
+        number_density_t n_e,           // electron density [cm^-3]
+        magnetic_field_t bfield,        // magnetic field [gauss]
+        double           path_length,   // cm
+        double           p              // spectral index
     )
     {
         // synchrotron self-absorption coefficient
-        // α_ν ∝ n_e B (ν_g/ν)^{(p+4)/2}
+        // \alpha_\nu \propto n_e B (\nu_g/\nu)^{(p+4)/2}
 
-        double nu_photon = photon_energy / constants::h_planck.value;
-        double nu_gyro   = constants::e_charge.value * bfield /
-                         (2.0 * std::numbers::pi * constants::m_e.value * constants::c_light.value);
-        double nu_ratio = nu_gyro / nu_photon;
+        auto nu_photon = photon_energy / constants::h_planck;
+        auto nu_gyro   = constants::e_charge * bfield /
+                       (2.0 * std::numbers::pi * constants::m_e * constants::c_light);
+        double nu_ratio = (nu_gyro / nu_photon).value;
 
         if (nu_ratio < 1.0) {
             return 0.0; // above synchrotron peak, SSA negligible
         }
 
-        // SSA coefficient (simplified, CGS units: cm^-1)
-        // prefactor calibrated for typical GRB afterglow conditions
-        double alpha_ssa = 3.3e-10 * n_e * bfield * std::pow(nu_ratio, (p + 4.0) / 2.0);
+        // ssa coefficient (simplified, cgs units: cm^-1)
+        // prefactor calibrated for typical grb afterglow conditions
+        auto   alpha_ssa_typed = 3.3e-10 * n_e * bfield * std::pow(nu_ratio, (p + 4.0) / 2.0);
+        double alpha_ssa       = alpha_ssa_typed.value;
 
         return alpha_ssa * path_length;
     }
 
     // helper: compute thomson scattering optical depth
-    double compute_thomson_optical_depth(double n_e, double path_length)
+    double compute_thomson_optical_depth(number_density_t n_e, double path_length)
     {
         // \tau_T = n_e \sigma_T L
-        return n_e * constants::sigma_thomson.value * path_length;
+        return (n_e * constants::sigma_thomson * path_length).value;
     }
 
     // helper: scatter photon (thomson scattering)
@@ -312,14 +315,14 @@ namespace simbi::afterglow {
             const auto rho_einternal = pre[cell_id] * qscales.pre_scale /
                                        (args.adiabatic_index - 1.0) * units::erg_per_cm3;
             const auto bfield = calc_shock_bfield(rho_einternal, eps_b);
-            const auto n_e =
-                rho[cell_id] * qscales.rho_scale * units::g_per_cm3.value / constants::m_p.value;
+            const auto n_e = rho[cell_id] * qscales.rho_scale * units::g_per_cm3 / constants::m_p;
 
             // estimate path length through cell (approximate as ~10% of radius)
             double path_length = x1[0] * qscales.length_scale * 0.1;
 
             // compute optical depths
-            double tau_ssa = compute_ssa_optical_depth(photon.energy, n_e, bfield, path_length, p);
+            double tau_ssa =
+                compute_ssa_optical_depth(energy_t{photon.energy}, n_e, bfield, path_length, p);
 
             double tau_thomson = compute_thomson_optical_depth(n_e, path_length);
             double tau_total   = tau_ssa + tau_thomson;
@@ -342,11 +345,11 @@ namespace simbi::afterglow {
 
             // pair production (optional, high energy only)
             if (include_pair_production) {
-                // γγ → e⁺e⁻ threshold: E > ~100 MeV
-                double threshold_energy = 1e-4; // erg (~60 MeV)
+                // \gamma\gamma -> e^+e^- threshold: E > m_e c^2 ~ 0.5 MeV ~ 8e-7 erg
+                double threshold_energy = 8e-7; // erg (~0.5 MeV)
                 if (photon.energy > threshold_energy) {
                     // simplified: mark as absorbed if above threshold
-                    // proper treatment would compute γγ opacity
+                    // proper treatment would compute \gamma\gamma opacity
                     photon.absorbed = true;
                 }
             }
@@ -376,7 +379,7 @@ namespace simbi::afterglow {
         const auto    gb  = fields[1]; // four-velocity
         const auto    pre = fields[2]; // pressure
 
-        // Extract the geomtry of the mesh
+        // extract the geometry of the mesh
         const auto   x1     = mesh[0];
         const auto   x2     = mesh[1];
         const auto   x3     = mesh[2];
@@ -392,8 +395,8 @@ namespace simbi::afterglow {
         const auto   x3max  = x3[nk - 1];
         const auto   x3min  = x3[0];
         const auto   dx3    = (x3max - x2min) / (nk - 1);
-        const double p      = args.p;     // Electron number index
-        const double eps_b  = args.eps_b; // Magnetic field fraction of internal energy
+        const double p      = args.p;     // electron number index
+        const double eps_b  = args.eps_b; // magnetic field fraction of internal energy
         const double eps_e  = args.eps_e; // shocked electrons fraction of internal energy
 
         const auto t_prime = args.current_time * qscales.time_scale * units::s;
@@ -405,7 +408,7 @@ namespace simbi::afterglow {
             const double cos_phi = std::cos(x3[kk]);
             const double dx3     = x3r - x3l;
 
-            // If the data is 3D, then there is a real k-space to pull data from
+            // if the data is 3d, then there is a real k-space to pull data from
             const std::int64_t kreal = (data_dim > 2) * kk;
 #pragma omp parallel
             for (std::size_t jj = 0; jj < x2.size(); jj++) {
@@ -422,7 +425,7 @@ namespace simbi::afterglow {
                     const auto central_idx =
                         kreal * ni * nj + jreal * ni + ii;             // index for current zone
                     const auto beta      = calc_beta(gb[central_idx]); // velocity in units of c
-                    const auto w         = calc_lorentz_factor(gb[central_idx]); // Lorentz factor
+                    const auto w         = calc_lorentz_factor(gb[central_idx]); // lorentz factor
                     const auto t_emitter = t_prime / w; // time in emitter frame
 
                     const double              phi_prime  = 2.0 * std::numbers::pi * dis(gen);
@@ -433,7 +436,7 @@ namespace simbi::afterglow {
                         mu_prime
                     };
 
-                    // Cosine of the isotropic emission angle wrt to the
+                    // cosine of the isotropic emission angle wrt to the
                     // propagation direction
                     const double mu_rhat_prime = vector_dotproduct(rhat, nhat_prime);
                     // cos of the resulting beamed angle in the plane of rhat
@@ -449,9 +452,7 @@ namespace simbi::afterglow {
                     const std::vector<double> x_mu =
                         {t_prime.value, nvec_lab[0], nvec_lab[1], nvec_lab[2]};
 
-                    //================================================================
-                    //                    HYDRO CONDITIONS
-                    //================================================================
+                    // hydro conditions
                     const auto rho_einternal = pre[central_idx] * qscales.pre_scale /
                                                (args.adiabatic_index - 1.0) * units::erg_per_cm3;
                     const auto bfield = calc_shock_bfield(
@@ -466,14 +467,14 @@ namespace simbi::afterglow {
                         rho_einternal,
                         n_e_proper,
                         p
-                    ); // Minimum Lorentz factor of electrons
+                    ); // minimum lorentz factor of electrons
                     const auto gamma_crit = calc_critical_lorentz(bfield, t_emitter);
 
                     const auto gamma_max = std::max(gamma_min, gamma_crit);
                     const auto gamma_low = std::min(gamma_min, gamma_crit);
                     const auto dg        = (gamma_max - gamma_low) / (ng - 1);
 
-                    // Calc cell volumes
+                    // calc cell volumes
                     const double x1l =
                         (ii > 0) ? x1min * std::pow(10.0, (ii - 0.5) * dlogx1) : x1min;
                     const double x1r     = (ii < ni - 1)
@@ -484,8 +485,8 @@ namespace simbi::afterglow {
                                          qscales.length_scale * qscales.length_scale *
                                          qscales.length_scale * units::cm3;
 
-                    // Each cell will have its own photons distribution.
-                    // To account for this, we divide the gamma bins up
+                    // each cell will have its own photons distribution.
+                    // to account for this, we divide the gamma bins up
                     // and bin the photons in each cell with respect to the
                     // gamma bin
                     const auto n_e = n_e_proper * w;
@@ -543,14 +544,14 @@ namespace simbi::afterglow {
         std::int64_t                            data_dim
     )
     {
-        // Place observer along chosen axis
+        // place observer along chosen axis
         const std::vector<double> obs_hat =
             {std::sin(args.theta_obs), 0.0, std::cos(args.theta_obs)};
 
         const auto nt = tbin_edges.size(); // time bin size
-        const auto nf = args.nus.size();   // frequency_t bin size
+        const auto nf = args.nus.size();   // frequency bin size
 
-        // Extract the geomtry of the mesh
+        // extract the geometry of the mesh
         const auto x1      = mesh[0];
         const auto x2      = mesh[1];
         const auto ni      = x1.size();
@@ -567,7 +568,7 @@ namespace simbi::afterglow {
         double sin_phi = 0;
         double cos_phi = 1.0;
         double dx3     = 2.0 * std::numbers::pi;
-        // Check whether to do 3D (off-axis) or not
+        // check whether to do 3d (off-axis) or not
         std::vector<double> x3;
         double              x3max = 0.0;
         double              x3min = 0.0;
@@ -596,7 +597,7 @@ namespace simbi::afterglow {
                 dx3              = x3r - x3l;
             }
 
-            // If the data is 3D, then there is a real k-space to pull data from
+            // if the data is 3d, then there is a real k-space to pull data from
             const std::int64_t kreal = (data_dim > 2) * kk;
 #pragma omp parallel
             for (std::uint64_t jj = 0; jj < nj; jj++) {
@@ -608,8 +609,7 @@ namespace simbi::afterglow {
                 const std::vector<double> rhat =
                     {std::sin(x2[jj]) * cos_phi, std::sin(x2[jj]) * sin_phi, std::cos(x2[jj])};
 
-                // Data greater than 1D? Cool, there is a j space to pull data
-                // from
+                // data greater than 1d? there is a j space to pull data from
                 const std::uint64_t jreal = (data_dim > 1) * jj;
 #pragma omp for nowait
                 for (std::uint64_t ii = 0; ii < ni; ii++) {
@@ -633,13 +633,13 @@ namespace simbi::afterglow {
                         rho_einternal,
                         n_e_proper,
                         p
-                    ); // Minimum Lorentz factor of electrons
+                    ); // minimum lorentz factor of electrons
                     const auto gamma_crit = calc_critical_lorentz(
                         bfield,
                         t_emitter
-                    ); // Critical Lorentz factor of electrons
+                    ); // critical lorentz factor of electrons
 
-                    // Calc cell volumes
+                    // calc cell volumes
                     const double x1l =
                         (ii > 0) ? x1min * std::pow(10.0, (ii - 0.5) * dlogx1) : x1min;
                     const double x1r     = (ii < ni - 1)
@@ -658,31 +658,29 @@ namespace simbi::afterglow {
                     const std::vector<double> beta_vec =
                         {beta * rhat[0], beta * rhat[1], beta * rhat[2]};
 
-                    // Calculate the maximum flux based on the average
+                    // calculate the maximum flux based on the average
                     // bolometric power per electron
-                    const frequency_t nu_c = calc_nu(gamma_crit, nu_g); // Critical frequency_t
-                    const frequency_t nu_m = calc_nu(gamma_min, nu_g);  // Minimum frequency_t
+                    const frequency_t nu_c = calc_nu(gamma_crit, nu_g); // critical frequency
+                    const frequency_t nu_m = calc_nu(gamma_min, nu_g);  // minimum frequency
                     const double      delta_doppler = calc_delta_doppler(
                         w,
                         beta_vec,
                         obs_hat
-                    ); // Doppler factor
+                    ); // doppler factor
                     const spectral_emissivity_t eps_m = calc_emissivity(
                         bfield,
                         n_e_proper,
                         p
-                    ); // Emissivity per cell
+                    ); // emissivity per cell
 
-                    // Total emitted power per unit
-                    // frequency_t in each cell volume
+                    // total emitted power per unit frequency in each cell volume
                     const spectral_power_t power_prime =
                         dvolume * eps_m * delta_doppler * delta_doppler;
                     const double t_obs_day = (t_obs / day);
                     // loop through the given frequencies and put them in their
                     // respective locations in dictionary
                     for (size_t fidx = 0; fidx < nf; fidx++) {
-                        // The frequency_t we see is doppler boosted, so account
-                        // for that
+                        // the frequency we see is doppler boosted, so account for that
                         const frequency_t      nu_source = args.nus[fidx] * hz / delta_doppler;
                         const spectral_power_t power_cool =
                             calc_powerlaw_flux(power_prime, p, nu_source, nu_c, nu_m);
@@ -699,7 +697,7 @@ namespace simbi::afterglow {
                                 const auto   dt_obs = t2 - t1;
                                 const double trat =
                                     (checkpoint_index > 0) ? dt_day.value / dt_obs : 1.0;
-                                // Sum the fluxes in the given time bin
+                                // sum the fluxes in the given time bin
                                 flux_array[fidx * (nt - 1) + tidx] += trat * f_nu.value;
                                 break;
                             }
@@ -754,22 +752,42 @@ namespace simbi::afterglow {
 
         std::uint64_t events_generated = 0;
 
-        for (std::size_t kk = 0; kk < nk; kk++) {
-            const double       sin_phi = std::sin(x3[kk]);
-            const double       cos_phi = std::cos(x3[kk]);
-            const std::int64_t kreal   = (data_dim > 2) * kk;
+        // loop order: radius outermost, then theta, then phi
+        // this ensures we sample all angles at each radius before moving outward
+        for (std::size_t ii = 0; ii < ni; ii++) {
+            if (events_generated >= max_events) {
+                goto done;
+            }
+
+            const auto r_center = x1[ii] * qscales.length_scale * units::cm;
+
+            // cell radial bounds (log-spaced grid)
+            const double x1l =
+                (ii > 0) ? x1[0] * std::pow(10.0, (ii - 0.5) * std::log10(x1[1] / x1[0])) : x1[0];
+            const double x1r =
+                (ii < ni - 1) ? x1l * std::pow(10.0, std::log10(x1[1] / x1[0])) : x1[ni - 1];
 
             for (std::size_t jj = 0; jj < nj; jj++) {
-                const std::vector<double> rhat =
-                    {std::sin(x2[jj]) * cos_phi, std::sin(x2[jj]) * sin_phi, std::cos(x2[jj])};
                 const std::int64_t jreal = (data_dim > 1) * jj;
+                const double       dx2   = (nj > 1) ? (x2[1] - x2[0]) : 2.0 * std::numbers::pi;
+                const double       dcos =
+                    (nj > 1) ? std::abs(std::cos(x2[jj]) - std::cos(x2[jj] + dx2)) : 2.0;
 
-                for (std::size_t ii = 0; ii < ni; ii++) {
+                for (std::size_t kk = 0; kk < nk; kk++) {
                     if (events_generated >= max_events) {
                         goto done;
                     }
 
-                    const auto central_idx = kreal * ni * nj + jreal * ni + ii;
+                    const double       sin_phi = std::sin(x3[kk]);
+                    const double       cos_phi = std::cos(x3[kk]);
+                    const std::int64_t kreal   = (data_dim > 2) * kk;
+
+                    const std::vector<double> rhat =
+                        {std::sin(x2[jj]) * cos_phi, std::sin(x2[jj]) * sin_phi, std::cos(x2[jj])};
+
+                    // numpy uses C-order (row-major): last index varies fastest
+                    // for shape (ni, nj, nk), flat index = ii * nj * nk + jj * nk + kk
+                    const auto central_idx = ii * nj * nk + jreal * nk + kreal;
                     const auto beta        = calc_beta(gb[central_idx]);
                     const auto w           = calc_lorentz_factor(gb[central_idx]);
 
@@ -778,11 +796,39 @@ namespace simbi::afterglow {
                     const auto bfield = calc_shock_bfield(rho_einternal, eps_b);
                     const auto n_e_proper =
                         rho[central_idx] * qscales.rho_scale * units::g_per_cm3 / constants::m_p;
-                    const auto nu_g = calc_gyration_frequency(bfield);
                     const auto gamma_min =
                         calc_minimum_lorentz(eps_e, rho_einternal, n_e_proper, p);
 
-                    const auto r_center = x1[ii] * qscales.length_scale * units::cm;
+                    // cell volume for packet weighting
+                    const double dx3 = (nk > 1) ? (x3[1] - x3[0]) : 2.0 * std::numbers::pi;
+
+                    // volume in cm^3 (bare double from product of lengths)
+                    const double dvolume_cgs =
+                        dx3 * dcos * (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) *
+                        qscales.length_scale * qscales.length_scale * qscales.length_scale;
+
+                    // calculate total synchrotron power from this cell
+                    // p_sync = (4/3) * sigma_T * c * beta^2 * u_B * gamma_e^2 * n_e * V
+                    const auto u_B     = bfield * bfield / (8.0 * std::numbers::pi);
+                    const auto dt      = args.dt * qscales.time_scale * units::s;
+                    const auto dvolume = dvolume_cgs * units::cm3;
+
+                    // for power-law distribution N(\gamma) \propto \gamma^{-p} between \gamma_min
+                    // and \gamma_max:
+                    // <\gamma^2> = \int \gamma^2 \gamma^{-p} d\gamma / \int \gamma^{-p} d\gamma
+                    // for p > 3 and \gamma_max >> \gamma_min: <\gamma^2> ~ (p-1)/(p-3) *
+                    // \gamma_min^2 for 2 < p < 3: integral diverges at high \gamma, use
+                    // \gamma_min^2 as lower bound
+                    const double power_law_factor = (p > 3.0) ? (p - 1.0) / (p - 3.0) : 1.0;
+                    const double gamma_e_sq_avg   = gamma_min * gamma_min * power_law_factor;
+
+                    // total radiated energy from cell [erg]
+                    const auto total_energy_cell = (4.0 / 3.0) * constants::sigma_thomson *
+                                                   constants::c_light * beta * beta * u_B *
+                                                   n_e_proper * dvolume * dt * gamma_e_sq_avg;
+
+                    // packet weight: total energy divided by number of packets per cell
+                    const auto packet_weight = total_energy_cell / photons_target;
 
                     for (std::uint64_t pp = 0; pp < photons_target; pp++) {
                         if (events_generated >= max_events) {
@@ -790,11 +836,6 @@ namespace simbi::afterglow {
                         }
 
                         photon_event_t evt;
-
-                        const double gamma_sample =
-                            gen_random_from_powerlaw(gamma_min, gamma_min * 10.0, p, dis(gen));
-                        const auto nu_c     = calc_nu(gamma_sample, nu_g);
-                        const auto E_photon = constants::h_planck * nu_c;
 
                         const double              phi_prime  = 2.0 * std::numbers::pi * dis(gen);
                         const double              mu_prime   = 2.0 * dis(gen) - 1.0;
@@ -815,12 +856,12 @@ namespace simbi::afterglow {
                         evt.y          = r_center.value * rhat[1];
                         evt.z          = r_center.value * rhat[2];
 
-                        evt.energy = E_photon.value;
+                        evt.energy = packet_weight.value;
                         evt.px     = nhat_beamed[0];
                         evt.py     = nhat_beamed[1];
                         evt.pz     = nhat_beamed[2];
 
-                        evt.stokes_I = evt.energy;
+                        evt.stokes_I = 1.0;
                         evt.stokes_Q = 0.0;
                         evt.stokes_U = 0.0;
                         evt.stokes_V = 0.0;
@@ -845,6 +886,721 @@ namespace simbi::afterglow {
 
     done:
         return events;
+    }
+
+    // compute lightcurve from photon events
+    observer_lightcurve_t compute_lightcurve_from_events(
+        const std::vector<photon_event_t>& events,
+        const std::vector<double>&         observer_direction,
+        const std::vector<double>&         frequencies,
+        double                             redshift,
+        double                             luminosity_distance,
+        const std::vector<double>&         time_bins
+    )
+    {
+        observer_lightcurve_t result;
+        result.times       = time_bins;
+        result.frequencies = frequencies;
+
+        const std::size_t n_times = time_bins.size();
+        const std::size_t n_freqs = frequencies.size();
+        result.fluxes.resize(n_times * n_freqs, 0.0);
+
+        // convert time bins from days to seconds
+        std::vector<double> time_bins_s(n_times);
+        for (std::size_t i = 0; i < n_times; ++i) {
+            time_bins_s[i] = time_bins[i] * 86400.0;
+        }
+
+        // normalize observer direction
+        const double obs_mag = std::sqrt(
+            observer_direction[0] * observer_direction[0] +
+            observer_direction[1] * observer_direction[1] +
+            observer_direction[2] * observer_direction[2]
+        );
+        const std::vector<double> obs_hat = {
+            observer_direction[0] / obs_mag,
+            observer_direction[1] / obs_mag,
+            observer_direction[2] / obs_mag
+        };
+
+        // luminosity distance in cm
+        const double d_L    = luminosity_distance;
+        const double d_L_sq = d_L * d_L;
+
+        // bin photon events by arrival time and frequency
+        for (const auto& evt : events) {
+            // skip absorbed photons
+            if (evt.absorbed) {
+                continue;
+            }
+
+            // check if photon is propagating toward observer
+            // photon direction (px, py, pz) should align with observer direction
+            const double cos_angle =
+                evt.px * obs_hat[0] + evt.py * obs_hat[1] + evt.pz * obs_hat[2];
+            if (cos_angle < 0.5) { // viewing angle > 60 degrees, likely not visible
+                continue;
+            }
+
+            // compute observer arrival time: t_obs = t_emission + r/c
+            const double r_emission = std::sqrt(evt.x * evt.x + evt.y * evt.y + evt.z * evt.z);
+            const double t_arrival  = evt.t_emission + r_emission / constants::c_light.value;
+
+            // find time bin
+            std::size_t t_bin = n_times;
+            for (std::size_t i = 0; i < n_times - 1; ++i) {
+                if (t_arrival >= time_bins_s[i] && t_arrival < time_bins_s[i + 1]) {
+                    t_bin = i;
+                    break;
+                }
+            }
+            if (t_bin >= n_times - 1) {
+                continue; // outside time range
+            }
+
+            // photon frequency (assume monochromatic at packet representative frequency)
+            // use photon energy: E = h*nu -> nu = E/h
+            const double nu_photon = evt.energy / constants::h_planck.value;
+
+            // apply redshift: observed frequency = emitted frequency / (1+z)
+            const double nu_obs = nu_photon / (1.0 + redshift);
+
+            // find frequency bin
+            std::size_t f_bin = n_freqs;
+            for (std::size_t j = 0; j < n_freqs - 1; ++j) {
+                if (nu_obs >= frequencies[j] && nu_obs < frequencies[j + 1]) {
+                    f_bin = j;
+                    break;
+                }
+            }
+            if (f_bin >= n_freqs - 1) {
+                continue; // outside frequency range
+            }
+
+            // compute flux contribution: F_nu = L_nu / (4\pi d_L^2)
+            // packet energy is total energy, distribute over frequency bin width
+            const double dnu          = frequencies[f_bin + 1] - frequencies[f_bin];
+            const double dt           = time_bins_s[t_bin + 1] - time_bins_s[t_bin];
+            const double flux_contrib = evt.energy / (4.0 * std::numbers::pi * d_L_sq * dnu * dt);
+
+            // accumulate flux (weighted by stokes I for intensity)
+            result.fluxes[t_bin * n_freqs + f_bin] += flux_contrib * evt.stokes_I;
+        }
+
+        return result;
+    }
+
+    // compute skymap from photon events
+    //
+    // the skymap shows intensity as function of angular position on the sky.
+    // for a spherically symmetric blast wave viewed on-axis, the image is a ring
+    // due to the equal arrival time surface (EATS) geometry.
+    //
+    // coordinate system:
+    //   - observer_direction n points FROM source TO observer (unit vector)
+    //   - sky plane is perpendicular to n
+    //   - theta_sky = angular distance from center (line of sight)
+    //   - phi_sky = azimuthal angle in sky plane
+    //
+    // arrival time: t_obs = (1 + z) * (t_em - r dot n / c)
+    //   photons from far side (positive r dot n) arrive later
+    //   redshift dilates the observed time
+    skymap_t compute_skymap_from_events(
+        const std::vector<photon_event_t>& events,
+        const std::vector<double>&         observer_direction,
+        double                             observer_time, // day
+        double                             energy_min,    // erg
+        double                             energy_max,    // erg
+        double                             redshift,
+        double                             luminosity_distance, // cm
+        double                             time_window,         // day
+        std::uint32_t                      n_theta,
+        std::uint32_t                      n_phi
+    )
+    {
+        const double one_plus_z = 1.0 + redshift;
+        skymap_t     result;
+
+        // observer direction (unit vector toward observer)
+        const double nx = observer_direction[0];
+        const double ny = observer_direction[1];
+        const double nz = observer_direction[2];
+
+        // build orthonormal basis for sky plane
+        // e1, e2 span the plane perpendicular to n
+        // choose e1 perpendicular to n and to z-axis (unless n is along z)
+        double e1x, e1y, e1z;
+        if (std::abs(nz) < 0.99) {
+            // n is not along z, cross with z
+            e1x = -ny;
+            e1y = nx;
+            e1z = 0.0;
+        }
+        else {
+            // n is along z, cross with x
+            e1x = 0.0;
+            e1y = -nz;
+            e1z = ny;
+        }
+        double e1_norm = std::sqrt(e1x * e1x + e1y * e1y + e1z * e1z);
+        e1x /= e1_norm;
+        e1y /= e1_norm;
+        e1z /= e1_norm;
+
+        // e2 = n cross e1
+        double e2x = ny * e1z - nz * e1y;
+        double e2y = nz * e1x - nx * e1z;
+        double e2z = nx * e1y - ny * e1x;
+
+        // determine angular scale from event positions projected onto sky
+        double max_sky_radius = 0.0;
+        for (const auto& evt : events) {
+            // project position onto sky plane
+            double proj1   = evt.x * e1x + evt.y * e1y + evt.z * e1z;
+            double proj2   = evt.x * e2x + evt.y * e2y + evt.z * e2z;
+            double sky_r   = std::sqrt(proj1 * proj1 + proj2 * proj2);
+            max_sky_radius = std::max(max_sky_radius, sky_r);
+        }
+
+        // angular size on sky: theta = R_sky / d_L
+        const double max_angle_rad = (max_sky_radius / luminosity_distance) * 1.5; // 1.5x padding
+
+        // create angular grid
+        result.theta.resize(n_theta);
+        result.phi.resize(n_phi);
+        result.intensity.resize(n_theta, std::vector<double>(n_phi, 0.0));
+
+        for (std::uint32_t ii = 0; ii < n_theta; ++ii) {
+            result.theta[ii] = max_angle_rad * ii / (n_theta - 1.0);
+        }
+        for (std::uint32_t jj = 0; jj < n_phi; ++jj) {
+            result.phi[jj] = 2.0 * std::numbers::pi * jj / n_phi;
+        }
+
+        // convert observer time from days to seconds
+        const double t_obs_s       = observer_time * 86400.0;
+        const double time_window_s = time_window * 86400.0;
+        const double t_obs_min     = t_obs_s - 0.5 * time_window_s;
+        const double t_obs_max     = t_obs_s + 0.5 * time_window_s;
+
+        // bin photon events onto angular grid
+        for (const auto& evt : events) {
+            // skip absorbed photons
+            if (evt.absorbed) {
+                continue;
+            }
+
+            // filter by energy
+            if (evt.energy < energy_min || evt.energy > energy_max) {
+                continue;
+            }
+
+            // compute observer arrival time: t_obs = (1+z) * (t_em - r dot n / c)
+            // r dot n = projection of emission position onto line of sight
+            const double r_dot_n = evt.x * nx + evt.y * ny + evt.z * nz;
+            const double t_arrival =
+                one_plus_z * (evt.t_emission - r_dot_n / constants::c_light.value);
+
+            // filter by observer time window
+            if (t_arrival < t_obs_min || t_arrival > t_obs_max) {
+                continue;
+            }
+
+            // project emission position onto sky plane
+            const double proj1 = evt.x * e1x + evt.y * e1y + evt.z * e1z;
+            const double proj2 = evt.x * e2x + evt.y * e2y + evt.z * e2z;
+
+            // angular position on sky
+            const double sky_r     = std::sqrt(proj1 * proj1 + proj2 * proj2);
+            const double theta_sky = sky_r / luminosity_distance;
+            const double phi_sky   = std::atan2(proj2, proj1);
+
+            // wrap phi to [0, 2\pi]
+            const double phi_wrapped = phi_sky < 0.0 ? phi_sky + 2.0 * std::numbers::pi : phi_sky;
+
+            // find angular bin
+            const std::uint32_t i_theta = std::min(
+                static_cast<std::uint32_t>(theta_sky / max_angle_rad * (n_theta - 1)),
+                n_theta - 1
+            );
+            const std::uint32_t i_phi = std::min(
+                static_cast<std::uint32_t>(phi_wrapped / (2.0 * std::numbers::pi) * n_phi),
+                n_phi - 1
+            );
+
+            // accumulate intensity (photon packet energy weighted by stokes I)
+            result.intensity[i_theta][i_phi] += evt.energy * evt.stokes_I;
+        }
+
+        // normalize by solid angle per bin and convert to surface brightness
+        const double dtheta = max_angle_rad / (n_theta - 1.0);
+        const double dphi   = 2.0 * std::numbers::pi / n_phi;
+
+        for (std::uint32_t ii = 0; ii < n_theta; ++ii) {
+            // solid angle element: d\Omega = sin(\theta) d\theta d\phi
+            // for small angles: sin(\theta) ~ \theta
+            const double theta       = result.theta[ii];
+            const double solid_angle = (theta > 0.0) ? theta * dtheta * dphi : dtheta * dphi;
+
+            for (std::uint32_t jj = 0; jj < n_phi; ++jj) {
+                if (solid_angle > 0.0) {
+                    result.intensity[ii][jj] /= solid_angle;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    // compute polarization curve from photon events
+    polarization_curve_t compute_polarization_from_events(
+        const std::vector<photon_event_t>& events,
+        const std::vector<double>&         observer_direction,
+        const std::vector<double>&         time_bins,
+        double                             energy_min,
+        double                             energy_max
+    )
+    {
+        polarization_curve_t result;
+        result.times = time_bins;
+
+        const std::size_t n_times = time_bins.size();
+        result.polarization_degree.resize(n_times, 0.0);
+        result.polarization_angle.resize(n_times, 0.0);
+        result.stokes_Q.resize(n_times, 0.0);
+        result.stokes_U.resize(n_times, 0.0);
+        result.stokes_V.resize(n_times, 0.0);
+
+        // normalize observer direction
+        const double obs_mag = std::sqrt(
+            observer_direction[0] * observer_direction[0] +
+            observer_direction[1] * observer_direction[1] +
+            observer_direction[2] * observer_direction[2]
+        );
+        const std::vector<double> obs_hat = {
+            observer_direction[0] / obs_mag,
+            observer_direction[1] / obs_mag,
+            observer_direction[2] / obs_mag
+        };
+
+        // convert time bins from days to seconds
+        std::vector<double> time_bins_s(n_times);
+        for (std::size_t i = 0; i < n_times; ++i) {
+            time_bins_s[i] = time_bins[i] * 86400.0;
+        }
+
+        // accumulate stokes parameters in each time bin
+        std::vector<double> stokes_I_total(n_times, 0.0);
+
+        for (const auto& evt : events) {
+            // skip absorbed photons
+            if (evt.absorbed) {
+                continue;
+            }
+
+            // filter by energy
+            if (evt.energy < energy_min || evt.energy > energy_max) {
+                continue;
+            }
+
+            // check if photon is propagating toward observer
+            const double cos_angle =
+                evt.px * obs_hat[0] + evt.py * obs_hat[1] + evt.pz * obs_hat[2];
+            if (cos_angle < 0.5) { // viewing angle > 60 degrees
+                continue;
+            }
+
+            // compute observer arrival time
+            const double r_emission = std::sqrt(evt.x * evt.x + evt.y * evt.y + evt.z * evt.z);
+            const double t_arrival  = evt.t_emission + r_emission / constants::c_light.value;
+
+            // find time bin
+            std::size_t t_bin = n_times;
+            for (std::size_t i = 0; i < n_times - 1; ++i) {
+                if (t_arrival >= time_bins_s[i] && t_arrival < time_bins_s[i + 1]) {
+                    t_bin = i;
+                    break;
+                }
+            }
+            if (t_bin >= n_times - 1) {
+                continue;
+            }
+
+            // accumulate stokes parameters
+            stokes_I_total[t_bin] += evt.energy * evt.stokes_I;
+            result.stokes_Q[t_bin] += evt.energy * evt.stokes_Q;
+            result.stokes_U[t_bin] += evt.energy * evt.stokes_U;
+            result.stokes_V[t_bin] += evt.energy * evt.stokes_V;
+        }
+
+        // compute polarization degree and angle from stokes parameters
+        for (std::size_t i = 0; i < n_times; ++i) {
+            if (stokes_I_total[i] > 0.0) {
+                // normalize stokes parameters
+                result.stokes_Q[i] /= stokes_I_total[i];
+                result.stokes_U[i] /= stokes_I_total[i];
+                result.stokes_V[i] /= stokes_I_total[i];
+
+                // linear polarization degree: P_L = sqrt(Q^2 + U^2) / I
+                const double Q                = result.stokes_Q[i];
+                const double U                = result.stokes_U[i];
+                result.polarization_degree[i] = std::sqrt(Q * Q + U * U);
+
+                // polarization angle: \chi = 0.5 * atan2(U, Q)
+                result.polarization_angle[i] = 0.5 * std::atan2(U, Q);
+            }
+        }
+
+        return result;
+    }
+
+    // =============================================================================
+    // array-based (numpy-native) implementations
+    // =============================================================================
+
+    observer_lightcurve_t compute_lightcurve_from_arrays(
+        std::size_t         n_events,
+        const double*       t_emission,
+        const double*       x,
+        const double*       y,
+        const double*       z,
+        const double*       energy,
+        const double*       px,
+        const double*       py,
+        const double*       pz,
+        const double*       stokes_I,
+        const std::uint8_t* absorbed,
+        const double*       observer_direction,
+        const double*       frequencies,
+        std::size_t         n_frequencies,
+        double              redshift,
+        double              luminosity_distance,
+        const double*       time_bins,
+        std::size_t         n_time_bins
+    )
+    {
+        observer_lightcurve_t result;
+        result.times.assign(time_bins, time_bins + n_time_bins);
+        result.frequencies.assign(frequencies, frequencies + n_frequencies);
+
+        const std::size_t n_bins = n_time_bins - 1;
+        result.fluxes.resize(n_bins * n_frequencies, 0.0);
+
+        // convert time bins from days to seconds
+        std::vector<double> time_bins_s(n_time_bins);
+        for (std::size_t ii = 0; ii < n_time_bins; ++ii) {
+            time_bins_s[ii] = time_bins[ii] * 86400.0;
+        }
+
+        // normalize observer direction
+        const double obs_mag = std::sqrt(
+            observer_direction[0] * observer_direction[0] +
+            observer_direction[1] * observer_direction[1] +
+            observer_direction[2] * observer_direction[2]
+        );
+        const double obs_hat[3] = {
+            observer_direction[0] / obs_mag,
+            observer_direction[1] / obs_mag,
+            observer_direction[2] / obs_mag
+        };
+
+        const double d_L_sq = luminosity_distance * luminosity_distance;
+
+        // process events
+        for (std::size_t ii = 0; ii < n_events; ++ii) {
+            // skip absorbed photons
+            if (absorbed[ii]) {
+                continue;
+            }
+
+            // check if photon is propagating toward observer
+            const double cos_angle =
+                px[ii] * obs_hat[0] + py[ii] * obs_hat[1] + pz[ii] * obs_hat[2];
+            if (cos_angle < 0.5) {
+                continue;
+            }
+
+            // compute observer arrival time: t_obs = t_emission + r/c
+            const double r_emission = std::sqrt(x[ii] * x[ii] + y[ii] * y[ii] + z[ii] * z[ii]);
+            const double t_arrival  = t_emission[ii] + r_emission / constants::c_light.value;
+
+            // find time bin
+            std::size_t t_bin = n_bins;
+            for (std::size_t jj = 0; jj < n_bins; ++jj) {
+                if (t_arrival >= time_bins_s[jj] && t_arrival < time_bins_s[jj + 1]) {
+                    t_bin = jj;
+                    break;
+                }
+            }
+            if (t_bin >= n_bins) {
+                continue;
+            }
+
+            // photon frequency: E = h*nu -> nu = E/h
+            const double nu_photon = energy[ii] / constants::h_planck.value;
+            const double nu_obs    = nu_photon / (1.0 + redshift);
+
+            // find frequency bin
+            std::size_t f_bin = n_frequencies;
+            for (std::size_t jj = 0; jj < n_frequencies - 1; ++jj) {
+                if (nu_obs >= frequencies[jj] && nu_obs < frequencies[jj + 1]) {
+                    f_bin = jj;
+                    break;
+                }
+            }
+            if (f_bin >= n_frequencies - 1) {
+                continue;
+            }
+
+            // compute flux contribution
+            const double dnu          = frequencies[f_bin + 1] - frequencies[f_bin];
+            const double dt           = time_bins_s[t_bin + 1] - time_bins_s[t_bin];
+            const double flux_contrib = energy[ii] / (4.0 * std::numbers::pi * d_L_sq * dnu * dt);
+
+            result.fluxes[t_bin * n_frequencies + f_bin] += flux_contrib * stokes_I[ii];
+        }
+
+        return result;
+    }
+
+    skymap_t compute_skymap_from_arrays(
+        std::size_t         n_events,
+        const double*       t_emission,
+        const double*       x,
+        const double*       y,
+        const double*       z,
+        const double*       energy,
+        const double*       stokes_I,
+        const std::uint8_t* absorbed,
+        const double*       observer_direction,
+        double              observer_time,
+        double              energy_min,
+        double              energy_max,
+        double              redshift,
+        double              luminosity_distance,
+        double              time_window,
+        std::uint32_t       n_theta,
+        std::uint32_t       n_phi
+    )
+    {
+        const double one_plus_z = 1.0 + redshift;
+        skymap_t     result;
+
+        // observer direction (unit vector toward observer)
+        const double nx = observer_direction[0];
+        const double ny = observer_direction[1];
+        const double nz = observer_direction[2];
+
+        // build orthonormal basis for sky plane
+        double e1x, e1y, e1z;
+        if (std::abs(nz) < 0.99) {
+            e1x = -ny;
+            e1y = nx;
+            e1z = 0.0;
+        }
+        else {
+            e1x = 0.0;
+            e1y = -nz;
+            e1z = ny;
+        }
+        double e1_norm = std::sqrt(e1x * e1x + e1y * e1y + e1z * e1z);
+        e1x /= e1_norm;
+        e1y /= e1_norm;
+        e1z /= e1_norm;
+
+        double e2x = ny * e1z - nz * e1y;
+        double e2y = nz * e1x - nx * e1z;
+        double e2z = nx * e1y - ny * e1x;
+
+        // find max sky radius for angular scale
+        double max_sky_radius = 0.0;
+        for (std::size_t ii = 0; ii < n_events; ++ii) {
+            double proj1   = x[ii] * e1x + y[ii] * e1y + z[ii] * e1z;
+            double proj2   = x[ii] * e2x + y[ii] * e2y + z[ii] * e2z;
+            double sky_r   = std::sqrt(proj1 * proj1 + proj2 * proj2);
+            max_sky_radius = std::max(max_sky_radius, sky_r);
+        }
+
+        const double max_angle_rad = (max_sky_radius / luminosity_distance) * 1.5;
+
+        // create angular grid
+        result.theta.resize(n_theta);
+        result.phi.resize(n_phi);
+        result.intensity.resize(n_theta, std::vector<double>(n_phi, 0.0));
+
+        for (std::uint32_t ii = 0; ii < n_theta; ++ii) {
+            result.theta[ii] = max_angle_rad * ii / (n_theta - 1.0);
+        }
+        for (std::uint32_t jj = 0; jj < n_phi; ++jj) {
+            result.phi[jj] = 2.0 * std::numbers::pi * jj / n_phi;
+        }
+
+        // time window in seconds
+        const double t_obs_s       = observer_time * 86400.0;
+        const double time_window_s = time_window * 86400.0;
+        const double t_obs_min     = t_obs_s - 0.5 * time_window_s;
+        const double t_obs_max     = t_obs_s + 0.5 * time_window_s;
+
+        // bin events
+        for (std::size_t ii = 0; ii < n_events; ++ii) {
+            if (absorbed[ii]) {
+                continue;
+            }
+
+            if (energy[ii] < energy_min || energy[ii] > energy_max) {
+                continue;
+            }
+
+            // correct arrival time: t_obs = (1+z) * (t_em - (r dot n) / c)
+            const double r_dot_n = x[ii] * nx + y[ii] * ny + z[ii] * nz;
+            const double t_arrival =
+                one_plus_z * (t_emission[ii] - r_dot_n / constants::c_light.value);
+
+            if (t_arrival < t_obs_min || t_arrival > t_obs_max) {
+                continue;
+            }
+
+            // project onto sky plane
+            const double proj1 = x[ii] * e1x + y[ii] * e1y + z[ii] * e1z;
+            const double proj2 = x[ii] * e2x + y[ii] * e2y + z[ii] * e2z;
+
+            const double sky_r       = std::sqrt(proj1 * proj1 + proj2 * proj2);
+            const double theta_sky   = sky_r / luminosity_distance;
+            const double phi_sky     = std::atan2(proj2, proj1);
+            const double phi_wrapped = phi_sky < 0.0 ? phi_sky + 2.0 * std::numbers::pi : phi_sky;
+
+            const std::uint32_t i_theta = std::min(
+                static_cast<std::uint32_t>(theta_sky / max_angle_rad * (n_theta - 1)),
+                n_theta - 1
+            );
+            const std::uint32_t i_phi = std::min(
+                static_cast<std::uint32_t>(phi_wrapped / (2.0 * std::numbers::pi) * n_phi),
+                n_phi - 1
+            );
+
+            result.intensity[i_theta][i_phi] += energy[ii] * stokes_I[ii];
+        }
+
+        // normalize by solid angle
+        const double dtheta = max_angle_rad / (n_theta - 1.0);
+        const double dphi   = 2.0 * std::numbers::pi / n_phi;
+
+        for (std::uint32_t ii = 0; ii < n_theta; ++ii) {
+            const double theta       = result.theta[ii];
+            const double solid_angle = (theta > 0.0) ? theta * dtheta * dphi : dtheta * dphi;
+
+            for (std::uint32_t jj = 0; jj < n_phi; ++jj) {
+                if (solid_angle > 0.0) {
+                    result.intensity[ii][jj] /= solid_angle;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    polarization_curve_t compute_polarization_from_arrays(
+        std::size_t         n_events,
+        const double*       t_emission,
+        const double*       x,
+        const double*       y,
+        const double*       z,
+        const double*       energy,
+        const double*       px,
+        const double*       py,
+        const double*       pz,
+        const double*       stokes_I,
+        const double*       stokes_Q,
+        const double*       stokes_U,
+        const double*       stokes_V,
+        const std::uint8_t* absorbed,
+        const double*       observer_direction,
+        const double*       time_bins,
+        std::size_t         n_time_bins,
+        double              energy_min,
+        double              energy_max
+    )
+    {
+        polarization_curve_t result;
+        result.times.assign(time_bins, time_bins + n_time_bins);
+
+        result.polarization_degree.resize(n_time_bins, 0.0);
+        result.polarization_angle.resize(n_time_bins, 0.0);
+        result.stokes_Q.resize(n_time_bins, 0.0);
+        result.stokes_U.resize(n_time_bins, 0.0);
+        result.stokes_V.resize(n_time_bins, 0.0);
+
+        // normalize observer direction
+        const double obs_mag = std::sqrt(
+            observer_direction[0] * observer_direction[0] +
+            observer_direction[1] * observer_direction[1] +
+            observer_direction[2] * observer_direction[2]
+        );
+        const double obs_hat[3] = {
+            observer_direction[0] / obs_mag,
+            observer_direction[1] / obs_mag,
+            observer_direction[2] / obs_mag
+        };
+
+        // convert time bins from days to seconds
+        std::vector<double> time_bins_s(n_time_bins);
+        for (std::size_t ii = 0; ii < n_time_bins; ++ii) {
+            time_bins_s[ii] = time_bins[ii] * 86400.0;
+        }
+
+        std::vector<double> stokes_I_total(n_time_bins, 0.0);
+
+        for (std::size_t ii = 0; ii < n_events; ++ii) {
+            if (absorbed[ii]) {
+                continue;
+            }
+
+            if (energy[ii] < energy_min || energy[ii] > energy_max) {
+                continue;
+            }
+
+            const double cos_angle =
+                px[ii] * obs_hat[0] + py[ii] * obs_hat[1] + pz[ii] * obs_hat[2];
+            if (cos_angle < 0.5) {
+                continue;
+            }
+
+            const double r_emission = std::sqrt(x[ii] * x[ii] + y[ii] * y[ii] + z[ii] * z[ii]);
+            const double t_arrival  = t_emission[ii] + r_emission / constants::c_light.value;
+
+            std::size_t t_bin = n_time_bins;
+            for (std::size_t jj = 0; jj < n_time_bins - 1; ++jj) {
+                if (t_arrival >= time_bins_s[jj] && t_arrival < time_bins_s[jj + 1]) {
+                    t_bin = jj;
+                    break;
+                }
+            }
+            if (t_bin >= n_time_bins - 1) {
+                continue;
+            }
+
+            stokes_I_total[t_bin] += energy[ii] * stokes_I[ii];
+            result.stokes_Q[t_bin] += energy[ii] * stokes_Q[ii];
+            result.stokes_U[t_bin] += energy[ii] * stokes_U[ii];
+            result.stokes_V[t_bin] += energy[ii] * stokes_V[ii];
+        }
+
+        // compute polarization degree and angle
+        for (std::size_t ii = 0; ii < n_time_bins; ++ii) {
+            if (stokes_I_total[ii] > 0.0) {
+                result.stokes_Q[ii] /= stokes_I_total[ii];
+                result.stokes_U[ii] /= stokes_I_total[ii];
+                result.stokes_V[ii] /= stokes_I_total[ii];
+
+                const double Q                 = result.stokes_Q[ii];
+                const double U                 = result.stokes_U[ii];
+                result.polarization_degree[ii] = std::sqrt(Q * Q + U * U);
+                result.polarization_angle[ii]  = 0.5 * std::atan2(U, Q);
+            }
+        }
+
+        return result;
     }
 
 } // namespace simbi::afterglow

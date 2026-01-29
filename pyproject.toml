@@ -35,6 +35,7 @@ dependencies = [
     "rich",
     "pydantic",
     "scipy>=1.15.3",
+    "textual>=0.50.0",
 ]
 
 [project.optional-dependencies]

@@ -14,7 +14,7 @@ dark_theme = ThemeConfig(
     color_map="plasma",
     # Axis styling
     hide_spines=[],
-    grid=True,
+    grid=False,
     # Figure styling
     fig_size=(8, 6),
     dpi=300,

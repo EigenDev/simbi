@@ -26,7 +26,7 @@ namespace py = pybind11;
 using namespace simbi::afterglow;
 
 // =============================================================================
-// helper functions: python dict/array → c++ struct/vector conversion
+// helper functions: python dict/array -> c++ struct/vector conversion
 // =============================================================================
 
 std::vector<double> array_to_vector(const py::array_t<double>& arr)
@@ -114,7 +114,6 @@ py::dict metadata_to_dict(const photon_event_metadata_t& meta)
     d["v_scale"]         = meta.v_scale;
     d["length_scale"]    = meta.length_scale;
     d["n_events"]        = meta.n_events;
-    d["data_dim"]        = meta.data_dim;
     d["hydro_type"]      = static_cast<int>(meta.hydro_type);
 
     py::list freq_list;
@@ -273,6 +272,28 @@ PYBIND11_MODULE(rad_hydro, m)
         .value("SRMHD", hydro_type_t::SRMHD)
         .export_values();
 
+    // bind observer analysis result structures
+    py::class_<observer_lightcurve_t>(m, "ObserverLightcurve")
+        .def(py::init<>())
+        .def_readwrite("times", &observer_lightcurve_t::times)
+        .def_readwrite("fluxes", &observer_lightcurve_t::fluxes)
+        .def_readwrite("frequencies", &observer_lightcurve_t::frequencies);
+
+    py::class_<skymap_t>(m, "Skymap")
+        .def(py::init<>())
+        .def_readwrite("theta", &skymap_t::theta)
+        .def_readwrite("phi", &skymap_t::phi)
+        .def_readwrite("intensity", &skymap_t::intensity);
+
+    py::class_<polarization_curve_t>(m, "PolarizationCurve")
+        .def(py::init<>())
+        .def_readwrite("times", &polarization_curve_t::times)
+        .def_readwrite("polarization_degree", &polarization_curve_t::polarization_degree)
+        .def_readwrite("polarization_angle", &polarization_curve_t::polarization_angle)
+        .def_readwrite("stokes_Q", &polarization_curve_t::stokes_Q)
+        .def_readwrite("stokes_U", &polarization_curve_t::stokes_U)
+        .def_readwrite("stokes_V", &polarization_curve_t::stokes_V);
+
     // bind photon_event_t structure
     py::class_<photon_event_t>(m, "PhotonEvent")
         .def(py::init<>())
@@ -379,5 +400,263 @@ PYBIND11_MODULE(rad_hydro, m)
         &read_photon_event_metadata_wrapper,
         py::arg("filename"),
         "read metadata from HDF5 file without loading events"
+    );
+
+    // bind observer analysis functions
+    m.def(
+        "compute_lightcurve_from_events",
+        &compute_lightcurve_from_events,
+        py::arg("events"),
+        py::arg("observer_direction"),
+        py::arg("frequencies"),
+        py::arg("redshift"),
+        py::arg("luminosity_distance"),
+        py::arg("time_bins"),
+        "compute multi-frequency lightcurve from photon events"
+    );
+
+    m.def(
+        "compute_skymap_from_events",
+        &compute_skymap_from_events,
+        py::arg("events"),
+        py::arg("observer_direction"),
+        py::arg("observer_time"),
+        py::arg("energy_min"),
+        py::arg("energy_max"),
+        py::arg("redshift"),
+        py::arg("luminosity_distance"),
+        py::arg("time_window"),
+        py::arg("n_theta") = 128,
+        py::arg("n_phi")   = 256,
+        "compute sky intensity map at specific observer time"
+    );
+
+    m.def(
+        "compute_polarization_from_events",
+        &compute_polarization_from_events,
+        py::arg("events"),
+        py::arg("observer_direction"),
+        py::arg("time_bins"),
+        py::arg("energy_min"),
+        py::arg("energy_max"),
+        "compute polarization evolution for observer"
+    );
+
+    // =============================================================================
+    // array-based functions for zero-copy numpy interop
+    // these avoid the O(n) python loop overhead of converting events one-by-one
+    // =============================================================================
+
+    m.def(
+        "compute_lightcurve_from_arrays",
+        [](py::array_t<double>       t_emission,
+           py::array_t<double>       x,
+           py::array_t<double>       y,
+           py::array_t<double>       z,
+           py::array_t<double>       energy,
+           py::array_t<double>       px,
+           py::array_t<double>       py_arr,
+           py::array_t<double>       pz,
+           py::array_t<double>       stokes_I,
+           py::array_t<std::uint8_t> absorbed,
+           py::array_t<double>       observer_direction,
+           py::array_t<double>       frequencies,
+           double                    redshift,
+           double                    luminosity_distance,
+           py::array_t<double>       time_bins) {
+            auto t_buf  = t_emission.request();
+            auto x_buf  = x.request();
+            auto y_buf  = y.request();
+            auto z_buf  = z.request();
+            auto e_buf  = energy.request();
+            auto px_buf = px.request();
+            auto py_buf = py_arr.request();
+            auto pz_buf = pz.request();
+            auto sI_buf = stokes_I.request();
+            auto ab_buf = absorbed.request();
+            auto od_buf = observer_direction.request();
+            auto fr_buf = frequencies.request();
+            auto tb_buf = time_bins.request();
+
+            return compute_lightcurve_from_arrays(
+                static_cast<std::size_t>(t_buf.size),
+                static_cast<double*>(t_buf.ptr),
+                static_cast<double*>(x_buf.ptr),
+                static_cast<double*>(y_buf.ptr),
+                static_cast<double*>(z_buf.ptr),
+                static_cast<double*>(e_buf.ptr),
+                static_cast<double*>(px_buf.ptr),
+                static_cast<double*>(py_buf.ptr),
+                static_cast<double*>(pz_buf.ptr),
+                static_cast<double*>(sI_buf.ptr),
+                static_cast<std::uint8_t*>(ab_buf.ptr),
+                static_cast<double*>(od_buf.ptr),
+                static_cast<double*>(fr_buf.ptr),
+                static_cast<std::size_t>(fr_buf.size),
+                redshift,
+                luminosity_distance,
+                static_cast<double*>(tb_buf.ptr),
+                static_cast<std::size_t>(tb_buf.size)
+            );
+        },
+        py::arg("t_emission"),
+        py::arg("x"),
+        py::arg("y"),
+        py::arg("z"),
+        py::arg("energy"),
+        py::arg("px"),
+        py::arg("py"),
+        py::arg("pz"),
+        py::arg("stokes_I"),
+        py::arg("absorbed"),
+        py::arg("observer_direction"),
+        py::arg("frequencies"),
+        py::arg("redshift"),
+        py::arg("luminosity_distance"),
+        py::arg("time_bins"),
+        "compute lightcurve from numpy arrays (zero-copy)"
+    );
+
+    m.def(
+        "compute_skymap_from_arrays",
+        [](py::array_t<double>       t_emission,
+           py::array_t<double>       x,
+           py::array_t<double>       y,
+           py::array_t<double>       z,
+           py::array_t<double>       energy,
+           py::array_t<double>       stokes_I,
+           py::array_t<std::uint8_t> absorbed,
+           py::array_t<double>       observer_direction,
+           double                    observer_time,
+           double                    energy_min,
+           double                    energy_max,
+           double                    redshift,
+           double                    luminosity_distance,
+           double                    time_window,
+           std::uint32_t             n_theta,
+           std::uint32_t             n_phi) {
+            auto t_buf  = t_emission.request();
+            auto x_buf  = x.request();
+            auto y_buf  = y.request();
+            auto z_buf  = z.request();
+            auto e_buf  = energy.request();
+            auto sI_buf = stokes_I.request();
+            auto ab_buf = absorbed.request();
+            auto od_buf = observer_direction.request();
+
+            return compute_skymap_from_arrays(
+                static_cast<std::size_t>(t_buf.size),
+                static_cast<double*>(t_buf.ptr),
+                static_cast<double*>(x_buf.ptr),
+                static_cast<double*>(y_buf.ptr),
+                static_cast<double*>(z_buf.ptr),
+                static_cast<double*>(e_buf.ptr),
+                static_cast<double*>(sI_buf.ptr),
+                static_cast<std::uint8_t*>(ab_buf.ptr),
+                static_cast<double*>(od_buf.ptr),
+                observer_time,
+                energy_min,
+                energy_max,
+                redshift,
+                luminosity_distance,
+                time_window,
+                n_theta,
+                n_phi
+            );
+        },
+        py::arg("t_emission"),
+        py::arg("x"),
+        py::arg("y"),
+        py::arg("z"),
+        py::arg("energy"),
+        py::arg("stokes_I"),
+        py::arg("absorbed"),
+        py::arg("observer_direction"),
+        py::arg("observer_time"),
+        py::arg("energy_min"),
+        py::arg("energy_max"),
+        py::arg("redshift"),
+        py::arg("luminosity_distance"),
+        py::arg("time_window"),
+        py::arg("n_theta") = 128,
+        py::arg("n_phi")   = 256,
+        "compute skymap from numpy arrays (zero-copy)"
+    );
+
+    m.def(
+        "compute_polarization_from_arrays",
+        [](py::array_t<double>       t_emission,
+           py::array_t<double>       x,
+           py::array_t<double>       y,
+           py::array_t<double>       z,
+           py::array_t<double>       energy,
+           py::array_t<double>       px,
+           py::array_t<double>       py_arr,
+           py::array_t<double>       pz,
+           py::array_t<double>       stokes_I,
+           py::array_t<double>       stokes_Q,
+           py::array_t<double>       stokes_U,
+           py::array_t<double>       stokes_V,
+           py::array_t<std::uint8_t> absorbed,
+           py::array_t<double>       observer_direction,
+           py::array_t<double>       time_bins,
+           double                    energy_min,
+           double                    energy_max) {
+            auto t_buf  = t_emission.request();
+            auto x_buf  = x.request();
+            auto y_buf  = y.request();
+            auto z_buf  = z.request();
+            auto e_buf  = energy.request();
+            auto px_buf = px.request();
+            auto py_buf = py_arr.request();
+            auto pz_buf = pz.request();
+            auto sI_buf = stokes_I.request();
+            auto sQ_buf = stokes_Q.request();
+            auto sU_buf = stokes_U.request();
+            auto sV_buf = stokes_V.request();
+            auto ab_buf = absorbed.request();
+            auto od_buf = observer_direction.request();
+            auto tb_buf = time_bins.request();
+
+            return compute_polarization_from_arrays(
+                static_cast<std::size_t>(t_buf.size),
+                static_cast<double*>(t_buf.ptr),
+                static_cast<double*>(x_buf.ptr),
+                static_cast<double*>(y_buf.ptr),
+                static_cast<double*>(z_buf.ptr),
+                static_cast<double*>(e_buf.ptr),
+                static_cast<double*>(px_buf.ptr),
+                static_cast<double*>(py_buf.ptr),
+                static_cast<double*>(pz_buf.ptr),
+                static_cast<double*>(sI_buf.ptr),
+                static_cast<double*>(sQ_buf.ptr),
+                static_cast<double*>(sU_buf.ptr),
+                static_cast<double*>(sV_buf.ptr),
+                static_cast<std::uint8_t*>(ab_buf.ptr),
+                static_cast<double*>(od_buf.ptr),
+                static_cast<double*>(tb_buf.ptr),
+                static_cast<std::size_t>(tb_buf.size),
+                energy_min,
+                energy_max
+            );
+        },
+        py::arg("t_emission"),
+        py::arg("x"),
+        py::arg("y"),
+        py::arg("z"),
+        py::arg("energy"),
+        py::arg("px"),
+        py::arg("py"),
+        py::arg("pz"),
+        py::arg("stokes_I"),
+        py::arg("stokes_Q"),
+        py::arg("stokes_U"),
+        py::arg("stokes_V"),
+        py::arg("absorbed"),
+        py::arg("observer_direction"),
+        py::arg("time_bins"),
+        py::arg("energy_min"),
+        py::arg("energy_max"),
+        "compute polarization from numpy arrays (zero-copy)"
     );
 }

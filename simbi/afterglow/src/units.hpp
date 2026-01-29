@@ -2,7 +2,7 @@
 // units.hpp
 //
 // compile-time dimensional analysis for physical calculations.
-// uses c++20 template parameter deduction for clean syntax.
+// uses c++11 std::ratio for fractional dimension powers.
 //
 // dimensions tracked: [M^m L^l T^t Q^q K^k]
 //   M = mass (grams)
@@ -11,11 +11,16 @@
 //   Q = charge (statcoulombs)
 //   K = temperature (kelvin)
 //
+// fractional dimensions supported via std::ratio:
+//   magnetic field (gauss): g^{1/2} cm^{-1/2} s^{-1}
+//   charge (statcoulomb): g^{1/2} cm^{3/2} s^{-1}
+//
 // usage:
 //   mass_t m = 1.0;           // 1 gram
 //   length_t r = 1e10;        // 1e10 cm
 //   velocity_t v = r / (1.0 * second);  // cm/s, type-checked
 //   energy_t e = m * v * v;   // erg, dimensions verified at compile time
+//   magnetic_field_t b = 100.0; // 100 gauss, with fractional dimensions
 //
 // operations:
 //   - same dimensions: +, -, <, >
@@ -27,11 +32,17 @@
 
 #include <cmath>
 #include <ostream>
+#include <ratio>
 
 namespace simbi::afterglow {
 
-    // core quantity type: value with compile-time dimensions
-    template <int M, int L, int T, int Q, int K>
+    // core quantity type: value with compile-time fractional dimensions
+    template <
+        typename M = std::ratio<0>,
+        typename L = std::ratio<0>,
+        typename T = std::ratio<0>,
+        typename Q = std::ratio<0>,
+        typename K = std::ratio<0>>
     struct quantity_t
     {
         double value;
@@ -89,7 +100,12 @@ namespace simbi::afterglow {
         }
         friend constexpr auto operator/(double s, quantity_t q)
         {
-            return quantity_t<-M, -L, -T, -Q, -K>{s / q.value};
+            using M_neg = std::ratio<-M::num, M::den>;
+            using L_neg = std::ratio<-L::num, L::den>;
+            using T_neg = std::ratio<-T::num, T::den>;
+            using Q_neg = std::ratio<-Q::num, Q::den>;
+            using K_neg = std::ratio<-K::num, K::den>;
+            return quantity_t<M_neg, L_neg, T_neg, Q_neg, K_neg>{s / q.value};
         }
 
         // comparisons
@@ -119,23 +135,33 @@ namespace simbi::afterglow {
         }
 
         // multiplication: add dimensions
-        template <int M2, int L2, int T2, int Q2, int K2>
+        template <typename M2, typename L2, typename T2, typename Q2, typename K2>
         constexpr auto operator*(quantity_t<M2, L2, T2, Q2, K2> rhs) const
         {
-            return quantity_t<M + M2, L + L2, T + T2, Q + Q2, K + K2>{value * rhs.value};
+            using M_result = std::ratio_add<M, M2>;
+            using L_result = std::ratio_add<L, L2>;
+            using T_result = std::ratio_add<T, T2>;
+            using Q_result = std::ratio_add<Q, Q2>;
+            using K_result = std::ratio_add<K, K2>;
+            return quantity_t<M_result, L_result, T_result, Q_result, K_result>{value * rhs.value};
         }
 
         // division: subtract dimensions
-        template <int M2, int L2, int T2, int Q2, int K2>
+        template <typename M2, typename L2, typename T2, typename Q2, typename K2>
         constexpr auto operator/(quantity_t<M2, L2, T2, Q2, K2> rhs) const
         {
-            return quantity_t<M - M2, L - L2, T - T2, Q - Q2, K - K2>{value / rhs.value};
+            using M_result = std::ratio_subtract<M, M2>;
+            using L_result = std::ratio_subtract<L, L2>;
+            using T_result = std::ratio_subtract<T, T2>;
+            using Q_result = std::ratio_subtract<Q, Q2>;
+            using K_result = std::ratio_subtract<K, K2>;
+            return quantity_t<M_result, L_result, T_result, Q_result, K_result>{value / rhs.value};
         }
     };
 
     // dimensionless specialization: implicit conversion to/from double
     template <>
-    struct quantity_t<0, 0, 0, 0, 0>
+    struct quantity_t<std::ratio<0>, std::ratio<0>, std::ratio<0>, std::ratio<0>, std::ratio<0>>
     {
         double value;
 
@@ -185,42 +211,170 @@ namespace simbi::afterglow {
         }
     };
 
-    
+    // =========================================================================
+    // base physical dimensions (fundamental units)
+    // =========================================================================
 
-    using mass_t        = quantity_t<1, 0, 0, 0, 0>; // gram
-    using length_t      = quantity_t<0, 1, 0, 0, 0>; // centimeter
-    using time_t        = quantity_t<0, 0, 1, 0, 0>; // second
-    using charge_t      = quantity_t<0, 0, 0, 1, 0>; // statcoulomb
-    using temperature_t = quantity_t<0, 0, 0, 0, 1>; // kelvin
+    using mass_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>>; // gram
+    using length_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<1>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>>; // centimeter
+    using time_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<1>,
+        std::ratio<0>,
+        std::ratio<0>>; // second
+    using charge_t = quantity_t<
+        std::ratio<1, 2>,
+        std::ratio<3, 2>,
+        std::ratio<-1>,
+        std::ratio<0>,
+        std::ratio<0>>; // statcoulomb (esu)
+    using temperature_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<1>>; // kelvin
 
-    // derived dimensions
-    using dimensionless_t  = quantity_t<0, 0, 0, 0, 0>;
-    using velocity_t       = quantity_t<0, 1, -1, 0, 0>;  // cm/s
-    using acceleration_t   = quantity_t<0, 1, -2, 0, 0>;  // cm/s^2
-    using energy_t         = quantity_t<1, 2, -2, 0, 0>;  // erg
-    using power_t          = quantity_t<1, 2, -3, 0, 0>;  // erg/s
-    using force_t          = quantity_t<1, 1, -2, 0, 0>;  // dyne
-    using area_t           = quantity_t<0, 2, 0, 0, 0>;   // cm^2
-    using volume_t         = quantity_t<0, 3, 0, 0, 0>;   // cm^3
-    using frequency_t      = quantity_t<0, 0, -1, 0, 0>;  // Hz
-    using mass_density_t   = quantity_t<1, -3, 0, 0, 0>;  // g/cm^3
-    using energy_density_t = quantity_t<1, -1, -2, 0, 0>; // erg/cm^3
-    using number_density_t = quantity_t<0, -3, 0, 0, 0>;  // cm^-3
+    // =========================================================================
+    // derived dimensions (integer powers)
+    // =========================================================================
 
-    // electromagnetic
-    // note: magnetic field in cgs gaussian units has fractional dimensions [g^1/2 cm^-1/2 s^-1]
-    // which cannot be represented with integer template parameters. use double for B in gauss.
-    // B^2 / 8π has dimensions of energy density and can be properly typed.
-    using magnetic_field_squared_t = quantity_t<1, -1, -2, 0, 0>; // gauss^2 (energy density)
-    using electric_field_t         = quantity_t<1, -1, -1, 0, 0>; // statV/cm
+    using dimensionless_t =
+        quantity_t<std::ratio<0>, std::ratio<0>, std::ratio<0>, std::ratio<0>, std::ratio<0>>;
+    using velocity_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<1>,
+        std::ratio<-1>,
+        std::ratio<0>,
+        std::ratio<0>>; // cm/s
+    using acceleration_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<1>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // cm/s^2
+    using energy_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<2>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // erg
+    using power_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<2>,
+        std::ratio<-3>,
+        std::ratio<0>,
+        std::ratio<0>>; // erg/s
+    using force_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<1>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // dyne
+    using area_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<2>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>>; // cm^2
+    using volume_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<3>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>>; // cm^3
+    using frequency_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<-1>,
+        std::ratio<0>,
+        std::ratio<0>>; // Hz
+    using mass_density_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<-3>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>>; // g/cm^3
+    using energy_density_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<-1>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // erg/cm^3
+    using number_density_t = quantity_t<
+        std::ratio<0>,
+        std::ratio<-3>,
+        std::ratio<0>,
+        std::ratio<0>,
+        std::ratio<0>>; // cm^-3
 
-    // radiative (note: "per frequency" is implicit in spectral quantities)
-    using spectral_flux_t       = quantity_t<1, 0, -2, 0, 0>;  // erg/cm^2/s (flux density)
-    using spectral_power_t      = quantity_t<1, 2, -2, 0, 0>;  // erg (energy per frequency)
-    using emissivity_t          = quantity_t<1, -1, -2, 0, 0>; // erg/cm/s
-    using spectral_emissivity_t = quantity_t<1, -1, -2, 0, 0>; // erg/cm/s (same as emissivity)
+    // =========================================================================
+    // electromagnetic (fractional dimensions in cgs gaussian units)
+    // =========================================================================
 
-    
+    // magnetic field: g^{1/2} cm^{-1/2} s^{-1} (gauss)
+    using magnetic_field_t = quantity_t<
+        std::ratio<1, 2>,
+        std::ratio<-1, 2>,
+        std::ratio<-1>,
+        std::ratio<0>,
+        std::ratio<0>>;
+
+    // electric field: g^{1/2} cm^{-1/2} s^{-1} (statV/cm, same dimensions as B in gaussian units)
+    using electric_field_t = quantity_t<
+        std::ratio<1, 2>,
+        std::ratio<-1, 2>,
+        std::ratio<-1>,
+        std::ratio<0>,
+        std::ratio<0>>;
+
+    // B^2 has dimensions of energy density (useful for u_B = B^2 / 8\pi)
+    using magnetic_energy_density_t =
+        quantity_t<std::ratio<1>, std::ratio<-1>, std::ratio<-2>, std::ratio<0>, std::ratio<0>>;
+
+    // =========================================================================
+    // radiative quantities (spectral = "per frequency" implicit)
+    // =========================================================================
+
+    using spectral_flux_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<0>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // erg/cm^2/s (flux density)
+    using spectral_power_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<2>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // erg (energy per frequency)
+    using emissivity_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<-1>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // erg/cm/s
+    using spectral_emissivity_t = quantity_t<
+        std::ratio<1>,
+        std::ratio<-1>,
+        std::ratio<-2>,
+        std::ratio<0>,
+        std::ratio<0>>; // erg/cm/s (same as emissivity)
+
+    // =========================================================================
+    // user-defined literals
+    // =========================================================================
 
     namespace literals {
         // fundamental
@@ -280,7 +434,9 @@ namespace simbi::afterglow {
         }
     } // namespace literals
 
-    
+    // =========================================================================
+    // conversion factors and derived units
+    // =========================================================================
 
     // mass
     constexpr double kg_to_g    = 1e3;
@@ -314,7 +470,9 @@ namespace simbi::afterglow {
     constexpr spectral_flux_t jansky      = spectral_flux_t{jy_to_cgs};
     constexpr spectral_flux_t millijansky = spectral_flux_t{mjy_to_cgs};
 
-    
+    // =========================================================================
+    // base units namespace (for explicit construction)
+    // =========================================================================
 
     namespace units {
         // base units
@@ -335,61 +493,90 @@ namespace simbi::afterglow {
         constexpr power_t          erg_per_s{1.0};   // erg/s
         constexpr spectral_flux_t  mjy{mjy_to_cgs};  // millijansky
         constexpr spectral_flux_t  jy{jy_to_cgs};    // jansky
+        constexpr magnetic_field_t gauss{1.0};       // gauss
     } // namespace units
 
-    
+    // =========================================================================
+    // mathematical operations
+    // =========================================================================
 
-    // sqrt: halve all dimensions
-    template <int M, int L, int T, int Q, int K>
+    // sqrt: halve all dimension powers
+    template <typename M, typename L, typename T, typename Q, typename K>
     constexpr auto sqrt(quantity_t<M, L, T, Q, K> q)
     {
-        static_assert(
-            M % 2 == 0 && L % 2 == 0 && T % 2 == 0 && Q % 2 == 0 && K % 2 == 0,
-            "sqrt requires even dimension powers"
-        );
-        return quantity_t<M / 2, L / 2, T / 2, Q / 2, K / 2>{std::sqrt(q.value)};
+        using M_half = std::ratio_divide<M, std::ratio<2>>;
+        using L_half = std::ratio_divide<L, std::ratio<2>>;
+        using T_half = std::ratio_divide<T, std::ratio<2>>;
+        using Q_half = std::ratio_divide<Q, std::ratio<2>>;
+        using K_half = std::ratio_divide<K, std::ratio<2>>;
+        return quantity_t<M_half, L_half, T_half, Q_half, K_half>{std::sqrt(q.value)};
     }
 
-    // pow<N>: multiply dimensions by N
-    template <int N, int M, int L, int T, int Q, int K>
+    // pow<N, D>: multiply dimensions by N/D (rational power)
+    template <
+        std::intmax_t N,
+        std::intmax_t D = 1,
+        typename M,
+        typename L,
+        typename T,
+        typename Q,
+        typename K>
     constexpr auto pow(quantity_t<M, L, T, Q, K> q)
     {
-        return quantity_t<M * N, L * N, T * N, Q * N, K * N>{std::pow(q.value, N)};
+        using power_ratio = std::ratio<N, D>;
+        using M_pow       = std::ratio_multiply<M, power_ratio>;
+        using L_pow       = std::ratio_multiply<L, power_ratio>;
+        using T_pow       = std::ratio_multiply<T, power_ratio>;
+        using Q_pow       = std::ratio_multiply<Q, power_ratio>;
+        using K_pow       = std::ratio_multiply<K, power_ratio>;
+        return quantity_t<M_pow, L_pow, T_pow, Q_pow, K_pow>{
+            std::pow(q.value, static_cast<double>(N) / D)
+        };
     }
 
     // abs: preserve dimensions
-    template <int M, int L, int T, int Q, int K>
+    template <typename M, typename L, typename T, typename Q, typename K>
     constexpr auto abs(quantity_t<M, L, T, Q, K> q)
     {
         return quantity_t<M, L, T, Q, K>{std::abs(q.value)};
     }
 
-    
+    // =========================================================================
+    // output stream (for debugging)
+    // =========================================================================
 
-    template <int M, int L, int T, int Q, int K>
+    namespace detail {
+        // helper to format rational exponents
+        template <typename R>
+        void print_dimension(std::ostream& os, const char* name, bool& first)
+        {
+            if (R::num != 0) {
+                if (!first) {
+                    os << " ";
+                }
+                os << name;
+                if (R::den == 1 && R::num != 1) {
+                    os << "^" << R::num;
+                }
+                else if (R::den != 1) {
+                    os << "^(" << R::num << "/" << R::den << ")";
+                }
+                first = false;
+            }
+        }
+    } // namespace detail
+
+    template <typename M, typename L, typename T, typename Q, typename K>
     std::ostream& operator<<(std::ostream& os, quantity_t<M, L, T, Q, K> q)
     {
         os << q.value << " [";
         bool first = true;
 
-        auto append_dim = [&](const char* name, int power) {
-            if (power != 0) {
-                if (!first) {
-                    os << " ";
-                }
-                os << name;
-                if (power != 1) {
-                    os << "^" << power;
-                }
-                first = false;
-            }
-        };
-
-        append_dim("g", M);
-        append_dim("cm", L);
-        append_dim("s", T);
-        append_dim("statC", Q);
-        append_dim("K", K);
+        detail::print_dimension<M>(os, "g", first);
+        detail::print_dimension<L>(os, "cm", first);
+        detail::print_dimension<T>(os, "s", first);
+        detail::print_dimension<Q>(os, "statC", first);
+        detail::print_dimension<K>(os, "K", first);
 
         if (first) {
             os << "1"; // dimensionless
