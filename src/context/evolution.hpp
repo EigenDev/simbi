@@ -187,6 +187,15 @@ namespace simbi::evolution {
 
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 c2p_system_t{}(sim, lvl, block_geo);
+
+                // snapshot prim^n after c2p (for time interpolation during subcycling)
+                if (lvl < sim.num_levels() - 1) {
+                    const auto nsteps = get_substeps(lvl + 1);
+                    if (nsteps > 1) {
+                        snapshot_u_n_system_t{}(sim, lvl);
+                    }
+                }
+
                 ghost_fill_system_t{}(sim, lvl);
                 sink_cache_system_t{}(sim);
 
@@ -202,21 +211,25 @@ namespace simbi::evolution {
                 }
 
                 euler_system_t<Ops>{ops}(sim, block_geo, lvl);
+
+                // coarse level cons now at u^{n+1}
+                // update primitives so time interpolation has correct endpoint
+                if (lvl < sim.num_levels() - 1) {
+                    const auto nsteps = get_substeps(lvl + 1);
+                    if (nsteps > 1) {
+                        c2p_system_t{}(sim, lvl, block_geo);
+                    }
+                }
             });
 
             if (lvl < sim.num_levels() - 1) {
-                const auto nsteps     = get_substeps(lvl + 1);
                 const auto fine_level = lvl + 1;
+                const auto nsteps     = get_substeps(fine_level);
                 const auto dt_fine    = meta.level_dts[fine_level];
 
-                // snapshot u^n on coarse level before subcycling
-                // (needed for time-interpolated ghost fills)
-                if (nsteps > 1) {
-                    snapshot_u_n_system_t{}(sim, lvl);
-                }
-
                 for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
-                    // interpolate boundary at time t^n + substep * dt_fine
+                    // time interpolation between prim^n (stored) and prim^{n+1} (current)
+                    // alpha = substep/nsteps gives boundary at t^n + substep*dt_fine
                     real alpha =
                         nsteps > 1 ? static_cast<real>(substep) / static_cast<real>(nsteps) : -1.0;
                     ghost_fill_system_t{.alpha = alpha}(sim, fine_level);
@@ -249,7 +262,16 @@ namespace simbi::evolution {
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 // === STAGE 1: u^n -> u* ===
                 c2p_system_t{}(sim, lvl, block_geo);
-                ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
+
+                // snapshot prim^n after c2p (for time interpolation during subcycling)
+                if (lvl < sim.num_levels() - 1) {
+                    const auto nsteps = get_substeps(lvl + 1);
+                    if (nsteps > 1) {
+                        snapshot_u_n_system_t{}(sim, lvl);
+                    }
+                }
+
+                ghost_fill_system_t{}(sim, lvl);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u^n)
@@ -268,21 +290,9 @@ namespace simbi::evolution {
 
                 rk2_stage1_system_t<Ops>{ops}(sim, block_geo, lvl);
 
-                // === RECURSION ===
-                if (lvl < sim.num_levels() - 1) {
-                    const auto fine_level = lvl + 1;
-                    const auto nsteps     = get_substeps(fine_level);
-
-                    for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
-                        // for rk2: no time interpolation (u* is not a physical state)
-                        // just use u_n for all substeps
-                        advance_level_rk2(fine_level);
-                    }
-                }
-
                 // === STAGE 2: u* -> u^{n+1} ===
                 c2p_system_t{}(sim, lvl, block_geo);
-                ghost_fill_system_t{.use_coarse_u_n = true}(sim, lvl);
+                ghost_fill_system_t{}(sim, lvl);
                 sink_cache_system_t{}(sim);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u*)
@@ -299,15 +309,38 @@ namespace simbi::evolution {
                 }
                 rk2_stage2_system_t<Ops>{ops}(sim, block_geo, lvl);
 
-                // === REFLUX AND SYNCHRONIZE ===
+                // coarse level cons now at u^{n+1}
+                // update prim so time interpolation has correct endpoint (prim^{n+1})
                 if (lvl < sim.num_levels() - 1) {
-                    // apply reflux to fix conservation at boundaries
-                    reflux_system_t{}(sim, lvl + 1);
+                    const auto nsteps = get_substeps(lvl + 1);
+                    if (nsteps > 1) {
+                        c2p_system_t{}(sim, lvl, block_geo);
+                    }
+                }
 
-                    // perform restriction to sync the grids for the
-                    // next step. The coarse grid has finished its RK2 step,
-                    // so it is safe to overwrite.
-                    restriction_system_t{}(sim, lvl + 1);
+                // === SUBCYCLE FINE LEVELS ===
+                // now that coarse has completed its rk2 step, we have prim^n (stored)
+                // and prim^{n+1} (current). subcycle fine with time interpolation.
+                if (lvl < sim.num_levels() - 1) {
+                    const auto fine_level = lvl + 1;
+                    const auto nsteps     = get_substeps(fine_level);
+
+                    for (std::uint64_t substep = 0; substep < nsteps; ++substep) {
+                        // time interpolation: alpha = substep/nsteps
+                        // alpha=0 -> prim^n, alpha=1 -> prim^{n+1}
+                        real alpha = nsteps > 1
+                                         ? static_cast<real>(substep) / static_cast<real>(nsteps)
+                                         : -1.0;
+                        ghost_fill_system_t{.alpha = alpha}(sim, fine_level);
+
+                        advance_level_rk2(fine_level);
+                    }
+
+                    // apply reflux to fix conservation at boundaries
+                    reflux_system_t{}(sim, fine_level);
+
+                    // restriction to sync grids for next step
+                    restriction_system_t{}(sim, fine_level);
                 }
             });
 

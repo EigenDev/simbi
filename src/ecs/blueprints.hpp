@@ -21,8 +21,6 @@
 
 namespace simbi::ecs {
 
-    
-
     // -----------------------------------------------------------------------------
     // mesh_blueprint_t
     //
@@ -234,7 +232,6 @@ namespace simbi::ecs {
         std::int64_t halo_width;
     };
 
-    
     template <std::uint64_t Rank>
     struct blueprint_set_t
     {

@@ -34,8 +34,6 @@
 
 namespace simbi::ecs::creation {
 
-    
-
     inline void require(bool condition, const std::string& msg)
     {
         if (!condition) {
@@ -58,8 +56,6 @@ namespace simbi::ecs::creation {
     {
         return config::try_read<T>(config, key).unwrap_or(default_value);
     }
-
-    
 
     template <std::uint64_t Rank>
     struct blueprint_extractor_t
@@ -496,8 +492,6 @@ namespace simbi::ecs::creation {
             return bp;
         }
     };
-
-    
 
     inline std::uint64_t infer_dimensionality(const config_dict_t& config)
     {

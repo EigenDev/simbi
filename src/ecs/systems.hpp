@@ -319,6 +319,7 @@ namespace simbi::ecs {
             constexpr auto Rank       = Sim::rank;
             const auto     coarse_lvl = fine_lvl - 1;
             const auto     ref_ratio  = sim.level_info(fine_lvl).refinement_ratio;
+            const auto     order      = sim.metadata().prolongation_order();
 
             iarray<Rank> ratio;
             ratio.fill(static_cast<std::int64_t>(ref_ratio));
@@ -357,7 +358,8 @@ namespace simbi::ecs {
                         prim_interp,
                         fine_part.owned_domain,
                         ratio,
-                        exec
+                        exec,
+                        order
                     );
                 }
                 else if (use_coarse_u_n && sim.has_workspace(coarse_lvl, cp)) {
@@ -368,7 +370,8 @@ namespace simbi::ecs {
                         coarse_ws.prim_n,
                         fine_part.owned_domain,
                         ratio,
-                        exec
+                        exec,
+                        order
                     );
                 }
                 else {
@@ -378,7 +381,8 @@ namespace simbi::ecs {
                         coarse_fields.prim,
                         fine_part.owned_domain,
                         ratio,
-                        exec
+                        exec,
+                        order
                     );
                 }
             }
@@ -920,6 +924,7 @@ namespace simbi::ecs {
             constexpr auto Rank       = Sim::rank;
             const auto     coarse_lvl = fine_lvl - 1;
             const auto     ref_ratio  = sim.level_info(fine_lvl).refinement_ratio;
+            const auto     order      = sim.metadata().prolongation_order();
 
             iarray<Rank> ratio;
             ratio.fill(static_cast<std::int64_t>(ref_ratio));
@@ -945,7 +950,8 @@ namespace simbi::ecs {
                     coarse_fields.cons,
                     fine_part.owned_domain,
                     ratio,
-                    exec
+                    exec,
+                    order
                 );
             }
         }

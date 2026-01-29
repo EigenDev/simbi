@@ -7,6 +7,15 @@
 // `fine_flux_area_t` functors used to perform the refluxing operation,
 // ensuring conservation across AMR levels.
 //
+// the reflux operation corrects conservation at coarse-fine interfaces:
+//   1. coarse flux is subtracted: R -= F_coarse * dt * A_coarse
+//   2. fine fluxes are summed:    R += sum(F_fine * A_fine) * dt
+//   3. correction applied:        U_coarse += R / V_coarse
+//
+// note: fine flux uses summation (not averaging) because we need the total
+// flux through all fine faces that comprise one coarse face. this is
+// ratio^(Rank-1) fine faces, not ratio^Rank cells.
+//
 // usage:
 //   flux_register.accumulate_coarse(...);
 //   flux_register.accumulate_fine(...);
@@ -15,10 +24,10 @@
 #pragma once
 
 #include "build_config.hpp"
+#include "containers/state_ops.hpp"
 #include "containers/vector.hpp"
 #include "decorators.hpp"
 #include "functional/fp.hpp"
-#include "grid/amr/restriction.hpp"
 #include "grid/connectivity.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
@@ -32,6 +41,136 @@
 namespace simbi::grid::amr {
 
     using namespace simbi::compute;
+
+    // -------------------------------------------------------------------------
+    // face restriction kernel (summation, not averaging)
+    //
+    // for flux correction, we need to sum fine face fluxes, not average them.
+    // each coarse face is covered by ratio^(Rank-1) fine faces. the total flux
+    // through the coarse face equals the sum of fluxes through all fine faces.
+    // -------------------------------------------------------------------------
+    template <typename FineComp, std::uint64_t Rank>
+    struct restrict_face_sum_t
+    {
+        using value_type = std::remove_cv_t<std::remove_reference_t<typename FineComp::value_type>>;
+        using argument_type                 = iarray<Rank>;
+        static constexpr std::uint64_t rank = Rank;
+
+        FineComp      fine_comp_;
+        argument_type ratio_;
+        std::size_t   face_dim_;
+
+        DUAL restrict_face_sum_t(FineComp fine, argument_type ratio, std::size_t face_dim)
+            : fine_comp_(std::move(fine)), ratio_(ratio), face_dim_(face_dim)
+        {
+        }
+
+        DUAL value_type operator()(const argument_type& coarse_coord) const
+        {
+            using namespace structs;
+
+            // compute fine base coordinate
+            argument_type fine_base;
+            for (std::uint64_t d = 0; d < Rank; ++d) {
+                fine_base[d] = coarse_coord[d] * ratio_[d];
+            }
+
+            value_type sum{};
+            bool       first = true;
+
+            // sum over fine faces: loop over all dimensions except face_dim
+            // for a face normal to dimension d, we have ratio^(Rank-1) fine faces
+            if constexpr (Rank == 1) {
+                // 1d: one fine face per coarse face (no transverse directions)
+                sum = fine_comp_(fine_base);
+            }
+            else if constexpr (Rank == 2) {
+                // 2d: ratio fine faces per coarse face
+                std::size_t trans_dim = (face_dim_ == 0) ? 1 : 0;
+                for (std::int64_t ii = 0; ii < ratio_[trans_dim]; ++ii) {
+                    argument_type fc = fine_base;
+                    fc[trans_dim] += ii;
+                    if (first) {
+                        sum   = fine_comp_(fc);
+                        first = false;
+                    }
+                    else {
+                        if constexpr (is_hydro_conserved_c<value_type>) {
+                            sum = sum | add_gas(fine_comp_(fc));
+                        }
+                        else {
+                            sum = sum + fine_comp_(fc);
+                        }
+                    }
+                }
+            }
+            else if constexpr (Rank == 3) {
+                // 3d: ratio^2 fine faces per coarse face
+                std::size_t t0, t1;
+                if (face_dim_ == 0) {
+                    t0 = 1;
+                    t1 = 2;
+                }
+                else if (face_dim_ == 1) {
+                    t0 = 0;
+                    t1 = 2;
+                }
+                else {
+                    t0 = 0;
+                    t1 = 1;
+                }
+
+                for (std::int64_t jj = 0; jj < ratio_[t1]; ++jj) {
+                    for (std::int64_t ii = 0; ii < ratio_[t0]; ++ii) {
+                        argument_type fc = fine_base;
+                        fc[t0] += ii;
+                        fc[t1] += jj;
+                        if (first) {
+                            sum   = fine_comp_(fc);
+                            first = false;
+                        }
+                        else {
+                            if constexpr (is_hydro_conserved_c<value_type>) {
+                                sum = sum | add_gas(fine_comp_(fc));
+                            }
+                            else {
+                                sum = sum + fine_comp_(fc);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return sum;
+        }
+    };
+
+    // helper to scale face domain down (for face restriction)
+    template <std::uint64_t Rank>
+    constexpr grid::domain_t<Rank>
+    scale_face_domain_down(const grid::domain_t<Rank>& d, const iarray<Rank>& ratio)
+    {
+        auto start = d.start;
+        auto fin   = d.fin;
+        for (std::uint64_t ii = 0; ii < Rank; ++ii) {
+            start[ii] /= ratio[ii];
+            fin[ii] /= ratio[ii];
+            // handle rounding for non-aligned boundaries
+            if (d.fin[ii] % ratio[ii] != 0) {
+                fin[ii] += 1;
+            }
+        }
+        return {start, fin};
+    }
+
+    // factory for face restriction (summation)
+    template <typename Computation, std::uint64_t Rank>
+    auto restrict_face(const Computation& fine, iarray<Rank> ratio, std::size_t face_dim)
+    {
+        auto coarse_domain = scale_face_domain_down(fine.domain(), ratio);
+        auto kernel        = restrict_face_sum_t<Computation, Rank>(fine, ratio, face_dim);
+        return computation_t<Rank, decltype(kernel)>{std::move(kernel), coarse_domain};
+    }
 
     // -------------------------------------------------------------------------
     // coarse flux accumulation functor
@@ -177,7 +316,9 @@ namespace simbi::grid::amr {
             *reg = update.with(exec);
         }
 
-        // fine: R += average(F * area) * dt
+        // fine: R += sum(F * area) * dt
+        // note: uses summation (not averaging) because we need total flux
+        // through all fine faces that cover one coarse face
         template <xpu::execution_space_c ExecutionSpace, typename Geometry>
         void accumulate_fine(
             xpu::executor_t<ExecutionSpace>& exec,
@@ -199,13 +340,14 @@ namespace simbi::grid::amr {
 
             auto fine_flux_area = fine_flux.enum_map(flux_area_op);
 
-            // now restrict F*A to coarse domain (conservative averaging)
-            auto restricted_flux_area = restrict(fine_flux_area, ratio_);
+            // sum F*A over fine faces (not average!)
+            // each coarse face is covered by ratio^(Rank-1) fine faces
+            auto summed_flux_area = restrict_face(fine_flux_area, ratio_, dim);
 
-            // intersect with register
-            auto face_flux_area = restricted_flux_area.at(reg->domain());
+            // intersect with register domain
+            auto face_flux_area = summed_flux_area.at(reg->domain());
 
-            // update: current + average(F*A) * dt
+            // update: current + sum(F*A) * dt
             auto current_val = reg->as_computation();
 
             auto scaled_flux = face_flux_area.map(fp::scalar_multiply(dt));

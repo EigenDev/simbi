@@ -20,6 +20,7 @@
 #include "grid/algebra.hpp"
 #include "grid/amr/flux_correction.hpp"
 #include "grid/amr/prolongation.hpp"
+#include "grid/amr/restriction.hpp"
 #include "grid/connectivity.hpp"
 #include "grid/domain.hpp"
 #include "grid/field.hpp"
@@ -53,9 +54,10 @@ namespace simbi::grid::amr {
     // -------------------------------------------------------------------------
     // ghost cell filling (coarse -> fine)
     // -------------------------------------------------------------------------
-    // standard version for memory-backed fields
-    template <typename T, std::uint64_t Rank, typename Exec>
-    void fill_fine_ghosts(
+
+    // implementation with compile-time order
+    template <std::int64_t Order, typename T, std::uint64_t Rank, typename Exec>
+    void fill_fine_ghosts_impl(
         field_t<T, Rank>&       fine,
         const field_t<T, Rank>& coarse,
         const domain_t<Rank>&   fine_active_domain,
@@ -65,19 +67,12 @@ namespace simbi::grid::amr {
     {
         using namespace grid::domain_algebra;
 
-        // identify ghost regions
         auto ghost_regions = difference(fine.domain(), fine_active_domain);
+        auto prolong_op    = prolong<Order>(coarse.view(), refinement_ratio);
 
-        // construct lazy prolongator
-        // this creates a computation defined on the fine global index space
-        // prolong(coarse) covers the entire fine domain logically
-        auto prolong_op = prolong<3>(coarse.view(), refinement_ratio);
-
-        // verify proper nesting: coarse must cover all ghost regions
         for (const auto& ghost_box : ghost_regions) {
             auto coarse_equiv = scale_domain_down(ghost_box, refinement_ratio);
-            using namespace grid::domain_algebra;
-            auto overlap = intersection(coarse.domain(), coarse_equiv);
+            auto overlap      = intersection(coarse.domain(), coarse_equiv);
             if (overlap != coarse_equiv) {
                 throw std::runtime_error(
                     "fill_fine_ghosts: coarse grid does not cover fine ghost "
@@ -86,12 +81,35 @@ namespace simbi::grid::amr {
             }
         }
 
-        // execute fill for each ghost region
         for (const auto& ghost_box : ghost_regions) {
-            // assignment triggers the fused kernel:
-            // fine[ghost] = prolong(coarse)[ghost]
-            // the computation engine handles the coordinate mapping internally
             fine[ghost_box] = prolong_op.with(exec);
+        }
+    }
+
+    // standard version with runtime order selection
+    // order: 1=constant (pcm), 2=linear (plm), 3=parabolic (ppm)
+    template <typename T, std::uint64_t Rank, typename Exec>
+    void fill_fine_ghosts(
+        field_t<T, Rank>&       fine,
+        const field_t<T, Rank>& coarse,
+        const domain_t<Rank>&   fine_active_domain,
+        const iarray<Rank>&     refinement_ratio,
+        Exec&                   exec,
+        std::uint64_t           order = 2
+    )
+    {
+        switch (order) {
+            case 1:
+                fill_fine_ghosts_impl<1>(fine, coarse, fine_active_domain, refinement_ratio, exec);
+                break;
+            case 2:
+                fill_fine_ghosts_impl<2>(fine, coarse, fine_active_domain, refinement_ratio, exec);
+                break;
+            case 3:
+                fill_fine_ghosts_impl<3>(fine, coarse, fine_active_domain, refinement_ratio, exec);
+                break;
+            default:
+                throw std::runtime_error("fill_fine_ghosts: order must be 1, 2, or 3");
         }
     }
 
@@ -102,7 +120,8 @@ namespace simbi::grid::amr {
         const bound_computation_t<Rank, Computation, Exec>& coarse_bound,
         const domain_t<Rank>&                               fine_active_domain,
         const iarray<Rank>&                                 refinement_ratio,
-        Exec&                                               exec
+        Exec&                                               exec,
+        std::uint64_t                                       order = 2
     )
     {
         // materialize the computation into a temporary field
@@ -110,7 +129,7 @@ namespace simbi::grid::amr {
         coarse_temp      = coarse_bound;
 
         // call the standard version
-        fill_fine_ghosts(fine, coarse_temp, fine_active_domain, refinement_ratio, exec);
+        fill_fine_ghosts(fine, coarse_temp, fine_active_domain, refinement_ratio, exec, order);
     }
 
     // -------------------------------------------------------------------------
