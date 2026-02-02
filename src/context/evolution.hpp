@@ -247,10 +247,9 @@ namespace simbi::evolution {
                     real alpha =
                         nsteps > 1 ? static_cast<real>(substep) / static_cast<real>(nsteps) : -1.0;
 
-                    // // TEMPORARY: disable body interpolation to isolate artifact source
-                    // if (sim.has_bodies() && alpha >= 0.0) {
-                    //     sim.bodies().interpolate_to(alpha);
-                    // }
+                    if (sim.has_bodies() && alpha >= 0.0) {
+                        sim.bodies().interpolate_to(alpha);
+                    }
 
                     ghost_fill_system_t{.alpha = alpha}(sim, fine_level);
 
@@ -364,10 +363,9 @@ namespace simbi::evolution {
                                          ? static_cast<real>(substep) / static_cast<real>(nsteps)
                                          : -1.0;
 
-                        // // TEMPORARY: disable body interpolation to isolate artifact source
-                        // if (sim.has_bodies() && alpha >= 0.0) {
-                        //     sim.bodies().interpolate_to(alpha);
-                        // }
+                        if (sim.has_bodies() && alpha >= 0.0) {
+                            sim.bodies().interpolate_to(alpha);
+                        }
 
                         ghost_fill_system_t{.alpha = alpha}(sim, fine_level);
 
@@ -461,10 +459,9 @@ namespace simbi::evolution {
 
             meta.time += meta.global_dt;
 
-            // // TEMPORARY: disable body evolution to isolate artifact source
-            // if (sim.has_bodies()) {
-            //     body::evolve_bodies(sim);
-            // }
+            if (sim.has_bodies()) {
+                body::evolve_bodies(sim);
+            }
         }
     };
 
