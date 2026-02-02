@@ -14,6 +14,8 @@
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -41,6 +43,7 @@ namespace simbi::display {
         std::int64_t                          progress_percent;
 
         std::deque<message_t> messages;
+        std::ofstream         log_stream;
 
         renderer_t sys_info_renderer;
         renderer_t benchmark_renderer;
@@ -139,6 +142,18 @@ namespace simbi::display {
                 static_info_rows.push_back({"", "Bandwidth", bandwidth.str()});
             }
 #endif
+        }
+
+        void log_to_file(message_type_t type, const std::string& msg)
+        {
+            if (!log_stream.is_open()) {
+                return;
+            }
+            auto        now = std::chrono::system_clock::now();
+            std::string ts  = format_timestamp(now);
+            log_stream << ts << " [" << std::left << std::setw(7) << message_type_string(type)
+                       << "] " << msg << "\n"
+                       << std::flush;
         }
 
         // calculate how many messages we can display based on terminal height
@@ -369,21 +384,30 @@ namespace simbi::display {
     void table_t::post_info(const std::string& msg)
     {
         impl->messages.push_back({std::chrono::system_clock::now(), message_type_t::INFO, msg});
+        impl->log_to_file(message_type_t::INFO, msg);
     }
 
     void table_t::post_success(const std::string& msg)
     {
         impl->messages.push_back({std::chrono::system_clock::now(), message_type_t::SUCCESS, msg});
+        impl->log_to_file(message_type_t::SUCCESS, msg);
     }
 
     void table_t::post_warning(const std::string& msg)
     {
         impl->messages.push_back({std::chrono::system_clock::now(), message_type_t::WARNING, msg});
+        impl->log_to_file(message_type_t::WARNING, msg);
     }
 
     void table_t::post_error(const std::string& msg)
     {
         impl->messages.push_back({std::chrono::system_clock::now(), message_type_t::ERROR, msg});
+        impl->log_to_file(message_type_t::ERROR, msg);
+    }
+
+    void table_t::set_log_file(const std::filesystem::path& path)
+    {
+        impl->log_stream.open(path, std::ios::app);
     }
 
     void table_t::refresh()

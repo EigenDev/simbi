@@ -20,6 +20,7 @@
 #include "utility/helpers.hpp"
 
 #include <cstdint>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 
@@ -40,7 +41,7 @@ namespace simbi::evolution {
     {
         auto& meta = sim.metadata();
 
-        return {
+        auto state = evolution_state_t{
             .stats    = timing::timing_stats_t{},
             .progress = progress::initialize(meta.regime),
             .schedule =
@@ -53,6 +54,14 @@ namespace simbi::evolution {
                 },
             .should_stop = false
         };
+
+        // mirror all display messages to a log file in the data directory
+        if (!meta.data_dir.empty()) {
+            auto log_path = std::filesystem::path(meta.data_dir) / "simbi.log";
+            state.progress.table.set_log_file(log_path);
+        }
+
+        return state;
     }
 
     template <typename Sim, typename PhysicsStep>

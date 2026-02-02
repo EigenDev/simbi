@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <vector>
@@ -56,11 +57,12 @@ namespace simbi::display {
         void post_warning(const std::string& msg);
         void post_error(const std::string& msg);
 
+        // log file output (mirrors all post_* messages to disk)
+        void set_log_file(const std::filesystem::path& path);
+
         // rendering
         void refresh();
         void print(); // alias for refresh
     };
 
 } // namespace simbi::display
-
-
