@@ -19,12 +19,14 @@
 #include "functional/monad/maybe.hpp" // for maybe_t, None
 #include "io/exceptions.hpp"          // for ErrorCode
 #include "physics/eos/ideal.hpp"      // for ideal_gas_eos_t
-#include "physics/hydro/physics.hpp"  // for pressure_from_conserved
-#include "utility/enums.hpp"          // for Regime
-#include "utility/helpers.hpp"        // for find_mu_plus, etc
+#include "physics/eos/isothermal.hpp"
+#include "physics/hydro/physics.hpp" // for pressure_from_conserved
+#include "utility/enums.hpp"         // for Regime
+#include "utility/helpers.hpp"       // for find_mu_plus, etc
 
 #include <cmath>   // for abs, isfinite, sqrt
 #include <cstdint> // for std::uint64_t
+#include <type_traits>
 
 namespace simbi::hydro::newtonian {
     using namespace eos;
@@ -42,8 +44,22 @@ namespace simbi::hydro::newtonian {
         prim.vel      = u.mom / u.den;
         prim.pre      = pressure_from_conserved(u, gamma);
 
-        if (prim.pre <= 0.0 || !std::isfinite(prim.pre)) {
-            return None(ErrorCode::NEGATIVE_PRESSURE | ErrorCode::NON_FINITE_PRESSURE);
+        if (!std::isfinite(prim.pre)) {
+            return None(ErrorCode::NON_FINITE_PRESSURE);
+        }
+        if (prim.pre <= 0.0) {
+            if constexpr (std::is_same_v<EoS, isothermal_gas_eos_t>) {
+                // hard crash for isothermal EoS
+                return None(ErrorCode::NEGATIVE_PRESSURE);
+            }
+            // best-effort floor: reset pressure to a small fraction of
+            // the kinetic energy density. if that's also zero, bail out
+            constexpr auto eps_machine = build::epsilon;
+            const auto     ekin        = 0.5 * vecops::dot(u.mom, u.mom) / u.den;
+            prim.pre                   = eps_machine * (gamma - 1) * helpers::my_max(ekin, u.nrg);
+            if (prim.pre <= 0.0) {
+                return None(ErrorCode::NEGATIVE_PRESSURE);
+            }
         }
         return prim;
     }
