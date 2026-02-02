@@ -74,22 +74,28 @@ int main()
     amr::flux_register_t<double, 2> flux_reg(footprint, ratio);
     flux_reg.initialize_face(0, side_t::left);
 
-    // create uniform cartesian geometry for test
-    auto x1_map = geometry::uniform_map_t(0.0, 1.0);
-    auto x2_map = geometry::uniform_map_t(0.0, 1.0);
-    auto metric = geometry::cartesian_metric_t(x1_map, x2_map);
-    auto motion = geometry::motion_state_t::static_mesh();
-    auto geo    = geometry::block_geometry(metric, motion);
+    // coarse geometry: dx = 1.0
+    auto c_x1_map = geometry::uniform_map_t(0.0, 1.0);
+    auto c_x2_map = geometry::uniform_map_t(0.0, 1.0);
+    auto c_metric = geometry::cartesian_metric_t(c_x1_map, c_x2_map);
+    auto motion   = geometry::motion_state_t::static_mesh();
+    auto c_geo    = geometry::block_geometry(c_metric, motion);
+
+    // fine geometry: dx = 0.5 (refined by ratio 2)
+    auto f_x1_map = geometry::uniform_map_t(0.0, 0.5);
+    auto f_x2_map = geometry::uniform_map_t(0.0, 0.5);
+    auto f_metric = geometry::cartesian_metric_t(f_x1_map, f_x2_map);
+    auto f_geo    = geometry::block_geometry(f_metric, motion);
 
     double dt = 0.1;
 
     field_t<double, 2> c_flux(grid::domain_t<2>(iarray<2>{2, 2}, iarray<2>{3, 6}));
     c_flux = compute::constant(c_flux.domain(), 1.0).with(exec);
-    flux_reg.accumulate_coarse(exec, c_flux, geo, 0, side_t::left, dt);
+    flux_reg.accumulate_coarse(exec, c_flux, c_geo, 0, side_t::left, dt);
 
     field_t<double, 2> f_flux(grid::domain_t<2>(iarray<2>{4, 4}, iarray<2>{6, 12}));
     f_flux = compute::constant(f_flux.domain(), 1.2).with(exec);
-    flux_reg.accumulate_fine(exec, f_flux, geo, 0, side_t::left, dt);
+    flux_reg.accumulate_fine(exec, f_flux, f_geo, 0, side_t::left, dt);
 
     exec.sync();
 
