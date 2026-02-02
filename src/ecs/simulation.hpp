@@ -356,7 +356,7 @@ namespace simbi::ecs {
             auto& part   = partition(lvl, part_id);
 
             // allocate workspace on same device as fields
-            workspace_t ws;
+            workspace_t ws{};
             ws.u_n    = grid::field_t<conserved_t, Rank>(part.allocated_domain);
             ws.prim_n = grid::field_t<primitive_t, Rank>(part.allocated_domain);
             ws.u_star = grid::field_t<conserved_t, Rank>(part.allocated_domain);
