@@ -37,7 +37,6 @@ namespace simbi::cfd {
     using namespace body::expr;
     using namespace body;
 
-    
     template <typename G, std::uint64_t Rank>
     concept block_geometry_c = requires(const G& geo, const iarray<Rank>& idx, std::size_t dim) {
         { geo.comoving_volume(idx) } -> std::convertible_to<real>;
@@ -49,7 +48,6 @@ namespace simbi::cfd {
         { geo.scale_factors(idx) } -> std::convertible_to<vector_t<real, Rank>>;
     };
 
-    
     template <typename Fluxes, typename Geometry>
     struct flux_divergence_op_t
     {
@@ -108,7 +106,6 @@ namespace simbi::cfd {
         };
     }
 
-    
     template <typename GravitySource, typename PrimField, typename Geometry>
     struct gravity_source_op_t
     {
@@ -160,7 +157,6 @@ namespace simbi::cfd {
         };
     }
 
-    
     template <typename HydroSource, typename ConsField, typename Geometry>
     struct hydro_source_op_t
     {
@@ -203,7 +199,6 @@ namespace simbi::cfd {
         };
     }
 
-    
     template <typename PrimField, typename Geometry>
     struct geometric_source_op_t
     {
@@ -240,7 +235,6 @@ namespace simbi::cfd {
         };
     }
 
-    
     template <typename PrimField, typename Geometry, typename CfdOps>
     struct compute_fluxes_op_t
     {
@@ -399,7 +393,6 @@ namespace simbi::cfd {
         }
     };
 
-    
     template <
         typename HydroState,
         typename Geometry,
@@ -447,7 +440,6 @@ namespace simbi::cfd {
         return intensive_rate.enum_map(maybe_extensive_converter_t{geometry});
     }
 
-    
     template <typename Bodies, typename PrimField, typename Geometry, typename Diagnostics>
     struct body_effects_op_t
     {
@@ -526,7 +518,6 @@ namespace simbi::cfd {
         }
     };
 
-    
     template <typename PrimField, typename Geometry, typename Bodies, typename Diagnostics>
     auto body_effects(
         const PrimField&                       prims,

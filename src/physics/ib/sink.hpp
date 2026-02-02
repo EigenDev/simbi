@@ -243,7 +243,7 @@ namespace simbi::body {
     }
 
     template <typename SimState>
-    void update_sink_cache(SimState& sim)
+    void update_sink_cache(SimState& sim, std::uint64_t lvl)
     {
         if (!sim.has_bodies()) {
             return;
@@ -261,9 +261,9 @@ namespace simbi::body {
             bodies.sink_cache = sink_cache_t<Rank, MaxBodies>{};
         }
 
-        auto finest_level = sim.num_levels() - 1;
+        bodies.sink_cache->count = 0;
         bodies.visit_accretion([&](const auto& body) {
-            auto props                     = compute_sink_properties(body, sim, finest_level);
+            auto props                     = compute_sink_properties(body, sim, lvl);
             (*bodies.sink_cache)[body.idx] = props;
             bodies.sink_cache->count++;
         });

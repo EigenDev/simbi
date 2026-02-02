@@ -187,8 +187,10 @@ namespace simbi::evolution {
 
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 c2p_system_t{}(sim, lvl, block_geo);
+                ghost_fill_system_t{}(sim, lvl);
 
-                // snapshot prim^n after c2p (for time interpolation during subcycling)
+                // snapshot prim^n after ghost fill so ghost cells are
+                // consistent with interior data at t^n
                 if (lvl < sim.num_levels() - 1) {
                     const auto nsteps = get_substeps(lvl + 1);
                     if (nsteps > 1) {
@@ -196,8 +198,7 @@ namespace simbi::evolution {
                     }
                 }
 
-                ghost_fill_system_t{}(sim, lvl);
-                sink_cache_system_t{}(sim);
+                sink_cache_system_t{}(sim, lvl);
 
                 flux_system_t{}(sim, ops, block_geo, lvl);
 
@@ -218,6 +219,10 @@ namespace simbi::evolution {
                     const auto nsteps = get_substeps(lvl + 1);
                     if (nsteps > 1) {
                         c2p_system_t{}(sim, lvl, block_geo);
+                        // refresh coarse ghost prims so the prolongation slope
+                        // stencil sees consistent t^{n+1} data at owned-domain
+                        // edges
+                        ghost_fill_system_t{}(sim, lvl);
                     }
                 }
             });
@@ -232,12 +237,23 @@ namespace simbi::evolution {
                     // alpha = substep/nsteps gives boundary at t^n + substep*dt_fine
                     real alpha =
                         nsteps > 1 ? static_cast<real>(substep) / static_cast<real>(nsteps) : -1.0;
+
+                    // // TEMPORARY: disable body interpolation to isolate artifact source
+                    // if (sim.has_bodies() && alpha >= 0.0) {
+                    //     sim.bodies().interpolate_to(alpha);
+                    // }
+
                     ghost_fill_system_t{.alpha = alpha}(sim, fine_level);
 
                     advance_level_euler(fine_level);
 
                     // accumulate fine flux at interface
                     accumulate_fine_flux_system_t{}(sim, fine_level, dt_fine);
+                }
+
+                // restore bodies to t^n for consistency before restriction
+                if (sim.has_bodies()) {
+                    sim.bodies().restore_from_snapshot();
                 }
 
                 // restriction: inject fine interior back to coarse
@@ -262,8 +278,10 @@ namespace simbi::evolution {
             with_block_geometry<Sim::coord_system>(mesh_cfg, motion, [&](const auto& block_geo) {
                 // === STAGE 1: u^n -> u* ===
                 c2p_system_t{}(sim, lvl, block_geo);
+                ghost_fill_system_t{}(sim, lvl);
 
-                // snapshot prim^n after c2p (for time interpolation during subcycling)
+                // snapshot prim^n after ghost fill so ghost cells are
+                // consistent with interior data at t^n
                 if (lvl < sim.num_levels() - 1) {
                     const auto nsteps = get_substeps(lvl + 1);
                     if (nsteps > 1) {
@@ -271,8 +289,7 @@ namespace simbi::evolution {
                     }
                 }
 
-                ghost_fill_system_t{}(sim, lvl);
-                sink_cache_system_t{}(sim);
+                sink_cache_system_t{}(sim, lvl);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u^n)
 
@@ -293,7 +310,7 @@ namespace simbi::evolution {
                 // === STAGE 2: u* -> u^{n+1} ===
                 c2p_system_t{}(sim, lvl, block_geo);
                 ghost_fill_system_t{}(sim, lvl);
-                sink_cache_system_t{}(sim);
+                sink_cache_system_t{}(sim, lvl);
 
                 flux_system_t{}(sim, ops, block_geo, lvl); // F(u*)
 
@@ -315,6 +332,12 @@ namespace simbi::evolution {
                     const auto nsteps = get_substeps(lvl + 1);
                     if (nsteps > 1) {
                         c2p_system_t{}(sim, lvl, block_geo);
+                        // refresh coarse ghost prims so the prolongation slope
+                        // stencil sees consistent t^{n+1} data at owned-domain
+                        // edges. without this, ghost prims remain at t^n,
+                        // creating a time discontinuity that slope-based
+                        // prolongation amplifies into artifacts
+                        ghost_fill_system_t{}(sim, lvl);
                     }
                 }
 
@@ -331,16 +354,27 @@ namespace simbi::evolution {
                         real alpha = nsteps > 1
                                          ? static_cast<real>(substep) / static_cast<real>(nsteps)
                                          : -1.0;
+
+                        // // TEMPORARY: disable body interpolation to isolate artifact source
+                        // if (sim.has_bodies() && alpha >= 0.0) {
+                        //     sim.bodies().interpolate_to(alpha);
+                        // }
+
                         ghost_fill_system_t{.alpha = alpha}(sim, fine_level);
 
                         advance_level_rk2(fine_level);
                     }
 
-                    // apply reflux to fix conservation at boundaries
-                    reflux_system_t{}(sim, fine_level);
+                    // restore bodies to t^n for consistency before reflux/restriction
+                    if (sim.has_bodies()) {
+                        sim.bodies().restore_from_snapshot();
+                    }
 
-                    // restriction to sync grids for next step
+                    // restriction first: inject fine interior back to coarse
                     restriction_system_t{}(sim, fine_level);
+
+                    // reflux after restriction: correct coarse-fine interface conservation
+                    reflux_system_t{}(sim, fine_level);
                 }
             });
 
@@ -400,6 +434,12 @@ namespace simbi::evolution {
 
             timestep_system_t{}(sim);
 
+            // snapshot body positions for subcycle interpolation
+            if (sim.has_bodies() && sim.has_refinement()) {
+                auto advanced = body::compute_advanced_bodies(sim);
+                sim.bodies().snapshot(advanced);
+            }
+
             if (meta.timestepping == timestepping_t::RK2) {
                 advance_level_rk2(0);
             }
@@ -412,9 +452,10 @@ namespace simbi::evolution {
 
             meta.time += meta.global_dt;
 
-            if (sim.has_bodies()) {
-                body::evolve_bodies(sim);
-            }
+            // // TEMPORARY: disable body evolution to isolate artifact source
+            // if (sim.has_bodies()) {
+            //     body::evolve_bodies(sim);
+            // }
         }
     };
 

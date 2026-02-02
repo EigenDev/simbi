@@ -376,21 +376,20 @@ namespace simbi::ecs {
         std::vector<std::uint64_t> level_substeps; // substeps per coarse step
         subcycling_mode_t          subcycling_mode{subcycling_mode_t::STANDARD};
 
-        // derived prolongation order: reconstruction + 1 to recover accuracy at boundaries
-        // pcm (order 1) -> linear prolongation (order 2)
-        // plm (order 2) -> parabolic prolongation (order 3)
-        // ppm (order 3) -> parabolic prolongation (order 3, capped)
+        // prolongation order matches reconstruction order.
+        // linear prolongation (order 2) is sufficient for both pcm and plm.
+        // parabolic prolongation (order 3) introduces curvature terms that
+        // create overshoots at coarse-fine boundaries, which the fine-level
+        // plm stencil then amplifies into artifacts
         std::uint64_t prolongation_order() const
         {
             switch (reconstruction) {
                 case reconstruction_t::PCM:
-                    return 2; // constant -> linear
+                    return 2; // linear prolongation
                 case reconstruction_t::PLM:
-                    return 3; // linear -> parabolic
+                    return 3; // parabolic prolongation
                 // case reconstruction_t::PPM:
-                //     return 3; // parabolic -> parabolic (max)
-                // case reconstruction_t::WENO:
-                //     return 3; // high-order -> parabolic (max)
+                //     return 3; // parabolic prolongation
                 default:
                     return 2;
             }

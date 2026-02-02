@@ -97,6 +97,12 @@ namespace simbi::body {
         std::string                               system_name_ = "Untitled";
         std::string reference_frame_ = "inertial"; // or "corotating" or "stationary"
 
+        // snapshots for subcycle interpolation: bodies_n_ = t^n, bodies_next_ = t^{n+1}
+        // bodies_ is the working copy set to the interpolated state
+        vector_t<body_variant_t<Rank>, MaxBodies> bodies_n_;
+        vector_t<body_variant_t<Rank>, MaxBodies> bodies_next_;
+        bool                                      has_snapshot_{false};
+
         template <typename Body>
         constexpr auto add(Body&& body) &&
         {
@@ -287,6 +293,68 @@ namespace simbi::body {
                 }
             }
             return size_;
+        }
+
+        // store current bodies as t^n, and pre-advanced bodies as t^{n+1}.
+        // bodies_ becomes the working copy that interpolate_to() writes into
+        void snapshot(const vector_t<body_variant_t<Rank>, MaxBodies>& advanced)
+        {
+            for (std::size_t ii = 0; ii < size_; ++ii) {
+                bodies_n_[ii]    = bodies_[ii];
+                bodies_next_[ii] = advanced[ii];
+            }
+            has_snapshot_ = true;
+        }
+
+        bool has_snapshot() const
+        {
+            return has_snapshot_;
+        }
+
+        // set bodies_ to lerp between t^n and t^{n+1}
+        // alpha=0 -> t^n, alpha=1 -> t^{n+1}
+        void interpolate_to(real alpha)
+        {
+            if (!has_snapshot_) {
+                return;
+            }
+            for (std::size_t ii = 0; ii < size_; ++ii) {
+                std::visit(
+                    [&](auto& working_body) {
+                        using body_type     = std::decay_t<decltype(working_body)>;
+                        const auto& body_n  = std::get<body_type>(bodies_n_[ii]);
+                        const auto& body_np = std::get<body_type>(bodies_next_[ii]);
+                        working_body.position =
+                            (1.0 - alpha) * body_n.position + alpha * body_np.position;
+                        working_body.velocity =
+                            (1.0 - alpha) * body_n.velocity + alpha * body_np.velocity;
+                    },
+                    bodies_[ii]
+                );
+            }
+        }
+
+        // finalize bodies to t^{n+1} state and clear snapshot
+        void finalize_advance()
+        {
+            if (!has_snapshot_) {
+                return;
+            }
+            for (std::size_t ii = 0; ii < size_; ++ii) {
+                bodies_[ii] = bodies_next_[ii];
+            }
+            has_snapshot_ = false;
+        }
+
+        // restore bodies to t^n state
+        void restore_from_snapshot()
+        {
+            if (!has_snapshot_) {
+                return;
+            }
+            for (std::size_t ii = 0; ii < size_; ++ii) {
+                bodies_[ii] = bodies_n_[ii];
+            }
         }
     };
 

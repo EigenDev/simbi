@@ -1012,18 +1012,17 @@ namespace simbi::ecs {
                 flux_regs.ratio = ratio;
 
                 // create one register per coarse partition that borders
-                // fine
-                auto& coarse_decomp = sim.decomposition(coarse_lvl);
-                for (std::uint64_t cp = 0; cp < coarse_decomp.num_partitions(); ++cp) {
-                    auto& coarse_part = coarse_decomp.partitions[cp];
+                // fine. the register domain is the fine grid's footprint
+                // in coarse coordinates (parent_coverage), intersected
+                // with each coarse partition's owned domain.
+                auto& coarse_decomp   = sim.decomposition(coarse_lvl);
+                auto  parent_coverage = sim.refinement(fine_lvl).parent_coverage;
 
-                    // runtime locality check: ensure that the coarse
-                    // partition's field storage locality matches the partition
-                    // stream locality. this guards against scheduling kernel
-                    // execution on an executor that cannot directly write into
-                    // the register backing storage (important for single-device
-                    // correctness).
-                    flux_regs.registers.emplace_back(coarse_part.owned_domain, ratio);
+                for (std::uint64_t cp = 0; cp < coarse_decomp.num_partitions(); ++cp) {
+                    auto& coarse_part  = coarse_decomp.partitions[cp];
+                    auto  register_dom = coarse_part.owned_domain.intersect(parent_coverage);
+
+                    flux_regs.registers.emplace_back(register_dom, ratio);
                 }
 
                 flux_regs.initialized = true;
@@ -1213,9 +1212,9 @@ namespace simbi::ecs {
     struct sink_cache_system_t
     {
         template <typename Sim>
-        void operator()(Sim& sim) const
+        void operator()(Sim& sim, std::uint64_t lvl) const
         {
-            body::update_sink_cache(sim);
+            body::update_sink_cache(sim, lvl);
         }
     };
 

@@ -38,18 +38,18 @@ namespace simbi::grid::amr {
 
         if constexpr (is_hydro_primitive_c<T> || is_hydro_conserved_c<T>) {
             T limited;
-            for (std::uint64_t i = 0; i < T::nmem; ++i) {
-                const auto sl = slope_left[i];
-                const auto sr = slope_right[i];
+            for (std::uint64_t ii = 0; ii < T::nmem; ++ii) {
+                const auto sl = slope_left[ii];
+                const auto sr = slope_right[ii];
 
                 if (sl * sr <= 0) {
-                    limited[i] = 0; // opposite signs
+                    limited[ii] = 0; // opposite signs
                 }
                 else {
                     // van leer limiter
                     const auto     r     = (std::abs(sl) < build::epsilon) ? 1.0 : sr / sl;
                     constexpr real theta = 2.0;
-                    limited[i] =
+                    limited[ii] =
                         sl * my_max(0.0, my_min(theta * r, my_min((1.0 + r) * 0.5, theta)));
                 }
             }
@@ -339,8 +339,14 @@ namespace simbi::grid::amr {
                         result = result + slope * x_norm[dd];
                     }
 
-                    // add parabolic term: (d2v/2) * (x^2 - 1/12)
-                    real parabolic_factor = x_norm[dd] * x_norm[dd] - (1.0 / 12.0);
+                    // add parabolic term: (d2v/2) * (x^2 - c)
+                    // c = discrete mean of x^2 over fine subcells, not the
+                    // continuous integral 1/12. for r fine cells per coarse
+                    // cell, c = (r^2 - 1) / (12 * r^2). using 1/12 breaks
+                    // discrete conservation of the prolongation
+                    const real r2               = static_cast<real>(ratio_[dd] * ratio_[dd]);
+                    const real discrete_x2_mean = (r2 - 1.0) / (12.0 * r2);
+                    real       parabolic_factor = x_norm[dd] * x_norm[dd] - discrete_x2_mean;
                     if constexpr (is_hydro_primitive_c<value_type> ||
                                   is_hydro_conserved_c<value_type>) {
                         result = result | structs::add_gas((d2v_limited * 0.5) * parabolic_factor);

@@ -180,22 +180,13 @@ namespace simbi::grid::amr {
     {
         real        dt;
         std::size_t dim;
-        side_t      side;
         Geometry    geometry;
         FluxComp    flux_comp;
 
         DEV T operator()(const iarray<Rank>& coord, const T& curr) const
         {
-            auto f = flux_comp(coord);
-            // compute face area at the interface
-            real area;
-            if (side == side_t::left) {
-                area = geometry.labframe_face_area(coord, dim);
-            }
-            else {
-                auto rc = coord + unit_vectors::array_offset<Rank>(dim);
-                area    = geometry.labframe_face_area(rc, dim);
-            }
+            auto f    = flux_comp(coord);
+            real area = geometry.labframe_face_area(coord, dim);
             return curr + f * (-dt * area);
         }
     };
@@ -207,21 +198,11 @@ namespace simbi::grid::amr {
     struct fine_flux_area_t
     {
         std::size_t dim;
-        side_t      side;
         Geometry    geometry;
 
         DEV T operator()(const iarray<Rank>& fine_coord, const T& f) const
         {
-            // fine_coord is in fine index space
-            // compute face area at fine resolution
-            real area;
-            if (side == side_t::left) {
-                area = geometry.labframe_face_area(fine_coord, dim);
-            }
-            else {
-                auto rc = fine_coord + unit_vectors::array_offset<Rank>(dim);
-                area    = geometry.labframe_face_area(rc, dim);
-            }
+            real area = geometry.labframe_face_area(fine_coord, dim);
             return f * area;
         }
     };
@@ -241,6 +222,10 @@ namespace simbi::grid::amr {
             : coarse_domain_(domain), ratio_(ratio)
         {
             registers_.resize(2 * Rank);
+            for (std::size_t dd = 0; dd < Rank; ++dd) {
+                initialize_face(dd, side_t::left);
+                initialize_face(dd, side_t::right);
+            }
         }
 
         // allocate buffer for a face (uses unified memory)
@@ -251,13 +236,17 @@ namespace simbi::grid::amr {
                 return;
             }
 
-            // construct face domain (1 cell thick) inside coarse block
+            // construct face domain (1 cell thick) at the coarse-fine interface.
+            // flux[i] stores the flux at the left face of cell i, so:
+            //   left boundary  -> face at index start (flux at left face of first cell)
+            //   right boundary -> face at index fin   (flux at right face of last cell)
             domain_t<Rank> face = coarse_domain_;
             if (side == side_t::left) {
                 face.fin[dim] = face.start[dim] + 1;
             }
             else {
-                face.start[dim] = face.fin[dim] - 1;
+                face.start[dim] = face.fin[dim];
+                face.fin[dim]   = face.start[dim] + 1;
             }
 
             registers_[idx] = std::make_unique<field_type>(face);
@@ -309,7 +298,7 @@ namespace simbi::grid::amr {
             auto flux_comp   = flux_slice.as_computation();
 
             coarse_flux_accumulate_t<T, Rank, Geometry, decltype(flux_comp)>
-                accumulate_op{dt, dim, side, geometry, flux_comp};
+                accumulate_op{dt, dim, geometry, flux_comp};
 
             auto update = current_val.enum_map(accumulate_op);
 
@@ -336,7 +325,7 @@ namespace simbi::grid::amr {
 
             // multiply fine flux by fine face area before restricting
             // this creates F * A at fine resolution
-            fine_flux_area_t<T, Rank, Geometry> flux_area_op{dim, side, geometry};
+            fine_flux_area_t<T, Rank, Geometry> flux_area_op{dim, geometry};
 
             auto fine_flux_area = fine_flux.enum_map(flux_area_op);
 
