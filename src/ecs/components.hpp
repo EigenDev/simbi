@@ -376,11 +376,9 @@ namespace simbi::ecs {
         std::vector<std::uint64_t> level_substeps; // substeps per coarse step
         subcycling_mode_t          subcycling_mode{subcycling_mode_t::STANDARD};
 
-        // prolongation order matches reconstruction order.
-        // linear prolongation (order 2) is sufficient for both pcm and plm.
-        // parabolic prolongation (order 3) introduces curvature terms that
-        // create overshoots at coarse-fine boundaries, which the fine-level
-        // plm stencil then amplifies into artifacts
+        // prolongation order is one higher than the reconstruction order
+        // to recover the interior scheme's formal accuracy at level
+        // boundaries (berger-colella 1989)
         std::uint64_t prolongation_order() const
         {
             switch (reconstruction) {
