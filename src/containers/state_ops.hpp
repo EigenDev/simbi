@@ -69,8 +69,14 @@ namespace simbi::structs {
         }
 
         static constexpr bool has_magnetic_field = false;
+        static constexpr bool is_conserved       = false;
         static constexpr bool is_isothermal =
             std::same_as<typename T::eos_t, eos::isothermal_gas_eos_t>;
+
+        // isothermal energy/pressure is frozen only for conserved variables
+        // (where nrg stores cs^2). primitive pressure = rho * cs^2 varies
+        // with density and must participate in arithmetic normally.
+        static constexpr bool freeze_energy = is_isothermal && is_conserved;
     };
 
     // specialization for conserved hydro values
@@ -113,8 +119,10 @@ namespace simbi::structs {
         }
 
         static constexpr bool has_magnetic_field = false;
+        static constexpr bool is_conserved       = true;
         static constexpr bool is_isothermal =
             std::same_as<typename T::eos_t, eos::isothermal_gas_eos_t>;
+        static constexpr bool freeze_energy = is_isothermal && is_conserved;
     };
 
     // specialization for primitive MHD values
@@ -165,8 +173,10 @@ namespace simbi::structs {
         }
 
         static constexpr bool has_magnetic_field = true;
+        static constexpr bool is_conserved       = false;
         static constexpr bool is_isothermal =
             std::same_as<typename T::eos_t, eos::isothermal_gas_eos_t>;
+        static constexpr bool freeze_energy = is_isothermal && is_conserved;
     };
 
     // specialization for conserved MHD values
@@ -217,8 +227,10 @@ namespace simbi::structs {
         }
 
         static constexpr bool has_magnetic_field = true;
+        static constexpr bool is_conserved       = true;
         static constexpr bool is_isothermal =
             std::same_as<typename T::eos_t, eos::isothermal_gas_eos_t>;
+        static constexpr bool freeze_energy = is_isothermal && is_conserved;
     };
 
     // ---- Gas-only operation pipeline components ----
@@ -271,8 +283,11 @@ namespace simbi::structs {
         using traits_t = state_traits<StateT>;
         StateT result  = state; // copy preserves magnetic fields
 
-        // apply function only to gas variables
-        if constexpr (!traits_t::is_isothermal) {
+        // apply function only to gas variables.
+        // freeze_energy is true only for isothermal conserved variables
+        // (where nrg stores cs^2 and must not be modified).
+        // for isothermal primitives, pressure varies and is included.
+        if constexpr (!traits_t::freeze_energy) {
             if constexpr (traits_t::has_magnetic_field) {
                 func(
                     traits_t::density(result),
@@ -329,8 +344,8 @@ namespace simbi::structs {
     {
         using traits_t = state_traits<StateT>;
         return map_gas_vars(state, [&op](auto&... vars) {
-            if constexpr (!traits_t::is_isothermal) {
-                // for non-isothermal: density, momentum, energy, passive scalar
+            if constexpr (!traits_t::freeze_energy) {
+                // energy/pressure participates in addition
                 auto var_tuple = std::tie(vars...);
                 std::get<0>(var_tuple) += traits_t::density(op.other);
                 std::get<1>(var_tuple) += traits_t::momentum_or_velocity(op.other);
@@ -344,8 +359,7 @@ namespace simbi::structs {
                 }
             }
             else {
-                // for isothermal: density, momentum, passive scalar (skip
-                // energy)
+                // isothermal conserved: skip nrg (stores cs^2)
                 auto var_tuple = std::tie(vars...);
                 std::get<0>(var_tuple) += traits_t::density(op.other);
                 std::get<1>(var_tuple) += traits_t::momentum_or_velocity(op.other);
@@ -377,7 +391,7 @@ namespace simbi::structs {
         traits_t::momentum_or_velocity(result) =
             traits_t::momentum_or_velocity(lhs) + traits_t::momentum_or_velocity(rhs);
 
-        if constexpr (!traits_t::is_isothermal) {
+        if constexpr (!traits_t::freeze_energy) {
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs) + traits_t::energy_or_pressure(rhs);
         }
@@ -406,7 +420,7 @@ namespace simbi::structs {
         traits_t::momentum_or_velocity(result) =
             traits_t::momentum_or_velocity(lhs) - traits_t::momentum_or_velocity(rhs);
 
-        if constexpr (!traits_t::is_isothermal) {
+        if constexpr (!traits_t::freeze_energy) {
             traits_t::energy_or_pressure(result) =
                 traits_t::energy_or_pressure(lhs) - traits_t::energy_or_pressure(rhs);
         }
@@ -434,7 +448,7 @@ namespace simbi::structs {
         traits_t::density(result)              = traits_t::density(lhs) * rhs;
         traits_t::momentum_or_velocity(result) = traits_t::momentum_or_velocity(lhs) * rhs;
 
-        if constexpr (!traits_t::is_isothermal) {
+        if constexpr (!traits_t::freeze_energy) {
             traits_t::energy_or_pressure(result) = traits_t::energy_or_pressure(lhs) * rhs;
         }
         else {
@@ -470,7 +484,7 @@ namespace simbi::structs {
         traits_t::density(lhs) += traits_t::density(rhs);
         traits_t::momentum_or_velocity(lhs) += traits_t::momentum_or_velocity(rhs);
 
-        if constexpr (!traits_t::is_isothermal) {
+        if constexpr (!traits_t::freeze_energy) {
             traits_t::energy_or_pressure(lhs) += traits_t::energy_or_pressure(rhs);
         }
         if constexpr (traits_t::has_magnetic_field) {
@@ -490,7 +504,7 @@ namespace simbi::structs {
         traits_t::density(lhs) -= traits_t::density(rhs);
         traits_t::momentum_or_velocity(lhs) -= traits_t::momentum_or_velocity(rhs);
 
-        if constexpr (!traits_t::is_isothermal) {
+        if constexpr (!traits_t::freeze_energy) {
             traits_t::energy_or_pressure(lhs) -= traits_t::energy_or_pressure(rhs);
         }
         if constexpr (traits_t::has_magnetic_field) {
@@ -533,8 +547,15 @@ namespace simbi::structs {
 
         traits_t::density(result)              = -traits_t::density(v);
         traits_t::momentum_or_velocity(result) = -traits_t::momentum_or_velocity(v);
-        traits_t::energy_or_pressure(result)   = -traits_t::energy_or_pressure(v);
-        traits_t::passive_scalar(result)       = -traits_t::passive_scalar(v);
+
+        if constexpr (!traits_t::freeze_energy) {
+            traits_t::energy_or_pressure(result) = -traits_t::energy_or_pressure(v);
+        }
+        else {
+            traits_t::energy_or_pressure(result) = traits_t::energy_or_pressure(v);
+        }
+
+        traits_t::passive_scalar(result) = -traits_t::passive_scalar(v);
 
         if constexpr (traits_t::has_magnetic_field) {
             traits_t::magnetic_field(result) = -traits_t::magnetic_field(v);
