@@ -52,11 +52,9 @@ namespace simbi::hydro::newtonian {
                 // hard crash for isothermal EoS
                 return None(ErrorCode::NEGATIVE_PRESSURE);
             }
-            // best-effort floor: reset pressure to a small fraction of
-            // the kinetic energy density. if that's also zero, bail out
-            constexpr auto eps_machine = build::epsilon;
-            const auto     ekin        = 0.5 * vecops::dot(u.mom, u.mom) / u.den;
-            prim.pre                   = eps_machine * (gamma - 1) * helpers::my_max(ekin, u.nrg);
+            // floor on minimum internal energy density
+            constexpr auto eps_floor = 1e-6;
+            prim.pre                 = eps_floor * u.den;
             if (prim.pre <= 0.0) {
                 return None(ErrorCode::NEGATIVE_PRESSURE);
             }
