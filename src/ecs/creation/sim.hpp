@@ -383,11 +383,12 @@ namespace simbi::ecs::builders {
             // refinement linkage for child levels
             if (lvl > 0) {
                 entity_t             parent_entity = sim.levels[lvl - 1];
+                auto                 child_domain  = skeleton.begin()->second.geometry;
                 grid::domain_t<Rank> parent_coverage;
-                // compute parent coverage from mesh bounds
+                // map child domain to parent space (same as build_level)
                 for (std::uint64_t dd = 0; dd < Rank; ++dd) {
-                    parent_coverage.start[dd] = 0;
-                    parent_coverage.fin[dd]   = mesh_cfg.global_cells[dd] / ratio;
+                    parent_coverage.start[dd] = child_domain.start[dd] / ratio;
+                    parent_coverage.fin[dd]   = child_domain.fin[dd] / ratio;
                 }
 
                 sim.registry.add(
