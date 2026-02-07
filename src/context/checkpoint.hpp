@@ -89,7 +89,8 @@ namespace simbi::checkpoint {
                 sim.diagnostics()->reset();
             }
         }
-        progress.table.post_success("Checkpoint saved: " + filename);
+        std::filesystem::path p(filename);
+        progress.table.post_success("Checkpoint: " + p.filename().string());
         progress.table.print();
     }
 
