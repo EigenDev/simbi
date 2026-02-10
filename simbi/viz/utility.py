@@ -1,11 +1,10 @@
 # Utility functions for visualization scripts
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import astropy.constants as const
 import astropy.units as units
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
@@ -103,6 +102,8 @@ FIELD_MAP: dict[str, str] = {
     "term_pressure": r"$-\nabla p$",
     "term_residual": r"$\mathbf{R}$",
     "schlieren": r"$|\nabla \ln \rho|$",
+    "entropy-gradient": r"$|\nabla (p / \rho^\gamma)|$",
+    "entropy-measure": r"$p / \rho^\gamma$",
     "torque x": r"$\tau_x$",
     "torque y": r"$\tau_y$",
     "torque z": r"$\tau_z$",
@@ -255,30 +256,6 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
         return dims[0]
     else:
         raise ValueError("inconsistent dimensionality across files.")
-
-
-def get_colors(
-    interval: NDArray[np.floating[Any]],
-    cmap: matplotlib.colors.ListedColormap,
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
-) -> NDArray[Any]:
-    """
-    Return array of rgba colors for a given matplotlib colormap
-
-    Parameters
-    -------------------------
-    interval: interval range for colormarp min and max
-    cmap: the matplotlib colormap instance
-    vmin: minimum for colormap
-    vmax: maximum for colormap
-
-    Returns
-    -------------------------
-    arr: the colormap array generate by the user conditions
-    """
-    matplotlib.colors.Normalize(vmin, vmax)
-    return np.asarray(cmap(interval), dtype=np.float64)
 
 
 def fill_below_intersec(

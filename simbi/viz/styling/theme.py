@@ -1,3 +1,14 @@
+# =============================================================================
+# theme.py
+#
+# theme configuration for visualization styling.
+# contains ThemeConfig dataclass and predefined theme instances.
+#
+# usage:
+#   from simbi.viz.styling.theme import ThemeConfig, THEMES
+#   theme = ThemeConfig.from_name("dark")
+#   theme.apply(nfiles=2, nfields=3)
+# =============================================================================
 from dataclasses import dataclass, field, fields
 from typing import Any, Sequence
 
@@ -33,11 +44,6 @@ class ThemeConfig:
     axis_below: bool = True
     axis_equal: bool = False
 
-    # Figure styling
-    fig_size: tuple[float, float] = (8, 6)
-    dpi: int = 300
-    transparent: bool = False
-
     # Special styling
     polar_style: dict[str, Any] = field(default_factory=dict)
     colorbar_style: dict[str, Any] = field(default_factory=dict)
@@ -51,39 +57,21 @@ class ThemeConfig:
     )
 
     @classmethod
-    def from_mapping(cls, data: Any) -> "ThemeConfig":
-        """Build a ThemeConfig from a mapping-like object.
-
-        This helper accepts dicts, pydantic models, or other mapping-like objects
-        and constructs a ThemeConfig by filtering only the dataclass fields that
-        ThemeConfig defines. It avoids importing ThemeProps (or other component
-        props types) into styling code paths and therefore helps prevent circular
-        imports when callers pass their props/dicts directly.
-
-        Examples:
-            ThemeConfig.from_mapping({"font_family": "sans-serif", "font_size": 14})
-            ThemeConfig.from_mapping(theme_props_instance)
-        """
-        # normalize to plain dict if possible
+    def from_mapping(cls, data: dict[str, Any]) -> "ThemeConfig":
+        """build a ThemeConfig from a dict, filtering to known fields only."""
         if not isinstance(data, dict):
-            if hasattr(data, "model_dump"):
-                # pydantic v2
-                data = data.model_dump()
-            elif hasattr(data, "dict"):
-                # pydantic v1 or other mapping-like objects
-                data = data.dict()
-            else:
-                try:
-                    data = dict(data)
-                except Exception:
-                    raise TypeError(
-                        "unsupported data type for ThemeConfig.from_mapping"
-                    )
-
-        # only use keys that match ThemeConfig fields to avoid passing unknown keys
+            raise TypeError(f"expected dict, got {type(data).__name__}")
         allowed = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in data.items() if k in allowed}
         return cls(**filtered)
+
+    @classmethod
+    def from_name(cls, name: str) -> "ThemeConfig":
+        """build a ThemeConfig from a predefined theme name."""
+        if name not in THEMES:
+            valid = ", ".join(sorted(THEMES.keys()))
+            raise ValueError(f"unknown theme: '{name}'. valid themes: {valid}")
+        return THEMES[name]
 
     def apply(
         self, nfiles: int = 1, nfields: int = 1, overlay_mode: bool = False
@@ -158,10 +146,6 @@ class ThemeConfig:
                 # Line settings
                 "lines.linewidth": self.line_width,
                 "axes.prop_cycle": default_cycler,
-                # Figure settings
-                # "figure.figsize": user_fig_size or self.fig_size,
-                # "figure.dpi": self.dpi,
-                "savefig.transparent": self.transparent,
                 # Text rendering settings
                 "text.usetex": self.use_tex,
             }
@@ -191,3 +175,68 @@ class ThemeConfig:
         if not self.polar_style.get("show_ticks", True):
             ax.set_xticklabels([])
             ax.set_yticklabels([])
+
+
+# =============================================================================
+# predefined themes
+# =============================================================================
+
+default_theme = ThemeConfig(
+    font_family="serif",
+    font_size=12,
+    title_size=14,
+    label_size=12,
+    text_color="black",
+    line_styles=["-", "--", ":", "-."],
+    line_width=1.5,
+    color_map="viridis",
+    hide_spines=["top", "right"],
+    grid=False,
+    polar_style={
+        "grid": False,
+        "zero_location": "N",
+        "direction": -1,
+        "show_ticks": True,
+    },
+    use_tex=False,
+)
+
+dark_theme = ThemeConfig(
+    font_family="sans-serif",
+    font_size=12,
+    title_size=14,
+    label_size=12,
+    text_color="white",
+    line_styles=["-", "--", ":", "-."],
+    line_width=1.8,
+    color_map="plasma",
+    hide_spines=[],
+    grid=False,
+    background_colors={
+        "figure": "#1e1e1e",
+        "axes": "#1e1e1e",
+    },
+    use_tex=False,
+)
+
+scientific_theme = ThemeConfig(
+    font_family="Times New Roman",
+    font_size=10,
+    title_size=12,
+    label_size=10,
+    text_color="black",
+    line_styles=["-", "--", ":", "-."],
+    line_width=1.2,
+    color_map="viridis",
+    hide_spines=["top", "right"],
+    grid=False,
+    axis_below=True,
+    use_tex=True,
+)
+
+# theme registry
+THEMES: dict[str, ThemeConfig] = {
+    "default": default_theme,
+    "dark": dark_theme,
+    "scientific": scientific_theme,
+}

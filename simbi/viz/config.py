@@ -43,7 +43,9 @@ class FigureConfig(BaseModel):
 class PlotConfig(BaseModel):
     """Plot type and data configuration."""
 
-    plot_type: Literal["line", "multidim", "coordinate_bin", "time_series"]
+    plot_type: Literal[
+        "line", "multidim", "coordinate_bin", "time_series", "power_spectrum"
+    ]
     fields: list[str]
     ndim: int = 1
     slice: Optional[dict[str, float]] = None
@@ -101,6 +103,29 @@ class AnimationConfig(BaseModel):
         return v
 
 
+class OverlayConfig(BaseModel):
+    """Configuration for a single overlay layer (e.g., contour lines)."""
+
+    field: str
+    component: str = "contour"
+    levels: list[float] = Field(default_factory=lambda: [1.0])
+    color: str = "lightgrey"
+    linewidth: float = 1.5
+    linestyle: str = "--"
+    alpha: float = 1.0
+    filled: bool = False
+    label_contours: bool = False
+
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+
+    @field_validator("alpha")
+    @classmethod
+    def validate_alpha(cls, v: float, info: ValidationInfo) -> float:
+        if v < 0 or v > 1:
+            raise ValueError(f"alpha must be between 0 and 1, got {v}")
+        return v
+
+
 class VisualizationConfig(BaseModel):
     """Complete visualization configuration."""
 
@@ -111,5 +136,6 @@ class VisualizationConfig(BaseModel):
     time_series: TimeSeriesConfig = Field(default_factory=TimeSeriesConfig)
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
+    overlays: list[OverlayConfig] = Field(default_factory=list)
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True}

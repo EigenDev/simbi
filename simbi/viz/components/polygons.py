@@ -21,8 +21,6 @@ from ..types import ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
 from .quad import _create_color_normalization
 
-LOGICAL_AXIS_MAP = {"x1": 0, "x2": 1, "x3": 2}
-
 
 class PolygonPlotProps(ComponentProps):
     """Properties for a *single* polygon plot component."""
@@ -189,30 +187,7 @@ class PolygonPlotComponent(Component):
         self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
     ) -> None:
         """Draw immersed bodies on the plot."""
-        # This function can be simplified as it no longer
-        # needs projection logic (that's handled by the slice)
-        import matplotlib.patches as mpatches
-
-        for patch in self.ax.patches:
-            patch.remove()
-        n_i = LOGICAL_AXIS_MAP[axes[0]]
-        n_j = LOGICAL_AXIS_MAP[axes[1]]
-
-        for body in body_collection.bodies:
-            radius = body.radius
-            if body.accretion is not None:
-                radius = body.accretion.accretion_radius
-            position = (body.position[n_i], body.position[n_j])  # Assumes 2D
-
-            circle = mpatches.Circle(
-                position,
-                radius,
-                color="black",
-                linestyle="--",
-                alpha=0.5,
-                zorder=zorder,
-            )
-            self.ax.add_patch(circle)
+        _draw_bodies(self.ax, body_collection, zorder, axes)
 
     def _draw_level_bounds(
         self, level_bounds: Sequence[tuple[float, float, float, float]]
@@ -235,7 +210,7 @@ class PolygonPlotComponent(Component):
                 fill=False,
                 edgecolor=self.props.level_color,
                 linewidth=self.props.level_linewidth,
-                alpha=self.props.level_alpha,
+                alpha=0.2,  # self.props.level_alpha,
                 zorder=5,
             )
             self.ax.add_patch(rect)

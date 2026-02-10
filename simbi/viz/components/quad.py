@@ -20,8 +20,6 @@ from ..config import FigureConfig
 from ..types import Array, ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
 
-LOGICAL_AXIS_MAP = {"x1": 0, "x2": 1, "x3": 2}
-
 
 class QuadPlotProps(ComponentProps):
     """Properties for a *single* Quadensional plot component."""
@@ -163,7 +161,6 @@ class QuadPlotComponent(Component):
             self.props.power,
         )
 
-
         if self._mesh is None:
             self._mesh = self.ax.pcolormesh(
                 x,
@@ -246,30 +243,7 @@ class QuadPlotComponent(Component):
         self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
     ) -> None:
         """Draw immersed bodies on the plot."""
-        # This function can be simplified as it no longer
-        # needs projection logic (that's handled by the slice)
-        import matplotlib.patches as mpatches
-
-        for patch in self.ax.patches:
-            patch.remove()
-        n_i = LOGICAL_AXIS_MAP[axes[0]]
-        n_j = LOGICAL_AXIS_MAP[axes[1]]
-
-        for body in body_collection.bodies:
-            radius = body.radius
-            if body.accretion is not None:
-                radius = body.accretion.accretion_radius
-            position = (body.position[n_i], body.position[n_j])  # Assumes 2D
-
-            circle = mpatches.Circle(
-                position,
-                radius,
-                color="black",
-                linestyle="--",
-                alpha=0.5,
-                zorder=zorder,
-            )
-            self.ax.add_patch(circle)
+        _draw_bodies(self.ax, body_collection, zorder, axes)
 
     def _draw_mesh_grid(self, x: Array, y: Array) -> None:
         """Draw cell boundaries on the mesh."""

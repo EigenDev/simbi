@@ -341,28 +341,6 @@ def get_props_for_component(
     return props_cls(**(defaults or {}))
 
 
-def load_theme_config(
-    config_path: Optional[Union[str, Path]] = None,
-    overrides: Optional[Sequence[str]] = None,
-) -> dict[str, Any]:
-    """
-    Load and return validated theme props (if present) using load_component_props.
-
-    This convenience wrapper focuses on the `theme` key and returns the validated
-    ThemeProps instance (pydantic model) when found, otherwise returns an empty dict.
-
-    It delegates parsing, coercion and validation to load_component_props so CLI
-    overrides and config files are handled consistently.
-    """
-    # nothing to do if no source provided
-    if not config_path and not overrides:
-        return {}
-
-    # reuse existing loader which merges file + overrides and validates props
-    loaded = load_component_props(config_path, overrides)
-    return loaded.get("theme", {})
-
-
 def generate_example_config() -> str:
     """
     Generate an example config file showing all available options.

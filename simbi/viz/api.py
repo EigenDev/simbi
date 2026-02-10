@@ -15,24 +15,29 @@ from .components import (
     CoordinateProfileProps,
     LinePlotComponent,
     LinePlotProps,
-    PolygonPlotComponent,
-    PolygonPlotProps,
-    QuadPlotComponent,
-    QuadPlotProps,
-    QuiverPlotComponent,
-    QuiverPlotProps,
-    StreamPlotComponent,
-    StreamPlotProps,
+    PowerSpectrumComponent,
+    PowerSpectrumProps,
+    TimeSeriesPlotComponent,
+    TimeSeriesPlotProps,
 )
 from .components.interface import Component, ComponentProps
-from .components.time_series import TimeSeriesPlotComponent, TimeSeriesPlotProps
-from .config import VisualizationConfig
-from .figure import Figure
-from .pipeline import create_plot_data, load_data, prepare_figure
+from .config import OverlayConfig, VisualizationConfig
+from .dispatch import (
+    select_overlay_component,
+    select_scalar_component,
+    select_vector_component,
+)
+from .figure import Figure, prepare_figure
+from .pipeline import create_plot_data, load_data
 from .pipeline.coord_binning import create_coordinate_profile_data
+from .pipeline.power_spectrum import create_power_spectrum_data
 from .pipeline.time_series import create_time_series_data
-from .pipeline.transforms import _compose_pcolormesh, _compose_polygons
+from .pipeline.transforms import _compose_pcolormesh, compose_fields_for_render
 from .types import CoordSystem, FieldData
+
+# ---------------------------------------------------------------------------
+# shared helpers
+# ---------------------------------------------------------------------------
 
 
 def _get_props(
@@ -40,10 +45,160 @@ def _get_props(
     key: str,
     default_factory,
 ) -> ComponentProps:
-    """Get props from dict or create default."""
+    """get props from dict or create default."""
     if component_props and key in component_props:
         return component_props[key]
     return default_factory()
+
+
+def _refinement_info(
+    fields: Sequence[FieldData], config: VisualizationConfig
+) -> tuple[int, bool]:
+    """compute nlvls and use_polygons from field list."""
+    nlvls = 1 + sum("_L" in f.name for f in fields)
+    use_polygons = nlvls > 1 or config.refinement.render_mode == "polygons"
+    return nlvls, use_polygons
+
+
+def _detect_projection(fields: Sequence[FieldData], coord_system: str) -> str:
+    """determine projection from fields and coordinate system."""
+    if not fields:
+        return "cartesian"
+    is_2d = fields[0].ndim == 2 or fields[0].name.endswith("_polygons")
+    if is_2d and coord_system == "spherical":
+        return "polar"
+    return "cartesian"
+
+
+def _dispatch_scalar_components(
+    figure: Figure,
+    final_fields: Sequence[FieldData],
+    component_props: Optional[dict[str, ComponentProps]],
+    use_polygons: bool,
+    bodies=None,
+) -> None:
+    """create and attach scalar components to figure based on field dimensionality."""
+    for field_data in final_fields:
+        comp_cls, props_cls, props_key = select_scalar_component(
+            field_data, use_polygons
+        )
+
+        props = _get_props(component_props, props_key, props_cls)
+
+        # some components accept bodies parameter
+        if props_key in ("polygon", "quad"):
+            component = comp_cls(props, bodies)
+        else:
+            component = comp_cls(props)
+
+        if figure.fig is None:
+            raise RuntimeError("figure not initialized")
+
+        component.initialize(figure.fig, figure.axes["main"])
+        figure.add_component(component, field_data)
+
+
+def _dispatch_vector_components(
+    figure: Figure,
+    sim_data,
+    vector_fields: Sequence[str],
+    config: VisualizationConfig,
+    component_props: Optional[dict[str, ComponentProps]],
+    vector_type: str = "quiver",
+) -> None:
+    """create and attach vector field components (quiver or streamplot)."""
+    vector_plot_data = create_plot_data(sim_data, vector_fields, config)
+
+    vi_levels = [
+        f
+        for f in vector_plot_data.fields
+        if f.name.startswith(vector_fields[0])
+    ]
+    vj_levels = [
+        f
+        for f in vector_plot_data.fields
+        if f.name.startswith(vector_fields[1])
+    ]
+
+    v1_field = _compose_pcolormesh(vi_levels)
+    v2_field = _compose_pcolormesh(vj_levels)
+    vector_data = [v1_field, v2_field]
+
+    comp_cls, props_cls, props_key = select_vector_component(vector_type)
+    props = _get_props(component_props, props_key, props_cls)
+    component = comp_cls(props)
+
+    if figure.fig is None:
+        raise RuntimeError("figure not initialized")
+
+    component.initialize(figure.fig, figure.axes["main"])
+    figure.add_component(component, vector_data)
+
+
+def _dispatch_overlay_components(
+    figure: Figure,
+    sim_data,
+    overlays: Sequence[OverlayConfig],
+    config: VisualizationConfig,
+) -> None:
+    """create and attach overlay components (e.g., contour lines)."""
+    for overlay in overlays:
+        # load overlay field data
+        overlay_plot_data = create_plot_data(sim_data, [overlay.field], config)
+
+        if not overlay_plot_data.fields:
+            continue
+
+        # for contour overlays, we need 2d data (pcolormesh format), not polygons
+        # use _compose_pcolormesh directly to ensure we get 2d output
+        overlay_field = _compose_pcolormesh(list(overlay_plot_data.fields))
+
+        if overlay_field.ndim != 2:
+            # can't render contours on non-2d data
+            continue
+
+        # select overlay component
+        comp_cls, props_cls, _ = select_overlay_component(overlay.component)
+
+        # build props from overlay config
+        props = props_cls(
+            levels=tuple(overlay.levels),
+            color=overlay.color,
+            linewidths=overlay.linewidth,
+            linestyles=overlay.linestyle,
+            alpha=overlay.alpha,
+            filled=overlay.filled,
+            label_contours=overlay.label_contours,
+        )
+
+        component = comp_cls(props)
+
+        if figure.fig is None:
+            raise RuntimeError("figure not initialized")
+
+        component.initialize(figure.fig, figure.axes["main"])
+        figure.add_component(component, overlay_field, is_overlay=True)
+
+
+def _save_and_show(figure: Figure, save_as: Optional[str], show: bool) -> None:
+    """save and/or display the figure."""
+    if save_as:
+        figure.save(save_as)
+    if show:
+        plt.show()
+
+
+def _init_component(figure: Figure, component: Component, field_data) -> None:
+    """initialize a component and attach it to the figure."""
+    if figure.fig is None:
+        raise RuntimeError("figure not initialized")
+    component.initialize(figure.fig, figure.axes["main"])
+    figure.add_component(component, field_data)
+
+
+# ---------------------------------------------------------------------------
+# public api
+# ---------------------------------------------------------------------------
 
 
 def plot(
@@ -51,53 +206,43 @@ def plot(
     files: str | Sequence[str],
     fields: Sequence[str] = ["rho"],
     vector_fields: Optional[Sequence[str]] = None,
+    overlays: Optional[Sequence[OverlayConfig]] = None,
     save_as: Optional[str] = None,
     show: bool = True,
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
     """
-    Create a visualization from checkpoint file(s).
+    create a visualization from checkpoint file(s).
 
-    Args:
-        config: visualization configuration (figure, refinement, etc.)
-        files: checkpoint file path(s)
-        fields: field names to visualize
-        vector_fields: optional vector field components for quiver/stream
-        save_as: optional output file path
-        show: whether to display the plot
-        component_props: dict mapping component names to props instances
-        **kwargs: additional arguments (vector_type, etc.)
+    args:
+        config: visualization configuration
+        files: checkpoint file(s) to visualize
+        fields: field(s) to visualize
+        vector_fields: optional vector field components (e.g., ["v1", "v2"])
+        overlays: optional overlay specifications (e.g., contour lines)
+        save_as: optional path to save the figure
+        show: whether to display the figure
+        component_props: optional component-specific props overrides
+
+    returns:
+        the created Figure object
     """
     if isinstance(files, str):
         files = [files]
 
+    # merge overlays from config and function argument
+    all_overlays = list(config.overlays)
+    if overlays:
+        all_overlays.extend(overlays)
+
     sim_data = load_data(files[0])
     scalar_plot_data = create_plot_data(sim_data, fields, config)
-    scalar_fields = scalar_plot_data.fields
-
-    from .pipeline.transforms import compose_fields_for_render
-
-    final_fields = compose_fields_for_render(scalar_fields, config)
-
-    nlvls = 1 + sum("_L" in f.name for f in scalar_fields)
-    is_refined = nlvls > 1
-
-    # determine rendering mode
-    # refined data MUST use polygons (pcolormesh can't handle different grids)
-    if is_refined:
-        use_polygons = True
-    else:
-        use_polygons = config.refinement.render_mode == "polygons"
-
-    # determine projection
-    projection = "cartesian"
-    if final_fields:
-        is_2d = final_fields[0].ndim == 2 or final_fields[0].name.endswith(
-            "_polygons"
-        )
-        if is_2d and sim_data.metadata.coord_system == "spherical":
-            projection = "polar"
+    final_fields = compose_fields_for_render(scalar_plot_data.fields, config)
+    nlvls, use_polygons = _refinement_info(scalar_plot_data.fields, config)
+    projection = _detect_projection(
+        final_fields, sim_data.metadata.coord_system
+    )
 
     figure = prepare_figure(
         config,
@@ -107,85 +252,30 @@ def plot(
         coord_system=CoordSystem(sim_data.metadata.coord_system),
     )
 
-    bodies = scalar_plot_data.body_collection
+    _dispatch_scalar_components(
+        figure,
+        final_fields,
+        component_props,
+        use_polygons,
+        bodies=scalar_plot_data.body_collection,
+    )
 
-    # dispatch scalar components
-    for field_data in final_fields:
-        component: Component
-
-        if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
-            # polygon plot (1d array of patches)
-            props = _get_props(component_props, "polygon", PolygonPlotProps)
-            component = PolygonPlotComponent(props, bodies)
-
-        elif field_data.ndim == 1:
-            # line plot
-            props = _get_props(component_props, "line", LinePlotProps)
-            component = LinePlotComponent(props)
-
-        elif field_data.ndim == 2:
-            if use_polygons:
-                props = _get_props(component_props, "polygon", PolygonPlotProps)
-                component = PolygonPlotComponent(props, bodies)
-            else:
-                props = _get_props(component_props, "quad", QuadPlotProps)
-                component = QuadPlotComponent(props, bodies)
-
-        elif field_data.ndim == 3:
-            raise ValueError(
-                f"field '{field_data.name}' is 3D. use --slice to reduce."
-            )
-        else:
-            raise ValueError(
-                f"field '{field_data.name}' has unsupported ndim={field_data.ndim}"
-            )
-
-        if figure.fig is None:
-            raise RuntimeError("figure not initialized")
-
-        component.initialize(figure.fig, figure.axes["main"])
-        figure.add_component(component, field_data)
-
-    # dispatch vector components
     if vector_fields:
-        vector_plot_data = create_plot_data(sim_data, vector_fields, config)
+        _dispatch_vector_components(
+            figure,
+            sim_data,
+            vector_fields,
+            config,
+            component_props,
+            vector_type=kwargs.get("vector_type", "quiver"),
+        )
 
-        vi_levels = [
-            f
-            for f in vector_plot_data.fields
-            if f.name.startswith(vector_fields[0])
-        ]
-        vj_levels = [
-            f
-            for f in vector_plot_data.fields
-            if f.name.startswith(vector_fields[1])
-        ]
-
-        v1_field = _compose_pcolormesh(vi_levels)
-        v2_field = _compose_pcolormesh(vj_levels)
-        vector_data = [v1_field, v2_field]
-
-        vector_type = kwargs.get("vector_type", "quiver")
-        if vector_type == "quiver":
-            props = _get_props(component_props, "quiver", QuiverPlotProps)
-            component = QuiverPlotComponent(props)
-        else:
-            props = _get_props(component_props, "stream", StreamPlotProps)
-            component = StreamPlotComponent(props)
-
-        if figure.fig is None:
-            raise RuntimeError("figure not initialized")
-
-        component.initialize(figure.fig, figure.axes["main"])
-        figure.add_component(component, vector_data)
+    # add overlay components
+    if all_overlays:
+        _dispatch_overlay_components(figure, sim_data, all_overlays, config)
 
     figure.render()
-
-    if save_as:
-        figure.save(save_as)
-    if show:
-        plt.show()
-
+    _save_and_show(figure, save_as, show)
     return figure
 
 
@@ -193,22 +283,16 @@ def animate(
     config: VisualizationConfig,
     files: str | Sequence[str],
     fields: Sequence[str] = ["rho"],
+    overlays: Optional[Sequence[OverlayConfig]] = None,
     save_as: Optional[str] = None,
     show: bool = True,
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
     """
-    Create animation from ordered sequence of checkpoint files.
+    create animation from ordered sequence of checkpoint files.
 
-    Args:
-        config: visualization configuration
-        files: checkpoint file paths (must be > 1)
-        fields: field names to visualize
-        save_as: output file path
-        show: whether to display after rendering
-        component_props: dict mapping component names to props instances
-        **kwargs: additional arguments (vector_fields, vector_type, fps, etc.)
+    overlays animate together with the primary field.
     """
     if isinstance(files, str):
         files = [files]
@@ -216,39 +300,20 @@ def animate(
     if len(files) < 2:
         raise ValueError("animation requires at least 2 files")
 
+    # merge overlays from config and function argument
+    all_overlays = list(config.overlays)
+    if overlays:
+        all_overlays.extend(overlays)
+
     sim_data = load_data(files[0])
     vector_fields = kwargs.get("vector_fields")
 
     scalar_plot_data = create_plot_data(sim_data, fields, config)
-    scalar_fields = scalar_plot_data.fields
-
-    nlvls = 1 + sum("_L" in f.name for f in scalar_fields)
-    is_refined = nlvls > 1
-
-    # determine rendering mode
-    # refined data MUST use polygons (pcolormesh can't handle different grids)
-    if is_refined:
-        use_polygons = True
-    else:
-        use_polygons = config.refinement.render_mode == "polygons"
-
-    # compose fields for first frame
-    final_fields: Sequence[FieldData] = []
-    if scalar_fields:
-        is_2d = scalar_fields[0].ndim == 2
-        if is_2d and use_polygons:
-            final_fields = [_compose_polygons(list(scalar_fields))]
-        else:
-            final_fields = scalar_fields
-
-    # determine projection
-    projection = "cartesian"
-    if final_fields:
-        is_2d = final_fields[0].ndim == 2 or final_fields[0].name.endswith(
-            "_polygons"
-        )
-        if is_2d and sim_data.metadata.coord_system == "spherical":
-            projection = "polar"
+    final_fields = compose_fields_for_render(scalar_plot_data.fields, config)
+    nlvls, use_polygons = _refinement_info(scalar_plot_data.fields, config)
+    projection = _detect_projection(
+        final_fields, sim_data.metadata.coord_system
+    )
 
     figure = prepare_figure(
         config,
@@ -258,93 +323,37 @@ def animate(
         coord_system=CoordSystem(sim_data.metadata.coord_system),
     )
 
-    bodies = scalar_plot_data.body_collection
+    _dispatch_scalar_components(
+        figure,
+        final_fields,
+        component_props,
+        use_polygons,
+        bodies=scalar_plot_data.body_collection,
+    )
 
-    # dispatch scalar components
-    for field_data in final_fields:
-        component: Component
-
-        if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
-            props = _get_props(component_props, "polygon", PolygonPlotProps)
-            component = PolygonPlotComponent(props, bodies)
-
-        elif field_data.ndim == 1:
-            props = _get_props(component_props, "line", LinePlotProps)
-            component = LinePlotComponent(props)
-
-        elif field_data.ndim == 2:
-            if use_polygons:
-                props = _get_props(component_props, "polygon", PolygonPlotProps)
-                component = PolygonPlotComponent(props, bodies)
-            else:
-                props = _get_props(component_props, "quad", QuadPlotProps)
-                component = QuadPlotComponent(props, bodies)
-
-        elif field_data.ndim == 3:
-            raise ValueError(
-                f"field '{field_data.name}' is 3D. use --slice to reduce."
-            )
-        else:
-            raise ValueError(
-                f"field '{field_data.name}' has unsupported ndim={field_data.ndim}"
-            )
-
-        if figure.fig is None:
-            raise RuntimeError("figure not initialized")
-
-        component.initialize(figure.fig, figure.axes["main"])
-        figure.add_component(component, field_data)
-
-    # dispatch vector components
     if vector_fields:
-        vector_plot_data = create_plot_data(sim_data, vector_fields, config)
+        _dispatch_vector_components(
+            figure,
+            sim_data,
+            vector_fields,
+            config,
+            component_props,
+            vector_type=kwargs.get("vector_type", "quiver"),
+        )
 
-        vi_levels = [
-            f
-            for f in vector_plot_data.fields
-            if f.name.startswith(vector_fields[0])
-        ]
-        vj_levels = [
-            f
-            for f in vector_plot_data.fields
-            if f.name.startswith(vector_fields[1])
-        ]
+    # add overlay components
+    if all_overlays:
+        _dispatch_overlay_components(figure, sim_data, all_overlays, config)
 
-        v1_field = _compose_pcolormesh(vi_levels)
-        v2_field = _compose_pcolormesh(vj_levels)
-        vector_data = [v1_field, v2_field]
-
-        vector_type = kwargs.get("vector_type", "quiver")
-        if vector_type == "quiver":
-            props = _get_props(component_props, "quiver", QuiverPlotProps)
-            component = QuiverPlotComponent(props)
-        else:
-            props = _get_props(component_props, "stream", StreamPlotProps)
-            component = StreamPlotComponent(props)
-
-        if figure.fig is None:
-            raise RuntimeError("figure not initialized")
-
-        component.initialize(figure.fig, figure.axes["main"])
-        figure.add_component(component, vector_data)
-
-    # run animation
-    output = save_as or "animation.mp4"
     fps = kwargs.get("fps") or config.animation.frame_rate
-
     figure.animate(
         files,
-        output_path=output,
+        output_path=save_as or "animation.mp4",
         fps=fps,
         save_all_frames=config.animation.save_all_frames,
     )
 
-    if save_as:
-        figure.save(save_as)
-
-    if show:
-        plt.show()
-
+    _save_and_show(figure, save_as, show)
     return figure
 
 
@@ -357,66 +366,38 @@ def animate_coordinate_profile(
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
-    """
-    Create animation of coordinate-binned profiles from multiple files.
-
-    Args:
-        config: visualization configuration
-        files: checkpoint file paths (must be > 1)
-        fields: field names to visualize
-        save_as: output file path
-        show: whether to display after rendering
-        component_props: dict mapping component names to props instances
-        **kwargs: additional arguments (fps, etc.)
-    """
+    """create animation of coordinate-binned profiles from multiple files."""
     if isinstance(files, str):
         files = [files]
 
     if len(files) < 2:
         raise ValueError("animation requires at least 2 files")
 
-    # load first file to set up components
     sim_data = load_data(files[0])
     plot_data = create_coordinate_profile_data(sim_data, fields, config)
 
     if not plot_data.fields:
         raise ValueError("no coordinate profiles generated")
 
-    # coordinate profiles are always 1D lines
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=4)
 
-    # initialize components for each field
     for field_data in plot_data.fields:
         props = _get_props(
             component_props, "coordinate_profile", CoordinateProfileProps
         )
-        component = CoordinateProfileComponent(props)
+        _init_component(figure, CoordinateProfileComponent(props), field_data)
 
-        if figure.fig is None:
-            raise RuntimeError("figure not initialized")
-
-        component.initialize(figure.fig, figure.axes["main"])
-        figure.add_component(component, field_data)
-
-    # run animation using the coordinate profile data pipeline
-    output = save_as or "animation.mp4"
     fps = kwargs.get("fps") or config.animation.frame_rate
-
     figure.animate_coordinate_profile(
         files,
         fields,
         config,
-        output_path=output,
+        output_path=save_as or "animation.mp4",
         fps=fps,
         save_all_frames=config.animation.save_all_frames,
     )
 
-    if save_as:
-        figure.save(save_as)
-
-    if show:
-        plt.show()
-
+    _save_and_show(figure, save_as, show)
     return figure
 
 
@@ -429,17 +410,7 @@ def plot_coordinate_profile(
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
-    """
-    Create coordinate-binned profile plot.
-
-    Args:
-        config: visualization configuration
-        files: checkpoint file path(s)
-        fields: field names to visualize
-        save_as: optional output file path
-        show: whether to display the plot
-        component_props: dict mapping component names to props instances
-    """
+    """create coordinate-binned profile plot."""
     if isinstance(files, str):
         files = [files]
 
@@ -455,21 +426,10 @@ def plot_coordinate_profile(
         props = _get_props(
             component_props, "coordinate_profile", CoordinateProfileProps
         )
-        component = CoordinateProfileComponent(props)
-
-        if figure.fig is None:
-            raise RuntimeError("figure not initialized")
-
-        component.initialize(figure.fig, figure.axes["main"])
-        figure.add_component(component, field_data)
+        _init_component(figure, CoordinateProfileComponent(props), field_data)
 
     figure.render()
-
-    if save_as:
-        figure.save(save_as)
-    if show:
-        plt.show()
-
+    _save_and_show(figure, save_as, show)
     return figure
 
 
@@ -482,17 +442,7 @@ def plot_time_series(
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
-    """
-    Create time series plot from multiple checkpoint files.
-
-    Args:
-        config: visualization configuration
-        files: checkpoint file paths (must be > 1)
-        fields: field names to visualize
-        save_as: optional output file path
-        show: whether to display the plot
-        component_props: dict mapping component names to props instances
-    """
+    """create time series plot from multiple checkpoint files."""
     if isinstance(files, str):
         raise ValueError("time series requires multiple files")
 
@@ -506,21 +456,47 @@ def plot_time_series(
 
     for field_data in time_series_data.fields:
         props = _get_props(component_props, "time_series", TimeSeriesPlotProps)
-        component = TimeSeriesPlotComponent(props)
-
-        if figure.fig is None:
-            raise RuntimeError("figure not initialized")
-
-        component.initialize(figure.fig, figure.axes["main"])
-        figure.add_component(component, field_data)
+        _init_component(figure, TimeSeriesPlotComponent(props), field_data)
 
     figure.render()
+    _save_and_show(figure, save_as, show)
+    return figure
 
-    if save_as:
-        figure.save(save_as)
-    if show:
-        plt.show()
 
+def plot_power_spectrum(
+    config: VisualizationConfig,
+    files: str | Sequence[str],
+    fields: Sequence[str] = ["v1", "v2", "v3"],
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    **kwargs,
+) -> Figure:
+    """create kinetic energy power spectrum plot from a checkpoint file."""
+    if isinstance(files, str):
+        files = [files]
+
+    sim_data = load_data(files[0])
+
+    # power spectrum always uses velocity fields
+    velocity_fields = fields if len(fields) >= 3 else ["v1", "v2", "v3"]
+    spectrum_data = create_power_spectrum_data(
+        sim_data, config, velocity_fields
+    )
+
+    if not spectrum_data.fields:
+        raise ValueError("no power spectrum data generated")
+
+    figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
+
+    for field_data in spectrum_data.fields:
+        props = _get_props(
+            component_props, "power_spectrum", PowerSpectrumProps
+        )
+        _init_component(figure, PowerSpectrumComponent(props), field_data)
+
+    figure.render()
+    _save_and_show(figure, save_as, show)
     return figure
 
 
@@ -533,27 +509,14 @@ def plot_overlay(
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
-    """
-    Overlay multiple files on the same axes (line plots only).
-
-    Args:
-        config: visualization configuration
-        files: checkpoint file paths (each gets its own line)
-        fields: field names to visualize
-        save_as: optional output file path
-        show: whether to display the plot
-        component_props: dict mapping component names to props instances
-    """
+    """overlay multiple files on the same axes (line plots only)."""
     if len(files) < 2:
         raise ValueError("overlay requires at least 2 files")
 
-    # load first file to determine figure setup
     first_data = load_data(files[0])
     first_plot_data = create_plot_data(first_data, fields, config)
-    first_fields = first_plot_data.fields
 
-    # overlay only works for 1d data
-    for f in first_fields:
+    for f in first_plot_data.fields:
         if f.ndim != 1:
             raise ValueError(
                 f"overlay only supports 1D data, got ndim={f.ndim} for '{f.name}'. "
@@ -570,23 +533,15 @@ def plot_overlay(
         overlay_mode=True,
     )
 
-    if figure.fig is None:
-        raise RuntimeError("figure not initialized")
-
-    # iterate through files and add each as a separate line
     for file_path in files:
         sim_data = load_data(file_path)
         plot_data = create_plot_data(sim_data, fields, config)
-
-        file_label = Path(file_path).stem
 
         for field_data in plot_data.fields:
             if field_data.ndim != 1:
                 continue
 
-            # create a new component for each file's data
             base_props = _get_props(component_props, "line", LinePlotProps)
-            # override label to include file identifier
             props = LinePlotProps(
                 label=f"{field_data.name}",
                 linewidth=base_props.linewidth,
@@ -594,17 +549,10 @@ def plot_overlay(
                 marker_size=base_props.marker_size,
                 alpha=base_props.alpha,
             )
-            component = LinePlotComponent(props)
-            component.initialize(figure.fig, figure.axes["main"])
-            figure.add_component(component, field_data)
+            _init_component(figure, LinePlotComponent(props), field_data)
 
     figure.render()
-
-    if save_as:
-        figure.save(save_as)
-    if show:
-        plt.show()
-
+    _save_and_show(figure, save_as, show)
     return figure
 
 
@@ -617,17 +565,7 @@ def plot_coordinate_profile_overlay(
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
-    """
-    Overlay coordinate profiles from multiple files on the same axes.
-
-    Args:
-        config: visualization configuration
-        files: checkpoint file paths (each gets its own line)
-        fields: field names to visualize
-        save_as: optional output file path
-        show: whether to display the plot
-        component_props: dict mapping component names to props instances
-    """
+    """overlay coordinate profiles from multiple files on the same axes."""
     if len(files) < 2:
         raise ValueError("overlay requires at least 2 files")
 
@@ -640,10 +578,6 @@ def plot_coordinate_profile_overlay(
         overlay_mode=True,
     )
 
-    if figure.fig is None:
-        raise RuntimeError("figure not initialized")
-
-    # iterate through files and add each as a separate profile
     for file_path in files:
         sim_data = load_data(file_path)
         plot_data = create_coordinate_profile_data(sim_data, fields, config)
@@ -657,7 +591,6 @@ def plot_coordinate_profile_overlay(
             base_props = _get_props(
                 component_props, "coordinate_profile", CoordinateProfileProps
             )
-            # override label to include file identifier
             props = CoordinateProfileProps(
                 label=f"{field_data.name} ({file_label})",
                 color=base_props.color,
@@ -670,15 +603,10 @@ def plot_coordinate_profile_overlay(
                 x_scale=base_props.x_scale,
                 y_scale=base_props.y_scale,
             )
-            component = CoordinateProfileComponent(props)
-            component.initialize(figure.fig, figure.axes["main"])
-            figure.add_component(component, field_data)
+            _init_component(
+                figure, CoordinateProfileComponent(props), field_data
+            )
 
     figure.render()
-
-    if save_as:
-        figure.save(save_as)
-    if show:
-        plt.show()
-
+    _save_and_show(figure, save_as, show)
     return figure

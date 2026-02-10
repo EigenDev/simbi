@@ -11,15 +11,15 @@
 # =============================================================================
 from typing import Type
 
-from .components.body_diagnostics import BodyDiagnosticsProps
+from .components.contour import ContourPlotProps
 from .components.coord_binning import CoordinateProfileProps
 from .components.interface import ComponentProps
 from .components.line import LinePlotProps
 from .components.polygons import PolygonPlotProps
+from .components.power_spectrum import PowerSpectrumProps
 from .components.quad import QuadPlotProps
 from .components.quiver import QuiverPlotProps
 from .components.stream import StreamPlotProps
-from .components.theming import ThemeProps
 from .components.time_series import TimeSeriesPlotProps
 
 # maps config key -> props class
@@ -30,10 +30,10 @@ PROPS_REGISTRY: dict[str, Type[ComponentProps]] = {
     "line": LinePlotProps,
     "quiver": QuiverPlotProps,
     "stream": StreamPlotProps,
+    "contour": ContourPlotProps,
     "coordinate_profile": CoordinateProfileProps,
     "time_series": TimeSeriesPlotProps,
-    "body_diagnostics": BodyDiagnosticsProps,
-    "theme": ThemeProps,
+    "power_spectrum": PowerSpectrumProps,
 }
 
 # reverse lookup: props class -> config key

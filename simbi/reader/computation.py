@@ -836,6 +836,39 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
         return np.asarray(grad_mag)
 
+    def compute_entropy_measure(level_data: dict[str, Array]) -> Array:
+        """
+        entropy measure: p / rho^gamma
+        useful for identifying shocks and mixing regions.
+        """
+        gamma_val = gamma
+        p = level_data["p"]
+        rho = level_data["rho"]
+        entropy = p / (rho**gamma_val + 1e-20)  # avoid division by zero
+        return np.asarray(entropy)
+
+    def compute_entropy_gradient(level_data: dict[str, Array]) -> Array:
+        """
+        gradient magnitude of entropy s = p / rho^gamma.
+        """
+        mesh = getattr(level_data, "mesh")
+        p = level_data["p"]
+        rho = level_data["rho"]
+        s = p / (rho**gamma + 1e-20)
+
+        coords = []
+        if ndim >= 1:
+            coords.append(0.5 * (mesh.x1v[1:] + mesh.x1v[:-1]))
+        if ndim >= 2:
+            coords.append(0.5 * (mesh.x2v[1:] + mesh.x2v[:-1]))
+        if ndim >= 3:
+            coords.append(0.5 * (mesh.x3v[1:] + mesh.x3v[:-1]))
+
+        grads = [
+            np.gradient(s, coords[ax], axis=ndim - 1 - ax) for ax in range(ndim)
+        ]
+        return np.asarray(np.sqrt(sum(g**2 for g in grads)))
+
     # build base pipeline of functions
     base_pipeline: dict[str, Callable[..., Any]] = {
         "W": compute_W,
@@ -860,6 +893,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "okubo_weiss": compute_okubo_weiss,
         "div_v": compute_divergence,
         "schlieren": compute_schlieren,
+        "entropy-measure": compute_entropy_measure,
+        "entropy-gradient": compute_entropy_gradient,
     }
 
     # add component fields

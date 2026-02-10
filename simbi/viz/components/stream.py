@@ -26,7 +26,7 @@ class StreamPlotProps(ComponentProps):
     density: float | Tuple[float, float] = 1.0
     arrowstyle: str = "->"
     arrowsize: float = 1.0
-    alpha: float = 0.6
+    alpha: float = 0.35
 
     @field_validator("alpha")
     @classmethod
@@ -91,6 +91,34 @@ class StreamPlotComponent(Component):
 
         return x, y, u_values, v_values
 
+    def _crop_to_limits(self, x, y, u, v, style: FigureConfig):
+        """crop velocity data to axis limits for denser streamlines in zoomed views."""
+        import numpy as np
+
+        xlims = style.xlims
+        ylims = style.ylims
+
+        if not xlims and not ylims:
+            return x, y, u, v, False
+
+        xmin = xlims.min if xlims and xlims.min is not None else x[0]
+        xmax = xlims.max if xlims and xlims.max is not None else x[-1]
+        ymin = ylims.min if ylims and ylims.min is not None else y[0]
+        ymax = ylims.max if ylims and ylims.max is not None else y[-1]
+
+        xi = np.where((x >= xmin) & (x <= xmax))[0]
+        yi = np.where((y >= ymin) & (y <= ymax))[0]
+
+        if len(xi) < 2 or len(yi) < 2:
+            return x, y, u, v, False
+
+        x_crop = x[xi]
+        y_crop = y[yi]
+        u_crop = u[np.ix_(yi, xi)]
+        v_crop = v[np.ix_(yi, xi)]
+
+        return x_crop, y_crop, u_crop, v_crop, True
+
     def render(
         self, data: List[FieldData], style: FigureConfig
     ) -> RenderResult:
@@ -111,6 +139,9 @@ class StreamPlotComponent(Component):
         x = 0.5 * (x[1:] + x[:-1])
         y = 0.5 * (y[1:] + y[:-1])
 
+        x, y, u, v, is_cropped = self._crop_to_limits(x, y, u, v, style)
+        alpha = self.props.alpha * 0.5 if is_cropped else self.props.alpha
+
         self._streamplot = self.ax.streamplot(
             x,
             y,
@@ -122,7 +153,7 @@ class StreamPlotComponent(Component):
             arrowstyle=self.props.arrowstyle,
             arrowsize=self.props.arrowsize,
         )
-        self._streamplot.lines.set_alpha(self.props.alpha)
+        self._streamplot.lines.set_alpha(alpha)
 
         return RenderResult(
             artists={"streamplot": self._streamplot},

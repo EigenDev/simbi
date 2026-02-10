@@ -13,6 +13,7 @@ from simbi.viz.config import (
     AnimationConfig,
     CoordinateConfig,
     FigureConfig,
+    OverlayConfig,
     PlotConfig,
     RefinementConfig,
     TimeSeriesConfig,
@@ -20,7 +21,7 @@ from simbi.viz.config import (
 )
 from simbi.viz.utility import get_dimensionality
 
-from ..styling import ThemeManager
+from ..styling import get_theme
 from ..styling.theme import ThemeConfig
 from ..types import Bounds
 
@@ -135,55 +136,84 @@ def animation_config_from_args(args: Namespace) -> AnimationConfig:
 
 
 def theme_config_from_args(args: Namespace) -> ThemeConfig:
-    """Build ThemeConfig from cli arguments.
+    """Build ThemeConfig from cli arguments."""
+    from simbi.viz.config_loader import parse_overrides
 
-    Strategy:
-      - prefer validated theme props loaded via the existing loader (file + overrides)
-      - convert validated ThemeProps -> ThemeConfig using ThemeConfig.from_mapping
-      - if no validated theme props are present, parse the CLI overrides to extract
-        any `theme.*` overrides and pass them to ThemeManager.get_theme
-      - ensure a ThemeConfig is returned in all code paths
+    overrides = parse_overrides(getattr(args, "props", [])).get("theme", {})
+    return get_theme(getattr(args, "theme", "default"), overrides or None)
+
+
+def parse_overlay_spec(
+    spec: str,
+    default_color: str = "white",
+    default_linewidth: float = 1.5,
+) -> OverlayConfig:
     """
-    # delegate parsing/validation to the config loader when possible to reuse
-    # coercion and pydantic validation, avoiding ad-hoc parsing here.
-    from simbi.viz.config_loader import load_theme_config, parse_overrides
+    parse overlay specification string.
 
-    # try to load validated theme props (from config file and/or --props)
-    theme_props = load_theme_config(
-        getattr(args, "config", None), getattr(args, "props", [])
+    format: FIELD:COMPONENT:LEVELS
+    examples:
+        "mach:contour:1.0"
+        "mach:contour:1.0,2.0,3.0"
+        "v:contour:0.5"
+
+    args:
+        spec: the specification string
+        default_color: default color for the overlay
+        default_linewidth: default linewidth for the overlay
+
+    returns:
+        OverlayConfig instance
+    """
+    parts = spec.split(":")
+
+    if len(parts) < 1:
+        raise ValueError(
+            f"invalid overlay spec: '{spec}'. expected FIELD:COMPONENT:LEVELS"
+        )
+
+    field = parts[0]
+    component = parts[1] if len(parts) > 1 else "contour"
+    levels_str = parts[2] if len(parts) > 2 else "1.0"
+
+    try:
+        levels = [float(x.strip()) for x in levels_str.split(",")]
+    except ValueError as e:
+        raise ValueError(f"invalid levels in overlay spec '{spec}': {e}")
+
+    return OverlayConfig(
+        field=field,
+        component=component,
+        levels=levels,
+        color=default_color,
+        linewidth=default_linewidth,
     )
-    if theme_props:
-        # theme_props is a pydantic ThemeProps instance (or mapping); convert safely
-        return ThemeConfig.from_mapping(theme_props)
 
-    # no validated ThemeProps provided: extract any theme.* overrides to pass to ThemeManager
-    overrides = parse_overrides(getattr(args, "props", []))
-    theme_override_dict = overrides.get("theme", {})
 
-    theme_candidate = ThemeManager.get_theme(
-        theme_name=getattr(args, "theme", "default"),
-        theme_props=theme_override_dict,
-    )
+def overlays_from_args(args: Namespace) -> list[OverlayConfig]:
+    """
+    parse field overlay arguments into OverlayConfig list.
 
-    # if ThemeManager already returned a ThemeConfig, use it directly
-    if isinstance(theme_candidate, ThemeConfig):
-        return theme_candidate
+    handles --field-overlay flag which can be specified multiple times.
+    each --field-overlay can have multiple specs (space-separated).
+    """
+    raw_overlays = getattr(args, "field_overlays", None)
+    if not raw_overlays:
+        return []
 
-    # try to convert mapping-like candidate into ThemeConfig
-    if hasattr(ThemeConfig, "from_mapping"):
-        try:
-            return ThemeConfig.from_mapping(theme_candidate)
-        except Exception:
-            pass
+    default_color = getattr(args, "overlay_color", "white")
+    default_linewidth = getattr(args, "overlay_linewidth", 1.5)
 
-    # fallback: if dict-like, filter to dataclass fields
-    if isinstance(theme_candidate, dict):
-        allowed = set(ThemeConfig.__dataclass_fields__.keys())
-        filtered = {k: v for k, v in theme_candidate.items() if k in allowed}
-        return ThemeConfig(**filtered)
+    overlays: list[OverlayConfig] = []
 
-    # last resort: default ThemeConfig
-    return ThemeConfig()
+    # raw_overlays is list[list[str]] due to action="append" with nargs="+"
+    for overlay_group in raw_overlays:
+        for spec in overlay_group:
+            overlays.append(
+                parse_overlay_spec(spec, default_color, default_linewidth)
+            )
+
+    return overlays
 
 
 def config_from_args(args: Namespace) -> VisualizationConfig:
@@ -196,6 +226,7 @@ def config_from_args(args: Namespace) -> VisualizationConfig:
         time_series=time_series_config_from_args(args),
         animation=animation_config_from_args(args),
         theme=theme_config_from_args(args),
+        overlays=overlays_from_args(args),
     )
 
 

@@ -13,7 +13,6 @@ import numpy as np
 from simbi.reader.adapter import SimData
 
 from ..config import VisualizationConfig
-from ..figure import Figure
 from ..types import Array, CoordSystem, FieldData
 
 # Maps logical axis names (user-facing) to the data's array index.
@@ -240,50 +239,6 @@ def prepare_field_level(
     )
 
 
-def prepare_figure(
-    config: VisualizationConfig,
-    nfiles: int = 1,
-    projection: Literal["polar", "cartesian"] | None = None,
-    nlvls: int = 1,
-    coord_system: CoordSystem = CoordSystem.CARTESIAN,
-    formatter: Optional[object] = None,
-    overlay_mode: bool = False,
-) -> Figure:
-    """Create and prepare a figure based on configuration.
-
-    Accepts an optional `formatter` argument which will be forwarded to the
-    Figure constructor. This allows callers (and tests) to inject a custom
-    formatter instance or policy.
-    """
-    import matplotlib.pyplot as plt
-
-    config.theme.apply(
-        nfiles=nfiles,
-        nfields=len(config.plot.fields) * nlvls,
-        overlay_mode=overlay_mode,
-    )
-    if projection == "polar":
-        fig, ax = plt.subplots(
-            1,
-            1,
-            figsize=config.figure.fig_size,
-            subplot_kw={"projection": "polar"},
-            layout="constrained",
-        )
-    else:
-        fig = plt.figure(figsize=config.figure.fig_size)
-        ax = fig.add_subplot(111)
-
-    # pass optional formatter into the Figure so it can control layout policy
-    figure = Figure(config, formatter=formatter)
-
-    figure.fig = fig
-    figure.axes["main"] = ax
-    figure.coord_system = coord_system
-
-    return figure
-
-
 def extract_field(field_name: str) -> Callable[[SimData], Array]:
     """Extract a named field from simulation data."""
     return lambda data: data[FIELD_ALIASES.get(field_name, field_name)]
@@ -310,25 +265,6 @@ def get_effective_dimensions(data: SimData, config: VisualizationConfig) -> int:
     """Determine the effective number of dimensions to use based on data and config."""
     x = sum(r > 1 for r in data.mesh.shape)
     return min(config.plot.ndim, x)
-
-
-def _block_average(arr: Array, block_shape: tuple[int, ...]) -> Array:
-    """N-dimensional block averaging (downsampling)."""
-    if len(arr.shape) != len(block_shape):
-        raise ValueError("Array shape and block shape must have same ndim.")
-
-    new_shape = []
-    for i, dim in enumerate(arr.shape):
-        block_size = block_shape[i]
-        if dim % block_size != 0:
-            raise ValueError(
-                f"Axis {i} (size {dim}) not divisible by block size {block_size}"
-            )
-        new_shape.extend([dim // block_size, block_size])
-
-    reshaped = arr.reshape(tuple(new_shape))
-    avg_axes = tuple(range(1, len(new_shape), 2))
-    return np.mean(reshaped, axis=avg_axes)
 
 
 def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
@@ -373,7 +309,9 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
         ref_ratio_x = fine_nx // coarse_nx
         ref_ratio_y = fine_ny // coarse_ny
 
-        averaged_fine_data = _block_average(
+        from .refinement import block_average
+
+        averaged_fine_data = block_average(
             fine_values, (ref_ratio_y, ref_ratio_x)
         )
 

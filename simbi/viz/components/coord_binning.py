@@ -31,8 +31,12 @@ class CoordinateProfileProps(ComponentProps):
     rbeg: float = 0.2  # Reference line start radius
     rend: float = 0.5  # Reference line end radius
 
-    # Analysis-specific formatting
+    # reference power-law overlay
     show_reference_lines: bool = True
+    reference_power_law: float = -1.5
+    reference_scale: float = 1.5
+    reference_fields: tuple[str, ...] = ("rho",)
+
     x_scale: str = "linear"
     y_scale: str = "linear"
 
@@ -114,32 +118,32 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         field_base_name, field_str = stripped_field_name(field_name)
 
         self.ax.set_xlabel("$r$")
-        # self.ax.set_ylabel(field_str)
 
-        # Add reference lines
-        if self.props.show_reference_lines:
-            # self.ax.axvline(50.0, color="gray", linestyle="--", linewidth=0.5)
-            # Add power-law reference for density
-            if field_base_name == "rho":
-                good_bins = ~np.isnan(values)
-                r_ref = r_bins[good_bins]
-                val_ref = values[good_bins]
+        if (
+            self.props.show_reference_lines
+            and field_base_name in self.props.reference_fields
+        ):
+            good_bins = ~np.isnan(values)
+            r_ref = r_bins[good_bins]
+            val_ref = values[good_bins]
 
-                # Find a good anchor point for the reference line
-                ref_beg_idx = np.argmax(r_ref > 2)
-                ref_end_idx = np.argmax(r_ref > 30)
-                if ref_beg_idx > 0:
-                    norm = val_ref[ref_beg_idx] / (r_ref[ref_beg_idx] ** (-1.5))
-                    ref_vals = norm * (r_ref ** (-1.5))
+            ref_beg_idx = np.argmax(r_ref > self.props.rbeg)
+            ref_end_idx = np.argmax(r_ref > self.props.rend)
+            power = self.props.reference_power_law
 
-                    ref_line = self.ax.plot(
-                        r_ref[ref_beg_idx:ref_end_idx],
-                        ref_vals[ref_beg_idx:ref_end_idx] * 1.5,
-                        linestyle="--",
-                        color="red",
-                        label=r"$r^{-3/2}$",
-                    )[0]
-                    self._ref_lines.append(ref_line)
+            if ref_beg_idx > 0 and ref_end_idx > ref_beg_idx:
+                anchor = val_ref[ref_beg_idx] / (r_ref[ref_beg_idx] ** power)
+                ref_vals = anchor * (r_ref**power)
+
+                ref_line = self.ax.plot(
+                    r_ref[ref_beg_idx:ref_end_idx],
+                    ref_vals[ref_beg_idx:ref_end_idx]
+                    * self.props.reference_scale,
+                    linestyle="--",
+                    color="red",
+                    label=rf"$r^{{{power}}}$",
+                )[0]
+                self._ref_lines.append(ref_line)
 
     def cleanup(self) -> None:
         if hasattr(self, "ax"):

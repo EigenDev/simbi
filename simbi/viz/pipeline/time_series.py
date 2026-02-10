@@ -38,23 +38,6 @@ def _calculate_time_series_value(
         return np.mean(field)
 
 
-def _compute_orbital_averages(
-    time: Array, mdot: Array, time_scale: float
-) -> tuple[Array, Array]:
-    """Compute averages over orbital periods."""
-    n_orbits = (time[-1] - time[0]) / time_scale
-    bins = np.linspace(time[0], time[-1], int(n_orbits) + 1)
-    t_bins = (bins[1:] + bins[:-1]) / 2  # bin centers
-
-    mdot_avg = np.array(
-        [
-            np.mean(mdot[(time >= bins[i]) & (time < bins[i + 1])])
-            for i in range(len(bins) - 1)
-        ]
-    )
-    return t_bins, mdot_avg
-
-
 def compute_orbital_averages(
     time: Array, mdot: Array, time_scale: float
 ) -> tuple[Array, Array]:

@@ -10,10 +10,17 @@ import warnings
 from typing import Optional
 
 from simbi.viz.checkpoint.checkpoint_utils import (
+    extract_timestep,
     glob_checkpoints,
 )
 
-VALID_PLOT_TYPES = ["line", "multidim", "coordinate_bin", "time_series"]
+VALID_PLOT_TYPES = [
+    "line",
+    "multidim",
+    "coordinate_bin",
+    "time_series",
+    "power_spectrum",
+]
 
 try:
     with warnings.catch_warnings():
@@ -153,8 +160,8 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     # =========================================================================
     parser.add_argument(
         "files",
-        nargs="+",
-        help="checkpoint file(s) or directory for body diagnostics",
+        nargs="*",
+        help="checkpoint file(s) or directory",
         action=glob_files,
     )
     parser.add_argument(
@@ -233,6 +240,34 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--overlay",
         action="store_true",
         help="overlay multiple files on same axes (line/coordinate_bin only)",
+    )
+
+    # =========================================================================
+    # field overlays (e.g., contour lines over 2d plots)
+    # =========================================================================
+    parser.add_argument(
+        "--field-overlay",
+        nargs="+",
+        action="append",
+        metavar="SPEC",
+        dest="field_overlays",
+        help=(
+            "add field overlay (e.g., --field-overlay mach:contour:1.0). "
+            "format: FIELD:COMPONENT:LEVELS where LEVELS is comma-separated. "
+            "can be specified multiple times for multiple overlays."
+        ),
+    )
+    parser.add_argument(
+        "--overlay-color",
+        type=str,
+        default="lightgrey",
+        help="default color for field overlays",
+    )
+    parser.add_argument(
+        "--overlay-linewidth",
+        type=float,
+        default=1.5,
+        help="default linewidth for field overlays",
     )
 
     # =========================================================================
@@ -358,15 +393,6 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
 
     # =========================================================================
-    # body diagnostics mode
-    # =========================================================================
-    parser.add_argument(
-        "--bodies",
-        action="store_true",
-        help="enable body diagnostics mode (use --props body_diagnostics.* for options)",
-    )
-
-    # =========================================================================
     # coordinate binning options
     # =========================================================================
     parser.add_argument(
@@ -404,4 +430,13 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--generate-config",
         action="store_true",
         help="print example config and exit",
+    )
+
+    # =========================================================================
+    # tui mode
+    # =========================================================================
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="launch interactive TUI for plot configuration",
     )
