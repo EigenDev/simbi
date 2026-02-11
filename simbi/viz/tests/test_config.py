@@ -18,7 +18,7 @@ class TestOverlayConfig:
         assert config.field == "mach"
         assert config.component == "contour"
         assert config.levels == [1.0]
-        assert config.color == "white"
+        assert config.color == "lightgrey"
         assert config.linewidth == 1.5
 
     def test_custom_levels(self):

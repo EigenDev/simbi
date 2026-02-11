@@ -1,84 +1,29 @@
 """
-Quadensional plot component for visualization.
+Quad plot component for visualization.
 
-This component is a simple renderer. It expects to be given
-a single, 2D FieldData object and will render it as a pcolormesh.
+Renders a single 2D FieldData object as a pcolormesh.
 """
 
 from typing import Literal, Optional, Sequence
 
-import matplotlib.colors as mcolors
 import numpy as np
 from matplotlib.axes import Axes
 from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
-from pydantic import ValidationInfo, field_validator
 
 from simbi.reader.io import BodyCollection
 
 from ..config import FigureConfig
-from ..types import Array, ColorRange, FieldData, RenderResult
-from .interface import Component, ComponentProps
+from ..types import Array, FieldData, RenderResult
+from .interface import Component
+from .shared import ColormappedProps, create_color_normalization, draw_bodies
 
 
-class QuadPlotProps(ComponentProps):
-    """Properties for a *single* Quadensional plot component."""
+class QuadPlotProps(ColormappedProps):
+    """Properties for a quad (pcolormesh) plot component."""
 
-    cmap: str = "viridis"
-    color_range: ColorRange = ColorRange(min=None, max=None)
-    log_scale: bool = False
-    power: float = 1.0
     shading: Literal["auto", "nearest", "gouraud", "flat"] = "auto"
-    alpha: float = 1.0
     plot_type: Literal["polar", "cartesian"] = "cartesian"
-
-    # Mesh visualization (optional)
-    show_mesh_grid: bool = False
-    mesh_color: str = "white"
-    mesh_alpha: float = 0.3
-    mesh_linewidth: float = 0.1
-
-    @field_validator("power")
-    @classmethod
-    def validate_power(cls, v: float, _: ValidationInfo) -> float:
-        if v <= 0:
-            raise ValueError(f"Power must be positive, got {v}")
-        return v
-
-    @field_validator("alpha", "mesh_alpha")
-    @classmethod
-    def validate_alpha(cls, v: float, _: ValidationInfo) -> float:
-        if v < 0 or v > 1:
-            raise ValueError(f"Alpha must be between 0 and 1, got {v}")
-        return v
-
-
-def _create_color_normalization(
-    values: Array,
-    color_range: ColorRange,
-    log_scale: bool = False,
-    power: float = 1.0,
-) -> mcolors.Normalize:
-    """Create color normalization based on data and settings."""
-    vmin = color_range.min if color_range.min is not None else np.nanmin(values)
-    vmax = color_range.max if color_range.max is not None else np.nanmax(values)
-
-    if np.allclose(vmin, vmax, rtol=1e-10):
-        eps = max(float(abs(vmin) * 1e-2), 0.1)
-        vmin -= eps
-        vmax += eps
-
-    if log_scale:
-        if vmin <= 0:
-            pos_min = (
-                np.nanmin(values[values > 0]) if np.any(values > 0) else 1e-10
-            )
-            vmin = pos_min * 0.9
-        return mcolors.LogNorm(vmin=float(vmin), vmax=float(vmax))
-    else:
-        return mcolors.PowerNorm(
-            gamma=power, vmin=float(vmin), vmax=float(vmax)
-        )
 
 
 class QuadPlotComponent(Component):
@@ -154,7 +99,7 @@ class QuadPlotComponent(Component):
         x_min, x_max = x.min(), x.max()
         y_min, y_max = y.min(), y.max()
 
-        norm = _create_color_normalization(
+        norm = create_color_normalization(
             values,
             self.props.color_range,
             self.props.log_scale,
@@ -243,7 +188,7 @@ class QuadPlotComponent(Component):
         self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
     ) -> None:
         """Draw immersed bodies on the plot."""
-        _draw_bodies(self.ax, body_collection, zorder, axes)
+        draw_bodies(self.ax, body_collection, zorder, axes)
 
     def _draw_mesh_grid(self, x: Array, y: Array) -> None:
         """Draw cell boundaries on the mesh."""

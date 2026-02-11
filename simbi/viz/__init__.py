@@ -4,7 +4,9 @@ from .api import (
     plot,
     plot_coordinate_profile,
     plot_coordinate_profile_overlay,
+    plot_grid,
     plot_overlay,
+    plot_power_spectrum,
     plot_time_series,
 )
 from .cli import setup_parser as setup_viz_parser
@@ -20,6 +22,8 @@ __all__ = [
     "animate_coordinate_profile",
     "plot_coordinate_profile",
     "plot_coordinate_profile_overlay",
+    "plot_grid",
+    "plot_power_spectrum",
     "plot_time_series",
     "config_from_args",
     "load_component_props",

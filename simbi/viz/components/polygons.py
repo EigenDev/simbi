@@ -1,9 +1,8 @@
 """
 Polygon plot component for visualization.
 
-This component is a simple renderer. It expects to be given
-a single, 1D FieldData object where the domain is a list of patches
-and the values are a list of corresponding colors.
+Renders 2D AMR data as a PolyCollection. Expects 1D FieldData
+where domain is a list of patches and values are cell scalars.
 """
 
 from typing import Optional, Sequence
@@ -11,51 +10,22 @@ from typing import Optional, Sequence
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
-from pydantic import ValidationInfo, field_validator
 
 from simbi.reader.io import BodyCollection
-from simbi.types.bodies import Body
 
 from ..config import FigureConfig
-from ..types import ColorRange, FieldData, RenderResult
-from .interface import Component, ComponentProps
-from .quad import _create_color_normalization
+from ..types import FieldData, RenderResult
+from .interface import Component
+from .shared import ColormappedProps, create_color_normalization, draw_bodies
 
 
-class PolygonPlotProps(ComponentProps):
-    """Properties for a *single* polygon plot component."""
+class PolygonPlotProps(ColormappedProps):
+    """Properties for a polygon (AMR) plot component."""
 
-    cmap: str = "viridis"
-    color_range: ColorRange = ColorRange(min=None, max=None)
-    log_scale: bool = False
-    power: float = 1.0
-    alpha: float = 1.0
-
-    # Mesh visualization (optional)
-    show_mesh_grid: bool = False
-    mesh_color: str = "white"
-    mesh_alpha: float = 0.3
-    mesh_linewidth: float = 0.1
-
-    # Level bounds visualization (optional)
     show_level_bounds: bool = False
     level_color: str = "white"
     level_linewidth: float = 1.5
     level_alpha: float = 0.8
-
-    @field_validator("power")
-    @classmethod
-    def validate_power(cls, v: float, _: ValidationInfo) -> float:
-        if v <= 0:
-            raise ValueError(f"Power must be positive, got {v}")
-        return v
-
-    @field_validator("alpha", "mesh_alpha")
-    @classmethod
-    def validate_alpha(cls, v: float, _: ValidationInfo) -> float:
-        if v < 0 or v > 1:
-            raise ValueError(f"Alpha must be between 0 and 1, got {v}")
-        return v
 
 
 class PolygonPlotComponent(Component):
@@ -72,7 +42,7 @@ class PolygonPlotComponent(Component):
         self._level_artists: list = []
         self._initialized: bool = False
         self._first_render: bool = True
-        self.bodies: Optional[dict[str, Body]] = bodies
+        self.bodies: Optional[BodyCollection] = bodies
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
         self.fig = fig
@@ -128,7 +98,7 @@ class PolygonPlotComponent(Component):
         y_min, y_max = np.min(all_y), np.max(all_y)
 
         # Create color normalization
-        norm = _create_color_normalization(
+        norm = create_color_normalization(
             values,
             self.props.color_range,
             self.props.log_scale,
@@ -187,7 +157,7 @@ class PolygonPlotComponent(Component):
         self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
     ) -> None:
         """Draw immersed bodies on the plot."""
-        _draw_bodies(self.ax, body_collection, zorder, axes)
+        draw_bodies(self.ax, body_collection, zorder, axes)
 
     def _draw_level_bounds(
         self, level_bounds: Sequence[tuple[float, float, float, float]]

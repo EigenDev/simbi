@@ -8,6 +8,7 @@ as a stream plot.
 
 from typing import List, Optional, Tuple
 
+import matplotlib.colors as mcolors
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.streamplot import StreamplotSet
@@ -142,18 +143,23 @@ class StreamPlotComponent(Component):
         x, y, u, v, is_cropped = self._crop_to_limits(x, y, u, v, style)
         alpha = self.props.alpha * 0.5 if is_cropped else self.props.alpha
 
+        # bake alpha into the color tuple so both lines and arrows
+        # inherit it — streamplot has no alpha kwarg and post-hoc
+        # set_alpha is overridden by explicit facecolors
+
+        rgba = mcolors.to_rgba(self.props.color, alpha=alpha)
+
         self._streamplot = self.ax.streamplot(
             x,
             y,
             u,
             v,
-            color=self.props.color,
+            color=rgba,
             linewidth=self.props.linewidth,
             density=self.props.density,
             arrowstyle=self.props.arrowstyle,
             arrowsize=self.props.arrowsize,
         )
-        self._streamplot.lines.set_alpha(alpha)
 
         return RenderResult(
             artists={"streamplot": self._streamplot},

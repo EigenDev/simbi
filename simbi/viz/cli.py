@@ -13,14 +13,9 @@ from simbi.viz.checkpoint.checkpoint_utils import (
     extract_timestep,
     glob_checkpoints,
 )
+from simbi.viz.config import _PLOT_TYPE_TO_REGISTRY
 
-VALID_PLOT_TYPES = [
-    "line",
-    "multidim",
-    "coordinate_bin",
-    "time_series",
-    "power_spectrum",
-]
+VALID_PLOT_TYPES = sorted(_PLOT_TYPE_TO_REGISTRY.keys())
 
 try:
     with warnings.catch_warnings():
@@ -240,6 +235,92 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--overlay",
         action="store_true",
         help="overlay multiple files on same axes (line/coordinate_bin only)",
+    )
+    parser.add_argument(
+        "--normalizations",
+        nargs="+",
+        type=float,
+        default=None,
+        metavar="NORM",
+        help="per-file y-axis normalizations for overlay plots",
+    )
+    parser.add_argument(
+        "--labels",
+        nargs="+",
+        default=None,
+        metavar="LABEL",
+        help="custom per-file legend labels for overlay plots",
+    )
+    parser.add_argument(
+        "--x-normalizations",
+        nargs="+",
+        type=float,
+        default=None,
+        metavar="XNORM",
+        help="per-file x-axis normalizations (overrides auto max-extent detection)",
+    )
+
+    # =========================================================================
+    # subplot grid (multi-panel comparison)
+    # =========================================================================
+    parser.add_argument(
+        "--subplot",
+        action="store_true",
+        help="enable grid mode (auto-layout from file count)",
+    )
+    parser.add_argument(
+        "--layout",
+        nargs=2,
+        type=int,
+        metavar=("ROWS", "COLS"),
+        default=None,
+        help="explicit grid dimensions (e.g., --layout 2 3)",
+    )
+    parser.add_argument(
+        "--panel-labels",
+        nargs="+",
+        default=None,
+        metavar="LABEL",
+        help="custom per-panel titles",
+    )
+    parser.add_argument(
+        "--auto-label",
+        action="store_true",
+        help="derive panel titles from checkpoint metadata",
+    )
+    parser.add_argument(
+        "--no-shared-colorbar",
+        action="store_true",
+        help="use per-panel colorbars instead of a single shared one",
+    )
+    parser.add_argument(
+        "--annotate-inside",
+        action="store_true",
+        help="place panel labels inside the plot area instead of as titles",
+    )
+    parser.add_argument(
+        "--wspace",
+        type=float,
+        default=None,
+        help="horizontal spacing between subplots (0.0 = no gap)",
+    )
+    parser.add_argument(
+        "--hspace",
+        type=float,
+        default=None,
+        help="vertical spacing between subplots (0.0 = no gap)",
+    )
+    parser.add_argument(
+        "--max-xticks",
+        type=int,
+        default=None,
+        help="max number of x-axis ticks per panel (reduces label collisions)",
+    )
+    parser.add_argument(
+        "--max-yticks",
+        type=int,
+        default=None,
+        help="max number of y-axis ticks per panel (reduces label collisions)",
     )
 
     # =========================================================================

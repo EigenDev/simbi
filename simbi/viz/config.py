@@ -19,6 +19,16 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from .styling.theme import ThemeConfig
 from .types import Bounds
 
+# cli-facing plot type names (user sees these)
+# mapped to internal registry keys by _PLOT_TYPE_TO_REGISTRY
+_PLOT_TYPE_TO_REGISTRY: dict[str, str] = {
+    "line": "line",
+    "multidim": "quad",
+    "coordinate_bin": "coordinate_profile",
+    "time_series": "time_series",
+    "power_spectrum": "power_spectrum",
+}
+
 
 class FigureConfig(BaseModel):
     """Figure-level configuration (layout, axes, labels)."""
@@ -43,14 +53,22 @@ class FigureConfig(BaseModel):
 class PlotConfig(BaseModel):
     """Plot type and data configuration."""
 
-    plot_type: Literal[
-        "line", "multidim", "coordinate_bin", "time_series", "power_spectrum"
-    ]
+    plot_type: str
     fields: list[str]
     ndim: int = 1
     slice: Optional[dict[str, float]] = None
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
+
+    @field_validator("plot_type")
+    @classmethod
+    def validate_plot_type(cls, v: str) -> str:
+        valid = set(_PLOT_TYPE_TO_REGISTRY.keys())
+        if v not in valid:
+            raise ValueError(
+                f"unknown plot type '{v}'. valid: {', '.join(sorted(valid))}"
+            )
+        return v
 
     @field_validator("ndim")
     @classmethod

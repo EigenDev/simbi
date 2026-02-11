@@ -14,7 +14,7 @@ from simbi.viz.components import (
     QuiverPlotComponent,
     StreamPlotComponent,
 )
-from simbi.viz.dispatch import (
+from simbi.viz.registry import (
     list_overlay_types,
     select_overlay_component,
     select_scalar_component,

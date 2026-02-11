@@ -38,7 +38,7 @@ from typing import Any, Optional, Sequence, Union
 from pydantic import ValidationError
 
 from .components.interface import ComponentProps
-from .props_registry import PROPS_REGISTRY, get_props_class
+from .registry import get_props_class, get_props_registry
 
 # type alias for raw config dict
 ConfigDict = dict[str, dict[str, Any]]
@@ -292,12 +292,15 @@ def load_component_props(
     # merge configs (cli wins)
     merged = merge_configs(file_config, cli_config)
 
+    # extract grid section (not a component — handled separately)
+    merged.pop("grid", None)
+
     # validate and instantiate
     props: dict[str, ComponentProps] = {}
     errors: list[str] = []
 
     for component, config in merged.items():
-        if component not in PROPS_REGISTRY:
+        if component not in get_props_registry():
             # warn but don't fail - might be for a different purpose
             continue
 
@@ -313,6 +316,22 @@ def load_component_props(
         )
 
     return props
+
+
+def load_grid_config(
+    config_path: Optional[Union[str, Path]] = None,
+) -> Optional[dict[str, Any]]:
+    """
+    extract the grid section from a config file.
+
+    returns the raw grid dict (with keys like shared_colorbar, auto_label,
+    panels) or None if no grid section exists.
+    """
+    if not config_path:
+        return None
+
+    file_config = load_config_file(config_path)
+    return file_config.get("grid", None)
 
 
 def get_props_for_component(
@@ -354,7 +373,7 @@ def generate_example_config() -> str:
         "",
     ]
 
-    for name, props_cls in sorted(PROPS_REGISTRY.items()):
+    for name, props_cls in sorted(get_props_registry().items()):
         lines.append(f"{name}:")
 
         # get field info from pydantic model

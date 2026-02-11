@@ -28,6 +28,7 @@ class CoordinateProfileProps(ComponentProps):
     linestyle: str = "-"
     linewidth: float = 2.0
     normalization: float = 1
+    x_normalization: float = 1
     rbeg: float = 0.2  # Reference line start radius
     rend: float = 0.5  # Reference line end radius
 
@@ -78,17 +79,18 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         if data.ndim != 1:
             raise ValueError("CoordinateProfileComponent expects 1D FieldData.")
 
-        r_bins = data.domain[0]
+        r_bins = data.domain[0] / self.props.x_normalization
         values = data.values
         _, field_str = stripped_field_name(data.name)
         norm = self.props.normalization
+        line_label = self.props.label if self.props.label else field_str
         # --- Render Main Line ---
         good_bins = ~np.isnan(values)
         if self._main_line is None:
             self._main_line = self.ax.plot(
                 r_bins[good_bins],
                 values[good_bins] / norm,
-                label=field_str,
+                label=line_label,
             )[0]
         else:
             self._main_line.set_data(
@@ -117,7 +119,9 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         self.ax.set_yscale(self.props.y_scale)
         field_base_name, field_str = stripped_field_name(field_name)
 
-        self.ax.set_xlabel("$r$")
+        self.ax.set_xlabel(
+            r"$\tilde{r}$" if self.props.x_normalization != 1 else "$r$"
+        )
 
         if (
             self.props.show_reference_lines
