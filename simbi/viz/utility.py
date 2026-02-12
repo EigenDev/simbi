@@ -62,6 +62,7 @@ FIELD_MAP: dict[str, str] = {
     "schlieren": r"$|\nabla \ln \rho|$",
     "entropy-gradient": r"$|\nabla (p / \rho^\gamma)|$",
     "entropy-measure": r"$p / \rho^\gamma$",
+    "v_turb": r"$|\mathbf{v} - \langle \mathbf{v} \rangle|$",
     "torque x": r"$\tau_x$",
     "torque y": r"$\tau_y$",
     "torque z": r"$\tau_z$",

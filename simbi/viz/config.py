@@ -12,22 +12,15 @@
 # component-specific styling (cmap, log_scale, alpha, etc.) is handled
 # entirely by component props via --config and --props.
 # =============================================================================
+from argparse import Namespace
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
+# re-export for backward compatibility
+from .registry import PLOT_TYPE_ALIASES as _PLOT_TYPE_TO_REGISTRY  # noqa: F401
 from .styling.theme import ThemeConfig
 from .types import Bounds
-
-# cli-facing plot type names (user sees these)
-# mapped to internal registry keys by _PLOT_TYPE_TO_REGISTRY
-_PLOT_TYPE_TO_REGISTRY: dict[str, str] = {
-    "line": "line",
-    "multidim": "quad",
-    "coordinate_bin": "coordinate_profile",
-    "time_series": "time_series",
-    "power_spectrum": "power_spectrum",
-}
 
 
 class FigureConfig(BaseModel):
@@ -142,6 +135,68 @@ class OverlayConfig(BaseModel):
         if v < 0 or v > 1:
             raise ValueError(f"alpha must be between 0 and 1, got {v}")
         return v
+
+
+def parse_overlay_spec(
+    spec: str,
+    default_color: str = "white",
+    default_linewidth: float = 1.5,
+) -> OverlayConfig:
+    """
+    parse overlay specification string.
+
+    format: FIELD:COMPONENT:LEVELS
+    examples:
+        "mach:contour:1.0"
+        "mach:contour:1.0,2.0,3.0"
+    """
+    parts = spec.split(":")
+
+    if len(parts) < 1:
+        raise ValueError(
+            f"invalid overlay spec: '{spec}'. expected FIELD:COMPONENT:LEVELS"
+        )
+
+    field = parts[0]
+    component = parts[1] if len(parts) > 1 else "contour"
+    levels_str = parts[2] if len(parts) > 2 else "1.0"
+
+    try:
+        levels = [float(x.strip()) for x in levels_str.split(",")]
+    except ValueError as e:
+        raise ValueError(f"invalid levels in overlay spec '{spec}': {e}")
+
+    return OverlayConfig(
+        field=field,
+        component=component,
+        levels=levels,
+        color=default_color,
+        linewidth=default_linewidth,
+    )
+
+
+def overlays_from_args(args: Namespace) -> list[OverlayConfig]:
+    """
+    parse field overlay arguments into OverlayConfig list.
+
+    handles --field-overlay flag which can be specified multiple times.
+    """
+    raw_overlays = getattr(args, "field_overlays", None)
+    if not raw_overlays:
+        return []
+
+    default_color = getattr(args, "overlay_color", "white")
+    default_linewidth = getattr(args, "overlay_linewidth", 1.5)
+
+    overlays: list[OverlayConfig] = []
+
+    for overlay_group in raw_overlays:
+        for spec in overlay_group:
+            overlays.append(
+                parse_overlay_spec(spec, default_color, default_linewidth)
+            )
+
+    return overlays
 
 
 class VisualizationConfig(BaseModel):

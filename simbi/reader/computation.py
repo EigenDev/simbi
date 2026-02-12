@@ -847,6 +847,12 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         entropy = p / (rho**gamma_val + 1e-20)  # avoid division by zero
         return np.asarray(entropy)
 
+    def compute_turbulent_velocity(level_data: dict[str, Array]) -> Array:
+        """turbulent velocity: |v - <v>| where <v> is the spatial mean per component."""
+        components = [level_data[f"v{ii}"] for ii in range(1, ndim + 1)]
+        fluctuations = [vi - np.mean(vi) for vi in components]
+        return np.asarray(np.sqrt(sum(dv**2 for dv in fluctuations)))
+
     def compute_entropy_gradient(level_data: dict[str, Array]) -> Array:
         """
         gradient magnitude of entropy s = p / rho^gamma.
@@ -895,6 +901,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "schlieren": compute_schlieren,
         "entropy-measure": compute_entropy_measure,
         "entropy-gradient": compute_entropy_gradient,
+        "v_turb": compute_turbulent_velocity,
     }
 
     # add component fields

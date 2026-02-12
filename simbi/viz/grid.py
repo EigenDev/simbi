@@ -27,7 +27,11 @@ from .config import VisualizationConfig
 from .formatting import apply_scaling, remove_spines
 from .pipeline import create_plot_data, load_data
 from .pipeline.transforms import _compose_pcolormesh, compose_fields_for_render
-from .registry import select_scalar_component, select_vector_component
+from .registry import (
+    refinement_info,
+    select_scalar_component,
+    select_vector_component,
+)
 from .types import ColorRange, FieldData
 from .utility import get_field_str
 
@@ -100,15 +104,6 @@ def _resolve_panel_props(
                 pass
 
     return result
-
-
-def _refinement_info(
-    fields: Sequence[FieldData], config: VisualizationConfig
-) -> tuple[int, bool]:
-    """compute nlvls and use_polygons from field list."""
-    nlvls = 1 + sum("_L" in f.name for f in fields)
-    use_polygons = nlvls > 1 or config.refinement.render_mode == "polygons"
-    return nlvls, use_polygons
 
 
 def _compute_global_range(
@@ -275,7 +270,7 @@ def plot_grid(
     ):
         ax = axes_flat[ii]
         sim_data = panel_sim_data[ii]
-        nlvls, use_polygons = _refinement_info(plot_data.fields, config)
+        nlvls, use_polygons = refinement_info(plot_data.fields, config)
 
         # resolve per-panel props
         panel_props = _resolve_panel_props(component_props, panel_overrides, ii)

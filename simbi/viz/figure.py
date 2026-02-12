@@ -1,16 +1,13 @@
 # =============================================================================
 # figure.py
 #
-# orchestrator for visualization components.
+# figure management and animation for visualization components.
 #
 # responsibilities:
 #   - prepare and own the matplotlib Figure/Axes
 #   - manage component lifecycle (initialize, render, cleanup)
 #   - collect component outputs and delegate formatting to FigureFormatter
 #   - drive animations via a pluggable data pipeline
-#
-# the prepare_figure() factory lives here (not in pipeline/) to avoid
-# circular imports between the data pipeline and presentation layers.
 # =============================================================================
 import logging
 from typing import Any, Callable, Literal, Optional, Sequence, Tuple
@@ -20,16 +17,15 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure as MplFigure
 
-from simbi.viz.components.coord_binning import CoordinateProfileComponent
-from simbi.viz.components.time_series import TimeSeriesPlotComponent
-
 from . import formatting
 from .components import (
     LinePlotComponent,
     PolygonPlotComponent,
     QuadPlotComponent,
 )
+from .components.coord_binning import CoordinateProfileComponent
 from .components.interface import Component
+from .components.time_series import TimeSeriesPlotComponent
 from .config import VisualizationConfig
 from .types import CoordSystem, FieldData, PlotData
 
@@ -43,18 +39,12 @@ def _normalize_render_output(
     if result is None:
         return {}, None
 
+    # standard path: RenderResult or any object with .artists
     if hasattr(result, "artists"):
         artists = getattr(result, "artists", {}) or {}
         metadata = getattr(result, "metadata", None)
         if isinstance(artists, dict):
             return artists, metadata
-
-    if isinstance(result, (list, tuple)) and len(result) >= 1:
-        artists_candidate = result[0] if len(result) > 0 else {}
-        metadata_candidate = result[1] if len(result) > 1 else None
-        if isinstance(artists_candidate, dict):
-            return artists_candidate, metadata_candidate
-        return {}, metadata_candidate
 
     if isinstance(result, dict):
         return result, None
@@ -163,14 +153,7 @@ class Figure:
     def add_component(
         self, component: Component, data: Any = None, is_overlay: bool = False
     ):
-        """
-        adds a component and its associated data payload.
-
-        args:
-            component: the component to add
-            data: the data payload for the component
-            is_overlay: if True, marks this as an overlay (no colorbar, etc.)
-        """
+        """adds a component and its associated data payload."""
         self._components.append((component, data, is_overlay))
 
     def render(self):
@@ -191,7 +174,6 @@ class Figure:
             result = component.render(data, self.config.figure)
             artist_dict, metadata = _normalize_render_output(result)
 
-            # mark overlay metadata so formatter can skip colorbars
             if is_overlay:
                 if metadata is None:
                     metadata = {}
@@ -326,10 +308,6 @@ class Figure:
             )
             reader_logger.info(f"figure saved: {save_path}")
 
-    def show(self):
-        if self.fig:
-            plt.show()
-
     def _animate_with_pipeline(
         self,
         files: Sequence[str],
@@ -337,7 +315,7 @@ class Figure:
         config: VisualizationConfig,
         fps: int = 30,
     ) -> None:
-        """unified animation driver parameterized by a data pipeline.
+        """animation driver parameterized by a data pipeline.
 
         both animate() and animate_coordinate_profile() delegate here.
         the only difference between them is the data_pipeline callable.
@@ -414,9 +392,8 @@ class Figure:
     def animate(
         self,
         files: Sequence[str],
-        output_path: str | None = None,
         fps: int = 30,
-        save_all_frames: bool = False,
+        **kwargs,
     ):
         """create an animation from a sequence of checkpoint files."""
         from simbi.viz.pipeline import load_data
@@ -445,9 +422,8 @@ class Figure:
         files: Sequence[str],
         fields: Sequence[str],
         config: VisualizationConfig,
-        output_path: str | None = None,
         fps: int = 30,
-        save_all_frames: bool = False,
+        **kwargs,
     ):
         """create an animation of coordinate-binned profiles."""
         from simbi.viz.pipeline import load_data
@@ -460,7 +436,3 @@ class Figure:
             return create_coordinate_profile_data(sim_data, fields, config)
 
         self._animate_with_pipeline(files, pipeline, config, fps)
-
-    def tight_layout(self):
-        if self.fig:
-            self.fig.tight_layout()

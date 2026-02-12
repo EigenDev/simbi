@@ -38,12 +38,12 @@ def set_title(
     if time_scale and title_time is not None:
         title_time /= time_scale
 
-    title_str = (
-        f"{title}, t={title_time:.2f} {time_units}"
-        if title_time is not None
-        else f"{title}"
-    )
-    # title_str = title
+    # title_str = (
+    #     f"{title}, t={title_time:.2f} {time_units}"
+    #     if title_time is not None
+    #     else f"{title}"
+    # )
+    title_str = title
 
     if "polar" in ax.name:
         fig.suptitle(title_str)

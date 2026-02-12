@@ -1,9 +1,8 @@
 # =============================================================================
-# conversion.py
+# plot_config.py
 #
-# converts cli arguments to typed configuration objects.
-# clean separation: figure config is separate from component props.
-# component styling is handled entirely by config_loader, not here.
+# converts cli arguments (argparse.Namespace) to typed viz configuration
+# objects. pure CLI glue — no rendering, no data loading.
 # =============================================================================
 from argparse import Namespace
 from typing import Literal, Optional
@@ -18,16 +17,16 @@ from simbi.viz.config import (
     RefinementConfig,
     TimeSeriesConfig,
     VisualizationConfig,
+    overlays_from_args,
 )
+from simbi.viz.styling import get_theme
+from simbi.viz.styling.theme import ThemeConfig
+from simbi.viz.types import Bounds
 from simbi.viz.utility import get_dimensionality
-
-from ..styling import get_theme
-from ..styling.theme import ThemeConfig
-from ..types import Bounds
 
 
 def _pair_to_bounds(pair: list[float] | None) -> Optional[Bounds]:
-    """Convert a [min, max] pair to Bounds object."""
+    """convert a [min, max] pair to Bounds object."""
     if not pair or not any(x is not None for x in pair):
         return None
     return Bounds(min=pair[0], max=pair[1])
@@ -36,7 +35,7 @@ def _pair_to_bounds(pair: list[float] | None) -> Optional[Bounds]:
 def _validate_plot_type(
     plot_type: str | None, files: list[str]
 ) -> Literal["line", "multidim", "time_series", "coordinate_bin"]:
-    """Validate and auto-detect plot type if not specified."""
+    """validate and auto-detect plot type if not specified."""
     if plot_type:
         return plot_type  # type: ignore[return-value]
 
@@ -45,13 +44,12 @@ def _validate_plot_type(
 
 
 def plot_config_from_args(args: Namespace) -> PlotConfig:
-    """Build PlotConfig from cli arguments."""
+    """build PlotConfig from cli arguments."""
     import argparse
 
     files = args.files
     plot_type = getattr(args, "plot_type", None)
 
-    # parse slice spec
     raw_slice = getattr(args, "slice", None)
     slice_spec: Optional[dict[str, float]] = None
     if raw_slice:
@@ -71,7 +69,7 @@ def plot_config_from_args(args: Namespace) -> PlotConfig:
 
 
 def figure_config_from_args(args: Namespace) -> FigureConfig:
-    """Build FigureConfig from cli arguments."""
+    """build FigureConfig from cli arguments."""
     return FigureConfig(
         fig_size=getattr(args, "fig_size", None) or (8, 6),
         dpi=getattr(args, "dpi", 300),
@@ -90,13 +88,13 @@ def figure_config_from_args(args: Namespace) -> FigureConfig:
 
 
 def refinement_config_from_args(args: Namespace) -> RefinementConfig:
-    """Build RefinementConfig from cli arguments."""
+    """build RefinementConfig from cli arguments."""
     raw_levels = getattr(args, "active_levels", None)
 
     active_levels: Optional[set[int]] = None
     if raw_levels:
         if len(raw_levels) == 1 and raw_levels[0].lower() == "all":
-            active_levels = None  # signals "all levels"
+            active_levels = None
         else:
             try:
                 active_levels = set(int(lvl) for lvl in raw_levels)
@@ -113,21 +111,21 @@ def refinement_config_from_args(args: Namespace) -> RefinementConfig:
 
 
 def coordinate_config_from_args(args: Namespace) -> CoordinateConfig:
-    """Build CoordinateConfig from cli arguments."""
+    """build CoordinateConfig from cli arguments."""
     return CoordinateConfig(
         n_bins=getattr(args, "n_bins", 64),
     )
 
 
 def time_series_config_from_args(args: Namespace) -> TimeSeriesConfig:
-    """Build TimeSeriesConfig from cli arguments."""
+    """build TimeSeriesConfig from cli arguments."""
     return TimeSeriesConfig(
         weight=getattr(args, "weight", None),
     )
 
 
 def animation_config_from_args(args: Namespace) -> AnimationConfig:
-    """Build AnimationConfig from cli arguments."""
+    """build AnimationConfig from cli arguments."""
     return AnimationConfig(
         total_frames=len(getattr(args, "files", [])),
         frame_rate=getattr(args, "frame_rate", 30),
@@ -136,88 +134,15 @@ def animation_config_from_args(args: Namespace) -> AnimationConfig:
 
 
 def theme_config_from_args(args: Namespace) -> ThemeConfig:
-    """Build ThemeConfig from cli arguments."""
+    """build ThemeConfig from cli arguments."""
     from simbi.viz.config_loader import parse_overrides
 
     overrides = parse_overrides(getattr(args, "props", [])).get("theme", {})
     return get_theme(getattr(args, "theme", "default"), overrides or None)
 
 
-def parse_overlay_spec(
-    spec: str,
-    default_color: str = "white",
-    default_linewidth: float = 1.5,
-) -> OverlayConfig:
-    """
-    parse overlay specification string.
-
-    format: FIELD:COMPONENT:LEVELS
-    examples:
-        "mach:contour:1.0"
-        "mach:contour:1.0,2.0,3.0"
-        "v:contour:0.5"
-
-    args:
-        spec: the specification string
-        default_color: default color for the overlay
-        default_linewidth: default linewidth for the overlay
-
-    returns:
-        OverlayConfig instance
-    """
-    parts = spec.split(":")
-
-    if len(parts) < 1:
-        raise ValueError(
-            f"invalid overlay spec: '{spec}'. expected FIELD:COMPONENT:LEVELS"
-        )
-
-    field = parts[0]
-    component = parts[1] if len(parts) > 1 else "contour"
-    levels_str = parts[2] if len(parts) > 2 else "1.0"
-
-    try:
-        levels = [float(x.strip()) for x in levels_str.split(",")]
-    except ValueError as e:
-        raise ValueError(f"invalid levels in overlay spec '{spec}': {e}")
-
-    return OverlayConfig(
-        field=field,
-        component=component,
-        levels=levels,
-        color=default_color,
-        linewidth=default_linewidth,
-    )
-
-
-def overlays_from_args(args: Namespace) -> list[OverlayConfig]:
-    """
-    parse field overlay arguments into OverlayConfig list.
-
-    handles --field-overlay flag which can be specified multiple times.
-    each --field-overlay can have multiple specs (space-separated).
-    """
-    raw_overlays = getattr(args, "field_overlays", None)
-    if not raw_overlays:
-        return []
-
-    default_color = getattr(args, "overlay_color", "white")
-    default_linewidth = getattr(args, "overlay_linewidth", 1.5)
-
-    overlays: list[OverlayConfig] = []
-
-    # raw_overlays is list[list[str]] due to action="append" with nargs="+"
-    for overlay_group in raw_overlays:
-        for spec in overlay_group:
-            overlays.append(
-                parse_overlay_spec(spec, default_color, default_linewidth)
-            )
-
-    return overlays
-
-
 def config_from_args(args: Namespace) -> VisualizationConfig:
-    """Build complete VisualizationConfig from cli arguments."""
+    """build complete VisualizationConfig from cli arguments."""
     return VisualizationConfig(
         plot=plot_config_from_args(args),
         figure=figure_config_from_args(args),
@@ -231,7 +156,7 @@ def config_from_args(args: Namespace) -> VisualizationConfig:
 
 
 def is_animation_requested(args: Namespace) -> bool:
-    """Check if animation was requested."""
+    """check if animation was requested."""
     return (
         getattr(args, "animate", False)
         or getattr(args, "kind", "snapshot") == "movie"
@@ -239,24 +164,18 @@ def is_animation_requested(args: Namespace) -> bool:
 
 
 def should_show_plot(args: Namespace) -> bool:
-    """Determine if plot should be displayed."""
+    """determine if plot should be displayed."""
     return not getattr(args, "no_show", False)
 
 
 def get_save_path(args: Namespace) -> Optional[str]:
-    """Get the save path if specified."""
+    """get the save path if specified."""
     return getattr(args, "save_as", None)
 
 
 def load_props_from_args(args: Namespace) -> dict[str, ComponentProps]:
     """
-    Load component props from config file and/or cli overrides.
-
-    Args:
-        args: parsed cli arguments (expects --config and --props)
-
-    Returns:
-        dict mapping component names to validated props instances
+    load component props from config file and/or cli overrides.
     """
     from simbi.viz.config_loader import load_component_props
 
@@ -271,7 +190,7 @@ def load_props_from_args(args: Namespace) -> dict[str, ComponentProps]:
 
 def handle_generate_config(args: Namespace) -> bool:
     """
-    Handle --generate-config flag. Returns True if handled (should exit).
+    handle --generate-config flag. returns True if handled (should exit).
     """
     if getattr(args, "generate_config", False):
         from simbi.viz.config_loader import generate_example_config

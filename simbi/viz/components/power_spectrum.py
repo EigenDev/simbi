@@ -71,14 +71,21 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         k = data.domain[0]
         e_k = data.values
 
-        if self.props.compensated:
+        # axis labels from data when available, fall back to E(k) vs k
+        has_custom_axes = data.axis_names and len(data.axis_names) >= 1
+        default_xlabel = data.axis_names[0] if has_custom_axes else r"$k$"
+        default_ylabel = data.name if has_custom_axes else r"$E(k)$"
+
+        if self.props.compensated and not has_custom_axes:
             y = k ** (5.0 / 3.0) * e_k
             ylabel = r"$k^{5/3}\,E(k)$"
         else:
             y = e_k
-            ylabel = r"$E(k)$"
+            ylabel = default_ylabel
 
-        label = self.props.label or ylabel
+        # prefer body name for legend (multi-body PSD), then props, then ylabel
+        body_label = data.body_names[0] if data.body_names else None
+        label = self.props.label or body_label or ylabel
 
         line_kwargs = {"linewidth": self.props.linewidth, "label": label}
         if self.props.color:
@@ -89,12 +96,18 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         else:
             self._main_line.set_data(k, y)
 
-        # reference slopes
-        if self.props.show_reference_slopes and not self.props.compensated:
+        # reference slopes only for spatial spectra (not temporal PSD)
+        if (
+            self.props.show_reference_slopes
+            and not self.props.compensated
+            and not has_custom_axes
+        ):
             self._draw_reference_slopes(k, e_k)
+
+        if self.ax.get_legend_handles_labels()[1]:
             self.ax.legend(loc="best")
 
-        self.ax.set_xlabel(r"$k$")
+        self.ax.set_xlabel(default_xlabel)
         self.ax.set_ylabel(ylabel)
 
         return RenderResult(

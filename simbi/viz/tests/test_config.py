@@ -6,7 +6,7 @@
 import pytest
 
 from simbi.viz.config import OverlayConfig, PlotConfig, VisualizationConfig
-from simbi.viz.pipeline.conversion import overlays_from_args, parse_overlay_spec
+from simbi.viz.config import overlays_from_args, parse_overlay_spec
 
 
 class TestOverlayConfig:

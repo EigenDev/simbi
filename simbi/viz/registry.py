@@ -1,42 +1,44 @@
 # =============================================================================
 # registry.py
 #
-# single source of truth for all visualization components.
-# adding a new plot type means adding one entry here (plus the component file).
+# single source of truth for visualization components.
+# components are grouped by category in separate dicts.
+# each entry is a (component_cls, props_cls, props_key) tuple.
 #
 # usage:
-#   from simbi.viz.registry import registry, get_valid_plot_types
-#   entry = registry()["power_spectrum"]
-#   component = entry.component_cls(entry.props_cls())
+#   from simbi.viz.registry import select_scalar_component
+#   comp_cls, props_cls, key = select_scalar_component(field_data)
 # =============================================================================
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, Type
+from typing import Any, Optional, Type
 
-if TYPE_CHECKING:
-    pass
+# component tuple: (component_cls, props_cls, props_key)
+_ComponentEntry = tuple[Type, Type, str]
 
+# lazy-loaded dicts
+_SCALAR: Optional[dict[str, _ComponentEntry]] = None
+_VECTOR: Optional[dict[str, _ComponentEntry]] = None
+_OVERLAY: Optional[dict[str, _ComponentEntry]] = None
+_ANALYSIS: Optional[dict[str, _ComponentEntry]] = None
 
-@dataclass(frozen=True)
-class PlotTypeEntry:
-    """metadata for a registered plot type."""
-
-    component_cls: Type
-    props_cls: Type
-    props_key: str
-    category: str  # "scalar", "vector", "overlay", "analysis"
-    data_dims: tuple[int, ...] = ()
-    is_polygon: bool = False
-    supports_animation: bool = False
-    supports_overlay: bool = False
-
-
-_REGISTRY: Optional[dict[str, PlotTypeEntry]] = None
+# cli plot-type names -> internal registry keys
+PLOT_TYPE_ALIASES: dict[str, str] = {
+    "line": "line",
+    "multidim": "quad",
+    "coordinate_bin": "coordinate_profile",
+    "time_series": "time_series",
+    "power_spectrum": "power_spectrum",
+    "temporal_spectrum": "temporal_spectrum",
+}
 
 
-def _build_registry() -> dict[str, PlotTypeEntry]:
-    """build the component registry. lazy-loaded to avoid circular imports."""
+def _ensure_loaded() -> None:
+    """lazy-load all component dicts to avoid circular imports."""
+    global _SCALAR, _VECTOR, _OVERLAY, _ANALYSIS
+    if _SCALAR is not None:
+        return
+
     from .components.contour import ContourPlotComponent, ContourPlotProps
     from .components.coord_binning import (
         CoordinateProfileComponent,
@@ -56,131 +58,93 @@ def _build_registry() -> dict[str, PlotTypeEntry]:
         TimeSeriesPlotProps,
     )
 
-    return {
-        # scalar components (dispatched by ndim)
-        "line": PlotTypeEntry(
-            component_cls=LinePlotComponent,
-            props_cls=LinePlotProps,
-            props_key="line",
-            category="scalar",
-            data_dims=(1,),
-            supports_animation=True,
-            supports_overlay=True,
+    _SCALAR = {
+        "line": (LinePlotComponent, LinePlotProps, "line"),
+        "quad": (QuadPlotComponent, QuadPlotProps, "quad"),
+        "polygon": (PolygonPlotComponent, PolygonPlotProps, "polygon"),
+    }
+
+    _VECTOR = {
+        "quiver": (QuiverPlotComponent, QuiverPlotProps, "quiver"),
+        "stream": (StreamPlotComponent, StreamPlotProps, "stream"),
+    }
+
+    _OVERLAY = {
+        "contour": (ContourPlotComponent, ContourPlotProps, "contour"),
+    }
+
+    _ANALYSIS = {
+        "coordinate_profile": (
+            CoordinateProfileComponent,
+            CoordinateProfileProps,
+            "coordinate_profile",
         ),
-        "quad": PlotTypeEntry(
-            component_cls=QuadPlotComponent,
-            props_cls=QuadPlotProps,
-            props_key="quad",
-            category="scalar",
-            data_dims=(2,),
-            supports_animation=True,
+        "time_series": (
+            TimeSeriesPlotComponent,
+            TimeSeriesPlotProps,
+            "time_series",
         ),
-        "polygon": PlotTypeEntry(
-            component_cls=PolygonPlotComponent,
-            props_cls=PolygonPlotProps,
-            props_key="polygon",
-            category="scalar",
-            data_dims=(1, 2),
-            is_polygon=True,
-            supports_animation=True,
+        "power_spectrum": (
+            PowerSpectrumComponent,
+            PowerSpectrumProps,
+            "power_spectrum",
         ),
-        # vector components
-        "quiver": PlotTypeEntry(
-            component_cls=QuiverPlotComponent,
-            props_cls=QuiverPlotProps,
-            props_key="quiver",
-            category="vector",
-            data_dims=(2,),
-        ),
-        "stream": PlotTypeEntry(
-            component_cls=StreamPlotComponent,
-            props_cls=StreamPlotProps,
-            props_key="stream",
-            category="vector",
-            data_dims=(2,),
-        ),
-        # overlay components
-        "contour": PlotTypeEntry(
-            component_cls=ContourPlotComponent,
-            props_cls=ContourPlotProps,
-            props_key="contour",
-            category="overlay",
-            data_dims=(2,),
-        ),
-        # analysis components (custom pipelines, not dispatched by ndim)
-        "coordinate_profile": PlotTypeEntry(
-            component_cls=CoordinateProfileComponent,
-            props_cls=CoordinateProfileProps,
-            props_key="coordinate_profile",
-            category="analysis",
-            supports_animation=True,
-            supports_overlay=True,
-        ),
-        "time_series": PlotTypeEntry(
-            component_cls=TimeSeriesPlotComponent,
-            props_cls=TimeSeriesPlotProps,
-            props_key="time_series",
-            category="analysis",
-        ),
-        "power_spectrum": PlotTypeEntry(
-            component_cls=PowerSpectrumComponent,
-            props_cls=PowerSpectrumProps,
-            props_key="power_spectrum",
-            category="analysis",
+        # temporal spectrum reuses the power spectrum component
+        "temporal_spectrum": (
+            PowerSpectrumComponent,
+            PowerSpectrumProps,
+            "power_spectrum",
         ),
     }
 
 
-def registry() -> dict[str, PlotTypeEntry]:
-    """get the component registry (lazy-initialized)."""
-    global _REGISTRY
-    if _REGISTRY is None:
-        _REGISTRY = _build_registry()
-    return _REGISTRY
+def _all_entries() -> dict[str, _ComponentEntry]:
+    """merged view of all component dicts."""
+    _ensure_loaded()
+    return {**_SCALAR, **_VECTOR, **_OVERLAY, **_ANALYSIS}
 
 
 # =========================================================================
-# convenience accessors
+# public accessors
 # =========================================================================
+
+
 def get_valid_plot_types() -> list[str]:
     """plot types valid for --plot-type cli flag."""
-    from .config import _PLOT_TYPE_TO_REGISTRY
-
-    return sorted(_PLOT_TYPE_TO_REGISTRY.keys())
+    return sorted(PLOT_TYPE_ALIASES.keys())
 
 
 def get_props_class(name: str) -> Type:
     """get props class by component name."""
-    r = registry()
+    entries = _all_entries()
     key = name.lower().replace("-", "_")
-    if key not in r:
-        valid = ", ".join(sorted(r.keys()))
+    if key not in entries:
+        valid = ", ".join(sorted(entries.keys()))
         raise KeyError(f"unknown component '{name}'. valid: {valid}")
-    return r[key].props_cls
+    return entries[key][1]
 
 
 def get_props_registry() -> dict[str, Type]:
-    """get flat dict of name -> props_cls (backward compat for config_loader)."""
-    return {name: entry.props_cls for name, entry in registry().items()}
+    """get flat dict of name -> props_cls (used by config_loader)."""
+    return {name: entry[1] for name, entry in _all_entries().items()}
 
 
 def list_components() -> list[str]:
     """return sorted list of registered component names."""
-    return sorted(registry().keys())
+    return sorted(_all_entries().keys())
 
 
 # =========================================================================
-# dispatch helpers (replace dispatch.py)
+# dispatch helpers
 # =========================================================================
+
+
 def select_scalar_component(
     field_data: Any, use_polygons: bool = False
 ) -> tuple[Type, Type, str]:
-    """
-    select component for a scalar field based on dimensionality.
+    """select component for a scalar field based on dimensionality."""
+    _ensure_loaded()
 
-    returns:
-        tuple of (component_class, props_class, registry_key)
-    """
     ndim = field_data.ndim
     is_polygon = field_data.name.endswith("_polygons") or use_polygons
 
@@ -189,50 +153,53 @@ def select_scalar_component(
             f"field '{field_data.name}' is 3D. use --slice to reduce dimensionality."
         )
 
-    r = registry()
-
     if is_polygon:
-        entry = r["polygon"]
-        return entry.component_cls, entry.props_cls, entry.props_key
+        return _SCALAR["polygon"]
 
     if ndim == 1:
-        entry = r["line"]
+        return _SCALAR["line"]
     elif ndim == 2:
-        entry = r["quad"]
-    else:
-        raise ValueError(f"no component for ndim={ndim}, polygon={is_polygon}.")
+        return _SCALAR["quad"]
 
-    return entry.component_cls, entry.props_cls, entry.props_key
+    raise ValueError(f"no component for ndim={ndim}, polygon={is_polygon}.")
 
 
 def select_vector_component(
     vector_type: str = "quiver",
 ) -> tuple[Type, Type, str]:
     """select component for vector field visualization."""
-    r = registry()
-    if vector_type not in r or r[vector_type].category != "vector":
-        valid = [k for k, v in r.items() if v.category == "vector"]
+    _ensure_loaded()
+
+    if vector_type not in _VECTOR:
+        valid = ", ".join(sorted(_VECTOR.keys()))
         raise ValueError(
-            f"unknown vector_type: '{vector_type}'. valid: {', '.join(valid)}"
+            f"unknown vector_type: '{vector_type}'. valid: {valid}"
         )
-    entry = r[vector_type]
-    return entry.component_cls, entry.props_cls, entry.props_key
+    return _VECTOR[vector_type]
 
 
 def select_overlay_component(
     overlay_type: str,
 ) -> tuple[Type, Type, str]:
     """select component for overlay visualization."""
-    r = registry()
-    if overlay_type not in r or r[overlay_type].category != "overlay":
-        valid = [k for k, v in r.items() if v.category == "overlay"]
+    _ensure_loaded()
+
+    if overlay_type not in _OVERLAY:
+        valid = ", ".join(sorted(_OVERLAY.keys()))
         raise ValueError(
-            f"unknown overlay_type: '{overlay_type}'. valid: {', '.join(valid)}"
+            f"unknown overlay_type: '{overlay_type}'. valid: {valid}"
         )
-    entry = r[overlay_type]
-    return entry.component_cls, entry.props_cls, entry.props_key
+    return _OVERLAY[overlay_type]
 
 
 def list_overlay_types() -> list[str]:
     """return list of available overlay component types."""
-    return sorted(k for k, v in registry().items() if v.category == "overlay")
+    _ensure_loaded()
+    return sorted(_OVERLAY.keys())
+
+
+def refinement_info(fields, config) -> tuple[int, bool]:
+    """compute nlvls and use_polygons from field list."""
+    nlvls = 1 + sum("_L" in f.name for f in fields)
+    use_polygons = nlvls > 1 or config.refinement.render_mode == "polygons"
+    return nlvls, use_polygons
