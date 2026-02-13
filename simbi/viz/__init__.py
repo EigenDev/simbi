@@ -10,7 +10,9 @@ from .api import (
     plot_temporal_spectrum,
     plot_time_series,
 )
+from .builder import SimFigure
 from .config_loader import generate_example_config, load_component_props
+from .pipeline import create_plot_data, load_data
 
 __all__ = [
     "plot",
@@ -25,4 +27,7 @@ __all__ = [
     "plot_time_series",
     "load_component_props",
     "generate_example_config",
+    "SimFigure",
+    "create_plot_data",
+    "load_data",
 ]

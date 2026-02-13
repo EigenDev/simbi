@@ -21,17 +21,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.figure import Figure as MplFigure
 
+from .builder import create_scalar_component, get_props
 from .components.interface import ComponentProps
 from .components.shared import ColormappedProps
 from .config import VisualizationConfig
 from .formatting import apply_scaling, remove_spines
 from .pipeline import create_plot_data, load_data
 from .pipeline.transforms import _compose_pcolormesh, compose_fields_for_render
-from .registry import (
-    refinement_info,
-    select_scalar_component,
-    select_vector_component,
-)
+from .registry import refinement_info, select_vector_component
 from .types import ColorRange, FieldData
 from .utility import get_field_str
 
@@ -283,20 +280,16 @@ def plot_grid(
         apply_scaling(ax, config.figure)
 
         for field_data in final_fields:
-            comp_cls, props_cls, props_key = select_scalar_component(
-                field_data, use_polygons
+            component, props_key = create_scalar_component(
+                field_data, panel_props, use_polygons,
+                bodies=plot_data.body_collection,
             )
-
-            props = panel_props.get(props_key, props_cls())
 
             # apply shared color range
             if global_range and shared_colorbar:
-                props = _override_color_range(props, *global_range)
-
-            if props_key in ("polygon", "quad"):
-                component = comp_cls(props, plot_data.body_collection)
-            else:
-                component = comp_cls(props)
+                component.props = _override_color_range(
+                    component.props, *global_range
+                )
 
             component.initialize(fig, ax)
             result = component.render(field_data, config.figure)
@@ -343,7 +336,7 @@ def plot_grid(
                 comp_cls, props_cls, props_key = select_vector_component(
                     vector_type
                 )
-                vec_props = panel_props.get(props_key, props_cls())
+                vec_props = get_props(panel_props, props_key, props_cls)
                 vec_comp = comp_cls(vec_props)
                 vec_comp.initialize(fig, ax)
                 vec_comp.render([v1_field, v2_field], config.figure)

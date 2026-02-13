@@ -2,8 +2,9 @@
 # api.py
 #
 # public api for the visualization system.
-# each public function is self-contained: load -> figure -> components -> render.
-# no shared orchestrator — read any function top-to-bottom to see the full flow.
+# each public function is a thin wrapper that wires data to SimFigure or
+# directly to Figure for specialized analysis plots.
+# shared dispatch logic lives in builder.py.
 # =============================================================================
 from pathlib import Path
 from typing import Optional, Sequence
@@ -11,6 +12,15 @@ from typing import Optional, Sequence
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .builder import (
+    SimFigure,
+    detect_projection,
+    dispatch_overlay_components,
+    dispatch_scalar_components,
+    dispatch_vector_components,
+    get_props,
+    init_component,
+)
 from .components import (
     CoordinateProfileComponent,
     CoordinateProfileProps,
@@ -21,7 +31,7 @@ from .components import (
     TimeSeriesPlotComponent,
     TimeSeriesPlotProps,
 )
-from .components.interface import Component, ComponentProps
+from .components.interface import ComponentProps
 from .config import OverlayConfig, VisualizationConfig
 from .figure import Figure, prepare_figure
 from .pipeline import create_plot_data, load_data
@@ -29,49 +39,14 @@ from .pipeline.coord_binning import create_coordinate_profile_data
 from .pipeline.power_spectrum import create_power_spectrum_data
 from .pipeline.temporal_spectrum import create_temporal_spectrum_data
 from .pipeline.time_series import create_time_series_data
-from .pipeline.transforms import _compose_pcolormesh, compose_fields_for_render
-from .registry import (
-    refinement_info,
-    select_overlay_component,
-    select_scalar_component,
-    select_vector_component,
-)
-from .types import CoordSystem, FieldData
+from .pipeline.transforms import compose_fields_for_render
+from .registry import refinement_info
+from .types import CoordSystem
+
 
 # ---------------------------------------------------------------------------
-# shared helpers
+# internal helpers (api-specific)
 # ---------------------------------------------------------------------------
-
-
-def _get_props(
-    component_props: Optional[dict[str, ComponentProps]],
-    key: str,
-    default_factory,
-) -> ComponentProps:
-    """get props from dict or create default."""
-    if component_props and key in component_props:
-        return component_props[key]
-    return default_factory()
-
-
-def _detect_projection(fields: Sequence[FieldData], coord_system: str) -> str:
-    """determine projection from fields and coordinate system."""
-    if not fields:
-        return "cartesian"
-    is_2d = fields[0].ndim == 2 or fields[0].name.endswith("_polygons")
-    if is_2d and coord_system == "spherical":
-        return "polar"
-    return "cartesian"
-
-
-def _init_component(
-    figure: Figure, component: Component, field_data, is_overlay: bool = False
-) -> None:
-    """initialize a component and attach it to the figure."""
-    if figure.fig is None:
-        raise RuntimeError("figure not initialized")
-    component.initialize(figure.fig, figure.axes["main"])
-    figure.add_component(component, field_data, is_overlay=is_overlay)
 
 
 def _save_and_show(figure: Figure, save_as: Optional[str], show: bool) -> None:
@@ -82,97 +57,13 @@ def _save_and_show(figure: Figure, save_as: Optional[str], show: bool) -> None:
         plt.show()
 
 
-# ---------------------------------------------------------------------------
-# component dispatch helpers
-# ---------------------------------------------------------------------------
-
-
-def _dispatch_scalar_components(
-    figure: Figure,
-    final_fields: Sequence[FieldData],
-    component_props: Optional[dict[str, ComponentProps]],
-    use_polygons: bool,
-    bodies=None,
-) -> None:
-    """create and attach scalar components to figure based on field dimensionality."""
-    for field_data in final_fields:
-        comp_cls, props_cls, props_key = select_scalar_component(
-            field_data, use_polygons
-        )
-        props = _get_props(component_props, props_key, props_cls)
-        if props_key in ("polygon", "quad"):
-            component = comp_cls(props, bodies)
-        else:
-            component = comp_cls(props)
-        _init_component(figure, component, field_data)
-
-
-def _dispatch_vector_components(
-    figure: Figure,
-    sim_data,
-    vector_fields: Sequence[str],
-    config: VisualizationConfig,
-    component_props: Optional[dict[str, ComponentProps]],
-    vector_type: str = "quiver",
-) -> None:
-    """create and attach vector field components (quiver or streamplot)."""
-    vector_plot_data = create_plot_data(sim_data, vector_fields, config)
-
-    vi_levels = [
-        f
-        for f in vector_plot_data.fields
-        if f.name.startswith(vector_fields[0])
-    ]
-    vj_levels = [
-        f
-        for f in vector_plot_data.fields
-        if f.name.startswith(vector_fields[1])
-    ]
-
-    v1_field = _compose_pcolormesh(vi_levels)
-    v2_field = _compose_pcolormesh(vj_levels)
-
-    comp_cls, props_cls, props_key = select_vector_component(vector_type)
-    props = _get_props(component_props, props_key, props_cls)
-    _init_component(figure, comp_cls(props), [v1_field, v2_field])
-
-
-def _dispatch_overlay_components(
-    figure: Figure,
-    sim_data,
-    overlays: Sequence[OverlayConfig],
-    config: VisualizationConfig,
-) -> None:
-    """create and attach overlay components (e.g., contour lines)."""
-    for overlay in overlays:
-        overlay_plot_data = create_plot_data(sim_data, [overlay.field], config)
-        if not overlay_plot_data.fields:
-            continue
-
-        overlay_field = _compose_pcolormesh(list(overlay_plot_data.fields))
-        if overlay_field.ndim != 2:
-            continue
-
-        comp_cls, props_cls, _ = select_overlay_component(overlay.component)
-        props = props_cls(
-            levels=tuple(overlay.levels),
-            color=overlay.color,
-            linewidths=overlay.linewidth,
-            linestyles=overlay.linestyle,
-            alpha=overlay.alpha,
-            filled=overlay.filled,
-            label_contours=overlay.label_contours,
-        )
-        _init_component(figure, comp_cls(props), overlay_field, is_overlay=True)
-
-
 def _setup_scalar_figure(config, files, fields, component_props, **kwargs):
     """load data, prepare figure, and attach scalar/vector/overlay components."""
     sim_data = load_data(files[0])
     scalar_plot_data = create_plot_data(sim_data, fields, config)
     final_fields = compose_fields_for_render(scalar_plot_data.fields, config)
     nlvls, use_polygons = refinement_info(scalar_plot_data.fields, config)
-    projection = _detect_projection(
+    projection = detect_projection(
         final_fields, sim_data.metadata.coord_system
     )
 
@@ -184,7 +75,7 @@ def _setup_scalar_figure(config, files, fields, component_props, **kwargs):
         coord_system=CoordSystem(sim_data.metadata.coord_system),
     )
 
-    _dispatch_scalar_components(
+    dispatch_scalar_components(
         figure,
         final_fields,
         component_props,
@@ -194,7 +85,7 @@ def _setup_scalar_figure(config, files, fields, component_props, **kwargs):
 
     vector_fields = kwargs.get("vector_fields")
     if vector_fields:
-        _dispatch_vector_components(
+        dispatch_vector_components(
             figure,
             sim_data,
             vector_fields,
@@ -207,7 +98,7 @@ def _setup_scalar_figure(config, files, fields, component_props, **kwargs):
     if kwargs.get("overlays"):
         all_overlays.extend(kwargs["overlays"])
     if all_overlays:
-        _dispatch_overlay_components(figure, sim_data, all_overlays, config)
+        dispatch_overlay_components(figure, sim_data, all_overlays, config)
 
     return figure
 
@@ -298,10 +189,10 @@ def plot_coordinate_profile(
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=4)
 
     for field_data in plot_data.fields:
-        props = _get_props(
+        props = get_props(
             component_props, "coordinate_profile", CoordinateProfileProps
         )
-        _init_component(figure, CoordinateProfileComponent(props), field_data)
+        init_component(figure, CoordinateProfileComponent(props), field_data)
 
     figure.render()
     _save_and_show(figure, save_as, show)
@@ -331,10 +222,10 @@ def animate_coordinate_profile(
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=4)
 
     for field_data in plot_data.fields:
-        props = _get_props(
+        props = get_props(
             component_props, "coordinate_profile", CoordinateProfileProps
         )
-        _init_component(figure, CoordinateProfileComponent(props), field_data)
+        init_component(figure, CoordinateProfileComponent(props), field_data)
 
     fps = kwargs.get("fps") or config.animation.frame_rate
     figure.animate_coordinate_profile(files, fields, config, fps=fps)
@@ -363,8 +254,8 @@ def plot_time_series(
     figure = prepare_figure(config, nlvls=nlines)
 
     for field_data in plot_data.fields:
-        props = _get_props(component_props, "time_series", TimeSeriesPlotProps)
-        _init_component(figure, TimeSeriesPlotComponent(props), field_data)
+        props = get_props(component_props, "time_series", TimeSeriesPlotProps)
+        init_component(figure, TimeSeriesPlotComponent(props), field_data)
 
     figure.render()
     _save_and_show(figure, save_as, show)
@@ -391,10 +282,10 @@ def plot_temporal_spectrum(
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
 
     for field_data in plot_data.fields:
-        props = _get_props(
+        props = get_props(
             component_props, "power_spectrum", PowerSpectrumProps
         )
-        _init_component(figure, PowerSpectrumComponent(props), field_data)
+        init_component(figure, PowerSpectrumComponent(props), field_data)
 
     figure.render()
     _save_and_show(figure, save_as, show)
@@ -423,10 +314,10 @@ def plot_power_spectrum(
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
 
     for field_data in plot_data.fields:
-        props = _get_props(
+        props = get_props(
             component_props, "power_spectrum", PowerSpectrumProps
         )
-        _init_component(figure, PowerSpectrumComponent(props), field_data)
+        init_component(figure, PowerSpectrumComponent(props), field_data)
 
     figure.render()
     _save_and_show(figure, save_as, show)
@@ -475,7 +366,7 @@ def plot_overlay(
         for field_data in plot_data.fields:
             if field_data.ndim != 1:
                 continue
-            base_props = _get_props(component_props, "line", LinePlotProps)
+            base_props = get_props(component_props, "line", LinePlotProps)
             props = LinePlotProps(
                 label=f"{field_data.name}",
                 linewidth=base_props.linewidth,
@@ -483,7 +374,7 @@ def plot_overlay(
                 marker_size=base_props.marker_size,
                 alpha=base_props.alpha,
             )
-            _init_component(figure, LinePlotComponent(props), field_data)
+            init_component(figure, LinePlotComponent(props), field_data)
 
     figure.render()
     _save_and_show(figure, save_as, show)
@@ -536,7 +427,7 @@ def plot_coordinate_profile_overlay(
             x_norm = float(np.nanmax(plot_data.fields[0].domain[0]))
 
         for field_data in plot_data.fields:
-            base_props = _get_props(
+            base_props = get_props(
                 component_props,
                 "coordinate_profile",
                 CoordinateProfileProps,
@@ -554,7 +445,7 @@ def plot_coordinate_profile_overlay(
                 x_scale=base_props.x_scale,
                 y_scale=base_props.y_scale,
             )
-            _init_component(
+            init_component(
                 figure, CoordinateProfileComponent(props), field_data
             )
 

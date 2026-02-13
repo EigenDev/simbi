@@ -194,12 +194,12 @@ class TestPlotGrid:
     @patch("simbi.viz.grid.load_data")
     @patch("simbi.viz.grid.create_plot_data")
     @patch("simbi.viz.grid.compose_fields_for_render")
-    @patch("simbi.viz.grid.select_scalar_component")
+    @patch("simbi.viz.grid.create_scalar_component")
     @patch("matplotlib.pyplot.show")
     def test_basic_2d_grid(
         self,
         mock_show,
-        mock_select,
+        mock_create_comp,
         mock_compose,
         mock_create,
         mock_load,
@@ -235,9 +235,8 @@ class TestPlotGrid:
             artists={},
             metadata={},
         )
-        mock_comp_cls = MagicMock(return_value=mock_comp)
-        mock_props_cls = ColormappedProps
-        mock_select.return_value = (mock_comp_cls, mock_props_cls, "quad")
+        mock_comp.props = ColormappedProps()
+        mock_create_comp.return_value = (mock_comp, "quad")
 
         fig = plot_grid(
             mock_config,
@@ -256,12 +255,12 @@ class TestPlotGrid:
     @patch("simbi.viz.grid.load_data")
     @patch("simbi.viz.grid.create_plot_data")
     @patch("simbi.viz.grid.compose_fields_for_render")
-    @patch("simbi.viz.grid.select_scalar_component")
+    @patch("simbi.viz.grid.create_scalar_component")
     @patch("matplotlib.pyplot.show")
     def test_explicit_layout(
         self,
         mock_show,
-        mock_select,
+        mock_create_comp,
         mock_compose,
         mock_create,
         mock_load,
@@ -288,8 +287,8 @@ class TestPlotGrid:
             artists={},
             metadata={},
         )
-        mock_comp_cls = MagicMock(return_value=mock_comp)
-        mock_select.return_value = (mock_comp_cls, ColormappedProps, "quad")
+        mock_comp.props = ColormappedProps()
+        mock_create_comp.return_value = (mock_comp, "quad")
 
         fig = plot_grid(
             mock_config,
@@ -306,12 +305,12 @@ class TestPlotGrid:
     @patch("simbi.viz.grid.load_data")
     @patch("simbi.viz.grid.create_plot_data")
     @patch("simbi.viz.grid.compose_fields_for_render")
-    @patch("simbi.viz.grid.select_scalar_component")
+    @patch("simbi.viz.grid.create_scalar_component")
     @patch("matplotlib.pyplot.show")
     def test_shared_colorbar(
         self,
         mock_show,
-        mock_select,
+        mock_create_comp,
         mock_compose,
         mock_create,
         mock_load,
@@ -345,8 +344,8 @@ class TestPlotGrid:
             artists={"mesh": real_mappable},
             metadata={"mappable": real_mappable},
         )
-        mock_comp_cls = MagicMock(return_value=mock_comp)
-        mock_select.return_value = (mock_comp_cls, ColormappedProps, "quad")
+        mock_comp.props = ColormappedProps()
+        mock_create_comp.return_value = (mock_comp, "quad")
 
         fig = plot_grid(
             mock_config,

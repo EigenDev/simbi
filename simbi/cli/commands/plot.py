@@ -9,7 +9,7 @@ import sys
 import warnings
 from typing import Optional
 
-from simbi.viz.checkpoint.checkpoint_utils import (
+from simbi.reader.checkpoint_utils import (
     extract_timestep,
     glob_checkpoints,
 )
