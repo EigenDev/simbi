@@ -120,8 +120,12 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         if self.props.color:
             line_kwargs["color"] = self.props.color
 
+        # temporal PSD: linear x, log y. spatial E(k): log-log.
+        self._is_temporal = has_custom_axes
+        plot_fn = self.ax.semilogy if self._is_temporal else self.ax.loglog
+
         if self._main_line is None:
-            self._main_line = self.ax.loglog(k, y, **line_kwargs)[0]
+            self._main_line = plot_fn(k, y, **line_kwargs)[0]
         else:
             self._main_line.set_data(k, y)
             self._main_line.set_alpha(raw_alpha)
@@ -188,8 +192,10 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
 
         color = self._main_line.get_color() if self._main_line else None
 
+        plot_fn = self.ax.semilogy if self._is_temporal else self.ax.loglog
+
         if self._smooth_line is None:
-            self._smooth_line = self.ax.loglog(
+            self._smooth_line = plot_fn(
                 k,
                 smoothed,
                 color=color,
