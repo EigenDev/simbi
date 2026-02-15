@@ -10,11 +10,18 @@ from .radial_profiles import (
     spherical_profile,
     stitch_leaf_cells,
 )
-from .spectrum import lomb_scargle_psd, shell_averaged_spectrum
+from .spectrum import (
+    lomb_scargle_fap_levels,
+    lomb_scargle_psd,
+    shell_averaged_spectrum,
+    welch_lomb_scargle_psd,
+)
 
 __all__ = [
     "shell_averaged_spectrum",
     "lomb_scargle_psd",
+    "welch_lomb_scargle_psd",
+    "lomb_scargle_fap_levels",
     "stitch_leaf_cells",
     "spherical_profile",
     "mass_flux_profile",

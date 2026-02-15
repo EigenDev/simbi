@@ -2,15 +2,18 @@
 # spectrum.py
 #
 # spectral analysis functions for simulation data.
-# shell-averaged kinetic energy power spectrum and lomb-scargle PSD.
+# shell-averaged kinetic energy power spectrum, lomb-scargle PSD,
+# welch-style segment-averaged lomb-scargle, and false-alarm probability.
 # pure numpy/scipy — no viz dependency.
 #
 # usage:
 #   from simbi.analysis import shell_averaged_spectrum, lomb_scargle_psd
 #   k, Ek = shell_averaged_spectrum(vx, vy, vz, dx)
 #   omega, psd = lomb_scargle_psd(times, values)
+#   omega, psd = welch_lomb_scargle_psd(times, values, n_segments=8)
+#   thresholds = lomb_scargle_fap_levels(100, 1024)
 # =============================================================================
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 from scipy.signal import lombscargle
@@ -83,6 +86,7 @@ def lomb_scargle_psd(
     values: np.ndarray,
     orbital_period: Optional[float] = None,
     n_freqs: int = 1024,
+    normalize: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     compute power spectral density via lomb-scargle periodogram.
@@ -96,6 +100,7 @@ def lomb_scargle_psd(
         values: 1d array of signal values
         orbital_period: if given, normalize output frequencies to Omega_orb
         n_freqs: number of frequency points to evaluate
+        normalize: if true, divide PSD by its integral so it sums to 1
 
     returns:
         (omega, psd): angular frequencies and corresponding power
@@ -124,4 +129,121 @@ def lomb_scargle_psd(
         omega_orb = 2.0 * np.pi / orbital_period
         omega = omega / omega_orb
 
+    if normalize:
+        total = np.trapezoid(psd, omega)
+        if total > 0:
+            psd = psd / total
+
     return omega, psd
+
+
+def welch_lomb_scargle_psd(
+    times: np.ndarray,
+    values: np.ndarray,
+    orbital_period: Optional[float] = None,
+    n_segments: int = 8,
+    overlap: float = 0.5,
+    n_freqs: int = 1024,
+    normalize: bool = False,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    segment-averaged lomb-scargle PSD (welch-style variance reduction).
+
+    splits the time series into overlapping segments, computes
+    lomb-scargle PSD per segment on a shared frequency grid,
+    and averages. reduces variance at the cost of frequency resolution.
+
+    args:
+        times: 1d array of sample times
+        values: 1d array of signal values
+        orbital_period: if given, normalize output frequencies to Omega_orb
+        n_segments: number of segments
+        overlap: fractional overlap between segments (0 to <1)
+        n_freqs: number of frequency points to evaluate
+        normalize: if true, divide PSD by its integral
+
+    returns:
+        (omega, psd): angular frequencies and averaged power
+    """
+    n = len(times)
+    if n_segments < 2:
+        return lomb_scargle_psd(
+            times, values, orbital_period, n_freqs, normalize
+        )
+
+    step = max(1, int(n * (1.0 - overlap) / n_segments))
+    seg_len = max(2, int(n / n_segments * (1.0 + overlap)))
+
+    # shared frequency grid from the full time span
+    t_span = times[-1] - times[0]
+    dt_min = np.min(np.diff(times))
+    omega_min = 2.0 * np.pi / t_span
+    omega_max = np.pi / dt_min
+    omega = np.linspace(omega_min, omega_max, n_freqs)
+
+    psd_sum = np.zeros(n_freqs)
+    count = 0
+
+    for ii in range(0, n - seg_len + 1, step):
+        seg_t = times[ii : ii + seg_len]
+        seg_v = values[ii : ii + seg_len]
+        sig = seg_v - np.mean(seg_v)
+        seg_psd = lombscargle(
+            seg_t, sig, omega, precenter=False, normalize=False
+        )
+        seg_psd = seg_psd * 2.0 / len(sig)
+        psd_sum += seg_psd
+        count += 1
+
+    if count == 0:
+        return lomb_scargle_psd(
+            times, values, orbital_period, n_freqs, normalize
+        )
+
+    psd = psd_sum / count
+
+    if orbital_period is not None and orbital_period > 0:
+        omega_orb = 2.0 * np.pi / orbital_period
+        omega = omega / omega_orb
+
+    if normalize:
+        total = np.trapezoid(psd, omega)
+        if total > 0:
+            psd = psd / total
+
+    return omega, psd
+
+
+def lomb_scargle_fap_levels(
+    n_samples: int,
+    n_freqs: int,
+    levels: Sequence[float] = (0.01, 0.001),
+    psd_normalization: float = 1.0,
+) -> dict[float, float]:
+    """
+    compute PSD thresholds for given false-alarm probability levels.
+
+    uses the baluev (2008) approximation where the number of
+    independent frequencies M ~ n_freqs and the exponential
+    distribution of the normalized periodogram gives:
+        z = -ln(1 - (1-p)^(1/M))
+
+    args:
+        n_samples: number of data points in the time series
+        n_freqs: number of frequency points evaluated
+        levels: false-alarm probabilities (e.g., 0.01 = 1% FAP)
+        psd_normalization: factor to convert from normalized z to
+            actual PSD units (2/N for our convention)
+
+    returns:
+        dict mapping FAP level to PSD threshold
+    """
+    m_eff = n_freqs
+    result = {}
+    for p in levels:
+        # single-frequency survival probability
+        q = (1.0 - p) ** (1.0 / m_eff)
+        z = -np.log(1.0 - q)
+        # convert from normalized periodogram to our PSD units
+        result[p] = z * psd_normalization
+    return result

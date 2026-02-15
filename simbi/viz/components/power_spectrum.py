@@ -1,8 +1,12 @@
 # =============================================================================
 # power_spectrum.py
 #
-# component for rendering kinetic energy power spectrum E(k).
-# log-log line plot with optional reference slope overlays.
+# component for rendering power spectra as log-log line plots.
+# handles both spatial E(k) and temporal PSD with:
+# - optional reference slope overlays (spatial spectra)
+# - optional reference frequency annotations (temporal PSD)
+# - optional savitzky-golay smoothed envelope
+# - optional false-alarm probability threshold lines
 #
 # usage:
 #   component = PowerSpectrumComponent(PowerSpectrumProps())
@@ -31,6 +35,21 @@ class PowerSpectrumProps(ComponentProps):
     color: Optional[str] = None
     label: Optional[str] = None
 
+    # reference frequency annotations (vertical lines at known frequencies)
+    reference_frequencies: tuple[float, ...] = ()
+    reference_frequency_labels: tuple[str, ...] = ()
+
+    # smoothed envelope overlay
+    show_smoothed: bool = False
+    smooth_window: int = 51
+    smooth_polyorder: int = 3
+
+    # false-alarm probability levels
+    show_fap_levels: bool = False
+    fap_levels: tuple[float, ...] = (0.01, 0.001)
+    fap_n_samples: int = 0
+    fap_psd_normalization: float = 1.0
+
 
 _SLOPE_LABELS = {
     -5.0 / 3.0: r"$k^{-5/3}$",
@@ -41,12 +60,15 @@ _SLOPE_LABELS = {
 
 
 class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
-    """renders kinetic energy power spectrum as a log-log line plot."""
+    """renders power spectrum as a log-log line plot."""
 
     def __init__(self, props: PowerSpectrumProps):
         self.props = props
         self._main_line: Optional[Line2D] = None
+        self._smooth_line: Optional[Line2D] = None
         self._ref_lines: List[Line2D] = []
+        self._freq_lines: List = []
+        self._fap_lines: List[Line2D] = []
         self._initialized: bool = False
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
@@ -87,7 +109,14 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         body_label = data.body_names[0] if data.body_names else None
         label = self.props.label or body_label or ylabel
 
-        line_kwargs = {"linewidth": self.props.linewidth, "label": label}
+        # when smoothing is on, raw data gets reduced alpha
+        raw_alpha = 0.3 if self.props.show_smoothed else 1.0
+
+        line_kwargs = {
+            "linewidth": self.props.linewidth,
+            "label": label,
+            "alpha": raw_alpha,
+        }
         if self.props.color:
             line_kwargs["color"] = self.props.color
 
@@ -95,6 +124,11 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
             self._main_line = self.ax.loglog(k, y, **line_kwargs)[0]
         else:
             self._main_line.set_data(k, y)
+            self._main_line.set_alpha(raw_alpha)
+
+        # smoothed envelope
+        if self.props.show_smoothed:
+            self._draw_smoothed(k, y, label)
 
         # reference slopes only for spatial spectra (not temporal PSD)
         if (
@@ -103,6 +137,14 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
             and not has_custom_axes
         ):
             self._draw_reference_slopes(k, e_k)
+
+        # reference frequency vertical lines (temporal PSD)
+        if self.props.reference_frequencies:
+            self._draw_reference_frequencies()
+
+        # FAP threshold lines
+        if self.props.show_fap_levels and self.props.fap_n_samples > 0:
+            self._draw_fap_levels(k)
 
         if self.ax.get_legend_handles_labels()[1]:
             self.ax.legend(loc="best")
@@ -115,9 +157,106 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
             metadata={"label": label, "is_line": True},
         )
 
+    def _draw_smoothed(self, k: np.ndarray, y: np.ndarray, label: str) -> None:
+        """overlay savitzky-golay smoothed curve in log-space."""
+        from scipy.signal import savgol_filter
+
+        # clean data for log-space filtering
+        valid = y > 0
+        if np.sum(valid) < self.props.smooth_window:
+            return
+
+        log_y = np.full_like(y, dtype=float, fill_value=np.nan)
+        log_y[valid] = np.log10(y[valid])
+
+        # interpolate gaps for smooth filtering
+        if np.any(~valid):
+            nans = np.isnan(log_y)
+            log_y[nans] = np.interp(
+                np.flatnonzero(nans), np.flatnonzero(~nans), log_y[~nans]
+            )
+
+        window = min(self.props.smooth_window, len(log_y))
+        if window % 2 == 0:
+            window -= 1
+        if window < self.props.smooth_polyorder + 2:
+            return
+
+        smoothed = 10.0 ** savgol_filter(
+            log_y, window, self.props.smooth_polyorder
+        )
+
+        color = self._main_line.get_color() if self._main_line else None
+
+        if self._smooth_line is None:
+            self._smooth_line = self.ax.loglog(
+                k,
+                smoothed,
+                color=color,
+                linewidth=self.props.linewidth * 1.5,
+                alpha=0.9,
+                label=f"{label} (smoothed)",
+            )[0]
+        else:
+            self._smooth_line.set_data(k, smoothed)
+
+    def _draw_reference_frequencies(self) -> None:
+        """draw vertical lines at known frequencies (e.g., orbital harmonics)."""
+        for item in self._freq_lines:
+            item.remove()
+        self._freq_lines = []
+
+        colors = ["grey", "grey", "grey", "grey"]
+        for ii, freq in enumerate(self.props.reference_frequencies):
+            label = (
+                self.props.reference_frequency_labels[ii]
+                if ii < len(self.props.reference_frequency_labels)
+                else None
+            )
+            vline = self.ax.axvline(
+                freq,
+                color=colors[ii % len(colors)],
+                linestyle=":",
+                linewidth=0.8,
+                alpha=0.6,
+                label=label,
+            )
+            self._freq_lines.append(vline)
+
+    def _draw_fap_levels(self, k: np.ndarray) -> None:
+        """draw horizontal lines at false-alarm probability thresholds."""
+        from simbi.analysis import lomb_scargle_fap_levels
+
+        for line in self._fap_lines:
+            if line in self.ax.lines:
+                line.remove()
+        self._fap_lines = []
+
+        thresholds = lomb_scargle_fap_levels(
+            self.props.fap_n_samples,
+            len(k),
+            levels=self.props.fap_levels,
+            psd_normalization=self.props.fap_psd_normalization,
+        )
+
+        for fap, threshold in thresholds.items():
+            pct = fap * 100
+            if pct >= 1:
+                label = f"{pct:.0f}% FAP"
+            else:
+                label = f"{pct:.1f}% FAP"
+            fap_line = self.ax.axhline(
+                threshold,
+                color="red",
+                linestyle="--",
+                linewidth=0.8,
+                alpha=0.5,
+                label=label,
+            )
+            self._fap_lines.append(fap_line)
+
     def _draw_reference_slopes(self, k: np.ndarray, e_k: np.ndarray) -> None:
         """overlay reference power-law slopes anchored to the mid-range of the spectrum."""
-        # remove old reference lines
         for line in self._ref_lines:
             if line in self.ax.lines:
                 line.remove()
@@ -170,8 +309,18 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         if hasattr(self, "ax"):
             if self._main_line and self._main_line in self.ax.lines:
                 self._main_line.remove()
+            if self._smooth_line and self._smooth_line in self.ax.lines:
+                self._smooth_line.remove()
             for line in self._ref_lines:
                 if line in self.ax.lines:
                     line.remove()
+            for item in self._freq_lines:
+                item.remove()
+            for line in self._fap_lines:
+                if line in self.ax.lines:
+                    line.remove()
         self._main_line = None
+        self._smooth_line = None
         self._ref_lines = []
+        self._freq_lines = []
+        self._fap_lines = []

@@ -12,9 +12,9 @@ from simbi.viz.config import (
     AnimationConfig,
     CoordinateConfig,
     FigureConfig,
-    OverlayConfig,
     PlotConfig,
     RefinementConfig,
+    TemporalSpectrumConfig,
     TimeSeriesConfig,
     VisualizationConfig,
     overlays_from_args,
@@ -124,6 +124,18 @@ def time_series_config_from_args(args: Namespace) -> TimeSeriesConfig:
     )
 
 
+def temporal_spectrum_config_from_args(
+    args: Namespace,
+) -> TemporalSpectrumConfig:
+    """build TemporalSpectrumConfig from cli arguments."""
+    return TemporalSpectrumConfig(
+        psd_method=getattr(args, "psd_method", "standard"),
+        n_segments=getattr(args, "psd_segments", 8),
+        overlap=getattr(args, "psd_overlap", 0.5),
+        normalize_psd=getattr(args, "normalize_psd", False),
+    )
+
+
 def animation_config_from_args(args: Namespace) -> AnimationConfig:
     """build AnimationConfig from cli arguments."""
     return AnimationConfig(
@@ -150,6 +162,7 @@ def config_from_args(args: Namespace) -> VisualizationConfig:
         refinement=refinement_config_from_args(args),
         coordinate=coordinate_config_from_args(args),
         time_series=time_series_config_from_args(args),
+        temporal_spectrum=temporal_spectrum_config_from_args(args),
         animation=animation_config_from_args(args),
         theme=theme_config_from_args(args),
         overlays=overlays_from_args(args),

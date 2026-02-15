@@ -97,6 +97,17 @@ class TimeSeriesConfig(BaseModel):
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
 
 
+class TemporalSpectrumConfig(BaseModel):
+    """configuration for temporal power spectrum plots."""
+
+    psd_method: Literal["standard", "welch"] = "standard"
+    n_segments: int = 8
+    overlap: float = 0.5
+    normalize_psd: bool = False
+
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+
+
 class AnimationConfig(BaseModel):
     """Configuration for animations."""
 
@@ -207,6 +218,9 @@ class VisualizationConfig(BaseModel):
     refinement: RefinementConfig = Field(default_factory=RefinementConfig)
     coordinate: CoordinateConfig = Field(default_factory=CoordinateConfig)
     time_series: TimeSeriesConfig = Field(default_factory=TimeSeriesConfig)
+    temporal_spectrum: TemporalSpectrumConfig = Field(
+        default_factory=TemporalSpectrumConfig
+    )
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
     overlays: list[OverlayConfig] = Field(default_factory=list)

@@ -66,6 +66,7 @@ class PlotData(BaseModel):
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None
     hierarchy: Optional[HierarchyData] = None
+    extra: Optional[dict] = None
 
     @field_validator("dimensions")
     @classmethod

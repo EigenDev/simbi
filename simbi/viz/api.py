@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .builder import (
-    SimFigure,
     detect_projection,
     dispatch_overlay_components,
     dispatch_scalar_components,
@@ -21,7 +20,6 @@ from .builder import (
     get_props,
     init_component,
 )
-from .config_loader import ConfigDict, resolve_per_file_props
 from .components import (
     CoordinateProfileComponent,
     CoordinateProfileProps,
@@ -34,6 +32,7 @@ from .components import (
 )
 from .components.interface import ComponentProps
 from .config import OverlayConfig, VisualizationConfig
+from .config_loader import ConfigDict, resolve_per_file_props
 from .figure import Figure, prepare_figure
 from .pipeline import create_plot_data, load_data
 from .pipeline.coord_binning import create_coordinate_profile_data
@@ -43,7 +42,6 @@ from .pipeline.time_series import create_time_series_data
 from .pipeline.transforms import compose_fields_for_render
 from .registry import refinement_info
 from .types import CoordSystem
-
 
 # ---------------------------------------------------------------------------
 # internal helpers (api-specific)
@@ -64,9 +62,7 @@ def _setup_scalar_figure(config, files, fields, component_props, **kwargs):
     scalar_plot_data = create_plot_data(sim_data, fields, config)
     final_fields = compose_fields_for_render(scalar_plot_data.fields, config)
     nlvls, use_polygons = refinement_info(scalar_plot_data.fields, config)
-    projection = detect_projection(
-        final_fields, sim_data.metadata.coord_system
-    )
+    projection = detect_projection(final_fields, sim_data.metadata.coord_system)
 
     figure = prepare_figure(
         config,
@@ -280,11 +276,56 @@ def plot_temporal_spectrum(
     if not plot_data.fields:
         raise ValueError("no temporal spectrum data generated")
 
-    figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
+    # extract pipeline metadata for smart props
+    meta = plot_data.extra or {}
+    binary_params = meta.get("binary_params")
+    orbital_period = meta.get("orbital_period")
+    n_samples = meta.get("n_samples", 0)
+    n_freqs = meta.get("n_freqs", 1024)
+
+    nlines = len(plot_data.fields)
+    figure = prepare_figure(
+        config, len(files), projection="cartesian", nlvls=nlines
+    )
 
     for field_data in plot_data.fields:
-        props = get_props(
+        base_props = get_props(
             component_props, "power_spectrum", PowerSpectrumProps
+        )
+
+        # auto-populate reference frequencies for binary systems
+        # only when frequency axis is normalized (orbital_period is set)
+        ref_freqs = base_props.reference_frequencies
+        ref_labels = base_props.reference_frequency_labels
+        if (
+            not ref_freqs
+            and binary_params is not None
+            and orbital_period is not None
+            and orbital_period > 0
+        ):
+            ref_freqs = (1.0, 2.0, 3.0)
+            ref_labels = (r"$\Omega$", r"$2\Omega$", r"$3\Omega$")
+
+        # auto-populate FAP params from pipeline metadata
+        fap_n = base_props.fap_n_samples or n_samples
+        fap_norm = 2.0 / n_samples if n_samples > 0 else 1.0
+
+        props = PowerSpectrumProps(
+            show_reference_slopes=base_props.show_reference_slopes,
+            reference_slopes=base_props.reference_slopes,
+            compensated=base_props.compensated,
+            linewidth=base_props.linewidth,
+            color=base_props.color,
+            label=base_props.label,
+            reference_frequencies=ref_freqs,
+            reference_frequency_labels=ref_labels,
+            show_smoothed=base_props.show_smoothed,
+            smooth_window=base_props.smooth_window,
+            smooth_polyorder=base_props.smooth_polyorder,
+            show_fap_levels=base_props.show_fap_levels,
+            fap_levels=base_props.fap_levels,
+            fap_n_samples=fap_n,
+            fap_psd_normalization=fap_norm,
         )
         init_component(figure, PowerSpectrumComponent(props), field_data)
 
@@ -315,9 +356,7 @@ def plot_power_spectrum(
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
 
     for field_data in plot_data.fields:
-        props = get_props(
-            component_props, "power_spectrum", PowerSpectrumProps
-        )
+        props = get_props(component_props, "power_spectrum", PowerSpectrumProps)
         init_component(figure, PowerSpectrumComponent(props), field_data)
 
     figure.render()
@@ -448,12 +487,16 @@ def plot_coordinate_profile_overlay(
                 CoordinateProfileProps,
             )
             props = CoordinateProfileProps(
-                label=label or base_props.label or f"{field_data.name} ({file_label})",
+                label=label
+                or base_props.label
+                or f"{field_data.name} ({file_label})",
                 color=base_props.color,
                 linestyle=base_props.linestyle,
                 linewidth=base_props.linewidth,
                 normalization=norm or base_props.normalization,
-                x_normalization=x_norm if x_normalizations else base_props.x_normalization or x_norm,
+                x_normalization=x_norm
+                if x_normalizations
+                else base_props.x_normalization or x_norm,
                 rbeg=base_props.rbeg,
                 rend=base_props.rend,
                 show_reference_lines=base_props.show_reference_lines,

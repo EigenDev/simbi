@@ -16,7 +16,11 @@ from simbi.reader.checkpoint_utils import (
 from simbi.viz.config import _PLOT_TYPE_TO_REGISTRY
 
 from ..utils.formatter import HelpFormatter
-from .plot_config import config_from_args, handle_generate_config, load_props_from_args
+from .plot_config import (
+    config_from_args,
+    handle_generate_config,
+    load_props_from_args,
+)
 
 VALID_PLOT_TYPES = sorted(_PLOT_TYPE_TO_REGISTRY.keys())
 
@@ -457,6 +461,31 @@ def _setup_plot_args(parser: argparse.ArgumentParser) -> None:
     # time series options
     parser.add_argument(
         "--weight", default=None, help="weight field for time series averaging"
+    )
+
+    # temporal spectrum options
+    parser.add_argument(
+        "--psd-method",
+        choices=["standard", "welch"],
+        default="standard",
+        help="PSD estimation method (welch averages over segments for lower variance)",
+    )
+    parser.add_argument(
+        "--psd-segments",
+        type=int,
+        default=8,
+        help="number of segments for welch method (default: 8)",
+    )
+    parser.add_argument(
+        "--psd-overlap",
+        type=float,
+        default=0.5,
+        help="fractional overlap between welch segments (default: 0.5)",
+    )
+    parser.add_argument(
+        "--normalize-psd",
+        action="store_true",
+        help="normalize PSD to integrate to 1",
     )
 
     # config file and props overrides
