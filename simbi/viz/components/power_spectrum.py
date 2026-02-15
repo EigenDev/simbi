@@ -220,22 +220,31 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
             item.remove()
         self._freq_lines = []
 
-        colors = ["grey", "grey", "grey", "grey"]
         for ii, freq in enumerate(self.props.reference_frequencies):
-            label = (
-                self.props.reference_frequency_labels[ii]
-                if ii < len(self.props.reference_frequency_labels)
-                else None
-            )
             vline = self.ax.axvline(
                 freq,
-                color=colors[ii % len(colors)],
+                color="grey",
                 linestyle=":",
                 linewidth=0.8,
                 alpha=0.6,
-                label=label,
             )
             self._freq_lines.append(vline)
+
+            # text annotation at the top of the line instead of legend
+            if ii < len(self.props.reference_frequency_labels):
+                ann = self.ax.annotate(
+                    self.props.reference_frequency_labels[ii],
+                    xy=(freq, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    fontsize=8,
+                    color="grey",
+                    alpha=0.8,
+                    ha="center",
+                    va="bottom",
+                    xytext=(0, 2),
+                    textcoords="offset points",
+                )
+                self._ref_annotations.append(ann)
 
     def _draw_fap_levels(self, k: np.ndarray) -> None:
         """draw horizontal lines at false-alarm probability thresholds."""

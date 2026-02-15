@@ -426,6 +426,12 @@ def _setup_plot_args(parser: argparse.ArgumentParser) -> None:
         help="visualization theme",
     )
     parser.add_argument(
+        "--color-cycle",
+        type=str,
+        default=None,
+        help="colormap for line color cycle (e.g., tab10, cmasher.rainforest)",
+    )
+    parser.add_argument(
         "--transparent", action="store_true", help="transparent background"
     )
     parser.add_argument(

@@ -151,6 +151,10 @@ def theme_config_from_args(args: Namespace) -> ThemeConfig:
 
     global_overrides, _ = parse_overrides(getattr(args, "props", []))
     overrides = global_overrides.get("theme", {})
+    color_cycle = getattr(args, "color_cycle", None)
+    if color_cycle:
+        overrides = dict(overrides) if overrides else {}
+        overrides["color_map"] = color_cycle
     return get_theme(getattr(args, "theme", "default"), overrides or None)
 
 
