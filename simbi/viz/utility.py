@@ -123,8 +123,13 @@ def get_dimensionality(files: Union[list[str], dict[int, list[str]]]) -> int:
     for file in files:
         result = read_checkpoint(file)
         if result.is_ok():
-            mesh = result.value.levels[0].mesh
-            dims.append(sum(int(r) > 1 for r in mesh.global_cells))
+            checkpoint = result.value
+            if checkpoint.levels:
+                mesh = checkpoint.levels[0].mesh
+                dims.append(sum(int(r) > 1 for r in mesh.global_cells))
+            else:
+                # diagnostic-only file, no grid data
+                dims.append(1)
         else:
             raise ValueError(f"failed to read {file}: {result.error}")
 
