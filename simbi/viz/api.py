@@ -282,6 +282,7 @@ def plot_temporal_spectrum(
     orbital_period = meta.get("orbital_period")
     n_samples = meta.get("n_samples", 0)
     n_freqs = meta.get("n_freqs", 1024)
+    omega_nyquist = meta.get("omega_nyquist")
 
     nlines = len(plot_data.fields)
     figure = prepare_figure(
@@ -295,6 +296,7 @@ def plot_temporal_spectrum(
 
         # auto-populate reference frequencies for binary systems
         # only when frequency axis is normalized (orbital_period is set)
+        # filter out any harmonics above the nyquist limit
         ref_freqs = base_props.reference_frequencies
         ref_labels = base_props.reference_frequency_labels
         if (
@@ -303,8 +305,19 @@ def plot_temporal_spectrum(
             and orbital_period is not None
             and orbital_period > 0
         ):
-            ref_freqs = (1.0, 2.0, 3.0)
-            ref_labels = (r"$\Omega$", r"$2\Omega$", r"$3\Omega$")
+            all_freqs = (1.0, 2.0, 3.0)
+            all_labels = (r"$\Omega$", r"$2\Omega$", r"$3\Omega$")
+            if omega_nyquist is not None:
+                pairs = [
+                    (f, l)
+                    for f, l in zip(all_freqs, all_labels)
+                    if f < omega_nyquist
+                ]
+                ref_freqs = tuple(f for f, _ in pairs)
+                ref_labels = tuple(l for _, l in pairs)
+            else:
+                ref_freqs = all_freqs
+                ref_labels = all_labels
 
         # auto-populate FAP params from pipeline metadata
         fap_n = base_props.fap_n_samples or n_samples
@@ -330,6 +343,11 @@ def plot_temporal_spectrum(
         init_component(figure, PowerSpectrumComponent(props), field_data)
 
     figure.render()
+
+    # clamp x-axis to nyquist limit (after render so it's the final word)
+    if omega_nyquist is not None and config.figure.xlims is None:
+        figure.axes["main"].set_xlim(right=omega_nyquist)
+
     _save_and_show(figure, save_as, show)
     return figure
 

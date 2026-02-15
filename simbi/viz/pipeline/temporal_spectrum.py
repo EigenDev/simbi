@@ -169,6 +169,13 @@ def create_temporal_spectrum_data(
                 )
             )
 
+    # compute nyquist frequency (in normalized units if applicable)
+    dt_min = float(np.min(np.diff(time_array)))
+    omega_nyquist = np.pi / dt_min
+    if orbital_period is not None and orbital_period > 0:
+        omega_orb = 2.0 * np.pi / orbital_period
+        omega_nyquist = omega_nyquist / omega_orb
+
     # attach metadata for FAP computation and harmonic annotation
     n_freqs = len(result_fields[0].domain[0]) if result_fields else 1024
 
@@ -181,5 +188,6 @@ def create_temporal_spectrum_data(
             "n_freqs": n_freqs,
             "binary_params": binary_params,
             "orbital_period": orbital_period,
+            "omega_nyquist": omega_nyquist,
         },
     )
