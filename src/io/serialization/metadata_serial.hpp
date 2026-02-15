@@ -69,6 +69,9 @@ namespace simbi::io {
             write_attribute(g, "checkpoint_interval", meta.checkpoint_interval);
             write_attribute(g, "checkpoint_time", meta.checkpoint_time);
             write_attribute(g, "prev_checkpoint_time", meta.prev_checkpoint_time);
+            write_attribute(g, "diagnostic_interval", meta.diagnostic_interval);
+            write_attribute(g, "diagnostic_time", meta.diagnostic_time);
+            write_attribute(g, "prev_diagnostic_time", meta.prev_diagnostic_time);
             write_attribute(g, "ambient_sound_speed", meta.ambient_sound_speed);
             write_attribute(g, "initial_time", meta.initial_time);
 
@@ -77,6 +80,7 @@ namespace simbi::io {
             write_attribute(g, "halo_radius", meta.halo_radius);
             write_attribute(g, "checkpoint_index", meta.checkpoint_index);
             write_attribute(g, "checkpoint_zones", meta.checkpoint_zones);
+            write_attribute(g, "diagnostic_index", meta.diagnostic_index);
             write_attribute(g, "dimensions", meta.dimensions);
 
             // enums (as strings for robustness)
@@ -143,7 +147,19 @@ namespace simbi::io {
             meta.checkpoint_interval  = read_attribute<real>(g, "checkpoint_interval");
             meta.checkpoint_time      = read_attribute<real>(g, "checkpoint_time");
             meta.prev_checkpoint_time = read_attribute<real>(g, "prev_checkpoint_time");
-            meta.ambient_sound_speed  = read_attribute<real>(g, "ambient_sound_speed");
+
+            // diagnostic scheduling (backward compat: default to checkpoint values)
+            meta.diagnostic_interval  = attribute_exists(g, "diagnostic_interval")
+                                            ? read_attribute<real>(g, "diagnostic_interval")
+                                            : meta.checkpoint_interval;
+            meta.diagnostic_time      = attribute_exists(g, "diagnostic_time")
+                                            ? read_attribute<real>(g, "diagnostic_time")
+                                            : meta.checkpoint_time;
+            meta.prev_diagnostic_time = attribute_exists(g, "prev_diagnostic_time")
+                                            ? read_attribute<real>(g, "prev_diagnostic_time")
+                                            : meta.prev_checkpoint_time;
+
+            meta.ambient_sound_speed = read_attribute<real>(g, "ambient_sound_speed");
 
             // initial_time: backward compat with older checkpoints that lack it
             if (attribute_exists(g, "initial_time")) {
@@ -159,6 +175,9 @@ namespace simbi::io {
             meta.checkpoint_index = read_attribute<std::uint64_t>(g, "checkpoint_index");
 
             meta.checkpoint_zones = read_attribute<std::uint64_t>(g, "checkpoint_zones");
+            meta.diagnostic_index = attribute_exists(g, "diagnostic_index")
+                                        ? read_attribute<std::uint64_t>(g, "diagnostic_index")
+                                        : 0;
             meta.dimensions       = read_attribute<std::uint64_t>(g, "dimensions");
 
             // enums

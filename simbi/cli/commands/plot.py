@@ -93,6 +93,19 @@ def _timestep_converter(val: str) -> float:
     return float(val.replace("_", ""))
 
 
+_LINESTYLE_ALIASES = {
+    "solid": "-",
+    "dashed": "--",
+    "dotted": ":",
+    "dashdot": "-.",
+}
+
+
+def _linestyle_converter(val: str) -> str:
+    """convert word aliases to matplotlib linestyle strings."""
+    return _LINESTYLE_ALIASES.get(val.lower(), val)
+
+
 def _time_scale_converter(val: str) -> Optional[float]:
     """parse time scale value, supporting 'pi' and 'e' constants."""
     if not val:
@@ -243,6 +256,14 @@ def _setup_plot_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         metavar="LABEL",
         help="custom per-file legend labels for overlay plots",
+    )
+    parser.add_argument(
+        "--linestyles",
+        nargs="+",
+        default=None,
+        type=_linestyle_converter,
+        metavar="LS",
+        help="per-file line styles (solid, dashed, dotted, dashdot)",
     )
     parser.add_argument(
         "--x-normalizations",
@@ -432,6 +453,21 @@ def _setup_plot_args(parser: argparse.ArgumentParser) -> None:
         help="colormap for line color cycle (e.g., tab10, cmasher.rainforest)",
     )
     parser.add_argument(
+        "--color-range",
+        nargs=2,
+        type=float,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="sampling range for the color cycle (default: 0.1 0.9)",
+    )
+    parser.add_argument(
+        "--color-indices",
+        nargs="+",
+        type=int,
+        default=None,
+        help="pick specific indices from a discrete colormap (e.g., 0 5 1 for Pastel1's red, yellow, blue)",
+    )
+    parser.add_argument(
         "--transparent", action="store_true", help="transparent background"
     )
     parser.add_argument(
@@ -602,6 +638,7 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         "overlay",
         "normalizations",
         "labels",
+        "linestyles",
         "x_normalizations",
         "no_show",
         "vector_field",
@@ -710,6 +747,7 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
             per_file_overrides=per_file_overrides or None,
             normalizations=getattr(args, "normalizations", None),
             labels=getattr(args, "labels", None),
+            linestyles=getattr(args, "linestyles", None),
             x_normalizations=getattr(args, "x_normalizations", None),
             **pass_through_kwargs,
         )

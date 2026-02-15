@@ -13,11 +13,16 @@
 #   omega, psd = welch_lomb_scargle_psd(times, values, n_segments=8)
 #   thresholds = lomb_scargle_fap_levels(100, 1024)
 # =============================================================================
-from typing import Optional, Sequence
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional, Sequence
 
 import numpy as np
 from scipy.signal import lombscargle
 from scipy.stats import binned_statistic
+
+if TYPE_CHECKING:
+    from simbi.reader.adapter import SimData
 
 
 def shell_averaged_spectrum(
@@ -79,6 +84,52 @@ def shell_averaged_spectrum(
     # drop bins with no data
     valid = ~np.isnan(e_k) & (e_k > 0)
     return k_centers[valid], e_k[valid]
+
+
+def shell_averaged_scalar_spectrum(
+    field: np.ndarray,
+    dx: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    compute shell-averaged power spectrum of a scalar field.
+
+    args:
+        field: 3D scalar array
+        dx: uniform cell spacing
+
+    returns:
+        (k_centers, P_k): wavenumber bin centers and spectrum values
+    """
+    nx, ny, nz = field.shape
+    n_cells = nx * ny * nz
+
+    f_hat = np.fft.rfftn(field)
+    power = np.abs(f_hat) ** 2 / n_cells**2
+
+    kx = np.fft.fftfreq(nx, d=dx) * 2.0 * np.pi
+    ky = np.fft.fftfreq(ny, d=dx) * 2.0 * np.pi
+    kz = np.fft.rfftfreq(nz, d=dx) * 2.0 * np.pi
+
+    k_mag = np.sqrt(
+        kx[:, None, None] ** 2 + ky[None, :, None] ** 2 + kz[None, None, :] ** 2
+    )
+
+    dk = 2.0 * np.pi / (nx * dx)
+    k_max = k_mag.max()
+    bin_edges = np.arange(dk, k_max + dk, dk)
+
+    result = binned_statistic(
+        k_mag.ravel(),
+        power.ravel(),
+        statistic="sum",
+        bins=bin_edges,
+    )
+
+    k_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    p_k = result.statistic
+
+    valid = ~np.isnan(p_k) & (p_k > 0)
+    return k_centers[valid], p_k[valid]
 
 
 def lomb_scargle_psd(
@@ -247,3 +298,126 @@ def lomb_scargle_fap_levels(
         # convert from normalized periodogram to our PSD units
         result[p] = z * psd_normalization
     return result
+
+
+# =============================================================================
+# composite AMR spectra (prolongate to finest grid)
+# =============================================================================
+
+
+def _prolongate_field(
+    data: SimData, field_name: str
+) -> tuple[np.ndarray, float]:
+    """build a uniform grid at the finest resolution and compute its dx.
+
+    upsamples level-0 data via nearest-neighbor repeat, then
+    overwrites refined regions with actual fine-level data.
+    returns (composite_array, dx_finest).
+    """
+    hierarchy = data.hierarchy()
+    num_levels = data.num_levels
+
+    # total refinement ratio from level 0 to finest
+    total_ratio = 1
+    for rr in hierarchy.ref_ratios:
+        total_ratio *= rr
+
+    # level 0 data and grid info
+    base = data.get_field(field_name, level=0)
+    base_mesh = data.checkpoint.levels[0].mesh
+    ndim = base.ndim
+
+    # dx at finest level (use last axis — fastest varying, x1)
+    dx_coarse = (
+        base_mesh.dims[-1][1] - base_mesh.dims[-1][0]
+    ) / base_mesh.global_cells[-1]
+    dx_finest = dx_coarse / total_ratio
+
+    # upsample level 0 to finest resolution (nearest-neighbor)
+    composite = base
+    for ax in range(ndim):
+        composite = np.repeat(composite, total_ratio, axis=ax)
+
+    # overlay each refined level's actual data
+    cumulative_ratio = 1
+    for lvl in range(1, num_levels):
+        ref_ratio = hierarchy.ref_ratios[lvl - 1]
+        cumulative_ratio *= ref_ratio
+
+        # ratio from this level to the finest
+        level_to_finest = total_ratio // cumulative_ratio
+
+        level_data = data.checkpoint.levels[lvl]
+        owned = level_data.partitions[0].owned_domain
+        field = data.get_field(field_name, level=lvl)
+
+        # owned_domain indices are in this level's global_cells coords;
+        # scale to finest-grid coordinates
+        fine_slices = tuple(
+            slice(
+                owned.start[ax] * level_to_finest,
+                owned.fin[ax] * level_to_finest,
+            )
+            for ax in range(ndim)
+        )
+
+        if level_to_finest > 1:
+            upsampled = field
+            for ax in range(ndim):
+                upsampled = np.repeat(upsampled, level_to_finest, axis=ax)
+        else:
+            upsampled = field
+
+        composite[fine_slices] = upsampled
+
+    return composite, dx_finest
+
+
+def _k_nyquist_per_level(data: SimData) -> list[float]:
+    """compute per-level nyquist wavenumbers for annotation."""
+    hierarchy = data.hierarchy()
+    base_mesh = data.checkpoint.levels[0].mesh
+    dx_coarse = (
+        base_mesh.dims[-1][1] - base_mesh.dims[-1][0]
+    ) / base_mesh.global_cells[-1]
+    k_nyquist = []
+    cumulative_ratio = 1
+    for lvl in range(data.num_levels):
+        if lvl > 0:
+            cumulative_ratio *= hierarchy.ref_ratios[lvl - 1]
+        k_nyquist.append(np.pi / (dx_coarse / cumulative_ratio))
+    return k_nyquist
+
+
+def composite_shell_averaged_spectrum(
+    data: SimData,
+    fields: Sequence[str] = ("v1", "v2", "v3"),
+) -> tuple[np.ndarray, np.ndarray, list[float]]:
+    """kinetic energy spectrum from prolongated composite grid.
+
+    builds a uniform grid at the finest AMR resolution, then
+    computes the shell-averaged spectrum via a single FFT.
+
+    returns:
+        (k_centers, E_k, k_nyquist_per_level)
+    """
+    vx, dx = _prolongate_field(data, fields[0])
+    vy, _ = _prolongate_field(data, fields[1])
+    vz, _ = _prolongate_field(data, fields[2])
+
+    k, ek = shell_averaged_spectrum(vx, vy, vz, dx)
+    return k, ek, _k_nyquist_per_level(data)
+
+
+def composite_shell_averaged_scalar_spectrum(
+    data: SimData,
+    field: str,
+) -> tuple[np.ndarray, np.ndarray, list[float]]:
+    """scalar power spectrum from prolongated composite grid.
+
+    returns:
+        (k_centers, P_k, k_nyquist_per_level)
+    """
+    composite, dx = _prolongate_field(data, field)
+    k, pk = shell_averaged_scalar_spectrum(composite, dx)
+    return k, pk, _k_nyquist_per_level(data)

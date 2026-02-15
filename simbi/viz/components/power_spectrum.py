@@ -31,9 +31,13 @@ class PowerSpectrumProps(ComponentProps):
     show_reference_slopes: bool = True
     reference_slopes: tuple[float, ...] = (-2.0, -5.0 / 3.0)
     compensated: bool = False
-    linewidth: float = 2.0
+    linewidth: float = 3.0
+    linestyle: str = "-"
     color: Optional[str] = None
     label: Optional[str] = None
+    marker: Optional[str] = None
+    mark_every: int = 5
+    alpha: float = 0.7
 
     # reference frequency annotations (vertical lines at known frequencies)
     reference_frequencies: tuple[float, ...] = ()
@@ -46,6 +50,9 @@ class PowerSpectrumProps(ComponentProps):
 
     # blackboard-style axes: arrows, no tick labels
     arbitrary_units: bool = False
+
+    # nyquist cutoff annotations (per-level boundaries from AMR stitching)
+    nyquist_cutoffs: tuple[float, ...] = ()
 
     # false-alarm probability levels
     show_fap_levels: bool = False
@@ -73,6 +80,7 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         self._ref_annotations: List = []
         self._freq_lines: List = []
         self._fap_lines: List[Line2D] = []
+        self._nyquist_lines: List = []
         self._initialized: bool = False
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
@@ -115,15 +123,20 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         label = self.props.label or body_label or ylabel
 
         # when smoothing is on, raw data gets reduced alpha
-        raw_alpha = 0.3 if self.props.show_smoothed else 1.0
+        raw_alpha = 0.3 if self.props.show_smoothed else self.props.alpha
 
         line_kwargs = {
             "linewidth": self.props.linewidth,
+            "linestyle": self.props.linestyle,
             "label": label,
             "alpha": raw_alpha,
         }
         if self.props.color:
             line_kwargs["color"] = self.props.color
+        if self.props.marker:
+            line_kwargs["marker"] = self.props.marker
+            line_kwargs["markevery"] = self.props.mark_every
+            line_kwargs["markersize"] = self.props.linewidth * 2
 
         # temporal PSD: linear x, log y. spatial E(k): log-log.
         self._is_temporal = is_temporal
@@ -154,6 +167,10 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         # FAP threshold lines
         if self.props.show_fap_levels and self.props.fap_n_samples > 0:
             self._draw_fap_levels(k)
+
+        # nyquist cutoff annotations
+        if self.props.nyquist_cutoffs:
+            self._draw_nyquist_cutoffs()
 
         if self.ax.get_legend_handles_labels()[1]:
             self.ax.legend(loc="best")
@@ -278,6 +295,36 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
             )
             self._fap_lines.append(fap_line)
 
+    def _draw_nyquist_cutoffs(self) -> None:
+        """draw vertical lines at per-level nyquist wavenumbers."""
+        for item in self._nyquist_lines:
+            item.remove()
+        self._nyquist_lines = []
+
+        for ii, k_nyq in enumerate(self.props.nyquist_cutoffs):
+            vline = self.ax.axvline(
+                k_nyq,
+                color="grey",
+                linestyle=":",
+                linewidth=0.8,
+                alpha=0.4,
+            )
+            self._nyquist_lines.append(vline)
+
+            ann = self.ax.annotate(
+                rf"$k_{{\rm nyq}}^{{L{ii}}}$",
+                xy=(k_nyq, 1.0),
+                xycoords=("data", "axes fraction"),
+                fontsize=7,
+                color="grey",
+                alpha=0.6,
+                ha="center",
+                va="bottom",
+                xytext=(0, 2),
+                textcoords="offset points",
+            )
+            self._nyquist_lines.append(ann)
+
     def _apply_blackboard_axes(self) -> None:
         """strip tick labels, add arrow tips to axes."""
         from matplotlib.ticker import NullFormatter
@@ -342,16 +389,27 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         if len(k_seg) < 4:
             return
 
-        # anchor at the geometric center, placed above the data
-        i_mid = np.searchsorted(k, 10.0**log_center)
-        i_mid = min(i_mid, n - 1)
-        k_anchor = k[i_mid]
-        e_anchor = e_k[i_mid]
+        # anchor at the peak value in the segment range across all plotted data
+        k_anchor = 10.0**log_center
+        seg_mask = (k >= k_lo) & (k <= k_hi)
+        e_in_seg = e_k[seg_mask]
+
+        # check all lines on the axes for the max value in this k range
+        e_anchor = e_in_seg.max() if len(e_in_seg) > 0 else 0
+        for line in self.ax.get_lines():
+            xd = np.asarray(line.get_xdata(), dtype=float)
+            yd = np.asarray(line.get_ydata(), dtype=float)
+            if len(xd) < 3:
+                continue
+            in_range = (xd >= k_lo) & (xd <= k_hi)
+            if np.any(in_range):
+                e_anchor = max(e_anchor, np.max(yd[in_range]))
+
         if e_anchor <= 0:
             return
 
-        # place slopes above the data, stagger so they don't overlap
-        offsets = [3.0, 10.0]
+        # place slopes just above the data, stagger so they don't overlap
+        offsets = [0.4, 4.0]
 
         for ii, slope in enumerate(self.props.reference_slopes):
             slope_label = _SLOPE_LABELS.get(slope, rf"$k^{{{slope:.1f}}}$")
@@ -403,9 +461,12 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
             for line in self._fap_lines:
                 if line in self.ax.lines:
                     line.remove()
+            for item in self._nyquist_lines:
+                item.remove()
         self._main_line = None
         self._smooth_line = None
         self._ref_lines = []
         self._ref_annotations = []
         self._freq_lines = []
         self._fap_lines = []
+        self._nyquist_lines = []

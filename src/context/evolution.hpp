@@ -33,6 +33,7 @@ namespace simbi::evolution {
         timing::timing_stats_t            stats;
         progress::progress_state_t        progress;
         checkpoint::checkpoint_schedule_t schedule;
+        checkpoint::checkpoint_schedule_t diagnostic_schedule;
         bool                              should_stop{false};
     };
 
@@ -51,6 +52,14 @@ namespace simbi::evolution {
                     .dlogt               = meta.dlogt,
                     .tstart              = meta.initial_time,
                     .checkpoint_index    = meta.checkpoint_index
+                },
+            .diagnostic_schedule =
+                checkpoint::checkpoint_schedule_t{
+                    .checkpoint_time     = meta.diagnostic_interval,
+                    .checkpoint_interval = meta.diagnostic_interval,
+                    .dlogt               = meta.dlogt,
+                    .tstart              = meta.initial_time,
+                    .checkpoint_index    = meta.diagnostic_index
                 },
             .should_stop = false
         };
@@ -79,6 +88,11 @@ namespace simbi::evolution {
                     throw exception::SimulationFailureException();
                 }
                 checkpoint::save(sim, state.progress);
+
+                // initial diagnostic write
+                if (sim.has_bodies()) {
+                    checkpoint::save_diagnostics(sim, state.progress);
+                }
             }
         }
         catch (exception::SimulationFailureException& e) {
@@ -89,6 +103,9 @@ namespace simbi::evolution {
 
         state.schedule.advance(meta.time, meta.checkpoint_index);
         meta.advance_schedule(state.schedule);
+
+        state.diagnostic_schedule.advance(meta.time, meta.diagnostic_index);
+        meta.advance_diagnostic_schedule(state.diagnostic_schedule);
 
         while (meta.time < meta.tend && !state.should_stop) {
             try {
@@ -117,6 +134,14 @@ namespace simbi::evolution {
                     checkpoint::save(sim, state.progress);
                     state.schedule.advance(meta.time, meta.checkpoint_index);
                     meta.advance_schedule(state.schedule);
+                }
+
+                if (state.diagnostic_schedule.should_checkpoint(meta.time)) {
+                    if (sim.has_bodies()) {
+                        checkpoint::save_diagnostics(sim, state.progress);
+                    }
+                    state.diagnostic_schedule.advance(meta.time, meta.diagnostic_index);
+                    meta.advance_diagnostic_schedule(state.diagnostic_schedule);
                 }
 
                 meta.iteration++;

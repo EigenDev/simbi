@@ -17,11 +17,13 @@
 
 #include "build_config.hpp"
 #include "io/checkpoint.hpp"
+#include "io/diagnostic_writer.hpp"
 #include "io/write_policy.hpp"
 #include "progress.hpp"
 
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 
 namespace simbi::checkpoint {
 
@@ -50,7 +52,7 @@ namespace simbi::checkpoint {
                 checkpoint_time = tstart * std::pow(10.0, (n + 1) * dlogt);
             }
             else {
-                static auto round_place = 1.0 / checkpoint_interval;
+                auto round_place = 1.0 / checkpoint_interval;
                 checkpoint_time =
                     checkpoint_interval + std::floor(time * round_place + 0.5) / round_place;
             }
@@ -83,14 +85,36 @@ namespace simbi::checkpoint {
         // update prev_checkpoint_time after successful write
         meta.prev_checkpoint_time = meta.time;
 
-        // reset diagnostics for next checkpoint interval
+        std::filesystem::path p(filename);
+        progress.table.post_success("Checkpoint: " + p.filename().string());
+        progress.table.print();
+    }
+
+    template <typename Sim>
+    void save_diagnostics(Sim& sim, progress::progress_state_t& progress)
+    {
+        auto& meta = sim.metadata();
+
+        // build filename: {data_dir}/diagnostics/{zones}.diag.{id}.h5
+        auto diag_dir = std::filesystem::path(meta.data_dir) / "diagnostics";
+        std::filesystem::create_directories(diag_dir);
+
+        auto tnow = helpers::format_real(meta.diagnostic_identifier());
+        auto filename =
+            diag_dir / helpers::string_format("%d.diag.%s.h5", meta.checkpoint_zones, tnow.c_str());
+
+        io::write_diagnostic_checkpoint(sim, filename.string());
+
+        meta.prev_diagnostic_time = meta.time;
+
+        // reset accumulators only on diagnostic writes
         if constexpr (requires { sim.diagnostics(); }) {
             if (sim.has_bodies()) {
                 sim.diagnostics()->reset();
             }
         }
-        std::filesystem::path p(filename);
-        progress.table.post_success("Checkpoint: " + p.filename().string());
+
+        progress.table.post_success("Diagnostic: " + filename.filename().string());
         progress.table.print();
     }
 

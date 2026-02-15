@@ -11,14 +11,20 @@ from .radial_profiles import (
     stitch_leaf_cells,
 )
 from .spectrum import (
+    composite_shell_averaged_scalar_spectrum,
+    composite_shell_averaged_spectrum,
     lomb_scargle_fap_levels,
     lomb_scargle_psd,
+    shell_averaged_scalar_spectrum,
     shell_averaged_spectrum,
     welch_lomb_scargle_psd,
 )
 
 __all__ = [
     "shell_averaged_spectrum",
+    "shell_averaged_scalar_spectrum",
+    "composite_shell_averaged_spectrum",
+    "composite_shell_averaged_scalar_spectrum",
     "lomb_scargle_psd",
     "welch_lomb_scargle_psd",
     "lomb_scargle_fap_levels",

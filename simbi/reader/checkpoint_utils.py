@@ -75,8 +75,8 @@ def extract_timestep(filename: str | Path) -> float:
     """
     name = Path(filename).name
 
-    # try standard simbi format: chkpt.NNNN.h5 (supports underscore separators)
-    match = re.search(r"chkpt\.(\d[\d_]*(?:\.\d[\d_]*)?)", name)
+    # try standard simbi format: chkpt.NNNN.h5 or diag.NNNN.h5
+    match = re.search(r"(?:chkpt|diag)\.(\d[\d_]*(?:\.\d[\d_]*)?)", name)
     if match:
         return float(match.group(1).replace("_", ""))
 
@@ -123,8 +123,12 @@ def glob_checkpoints(
 
     # handle directory
     if input_path.is_dir():
+        matched = list(input_path.glob(pattern))
+        # if default pattern found nothing, try diagnostic files
+        if not matched and pattern == "*.chkpt.*.h5":
+            matched = list(input_path.glob("*.diag.*.h5"))
         checkpoint_files = sorted(
-            input_path.glob(pattern), key=lambda f: extract_timestep(f.name)
+            matched, key=lambda f: extract_timestep(f.name)
         )
 
     # handle glob pattern (has wildcard)

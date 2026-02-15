@@ -115,6 +115,13 @@ namespace simbi::io {
             write_bodies(file);
         }
 
+        // write body state + diagnostic deltas to an existing hdf5 file.
+        // used by diagnostic_writer to produce lightweight body-only files.
+        void write_bodies_to(H5::H5File& file) const
+        {
+            write_bodies(file);
+        }
+
       private:
         void write_metadata(H5::H5File& file) const
         {

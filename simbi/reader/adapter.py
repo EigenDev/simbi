@@ -53,7 +53,9 @@ class MeshAdapter:
         if spacing_type == "linear":
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)
         elif spacing_type == "log":
-            coords_comoving = np.logspace(np.log10(xmin), np.log10(xmax), ncells + 1)
+            coords_comoving = np.logspace(
+                np.log10(xmin), np.log10(xmax), ncells + 1
+            )
         else:
             # default to linear
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)
@@ -161,8 +163,7 @@ class SimData:
 
     def hierarchy(self):
         """access AMR hierarchy info."""
-        # TODO: implement once hierarchy parsing is added to io
-        return None
+        return self._checkpoint.hierarchy
 
     def list_derived_fields(self) -> list[str]:
         """return sorted list of available derived field names."""

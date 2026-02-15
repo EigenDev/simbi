@@ -216,7 +216,8 @@ namespace simbi::ecs::creation {
 
             bp.checkpoint_interval =
                 require_field<real>(config, "checkpoint_interval", "execution");
-            bp.dlogt = require_field<real>(config, "dlogt", "execution");
+            bp.diagnostic_interval = read_or_default<real>(config, "diagnostic_interval", 0.0);
+            bp.dlogt               = require_field<real>(config, "dlogt", "execution");
 
             bp.data_directory = require_field<std::string>(config, "data_directory", "execution");
             bp.start_index  = require_field<std::uint64_t>(config, "checkpoint_index", "execution");

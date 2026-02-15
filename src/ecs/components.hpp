@@ -339,15 +339,21 @@ namespace simbi::ecs {
         real checkpoint_interval;  // time between checkpoints
         real checkpoint_time;      // next scheduled checkpoint time
         real prev_checkpoint_time; // last checkpoint time
-        real ambient_sound_speed;  // for vacuum/floor handling
-        real initial_time;         // start time from original initial conditions
+        real diagnostic_interval{
+            0.0
+        }; // time between body diagnostic writes (0 = checkpoint_interval)
+        real diagnostic_time{0.0};      // next scheduled diagnostic time
+        real prev_diagnostic_time{0.0}; // last diagnostic write time
+        real ambient_sound_speed;       // for vacuum/floor handling
+        real initial_time;              // start time from original initial conditions
 
         // === integer tracking ===
-        std::uint64_t iteration;        // current iteration count
-        std::uint64_t halo_radius;      // ghost zone width
-        std::uint64_t checkpoint_index; // current checkpoint number
-        std::uint64_t checkpoint_zones; // zones per checkpoint file
-        std::uint64_t dimensions{Rank}; // spatial dimensions
+        std::uint64_t iteration;           // current iteration count
+        std::uint64_t halo_radius;         // ghost zone width
+        std::uint64_t checkpoint_index;    // current checkpoint number
+        std::uint64_t checkpoint_zones;    // zones per checkpoint file
+        std::uint64_t diagnostic_index{0}; // current diagnostic write number
+        std::uint64_t dimensions{Rank};    // spatial dimensions
 
         // === configuration enums ===
         regime_t                                  regime;         // newtonian, srhd, rmhd
@@ -406,6 +412,17 @@ namespace simbi::ecs {
         real checkpoint_identifier() const
         {
             return dlogt != 0.0 ? checkpoint_index : checkpoint_time;
+        }
+
+        void advance_diagnostic_schedule(auto schedule)
+        {
+            diagnostic_time  = schedule.checkpoint_time;
+            diagnostic_index = schedule.checkpoint_index;
+        }
+
+        real diagnostic_identifier() const
+        {
+            return static_cast<real>(diagnostic_index);
         }
     };
 

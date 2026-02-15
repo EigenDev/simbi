@@ -56,6 +56,203 @@ def _save_and_show(figure: Figure, save_as: Optional[str], show: bool) -> None:
         plt.show()
 
 
+def _apply_broken_axis(
+    figure: Figure,
+    config,
+    gap_threshold: float = 1e3,
+    height_ratio: tuple[float, float] = (3, 1),
+) -> bool:
+    """split axes into broken y-axis if data spans a huge dynamic range.
+
+    detects clusters of y-values separated by more than gap_threshold.
+    if found, replaces the single axes with two stacked panels and
+    adds diagonal break marks. returns True if the break was applied.
+    """
+    ax = figure.axes["main"]
+    lines = ax.get_lines()
+    if len(lines) < 2:
+        return False
+
+    # collect all y-values from plotted lines
+    all_y = []
+    for line in lines:
+        yd = np.asarray(line.get_ydata(), dtype=float)
+        valid = yd[yd > 0]
+        if len(valid) > 0:
+            all_y.append(valid)
+
+    if len(all_y) < 2:
+        return False
+
+    # find per-curve peak values and check for a large gap
+    peaks = sorted([chunk.max() for chunk in all_y])
+    max_gap_ratio = 0
+    gap_idx = 0
+    for ii in range(1, len(peaks)):
+        ratio = peaks[ii] / peaks[ii - 1] if peaks[ii - 1] > 0 else 0
+        if ratio > max_gap_ratio:
+            max_gap_ratio = ratio
+            gap_idx = ii
+
+    if max_gap_ratio < gap_threshold:
+        return False
+
+    # split point: geometric mean of the two clusters
+    lo_max = peaks[gap_idx - 1]
+    hi_min = peaks[gap_idx]
+    split = np.sqrt(lo_max * hi_min)
+
+    # collect line data before clearing
+    line_data = []
+    for line in lines:
+        line_data.append(
+            {
+                "x": line.get_xdata().copy(),
+                "y": line.get_ydata().copy(),
+                "color": line.get_color(),
+                "lw": line.get_linewidth(),
+                "ls": line.get_linestyle(),
+                "label": line.get_label(),
+                "alpha": line.get_alpha() or 1.0,
+                "marker": line.get_marker(),
+                "markevery": line.get_markevery(),
+                "markersize": line.get_markersize(),
+            }
+        )
+
+    # grab axis labels and formatting before replacing
+    xlabel = ax.get_xlabel()
+    ylabel = ax.get_ylabel()
+    title = ax.get_title()
+
+    # determine y-limits for each panel
+    lo_vals = np.concatenate(
+        [chunk[chunk <= split] for chunk in all_y if np.any(chunk <= split)]
+    )
+    hi_vals = np.concatenate(
+        [chunk[chunk > split] for chunk in all_y if np.any(chunk > split)]
+    )
+
+    lo_ymin = lo_vals.min() * 0.3 if len(lo_vals) > 0 else split * 0.01
+    lo_ymax = lo_vals.max() * 3.0 if len(lo_vals) > 0 else split
+    hi_ymin = hi_vals.min() * 0.3 if len(hi_vals) > 0 else split
+    hi_ymax = hi_vals.max() * 10.0 if len(hi_vals) > 0 else split * 100
+
+    # replace figure with two subplots
+    fig = figure.fig
+    fig.clear()
+    gs = fig.add_gridspec(
+        2,
+        1,
+        height_ratios=height_ratio,
+        hspace=0.08,
+    )
+    ax_top = fig.add_subplot(gs[0])
+    ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+    figure.axes["main"] = ax_top
+    figure.axes["broken_bottom"] = ax_bot
+
+    # plot data on both panels
+    for ld in line_data:
+        if ld["label"].startswith("_"):
+            label_top = ld["label"]
+            label_bot = ld["label"]
+        else:
+            label_top = ld["label"]
+            label_bot = "_" + ld["label"]
+        shared = dict(
+            color=ld["color"],
+            lw=ld["lw"],
+            ls=ld["ls"],
+            alpha=ld["alpha"],
+            marker=ld["marker"],
+            markevery=ld["markevery"],
+            markersize=ld["markersize"],
+        )
+        ax_top.loglog(ld["x"], ld["y"], label=label_top, **shared)
+        ax_bot.loglog(ld["x"], ld["y"], label=label_bot, **shared)
+
+    # set independent y-limits
+    ax_top.set_ylim(hi_ymin, hi_ymax)
+    ax_bot.set_ylim(lo_ymin, lo_ymax)
+
+    # x-limits from data
+    all_x = np.concatenate([ld["x"] for ld in line_data])
+    all_x = all_x[all_x > 0]
+    ax_top.set_xlim(all_x.min(), all_x.max())
+
+    # hide tick labels: use tick_params (survives loglog() and savefig redraws,
+    # unlike NullFormatter which gets reset by subsequent plot calls)
+    ax_top.tick_params(axis="x", which="both", labelbottom=False, bottom=False)
+    ax_top.tick_params(axis="y", which="both", labelleft=False, length=0)
+    ax_bot.tick_params(axis="x", which="both", labelbottom=False, length=0)
+    ax_bot.tick_params(axis="y", which="both", labelleft=False, length=0)
+
+    # labels — keep "noise floor" on bottom, clear everything else
+    ax_bot.set_xlabel(r"$k$")
+    ax_top.set_ylabel(ylabel)
+    ax_bot.set_ylabel("noise floor", fontsize=8, fontstyle="italic")
+    ax_top.set_title(title)
+
+    # legend on top panel only
+    handles, lbls = ax_top.get_legend_handles_labels()
+    if lbls:
+        ax_top.legend(loc="best")
+
+    # spines: only keep left on both, bottom on bottom panel
+    ax_top.spines["top"].set_visible(False)
+    ax_top.spines["bottom"].set_visible(False)
+    ax_top.spines["right"].set_visible(False)
+    ax_bot.spines["top"].set_visible(False)
+    ax_bot.spines["right"].set_visible(False)
+
+    # diagonal break marks (left side only — right spines are hidden)
+    # use pixel offsets from the spine corner for consistent 45-degree angle
+
+    size = 6  # pixels
+    for a, yc in [(ax_top, 0.0), (ax_bot, 1.0)]:
+        trans = a.transAxes
+        a.plot(
+            [0],
+            [yc],
+            transform=trans,
+            marker=[(-1, -1), (1, 1)],
+            markersize=size,
+            markeredgewidth=0.8,
+            markeredgecolor="k",
+            markerfacecolor="none",
+            clip_on=False,
+            linestyle="none",
+        )
+
+    # re-draw arrows on the new axes (originals were destroyed by fig.clear)
+    # y-arrow only on the top panel, x-arrow only on the bottom panel
+    color = ax_top.spines["left"].get_edgecolor()
+    lw = ax_top.spines["left"].get_linewidth()
+    ax_top.annotate(
+        "",
+        xy=(0, 1.02),
+        xycoords="axes fraction",
+        xytext=(0, 0.97),
+        textcoords="axes fraction",
+        arrowprops=dict(arrowstyle="-|>", color=color, lw=lw),
+        annotation_clip=False,
+    )
+    color = ax_bot.spines["bottom"].get_edgecolor()
+    lw = ax_bot.spines["bottom"].get_linewidth()
+    ax_bot.annotate(
+        "",
+        xy=(1.02, 0),
+        xycoords="axes fraction",
+        xytext=(0.97, 0),
+        textcoords="axes fraction",
+        arrowprops=dict(arrowstyle="-|>", color=color, lw=lw),
+        annotation_clip=False,
+    )
+
+    return True
+
+
 def _tighten_spectrum_axes(figure: Figure, config) -> None:
     """clamp axes tightly to the data range for power spectrum plots."""
     if config.figure.xlims is not None or config.figure.ylims is not None:
@@ -387,20 +584,33 @@ def plot_power_spectrum(
     component_props: Optional[dict[str, ComponentProps]] = None,
     **kwargs,
 ) -> Figure:
-    """create kinetic energy power spectrum plot from a checkpoint file."""
+    """create power spectrum plot from a checkpoint file."""
     if isinstance(files, str):
         files = [files]
 
-    velocity_fields = fields if len(fields) >= 3 else ["v1", "v2", "v3"]
     sim_data = load_data(files[0])
-    plot_data = create_power_spectrum_data(sim_data, config, velocity_fields)
+    plot_data = create_power_spectrum_data(sim_data, config, fields)
     if not plot_data.fields:
         raise ValueError("no power spectrum data generated")
 
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
 
     for field_data in plot_data.fields:
-        props = get_props(component_props, "power_spectrum", PowerSpectrumProps)
+        base_props = get_props(
+            component_props, "power_spectrum", PowerSpectrumProps
+        )
+        props = PowerSpectrumProps(
+            show_reference_slopes=base_props.show_reference_slopes,
+            reference_slopes=base_props.reference_slopes,
+            compensated=base_props.compensated,
+            arbitrary_units=base_props.arbitrary_units,
+            linewidth=base_props.linewidth,
+            linestyle=base_props.linestyle,
+            color=base_props.color,
+            label=base_props.label,
+            marker=base_props.marker,
+            mark_every=base_props.mark_every,
+        )
         init_component(figure, PowerSpectrumComponent(props), field_data)
 
     figure.render()
@@ -414,18 +624,18 @@ def plot_power_spectrum_overlay(
     files: Sequence[str],
     fields: Sequence[str] = ["v1", "v2", "v3"],
     labels: Optional[Sequence[str]] = None,
+    linestyles: Optional[Sequence[str]] = None,
     save_as: Optional[str] = None,
     show: bool = True,
     component_props: Optional[dict[str, ComponentProps]] = None,
     per_file_overrides: Optional[dict[int, ConfigDict]] = None,
     **kwargs,
 ) -> Figure:
-    """overlay E(k) spectra from multiple checkpoint files on the same axes."""
+    """overlay power spectra from multiple checkpoint files on the same axes."""
     if len(files) < 2:
         raise ValueError("overlay requires at least 2 files")
 
     nfiles = len(files)
-    velocity_fields = fields if len(fields) >= 3 else ["v1", "v2", "v3"]
 
     figure = prepare_figure(
         config,
@@ -437,9 +647,7 @@ def plot_power_spectrum_overlay(
 
     for ii, file_path in enumerate(files):
         sim_data = load_data(file_path)
-        plot_data = create_power_spectrum_data(
-            sim_data, config, velocity_fields
-        )
+        plot_data = create_power_spectrum_data(sim_data, config, fields)
         if not plot_data.fields:
             continue
 
@@ -447,6 +655,7 @@ def plot_power_spectrum_overlay(
             component_props, per_file_overrides, ii
         )
         label = labels[ii] if labels and ii < len(labels) else None
+        ls = linestyles[ii] if linestyles and ii < len(linestyles) else None
 
         for field_data in plot_data.fields:
             base_props = get_props(
@@ -455,12 +664,14 @@ def plot_power_spectrum_overlay(
             props = PowerSpectrumProps(
                 label=label or base_props.label,
                 linewidth=base_props.linewidth,
+                linestyle=ls or base_props.linestyle,
                 color=base_props.color,
+                marker=base_props.marker,
+                mark_every=base_props.mark_every,
                 compensated=base_props.compensated,
                 arbitrary_units=base_props.arbitrary_units,
-                # reference slopes only on the first file
-                show_reference_slopes=base_props.show_reference_slopes
-                and ii == 0,
+                # defer slopes to post-render so they see all data
+                show_reference_slopes=False,
                 reference_slopes=base_props.reference_slopes,
                 show_smoothed=base_props.show_smoothed,
                 smooth_window=base_props.smooth_window,
@@ -470,6 +681,29 @@ def plot_power_spectrum_overlay(
 
     figure.render()
     _tighten_spectrum_axes(figure, config)
+
+    # auto-detect large dynamic range and apply broken y-axis
+    broken = _apply_broken_axis(figure, config)
+
+    # draw reference slopes on the top panel after all data is visible
+    slope_ax = figure.axes["main"]
+    first_comp = None
+    first_data = None
+    for comp, data, _ in figure._components:
+        if isinstance(comp, PowerSpectrumComponent):
+            base = get_props(
+                component_props, "power_spectrum", PowerSpectrumProps
+            )
+            if base.show_reference_slopes:
+                first_comp = comp
+                first_data = data
+                break
+    if first_comp is not None and first_data is not None:
+        first_comp.ax = slope_ax
+        first_comp._draw_reference_slopes(
+            first_data.domain[0], first_data.values
+        )
+
     _save_and_show(figure, save_as, show)
     return figure
 

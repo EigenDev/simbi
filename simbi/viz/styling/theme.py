@@ -37,6 +37,8 @@ class ThemeConfig:
 
     # Color styling
     color_map: str = "viridis"
+    color_range: tuple[float, float] = (0.1, 0.9)
+    color_indices: tuple[int, ...] = ()
 
     # Axis styling
     hide_spines: Sequence[str] = field(default_factory=lambda: ["top", "right"])
@@ -88,6 +90,7 @@ class ThemeConfig:
 
         base_linestyles = ["-", "--", "-.", ":"]
         colormap = plt.get_cmap(self.color_map)
+        is_discrete = colormap.N <= 20
 
         if overlay_mode:
             # overlay mode: colors cycle through files, linestyles through fields
@@ -95,7 +98,18 @@ class ThemeConfig:
             n_colors = max(4, nfiles)
             n_linestyles = min(nfields, len(base_linestyles))
 
-            colors = [colormap(k) for k in np.linspace(0.1, 0.9, n_colors)]
+            if self.color_indices:
+                colors = [
+                    colormap(ii % colormap.N) for ii in self.color_indices
+                ]
+                # pad to n_colors if fewer indices than needed
+                while len(colors) < n_colors:
+                    colors.append(colors[len(colors) % len(self.color_indices)])
+            elif is_discrete:
+                colors = [colormap(ii % colormap.N) for ii in range(n_colors)]
+            else:
+                clo, chi = self.color_range
+                colors = [colormap(k) for k in np.linspace(clo, chi, n_colors)]
             linestyles = base_linestyles[:n_linestyles]
 
             # linestyle * color means: for each linestyle, cycle through all colors
@@ -108,9 +122,23 @@ class ThemeConfig:
             n_base_colors = max(
                 4, (nlines + len(base_linestyles) - 1) // len(base_linestyles)
             )
-            base_colors = [
-                colormap(k) for k in np.linspace(0.1, 0.9, n_base_colors)
-            ]
+            if self.color_indices:
+                base_colors = [
+                    colormap(ii % colormap.N) for ii in self.color_indices
+                ]
+                while len(base_colors) < n_base_colors:
+                    base_colors.append(
+                        base_colors[len(base_colors) % len(self.color_indices)]
+                    )
+            elif is_discrete:
+                base_colors = [
+                    colormap(ii % colormap.N) for ii in range(n_base_colors)
+                ]
+            else:
+                clo, chi = self.color_range
+                base_colors = [
+                    colormap(k) for k in np.linspace(clo, chi, n_base_colors)
+                ]
 
             colors = []
             linestyles = []

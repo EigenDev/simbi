@@ -155,6 +155,14 @@ def theme_config_from_args(args: Namespace) -> ThemeConfig:
     if color_cycle:
         overrides = dict(overrides) if overrides else {}
         overrides["color_map"] = color_cycle
+    color_range = getattr(args, "color_range", None)
+    if color_range:
+        overrides = dict(overrides) if overrides else {}
+        overrides["color_range"] = tuple(color_range)
+    color_indices = getattr(args, "color_indices", None)
+    if color_indices:
+        overrides = dict(overrides) if overrides else {}
+        overrides["color_indices"] = tuple(color_indices)
     return get_theme(getattr(args, "theme", "default"), overrides or None)
 
 

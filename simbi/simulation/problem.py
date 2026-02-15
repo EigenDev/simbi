@@ -135,6 +135,16 @@ class SimbiProblem(BaseModel):
             description="checkpoint interval",
         ),
     ]
+    diagnostic_interval: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            ge=0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="body diagnostic output interval (0 = use checkpoint_interval)",
+        ),
+    ]
     checkpoint_index: Annotated[
         int,
         ProblemParam(

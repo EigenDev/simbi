@@ -113,7 +113,8 @@ namespace simbi::ecs {
 
         // checkpointing
         real          checkpoint_interval;
-        real          dlogt; // logarithmic output spacing (0 = linear)
+        real          diagnostic_interval{0.0}; // 0 = use checkpoint_interval
+        real          dlogt;                    // logarithmic output spacing (0 = linear)
         std::uint64_t checkpoint_zones;
 
         // output paths

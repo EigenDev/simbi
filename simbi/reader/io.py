@@ -169,12 +169,21 @@ class BodyCollection:
 
 
 @dataclass(frozen=True)
+class HierarchyInfo:
+    """AMR hierarchy metadata."""
+
+    num_levels: int
+    ref_ratios: list[int]  # ref_ratios[i] = ratio between level i and level i+1
+
+
+@dataclass(frozen=True)
 class Checkpoint:
     """complete checkpoint state."""
 
     metadata: Metadata
     levels: list[LevelData]
     bodies: Optional[BodyCollection] = None
+    hierarchy: Optional[HierarchyInfo] = None
 
     @property
     def num_levels(self) -> int:
@@ -349,7 +358,9 @@ def read_partition(
     )
 
 
-def read_mesh_geometry(mesh_group: h5py.Group, level_group: h5py.Group = None) -> Result[MeshGeometry, str]:
+def read_mesh_geometry(
+    mesh_group: h5py.Group, level_group: h5py.Group = None
+) -> Result[MeshGeometry, str]:
     """read mesh configuration."""
     try:
         global_cells = tuple(mesh_group["global_cells"][()])
@@ -399,7 +410,9 @@ def read_mesh_geometry(mesh_group: h5py.Group, level_group: h5py.Group = None) -
                     else str(coord_sys_val)
                 )
             scale_factor_a = float(level_group.attrs.get("scale_factor_a", 1.0))
-            scale_factor_adot = float(level_group.attrs.get("scale_factor_adot", 0.0))
+            scale_factor_adot = float(
+                level_group.attrs.get("scale_factor_adot", 0.0)
+            )
 
         return Ok(
             MeshGeometry(
@@ -629,6 +642,28 @@ def read_bodies(bodies_group: h5py.Group) -> Result[BodyCollection, str]:
         return Err(f"failed to read bodies: {e}")
 
 
+def read_hierarchy(h5file: h5py.File) -> Optional[HierarchyInfo]:
+    """read AMR hierarchy info from /hierarchy/ group."""
+    if "hierarchy" not in h5file:
+        return None
+
+    hg = h5file["hierarchy"]
+    num_levels = int(hg.attrs.get("num_levels", 1))
+    if num_levels <= 1:
+        return None
+
+    ref_ratios = []
+    for lvl in range(1, num_levels):
+        lg = hg.get(f"level_{lvl}")
+        if lg is not None and "refinement_ratio" in lg.attrs:
+            ref_ratios.append(int(lg.attrs["refinement_ratio"]))
+        else:
+            # default to 2 if not stored
+            ref_ratios.append(2)
+
+    return HierarchyInfo(num_levels=num_levels, ref_ratios=ref_ratios)
+
+
 # =============================================================================
 # top-level reader
 # =============================================================================
@@ -660,6 +695,12 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
             if meta_result.is_err():
                 return Err(f"failed to read metadata: {meta_result.error}")
 
+            # check if this is a diagnostic-only file (no hydro)
+            file_type = f.attrs.get("type", b"checkpoint")
+            if isinstance(file_type, bytes):
+                file_type = file_type.decode("utf-8")
+            is_diagnostic = file_type == "diagnostic"
+
             # read all levels
             levels = []
             level_id = 0
@@ -672,7 +713,7 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
                     pass
                 level_id += 1
 
-            if not levels:
+            if not levels and not is_diagnostic:
                 return Err("no valid levels found")
 
             # read bodies if present
@@ -682,11 +723,15 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
                 if bodies_result.is_ok():
                     bodies = bodies_result.value
 
+            # read AMR hierarchy if present
+            hierarchy = read_hierarchy(f)
+
             return Ok(
                 Checkpoint(
                     metadata=meta_result.value,
                     levels=levels,
                     bodies=bodies,
+                    hierarchy=hierarchy,
                 )
             )
 

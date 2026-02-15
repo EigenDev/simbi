@@ -16,16 +16,34 @@ def _calculate_time_series_value(
     """
     Calculates a single scalar value for a given field at a given time.
     """
-    # Check for special analysis fields
-    if field_name in ["mdot", "maccr"]:
+    # body diagnostic fields
+    _body_accretion_fields = {
+        "mdot": "accretion_rate",
+        "maccr": "total_accreted_mass",
+    }
+    _body_vector_fields = {
+        "force_x": ("force", 0),
+        "force_y": ("force", 1),
+        "force_z": ("force", 2),
+        "torque_x": ("torque", 0),
+        "torque_y": ("torque", 1),
+        "torque_z": ("torque", 2),
+    }
+
+    if field_name in _body_accretion_fields:
         if data.body_collection is None:
             raise ValueError("No bodies in this run.")
-
-        prop = (
-            "accretion_rate" if field_name == "mdot" else "total_accreted_mass"
-        )
+        prop = _body_accretion_fields[field_name]
         return np.array(
             [getattr(v.accretion, prop) for v in data.body_collection.bodies]
+        )
+
+    if field_name in _body_vector_fields:
+        if data.body_collection is None:
+            raise ValueError("No bodies in this run.")
+        attr, idx = _body_vector_fields[field_name]
+        return np.array(
+            [getattr(v, attr)[idx] for v in data.body_collection.bodies]
         )
 
     # Standard field calculation

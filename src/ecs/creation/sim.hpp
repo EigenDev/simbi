@@ -239,6 +239,9 @@ namespace simbi::ecs::builders {
             meta.checkpoint_interval = exec_bp_.checkpoint_interval;
             meta.dlogt               = exec_bp_.dlogt;
             meta.data_dir            = exec_bp_.data_directory;
+            meta.diagnostic_interval = exec_bp_.diagnostic_interval > 0
+                                           ? exec_bp_.diagnostic_interval
+                                           : exec_bp_.checkpoint_interval;
 
             sim.registry.add(sim.global, std::move(meta));
 
@@ -437,6 +440,14 @@ namespace simbi::ecs::builders {
             meta.checkpoint_time      = exec_bp_.start_time;
             meta.prev_checkpoint_time = 0.0;
             meta.iteration            = 0;
+
+            // diagnostic scheduling
+            meta.diagnostic_interval  = exec_bp_.diagnostic_interval > 0
+                                            ? exec_bp_.diagnostic_interval
+                                            : exec_bp_.checkpoint_interval;
+            meta.diagnostic_time      = meta.diagnostic_interval;
+            meta.prev_diagnostic_time = 0.0;
+            meta.diagnostic_index     = 0;
 
             // mesh
             meta.resolution   = to_3d_resolution(mesh_bp_.active_resolution);
