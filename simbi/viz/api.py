@@ -56,6 +56,31 @@ def _save_and_show(figure: Figure, save_as: Optional[str], show: bool) -> None:
         plt.show()
 
 
+def _tighten_spectrum_axes(figure: Figure, config) -> None:
+    """clamp axes tightly to the data range for power spectrum plots."""
+    if config.figure.xlims is not None or config.figure.ylims is not None:
+        return
+
+    ax = figure.axes["main"]
+    all_x = []
+    all_y = []
+    for comp, data, _ in figure._components:
+        if isinstance(comp, PowerSpectrumComponent) and data is not None:
+            all_x.append(data.domain[0])
+            vals = data.values
+            valid = vals[vals > 0]
+            if len(valid) > 0:
+                all_y.append(valid)
+
+    if not all_x or not all_y:
+        return
+
+    x_all = np.concatenate(all_x)
+    y_all = np.concatenate(all_y)
+    ax.set_xlim(x_all.min(), x_all.max())
+    ax.set_ylim(y_all.min() * 0.5, y_all.max() * 3.0)
+
+
 def _setup_scalar_figure(config, files, fields, component_props, **kwargs):
     """load data, prepare figure, and attach scalar/vector/overlay components."""
     sim_data = load_data(files[0])
@@ -327,6 +352,7 @@ def plot_temporal_spectrum(
             show_reference_slopes=base_props.show_reference_slopes,
             reference_slopes=base_props.reference_slopes,
             compensated=base_props.compensated,
+            arbitrary_units=base_props.arbitrary_units,
             linewidth=base_props.linewidth,
             color=base_props.color,
             label=base_props.label,
@@ -378,6 +404,72 @@ def plot_power_spectrum(
         init_component(figure, PowerSpectrumComponent(props), field_data)
 
     figure.render()
+    _tighten_spectrum_axes(figure, config)
+    _save_and_show(figure, save_as, show)
+    return figure
+
+
+def plot_power_spectrum_overlay(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str] = ["v1", "v2", "v3"],
+    labels: Optional[Sequence[str]] = None,
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    per_file_overrides: Optional[dict[int, ConfigDict]] = None,
+    **kwargs,
+) -> Figure:
+    """overlay E(k) spectra from multiple checkpoint files on the same axes."""
+    if len(files) < 2:
+        raise ValueError("overlay requires at least 2 files")
+
+    nfiles = len(files)
+    velocity_fields = fields if len(fields) >= 3 else ["v1", "v2", "v3"]
+
+    figure = prepare_figure(
+        config,
+        nfiles=nfiles,
+        projection="cartesian",
+        nlvls=nfiles,
+        overlay_mode=True,
+    )
+
+    for ii, file_path in enumerate(files):
+        sim_data = load_data(file_path)
+        plot_data = create_power_spectrum_data(
+            sim_data, config, velocity_fields
+        )
+        if not plot_data.fields:
+            continue
+
+        file_props = resolve_per_file_props(
+            component_props, per_file_overrides, ii
+        )
+        label = labels[ii] if labels and ii < len(labels) else None
+
+        for field_data in plot_data.fields:
+            base_props = get_props(
+                file_props, "power_spectrum", PowerSpectrumProps
+            )
+            props = PowerSpectrumProps(
+                label=label or base_props.label,
+                linewidth=base_props.linewidth,
+                color=base_props.color,
+                compensated=base_props.compensated,
+                arbitrary_units=base_props.arbitrary_units,
+                # reference slopes only on the first file
+                show_reference_slopes=base_props.show_reference_slopes
+                and ii == 0,
+                reference_slopes=base_props.reference_slopes,
+                show_smoothed=base_props.show_smoothed,
+                smooth_window=base_props.smooth_window,
+                smooth_polyorder=base_props.smooth_polyorder,
+            )
+            init_component(figure, PowerSpectrumComponent(props), field_data)
+
+    figure.render()
+    _tighten_spectrum_axes(figure, config)
     _save_and_show(figure, save_as, show)
     return figure
 

@@ -227,7 +227,7 @@ def _setup_plot_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--overlay",
         action="store_true",
-        help="overlay multiple files on same axes (line/coordinate_bin only)",
+        help="overlay multiple files on same axes (line/coordinate_bin/power_spectrum)",
     )
     parser.add_argument(
         "--normalizations",
@@ -633,6 +633,7 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
     overlay_dispatch = {
         "line": api.plot_overlay,
         "coordinate_bin": api.plot_coordinate_profile_overlay,
+        "power_spectrum": api.plot_power_spectrum_overlay,
     }
 
     if is_grid:

@@ -7,6 +7,7 @@ from .api import (
     plot_grid,
     plot_overlay,
     plot_power_spectrum,
+    plot_power_spectrum_overlay,
     plot_temporal_spectrum,
     plot_time_series,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "plot_coordinate_profile_overlay",
     "plot_grid",
     "plot_power_spectrum",
+    "plot_power_spectrum_overlay",
     "plot_temporal_spectrum",
     "plot_time_series",
     "load_component_props",

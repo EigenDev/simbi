@@ -6,8 +6,6 @@
 # =============================================================================
 from typing import Sequence
 
-import numpy as np
-
 from simbi.analysis import shell_averaged_spectrum
 from simbi.reader.adapter import SimData
 
@@ -37,11 +35,11 @@ def create_power_spectrum_data(
     k_centers, e_k = shell_averaged_spectrum(vx, vy, vz, dx)
 
     spectrum_field = FieldData(
-        name="E_k",
+        name=r"$E(k)$",
         values=e_k,
         domain=[k_centers],
         time=data.metadata.time,
-        axis_names=["k"],
+        axis_names=[r"$k$"],
     )
 
     return PlotData(

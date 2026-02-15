@@ -25,6 +25,7 @@ from .components import (
 )
 from .components.coord_binning import CoordinateProfileComponent
 from .components.interface import Component
+from .components.power_spectrum import PowerSpectrumComponent
 from .components.time_series import TimeSeriesPlotComponent
 from .config import VisualizationConfig
 from .types import CoordSystem, FieldData, PlotData
@@ -283,6 +284,7 @@ class Figure:
                     (
                         LinePlotComponent,
                         CoordinateProfileComponent,
+                        PowerSpectrumComponent,
                         TimeSeriesPlotComponent,
                     ),
                 )

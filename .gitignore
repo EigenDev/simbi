@@ -37,6 +37,7 @@ gitrepo_home.txt
 *.txt
 !meson_build_options.txt
 !./README.md
+!./gitignore
 !/.githooks/
 # Automatically added by dev.py
 build*/
