@@ -21,6 +21,7 @@ from .builder import (
     get_props,
     init_component,
 )
+from .config_loader import ConfigDict, resolve_per_file_props
 from .components import (
     CoordinateProfileComponent,
     CoordinateProfileProps,
@@ -333,6 +334,7 @@ def plot_overlay(
     save_as: Optional[str] = None,
     show: bool = True,
     component_props: Optional[dict[str, ComponentProps]] = None,
+    per_file_overrides: Optional[dict[int, ConfigDict]] = None,
     **kwargs,
 ) -> Figure:
     """overlay multiple files on the same axes (line plots only)."""
@@ -360,15 +362,21 @@ def plot_overlay(
         overlay_mode=True,
     )
 
-    for file_path in files:
+    for ii, file_path in enumerate(files):
         sim_data = load_data(file_path)
         plot_data = create_plot_data(sim_data, fields, config)
+
+        file_props = resolve_per_file_props(
+            component_props, per_file_overrides, ii
+        )
+        label = labels[ii] if labels and ii < len(labels) else None
+
         for field_data in plot_data.fields:
             if field_data.ndim != 1:
                 continue
-            base_props = get_props(component_props, "line", LinePlotProps)
+            base_props = get_props(file_props, "line", LinePlotProps)
             props = LinePlotProps(
-                label=f"{field_data.name}",
+                label=label or f"{field_data.name}",
                 linewidth=base_props.linewidth,
                 marker=base_props.marker,
                 marker_size=base_props.marker_size,
@@ -391,6 +399,7 @@ def plot_coordinate_profile_overlay(
     save_as: Optional[str] = None,
     show: bool = True,
     component_props: Optional[dict[str, ComponentProps]] = None,
+    per_file_overrides: Optional[dict[int, ConfigDict]] = None,
     **kwargs,
 ) -> Figure:
     """overlay coordinate profiles from multiple files on the same axes."""
@@ -412,7 +421,14 @@ def plot_coordinate_profile_overlay(
         if not plot_data.fields:
             continue
 
+        # per-file props: global base merged with N: overrides
+        file_props = resolve_per_file_props(
+            component_props, per_file_overrides, ii
+        )
+
         file_label = Path(file_path).stem
+
+        # legacy positional flags layer on top (backward compat)
         norm = (
             normalizations[ii]
             if normalizations and ii < len(normalizations)
@@ -420,7 +436,6 @@ def plot_coordinate_profile_overlay(
         )
         label = labels[ii] if labels and ii < len(labels) else None
 
-        # use explicit x normalization if given, otherwise auto from max extent
         if x_normalizations and ii < len(x_normalizations):
             x_norm = x_normalizations[ii]
         else:
@@ -428,17 +443,17 @@ def plot_coordinate_profile_overlay(
 
         for field_data in plot_data.fields:
             base_props = get_props(
-                component_props,
+                file_props,
                 "coordinate_profile",
                 CoordinateProfileProps,
             )
             props = CoordinateProfileProps(
-                label=label or f"{field_data.name} ({file_label})",
+                label=label or base_props.label or f"{field_data.name} ({file_label})",
                 color=base_props.color,
                 linestyle=base_props.linestyle,
                 linewidth=base_props.linewidth,
                 normalization=norm or base_props.normalization,
-                x_normalization=x_norm,
+                x_normalization=x_norm if x_normalizations else base_props.x_normalization or x_norm,
                 rbeg=base_props.rbeg,
                 rend=base_props.rend,
                 show_reference_lines=base_props.show_reference_lines,

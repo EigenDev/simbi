@@ -525,7 +525,17 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
     from simbi.viz import api
 
     config = config_from_args(args)
-    component_props = load_props_from_args(args)
+    component_props, per_file_overrides = load_props_from_args(args)
+
+    # deprecation warnings for legacy per-file flags
+    for flag in ("normalizations", "x_normalizations", "labels"):
+        if getattr(args, flag, None):
+            warnings.warn(
+                f"--{flag.replace('_', '-')} is deprecated. "
+                "use --props N:component.field=value instead.",
+                DeprecationWarning,
+                stacklevel=1,
+            )
 
     is_grid = getattr(args, "subplot", False) or getattr(args, "layout", None)
 
@@ -609,12 +619,20 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         wspace = getattr(args, "wspace", None)
         hspace = getattr(args, "hspace", None)
 
-        panel_overrides = None
+        panel_overrides = dict(per_file_overrides) if per_file_overrides else {}
         grid_config = getattr(args, "_grid_config", None)
         if grid_config and "panels" in grid_config:
-            panel_overrides = {
-                int(k): v for k, v in grid_config["panels"].items()
-            }
+            # yaml config provides the base; cli per-file overrides win
+            for k, v in grid_config["panels"].items():
+                idx = int(k)
+                if idx in panel_overrides:
+                    merged = dict(v)
+                    for comp, fields in panel_overrides[idx].items():
+                        merged.setdefault(comp, {}).update(fields)
+                    panel_overrides[idx] = merged
+                else:
+                    panel_overrides[idx] = v
+        panel_overrides = panel_overrides or None
 
         api.plot_grid(
             config=config,
@@ -653,6 +671,7 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
             fields=args.fields,
             save_as=args.save_as,
             component_props=component_props,
+            per_file_overrides=per_file_overrides or None,
             normalizations=getattr(args, "normalizations", None),
             labels=getattr(args, "labels", None),
             x_normalizations=getattr(args, "x_normalizations", None),

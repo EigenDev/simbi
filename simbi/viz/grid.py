@@ -25,6 +25,7 @@ from .builder import create_scalar_component, get_props
 from .components.interface import ComponentProps
 from .components.shared import ColormappedProps
 from .config import VisualizationConfig
+from .config_loader import resolve_per_file_props
 from .formatting import apply_scaling, remove_spines
 from .pipeline import create_plot_data, load_data
 from .pipeline.transforms import _compose_pcolormesh, compose_fields_for_render
@@ -70,37 +71,6 @@ def _extract_panel_label(
         parts.append(meta.coord_system)
 
     return ", ".join(parts) if parts else Path(str(file_path)).stem
-
-
-def _resolve_panel_props(
-    base_props: Optional[dict[str, ComponentProps]],
-    panel_overrides: Optional[dict[int, dict]],
-    panel_idx: int,
-) -> dict[str, ComponentProps]:
-    """merge base props with per-panel overrides."""
-    result = dict(base_props) if base_props else {}
-
-    if not panel_overrides or panel_idx not in panel_overrides:
-        return result
-
-    overrides = panel_overrides[panel_idx]
-    for comp_name, comp_overrides in overrides.items():
-        if comp_name == "label":
-            continue
-        if comp_name in result:
-            existing = result[comp_name]
-            merged = {**existing.model_dump(), **comp_overrides}
-            result[comp_name] = type(existing)(**merged)
-        else:
-            from .registry import get_props_class
-
-            try:
-                props_cls = get_props_class(comp_name)
-                result[comp_name] = props_cls(**comp_overrides)
-            except KeyError:
-                pass
-
-    return result
 
 
 def _compute_global_range(
@@ -270,7 +240,7 @@ def plot_grid(
         nlvls, use_polygons = refinement_info(plot_data.fields, config)
 
         # resolve per-panel props
-        panel_props = _resolve_panel_props(component_props, panel_overrides, ii)
+        panel_props = resolve_per_file_props(component_props, panel_overrides, ii)
 
         # check for explicit label in panel_overrides
         override_label = None

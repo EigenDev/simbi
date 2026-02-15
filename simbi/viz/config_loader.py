@@ -120,25 +120,53 @@ def _set_nested(d: dict, key: str, value: Any) -> None:
     d[parts[-1]] = value
 
 
-def parse_overrides(overrides: Sequence[str]) -> ConfigDict:
+def _split_file_prefix(token: str) -> tuple[int | None, str]:
     """
-    Parse a sequence of override strings into a config dict.
+    detect an optional N: file-index prefix.
 
-    Args:
-        overrides: list of "component.field=value" strings
-
-    Returns:
-        dict mapping component names to field dicts
+    returns (file_index, remainder) where file_index is None for global
+    overrides. component names never start with a digit so the split is
+    unambiguous.
     """
-    config: ConfigDict = {}
+    colon = token.find(":")
+    if colon < 1:
+        return None, token
+    prefix = token[:colon]
+    if prefix.isdigit():
+        return int(prefix), token[colon + 1 :]
+    return None, token
+
+
+def parse_overrides(
+    overrides: Sequence[str],
+) -> tuple[ConfigDict, dict[int, ConfigDict]]:
+    """
+    parse a sequence of override strings into global and per-file config dicts.
+
+    supports two forms:
+        "component.field=value"        — global (applies to all files)
+        "N:component.field=value"      — per-file (applies to file N only)
+
+    returns:
+        (global_config, per_file_config)
+    """
+    global_config: ConfigDict = {}
+    per_file: dict[int, ConfigDict] = {}
 
     for override in overrides:
-        component, field, value = _parse_override(override)
-        if component not in config:
-            config[component] = {}
-        _set_nested(config[component], field, value)
+        file_idx, remainder = _split_file_prefix(override)
+        component, field, value = _parse_override(remainder)
 
-    return config
+        if file_idx is None:
+            target = global_config
+        else:
+            target = per_file.setdefault(file_idx, {})
+
+        if component not in target:
+            target[component] = {}
+        _set_nested(target[component], field, value)
+
+    return global_config, per_file
 
 
 def load_config_file(path: Union[str, Path]) -> ConfigDict:
@@ -252,34 +280,19 @@ def validate_props(component: str, config: dict[str, Any]) -> ComponentProps:
 def load_component_props(
     config_path: Optional[Union[str, Path]] = None,
     overrides: Optional[Sequence[str]] = None,
-) -> dict[str, ComponentProps]:
+) -> tuple[dict[str, ComponentProps], dict[int, ConfigDict]]:
     """
-    Load and validate component props from config file and/or cli overrides.
+    load and validate component props from config file and/or cli overrides.
 
-    Args:
-        config_path: optional path to yaml/json config file
-        overrides: optional list of "component.field=value" cli overrides
+    returns:
+        (validated_global_props, per_file_raw_dicts)
 
-    Returns:
-        dict mapping component names to validated props instances
-
-    Raises:
-        FileNotFoundError: if config file doesn't exist
-        ValueError: if config format is invalid
-        ValidationError: if props validation fails
-
-    Examples:
-        # file only
-        props = load_component_props("viz.yaml")
-
-        # overrides only
-        props = load_component_props(overrides=["polygon.cmap=inferno"])
-
-        # file + overrides
-        props = load_component_props("viz.yaml", ["polygon.cmap=inferno"])
+        per-file dicts are left raw — validated at render time via
+        resolve_per_file_props, matching the grid panel_overrides pattern.
     """
     file_config: ConfigDict = {}
-    cli_config: ConfigDict = {}
+    global_cli: ConfigDict = {}
+    per_file: dict[int, ConfigDict] = {}
 
     # load file config
     if config_path:
@@ -287,21 +300,20 @@ def load_component_props(
 
     # parse cli overrides
     if overrides:
-        cli_config = parse_overrides(overrides)
+        global_cli, per_file = parse_overrides(overrides)
 
     # merge configs (cli wins)
-    merged = merge_configs(file_config, cli_config)
+    merged = merge_configs(file_config, global_cli)
 
     # extract grid section (not a component — handled separately)
     merged.pop("grid", None)
 
-    # validate and instantiate
+    # validate and instantiate global props
     props: dict[str, ComponentProps] = {}
     errors: list[str] = []
 
     for component, config in merged.items():
         if component not in get_props_registry():
-            # warn but don't fail - might be for a different purpose
             continue
 
         try:
@@ -315,7 +327,7 @@ def load_component_props(
             + "\n".join(f"  - {e}" for e in errors)
         )
 
-    return props
+    return props, per_file
 
 
 def load_grid_config(
@@ -358,6 +370,35 @@ def get_props_for_component(
     # fall back to defaults or empty props
     props_cls = get_props_class(key)
     return props_cls(**(defaults or {}))
+
+
+def resolve_per_file_props(
+    base_props: Optional[dict[str, ComponentProps]],
+    per_file_overrides: Optional[dict[int, dict]],
+    file_idx: int,
+) -> dict[str, ComponentProps]:
+    """merge base props with per-file overrides for a single file index."""
+    result = dict(base_props) if base_props else {}
+
+    if not per_file_overrides or file_idx not in per_file_overrides:
+        return result
+
+    overrides = per_file_overrides[file_idx]
+    for comp_name, comp_overrides in overrides.items():
+        if comp_name == "label":
+            continue
+        if comp_name in result:
+            existing = result[comp_name]
+            merged = {**existing.model_dump(), **comp_overrides}
+            result[comp_name] = type(existing)(**merged)
+        else:
+            try:
+                props_cls = get_props_class(comp_name)
+                result[comp_name] = props_cls(**comp_overrides)
+            except KeyError:
+                pass
+
+    return result
 
 
 def generate_example_config() -> str:

@@ -137,7 +137,8 @@ def theme_config_from_args(args: Namespace) -> ThemeConfig:
     """build ThemeConfig from cli arguments."""
     from simbi.viz.config_loader import parse_overrides
 
-    overrides = parse_overrides(getattr(args, "props", [])).get("theme", {})
+    global_overrides, _ = parse_overrides(getattr(args, "props", []))
+    overrides = global_overrides.get("theme", {})
     return get_theme(getattr(args, "theme", "default"), overrides or None)
 
 
@@ -173,9 +174,13 @@ def get_save_path(args: Namespace) -> Optional[str]:
     return getattr(args, "save_as", None)
 
 
-def load_props_from_args(args: Namespace) -> dict[str, ComponentProps]:
+def load_props_from_args(
+    args: Namespace,
+) -> tuple[dict[str, ComponentProps], dict]:
     """
     load component props from config file and/or cli overrides.
+
+    returns (global_props, per_file_overrides).
     """
     from simbi.viz.config_loader import load_component_props
 
@@ -183,7 +188,7 @@ def load_props_from_args(args: Namespace) -> dict[str, ComponentProps]:
     overrides = getattr(args, "props", [])
 
     if not config_path and not overrides:
-        return {}
+        return {}, {}
 
     return load_component_props(config_path, overrides)
 

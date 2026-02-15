@@ -12,12 +12,12 @@ from matplotlib import pyplot as plt
 
 from simbi.viz.components.interface import ComponentProps
 from simbi.viz.components.shared import ColormappedProps
+from simbi.viz.config_loader import resolve_per_file_props
 from simbi.viz.grid import (
     _compute_global_range,
     _compute_grid_shape,
     _extract_panel_label,
     _override_color_range,
-    _resolve_panel_props,
     plot_grid,
 )
 from simbi.viz.types import ColorRange, FieldData
@@ -138,28 +138,28 @@ class TestOverrideColorRange:
 
 
 # =========================================================================
-# _resolve_panel_props
+# resolve_per_file_props
 # =========================================================================
 class TestResolvePanelProps:
     def test_no_overrides(self):
         base = {"quad": ColormappedProps(cmap="viridis")}
-        result = _resolve_panel_props(base, None, 0)
+        result = resolve_per_file_props(base, None, 0)
         assert result["quad"].cmap == "viridis"
 
     def test_with_override(self):
         base = {"quad": ColormappedProps(cmap="viridis")}
         overrides = {0: {"quad": {"cmap": "inferno"}}}
-        result = _resolve_panel_props(base, overrides, 0)
+        result = resolve_per_file_props(base, overrides, 0)
         assert result["quad"].cmap == "inferno"
 
     def test_no_override_for_panel(self):
         base = {"quad": ColormappedProps(cmap="viridis")}
         overrides = {1: {"quad": {"cmap": "inferno"}}}
-        result = _resolve_panel_props(base, overrides, 0)
+        result = resolve_per_file_props(base, overrides, 0)
         assert result["quad"].cmap == "viridis"
 
     def test_none_base(self):
-        result = _resolve_panel_props(None, None, 0)
+        result = resolve_per_file_props(None, None, 0)
         assert result == {}
 
 
