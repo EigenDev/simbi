@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -117,9 +118,10 @@ namespace simbi::io {
 
         // write body state + diagnostic deltas to an existing hdf5 file.
         // used by diagnostic_writer to produce lightweight body-only files.
-        void write_bodies_to(H5::H5File& file) const
+        // prev_time overrides prev_checkpoint_time for accretion rate computation.
+        void write_bodies_to(H5::H5File& file, std::optional<real> prev_time = std::nullopt) const
         {
-            write_bodies(file);
+            write_bodies(file, prev_time);
         }
 
       private:
@@ -236,7 +238,8 @@ namespace simbi::io {
             write_dataset(g, "owned_fin", owned_fin, dims, policy);
         }
 
-        void write_bodies(H5::H5File& file) const
+        void
+        write_bodies(H5::H5File& file, std::optional<real> prev_time_override = std::nullopt) const
         {
             if constexpr (requires { sim.has_bodies(); }) {
                 if (sim.has_bodies()) {
@@ -256,9 +259,11 @@ namespace simbi::io {
                             deltas.begin() + bodies_copy.size()
                         );
 
-                        // compute dt since last checkpoint
-                        const auto& meta          = sim.metadata();
-                        const real  dt_checkpoint = meta.time - meta.prev_checkpoint_time;
+                        // compute dt since last write
+                        const auto& meta = sim.metadata();
+                        const real  ref_time =
+                            prev_time_override.value_or(meta.prev_checkpoint_time);
+                        const real dt_checkpoint = meta.time - ref_time;
 
                         // merge accumulated deltas into body state
                         for (std::size_t ii = 0; ii < bodies_copy.size(); ++ii) {

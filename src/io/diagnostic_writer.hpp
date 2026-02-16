@@ -43,8 +43,12 @@ namespace simbi::io {
         // metadata (for time, iteration, etc.)
         h5_serializable<ecs::simulation_metadata_t<Sim::rank>>::write(file, sim.metadata(), policy);
 
-        // body state + diagnostic deltas (reuse checkpoint_writer_t logic)
-        checkpoint_writer_t<Sim>{sim, policy}.write_bodies_to(file);
+        // body state + diagnostic deltas
+        // use prev_diagnostic_time so accretion_rate = mass_delta / dt_diagnostic
+        checkpoint_writer_t<Sim>{sim, policy}.write_bodies_to(
+            file,
+            sim.metadata().prev_diagnostic_time
+        );
     }
 
 } // namespace simbi::io
