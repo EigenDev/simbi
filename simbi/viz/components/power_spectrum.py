@@ -123,9 +123,10 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         body_label = data.body_names[0] if data.body_names else None
         base_label = body_label or ylabel
         if self.props.label and body_label:
-            label = f"{base_label}, {self.props.label}"
+            raw_label = f"{base_label}, {self.props.label}"
         else:
-            label = self.props.label or base_label
+            raw_label = self.props.label or base_label
+        label = base_label
 
         # when smoothing is on, raw data gets reduced alpha
         raw_alpha = 0.1 if self.props.show_smoothed else self.props.alpha
@@ -133,7 +134,7 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         line_kwargs = {
             "linewidth": self.props.linewidth,
             "linestyle": self.props.linestyle,
-            "label": label,
+            "label": raw_label,
             "alpha": raw_alpha,
         }
         if self.props.color:
