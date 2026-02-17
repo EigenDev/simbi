@@ -121,7 +121,11 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
 
         # prefer body name for legend (multi-body PSD), then props, then ylabel
         body_label = data.body_names[0] if data.body_names else None
-        label = self.props.label or body_label or ylabel
+        base_label = body_label or ylabel
+        if self.props.label and body_label:
+            label = f"{base_label}, {self.props.label}"
+        else:
+            label = self.props.label or base_label
 
         # when smoothing is on, raw data gets reduced alpha
         raw_alpha = 0.1 if self.props.show_smoothed else self.props.alpha
