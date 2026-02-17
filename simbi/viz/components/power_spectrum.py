@@ -50,6 +50,7 @@ class PowerSpectrumProps(ComponentProps):
 
     # blackboard-style axes: arrows, no tick labels
     arbitrary_units: bool = False
+    show_xlabel: bool = True
 
     # nyquist cutoff annotations (per-level boundaries from AMR stitching)
     nyquist_cutoffs: tuple[float, ...] = ()
@@ -175,7 +176,8 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         if self.ax.get_legend_handles_labels()[1]:
             self.ax.legend(loc="best")
 
-        self.ax.set_xlabel(default_xlabel)
+        if self.props.show_xlabel:
+            self.ax.set_xlabel(default_xlabel)
         self.ax.set_ylabel(ylabel)
 
         if self.props.arbitrary_units:
