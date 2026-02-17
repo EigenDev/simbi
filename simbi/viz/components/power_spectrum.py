@@ -124,7 +124,7 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         label = self.props.label or body_label or ylabel
 
         # when smoothing is on, raw data gets reduced alpha
-        raw_alpha = 0.3 if self.props.show_smoothed else self.props.alpha
+        raw_alpha = 0.1 if self.props.show_smoothed else self.props.alpha
 
         line_kwargs = {
             "linewidth": self.props.linewidth,
