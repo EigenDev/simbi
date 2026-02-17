@@ -46,6 +46,19 @@ def _is_equal_mass(binary_params: Optional[dict]) -> bool:
     return abs(q - 1.0) < 1e-10
 
 
+def _pre_filter(
+    times: np.ndarray,
+    values: np.ndarray,
+    sigma: float,
+) -> np.ndarray:
+    """gaussian low-pass filter for nearly-uniform time series."""
+    from scipy.ndimage import gaussian_filter1d
+
+    dt_median = float(np.median(np.diff(times)))
+    sigma_samples = sigma / dt_median
+    return gaussian_filter1d(values, sigma=sigma_samples)
+
+
 def _compute_psd(
     time_array: np.ndarray,
     values: np.ndarray,
@@ -112,6 +125,15 @@ def create_temporal_spectrum_data(
 
     equal_mass = _is_equal_mass(binary_params)
 
+    # resolve pre-filter width to absolute time units
+    filter_width = config.temporal_spectrum.pre_filter_width
+    if filter_width is not None and orbital_period is not None:
+        sigma_time = filter_width * orbital_period
+    elif filter_width is not None:
+        sigma_time = filter_width
+    else:
+        sigma_time = None
+
     # build x-axis label
     if orbital_period is not None and orbital_period > 0:
         xlabel = r"$\omega / \Omega_{\rm orb}$"
@@ -128,8 +150,11 @@ def create_temporal_spectrum_data(
             # per-body curves (skip for equal-mass systems)
             if not equal_mass:
                 for jj in range(vals.shape[1]):
+                    col = vals[:, jj]
+                    if sigma_time is not None:
+                        col = _pre_filter(time_array, col, sigma_time)
                     omega, psd = _compute_psd(
-                        time_array, vals[:, jj], orbital_period, config
+                        time_array, col, orbital_period, config
                     )
                     label = (
                         body_names[jj] if jj < len(body_names) else f"body_{jj}"
@@ -146,6 +171,8 @@ def create_temporal_spectrum_data(
 
             # total binary power
             total_vals = vals.sum(axis=1)
+            if sigma_time is not None:
+                total_vals = _pre_filter(time_array, total_vals, sigma_time)
             omega, psd = _compute_psd(
                 time_array, total_vals, orbital_period, config
             )
@@ -159,6 +186,8 @@ def create_temporal_spectrum_data(
                 )
             )
         else:
+            if sigma_time is not None:
+                vals = _pre_filter(time_array, vals, sigma_time)
             omega, psd = _compute_psd(time_array, vals, orbital_period, config)
             result_fields.append(
                 FieldData(

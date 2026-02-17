@@ -104,6 +104,7 @@ class TemporalSpectrumConfig(BaseModel):
     n_segments: int = 8
     overlap: float = 0.5
     normalize_psd: bool = False
+    pre_filter_width: Optional[float] = None
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
 

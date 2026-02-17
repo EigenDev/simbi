@@ -529,6 +529,12 @@ def _setup_plot_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="normalize PSD to integrate to 1",
     )
+    parser.add_argument(
+        "--pre-filter-width",
+        type=float,
+        default=None,
+        help="gaussian pre-filter sigma for time series before PSD (in orbital periods if detected, else time units)",
+    )
 
     # config file and props overrides
     parser.add_argument(

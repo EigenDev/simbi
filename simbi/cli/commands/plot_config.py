@@ -133,6 +133,7 @@ def temporal_spectrum_config_from_args(
         n_segments=getattr(args, "psd_segments", 8),
         overlap=getattr(args, "psd_overlap", 0.5),
         normalize_psd=getattr(args, "normalize_psd", False),
+        pre_filter_width=getattr(args, "pre_filter_width", None),
     )
 
 
