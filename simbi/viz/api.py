@@ -553,6 +553,7 @@ def plot_temporal_spectrum(
             linewidth=base_props.linewidth,
             color=base_props.color,
             label=base_props.label,
+            alpha=base_props.alpha,
             reference_frequencies=ref_freqs,
             reference_frequency_labels=ref_labels,
             show_smoothed=base_props.show_smoothed,
@@ -562,6 +563,7 @@ def plot_temporal_spectrum(
             fap_levels=base_props.fap_levels,
             fap_n_samples=fap_n,
             fap_psd_normalization=fap_norm,
+            show_xlabel=base_props.show_xlabel,
         )
         init_component(figure, PowerSpectrumComponent(props), field_data)
 

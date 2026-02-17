@@ -178,6 +178,8 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
 
         if self.props.show_xlabel:
             self.ax.set_xlabel(default_xlabel)
+        else:
+            self.ax.set_xlabel(" ")
         self.ax.set_ylabel(ylabel)
 
         if self.props.arbitrary_units:
