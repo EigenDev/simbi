@@ -14,7 +14,8 @@ from typing import NamedTuple, Optional, Sequence
 
 from pydantic import BaseModel, field_validator
 
-from simbi.types import Array, HierarchyData
+from simbi.reader.io import HierarchyInfo
+from simbi.types import Array
 
 
 class CoordSystem(str, Enum):
@@ -65,7 +66,7 @@ class PlotData(BaseModel):
     time: Optional[float] = None
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None
-    hierarchy: Optional[HierarchyData] = None
+    hierarchy: Optional[HierarchyInfo] = None
     extra: Optional[dict] = None
 
     @field_validator("dimensions")
@@ -91,6 +92,9 @@ class PlotData(BaseModel):
         "arbitrary_types_allowed": True,
         "frozen": True,
     }
+
+
+PlotData.model_rebuild()
 
 
 class Bounds(BaseModel):
