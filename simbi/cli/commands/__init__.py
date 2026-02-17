@@ -4,6 +4,6 @@
 # cli command modules for simbi
 # =============================================================================
 
-from . import afterglow, plot, run
+from . import afterglow, diag, plot, run
 
-__all__ = ["afterglow", "plot", "run"]
+__all__ = ["afterglow", "diag", "plot", "run"]
