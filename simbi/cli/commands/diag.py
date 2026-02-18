@@ -68,6 +68,10 @@ def setup_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.set_defaults(func=execute)
 
 
+def _extract_vector_component(h5, nb, attr, idx):
+    return [float(h5[f"bodies/body_{i}"].attrs[attr][idx]) for i in range(nb)]
+
+
 _FIELD_EXTRACTORS = {
     "mdot": lambda h5, nb: [
         float(h5[f"bodies/body_{i}/accretion"].attrs["accretion_rate"])
@@ -77,6 +81,12 @@ _FIELD_EXTRACTORS = {
         float(h5[f"bodies/body_{i}/accretion"].attrs["total_accreted_mass"])
         for i in range(nb)
     ],
+    "force_x": lambda h5, nb: _extract_vector_component(h5, nb, "force", 0),
+    "force_y": lambda h5, nb: _extract_vector_component(h5, nb, "force", 1),
+    "force_z": lambda h5, nb: _extract_vector_component(h5, nb, "force", 2),
+    "torque_x": lambda h5, nb: _extract_vector_component(h5, nb, "torque", 0),
+    "torque_y": lambda h5, nb: _extract_vector_component(h5, nb, "torque", 1),
+    "torque_z": lambda h5, nb: _extract_vector_component(h5, nb, "torque", 2),
 }
 
 
@@ -130,17 +140,17 @@ def _windowed_stats(
     t_start: float,
     t_end: float,
     window_size: float,
-) -> tuple[float, float, float, int]:
-    """compute mean, std, and standard error over non-overlapping windows.
+) -> tuple[float, float, float, float, float, int]:
+    """compute mean, std, standard error, and percentiles over non-overlapping windows.
 
-    returns (grand_mean, window_std, standard_error, n_windows).
+    returns (grand_mean, window_std, standard_error, p10, p90, n_windows).
     """
     mask = (times >= t_start) & (times <= t_end)
     t_sel = times[mask]
     v_sel = values[mask]
 
     if len(v_sel) == 0:
-        return 0.0, 0.0, 0.0, 0
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0
 
     grand_mean = float(np.mean(v_sel))
 
@@ -155,12 +165,15 @@ def _windowed_stats(
 
     n_eff = len(window_means)
     if n_eff < 2:
-        return grand_mean, 0.0, 0.0, n_eff
+        return grand_mean, 0.0, 0.0, grand_mean, grand_mean, n_eff
 
-    window_std = float(np.std(window_means, ddof=1))
+    wm = np.array(window_means)
+    window_std = float(np.std(wm, ddof=1))
     standard_error = window_std / math.sqrt(n_eff)
+    p10 = float(np.percentile(wm, 10))
+    p90 = float(np.percentile(wm, 90))
 
-    return grand_mean, window_std, standard_error, n_eff
+    return grand_mean, window_std, standard_error, p10, p90, n_eff
 
 
 def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
@@ -202,29 +215,42 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         print(f"orbital_period: {orbital_period:.6f}")
     print()
 
-    header = f"{'window [' + time_unit + ']':<18s} {'<' + field + '>':<14s} {'sigma':<14s} {'sigma/sqrt(N)':<14s} {'N_windows':<10s}"
+    header = (
+        f"{'window [' + time_unit + ']':<16s} "
+        f"{'<' + field + '>':<14s} "
+        f"{'sigma':<14s} "
+        f"{'sigma/sqrt(N)':<14s} "
+        f"{'p10':<14s} "
+        f"{'p90':<14s} "
+        f"{'N_windows':<10s}"
+    )
     print(header)
     print("-" * len(header))
 
     for w in sorted(args.windows):
         w_abs = w * orbital_period_scale
-        mean, std, se, n_w = _windowed_stats(
+        mean, std, se, p10, p90, n_w = _windowed_stats(
             times, total, t_start * orbital_period_scale, t_end * orbital_period_scale, w_abs
         )
-        print(f"{w:<18.1f} {mean:<14.4f} {std:<14.4f} {se:<14.4f} {n_w:<10d}")
+        print(
+            f"{w:<16.1f} {mean:<14.4f} {std:<14.4f} {se:<14.4f} "
+            f"{p10:<14.4f} {p90:<14.4f} {n_w:<10d}"
+        )
 
     # per-body breakdown
     if values.ndim == 2 and n_bodies > 1:
         print()
         for jj in range(n_bodies):
             print(f"--- body {jj} ---")
-            header_b = f"{'window [' + time_unit + ']':<18s} {'<' + field + '>':<14s} {'sigma':<14s} {'sigma/sqrt(N)':<14s} {'N_windows':<10s}"
-            print(header_b)
-            print("-" * len(header_b))
+            print(header)
+            print("-" * len(header))
             for w in sorted(args.windows):
                 w_abs = w * orbital_period_scale
-                mean, std, se, n_w = _windowed_stats(
+                mean, std, se, p10, p90, n_w = _windowed_stats(
                     times, values[:, jj],
                     t_start * orbital_period_scale, t_end * orbital_period_scale, w_abs
                 )
-                print(f"{w:<18.1f} {mean:<14.4f} {std:<14.4f} {se:<14.4f} {n_w:<10d}")
+                print(
+                    f"{w:<16.1f} {mean:<14.4f} {std:<14.4f} {se:<14.4f} "
+                    f"{p10:<14.4f} {p90:<14.4f} {n_w:<10d}"
+                )

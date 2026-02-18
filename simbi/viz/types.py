@@ -40,6 +40,7 @@ class FieldData(BaseModel):
     axis_names: Optional[Sequence[str]] = None
     body_names: Optional[Sequence[str]] = None
     level_bounds: Optional[Sequence[tuple[float, float, float, float]]] = None
+    bands: Optional[tuple[Array, Array]] = None  # (lower, upper) percentile bands
 
     model_config = {
         "arbitrary_types_allowed": True,

@@ -150,6 +150,16 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
                 self.ax.axhline(1.0, color="black", linestyle="--", alpha=0.3)
             all_rendered_lines.append(main_line)
 
+        # render percentile bands if present
+        if data.bands is not None:
+            p_lo, p_hi = data.bands
+            norm = self.props.normalization or 1.0
+            color = all_rendered_lines[-1].get_color() if all_rendered_lines else "C0"
+            self.ax.fill_between(
+                times, p_lo / norm, p_hi / norm,
+                alpha=0.2, color=color, label="10th-90th percentile",
+            )
+
             # --- Render Decorators (Moving Avg / Trend) ---
             if self.props.show_moving_average:
                 ma_values = _calculate_moving_average(

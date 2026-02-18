@@ -57,29 +57,46 @@ def _calculate_time_series_value(
 
 
 def compute_orbital_averages(
-    time: Array, mdot: Array, time_scale: float
-) -> tuple[Array, Array]:
-    """Compute averages over orbital periods.
+    time: Array,
+    mdot: Array,
+    time_scale: float,
+    percentiles: tuple[float, float] = (10.0, 90.0),
+) -> tuple[Array, Array, Array, Array]:
+    """compute averages and percentile bands over orbital periods.
 
-    Args:
+    args:
         time: array of time values
         mdot: array of mdot values
-        time_scale: orbital period (e.g. 2π)
+        time_scale: orbital period (e.g. 2pi)
+        percentiles: (lower, upper) percentiles for bands
 
-    Returns:
+    returns:
         t_bins: array of time bin centers
         mdot_avg: array of averaged mdot values
+        p_lo: lower percentile per bin
+        p_hi: upper percentile per bin
     """
     n_orbits = (time[-1] - time[0]) / time_scale
     bins = np.linspace(time[0], time[-1], int(n_orbits) + 1)
     t_bins = (bins[1:] + bins[:-1]) / 2  # bin centers
-    mdot_avg = np.array(
-        [
-            np.mean(mdot[(time >= bins[i]) & (time < bins[i + 1])])
-            for i in range(len(bins) - 1)
-        ]
-    )
-    return t_bins, mdot_avg
+
+    mdot_avg = np.empty(len(t_bins))
+    p_lo = np.empty(len(t_bins))
+    p_hi = np.empty(len(t_bins))
+
+    for ii in range(len(t_bins)):
+        mask = (time >= bins[ii]) & (time < bins[ii + 1])
+        chunk = mdot[mask]
+        if len(chunk) > 0:
+            mdot_avg[ii] = np.mean(chunk)
+            p_lo[ii] = np.percentile(chunk, percentiles[0])
+            p_hi[ii] = np.percentile(chunk, percentiles[1])
+        else:
+            mdot_avg[ii] = np.nan
+            p_lo[ii] = np.nan
+            p_hi[ii] = np.nan
+
+    return t_bins, mdot_avg, p_lo, p_hi
 
 
 def create_time_series_data(
@@ -148,10 +165,10 @@ def create_time_series_data(
         )
 
         # Handle special case: orbital averages for mdot
-        # This creates a *new* derived field
+        # This creates a *new* derived field with percentile bands
         if name in ["mdot", "maccr"] and config.figure.time_scale:
             if values_array.ndim == 2:
-                ma_times, ma_total_mdot = compute_orbital_averages(
+                ma_times, ma_total_mdot, p_lo, p_hi = compute_orbital_averages(
                     time_array,
                     np.sum(values_array, axis=1),
                     time_scale=config.figure.time_scale or 2 * np.pi,
@@ -163,6 +180,7 @@ def create_time_series_data(
                             values=ma_total_mdot,
                             domain=[ma_times],
                             spacing_types=["linear"],
+                            bands=(p_lo, p_hi),
                         )
                     )
 
