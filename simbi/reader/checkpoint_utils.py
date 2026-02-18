@@ -133,8 +133,10 @@ def glob_checkpoints(
 
     # handle glob pattern (has wildcard)
     elif "*" in str(path):
+        # use parent directory for glob to support absolute paths
+        p = Path(path)
         checkpoint_files = sorted(
-            Path(".").glob(str(path)), key=lambda f: extract_timestep(f.name)
+            p.parent.glob(p.name), key=lambda f: extract_timestep(f.name)
         )
 
     # handle single file
