@@ -7,8 +7,7 @@
 #
 # features:
 # - auto-detects orbital_period from binary_params when --time-scale omitted
-# - equal-mass binaries emit only total power (individual curves suppressed)
-# - unequal-mass binaries emit per-body + total power
+# - multi-body systems emit per-body + total power
 # - supports welch-style segment averaging via config
 # - passes n_samples/n_freqs metadata for FAP computation
 # =============================================================================
@@ -36,14 +35,6 @@ def _detect_binary_params(data) -> Optional[dict]:
     if bc is None:
         return None
     return getattr(bc, "binary_params", None)
-
-
-def _is_equal_mass(binary_params: Optional[dict]) -> bool:
-    """check if binary system is equal mass."""
-    if binary_params is None:
-        return False
-    q = binary_params.get("mass_ratio", 0.0)
-    return abs(q - 1.0) < 1e-10
 
 
 def _pre_filter(
@@ -123,8 +114,6 @@ def create_temporal_spectrum_data(
     if orbital_period is None and binary_params is not None:
         orbital_period = binary_params.get("orbital_period")
 
-    equal_mass = _is_equal_mass(binary_params)
-
     # resolve pre-filter width to absolute time units
     filter_width = config.temporal_spectrum.pre_filter_width
     if filter_width is not None and orbital_period is not None:
@@ -147,27 +136,26 @@ def create_temporal_spectrum_data(
         ylabel = _PSD_YLABEL.get(name, rf"$|\hat{{{name}}}(\omega)|^2$")
 
         if vals.ndim == 2:
-            # per-body curves (skip for equal-mass systems)
-            if not equal_mass:
-                for jj in range(vals.shape[1]):
-                    col = vals[:, jj]
-                    if sigma_time is not None:
-                        col = _pre_filter(time_array, col, sigma_time)
-                    omega, psd = _compute_psd(
-                        time_array, col, orbital_period, config
+            # per-body curves
+            for jj in range(vals.shape[1]):
+                col = vals[:, jj]
+                if sigma_time is not None:
+                    col = _pre_filter(time_array, col, sigma_time)
+                omega, psd = _compute_psd(
+                    time_array, col, orbital_period, config
+                )
+                label = (
+                    body_names[jj] if jj < len(body_names) else f"body_{jj}"
+                )
+                result_fields.append(
+                    FieldData(
+                        name=ylabel,
+                        values=psd,
+                        domain=[omega],
+                        axis_names=[xlabel],
+                        body_names=[label],
                     )
-                    label = (
-                        body_names[jj] if jj < len(body_names) else f"body_{jj}"
-                    )
-                    result_fields.append(
-                        FieldData(
-                            name=ylabel,
-                            values=psd,
-                            domain=[omega],
-                            axis_names=[xlabel],
-                            body_names=[label],
-                        )
-                    )
+                )
 
             # total binary power
             total_vals = vals.sum(axis=1)

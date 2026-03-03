@@ -93,7 +93,6 @@ class plot_params_t:
     coord_linestyle: str = "-"
     coord_linewidth: float = 2.0
     coord_normalization: float = 1.0
-    coord_rbeg: float = 0.2
     coord_rend: float = 0.5
     coord_show_ref_lines: bool = True
     coord_x_scale: str = "linear"
@@ -782,15 +781,6 @@ class PlotTUI(App):
                         )
                         with Horizontal(classes="param-row"):
                             yield Static(
-                                "Ref line start:", classes="param-label"
-                            )
-                            yield Input(
-                                value="0.2",
-                                id="coord-rbeg",
-                                classes="param-input",
-                            )
-                        with Horizontal(classes="param-row"):
-                            yield Static(
                                 "Ref line end:", classes="param-label"
                             )
                             yield Input(
@@ -1191,7 +1181,6 @@ class PlotTUI(App):
             coord_linestyle=self._get_select("coord-linestyle", "-"),
             coord_linewidth=self._get_float("coord-linewidth", 2.0),
             coord_normalization=self._get_float("coord-norm", 1.0),
-            coord_rbeg=self._get_float("coord-rbeg", 0.2),
             coord_rend=self._get_float("coord-rend", 0.5),
             coord_show_ref_lines=self._get_checkbox("coord-show-ref"),
             coord_x_scale=self._get_select("coord-xscale", "linear"),
@@ -1363,7 +1352,6 @@ def config_from_plot_params(
             linestyle=params.coord_linestyle,
             linewidth=params.coord_linewidth,
             normalization=params.coord_normalization,
-            rbeg=params.coord_rbeg,
             rend=params.coord_rend,
             show_reference_lines=params.coord_show_ref_lines,
             x_scale=params.coord_x_scale,

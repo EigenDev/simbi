@@ -84,7 +84,7 @@ class RefinementConfig(BaseModel):
 class CoordinateConfig(BaseModel):
     """Configuration for coordinate binning plots."""
 
-    n_bins: int = 64
+    n_bins: int = 256
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
 

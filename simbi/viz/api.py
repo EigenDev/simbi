@@ -610,8 +610,8 @@ def plot_power_spectrum(
             linestyle=base_props.linestyle,
             color=base_props.color,
             label=base_props.label,
-            marker=base_props.marker,
-            mark_every=base_props.mark_every,
+            # marker=base_props.marker,
+            # mark_every=base_props.mark_every,
         )
         init_component(figure, PowerSpectrumComponent(props), field_data)
 
@@ -668,8 +668,8 @@ def plot_power_spectrum_overlay(
                 linewidth=base_props.linewidth,
                 linestyle=ls or base_props.linestyle,
                 color=base_props.color,
-                marker=base_props.marker,
-                mark_every=base_props.mark_every,
+                # marker=base_props.marker,
+                # mark_every=base_props.mark_every,
                 compensated=base_props.compensated,
                 arbitrary_units=base_props.arbitrary_units,
                 # defer slopes to post-render so they see all data
@@ -843,7 +843,6 @@ def plot_coordinate_profile_overlay(
                 x_normalization=x_norm
                 if x_normalizations
                 else base_props.x_normalization or x_norm,
-                rbeg=base_props.rbeg,
                 rend=base_props.rend,
                 show_reference_lines=base_props.show_reference_lines,
                 x_scale=base_props.x_scale,

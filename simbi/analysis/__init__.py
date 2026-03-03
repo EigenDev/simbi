@@ -9,6 +9,7 @@ from .radial_profiles import (
     momentum_equation_terms,
     spherical_profile,
     stitch_leaf_cells,
+    turbulent_velocity_sq_profile,
 )
 from .spectrum import (
     composite_shell_averaged_scalar_spectrum,
@@ -32,4 +33,5 @@ __all__ = [
     "spherical_profile",
     "mass_flux_profile",
     "momentum_equation_terms",
+    "turbulent_velocity_sq_profile",
 ]

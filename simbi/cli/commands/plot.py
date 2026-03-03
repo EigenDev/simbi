@@ -650,7 +650,6 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         "vector_field",
         "scale",
         "rend",
-        "rbeg",
         "config",
         "props",
         "generate_config",

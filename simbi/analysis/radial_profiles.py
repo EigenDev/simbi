@@ -214,6 +214,60 @@ def mass_flux_profile(
     return bin_centers, mdot_profile
 
 
+def turbulent_velocity_sq_profile(
+    stitched_data: dict[str, np.ndarray],
+    n_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    compute spherically-averaged turbulent velocity squared profile.
+
+    for each radial bin, computes <|v - <v>|^2> where <v> is the
+    bin-averaged velocity vector and the outer average is over cells
+    in the bin.
+
+    args:
+        stitched_data: flat arrays from stitch_leaf_cells()
+        n_bins: number of radial bins
+
+    returns:
+        (bin_centers, mean_v_turb_sq)
+    """
+    x_flat = stitched_data["x_flat"]
+    y_flat = stitched_data["y_flat"]
+    z_flat = stitched_data.get("z_flat", np.zeros_like(x_flat))
+
+    vx = stitched_data["v1_flat"]
+    vy = stitched_data["v2_flat"]
+    vz = stitched_data.get("v3_flat", np.zeros_like(x_flat))
+
+    r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
+    max_radius = np.max(r_flat)
+    bins = np.linspace(0, max_radius, n_bins + 1)
+
+    # mean velocity components per bin
+    mean_vx, bin_edges, binnumber = binned_statistic(
+        r_flat, vx, statistic="mean", bins=bins
+    )
+    mean_vy, _, _ = binned_statistic(r_flat, vy, statistic="mean", bins=bins)
+    mean_vz, _, _ = binned_statistic(r_flat, vz, statistic="mean", bins=bins)
+
+    # compute |v - <v>|^2 per cell using its bin's mean velocity
+    # binnumber is 1-indexed; clip to valid range
+    idx = np.clip(binnumber - 1, 0, n_bins - 1)
+    dvx = vx - mean_vx[idx]
+    dvy = vy - mean_vy[idx]
+    dvz = vz - mean_vz[idx]
+    v_turb_sq = dvx**2 + dvy**2 + dvz**2
+
+    # average the squared fluctuation per bin
+    mean_v_turb_sq, _, _ = binned_statistic(
+        r_flat, v_turb_sq, statistic="mean", bins=bins
+    )
+    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+
+    return bin_centers, mean_v_turb_sq
+
+
 def momentum_equation_terms(
     stitched_data: dict[str, np.ndarray],
     n_bins: int,

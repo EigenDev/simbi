@@ -14,6 +14,7 @@ from simbi.analysis import (
     momentum_equation_terms,
     spherical_profile,
     stitch_leaf_cells,
+    turbulent_velocity_sq_profile,
 )
 from simbi.reader.adapter import SimData
 
@@ -77,6 +78,8 @@ def create_coordinate_profile_data(
             prerequisite_fields.update(["rho", "v1", "v2", "v3"])
         elif name == "momentum_terms":
             prerequisite_fields.update(["rho", "v1", "v2", "v3", "p"])
+        elif name == "v_turb_sq":
+            prerequisite_fields.update(["v1", "v2", "v3"])
         else:
             prerequisite_fields.add(name)
 
@@ -102,6 +105,19 @@ def create_coordinate_profile_data(
                 FieldData(
                     name="mdot_vs_r",
                     values=mdot_vals,
+                    domain=[bin_centers],
+                    spacing_types=["linear"],
+                    time=data.metadata.time,
+                )
+            )
+        elif name == "v_turb_sq":
+            bin_centers, v_turb_sq_vals = turbulent_velocity_sq_profile(
+                stitched_data, n_bins
+            )
+            final_fields.append(
+                FieldData(
+                    name="v_turb_sq_vs_r",
+                    values=v_turb_sq_vals,
                     domain=[bin_centers],
                     spacing_types=["linear"],
                     time=data.metadata.time,

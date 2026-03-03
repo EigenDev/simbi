@@ -29,13 +29,11 @@ class CoordinateProfileProps(ComponentProps):
     linewidth: float = 2.0
     normalization: float = 1
     x_normalization: float = 1
-    rbeg: float = 0.2  # Reference line start radius
+    rbeg: float = 0.0  # Reference line start radius
     rend: float = 0.5  # Reference line end radius
 
-    # reference power-law overlay
+    # broken power-law fit overlay
     show_reference_lines: bool = True
-    reference_power_law: float = -1.5
-    reference_scale: float = 1.5
     reference_fields: tuple[str, ...] = ("rho",)
 
     x_scale: str = "linear"
@@ -130,24 +128,100 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
             good_bins = ~np.isnan(values)
             r_ref = r_bins[good_bins]
             val_ref = values[good_bins]
+            positive = (r_ref > 0) & (val_ref > 0)
 
-            ref_beg_idx = np.argmax(r_ref > self.props.rbeg)
-            ref_end_idx = np.argmax(r_ref > self.props.rend)
-            power = self.props.reference_power_law
+            if np.sum(positive) >= 6:
+                self._fit_broken_power_law(
+                    r_ref[positive],
+                    val_ref[positive],
+                    field_base_name,
+                )
 
-            if ref_beg_idx > 0 and ref_end_idx > ref_beg_idx:
-                anchor = val_ref[ref_beg_idx] / (r_ref[ref_beg_idx] ** power)
-                ref_vals = anchor * (r_ref**power)
+    def _fit_broken_power_law(
+        self,
+        rp: Array,
+        vp: Array,
+        field_base_name: str,
+    ) -> None:
+        """fit a 2-segment broken power law in [rbeg, rend], draw the result."""
+        # interpolate full data onto a dense log-uniform grid,
+        # then restrict to [rbeg, rend] for both fitting and drawing
+        r_lo = max(rp[0], self.props.rbeg) if self.props.rbeg > 0 else rp[0]
+        r_hi = min(rp[-1], self.props.rend) if self.props.rend > 0 else rp[-1]
+        if r_hi <= r_lo:
+            return
 
-                ref_line = self.ax.plot(
-                    r_ref[ref_beg_idx:ref_end_idx],
-                    ref_vals[ref_beg_idx:ref_end_idx]
-                    * self.props.reference_scale,
-                    linestyle="--",
-                    color="red",
-                    label=rf"$r^{{{power}}}$",
-                )[0]
-                self._ref_lines.append(ref_line)
+        n_resample = 200
+        lr_full = np.log(rp)
+        lv_full = np.log(vp)
+
+        # dense log-uniform grid in [r_lo, r_hi]
+        lr = np.linspace(np.log(r_lo), np.log(r_hi), n_resample)
+        lv = np.interp(lr, lr_full, lv_full)
+
+        # scan break points
+        min_seg = 5
+        best_ssr = np.inf
+        best_break = n_resample // 2
+        for kk in range(min_seg, n_resample - min_seg):
+            s1, i1 = np.polyfit(lr[:kk], lv[:kk], 1)
+            s2, i2 = np.polyfit(lr[kk:], lv[kk:], 1)
+            r1 = lv[:kk] - (s1 * lr[:kk] + i1)
+            r2 = lv[kk:] - (s2 * lr[kk:] + i2)
+            ssr = np.sum(r1**2) + np.sum(r2**2)
+            if ssr < best_ssr:
+                best_ssr = ssr
+                best_break = kk
+
+        r_break = np.exp(lr[best_break])
+
+        # fit each segment on the resampled grid
+        s1, i1 = np.polyfit(lr[:best_break], lv[:best_break], 1)
+        s2, i2 = np.polyfit(lr[best_break:], lv[best_break:], 1)
+
+        print(f"[{field_base_name}] broken power law:")
+        print(f"  inner slope: {s1:.3f}  (r < {r_break:.2f})")
+        print(f"  outer slope: {s2:.3f}  (r > {r_break:.2f})")
+
+        # draw lines offset slightly above data for visibility
+        offset = 1.3
+        n_draw = 100
+        r_inner = np.geomspace(r_lo, r_break, n_draw)
+        r_outer = np.geomspace(r_break, r_hi, n_draw)
+        y_inner = offset * np.exp(i1) * r_inner ** s1
+        y_outer = offset * np.exp(i2) * r_outer ** s2
+
+        line_inner = self.ax.plot(
+            r_inner, y_inner,
+            linestyle="--", linewidth=1.5, color="gray",
+        )[0]
+        line_outer = self.ax.plot(
+            r_outer, y_outer,
+            linestyle="--", linewidth=1.5, color="gray",
+        )[0]
+        self._ref_lines.extend([line_inner, line_outer])
+
+        # annotate above midpoint of each segment
+        mid_inner = len(r_inner) // 2
+        self.ax.annotate(
+            rf"$r^{{{s1:.2f}}}$",
+            xy=(r_inner[mid_inner], y_inner[mid_inner]),
+            xytext=(0, 12), textcoords="offset points",
+            fontsize=10,
+            ha="center", va="bottom",
+        )
+        mid_outer = len(r_outer) // 2
+        self.ax.annotate(
+            rf"$r^{{{s2:.2f}}}$",
+            xy=(r_outer[mid_outer], y_outer[mid_outer]),
+            xytext=(0, 12), textcoords="offset points",
+            fontsize=10,
+            ha="center", va="bottom",
+        )
+
+        self.ax.axvline(
+            r_break, color="gray", linestyle=":", linewidth=0.8
+        )
 
     def cleanup(self) -> None:
         if hasattr(self, "ax"):
