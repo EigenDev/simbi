@@ -546,8 +546,8 @@ def plot_temporal_spectrum(
         fap_n = base_props.fap_n_samples or n_samples
         fap_norm = 2.0 / n_samples if n_samples > 0 else 1.0
 
-        # per-body lines get reduced alpha so the total stands out
-        is_total = field_data.body_names and "tot" in field_data.body_names[0]
+        # per-body lines (no body_names) get reduced alpha so the total stands out
+        is_total = bool(field_data.body_names)
         line_alpha = base_props.alpha if is_total else base_props.alpha * 0.45
 
         props = PowerSpectrumProps(
@@ -558,7 +558,7 @@ def plot_temporal_spectrum(
             linewidth=base_props.linewidth,
             linestyle=_linestyles[ii % len(_linestyles)],
             color=base_props.color,
-            label=base_props.label,
+            label="_nolegend_" if not is_total else base_props.label,
             alpha=line_alpha,
             reference_frequencies=ref_freqs,
             reference_frequency_labels=ref_labels,

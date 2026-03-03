@@ -144,16 +144,12 @@ def create_temporal_spectrum_data(
                 omega, psd = _compute_psd(
                     time_array, col, orbital_period, config
                 )
-                label = (
-                    body_names[jj] if jj < len(body_names) else rf"$M_{{{jj + 1}}}$"
-                )
                 result_fields.append(
                     FieldData(
                         name=ylabel,
                         values=psd,
                         domain=[omega],
                         axis_names=[xlabel],
-                        body_names=[label],
                     )
                 )
 

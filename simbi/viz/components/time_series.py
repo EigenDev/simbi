@@ -104,10 +104,9 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
 
         if num_lines == 1:
             labels = [base_label]
-        elif self.data.body_names and len(self.data.body_names) == num_lines:
-            labels = list(self.data.body_names)
         else:
-            labels = [f"{base_label}_{i}" for i in range(num_lines)]
+            # per-body lines are unlabeled to keep the legend clean
+            labels = ["_nolegend_"] * num_lines
         return labels
 
     def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
