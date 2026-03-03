@@ -192,16 +192,14 @@ class TestPlotGrid:
             )
 
     @patch("simbi.viz.grid.load_data")
-    @patch("simbi.viz.grid.create_plot_data")
-    @patch("simbi.viz.grid.compose_fields_for_render")
+    @patch("simbi.viz.grid._prepare_panel_fields")
     @patch("simbi.viz.grid.create_scalar_component")
     @patch("matplotlib.pyplot.show")
     def test_basic_2d_grid(
         self,
         mock_show,
         mock_create_comp,
-        mock_compose,
-        mock_create,
+        mock_prepare,
         mock_load,
         mock_config,
     ):
@@ -225,9 +223,7 @@ class TestPlotGrid:
         mock_plot_data = MagicMock()
         mock_plot_data.fields = [field]
         mock_plot_data.body_collection = None
-        mock_create.return_value = mock_plot_data
-
-        mock_compose.return_value = [field]
+        mock_prepare.return_value = (mock_plot_data, [field])
 
         # mock component (no mappable — avoids real colorbar creation)
         mock_comp = MagicMock()
@@ -253,16 +249,14 @@ class TestPlotGrid:
         plt.close(fig)
 
     @patch("simbi.viz.grid.load_data")
-    @patch("simbi.viz.grid.create_plot_data")
-    @patch("simbi.viz.grid.compose_fields_for_render")
+    @patch("simbi.viz.grid._prepare_panel_fields")
     @patch("simbi.viz.grid.create_scalar_component")
     @patch("matplotlib.pyplot.show")
     def test_explicit_layout(
         self,
         mock_show,
         mock_create_comp,
-        mock_compose,
-        mock_create,
+        mock_prepare,
         mock_load,
         mock_config,
     ):
@@ -279,8 +273,7 @@ class TestPlotGrid:
         mock_plot_data = MagicMock()
         mock_plot_data.fields = [field]
         mock_plot_data.body_collection = None
-        mock_create.return_value = mock_plot_data
-        mock_compose.return_value = [field]
+        mock_prepare.return_value = (mock_plot_data, [field])
 
         mock_comp = MagicMock()
         mock_comp.render.return_value = MagicMock(
@@ -303,16 +296,14 @@ class TestPlotGrid:
         plt.close(fig)
 
     @patch("simbi.viz.grid.load_data")
-    @patch("simbi.viz.grid.create_plot_data")
-    @patch("simbi.viz.grid.compose_fields_for_render")
+    @patch("simbi.viz.grid._prepare_panel_fields")
     @patch("simbi.viz.grid.create_scalar_component")
     @patch("matplotlib.pyplot.show")
     def test_shared_colorbar(
         self,
         mock_show,
         mock_create_comp,
-        mock_compose,
-        mock_create,
+        mock_prepare,
         mock_load,
         mock_config,
     ):
@@ -332,8 +323,7 @@ class TestPlotGrid:
         mock_plot_data = MagicMock()
         mock_plot_data.fields = [field]
         mock_plot_data.body_collection = None
-        mock_create.return_value = mock_plot_data
-        mock_compose.return_value = [field]
+        mock_prepare.return_value = (mock_plot_data, [field])
 
         # use a real ScalarMappable so fig.colorbar works
         norm = mcolors.Normalize(vmin=0, vmax=1)

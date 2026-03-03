@@ -712,22 +712,41 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
                     panel_overrides[idx] = v
         panel_overrides = panel_overrides or None
 
-        api.plot_grid(
-            config=config,
-            files=args.files,
-            fields=args.fields,
-            layout=layout,
-            panel_labels=panel_labels,
-            auto_label=auto_label,
-            shared_colorbar=shared_colorbar,
-            annotate_inside=annotate_inside,
-            wspace=wspace,
-            hspace=hspace,
-            save_as=args.save_as,
-            component_props=component_props,
-            panel_overrides=panel_overrides,
-            **pass_through_kwargs,
-        )
+        if is_animation:
+            api.animate_grid(
+                config=config,
+                files=args.files,
+                fields=args.fields,
+                layout=layout,
+                panel_labels=panel_labels,
+                auto_label=auto_label,
+                shared_colorbar=shared_colorbar,
+                annotate_inside=annotate_inside,
+                wspace=wspace,
+                hspace=hspace,
+                save_as=args.save_as,
+                component_props=component_props,
+                panel_overrides=panel_overrides,
+                fps=getattr(args, "frame_rate", None),
+                **pass_through_kwargs,
+            )
+        else:
+            api.plot_grid(
+                config=config,
+                files=args.files,
+                fields=args.fields,
+                layout=layout,
+                panel_labels=panel_labels,
+                auto_label=auto_label,
+                shared_colorbar=shared_colorbar,
+                annotate_inside=annotate_inside,
+                wspace=wspace,
+                hspace=hspace,
+                save_as=args.save_as,
+                component_props=component_props,
+                panel_overrides=panel_overrides,
+                **pass_through_kwargs,
+            )
         return
 
     if is_overlay and is_animation:

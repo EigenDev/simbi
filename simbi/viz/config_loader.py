@@ -385,7 +385,7 @@ def resolve_per_file_props(
 
     overrides = per_file_overrides[file_idx]
     for comp_name, comp_overrides in overrides.items():
-        if comp_name == "label":
+        if comp_name in ("label", "file", "slice", "xlims", "ylims"):
             continue
         if comp_name in result:
             existing = result[comp_name]

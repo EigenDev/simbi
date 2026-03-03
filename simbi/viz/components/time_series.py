@@ -92,6 +92,8 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
         # In a full impl, this would update styles or rebuild lines
         pass
 
+    _LINESTYLES = ("-", "--", "-.", ":")
+
     def _get_labels(self, num_lines: int) -> list[str]:
         """Get labels for one or more lines."""
         labels: list[str] = []
@@ -103,7 +105,7 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
         if num_lines == 1:
             labels = [base_label]
         elif self.data.body_names and len(self.data.body_names) == num_lines:
-            labels = [f"${name}$" for name in self.data.body_names]
+            labels = list(self.data.body_names)
         else:
             labels = [f"{base_label}_{i}" for i in range(num_lines)]
         return labels
@@ -135,16 +137,21 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
 
         all_rendered_lines: List[Line2D] = []
 
+        # per-body lines get reduced alpha so totals stand out
+        line_alpha = self.props.alpha * 0.45 if num_lines > 1 else self.props.alpha
+
         for i in range(num_lines):
             line_values = values_2d[:, i]
             line_label = labels[i]
             norm = self.props.normalization or 1.0
+            ls = self._LINESTYLES[i % len(self._LINESTYLES)]
             main_line = self.ax.plot(
                 times,
                 line_values / norm,
                 label=line_label,
                 linewidth=self.props.linewidth,
-                alpha=self.props.alpha,
+                linestyle=ls,
+                alpha=line_alpha,
             )[0]
             if norm != 1:
                 self.ax.axhline(1.0, color="black", linestyle="--", alpha=0.3)

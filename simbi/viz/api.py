@@ -511,7 +511,8 @@ def plot_temporal_spectrum(
         config, len(files), projection="cartesian", nlvls=nlines
     )
 
-    for field_data in plot_data.fields:
+    _linestyles = ("-", "--", "-.", ":")
+    for ii, field_data in enumerate(plot_data.fields):
         base_props = get_props(
             component_props, "power_spectrum", PowerSpectrumProps
         )
@@ -545,15 +546,20 @@ def plot_temporal_spectrum(
         fap_n = base_props.fap_n_samples or n_samples
         fap_norm = 2.0 / n_samples if n_samples > 0 else 1.0
 
+        # per-body lines get reduced alpha so the total stands out
+        is_total = field_data.body_names and "tot" in field_data.body_names[0]
+        line_alpha = base_props.alpha if is_total else base_props.alpha * 0.45
+
         props = PowerSpectrumProps(
             show_reference_slopes=base_props.show_reference_slopes,
             reference_slopes=base_props.reference_slopes,
             compensated=base_props.compensated,
             arbitrary_units=base_props.arbitrary_units,
             linewidth=base_props.linewidth,
+            linestyle=_linestyles[ii % len(_linestyles)],
             color=base_props.color,
             label=base_props.label,
-            alpha=base_props.alpha,
+            alpha=line_alpha,
             reference_frequencies=ref_freqs,
             reference_frequency_labels=ref_labels,
             show_smoothed=base_props.show_smoothed,
@@ -874,10 +880,49 @@ def plot_grid(
     panel_overrides: Optional[dict[int, dict]] = None,
     **kwargs,
 ):
-    """create a multi-panel grid figure comparing different checkpoint files."""
+    """create a multi-panel grid figure with optional per-panel views."""
     from .grid import plot_grid as _plot_grid
 
     return _plot_grid(
+        config,
+        files,
+        fields,
+        layout=layout,
+        panel_labels=panel_labels,
+        auto_label=auto_label,
+        shared_colorbar=shared_colorbar,
+        annotate_inside=annotate_inside,
+        wspace=wspace,
+        hspace=hspace,
+        save_as=save_as,
+        show=show,
+        component_props=component_props,
+        panel_overrides=panel_overrides,
+        **kwargs,
+    )
+
+
+def animate_grid(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str] = ("rho",),
+    layout: Optional[tuple[int, int]] = None,
+    panel_labels: Optional[Sequence[str]] = None,
+    auto_label: bool = False,
+    shared_colorbar: bool = True,
+    annotate_inside: bool = False,
+    wspace: Optional[float] = None,
+    hspace: Optional[float] = None,
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    panel_overrides: Optional[dict[int, dict]] = None,
+    **kwargs,
+):
+    """animate a multi-panel grid across a checkpoint sequence."""
+    from .grid import animate_grid as _animate_grid
+
+    return _animate_grid(
         config,
         files,
         fields,

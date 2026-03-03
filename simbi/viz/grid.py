@@ -1,17 +1,22 @@
 # =============================================================================
 # grid.py
 #
-# multi-panel grid plotting for comparing simulations side-by-side.
+# multi-panel grid plotting and animation.
 # drives components directly against raw matplotlib axes — bypasses the
 # Figure class entirely since components are already axes-agnostic.
 #
+# features:
+# - per-panel slice specs for showing different views of the same data
+# - per-panel axis limits for zoom control
+# - grid animation across checkpoint sequences
+#
 # usage:
-#   from simbi.viz.grid import plot_grid
+#   from simbi.viz.grid import plot_grid, animate_grid
 #   plot_grid(config, files, fields=["rho"], layout=(2, 2))
 #
 #   # or via cli:
 #   simbi plot *.h5 --fields rho --subplot
-#   simbi plot *.h5 --fields rho --layout 2 3 --auto-label
+#   simbi plot *.h5 --fields rho --subplot --animate --config views.yaml
 # =============================================================================
 import math
 from pathlib import Path
@@ -19,18 +24,21 @@ from typing import Any, Optional, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.animation import FuncAnimation
+from matplotlib.axes import Axes
 from matplotlib.figure import Figure as MplFigure
 
 from .builder import create_scalar_component, get_props
 from .components.interface import ComponentProps
 from .components.shared import ColormappedProps
-from .config import VisualizationConfig
+from .config import FigureConfig, VisualizationConfig
 from .config_loader import resolve_per_file_props
 from .formatting import apply_scaling, remove_spines
 from .pipeline import create_plot_data, load_data
+from .pipeline.plot_data import apply_slicing, prepare_fields
 from .pipeline.transforms import _compose_pcolormesh, compose_fields_for_render
 from .registry import refinement_info, select_vector_component
-from .types import ColorRange, FieldData
+from .types import ColorRange, CoordSystem, FieldData, PlotData
 from .utility import get_field_str
 
 
@@ -133,6 +141,181 @@ def _annotate_panel(ax, label: str, inside: bool, fontsize: int = 10) -> None:
         ax.set_title(label, fontsize=fontsize)
 
 
+def _build_panel_specs(
+    files: Sequence[str],
+    panel_overrides: Optional[dict[int, dict]],
+    npanels: int,
+) -> list[dict]:
+    """build per-panel spec dicts from files and overrides."""
+    specs = []
+    for ii in range(npanels):
+        overrides = (panel_overrides or {}).get(ii, {})
+        file_ref = overrides.get("file")
+        if file_ref is None:
+            src = str(files[ii]) if ii < len(files) else str(files[-1])
+        elif isinstance(file_ref, int):
+            src = str(files[file_ref])
+        else:
+            src = str(file_ref)
+        specs.append({
+            "file": src,
+            "slice": overrides.get("slice"),
+            "xlims": overrides.get("xlims"),
+            "ylims": overrides.get("ylims"),
+        })
+    return specs
+
+
+def _prepare_panel_fields(
+    sim_data: Any,
+    field_names: Sequence[str],
+    config: VisualizationConfig,
+    panel_slice: Optional[dict[str, float]] = None,
+) -> tuple[PlotData, list[FieldData]]:
+    """prepare sliced and composed fields for a single panel."""
+    full_fields = prepare_fields(sim_data, field_names, config)
+    slice_spec = panel_slice if panel_slice is not None else config.plot.slice
+    sliced_fields = apply_slicing(full_fields, slice_spec)
+    plot_data = PlotData(
+        fields=sliced_fields,
+        body_collection=sim_data.body_collection,
+        time=sim_data.metadata.time,
+        dimensions=sliced_fields[0].ndim if sliced_fields else 0,
+        coord_system=CoordSystem(sim_data.metadata.coord_system),
+        hierarchy=sim_data.hierarchy() if sim_data.has_refinement() else None,
+    )
+    final_fields = compose_fields_for_render(plot_data.fields, config)
+    return plot_data, final_fields
+
+
+def _create_grid_figure(
+    config: VisualizationConfig,
+    nrows: int,
+    ncols: int,
+    is_polar: bool,
+    annotate_inside: bool,
+    wspace: Optional[float],
+    hspace: Optional[float],
+) -> tuple[MplFigure, np.ndarray]:
+    """create matplotlib figure and flattened axes array for grid layout."""
+    subplot_kw = {"projection": "polar"} if is_polar else {}
+    base_w, base_h = config.figure.fig_size
+    fig_w = base_w * min(ncols, 3) / 1.5
+    fig_h = base_h * min(nrows, 3) / 1.5
+    ws = wspace if wspace is not None else (0.05 if annotate_inside else 0.15)
+    hs = hspace if hspace is not None else (0.05 if annotate_inside else 0.2)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(fig_w, fig_h),
+        subplot_kw=subplot_kw,
+        gridspec_kw={"wspace": ws, "hspace": hs},
+    )
+    if nrows == 1 and ncols == 1:
+        axes_flat = np.array([axes])
+    elif nrows == 1 or ncols == 1:
+        axes_flat = np.atleast_1d(axes)
+    else:
+        axes_flat = axes.flatten()
+    return fig, axes_flat
+
+
+def _apply_panel_limits(
+    ax: Axes, spec: dict, figure_config: FigureConfig
+) -> None:
+    """apply per-panel axis limits, falling back to global config."""
+    panel_xlims = spec.get("xlims")
+    panel_ylims = spec.get("ylims")
+    if panel_xlims is not None:
+        ax.set_xlim(*panel_xlims)
+    elif figure_config.xlims is not None:
+        if figure_config.xlims.min is not None or figure_config.xlims.max is not None:
+            ax.set_xlim(figure_config.xlims.min, figure_config.xlims.max)
+    if panel_ylims is not None:
+        ax.set_ylim(*panel_ylims)
+    elif figure_config.ylims is not None:
+        if figure_config.ylims.min is not None or figure_config.ylims.max is not None:
+            ax.set_ylim(figure_config.ylims.min, figure_config.ylims.max)
+
+
+def _add_colorbar(
+    fig: MplFigure,
+    axes_flat: np.ndarray,
+    npanels: int,
+    nrows: int,
+    ncols: int,
+    last_mappable: Any,
+    field_label: Optional[str],
+    shared_colorbar: bool,
+) -> None:
+    """add shared or per-panel colorbar to grid figure."""
+    if last_mappable is None:
+        return
+    cbar_label = get_field_str(field_label) if field_label else ""
+    if shared_colorbar:
+        fig.canvas.draw()
+        top_ax = axes_flat[0]
+        bot_ax = axes_flat[min(npanels - 1, (nrows - 1) * ncols)]
+        rightmost_ax = axes_flat[min(ncols - 1, npanels - 1)]
+        top_pos = top_ax.get_position()
+        bot_pos = bot_ax.get_position()
+        right_pos = rightmost_ax.get_position()
+        top_mid = top_pos.y0 + top_pos.height * 0.5
+        bot_mid = bot_pos.y0 + bot_pos.height * 0.5
+        cbar_height = top_mid - bot_mid
+        if nrows == 1:
+            top_mid = top_pos.y0 + top_pos.height
+            bot_mid = top_pos.y0
+            cbar_height = top_pos.height
+        cbar_width = 0.02
+        cbar_pad = 0.015
+        cbar_x = right_pos.x0 + right_pos.width + cbar_pad
+        cax = fig.add_axes([cbar_x, bot_mid, cbar_width, cbar_height])
+        fig.colorbar(last_mappable, cax=cax, label=cbar_label)
+    else:
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+        for ii in range(npanels):
+            divider = make_axes_locatable(axes_flat[ii])
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            fig.colorbar(last_mappable, cax=cax, label=cbar_label)
+
+
+def _format_grid_panels(
+    axes_flat: np.ndarray,
+    npanels: int,
+    nrows: int,
+    ncols: int,
+    config: VisualizationConfig,
+    has_colormapped: bool,
+    **kwargs,
+) -> None:
+    """apply per-panel formatting (edge labels, tick density, spines)."""
+    max_xticks = kwargs.get("max_xticks")
+    max_yticks = kwargs.get("max_yticks")
+    for ii in range(npanels):
+        row, col = divmod(ii, ncols)
+        ax = axes_flat[ii]
+        if ax.name == "polar":
+            continue
+        is_bottom = row == nrows - 1 or ii + ncols >= npanels
+        is_left = col == 0
+        if not has_colormapped:
+            remove_spines(ax)
+        if max_xticks is not None:
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=max_xticks))
+        if max_yticks is not None:
+            ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=max_yticks))
+        if is_bottom and config.figure.xlabel:
+            ax.set_xlabel(config.figure.xlabel)
+        elif not is_bottom:
+            ax.set_xlabel("")
+        if is_left and config.figure.ylabel:
+            ax.set_ylabel(config.figure.ylabel)
+        elif not is_left:
+            ax.set_ylabel("")
+
+
 def plot_grid(
     config: VisualizationConfig,
     files: Sequence[str],
@@ -151,29 +334,34 @@ def plot_grid(
     **kwargs,
 ) -> MplFigure:
     """
-    create a multi-panel grid figure comparing different checkpoint files.
+    create a multi-panel grid figure.
 
-    each file gets its own panel with the same field(s) rendered.
+    supports per-panel slice specs and axis limits via panel_overrides:
+        panel_overrides = {
+            0: {"slice": {"x3": 0.0}, "label": "x-y plane"},
+            1: {"slice": {"x2": 0.0}, "xlims": [-1, 1], "ylims": [-1, 1]},
+        }
     """
     if not files:
         raise ValueError("no files provided")
 
-    nfiles = len(files)
-    nrows, ncols = layout if layout else _compute_grid_shape(nfiles)
+    npanels = len(files)
+    nrows, ncols = layout if layout else _compute_grid_shape(npanels)
 
-    if nrows * ncols < nfiles:
-        raise ValueError(f"layout {nrows}x{ncols} too small for {nfiles} files")
+    if nrows * ncols < npanels:
+        raise ValueError(f"layout {nrows}x{ncols} too small for {npanels} files")
 
-    # apply theme
-    config.theme.apply(nfiles=nfiles, nfields=len(fields), overlay_mode=False)
+    config.theme.apply(nfiles=npanels, nfields=len(fields), overlay_mode=False)
 
-    # load all data upfront (needed for shared colorbar range)
+    # build per-panel specs and load data with per-panel slicing
+    panel_specs = _build_panel_specs(files, panel_overrides, npanels)
     panel_data = []
     panel_sim_data = []
-    for file_path in files:
-        sim_data = load_data(file_path)
-        plot_data = create_plot_data(sim_data, list(fields), config)
-        final_fields = compose_fields_for_render(plot_data.fields, config)
+    for spec in panel_specs:
+        sim_data = load_data(spec["file"])
+        plot_data, final_fields = _prepare_panel_fields(
+            sim_data, list(fields), config, spec["slice"]
+        )
         panel_data.append((plot_data, final_fields))
         panel_sim_data.append(sim_data)
 
@@ -201,48 +389,23 @@ def plot_grid(
         and first_coord == "spherical"
     )
 
-    # create figure
-    subplot_kw = {"projection": "polar"} if is_polar else {}
-    base_w, base_h = config.figure.fig_size
-    fig_w = base_w * min(ncols, 3) / 1.5
-    fig_h = base_h * min(nrows, 3) / 1.5
-
-    # default spacing: tight for interior annotations, moderate otherwise
-    ws = wspace if wspace is not None else (0.05 if annotate_inside else 0.15)
-    hs = hspace if hspace is not None else (0.05 if annotate_inside else 0.2)
-
-    fig, axes = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(fig_w, fig_h),
-        subplot_kw=subplot_kw,
-        gridspec_kw={"wspace": ws, "hspace": hs},
+    fig, axes_flat = _create_grid_figure(
+        config, nrows, ncols, is_polar, annotate_inside, wspace, hspace
     )
-
-    # flatten axes to 1d array for uniform indexing
-    if nrows == 1 and ncols == 1:
-        axes_flat = np.array([axes])
-    elif nrows == 1 or ncols == 1:
-        axes_flat = np.atleast_1d(axes)
-    else:
-        axes_flat = axes.flatten()
 
     # render each panel
     last_mappable = None
     field_label = None
     has_colormapped = False
 
-    for ii, (file_path, (plot_data, final_fields)) in enumerate(
-        zip(files, panel_data)
-    ):
+    for ii, spec in enumerate(panel_specs):
         ax = axes_flat[ii]
+        plot_data, final_fields = panel_data[ii]
         sim_data = panel_sim_data[ii]
         nlvls, use_polygons = refinement_info(plot_data.fields, config)
 
-        # resolve per-panel props
         panel_props = resolve_per_file_props(component_props, panel_overrides, ii)
 
-        # check for explicit label in panel_overrides
         override_label = None
         if panel_overrides and ii in panel_overrides:
             override_label = panel_overrides[ii].get("label")
@@ -255,7 +418,6 @@ def plot_grid(
                 bodies=plot_data.body_collection,
             )
 
-            # apply shared color range
             if global_range and shared_colorbar:
                 component.props = _override_color_range(
                     component.props, *global_range
@@ -264,7 +426,6 @@ def plot_grid(
             component.initialize(fig, ax)
             result = component.render(field_data, config.figure)
 
-            # track mappable for colorbar
             if hasattr(result, "metadata") and result.metadata:
                 mappable = result.metadata.get("mappable")
                 if mappable is not None:
@@ -281,7 +442,7 @@ def plot_grid(
                     name = name.rsplit("_L", 1)[0]
                 field_label = name
 
-        # vector fields (quiver/streamplot) on this panel
+        # vector fields on this panel
         vector_fields = kwargs.get("vector_fields")
         if vector_fields and len(vector_fields) >= 2:
             vector_type = kwargs.get("vector_type", "quiver")
@@ -311,94 +472,31 @@ def plot_grid(
                 vec_comp.initialize(fig, ax)
                 vec_comp.render([v1_field, v2_field], config.figure)
 
+        _apply_panel_limits(ax, spec, config.figure)
+
         # panel label
         if panel_labels and ii < len(panel_labels):
             label = panel_labels[ii]
         elif override_label:
             label = override_label
         else:
-            label = _extract_panel_label(file_path, sim_data, auto_label)
+            label = _extract_panel_label(spec["file"], sim_data, auto_label)
         _annotate_panel(ax, label, inside=annotate_inside)
 
     # hide unused axes
-    for jj in range(nfiles, nrows * ncols):
+    for jj in range(npanels, nrows * ncols):
         axes_flat[jj].set_visible(False)
 
-    # colorbar
-    if last_mappable is not None and has_colormapped:
-        cbar_label = get_field_str(field_label) if field_label else ""
-        if shared_colorbar:
-            # draw once so axes positions are finalized
-            fig.canvas.draw()
+    if has_colormapped:
+        _add_colorbar(
+            fig, axes_flat, npanels, nrows, ncols,
+            last_mappable, field_label, shared_colorbar,
+        )
 
-            # find top of first row, bottom of last row (midpoints)
-            top_ax = axes_flat[0]
-            bot_ax = axes_flat[min(nfiles - 1, (nrows - 1) * ncols)]
-            rightmost_ax = axes_flat[min(ncols - 1, nfiles - 1)]
+    _format_grid_panels(
+        axes_flat, npanels, nrows, ncols, config, has_colormapped, **kwargs
+    )
 
-            top_pos = top_ax.get_position()
-            bot_pos = bot_ax.get_position()
-            right_pos = rightmost_ax.get_position()
-
-            top_mid = top_pos.y0 + top_pos.height * 0.5
-            bot_mid = bot_pos.y0 + bot_pos.height * 0.5
-            cbar_height = top_mid - bot_mid
-
-            # single row: span full panel height
-            if nrows == 1:
-                top_mid = top_pos.y0 + top_pos.height
-                bot_mid = top_pos.y0
-                cbar_height = top_pos.height
-
-            cbar_width = 0.02
-            cbar_pad = 0.015
-            cbar_x = right_pos.x0 + right_pos.width + cbar_pad
-
-            cax = fig.add_axes([cbar_x, bot_mid, cbar_width, cbar_height])
-            fig.colorbar(last_mappable, cax=cax, label=cbar_label)
-        else:
-            from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-            for ii in range(nfiles):
-                divider = make_axes_locatable(axes_flat[ii])
-                cax = divider.append_axes("right", size="5%", pad=0.05)
-                fig.colorbar(last_mappable, cax=cax, label=cbar_label)
-
-    # per-panel formatting
-    max_xticks = kwargs.get("max_xticks")
-    max_yticks = kwargs.get("max_yticks")
-
-    for ii in range(nfiles):
-        row, col = divmod(ii, ncols)
-        ax = axes_flat[ii]
-
-        if ax.name == "polar":
-            continue
-
-        is_bottom = row == nrows - 1 or ii + ncols >= nfiles
-        is_left = col == 0
-
-        if not has_colormapped:
-            remove_spines(ax)
-
-        # limit tick density to avoid collisions at tight spacing
-        if max_xticks is not None:
-            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=max_xticks))
-        if max_yticks is not None:
-            ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=max_yticks))
-
-        # axis labels on edges only, tick numbers on every panel
-        if is_bottom and config.figure.xlabel:
-            ax.set_xlabel(config.figure.xlabel)
-        elif not is_bottom:
-            ax.set_xlabel("")
-
-        if is_left and config.figure.ylabel:
-            ax.set_ylabel(config.figure.ylabel)
-        elif not is_left:
-            ax.set_ylabel("")
-
-    # save and show
     if save_as:
         fig.savefig(
             save_as,
@@ -406,6 +504,259 @@ def plot_grid(
             bbox_inches="tight",
             transparent=config.figure.transparent,
         )
+    if show:
+        plt.show()
+
+    return fig
+
+
+def animate_grid(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str] = ("rho",),
+    layout: Optional[tuple[int, int]] = None,
+    panel_labels: Optional[Sequence[str]] = None,
+    auto_label: bool = False,
+    shared_colorbar: bool = True,
+    annotate_inside: bool = False,
+    wspace: Optional[float] = None,
+    hspace: Optional[float] = None,
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    panel_overrides: Optional[dict[int, dict]] = None,
+    **kwargs,
+) -> MplFigure:
+    """
+    animate a multi-panel grid across a sequence of checkpoint files.
+
+    panel layout is fixed; files provide the time dimension.
+    each panel can have its own slice and axis limits via panel_overrides.
+    all panels render the current frame file unless a panel specifies a
+    fixed file source via the "file" key in its override.
+    """
+    if not files:
+        raise ValueError("no files provided")
+    if len(files) < 2:
+        raise ValueError("animation requires at least 2 files")
+    if not panel_overrides:
+        raise ValueError(
+            "animate_grid requires panel_overrides to define panel views"
+        )
+
+    npanels = max(panel_overrides.keys()) + 1
+    nrows, ncols = layout if layout else _compute_grid_shape(npanels)
+    if nrows * ncols < npanels:
+        raise ValueError(f"layout {nrows}x{ncols} too small for {npanels} panels")
+
+    # build panel specs — file=None means use the frame file
+    panel_specs = []
+    for ii in range(npanels):
+        overrides = panel_overrides.get(ii, {})
+        panel_specs.append({
+            "file": overrides.get("file"),
+            "slice": overrides.get("slice"),
+            "xlims": overrides.get("xlims"),
+            "ylims": overrides.get("ylims"),
+        })
+
+    fps = kwargs.pop("fps", None) or config.animation.frame_rate
+    nframes = len(files)
+    field_names = list(fields)
+    config.theme.apply(nfiles=npanels, nfields=len(fields), overlay_mode=False)
+
+    # load all panels for a single frame, caching shared file loads
+    def _load_frame(frame_file: str):
+        sim_cache: dict[str, Any] = {}
+        results = []
+        for spec in panel_specs:
+            src = spec["file"] or frame_file
+            if src not in sim_cache:
+                sim_cache[src] = load_data(src)
+            sim_data = sim_cache[src]
+            plot_data, final_fields = _prepare_panel_fields(
+                sim_data, field_names, config, spec["slice"]
+            )
+            results.append((sim_data, plot_data, final_fields))
+        return results
+
+    # frame 0: full setup
+    frame0_data = _load_frame(files[0])
+
+    global_range = None
+    if shared_colorbar:
+        all_2d = [
+            [f for f in flds if f.ndim == 2]
+            for _, _, flds in frame0_data
+        ]
+        if any(all_2d):
+            gmin, gmax = _compute_global_range(all_2d)
+            global_range = (gmin, gmax)
+
+    first_fields = frame0_data[0][2] if frame0_data else []
+    first_coord = (
+        frame0_data[0][0].metadata.coord_system
+        if frame0_data
+        else "cartesian"
+    )
+    is_polar = (
+        first_fields
+        and first_fields[0].ndim == 2
+        and first_coord == "spherical"
+    )
+
+    fig, axes_flat = _create_grid_figure(
+        config, nrows, ncols, is_polar, annotate_inside, wspace, hspace
+    )
+
+    # render frame 0 and store components for reuse
+    panel_components: list[list[tuple[Any, str]]] = []
+    last_mappable = None
+    field_label = None
+    has_colormapped = False
+
+    for ii, (sim_data, plot_data, final_fields) in enumerate(frame0_data):
+        ax = axes_flat[ii]
+        spec = panel_specs[ii]
+        panel_props = resolve_per_file_props(component_props, panel_overrides, ii)
+        nlvls, use_polygons = refinement_info(plot_data.fields, config)
+
+        apply_scaling(ax, config.figure)
+
+        components_for_panel = []
+        for field_data in final_fields:
+            component, props_key = create_scalar_component(
+                field_data, panel_props, use_polygons,
+                bodies=plot_data.body_collection,
+            )
+            if global_range and shared_colorbar:
+                component.props = _override_color_range(
+                    component.props, *global_range
+                )
+            component.initialize(fig, ax)
+            component.render(field_data, config.figure)
+            components_for_panel.append((component, field_data.name))
+
+            if hasattr(component, "props") and props_key in ("polygon", "quad"):
+                has_colormapped = True
+                # grab mappable from the component's internal state
+                mesh = getattr(component, "_main_mesh", None)
+                if mesh is not None:
+                    last_mappable = mesh
+
+            if field_label is None:
+                name = field_data.name
+                if "_polygons" in name:
+                    name = name.split("_polygons")[0]
+                if name.endswith("_L"):
+                    name = name.rsplit("_L", 1)[0]
+                field_label = name
+
+        panel_components.append(components_for_panel)
+        _apply_panel_limits(ax, spec, config.figure)
+
+        # panel label
+        override_label = panel_overrides.get(ii, {}).get("label")
+        if panel_labels and ii < len(panel_labels):
+            label = panel_labels[ii]
+        elif override_label:
+            label = override_label
+        else:
+            src = spec["file"] or files[0]
+            label = _extract_panel_label(src, sim_data, auto_label)
+        _annotate_panel(ax, label, inside=annotate_inside)
+
+    for jj in range(npanels, nrows * ncols):
+        axes_flat[jj].set_visible(False)
+
+    if has_colormapped:
+        _add_colorbar(
+            fig, axes_flat, npanels, nrows, ncols,
+            last_mappable, field_label, shared_colorbar,
+        )
+
+    _format_grid_panels(
+        axes_flat, npanels, nrows, ncols, config, has_colormapped, **kwargs
+    )
+
+    # time annotation
+    time_text = None
+    t0 = frame0_data[0][1].time if frame0_data else None
+    if t0 is not None:
+        time_scale = config.figure.time_scale
+        time_units = config.figure.time_units
+        t_display = t0 / time_scale if time_scale and time_scale > 0 else t0
+        time_text = fig.suptitle(
+            f"t = {t_display:.2f} {time_units}".strip(), fontsize=10
+        )
+
+    fig.canvas.draw()
+
+    def _init():
+        return []
+
+    def _update(frame_idx: int):
+        frame_data = _load_frame(files[frame_idx])
+        for ii, (_, plot_data, final_fields) in enumerate(frame_data):
+            for (component, _), field_data in zip(
+                panel_components[ii], final_fields
+            ):
+                component.render(field_data, config.figure)
+            _apply_panel_limits(axes_flat[ii], panel_specs[ii], config.figure)
+
+        if time_text is not None and frame_data:
+            t = frame_data[0][1].time
+            if t is not None:
+                time_scale = config.figure.time_scale
+                time_units = config.figure.time_units
+                t_display = (
+                    t / time_scale if time_scale and time_scale > 0 else t
+                )
+                time_text.set_text(
+                    f"t = {t_display:.2f} {time_units}".strip()
+                )
+
+        fig.canvas.draw_idle()
+        return []
+
+    anim = FuncAnimation(
+        fig,
+        _update,
+        frames=nframes,
+        init_func=_init,
+        blit=False,
+        interval=int(1000 / fps),
+    )
+
+    if save_as:
+        import os
+
+        from simbi.reader import logger as reader_logger
+        from simbi.reader.progress import create_progress_bar
+
+        base, ext = os.path.splitext(save_as)
+        base = base.strip().replace(" ", "_")
+        if ext not in (".mp4", ".avi", ".mov", ".gif"):
+            ext = ".mp4"
+        save_path = base + ext
+
+        prog_bar = create_progress_bar()
+        with prog_bar:
+            task = prog_bar.add_task(
+                f"[green]saving animation to {save_path}...",
+                total=nframes,
+            )
+
+            def prog_callback(current: int, total: int) -> None:
+                prog_bar.update(task, advance=1)
+
+            anim.save(
+                save_path,
+                dpi=config.figure.dpi,
+                progress_callback=prog_callback,
+            )
+        reader_logger.info(f"animation saved: {save_path}")
+
     if show:
         plt.show()
 

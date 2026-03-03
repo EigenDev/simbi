@@ -99,7 +99,7 @@ def create_temporal_spectrum_data(
         if ii == 0:
             if data.body_collection:
                 nbodies = list(data.body_collection.bodies)
-                body_names = [f"M_{jj}" for jj in range(len(nbodies))]
+                body_names = [rf"$M_{{{jj + 1}}}$" for jj in range(len(nbodies))]
             binary_params = _detect_binary_params(data)
 
         for name in field_names:
@@ -145,7 +145,7 @@ def create_temporal_spectrum_data(
                     time_array, col, orbital_period, config
                 )
                 label = (
-                    body_names[jj] if jj < len(body_names) else f"body_{jj}"
+                    body_names[jj] if jj < len(body_names) else rf"$M_{{{jj + 1}}}$"
                 )
                 result_fields.append(
                     FieldData(

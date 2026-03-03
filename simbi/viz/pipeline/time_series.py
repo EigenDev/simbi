@@ -124,7 +124,7 @@ def create_time_series_data(
 
         if i == 0 and data.body_collection:
             nbodies = list(data.body_collection.bodies)
-            body_names = [f"M_{i}" for i in range(len(nbodies))]
+            body_names = [rf"$M_{{{i + 1}}}$" for i in range(len(nbodies))]
 
         for name in field_names:
             value = _calculate_time_series_value(data, name, weight_field)
@@ -140,9 +140,9 @@ def create_time_series_data(
         for body in data.body_collection.bodies:
             masses.append(body.mass)
         if masses[0] > masses[1]:
-            body_names = ["M_1", "M_2"]
+            body_names = [r"$M_1$", r"$M_2$"]
         else:
-            body_names = ["M_2", "M_1"]
+            body_names = [r"$M_2$", r"$M_1$"]
 
     for name in field_names:
         values_array = np.array(field_values_over_time[name])
