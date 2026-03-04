@@ -528,8 +528,8 @@ def plot_temporal_spectrum(
             and orbital_period is not None
             and orbital_period > 0
         ):
-            all_freqs = (1.0, 2.0, 3.0)
-            all_labels = (r"$\Omega$", r"$2\Omega$", r"$3\Omega$")
+            all_freqs = (1.0, 2.0, 4.0)
+            all_labels = (r"$\Omega$", r"$2\Omega$", r"$4\Omega$")
             if omega_nyquist is not None:
                 pairs = [
                     (f, l)
