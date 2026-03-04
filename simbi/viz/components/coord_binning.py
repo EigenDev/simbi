@@ -36,8 +36,12 @@ class CoordinateProfileProps(ComponentProps):
     show_reference_lines: bool = True
     reference_fields: tuple[str, ...] = ("rho",)
 
-    x_scale: str = "linear"
-    y_scale: str = "linear"
+    # bondi reference line overlay
+    show_bondi: bool = False
+    bondi_gamma: Optional[float] = None
+    bondi_rho_inf: float = 1.0
+    bondi_cs_inf: float = 1.0
+    bondi_total_mass: float = 1.0
 
 
 class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
@@ -84,11 +88,14 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         line_label = self.props.label if self.props.label else field_str
         # --- Render Main Line ---
         good_bins = ~np.isnan(values)
+        plot_kwargs: dict = {"label": line_label}
+        if self.props.color:
+            plot_kwargs["color"] = self.props.color
         if self._main_line is None:
             self._main_line = self.ax.plot(
                 r_bins[good_bins],
                 values[good_bins] / norm,
-                label=line_label,
+                **plot_kwargs,
             )[0]
         else:
             self._main_line.set_data(
@@ -103,18 +110,27 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
                 norm_loc, color="gray", linestyle="--", linewidth=0.5
             )
 
+        # --- Bondi Reference Lines ---
+        if self.props.show_bondi and self.props.bondi_gamma is not None:
+            field_base_name, _ = stripped_field_name(data.name)
+            self._draw_bondi_reference(r_bins, field_base_name)
+
         # --- Apply Special Formatting ---
-        self._format_axes(r_bins, values, data.name)
+        self._format_axes(r_bins, values, data.name, style)
         # return a RenderResult so the Figure/Formatter can inspect artists and metadata
         return RenderResult(
             artists={"line": self._main_line, "refs": self._ref_lines},
             metadata={"label": field_str},
         )
 
-    def _format_axes(self, r_bins: Array, values: Array, field_name: str):
-        """Apply analysis-specific formatting."""
-        self.ax.set_xscale(self.props.x_scale)
-        self.ax.set_yscale(self.props.y_scale)
+    def _format_axes(
+        self, r_bins: Array, values: Array, field_name: str, style: FigureConfig
+    ):
+        """apply analysis-specific formatting."""
+        self.ax.set_xscale(style.xscale)
+        self.ax.set_yscale(style.yscale)
+        self.ax.spines["top"].set_visible(False)
+        self.ax.spines["right"].set_visible(False)
         field_base_name, field_str = stripped_field_name(field_name)
 
         self.ax.set_xlabel(
@@ -222,6 +238,40 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         self.ax.axvline(
             r_break, color="gray", linestyle=":", linewidth=0.8
         )
+
+    def _draw_bondi_reference(self, r_bins: Array, field_base_name: str) -> None:
+        """overlay analytic bondi profile for the current field."""
+        from simbi.analysis.bondi import bondi_profiles
+
+        bondi_fields = {"rho", "cs", "vr"}
+        if field_base_name not in bondi_fields:
+            return
+
+        # use un-normalized radii for the physics computation
+        r_phys = r_bins * self.props.x_normalization
+        valid = r_phys > 0
+        if not np.any(valid):
+            return
+
+        profiles = bondi_profiles(
+            r_phys[valid],
+            self.props.bondi_gamma,
+            self.props.bondi_total_mass,
+            self.props.bondi_rho_inf,
+            self.props.bondi_cs_inf,
+        )
+
+        ref_vals = profiles[field_base_name]
+        line = self.ax.plot(
+            r_bins[valid],
+            ref_vals / self.props.normalization,
+            linestyle=":",
+            alpha=0.5,
+            color="gray",
+            linewidth=1.5,
+            label="_nolegend_",
+        )[0]
+        self._ref_lines.append(line)
 
     def cleanup(self) -> None:
         if hasattr(self, "ax"):

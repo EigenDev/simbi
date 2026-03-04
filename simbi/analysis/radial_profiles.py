@@ -2,8 +2,11 @@
 # radial_profiles.py
 #
 # spherically-averaged radial profile analysis for AMR simulation data.
-# leaf-cell stitching, generic profiles, mass flux, and momentum equation
-# decomposition. pure numpy/scipy — no viz dependency.
+# leaf-cell stitching, volume-weighted profiles, mass flux, and momentum
+# equation decomposition. pure numpy/scipy -- no viz dependency.
+#
+# all profiles use logarithmic radial bins and volume-weighted averages:
+#   <q>(r) = sum(q_i * dV_i) / sum(dV_i)   for cells i in shell
 #
 # usage:
 #   from simbi.analysis import stitch_leaf_cells, spherical_profile
@@ -12,6 +15,47 @@
 # =============================================================================
 import numpy as np
 from scipy.stats import binned_statistic
+
+
+def _cell_radii(stitched_data: dict[str, np.ndarray]) -> np.ndarray:
+    """compute radial distance of each leaf cell from the origin."""
+    x = stitched_data["x_flat"]
+    y = stitched_data["y_flat"]
+    z = stitched_data.get("z_flat", np.zeros_like(x))
+    return np.sqrt(x**2 + y**2 + z**2)
+
+
+def _log_bins(r_flat: np.ndarray, n_bins: int) -> np.ndarray:
+    """logarithmically-spaced radial bin edges."""
+    r_pos = r_flat[r_flat > 0]
+    if len(r_pos) == 0:
+        return np.linspace(0, 1, n_bins + 1)
+    r_min = np.min(r_pos)
+    r_max = np.max(r_flat)
+    return np.geomspace(r_min, r_max, n_bins + 1)
+
+
+def _volume_weighted_mean(
+    r_flat: np.ndarray,
+    values: np.ndarray,
+    volume: np.ndarray,
+    bins: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    volume-weighted shell average of a scalar field.
+
+    returns (bin_centers, weighted_mean, binnumber).
+    """
+    weighted_sum, bin_edges, binnumber = binned_statistic(
+        r_flat, values * volume, statistic="sum", bins=bins,
+    )
+    total_vol, _, _ = binned_statistic(
+        r_flat, volume, statistic="sum", bins=bins,
+    )
+    mean = weighted_sum / np.where(total_vol > 0, total_vol, 1.0)
+    # geometric bin centers for log-spaced bins
+    centers = np.sqrt(bin_edges[1:] * bin_edges[:-1])
+    return centers, mean, binnumber
 
 
 def stitch_leaf_cells(
@@ -111,7 +155,7 @@ def stitch_leaf_cells(
                     if is_covered:
                         continue
 
-                    # leaf cell — keep it
+                    # leaf cell -- keep it
                     stitched_data["x_flat"].append(xc)
                     stitched_data["y_flat"].append(yc)
                     stitched_data["volume_flat"].append(cell_volume)
@@ -135,7 +179,7 @@ def spherical_profile(
     n_bins: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    compute spherically-averaged radial profile.
+    volume-weighted spherically-averaged radial profile with log bins.
 
     args:
         stitched_data: flat arrays from stitch_leaf_cells()
@@ -145,22 +189,13 @@ def spherical_profile(
     returns:
         (bin_centers, mean_values)
     """
-    x_flat = stitched_data["x_flat"]
-    y_flat = stitched_data["y_flat"]
-    z_flat = stitched_data.get("z_flat", np.zeros_like(x_flat))
-
+    r_flat = _cell_radii(stitched_data)
+    volume = stitched_data["volume_flat"]
     val_flat = stitched_data[f"{field_name}_flat"]
+    bins = _log_bins(r_flat, n_bins)
 
-    r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
-    max_radius = np.max(r_flat)
-    bins = np.linspace(0, max_radius, n_bins + 1)
-
-    mean_val, bin_edges, _ = binned_statistic(
-        r_flat, val_flat, statistic="mean", bins=bins
-    )
-    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-
-    return bin_centers, mean_val
+    centers, mean_val, _ = _volume_weighted_mean(r_flat, val_flat, volume, bins)
+    return centers, mean_val
 
 
 def mass_flux_profile(
@@ -168,7 +203,7 @@ def mass_flux_profile(
     n_bins: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    compute radial mass flux profile with proper volume weighting for AMR.
+    compute radial mass flux profile with volume weighting and log bins.
 
     args:
         stitched_data: flat arrays from stitch_leaf_cells()
@@ -192,26 +227,15 @@ def mass_flux_profile(
     )
     flux_density_flat = rho_flat * vr_flat
 
-    max_radius = np.max(r_flat)
-    bins = np.linspace(0, max_radius, n_bins + 1)
-
-    weighted_flux, bin_edges, _ = binned_statistic(
-        r_flat,
-        flux_density_flat * volume_flat,
-        statistic="sum",
-        bins=bins,
-    )
-    total_volume, _, _ = binned_statistic(
-        r_flat, volume_flat, statistic="sum", bins=bins
+    bins = _log_bins(r_flat, n_bins)
+    centers, mean_flux_density, _ = _volume_weighted_mean(
+        r_flat, flux_density_flat, volume_flat, bins,
     )
 
-    mean_flux_density = weighted_flux / (total_volume + 1e-10)
-
-    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
-    shell_area = 4.0 * np.pi * bin_centers**2
+    shell_area = 4.0 * np.pi * centers**2
     mdot_profile = mean_flux_density * shell_area
 
-    return bin_centers, mdot_profile
+    return centers, mdot_profile
 
 
 def turbulent_velocity_sq_profile(
@@ -219,11 +243,11 @@ def turbulent_velocity_sq_profile(
     n_bins: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    compute spherically-averaged turbulent velocity squared profile.
+    volume-weighted spherically-averaged turbulent velocity squared profile.
 
     for each radial bin, computes <|v - <v>|^2> where <v> is the
-    bin-averaged velocity vector and the outer average is over cells
-    in the bin.
+    volume-weighted bin-averaged velocity vector and the outer average
+    is volume-weighted over cells in the bin.
 
     args:
         stitched_data: flat arrays from stitch_leaf_cells()
@@ -231,6 +255,50 @@ def turbulent_velocity_sq_profile(
 
     returns:
         (bin_centers, mean_v_turb_sq)
+    """
+    r_flat = _cell_radii(stitched_data)
+    volume = stitched_data["volume_flat"]
+    vx = stitched_data["v1_flat"]
+    vy = stitched_data["v2_flat"]
+    vz = stitched_data.get("v3_flat", np.zeros_like(r_flat))
+
+    bins = _log_bins(r_flat, n_bins)
+
+    # volume-weighted mean velocity per shell
+    centers, mean_vx, binnumber = _volume_weighted_mean(
+        r_flat, vx, volume, bins,
+    )
+    _, mean_vy, _ = _volume_weighted_mean(r_flat, vy, volume, bins)
+    _, mean_vz, _ = _volume_weighted_mean(r_flat, vz, volume, bins)
+
+    # compute |v - <v>|^2 per cell using its bin's mean velocity
+    idx = np.clip(binnumber - 1, 0, n_bins - 1)
+    dvx = vx - mean_vx[idx]
+    dvy = vy - mean_vy[idx]
+    dvz = vz - mean_vz[idx]
+    v_turb_sq = dvx**2 + dvy**2 + dvz**2
+
+    # volume-weighted average of squared fluctuation per shell
+    _, mean_v_turb_sq, _ = _volume_weighted_mean(
+        r_flat, v_turb_sq, volume, bins,
+    )
+
+    return centers, mean_v_turb_sq
+
+
+def radial_velocity_profile(
+    stitched_data: dict[str, np.ndarray],
+    n_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    volume-weighted spherically-averaged radial velocity profile.
+
+    args:
+        stitched_data: flat arrays from stitch_leaf_cells()
+        n_bins: number of radial bins
+
+    returns:
+        (bin_centers, mean_vr)
     """
     x_flat = stitched_data["x_flat"]
     y_flat = stitched_data["y_flat"]
@@ -241,31 +309,42 @@ def turbulent_velocity_sq_profile(
     vz = stitched_data.get("v3_flat", np.zeros_like(x_flat))
 
     r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
-    max_radius = np.max(r_flat)
-    bins = np.linspace(0, max_radius, n_bins + 1)
+    vr_flat = (vx * x_flat + vy * y_flat + vz * z_flat) / (r_flat + 1e-10)
 
-    # mean velocity components per bin
-    mean_vx, bin_edges, binnumber = binned_statistic(
-        r_flat, vx, statistic="mean", bins=bins
-    )
-    mean_vy, _, _ = binned_statistic(r_flat, vy, statistic="mean", bins=bins)
-    mean_vz, _, _ = binned_statistic(r_flat, vz, statistic="mean", bins=bins)
+    volume = stitched_data["volume_flat"]
+    bins = _log_bins(r_flat, n_bins)
+    centers, mean_vr, _ = _volume_weighted_mean(r_flat, vr_flat, volume, bins)
 
-    # compute |v - <v>|^2 per cell using its bin's mean velocity
-    # binnumber is 1-indexed; clip to valid range
-    idx = np.clip(binnumber - 1, 0, n_bins - 1)
-    dvx = vx - mean_vx[idx]
-    dvy = vy - mean_vy[idx]
-    dvz = vz - mean_vz[idx]
-    v_turb_sq = dvx**2 + dvy**2 + dvz**2
+    return centers, mean_vr
 
-    # average the squared fluctuation per bin
-    mean_v_turb_sq, _, _ = binned_statistic(
-        r_flat, v_turb_sq, statistic="mean", bins=bins
-    )
-    bin_centers = 0.5 * (bin_edges[1:] + bin_edges[:-1])
 
-    return bin_centers, mean_v_turb_sq
+def sound_speed_profile(
+    stitched_data: dict[str, np.ndarray],
+    n_bins: int,
+    gamma: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    volume-weighted spherically-averaged sound speed profile.
+
+    args:
+        stitched_data: flat arrays from stitch_leaf_cells()
+        n_bins: number of radial bins
+        gamma: adiabatic index
+
+    returns:
+        (bin_centers, mean_cs)
+    """
+    r_flat = _cell_radii(stitched_data)
+    volume = stitched_data["volume_flat"]
+
+    rho_flat = stitched_data["rho_flat"]
+    p_flat = stitched_data.get("p_flat", rho_flat)
+    cs_flat = np.sqrt(gamma * p_flat / (rho_flat + 1e-10))
+
+    bins = _log_bins(r_flat, n_bins)
+    centers, mean_cs, _ = _volume_weighted_mean(r_flat, cs_flat, volume, bins)
+
+    return centers, mean_cs
 
 
 def momentum_equation_terms(
@@ -291,6 +370,7 @@ def momentum_equation_terms(
     y_flat = stitched_data["y_flat"]
     z_flat = stitched_data.get("z_flat", np.zeros_like(x_flat))
     rho_flat = stitched_data["rho_flat"]
+    volume = stitched_data["volume_flat"]
 
     if "p_flat" in stitched_data:
         p_flat = stitched_data["p_flat"]
@@ -305,35 +385,51 @@ def momentum_equation_terms(
     r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
     vr_flat = (vx * x_flat + vy * y_flat + vz * z_flat) / (r_flat + 1e-10)
 
-    max_radius = np.max(r_flat)
-    bins = np.linspace(0, max_radius, n_bins + 1)
-    bin_centers = 0.5 * (bins[1:] + bins[:-1])
+    bins = _log_bins(r_flat, n_bins)
 
-    mean_vr, _, _ = binned_statistic(
-        r_flat, vr_flat, statistic="mean", bins=bins
-    )
-    mean_rho, _, _ = binned_statistic(
-        r_flat, rho_flat, statistic="mean", bins=bins
-    )
-    mean_p, _, _ = binned_statistic(r_flat, p_flat, statistic="mean", bins=bins)
+    centers, mean_vr, _ = _volume_weighted_mean(r_flat, vr_flat, volume, bins)
+    _, mean_rho, _ = _volume_weighted_mean(r_flat, rho_flat, volume, bins)
+    _, mean_p, _ = _volume_weighted_mean(r_flat, p_flat, volume, bins)
 
     # advection: rho * v_r * dv_r/dr
-    dvr_dr = np.gradient(mean_vr, bin_centers)
+    dvr_dr = np.gradient(mean_vr, centers)
     term_advection = mean_rho * mean_vr * dvr_dr
 
     # pressure gradient: -dP/dr
-    dp_dr = np.gradient(mean_p, bin_centers)
+    dp_dr = np.gradient(mean_p, centers)
     term_pressure = -dp_dr
 
     # gravity: -rho * GM / r^2
-    term_gravity = -mean_rho * GM / (bin_centers**2 + 1e-10)
+    term_gravity = -mean_rho * GM / (centers**2 + 1e-10)
 
     # residual
     term_residual = term_advection - (term_pressure + term_gravity)
 
     return {
-        "advection": (bin_centers, term_advection),
-        "pressure": (bin_centers, term_pressure),
-        "gravity": (bin_centers, term_gravity),
-        "residual": (bin_centers, term_residual),
+        "advection": (centers, term_advection),
+        "pressure": (centers, term_pressure),
+        "gravity": (centers, term_gravity),
+        "residual": (centers, term_residual),
     }
+
+
+def time_average_profiles(
+    snapshots: list[tuple[np.ndarray, np.ndarray]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    time-average a sequence of per-snapshot radial profiles.
+
+    each snapshot is a (bin_centers, values) pair from any profile function.
+    all snapshots must share the same bin_centers (same n_bins + same domain).
+
+    args:
+        snapshots: list of (bin_centers, values) tuples
+
+    returns:
+        (bin_centers, time_averaged_values)
+    """
+    if not snapshots:
+        raise ValueError("no snapshots to average")
+    centers = snapshots[0][0]
+    stacked = np.column_stack([vals for _, vals in snapshots])
+    return centers, np.nanmean(stacked, axis=1)

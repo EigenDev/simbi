@@ -24,6 +24,7 @@ FIELD_MAP: dict[str, str] = {
     "chi_dens": r"$\rho \cdot \chi$",
     "T_eV": "T [eV]",
     "temperature": "T",
+    "cs": r"c_s",
     "mach": r"$\mathcal{M}$",
     "v1": r"$v_1 / v_0$",
     "v2": r"$v_2 / v_0$",

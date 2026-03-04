@@ -289,6 +289,15 @@ def _setup_plot_args(parser: argparse.ArgumentParser) -> None:
         help="explicit grid dimensions (e.g., --layout 2 3)",
     )
     parser.add_argument(
+        "--field-grid",
+        nargs=2,
+        type=int,
+        metavar=("ROWS", "COLS"),
+        default=None,
+        dest="field_grid",
+        help="split fields across an R×C grid with all files overlaid per panel",
+    )
+    parser.add_argument(
         "--panel-labels",
         nargs="+",
         default=None,
@@ -614,6 +623,12 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
                 stacklevel=1,
             )
 
+    is_animation = getattr(args, "animate", False) or args.kind == "movie"
+    is_overlay = (
+        getattr(args, "overlay", False)
+        or getattr(args, "field_grid", None) is not None
+    )
+
     is_grid = getattr(args, "subplot", False) or getattr(args, "layout", None)
 
     if is_grid and getattr(args, "config", None):
@@ -622,9 +637,6 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         args._grid_config = load_grid_config(args.config)
     else:
         args._grid_config = None
-
-    is_animation = getattr(args, "animate", False) or args.kind == "movie"
-    is_overlay = getattr(args, "overlay", False)
     plot_type = config.plot.plot_type
 
     cli_args = vars(args).copy()
@@ -655,6 +667,7 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         "generate_config",
         "subplot",
         "layout",
+        "field_grid",
         "panel_labels",
         "auto_label",
         "no_shared_colorbar",
@@ -762,6 +775,11 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
             sys.exit(1)
 
         overlay_func = overlay_dispatch[plot_type]
+        field_grid = (
+            tuple(args.field_grid)
+            if getattr(args, "field_grid", None)
+            else None
+        )
         overlay_func(
             config=config,
             files=args.files,
@@ -773,6 +791,7 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
             labels=getattr(args, "labels", None),
             linestyles=getattr(args, "linestyles", None),
             x_normalizations=getattr(args, "x_normalizations", None),
+            field_grid=field_grid,
             **pass_through_kwargs,
         )
     elif is_animation:

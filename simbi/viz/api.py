@@ -780,6 +780,50 @@ def plot_overlay(
     return figure
 
 
+def _build_profile_props(
+    base_props: CoordinateProfileProps,
+    sim_data,
+    field_data,
+    label: Optional[str],
+    file_label: str,
+    norm: Optional[float],
+    x_norm: float,
+    x_normalizations: Optional[Sequence[float]],
+) -> CoordinateProfileProps:
+    """assemble per-file per-field coordinate profile props."""
+    bondi_gamma = base_props.bondi_gamma or sim_data.metadata.gamma
+    bondi_mass = base_props.bondi_total_mass
+    if (
+        bondi_mass == 1.0
+        and sim_data.body_collection
+        and sim_data.body_collection.binary_params
+    ):
+        bondi_mass = sim_data.body_collection.binary_params.get(
+            "total_mass", 1.0
+        )
+
+    return CoordinateProfileProps(
+        label=label
+        or base_props.label
+        or f"{field_data.name} ({file_label})",
+        color=base_props.color,
+        linestyle=base_props.linestyle,
+        linewidth=base_props.linewidth,
+        normalization=norm or base_props.normalization,
+        x_normalization=x_norm
+        if x_normalizations
+        else base_props.x_normalization or x_norm,
+        rend=base_props.rend,
+        show_reference_lines=base_props.show_reference_lines,
+        reference_fields=base_props.reference_fields,
+        show_bondi=base_props.show_bondi,
+        bondi_gamma=bondi_gamma,
+        bondi_rho_inf=base_props.bondi_rho_inf,
+        bondi_cs_inf=base_props.bondi_cs_inf,
+        bondi_total_mass=bondi_mass,
+    )
+
+
 def plot_coordinate_profile_overlay(
     config: VisualizationConfig,
     files: Sequence[str],
@@ -793,10 +837,31 @@ def plot_coordinate_profile_overlay(
     per_file_overrides: Optional[dict[int, ConfigDict]] = None,
     **kwargs,
 ) -> Figure:
-    """overlay coordinate profiles from multiple files on the same axes."""
+    """overlay coordinate profiles from multiple files on the same axes.
+
+    when layout is provided and there are multiple fields, creates a
+    multi-panel figure with one field per panel, all files overlaid on each.
+    """
     if len(files) < 2:
         raise ValueError("overlay requires at least 2 files")
 
+    field_grid = kwargs.get("field_grid")
+
+    # multi-panel mode: one panel per field, files overlaid on each
+    if field_grid and len(fields) > 1:
+        return _plot_coordinate_profile_grid(
+            config, files, fields, field_grid,
+            normalizations=normalizations,
+            labels=labels,
+            x_normalizations=x_normalizations,
+            save_as=save_as,
+            show=show,
+            component_props=component_props,
+            per_file_overrides=per_file_overrides,
+            **{k: v for k, v in kwargs.items() if k != "field_grid"},
+        )
+
+    # single-axes mode (original behavior)
     nfiles = len(files)
     figure = prepare_figure(
         config,
@@ -812,21 +877,16 @@ def plot_coordinate_profile_overlay(
         if not plot_data.fields:
             continue
 
-        # per-file props: global base merged with N: overrides
         file_props = resolve_per_file_props(
             component_props, per_file_overrides, ii
         )
-
         file_label = Path(file_path).stem
-
-        # legacy positional flags layer on top (backward compat)
         norm = (
             normalizations[ii]
             if normalizations and ii < len(normalizations)
             else None
         )
         label = labels[ii] if labels and ii < len(labels) else None
-
         if x_normalizations and ii < len(x_normalizations):
             x_norm = x_normalizations[ii]
         else:
@@ -834,25 +894,11 @@ def plot_coordinate_profile_overlay(
 
         for field_data in plot_data.fields:
             base_props = get_props(
-                file_props,
-                "coordinate_profile",
-                CoordinateProfileProps,
+                file_props, "coordinate_profile", CoordinateProfileProps,
             )
-            props = CoordinateProfileProps(
-                label=label
-                or base_props.label
-                or f"{field_data.name} ({file_label})",
-                color=base_props.color,
-                linestyle=base_props.linestyle,
-                linewidth=base_props.linewidth,
-                normalization=norm or base_props.normalization,
-                x_normalization=x_norm
-                if x_normalizations
-                else base_props.x_normalization or x_norm,
-                rend=base_props.rend,
-                show_reference_lines=base_props.show_reference_lines,
-                x_scale=base_props.x_scale,
-                y_scale=base_props.y_scale,
+            props = _build_profile_props(
+                base_props, sim_data, field_data,
+                label, file_label, norm, x_norm, x_normalizations,
             )
             init_component(
                 figure, CoordinateProfileComponent(props), field_data
@@ -860,6 +906,140 @@ def plot_coordinate_profile_overlay(
 
     figure.render()
     _save_and_show(figure, save_as, show)
+    return figure
+
+
+def _plot_coordinate_profile_grid(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str],
+    layout: tuple[int, int],
+    normalizations: Optional[Sequence[float]] = None,
+    labels: Optional[Sequence[str]] = None,
+    x_normalizations: Optional[Sequence[float]] = None,
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    per_file_overrides: Optional[dict[int, ConfigDict]] = None,
+    **kwargs,
+) -> Figure:
+    """multi-panel profile grid: one panel per field, files overlaid on each."""
+    from .components.coord_binning import stripped_field_name
+
+    nrows, ncols = layout
+    nfields = len(fields)
+    nfiles = len(files)
+    wspace = kwargs.get("wspace", 0.3)
+    hspace = kwargs.get("hspace", 0.3)
+
+    config.theme.apply(nfiles=nfiles, nfields=nfields, overlay_mode=True)
+
+    base_w, base_h = config.figure.fig_size
+    fig_w = base_w * min(ncols, 3) / 1.5
+    fig_h = base_h * min(nrows, 3) / 1.5
+    fig, axes = plt.subplots(
+        nrows, ncols,
+        figsize=(fig_w, fig_h),
+        gridspec_kw={"wspace": wspace, "hspace": hspace},
+    )
+    if nrows == 1 and ncols == 1:
+        axes_flat = [axes]
+    elif nrows == 1 or ncols == 1:
+        axes_flat = list(np.atleast_1d(axes))
+    else:
+        axes_flat = list(axes.flatten())
+
+    # hide unused panels
+    for jj in range(nfields, nrows * ncols):
+        axes_flat[jj].set_visible(False)
+
+    # preload all file data
+    file_data = []
+    for ii, file_path in enumerate(files):
+        sim_data = load_data(file_path)
+        plot_data = create_coordinate_profile_data(sim_data, fields, config)
+        file_data.append((sim_data, plot_data))
+
+    # get the color cycle so each file has a consistent color across panels
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+    for ff, field_name in enumerate(fields):
+        ax = axes_flat[ff]
+        _, field_str = stripped_field_name(f"{field_name}_vs_r")
+
+        for ii, (sim_data, plot_data) in enumerate(file_data):
+            # find the field_data matching this field
+            target_name = f"{field_name}_vs_r"
+            field_data = None
+            for fd in plot_data.fields:
+                if fd.name == target_name:
+                    field_data = fd
+                    break
+            if field_data is None:
+                continue
+
+            file_props = resolve_per_file_props(
+                component_props, per_file_overrides, ii
+            )
+            file_label = Path(files[ii]).stem
+            norm = (
+                normalizations[ii]
+                if normalizations and ii < len(normalizations)
+                else None
+            )
+            label = labels[ii] if labels and ii < len(labels) else None
+            if x_normalizations and ii < len(x_normalizations):
+                x_norm = x_normalizations[ii]
+            else:
+                x_norm = float(np.nanmax(plot_data.fields[0].domain[0]))
+
+            base_props = get_props(
+                file_props, "coordinate_profile", CoordinateProfileProps,
+            )
+            props = _build_profile_props(
+                base_props, sim_data, field_data,
+                label, file_label, norm, x_norm, x_normalizations,
+            )
+
+            # render directly onto this panel's axes
+            if not props.color:
+                from matplotlib.colors import to_hex
+
+                props = CoordinateProfileProps(
+                    **{
+                        **props.model_dump(),
+                        "color": to_hex(color_cycle[ii % len(color_cycle)]),
+                    }
+                )
+            comp = CoordinateProfileComponent(props)
+            comp.initialize(fig, ax)
+            comp.render(field_data, config.figure)
+
+        ax.set_ylabel(field_str)
+        if ff < nfields - ncols:
+            ax.set_xlabel("")
+
+        # legend only on first panel
+        if ff == 0:
+            handles, leg_labels = ax.get_legend_handles_labels()
+            if handles:
+                ax.legend(loc="best")
+
+    fig.subplots_adjust(wspace=wspace, hspace=hspace)
+
+    if save_as:
+        fig.savefig(
+            save_as,
+            dpi=config.figure.dpi,
+            bbox_inches="tight",
+            transparent=config.figure.transparent,
+        )
+    if show:
+        plt.show()
+
+    # return a dummy Figure for api consistency
+    figure = prepare_figure(config, nfiles=nfiles, projection="cartesian")
+    figure.fig = fig
     return figure
 
 

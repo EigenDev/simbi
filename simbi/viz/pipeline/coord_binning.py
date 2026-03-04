@@ -12,6 +12,8 @@ import numpy as np
 from simbi.analysis import (
     mass_flux_profile,
     momentum_equation_terms,
+    radial_velocity_profile,
+    sound_speed_profile,
     spherical_profile,
     stitch_leaf_cells,
     turbulent_velocity_sq_profile,
@@ -78,8 +80,10 @@ def create_coordinate_profile_data(
             prerequisite_fields.update(["rho", "v1", "v2", "v3"])
         elif name == "momentum_terms":
             prerequisite_fields.update(["rho", "v1", "v2", "v3", "p"])
-        elif name == "v_turb_sq":
+        elif name in ("v_turb_sq", "v_turb", "vr"):
             prerequisite_fields.update(["v1", "v2", "v3"])
+        elif name == "cs":
+            prerequisite_fields.update(["rho", "p"])
         else:
             prerequisite_fields.add(name)
 
@@ -106,7 +110,7 @@ def create_coordinate_profile_data(
                     name="mdot_vs_r",
                     values=mdot_vals,
                     domain=[bin_centers],
-                    spacing_types=["linear"],
+                    spacing_types=["log"],
                     time=data.metadata.time,
                 )
             )
@@ -119,7 +123,46 @@ def create_coordinate_profile_data(
                     name="v_turb_sq_vs_r",
                     values=v_turb_sq_vals,
                     domain=[bin_centers],
-                    spacing_types=["linear"],
+                    spacing_types=["log"],
+                    time=data.metadata.time,
+                )
+            )
+        elif name == "vr":
+            bin_centers, vr_vals = radial_velocity_profile(
+                stitched_data, n_bins
+            )
+            final_fields.append(
+                FieldData(
+                    name="vr_vs_r",
+                    values=vr_vals,
+                    domain=[bin_centers],
+                    spacing_types=["log"],
+                    time=data.metadata.time,
+                )
+            )
+        elif name == "cs":
+            bin_centers, cs_vals = sound_speed_profile(
+                stitched_data, n_bins, data.metadata.gamma
+            )
+            final_fields.append(
+                FieldData(
+                    name="cs_vs_r",
+                    values=cs_vals,
+                    domain=[bin_centers],
+                    spacing_types=["log"],
+                    time=data.metadata.time,
+                )
+            )
+        elif name == "v_turb":
+            bin_centers, v_turb_sq_vals = turbulent_velocity_sq_profile(
+                stitched_data, n_bins
+            )
+            final_fields.append(
+                FieldData(
+                    name="v_turb_vs_r",
+                    values=np.sqrt(np.maximum(v_turb_sq_vals, 0.0)),
+                    domain=[bin_centers],
+                    spacing_types=["log"],
                     time=data.metadata.time,
                 )
             )
@@ -133,7 +176,7 @@ def create_coordinate_profile_data(
                         name=f"term_{term_name}",
                         values=vals,
                         domain=[bin_centers],
-                        spacing_types=["linear"],
+                        spacing_types=["log"],
                     )
                 )
         else:
@@ -145,7 +188,7 @@ def create_coordinate_profile_data(
                     name=f"{name}_vs_r",
                     values=mean_vals,
                     domain=[bin_centers],
-                    spacing_types=["linear"],
+                    spacing_types=["log"],
                     time=data.metadata.time,
                 )
             )

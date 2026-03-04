@@ -1354,8 +1354,6 @@ def config_from_plot_params(
             normalization=params.coord_normalization,
             rend=params.coord_rend,
             show_reference_lines=params.coord_show_ref_lines,
-            x_scale=params.coord_x_scale,
-            y_scale=params.coord_y_scale,
         )
 
     elif params.plot_type == "time_series":

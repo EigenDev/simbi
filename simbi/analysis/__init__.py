@@ -4,11 +4,15 @@
 # pure physics/math analysis functions with no viz dependency.
 # reusable from notebooks, scripts, or the viz pipeline.
 # =============================================================================
+from .bondi import accretion_coefficient, bondi_profiles
 from .radial_profiles import (
     mass_flux_profile,
     momentum_equation_terms,
+    radial_velocity_profile,
+    sound_speed_profile,
     spherical_profile,
     stitch_leaf_cells,
+    time_average_profiles,
     turbulent_velocity_sq_profile,
 )
 from .spectrum import (
@@ -22,6 +26,10 @@ from .spectrum import (
 )
 
 __all__ = [
+    "accretion_coefficient",
+    "bondi_profiles",
+    "radial_velocity_profile",
+    "sound_speed_profile",
     "shell_averaged_spectrum",
     "shell_averaged_scalar_spectrum",
     "composite_shell_averaged_spectrum",
@@ -33,5 +41,6 @@ __all__ = [
     "spherical_profile",
     "mass_flux_profile",
     "momentum_equation_terms",
+    "time_average_profiles",
     "turbulent_velocity_sq_profile",
 ]

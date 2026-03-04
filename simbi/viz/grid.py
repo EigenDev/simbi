@@ -497,6 +497,11 @@ def plot_grid(
         axes_flat, npanels, nrows, ncols, config, has_colormapped, **kwargs
     )
 
+    # reassert spacing so bbox_inches="tight" doesn't override it
+    eff_ws = wspace if wspace is not None else (0.05 if annotate_inside else 0.15)
+    eff_hs = hspace if hspace is not None else (0.05 if annotate_inside else 0.2)
+    fig.subplots_adjust(wspace=eff_ws, hspace=eff_hs)
+
     if save_as:
         fig.savefig(
             save_as,
