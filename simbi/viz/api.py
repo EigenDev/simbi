@@ -556,7 +556,7 @@ def plot_temporal_spectrum(
             compensated=base_props.compensated,
             arbitrary_units=base_props.arbitrary_units,
             linewidth=base_props.linewidth,
-            linestyle=_linestyles[ii % len(_linestyles)],
+            linestyle="-" if is_total else _linestyles[ii % len(_linestyles)],
             color=base_props.color,
             label="_nolegend_" if not is_total else base_props.label,
             alpha=line_alpha,
