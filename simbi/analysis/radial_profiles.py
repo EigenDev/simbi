@@ -415,7 +415,7 @@ def momentum_equation_terms(
 
 def time_average_profiles(
     snapshots: list[tuple[np.ndarray, np.ndarray]],
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     time-average a sequence of per-snapshot radial profiles.
 
@@ -426,10 +426,10 @@ def time_average_profiles(
         snapshots: list of (bin_centers, values) tuples
 
     returns:
-        (bin_centers, time_averaged_values)
+        (bin_centers, time_averaged_values, temporal_std)
     """
     if not snapshots:
         raise ValueError("no snapshots to average")
     centers = snapshots[0][0]
     stacked = np.column_stack([vals for _, vals in snapshots])
-    return centers, np.nanmean(stacked, axis=1)
+    return centers, np.nanmean(stacked, axis=1), np.nanstd(stacked, axis=1)
