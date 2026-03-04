@@ -548,7 +548,7 @@ def plot_temporal_spectrum(
 
         # per-body lines (no body_names) get reduced alpha so the total stands out
         is_total = bool(field_data.body_names)
-        line_alpha = base_props.alpha if is_total else base_props.alpha * 0.45
+        line_alpha = base_props.alpha if is_total else base_props.alpha * 0.25
 
         props = PowerSpectrumProps(
             show_reference_slopes=base_props.show_reference_slopes,
