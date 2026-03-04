@@ -99,7 +99,9 @@ def create_temporal_spectrum_data(
         if ii == 0:
             if data.body_collection:
                 nbodies = list(data.body_collection.bodies)
-                body_names = [rf"$M_{{{jj + 1}}}$" for jj in range(len(nbodies))]
+                body_names = [
+                    rf"$M_{{{jj + 1}}}$" for jj in range(len(nbodies))
+                ]
             binary_params = _detect_binary_params(data)
 
         for name in field_names:
@@ -125,7 +127,7 @@ def create_temporal_spectrum_data(
 
     # build x-axis label
     if orbital_period is not None and orbital_period > 0:
-        xlabel = r"$\omega / \Omega_{\rm orb}$"
+        xlabel = r"$\omega / \Omega$"
     else:
         xlabel = r"$\omega$"
 
