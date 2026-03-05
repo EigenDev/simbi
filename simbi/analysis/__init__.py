@@ -9,6 +9,7 @@ from .radial_profiles import (
     mass_flux_profile,
     momentum_equation_terms,
     radial_velocity_profile,
+    reynolds_delta_v_profile,
     sound_speed_profile,
     spherical_profile,
     stitch_leaf_cells,
@@ -41,6 +42,7 @@ __all__ = [
     "spherical_profile",
     "mass_flux_profile",
     "momentum_equation_terms",
+    "reynolds_delta_v_profile",
     "time_average_profiles",
     "turbulent_velocity_sq_profile",
 ]

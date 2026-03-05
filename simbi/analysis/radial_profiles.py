@@ -66,7 +66,8 @@ def stitch_leaf_cells(
     stitch all refined levels into flat arrays of leaf cells.
 
     for each cell on each level, checks whether it is covered by a finer
-    level. only leaf (uncovered) cells are kept.
+    level. only leaf (uncovered) cells are kept. uses vectorized numpy
+    operations over entire levels instead of per-cell python loops.
 
     args:
         level_domains: per-level coordinate arrays. each entry is a list of
@@ -85,92 +86,100 @@ def stitch_leaf_cells(
     field_names = list(level_values.keys())
     is_3d = len(level_domains[0]) == 3
 
-    # find refined regions from L1+
-    refined_regions = []
+    # collect refined region bounds for vectorized coverage checks
+    refined_bounds: list[tuple] = []
     for ii in range(1, num_levels):
         domain = level_domains[ii]
-        region = {
-            "xmin": domain[0][0],
-            "xmax": domain[0][-1],
-            "ymin": domain[1][0],
-            "ymax": domain[1][-1],
-        }
         if is_3d:
-            region["zmin"] = domain[2][0]
-            region["zmax"] = domain[2][-1]
-        refined_regions.append(region)
+            refined_bounds.append((
+                domain[0][0], domain[0][-1],
+                domain[1][0], domain[1][-1],
+                domain[2][0], domain[2][-1],
+            ))
+        else:
+            refined_bounds.append((
+                domain[0][0], domain[0][-1],
+                domain[1][0], domain[1][-1],
+            ))
 
-    # prepare output lists
-    stitched_data: dict[str, list] = {f"{name}_flat": [] for name in field_names}
-    stitched_data["x_flat"] = []
-    stitched_data["y_flat"] = []
-    stitched_data["volume_flat"] = []
-    if is_3d:
-        stitched_data["z_flat"] = []
+    # accumulate chunks per level, concatenate once at the end
+    x_chunks: list[np.ndarray] = []
+    y_chunks: list[np.ndarray] = []
+    z_chunks: list[np.ndarray] = []
+    vol_chunks: list[np.ndarray] = []
+    field_chunks: dict[str, list[np.ndarray]] = {n: [] for n in field_names}
 
     for level_idx in range(num_levels):
         domain = level_domains[level_idx]
         x_verts, y_verts = domain[0], domain[1]
-        z_verts = domain[2] if is_3d else np.array([0.0, 1.0])
 
         x_centers = 0.5 * (x_verts[1:] + x_verts[:-1])
         y_centers = 0.5 * (y_verts[1:] + y_verts[:-1])
-        z_centers = (
-            0.5 * (z_verts[1:] + z_verts[:-1]) if is_3d else np.array([0.0])
-        )
-
         dx = x_verts[1] - x_verts[0]
         dy = y_verts[1] - y_verts[0]
-        dz = (z_verts[1] - z_verts[0]) if is_3d else 1.0
-        cell_volume = dx * dy * dz
 
-        nx, ny, nz = len(x_centers), len(y_centers), len(z_centers)
+        if is_3d:
+            z_verts = domain[2]
+            z_centers = 0.5 * (z_verts[1:] + z_verts[:-1])
+            dz = z_verts[1] - z_verts[0]
+            cell_volume = dx * dy * dz
 
-        for kk in range(nz):
-            zc = z_centers[kk]
-            for jj in range(ny):
-                yc = y_centers[jj]
-                for ii in range(nx):
-                    xc = x_centers[ii]
+            # 3d meshgrid: shape (nz, ny, nx)
+            ZZ, YY, XX = np.meshgrid(
+                z_centers, y_centers, x_centers, indexing="ij",
+            )
 
-                    # check if covered by a finer level
-                    is_covered = False
-                    for region in refined_regions[level_idx:]:
-                        covered_2d = (
-                            region["xmin"] <= xc <= region["xmax"]
-                            and region["ymin"] <= yc <= region["ymax"]
-                        )
-                        if not is_3d:
-                            if covered_2d:
-                                is_covered = True
-                                break
-                        else:
-                            if (
-                                covered_2d
-                                and region["zmin"] <= zc <= region["zmax"]
-                            ):
-                                is_covered = True
-                                break
+            # vectorized coverage: OR across all finer regions
+            covered = np.zeros(XX.shape, dtype=bool)
+            for bounds in refined_bounds[level_idx:]:
+                xmin, xmax, ymin, ymax, zmin, zmax = bounds
+                covered |= (
+                    (XX >= xmin) & (XX <= xmax)
+                    & (YY >= ymin) & (YY <= ymax)
+                    & (ZZ >= zmin) & (ZZ <= zmax)
+                )
 
-                    if is_covered:
-                        continue
+            leaf = ~covered
+            x_chunks.append(XX[leaf])
+            y_chunks.append(YY[leaf])
+            z_chunks.append(ZZ[leaf])
+            vol_chunks.append(np.full(int(leaf.sum()), cell_volume))
 
-                    # leaf cell -- keep it
-                    stitched_data["x_flat"].append(xc)
-                    stitched_data["y_flat"].append(yc)
-                    stitched_data["volume_flat"].append(cell_volume)
-                    if is_3d:
-                        stitched_data["z_flat"].append(zc)
+            for name in field_names:
+                field_chunks[name].append(level_values[name][level_idx][leaf])
+        else:
+            cell_volume = dx * dy
 
-                    for name in field_names:
-                        val = (
-                            level_values[name][level_idx][kk, jj, ii]
-                            if is_3d
-                            else level_values[name][level_idx][jj, ii]
-                        )
-                        stitched_data[f"{name}_flat"].append(val)
+            # 2d meshgrid: shape (ny, nx)
+            YY, XX = np.meshgrid(y_centers, x_centers, indexing="ij")
 
-    return {key: np.array(val) for key, val in stitched_data.items()}
+            covered = np.zeros(XX.shape, dtype=bool)
+            for bounds in refined_bounds[level_idx:]:
+                xmin, xmax, ymin, ymax = bounds
+                covered |= (
+                    (XX >= xmin) & (XX <= xmax)
+                    & (YY >= ymin) & (YY <= ymax)
+                )
+
+            leaf = ~covered
+            x_chunks.append(XX[leaf])
+            y_chunks.append(YY[leaf])
+            vol_chunks.append(np.full(int(leaf.sum()), cell_volume))
+
+            for name in field_names:
+                field_chunks[name].append(level_values[name][level_idx][leaf])
+
+    result: dict[str, np.ndarray] = {
+        "x_flat": np.concatenate(x_chunks),
+        "y_flat": np.concatenate(y_chunks),
+        "volume_flat": np.concatenate(vol_chunks),
+    }
+    if is_3d:
+        result["z_flat"] = np.concatenate(z_chunks)
+    for name in field_names:
+        result[f"{name}_flat"] = np.concatenate(field_chunks[name])
+
+    return result
 
 
 def spherical_profile(
@@ -243,47 +252,44 @@ def turbulent_velocity_sq_profile(
     n_bins: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
-    volume-weighted spherically-averaged turbulent velocity squared profile.
+    volume-weighted spherically-averaged tangential velocity squared profile.
 
-    for each radial bin, computes <|v - <v>|^2> where <v> is the
-    volume-weighted bin-averaged velocity vector and the outer average
-    is volume-weighted over cells in the bin.
+    computes v_t^2 = |v|^2 - v_r^2 per cell, then shell-averages.
+    this correctly measures non-radial motion without the cancellation
+    bug of shell-averaging cartesian components (where <v_x> = 0 by
+    symmetry even for coherent radial inflow).
 
     args:
         stitched_data: flat arrays from stitch_leaf_cells()
         n_bins: number of radial bins
 
     returns:
-        (bin_centers, mean_v_turb_sq)
+        (bin_centers, mean_v_t_sq)
     """
-    r_flat = _cell_radii(stitched_data)
-    volume = stitched_data["volume_flat"]
+    x = stitched_data["x_flat"]
+    y = stitched_data["y_flat"]
+    z = stitched_data.get("z_flat", np.zeros_like(x))
+
     vx = stitched_data["v1_flat"]
     vy = stitched_data["v2_flat"]
-    vz = stitched_data.get("v3_flat", np.zeros_like(r_flat))
+    vz = stitched_data.get("v3_flat", np.zeros_like(x))
+
+    r_flat = np.sqrt(x**2 + y**2 + z**2)
+    volume = stitched_data["volume_flat"]
+
+    # radial velocity: v_r = v . r_hat
+    vr = (vx * x + vy * y + vz * z) / (r_flat + 1e-10)
+
+    # tangential component: v_t^2 = |v|^2 - v_r^2
+    v_t_sq = (vx**2 + vy**2 + vz**2) - vr**2
+    v_t_sq = np.maximum(v_t_sq, 0.0)
 
     bins = _log_bins(r_flat, n_bins)
-
-    # volume-weighted mean velocity per shell
-    centers, mean_vx, binnumber = _volume_weighted_mean(
-        r_flat, vx, volume, bins,
-    )
-    _, mean_vy, _ = _volume_weighted_mean(r_flat, vy, volume, bins)
-    _, mean_vz, _ = _volume_weighted_mean(r_flat, vz, volume, bins)
-
-    # compute |v - <v>|^2 per cell using its bin's mean velocity
-    idx = np.clip(binnumber - 1, 0, n_bins - 1)
-    dvx = vx - mean_vx[idx]
-    dvy = vy - mean_vy[idx]
-    dvz = vz - mean_vz[idx]
-    v_turb_sq = dvx**2 + dvy**2 + dvz**2
-
-    # volume-weighted average of squared fluctuation per shell
-    _, mean_v_turb_sq, _ = _volume_weighted_mean(
-        r_flat, v_turb_sq, volume, bins,
+    centers, mean_v_t_sq, _ = _volume_weighted_mean(
+        r_flat, v_t_sq, volume, bins,
     )
 
-    return centers, mean_v_turb_sq
+    return centers, mean_v_t_sq
 
 
 def radial_velocity_profile(
@@ -411,6 +417,43 @@ def momentum_equation_terms(
         "gravity": (centers, term_gravity),
         "residual": (centers, term_residual),
     }
+
+
+def reynolds_delta_v_profile(
+    stitched_data: dict[str, np.ndarray],
+    mean_vx: np.ndarray,
+    mean_vy: np.ndarray,
+    mean_vz: np.ndarray,
+    n_bins: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    volume-weighted shell-averaged velocity fluctuation profile.
+
+    uses reynolds decomposition: delta_v = sqrt(<|v - <v>_t|^2>_shell)
+    where <v>_t is the time-mean velocity at each cell, passed in as
+    mean_vx/vy/vz.
+
+    args:
+        stitched_data: flat arrays from stitch_leaf_cells()
+        mean_vx, mean_vy, mean_vz: time-averaged velocity per cell
+        n_bins: number of radial bins
+
+    returns:
+        (bin_centers, delta_v_profile)
+    """
+    r_flat = _cell_radii(stitched_data)
+    volume = stitched_data["volume_flat"]
+
+    vx = stitched_data["v1_flat"]
+    vy = stitched_data["v2_flat"]
+    vz = stitched_data.get("v3_flat", np.zeros_like(r_flat))
+
+    dv_sq = (vx - mean_vx) ** 2 + (vy - mean_vy) ** 2 + (vz - mean_vz) ** 2
+
+    bins = _log_bins(r_flat, n_bins)
+    centers, mean_dv_sq, _ = _volume_weighted_mean(r_flat, dv_sq, volume, bins)
+
+    return centers, np.sqrt(np.maximum(mean_dv_sq, 0.0))
 
 
 def time_average_profiles(
