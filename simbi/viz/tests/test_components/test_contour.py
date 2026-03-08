@@ -16,7 +16,7 @@ class TestContourPlotProps:
         props = ContourPlotProps()
         assert props.levels == (1.0,)
         assert props.color == "white"
-        assert props.linewidths == 1.5
+        assert props.linewidths == 1
         assert props.alpha == 1.0
         assert props.filled is False
 

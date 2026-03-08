@@ -24,7 +24,7 @@ class PolygonPlotProps(ColormappedProps):
 
     show_level_bounds: bool = False
     level_color: str = "white"
-    level_linewidth: float = 1.5
+    level_linewidth: float = 1
     level_alpha: float = 0.8
 
 

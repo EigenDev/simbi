@@ -103,5 +103,5 @@ def overlay_config():
         component="contour",
         levels=[1.0],
         color="white",
-        linewidth=1.5,
+        linewidth=1,
     )

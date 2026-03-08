@@ -86,12 +86,12 @@ class plot_params_t:
     show_level_bounds: bool = False
 
     # line-specific
-    linewidth: float = 2.0
+    linewidth: float = 1.0
     marker: Optional[str] = None
 
     # coordinate profile
     coord_linestyle: str = "-"
-    coord_linewidth: float = 2.0
+    coord_linewidth: float = 1.0
     coord_normalization: float = 1.0
     coord_rend: float = 0.5
     coord_show_ref_lines: bool = True
@@ -100,7 +100,7 @@ class plot_params_t:
 
     # time series
     ts_linestyle: str = "-"
-    ts_linewidth: float = 2.0
+    ts_linewidth: float = 1.0
     ts_marker: Optional[str] = None
     ts_alpha: float = 0.6
     ts_normalization: Optional[float] = None
@@ -264,10 +264,7 @@ class PlotTUI(App):
                 with TabPane("Data", id="tab-data"):
                     yield Static("Fields", classes="section-title")
                     yield SelectionList[str](
-                        *[
-                            (f, f, f == "rho")
-                            for f in self.available_fields
-                        ],
+                        *[(f, f, f == "rho") for f in self.available_fields],
                         id="field-select",
                     )
 
@@ -296,9 +293,7 @@ class PlotTUI(App):
                             classes="section-title",
                         )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Slice axis:", classes="param-label"
-                            )
+                            yield Static("Slice axis:", classes="param-label")
                             yield Select(
                                 [
                                     ("x3 (outermost)", "x3"),
@@ -309,9 +304,7 @@ class PlotTUI(App):
                                 id="slice-axis",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Slice value:", classes="param-label"
-                            )
+                            yield Static("Slice value:", classes="param-label")
                             yield Input(
                                 value="0.0",
                                 id="slice-value",
@@ -321,9 +314,7 @@ class PlotTUI(App):
                     # file filtering
                     yield Static("File Filtering", classes="section-title")
                     with Horizontal(classes="param-row"):
-                        yield Static(
-                            "Min timestep:", classes="param-label"
-                        )
+                        yield Static("Min timestep:", classes="param-label")
                         yield Input(
                             value="",
                             placeholder="no minimum",
@@ -331,9 +322,7 @@ class PlotTUI(App):
                             classes="param-input",
                         )
                     with Horizontal(classes="param-row"):
-                        yield Static(
-                            "Max timestep:", classes="param-label"
-                        )
+                        yield Static("Max timestep:", classes="param-label")
                         yield Input(
                             value="",
                             placeholder="no maximum",
@@ -465,12 +454,8 @@ class PlotTUI(App):
                         id="theme",
                         prompt="Select theme",
                     )
-                    yield Checkbox(
-                        "Transparent background", id="transparent"
-                    )
-                    yield Checkbox(
-                        "Draw immersed bodies", id="draw-bodies"
-                    )
+                    yield Checkbox("Transparent background", id="transparent")
+                    yield Checkbox("Draw immersed bodies", id="draw-bodies")
                     yield Checkbox("Use LaTeX rendering", id="use-tex")
 
                 # === component tab (reactive) ===
@@ -478,17 +463,21 @@ class PlotTUI(App):
                     # -- multidim (2d) props --
                     with Vertical(
                         id="multidim-props",
-                        classes="" if self._default_plot_type == "multidim" else "hidden",
+                        classes=""
+                        if self._default_plot_type == "multidim"
+                        else "hidden",
                     ):
                         yield Static(
                             "2D Plot Properties"
-                            + (" (polygons only, AMR detected)" if self.has_amr else ""),
+                            + (
+                                " (polygons only, AMR detected)"
+                                if self.has_amr
+                                else ""
+                            ),
                             classes="section-title",
                         )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Colormap:", classes="param-label"
-                            )
+                            yield Static("Colormap:", classes="param-label")
                             yield Input(
                                 value="viridis",
                                 id="cmap",
@@ -496,9 +485,7 @@ class PlotTUI(App):
                             )
                         yield Checkbox("Log scale", id="log-scale")
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Color min:", classes="param-label"
-                            )
+                            yield Static("Color min:", classes="param-label")
                             yield Input(
                                 value="",
                                 placeholder="auto",
@@ -506,9 +493,7 @@ class PlotTUI(App):
                                 classes="param-input",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Color max:", classes="param-label"
-                            )
+                            yield Static("Color max:", classes="param-label")
                             yield Input(
                                 value="",
                                 placeholder="auto",
@@ -535,9 +520,7 @@ class PlotTUI(App):
                             )
 
                         if not self.has_amr:
-                            yield Static(
-                                "Render Mode", classes="section-title"
-                            )
+                            yield Static("Render Mode", classes="section-title")
                             yield Select(
                                 [
                                     ("Pcolormesh", "pcolormesh"),
@@ -547,9 +530,7 @@ class PlotTUI(App):
                                 id="render-mode",
                             )
                             with Horizontal(classes="param-row"):
-                                yield Static(
-                                    "Shading:", classes="param-label"
-                                )
+                                yield Static("Shading:", classes="param-label")
                                 yield Select(
                                     [
                                         ("Auto", "auto"),
@@ -583,13 +564,9 @@ class PlotTUI(App):
                                     classes="param-input",
                                 )
 
-                        yield Static(
-                            "Vector Overlay", classes="section-title"
-                        )
+                        yield Static("Vector Overlay", classes="section-title")
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Components:", classes="param-label"
-                            )
+                            yield Static("Components:", classes="param-label")
                             yield Input(
                                 value="",
                                 placeholder="e.g. v1 v2",
@@ -601,9 +578,7 @@ class PlotTUI(App):
                                 classes="param-hint",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Vector type:", classes="param-label"
-                            )
+                            yield Static("Vector type:", classes="param-label")
                             yield Select(
                                 [
                                     ("Quiver", "quiver"),
@@ -626,9 +601,7 @@ class PlotTUI(App):
                                     classes="param-input",
                                 )
                             with Horizontal(classes="param-row"):
-                                yield Static(
-                                    "Skip:", classes="param-label"
-                                )
+                                yield Static("Skip:", classes="param-label")
                                 yield Input(
                                     value="5",
                                     id="quiver-skip",
@@ -672,18 +645,14 @@ class PlotTUI(App):
                                     classes="param-input",
                                 )
                             with Horizontal(classes="param-row"):
-                                yield Static(
-                                    "Density:", classes="param-label"
-                                )
+                                yield Static("Density:", classes="param-label")
                                 yield Input(
                                     value="1.0",
                                     id="stream-density",
                                     classes="param-input",
                                 )
                             with Horizontal(classes="param-row"):
-                                yield Static(
-                                    "Alpha:", classes="param-label"
-                                )
+                                yield Static("Alpha:", classes="param-label")
                                 yield Input(
                                     value="0.6",
                                     id="stream-alpha",
@@ -693,24 +662,22 @@ class PlotTUI(App):
                     # -- line props --
                     with Vertical(
                         id="line-props",
-                        classes="" if self._default_plot_type == "line" else "hidden",
+                        classes=""
+                        if self._default_plot_type == "line"
+                        else "hidden",
                     ):
                         yield Static(
                             "Line Plot Properties", classes="section-title"
                         )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Line width:", classes="param-label"
-                            )
+                            yield Static("Line width:", classes="param-label")
                             yield Input(
                                 value="2.0",
                                 id="line-linewidth",
                                 classes="param-input",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Marker:", classes="param-label"
-                            )
+                            yield Static("Marker:", classes="param-label")
                             yield Input(
                                 value="",
                                 placeholder="none (e.g. o, s, ^)",
@@ -726,26 +693,20 @@ class PlotTUI(App):
                             )
 
                     # -- coordinate profile props --
-                    with Vertical(
-                        id="coord-props", classes="hidden"
-                    ):
+                    with Vertical(id="coord-props", classes="hidden"):
                         yield Static(
                             "Coordinate Profile Properties",
                             classes="section-title",
                         )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Bins:", classes="param-label"
-                            )
+                            yield Static("Bins:", classes="param-label")
                             yield Input(
                                 value="64",
                                 id="n-bins",
                                 classes="param-input",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Line style:", classes="param-label"
-                            )
+                            yield Static("Line style:", classes="param-label")
                             yield Select(
                                 [
                                     ("Solid", "-"),
@@ -757,9 +718,7 @@ class PlotTUI(App):
                                 id="coord-linestyle",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Line width:", classes="param-label"
-                            )
+                            yield Static("Line width:", classes="param-label")
                             yield Input(
                                 value="2.0",
                                 id="coord-linewidth",
@@ -780,18 +739,14 @@ class PlotTUI(App):
                             value=True,
                         )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Ref line end:", classes="param-label"
-                            )
+                            yield Static("Ref line end:", classes="param-label")
                             yield Input(
                                 value="0.5",
                                 id="coord-rend",
                                 classes="param-input",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "X scale:", classes="param-label"
-                            )
+                            yield Static("X scale:", classes="param-label")
                             yield Select(
                                 [
                                     ("Linear", "linear"),
@@ -801,9 +756,7 @@ class PlotTUI(App):
                                 id="coord-xscale",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Y scale:", classes="param-label"
-                            )
+                            yield Static("Y scale:", classes="param-label")
                             yield Select(
                                 [
                                     ("Linear", "linear"),
@@ -814,17 +767,13 @@ class PlotTUI(App):
                             )
 
                     # -- time series props --
-                    with Vertical(
-                        id="ts-props", classes="hidden"
-                    ):
+                    with Vertical(id="ts-props", classes="hidden"):
                         yield Static(
                             "Time Series Properties",
                             classes="section-title",
                         )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Weight field:", classes="param-label"
-                            )
+                            yield Static("Weight field:", classes="param-label")
                             yield Input(
                                 value="",
                                 placeholder="none",
@@ -832,9 +781,7 @@ class PlotTUI(App):
                                 classes="param-input",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Line style:", classes="param-label"
-                            )
+                            yield Static("Line style:", classes="param-label")
                             yield Select(
                                 [
                                     ("Solid", "-"),
@@ -846,18 +793,14 @@ class PlotTUI(App):
                                 id="ts-linestyle",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Line width:", classes="param-label"
-                            )
+                            yield Static("Line width:", classes="param-label")
                             yield Input(
                                 value="2.0",
                                 id="ts-linewidth",
                                 classes="param-input",
                             )
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "Marker:", classes="param-label"
-                            )
+                            yield Static("Marker:", classes="param-label")
                             yield Input(
                                 value="",
                                 placeholder="none",
@@ -881,13 +824,9 @@ class PlotTUI(App):
                                 id="ts-norm",
                                 classes="param-input",
                             )
-                        yield Checkbox(
-                            "Show moving average", id="ts-show-ma"
-                        )
+                        yield Checkbox("Show moving average", id="ts-show-ma")
                         with Horizontal(classes="param-row"):
-                            yield Static(
-                                "MA window:", classes="param-label"
-                            )
+                            yield Static("MA window:", classes="param-label")
                             yield Input(
                                 value="5",
                                 id="ts-ma-window",
@@ -906,16 +845,12 @@ class PlotTUI(App):
                             id="save-as",
                             classes="param-input",
                         )
-                        yield Static(
-                            "[.png/.pdf/.mp4]", classes="param-hint"
-                        )
+                        yield Static("[.png/.pdf/.mp4]", classes="param-hint")
 
                     yield Static("Animation", classes="section-title")
                     yield Checkbox("Animate", id="animate")
                     with Horizontal(classes="param-row"):
-                        yield Static(
-                            "Frame rate:", classes="param-label"
-                        )
+                        yield Static("Frame rate:", classes="param-label")
                         yield Input(
                             value="10",
                             id="frame-rate",
@@ -924,9 +859,7 @@ class PlotTUI(App):
 
                     yield Static("Time Display", classes="section-title")
                     with Horizontal(classes="param-row"):
-                        yield Static(
-                            "Time scale:", classes="param-label"
-                        )
+                        yield Static("Time scale:", classes="param-label")
                         yield Input(
                             value="",
                             placeholder="e.g. 4pi, 1e6",
@@ -934,9 +867,7 @@ class PlotTUI(App):
                             classes="param-input",
                         )
                     with Horizontal(classes="param-row"):
-                        yield Static(
-                            "Time units:", classes="param-label"
-                        )
+                        yield Static("Time units:", classes="param-label")
                         yield Input(
                             value="",
                             placeholder="e.g. yr, s",
@@ -958,7 +889,9 @@ class PlotTUI(App):
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "plot-type" and event.value is not Select.BLANK:
             self.current_plot_type = event.value
-        elif event.select.id == "vector-type" and event.value is not Select.BLANK:
+        elif (
+            event.select.id == "vector-type" and event.value is not Select.BLANK
+        ):
             self._toggle_vector_props(event.value)
 
     def watch_current_plot_type(self, plot_type: str) -> None:
@@ -1081,9 +1014,7 @@ class PlotTUI(App):
             status.update("[bold red]Error: select at least one field[/]")
             return
 
-        plot_type = self._get_select(
-            "plot-type", self._default_plot_type
-        )
+        plot_type = self._get_select("plot-type", self._default_plot_type)
 
         if plot_type == "multidim" and len(selected) > 1:
             status.update(
@@ -1126,9 +1057,7 @@ class PlotTUI(App):
         # parse time scale
         time_scale = self._parse_time_scale()
         if self._get_str("time-scale") and time_scale is None:
-            status.update(
-                "[bold red]Error: invalid time scale value[/]"
-            )
+            status.update("[bold red]Error: invalid time scale value[/]")
             return
 
         # determine render mode
@@ -1175,11 +1104,11 @@ class PlotTUI(App):
             show_mesh_grid=self._get_checkbox("show-mesh-grid"),
             show_level_bounds=self._get_checkbox("show-level-bounds"),
             # line props
-            linewidth=self._get_float("line-linewidth", 2.0),
+            linewidth=self._get_float("line-linewidth", 1.0),
             marker=self._get_str("line-marker"),
             # coord profile props
             coord_linestyle=self._get_select("coord-linestyle", "-"),
-            coord_linewidth=self._get_float("coord-linewidth", 2.0),
+            coord_linewidth=self._get_float("coord-linewidth", 1.0),
             coord_normalization=self._get_float("coord-norm", 1.0),
             coord_rend=self._get_float("coord-rend", 0.5),
             coord_show_ref_lines=self._get_checkbox("coord-show-ref"),
@@ -1187,7 +1116,7 @@ class PlotTUI(App):
             coord_y_scale=self._get_select("coord-yscale", "linear"),
             # time series props
             ts_linestyle=self._get_select("ts-linestyle", "-"),
-            ts_linewidth=self._get_float("ts-linewidth", 2.0),
+            ts_linewidth=self._get_float("ts-linewidth", 1.0),
             ts_marker=self._get_str("ts-marker"),
             ts_alpha=self._get_float("ts-alpha", 0.6),
             ts_normalization=self._get_float("ts-norm"),
@@ -1223,9 +1152,7 @@ class PlotTUI(App):
         self.exit()
 
 
-def config_from_plot_params(
-    params: plot_params_t, files: list[Path]
-) -> tuple:
+def config_from_plot_params(params: plot_params_t, files: list[Path]) -> tuple:
     """
     convert plot_params_t to (VisualizationConfig, component_props dict).
     """

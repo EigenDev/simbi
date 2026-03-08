@@ -337,7 +337,7 @@ def plot_skymap(
             beam_fwhm_mas / 2,
             fill=False,
             color="white",
-            linewidth=1.5,
+            linewidth=1,
             linestyle="-",
         )
         ax.add_patch(beam_circle)

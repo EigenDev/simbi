@@ -31,7 +31,7 @@ class PowerSpectrumProps(ComponentProps):
     show_reference_slopes: bool = True
     reference_slopes: tuple[float, ...] = (-2.0, -5.0 / 3.0)
     compensated: bool = False
-    linewidth: float = 3.0
+    linewidth: float = 1
     linestyle: str = "-"
     color: Optional[str] = None
     label: Optional[str] = None
@@ -233,7 +233,8 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
                 k,
                 smoothed,
                 color=color,
-                linewidth=self.props.linewidth * 1.5,
+                linewidth=self.props.linewidth,
+                linestyle=self.props.linestyle,
                 alpha=0.9,
                 label=f"{label} (smoothed)",
             )[0]

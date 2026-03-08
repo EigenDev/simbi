@@ -26,7 +26,7 @@ class CoordinateProfileProps(ComponentProps):
     label: Optional[str] = None
     color: Optional[str] = None
     linestyle: str = "-"
-    linewidth: float = 2.0
+    linewidth: float = 1.0
     normalization: float = 1
     x_normalization: float = 1
     rbeg: float = 0.0  # Reference line start radius
@@ -204,16 +204,22 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         n_draw = 100
         r_inner = np.geomspace(r_lo, r_break, n_draw)
         r_outer = np.geomspace(r_break, r_hi, n_draw)
-        y_inner = offset * np.exp(i1) * r_inner ** s1
-        y_outer = offset * np.exp(i2) * r_outer ** s2
+        y_inner = offset * np.exp(i1) * r_inner**s1
+        y_outer = offset * np.exp(i2) * r_outer**s2
 
         line_inner = self.ax.plot(
-            r_inner, y_inner,
-            linestyle="--", linewidth=1.5, color="gray",
+            r_inner,
+            y_inner,
+            linestyle="--",
+            linewidth=1,
+            color="gray",
         )[0]
         line_outer = self.ax.plot(
-            r_outer, y_outer,
-            linestyle="--", linewidth=1.5, color="gray",
+            r_outer,
+            y_outer,
+            linestyle="--",
+            linewidth=1,
+            color="gray",
         )[0]
         self._ref_lines.extend([line_inner, line_outer])
 
@@ -222,24 +228,28 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         self.ax.annotate(
             rf"$r^{{{s1:.2f}}}$",
             xy=(r_inner[mid_inner], y_inner[mid_inner]),
-            xytext=(0, 12), textcoords="offset points",
+            xytext=(0, 12),
+            textcoords="offset points",
             fontsize=10,
-            ha="center", va="bottom",
+            ha="center",
+            va="bottom",
         )
         mid_outer = len(r_outer) // 2
         self.ax.annotate(
             rf"$r^{{{s2:.2f}}}$",
             xy=(r_outer[mid_outer], y_outer[mid_outer]),
-            xytext=(0, 12), textcoords="offset points",
+            xytext=(0, 12),
+            textcoords="offset points",
             fontsize=10,
-            ha="center", va="bottom",
+            ha="center",
+            va="bottom",
         )
 
-        self.ax.axvline(
-            r_break, color="gray", linestyle=":", linewidth=0.8
-        )
+        self.ax.axvline(r_break, color="gray", linestyle=":", linewidth=0.8)
 
-    def _draw_bondi_reference(self, r_bins: Array, field_base_name: str) -> None:
+    def _draw_bondi_reference(
+        self, r_bins: Array, field_base_name: str
+    ) -> None:
         """overlay analytic bondi profile for the current field."""
         from simbi.analysis.bondi import bondi_profiles
 
@@ -268,7 +278,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
             linestyle=":",
             alpha=0.5,
             color="gray",
-            linewidth=1.5,
+            linewidth=1,
             label="_nolegend_",
         )[0]
         self._ref_lines.append(line)

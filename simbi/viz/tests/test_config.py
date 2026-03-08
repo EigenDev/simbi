@@ -5,8 +5,13 @@
 # =============================================================================
 import pytest
 
-from simbi.viz.config import OverlayConfig, PlotConfig, VisualizationConfig
-from simbi.viz.config import overlays_from_args, parse_overlay_spec
+from simbi.viz.config import (
+    OverlayConfig,
+    PlotConfig,
+    VisualizationConfig,
+    overlays_from_args,
+    parse_overlay_spec,
+)
 
 
 class TestOverlayConfig:
@@ -19,7 +24,7 @@ class TestOverlayConfig:
         assert config.component == "contour"
         assert config.levels == [1.0]
         assert config.color == "lightgrey"
-        assert config.linewidth == 1.5
+        assert config.linewidth == 1
 
     def test_custom_levels(self):
         config = OverlayConfig(field="mach", levels=[0.5, 1.0, 2.0])
@@ -65,11 +70,11 @@ class TestParseOverlaySpec:
 
     def test_default_color_and_linewidth(self):
         config = parse_overlay_spec(
-            "mach:contour:1.0", default_color="red", default_linewidth=2.0
+            "mach:contour:1.0", default_color="red", default_linewidth=1.0
         )
 
         assert config.color == "red"
-        assert config.linewidth == 2.0
+        assert config.linewidth == 1.0
 
     def test_invalid_levels_raises(self):
         with pytest.raises(ValueError, match="invalid levels"):
@@ -90,7 +95,7 @@ class TestOverlaysFromArgs:
         class MockArgs:
             field_overlays = [["mach:contour:1.0"]]
             overlay_color = "white"
-            overlay_linewidth = 1.5
+            overlay_linewidth = 1
 
         result = overlays_from_args(MockArgs())
 
@@ -101,7 +106,7 @@ class TestOverlaysFromArgs:
         class MockArgs:
             field_overlays = [["mach:contour:1.0"], ["v:contour:0.5,1.0"]]
             overlay_color = "white"
-            overlay_linewidth = 1.5
+            overlay_linewidth = 1
 
         result = overlays_from_args(MockArgs())
 
@@ -114,13 +119,13 @@ class TestOverlaysFromArgs:
         class MockArgs:
             field_overlays = [["mach:contour:1.0", "v:contour:0.5"]]
             overlay_color = "red"
-            overlay_linewidth = 2.0
+            overlay_linewidth = 1.0
 
         result = overlays_from_args(MockArgs())
 
         assert len(result) == 2
         assert result[0].color == "red"
-        assert result[0].linewidth == 2.0
+        assert result[0].linewidth == 1.0
 
 
 class TestVisualizationConfigWithOverlays:

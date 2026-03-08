@@ -34,7 +34,7 @@ class TimeSeriesPlotProps(ComponentProps):
 
     label: Optional[str] = None
     linestyle: str = "-"
-    linewidth: float = 2.0
+    linewidth: float = 1.0
     marker: Optional[str] = None
     marker_size: float = 6.0
     alpha: float = 0.6
@@ -137,7 +137,9 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
         all_rendered_lines: List[Line2D] = []
 
         # per-body lines get reduced alpha so totals stand out
-        line_alpha = self.props.alpha * 0.45 if num_lines > 1 else self.props.alpha
+        line_alpha = (
+            self.props.alpha * 0.45 if num_lines > 1 else self.props.alpha
+        )
 
         for i in range(num_lines):
             line_values = values_2d[:, i]
@@ -160,10 +162,18 @@ class TimeSeriesPlotComponent(Component[TimeSeriesPlotProps, FieldData]):
         if data.bands is not None:
             p_lo, p_hi = data.bands
             norm = self.props.normalization or 1.0
-            color = all_rendered_lines[-1].get_color() if all_rendered_lines else "C0"
+            color = (
+                all_rendered_lines[-1].get_color()
+                if all_rendered_lines
+                else "C0"
+            )
             self.ax.fill_between(
-                times, p_lo / norm, p_hi / norm,
-                alpha=0.2, color=color, label="10th-90th percentile",
+                times,
+                p_lo / norm,
+                p_hi / norm,
+                alpha=0.2,
+                color=color,
+                label="10th-90th percentile",
             )
 
             # --- Render Decorators (Moving Avg / Trend) ---

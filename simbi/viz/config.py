@@ -133,7 +133,7 @@ class OverlayConfig(BaseModel):
     component: str = "contour"
     levels: list[float] = Field(default_factory=lambda: [1.0])
     color: str = "lightgrey"
-    linewidth: float = 1.5
+    linewidth: float = 1
     linestyle: str = "--"
     alpha: float = 1.0
     filled: bool = False
