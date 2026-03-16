@@ -52,6 +52,9 @@ class PowerSpectrumProps(ComponentProps):
     arbitrary_units: bool = False
     show_xlabel: bool = True
 
+    # subtract spherical mean profile before FFT (isolates fluctuations)
+    subtract_radial_mean: bool = False
+
     # nyquist cutoff annotations (per-level boundaries from AMR stitching)
     nyquist_cutoffs: tuple[float, ...] = ()
 

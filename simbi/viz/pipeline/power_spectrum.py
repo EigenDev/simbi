@@ -35,6 +35,7 @@ def create_power_spectrum_data(
     data: SimData,
     config: VisualizationConfig,
     fields: Sequence[str] = ("v1", "v2", "v3"),
+    subtract_radial_mean: bool = False,
 ) -> PlotData:
     """
     compute power spectrum from simulation checkpoint.
@@ -53,19 +54,25 @@ def create_power_spectrum_data(
         vx = data.get_field(fields[0], level=0)
         vy = data.get_field(fields[1], level=0)
         vz = data.get_field(fields[2], level=0)
-        k_centers, spectrum = shell_averaged_spectrum(vx, vy, vz, dx)
+        k_centers, spectrum = shell_averaged_spectrum(
+            vx, vy, vz, dx, subtract_mean=subtract_radial_mean
+        )
         name = r"$E(k)$"
     else:
         scalar = data.get_field(fields[0], level=0)
-        k_centers, spectrum = shell_averaged_scalar_spectrum(scalar, dx)
+        k_centers, spectrum = shell_averaged_scalar_spectrum(
+            scalar, dx, subtract_mean=subtract_radial_mean
+        )
         name = _scalar_name(fields[0])
+
+    xlabel = r"$k\;[\mathrm{rad}/a]$"
 
     spectrum_field = FieldData(
         name=name,
         values=spectrum,
         domain=[k_centers],
         time=data.metadata.time,
-        axis_names=[r"$k$"],
+        axis_names=[xlabel],
     )
 
     return PlotData(

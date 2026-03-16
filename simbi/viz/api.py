@@ -61,6 +61,7 @@ def _apply_broken_axis(
     config,
     gap_threshold: float = 1e3,
     height_ratio: tuple[float, float] = (3, 1),
+    blackboard: bool = True,
 ) -> bool:
     """split axes into broken y-axis if data spans a huge dynamic range.
 
@@ -181,15 +182,17 @@ def _apply_broken_axis(
     all_x = all_x[all_x > 0]
     ax_top.set_xlim(all_x.min(), all_x.max())
 
-    # hide tick labels: use tick_params (survives loglog() and savefig redraws,
-    # unlike NullFormatter which gets reset by subsequent plot calls)
+    # shared x-axis: hide top panel x ticks, keep bottom panel x ticks
     ax_top.tick_params(axis="x", which="both", labelbottom=False, bottom=False)
-    ax_top.tick_params(axis="y", which="both", labelleft=False, length=0)
-    ax_bot.tick_params(axis="x", which="both", labelbottom=False, length=0)
-    ax_bot.tick_params(axis="y", which="both", labelleft=False, length=0)
 
-    # labels — keep "noise floor" on bottom, clear everything else
-    ax_bot.set_xlabel(r"$k$")
+    if blackboard:
+        # blackboard style: strip all tick labels and marks
+        ax_top.tick_params(axis="y", which="both", labelleft=False, length=0)
+        ax_bot.tick_params(axis="x", which="both", labelbottom=False, length=0)
+        ax_bot.tick_params(axis="y", which="both", labelleft=False, length=0)
+
+    # labels
+    ax_bot.set_xlabel(xlabel)
     ax_top.set_ylabel(ylabel)
     ax_bot.set_ylabel("noise floor", fontsize=8, fontstyle="italic")
     ax_top.set_title(title)
@@ -199,56 +202,77 @@ def _apply_broken_axis(
     if lbls:
         ax_top.legend(loc="best")
 
-    # spines: only keep left on both, bottom on bottom panel
+    # spines and break marks
     ax_top.spines["top"].set_visible(False)
-    ax_top.spines["bottom"].set_visible(False)
-    ax_top.spines["right"].set_visible(False)
     ax_bot.spines["top"].set_visible(False)
-    ax_bot.spines["right"].set_visible(False)
 
-    # diagonal break marks (left side only — right spines are hidden)
-    # use pixel offsets from the spine corner for consistent 45-degree angle
+    if blackboard:
+        ax_top.spines["bottom"].set_visible(False)
+        ax_top.spines["right"].set_visible(False)
+        ax_bot.spines["right"].set_visible(False)
 
-    size = 6  # pixels
-    for a, yc in [(ax_top, 0.0), (ax_bot, 1.0)]:
-        trans = a.transAxes
-        a.plot(
-            [0],
-            [yc],
-            transform=trans,
-            marker=[(-1, -1), (1, 1)],
-            markersize=size,
-            markeredgewidth=0.8,
-            markeredgecolor="k",
-            markerfacecolor="none",
-            clip_on=False,
-            linestyle="none",
+        # diagonal break marks (left side only — right spines are hidden)
+        size = 6
+        for a, yc in [(ax_top, 0.0), (ax_bot, 1.0)]:
+            trans = a.transAxes
+            a.plot(
+                [0],
+                [yc],
+                transform=trans,
+                marker=[(-1, -1), (1, 1)],
+                markersize=size,
+                markeredgewidth=0.8,
+                markeredgecolor="k",
+                markerfacecolor="none",
+                clip_on=False,
+                linestyle="none",
+            )
+
+        # arrow-tipped axes
+        color = ax_top.spines["left"].get_edgecolor()
+        lw = ax_top.spines["left"].get_linewidth()
+        ax_top.annotate(
+            "",
+            xy=(0, 1.02),
+            xycoords="axes fraction",
+            xytext=(0, 0.97),
+            textcoords="axes fraction",
+            arrowprops=dict(arrowstyle="-|>", color=color, lw=lw),
+            annotation_clip=False,
         )
+        color = ax_bot.spines["bottom"].get_edgecolor()
+        lw = ax_bot.spines["bottom"].get_linewidth()
+        ax_bot.annotate(
+            "",
+            xy=(1.02, 0),
+            xycoords="axes fraction",
+            xytext=(0.97, 0),
+            textcoords="axes fraction",
+            arrowprops=dict(arrowstyle="-|>", color=color, lw=lw),
+            annotation_clip=False,
+        )
+    else:
+        # standard broken-axis: hide shared boundary and right spines
+        ax_top.spines["bottom"].set_visible(False)
+        ax_top.spines["right"].set_visible(False)
+        ax_bot.spines["right"].set_visible(False)
 
-    # re-draw arrows on the new axes (originals were destroyed by fig.clear)
-    # y-arrow only on the top panel, x-arrow only on the bottom panel
-    color = ax_top.spines["left"].get_edgecolor()
-    lw = ax_top.spines["left"].get_linewidth()
-    ax_top.annotate(
-        "",
-        xy=(0, 1.02),
-        xycoords="axes fraction",
-        xytext=(0, 0.97),
-        textcoords="axes fraction",
-        arrowprops=dict(arrowstyle="-|>", color=color, lw=lw),
-        annotation_clip=False,
-    )
-    color = ax_bot.spines["bottom"].get_edgecolor()
-    lw = ax_bot.spines["bottom"].get_linewidth()
-    ax_bot.annotate(
-        "",
-        xy=(1.02, 0),
-        xycoords="axes fraction",
-        xytext=(0.97, 0),
-        textcoords="axes fraction",
-        arrowprops=dict(arrowstyle="-|>", color=color, lw=lw),
-        annotation_clip=False,
-    )
+        # diagonal break marks (left side only — right spines are hidden)
+        size = 6
+        for a, yc in [(ax_top, 0.0), (ax_bot, 1.0)]:
+            trans = a.transAxes
+            a.plot(
+                [0],
+                [yc],
+                transform=trans,
+                marker=[(-1, -1), (1, 1)],
+                markersize=size,
+                markeredgewidth=0.8,
+                markeredgecolor="k",
+                markerfacecolor="none",
+                clip_on=False,
+                linestyle="none",
+            )
 
     return True
 
@@ -597,16 +621,19 @@ def plot_power_spectrum(
         files = [files]
 
     sim_data = load_data(files[0])
-    plot_data = create_power_spectrum_data(sim_data, config, fields)
+    base_props = get_props(
+        component_props, "power_spectrum", PowerSpectrumProps
+    )
+    plot_data = create_power_spectrum_data(
+        sim_data, config, fields,
+        subtract_radial_mean=base_props.subtract_radial_mean,
+    )
     if not plot_data.fields:
         raise ValueError("no power spectrum data generated")
 
     figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
 
     for field_data in plot_data.fields:
-        base_props = get_props(
-            component_props, "power_spectrum", PowerSpectrumProps
-        )
         props = PowerSpectrumProps(
             show_reference_slopes=base_props.show_reference_slopes,
             reference_slopes=base_props.reference_slopes,
@@ -653,9 +680,16 @@ def plot_power_spectrum_overlay(
         overlay_mode=True,
     )
 
+    global_props = get_props(
+        component_props, "power_spectrum", PowerSpectrumProps
+    )
+
     for ii, file_path in enumerate(files):
         sim_data = load_data(file_path)
-        plot_data = create_power_spectrum_data(sim_data, config, fields)
+        plot_data = create_power_spectrum_data(
+            sim_data, config, fields,
+            subtract_radial_mean=global_props.subtract_radial_mean,
+        )
         if not plot_data.fields:
             continue
 
@@ -691,7 +725,10 @@ def plot_power_spectrum_overlay(
     _tighten_spectrum_axes(figure, config)
 
     # auto-detect large dynamic range and apply broken y-axis
-    broken = _apply_broken_axis(figure, config)
+    use_blackboard = get_props(
+        component_props, "power_spectrum", PowerSpectrumProps
+    ).arbitrary_units
+    broken = _apply_broken_axis(figure, config, blackboard=use_blackboard)
 
     # draw reference slopes on the top panel after all data is visible
     slope_ax = figure.axes["main"]

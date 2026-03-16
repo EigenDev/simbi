@@ -25,11 +25,53 @@ if TYPE_CHECKING:
     from simbi.reader.adapter import SimData
 
 
+def _subtract_radial_mean(field: np.ndarray, dx: float) -> np.ndarray:
+    """subtract the spherically-averaged radial profile from a 3D field.
+
+    computes <f>(r) by binning cells by distance from the domain center,
+    then subtracts the interpolated profile from each cell. isolates
+    fluctuations from the smooth background gradient.
+    """
+    nx, ny, nz = field.shape
+    cx, cy, cz = (nx - 1) / 2.0, (ny - 1) / 2.0, (nz - 1) / 2.0
+
+    ii = np.arange(nx) - cx
+    jj = np.arange(ny) - cy
+    kk = np.arange(nz) - cz
+    r = np.sqrt(
+        (ii[:, None, None] * dx) ** 2
+        + (jj[None, :, None] * dx) ** 2
+        + (kk[None, None, :] * dx) ** 2
+    )
+
+    # bin by radius
+    r_max = r.max()
+    n_bins = max(nx, ny, nz) // 2
+    bin_edges = np.linspace(0, r_max, n_bins + 1)
+
+    result = binned_statistic(
+        r.ravel(), field.ravel(), statistic="mean", bins=bin_edges
+    )
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    mean_profile = result.statistic
+
+    # fill nans with nearest valid value
+    valid = ~np.isnan(mean_profile)
+    if not np.any(valid):
+        return field
+    mean_profile = np.interp(bin_centers, bin_centers[valid], mean_profile[valid])
+
+    # interpolate back to each cell and subtract
+    radial_mean = np.interp(r.ravel(), bin_centers, mean_profile).reshape(field.shape)
+    return field - radial_mean
+
+
 def shell_averaged_spectrum(
     vx: np.ndarray,
     vy: np.ndarray,
     vz: np.ndarray,
     dx: float,
+    subtract_mean: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     compute shell-averaged kinetic energy spectrum from 3D velocity fields.
@@ -37,10 +79,16 @@ def shell_averaged_spectrum(
     args:
         vx, vy, vz: 3D velocity component arrays (same shape)
         dx: uniform cell spacing
+        subtract_mean: if true, subtract spherical mean profile before FFT
 
     returns:
         (k_centers, E_k): wavenumber bin centers and spectrum values
     """
+    if subtract_mean:
+        vx = _subtract_radial_mean(vx, dx)
+        vy = _subtract_radial_mean(vy, dx)
+        vz = _subtract_radial_mean(vz, dx)
+
     nx, ny, nz = vx.shape
     n_cells = nx * ny * nz
 
@@ -89,6 +137,7 @@ def shell_averaged_spectrum(
 def shell_averaged_scalar_spectrum(
     field: np.ndarray,
     dx: float,
+    subtract_mean: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     compute shell-averaged power spectrum of a scalar field.
@@ -96,10 +145,14 @@ def shell_averaged_scalar_spectrum(
     args:
         field: 3D scalar array
         dx: uniform cell spacing
+        subtract_mean: if true, subtract spherical mean profile before FFT
 
     returns:
         (k_centers, P_k): wavenumber bin centers and spectrum values
     """
+    if subtract_mean:
+        field = _subtract_radial_mean(field, dx)
+
     nx, ny, nz = field.shape
     n_cells = nx * ny * nz
 
