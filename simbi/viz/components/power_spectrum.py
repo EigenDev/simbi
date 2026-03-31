@@ -55,6 +55,16 @@ class PowerSpectrumProps(ComponentProps):
     # subtract spherical mean profile before FFT (isolates fluctuations)
     subtract_radial_mean: bool = False
 
+    # use finest FMR level instead of coarsest (higher k resolution)
+    use_composite: bool = False
+
+    # angular power spectrum: spherical harmonic decomposition on radial shells
+    use_angular: bool = False
+    angular_radii: tuple[float, ...] = ()
+    angular_n_shells: int = 5
+    angular_n_theta: int = 64
+    angular_n_phi: int = 128
+
     # nyquist cutoff annotations (per-level boundaries from AMR stitching)
     nyquist_cutoffs: tuple[float, ...] = ()
 
@@ -69,6 +79,7 @@ _SLOPE_LABELS = {
     -5.0 / 3.0: r"$k^{-5/3}$",
     -2.0: r"$k^{-2}$",
     -3.0: r"$k^{-3}$",
+    -7.0 / 2.0: r"$k^{-7/2}$",
     -4.0: r"$k^{-4}$",
 }
 
@@ -390,20 +401,27 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         if np.sum(valid) < 4:
             return
 
-        # center the segment in log-space, spanning ~1 decade
+        # segment range for reference slope lines
         k_pos = k[valid]
         log_k = np.log10(k_pos)
-        log_center = 0.5 * (log_k[0] + log_k[-1])
-        log_half_span = 0.5  # half a decade each side
-        k_lo = 10.0 ** (log_center - log_half_span)
-        k_hi = 10.0 ** (log_center + log_half_span)
-        mask = (k >= k_lo) & (k <= k_hi)
-        k_seg = k[mask]
-        if len(k_seg) < 4:
-            return
+
+        if self.props.reference_frequencies:
+            # place segment well below the reference frequency
+            k_ref_min = min(self.props.reference_frequencies)
+            k_hi = k_ref_min * 0.65
+            k_lo = k_hi / 3.0  # ~half decade span
+        else:
+            # center the segment in log-space, spanning ~1 decade
+            log_center = 0.5 * (log_k[0] + log_k[-1])
+            log_half_span = 0.5
+            k_lo = 10.0 ** (log_center - log_half_span)
+            k_hi = 10.0 ** (log_center + log_half_span)
+
+        # generate continuous segment (not tied to data point spacing)
+        k_seg = np.geomspace(k_lo, k_hi, 100)
+        k_anchor = np.sqrt(k_lo * k_hi)
 
         # anchor at the peak value in the segment range across all plotted data
-        k_anchor = 10.0**log_center
         seg_mask = (k >= k_lo) & (k <= k_hi)
         e_in_seg = e_k[seg_mask]
 
@@ -421,8 +439,14 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
         if e_anchor <= 0:
             return
 
-        # place slopes just above the data, stagger so they don't overlap
-        offsets = [0.4, 4.0]
+        # vertical placement relative to data peak:
+        # < 1 places below data, > 1 places above.
+        # default two-slope layout: k^{-2} below, k^{-5/3} above
+        # single-slope layout: place above the data
+        if len(self.props.reference_slopes) == 1:
+            offsets = [1.5]
+        else:
+            offsets = [0.027, 0.403]
 
         for ii, slope in enumerate(self.props.reference_slopes):
             slope_label = _SLOPE_LABELS.get(slope, rf"$k^{{{slope:.1f}}}$")
@@ -443,8 +467,11 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
             )[0]
             self._ref_lines.append(ref_line)
 
-            # annotate just above the midpoint of the segment
+            # annotate near the midpoint of the segment.
+            # k^{-2} (offset < 1, below data): label below the line.
+            # all others: label above the line.
             mid = len(k_seg) // 2
+            below = offset < 1.0
             ann = self.ax.annotate(
                 slope_label,
                 xy=(k_seg[mid], ref_y[mid]),
@@ -452,8 +479,8 @@ class PowerSpectrumComponent(Component[PowerSpectrumProps, FieldData]):
                 color="black",
                 alpha=0.7,
                 ha="center",
-                va="bottom",
-                xytext=(0, 2),
+                va="top" if below else "bottom",
+                xytext=(0, -6 if below else 18),
                 textcoords="offset points",
             )
             self._ref_annotations.append(ann)

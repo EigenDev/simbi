@@ -689,12 +689,14 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         "time_series": api.plot_time_series,
         "power_spectrum": api.plot_power_spectrum,
         "temporal_spectrum": api.plot_temporal_spectrum,
+        "angular_spectrum": api.plot_angular_spectrum,
     }
 
     overlay_dispatch = {
         "line": api.plot_overlay,
         "coordinate_bin": api.plot_coordinate_profile_overlay,
         "power_spectrum": api.plot_power_spectrum_overlay,
+        "angular_spectrum": api.plot_angular_spectrum_overlay,
     }
 
     if is_grid:

@@ -2,6 +2,8 @@ from .api import (
     animate,
     animate_coordinate_profile,
     plot,
+    plot_angular_spectrum,
+    plot_angular_spectrum_overlay,
     plot_coordinate_profile,
     plot_coordinate_profile_overlay,
     plot_grid,
@@ -17,6 +19,8 @@ from .pipeline import create_plot_data, load_data
 
 __all__ = [
     "plot",
+    "plot_angular_spectrum",
+    "plot_angular_spectrum_overlay",
     "plot_overlay",
     "animate",
     "animate_coordinate_profile",

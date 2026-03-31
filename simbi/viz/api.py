@@ -36,7 +36,10 @@ from .config_loader import ConfigDict, resolve_per_file_props
 from .figure import Figure, prepare_figure
 from .pipeline import create_plot_data, load_data
 from .pipeline.coord_binning import create_coordinate_profile_data
-from .pipeline.power_spectrum import create_power_spectrum_data
+from .pipeline.power_spectrum import (
+    create_angular_spectrum_data,
+    create_power_spectrum_data,
+)
 from .pipeline.temporal_spectrum import create_temporal_spectrum_data
 from .pipeline.time_series import create_time_series_data
 from .pipeline.transforms import compose_fields_for_render
@@ -177,10 +180,13 @@ def _apply_broken_axis(
     ax_top.set_ylim(hi_ymin, hi_ymax)
     ax_bot.set_ylim(lo_ymin, lo_ymax)
 
-    # x-limits from data
-    all_x = np.concatenate([ld["x"] for ld in line_data])
-    all_x = all_x[all_x > 0]
-    ax_top.set_xlim(all_x.min(), all_x.max())
+    # x-limits: respect user overrides, fall back to data range
+    if hasattr(config, "figure") and config.figure.xlims is not None:
+        ax_top.set_xlim(config.figure.xlims.min, config.figure.xlims.max)
+    else:
+        all_x = np.concatenate([ld["x"] for ld in line_data])
+        all_x = all_x[all_x > 0]
+        ax_top.set_xlim(all_x.min(), all_x.max())
 
     # shared x-axis: hide top panel x ticks, keep bottom panel x ticks
     ax_top.tick_params(axis="x", which="both", labelbottom=False, bottom=False)
@@ -194,7 +200,8 @@ def _apply_broken_axis(
     # labels
     ax_bot.set_xlabel(xlabel)
     ax_top.set_ylabel(ylabel)
-    ax_bot.set_ylabel("noise floor", fontsize=8, fontstyle="italic")
+    if blackboard:
+        ax_bot.set_ylabel("noise floor", fontsize=8, fontstyle="italic")
     ax_top.set_title(title)
 
     # legend on top panel only
@@ -627,6 +634,7 @@ def plot_power_spectrum(
     plot_data = create_power_spectrum_data(
         sim_data, config, fields,
         subtract_radial_mean=base_props.subtract_radial_mean,
+        use_composite=base_props.use_composite,
     )
     if not plot_data.fields:
         raise ValueError("no power spectrum data generated")
@@ -689,6 +697,7 @@ def plot_power_spectrum_overlay(
         plot_data = create_power_spectrum_data(
             sim_data, config, fields,
             subtract_radial_mean=global_props.subtract_radial_mean,
+            use_composite=global_props.use_composite,
         )
         if not plot_data.fields:
             continue
@@ -748,6 +757,203 @@ def plot_power_spectrum_overlay(
         first_comp._draw_reference_slopes(
             first_data.domain[0], first_data.values
         )
+
+    # draw reference frequency lines on both panels (post broken-axis)
+    ref_props = get_props(
+        component_props, "power_spectrum", PowerSpectrumProps
+    )
+    if ref_props.reference_frequencies:
+        bot_ax = figure.axes.get("broken_bottom")
+        for ii, freq in enumerate(ref_props.reference_frequencies):
+            slope_ax.axvline(
+                freq, color="grey", linestyle=":", linewidth=0.8, alpha=0.6,
+            )
+            if bot_ax is not None:
+                bot_ax.axvline(
+                    freq, color="grey", linestyle=":", linewidth=0.8, alpha=0.6,
+                )
+            if ii < len(ref_props.reference_frequency_labels):
+                slope_ax.annotate(
+                    ref_props.reference_frequency_labels[ii],
+                    xy=(freq, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    color="grey", alpha=0.8,
+                    ha="center", va="bottom",
+                    xytext=(0, 2), textcoords="offset points",
+                )
+
+    _save_and_show(figure, save_as, show)
+    return figure
+
+
+def plot_angular_spectrum(
+    config: VisualizationConfig,
+    files: str | Sequence[str],
+    fields: Sequence[str] = ["entropy-measure"],
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    **kwargs,
+) -> Figure:
+    """create angular power spectrum C_l from a checkpoint file."""
+    if isinstance(files, str):
+        files = [files]
+
+    sim_data = load_data(files[0])
+    base_props = get_props(
+        component_props, "power_spectrum", PowerSpectrumProps
+    )
+
+    radii = list(base_props.angular_radii) if base_props.angular_radii else None
+    is_vector = len(fields) >= 3
+    plot_data = create_angular_spectrum_data(
+        sim_data, config,
+        field=fields[0],
+        fields=fields if is_vector else None,
+        radii=radii,
+        n_shells=base_props.angular_n_shells,
+        n_theta=base_props.angular_n_theta,
+        n_phi=base_props.angular_n_phi,
+        subtract_mean=base_props.subtract_radial_mean,
+    )
+    if not plot_data.fields:
+        raise ValueError("no angular spectrum data generated")
+
+    figure = prepare_figure(config, len(files), projection="cartesian", nlvls=1)
+
+    for field_data in plot_data.fields:
+        props = PowerSpectrumProps(
+            show_reference_slopes=False,
+            linewidth=base_props.linewidth,
+            linestyle=base_props.linestyle,
+            color=base_props.color,
+            label=base_props.label,
+        )
+        init_component(figure, PowerSpectrumComponent(props), field_data)
+
+    figure.render()
+    _tighten_spectrum_axes(figure, config)
+    _save_and_show(figure, save_as, show)
+    return figure
+
+
+def plot_angular_spectrum_overlay(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str] = ["entropy-measure"],
+    labels: Optional[Sequence[str]] = None,
+    linestyles: Optional[Sequence[str]] = None,
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    per_file_overrides: Optional[dict[int, ConfigDict]] = None,
+    **kwargs,
+) -> Figure:
+    """overlay angular power spectra from multiple checkpoint files."""
+    if len(files) < 2:
+        raise ValueError("overlay requires at least 2 files")
+
+    nfiles = len(files)
+    figure = prepare_figure(
+        config, nfiles=nfiles, projection="cartesian",
+        nlvls=nfiles, overlay_mode=True,
+    )
+
+    global_props = get_props(
+        component_props, "power_spectrum", PowerSpectrumProps
+    )
+
+    is_vector = len(fields) >= 3
+
+    for ii, file_path in enumerate(files):
+        sim_data = load_data(file_path)
+        radii = list(global_props.angular_radii) if global_props.angular_radii else None
+        plot_data = create_angular_spectrum_data(
+            sim_data, config,
+            field=fields[0],
+            fields=fields if is_vector else None,
+            radii=radii,
+            n_shells=global_props.angular_n_shells,
+            n_theta=global_props.angular_n_theta,
+            n_phi=global_props.angular_n_phi,
+            subtract_mean=global_props.subtract_radial_mean,
+        )
+        if not plot_data.fields:
+            continue
+
+        file_props = resolve_per_file_props(
+            component_props, per_file_overrides, ii
+        )
+        label = labels[ii] if labels and ii < len(labels) else None
+        ls = linestyles[ii] if linestyles and ii < len(linestyles) else None
+
+        for field_data in plot_data.fields:
+            base_props = get_props(
+                file_props, "power_spectrum", PowerSpectrumProps
+            )
+            props = PowerSpectrumProps(
+                label=label or base_props.label,
+                linewidth=base_props.linewidth,
+                linestyle=ls or base_props.linestyle,
+                color=base_props.color,
+                show_reference_slopes=False,
+                reference_slopes=base_props.reference_slopes,
+            )
+            init_component(figure, PowerSpectrumComponent(props), field_data)
+
+    figure.render()
+    _tighten_spectrum_axes(figure, config)
+
+    # auto-detect large dynamic range and apply broken y-axis
+    use_blackboard = global_props.arbitrary_units
+    broken = _apply_broken_axis(figure, config, blackboard=use_blackboard)
+
+    # draw reference slopes on the top panel if user explicitly requested them
+    if global_props.show_reference_slopes:
+        slope_ax = figure.axes["main"]
+        first_comp = None
+        first_data = None
+        for comp, data_item, _ in figure._components:
+            if isinstance(comp, PowerSpectrumComponent):
+                first_comp = comp
+                first_data = data_item
+                break
+        if first_comp is not None and first_data is not None:
+            first_comp.ax = slope_ax
+            first_comp.props = PowerSpectrumProps(
+                **{
+                    **first_comp.props.model_dump(),
+                    "show_reference_slopes": True,
+                    "reference_slopes": global_props.reference_slopes,
+                    "reference_frequencies": global_props.reference_frequencies,
+                }
+            )
+            first_comp._draw_reference_slopes(
+                first_data.domain[0], first_data.values
+            )
+
+    # draw reference frequency lines on both panels (post broken-axis)
+    slope_ax = figure.axes["main"]
+    ref_props = global_props
+    if ref_props.reference_frequencies:
+        bot_ax = figure.axes.get("broken_bottom")
+        for ii, freq in enumerate(ref_props.reference_frequencies):
+            slope_ax.axvline(
+                freq, color="grey", linestyle=":", linewidth=0.8, alpha=0.6,
+            )
+            if bot_ax is not None:
+                bot_ax.axvline(
+                    freq, color="grey", linestyle=":", linewidth=0.8, alpha=0.6,
+                )
+            if ii < len(ref_props.reference_frequency_labels):
+                slope_ax.annotate(
+                    ref_props.reference_frequency_labels[ii],
+                    xy=(freq, 1.0),
+                    xycoords=("data", "axes fraction"),
+                    color="grey", alpha=0.8,
+                    ha="center", va="bottom",
+                    xytext=(0, 2), textcoords="offset points",
+                )
 
     _save_and_show(figure, save_as, show)
     return figure

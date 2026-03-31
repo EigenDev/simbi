@@ -30,6 +30,7 @@ PLOT_TYPE_ALIASES: dict[str, str] = {
     "time_series": "time_series",
     "power_spectrum": "power_spectrum",
     "temporal_spectrum": "temporal_spectrum",
+    "angular_spectrum": "power_spectrum",
 }
 
 

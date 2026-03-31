@@ -44,10 +44,10 @@ from .registry import get_props_class, get_props_registry
 ConfigDict = dict[str, dict[str, Any]]
 
 
-def _coerce_value(value: str) -> Union[bool, int, float, str]:
+def _coerce_value(value: str) -> Union[bool, int, float, str, tuple, list]:
     """
     Coerce a string value to its appropriate python type.
-    Handles booleans, integers, floats, and strings.
+    Handles booleans, integers, floats, tuples, lists, and strings.
     """
     lower = value.lower()
 
@@ -60,6 +60,17 @@ def _coerce_value(value: str) -> Union[bool, int, float, str]:
     # none/null
     if lower in ("none", "null", ""):
         return None  # type: ignore
+
+    # tuple/list literals — safe parse via ast.literal_eval
+    if (value.startswith("(") and value.endswith(")")) or (
+        value.startswith("[") and value.endswith("]")
+    ):
+        import ast
+
+        try:
+            return ast.literal_eval(value)
+        except (ValueError, SyntaxError):
+            pass
 
     # try numeric types
     try:
