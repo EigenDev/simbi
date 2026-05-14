@@ -353,6 +353,53 @@ def lomb_scargle_fap_levels(
     return result
 
 
+def phase_fold(
+    times: np.ndarray,
+    values: np.ndarray,
+    period: float,
+    n_bins: int = 50,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    fold a time series on a given period and compute binned statistics.
+
+    args:
+        times: shape (N,) time array
+        values: shape (N,) or (N, M) signal values
+        period: folding period
+        n_bins: number of phase bins
+
+    returns:
+        (phase_centers, mean, std, phase_per_sample)
+        phase_centers: shape (n_bins,) bin centers in [0, 1)
+        mean: shape (n_bins,) or (n_bins, M) binned mean
+        std: shape (n_bins,) or (n_bins, M) binned std
+        phase_per_sample: shape (N,) raw phase of each sample
+    """
+    phase = (times % period) / period
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    digit = np.digitize(phase, bin_edges) - 1
+    digit = np.clip(digit, 0, n_bins - 1)
+
+    is_2d = values.ndim == 2
+    ncols = values.shape[1] if is_2d else 1
+    vals = values if is_2d else values[:, np.newaxis]
+
+    mean = np.full((n_bins, ncols), np.nan)
+    std = np.full((n_bins, ncols), np.nan)
+    for bb in range(n_bins):
+        mask = digit == bb
+        if mask.sum() > 0:
+            mean[bb] = vals[mask].mean(axis=0)
+            std[bb] = vals[mask].std(axis=0)
+
+    if not is_2d:
+        mean = mean[:, 0]
+        std = std[:, 0]
+
+    return centers, mean, std, phase
+
+
 # =============================================================================
 # composite AMR spectra (band-stitched per level)
 # =============================================================================

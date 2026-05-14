@@ -690,6 +690,7 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         "power_spectrum": api.plot_power_spectrum,
         "temporal_spectrum": api.plot_temporal_spectrum,
         "angular_spectrum": api.plot_angular_spectrum,
+        "phase_fold": api.plot_phase_fold,
     }
 
     overlay_dispatch = {
@@ -700,8 +701,8 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
     }
 
     if is_grid:
-        if len(args.files) < 2:
-            print("Error: grid mode requires at least 2 files")
+        if len(args.files) < 2 and len(args.fields) < 2:
+            print("Error: grid mode requires multiple files or multiple fields")
             sys.exit(1)
 
         layout = tuple(args.layout) if getattr(args, "layout", None) else None
@@ -713,6 +714,20 @@ def execute(args: argparse.Namespace, _: Optional[list] = None) -> None:
         hspace = getattr(args, "hspace", None)
 
         panel_overrides = dict(per_file_overrides) if per_file_overrides else {}
+
+        # extract "panel" pseudo-component for per-panel axis limits
+        # e.g. --props 1:panel.xlims=(-3,3) 1:panel.ylims=(-3,3)
+        for idx in list(panel_overrides.keys()):
+            panel_meta = panel_overrides[idx].pop("panel", None)
+            if panel_meta:
+                for key in ("xlims", "ylims"):
+                    raw = panel_meta.get(key)
+                    if raw is not None:
+                        if isinstance(raw, str):
+                            import ast
+                            raw = ast.literal_eval(raw)
+                        panel_overrides[idx][key] = tuple(raw)
+
         grid_config = getattr(args, "_grid_config", None)
         if grid_config and "panels" in grid_config:
             # yaml config provides the base; cli per-file overrides win

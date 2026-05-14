@@ -40,6 +40,7 @@ from .pipeline.power_spectrum import (
     create_angular_spectrum_data,
     create_power_spectrum_data,
 )
+from .pipeline.phase_fold import create_phase_fold_data
 from .pipeline.temporal_spectrum import create_temporal_spectrum_data
 from .pipeline.time_series import create_time_series_data
 from .pipeline.transforms import compose_fields_for_render
@@ -610,6 +611,49 @@ def plot_temporal_spectrum(
     if omega_nyquist is not None and config.figure.xlims is None:
         figure.axes["main"].set_xlim(right=omega_nyquist)
 
+    _save_and_show(figure, save_as, show)
+    return figure
+
+
+def plot_phase_fold(
+    config: VisualizationConfig,
+    files: str | Sequence[str],
+    fields: Sequence[str] = ["mdot"],
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    **kwargs,
+) -> Figure:
+    """create phase-folded time series from a sequence of checkpoint files."""
+    if isinstance(files, str):
+        files = [files]
+
+    plot_data = create_phase_fold_data(files, fields, config)
+    if not plot_data.fields:
+        raise ValueError("no phase-fold data generated")
+
+    nlines = len(plot_data.fields)
+    figure = prepare_figure(config, nlvls=nlines)
+
+    for field_data in plot_data.fields:
+        base_props = get_props(
+            component_props, "time_series", TimeSeriesPlotProps
+        )
+
+        # orbit traces get reduced alpha
+        is_trace = field_data.name == "_orbit_traces"
+        if is_trace:
+            props = TimeSeriesPlotProps(
+                alpha=0.15,
+                linewidth=0.5,
+                label="_nolegend_",
+            )
+        else:
+            props = base_props
+
+        init_component(figure, TimeSeriesPlotComponent(props), field_data)
+
+    figure.render()
     _save_and_show(figure, save_as, show)
     return figure
 

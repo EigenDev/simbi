@@ -208,6 +208,46 @@ def magnetization(rho: Array, bfields: Sequence[Array]) -> Array:
 
 
 # =============================================================================
+# reynolds-decomposition helpers
+# =============================================================================
+def make_fluctuation(
+    getter: Callable[[Any], Array],
+) -> Callable[[Any], Array]:
+    """
+    reynolds-decomposition factory: q' = q - <q>.
+
+    `getter(ctx)` produces the base scalar field from a compute context
+    (primitive dict or level_context_t). the returned function subtracts
+    the spatial mean, yielding the signed fluctuation suitable for
+    diverging colormaps.
+    """
+
+    def compute(ctx: Any) -> Array:
+        q = np.asarray(getter(ctx))
+        return np.asarray(q - np.mean(q))
+
+    return compute
+
+
+def make_relative_fluctuation(
+    getter: Callable[[Any], Array],
+) -> Callable[[Any], Array]:
+    """
+    relative fluctuation: (q - <q>) / <q>.
+
+    useful for scale-invariant comparison (e.g. subsonic density
+    fluctuations). guards against division by zero via np.finfo tiny.
+    """
+
+    def compute(ctx: Any) -> Array:
+        q = np.asarray(getter(ctx))
+        mean = np.mean(q)
+        return np.asarray((q - mean) / (mean + np.finfo(float).tiny))
+
+    return compute
+
+
+# =============================================================================
 # computation pipeline factory
 # =============================================================================
 def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
@@ -912,6 +952,32 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     if data.metadata.is_mhd:
         for ii in range(1, ndim + 1):
             base_pipeline[f"b{ii}_mean"] = compute_b_mean_component(ii)
+
+    # reynolds-decomposition variants: delta_<field> = field - <field>
+    # registered automatically for every primitive scalar present in the
+    # checkpoint and for the velocity magnitude / mach number.
+    prim_names: set[str] = set()
+    if data.levels and data.levels[0].num_partitions >= 1:
+        prim_names = set(data.levels[0].partitions[0].hydro.primitives.keys())
+
+    def _prim_getter(name: str) -> Callable[[dict[str, Array]], Array]:
+        return lambda ctx, _name=name: ctx[_name]
+
+    for name in prim_names:
+        base_pipeline[f"delta_{name}"] = make_fluctuation(_prim_getter(name))
+        base_pipeline[f"delta_rel_{name}"] = make_relative_fluctuation(
+            _prim_getter(name)
+        )
+
+    # velocity magnitude fluctuation: |v| - <|v|> (distinct from v_turb which is
+    # the magnitude of the per-component velocity fluctuation vector).
+    base_pipeline["delta_v"] = make_fluctuation(compute_velocity_magnitude)
+    base_pipeline["delta_rel_v"] = make_relative_fluctuation(
+        compute_velocity_magnitude
+    )
+
+    # mach number fluctuation
+    base_pipeline["delta_mach"] = make_fluctuation(compute_mach_number)
 
     # fields requiring composite/base-level computation
     # these involve spatial integration or coordinate transformations that are

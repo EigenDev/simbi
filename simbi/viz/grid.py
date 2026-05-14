@@ -281,6 +281,36 @@ def _add_colorbar(
             fig.colorbar(last_mappable, cax=cax, label=cbar_label)
 
 
+def _add_per_column_colorbars(
+    fig: MplFigure,
+    axes_flat: np.ndarray,
+    nrows: int,
+    ncols: int,
+    column_mappables: list[Any],
+    column_labels: list[str],
+) -> None:
+    """add one colorbar per column, spanning the full column height."""
+    fig.canvas.draw()
+    cbar_width = 0.02
+    cbar_pad = 0.015
+    for col in range(ncols):
+        mappable = column_mappables[col]
+        if mappable is None:
+            continue
+        top_ax = axes_flat[col]
+        bot_ax = axes_flat[(nrows - 1) * ncols + col]
+        top_pos = top_ax.get_position()
+        bot_pos = bot_ax.get_position()
+        col_ax = axes_flat[col]
+        col_pos = col_ax.get_position()
+        cbar_x = col_pos.x0 + col_pos.width + cbar_pad
+        cbar_bottom = bot_pos.y0
+        cbar_height = top_pos.y0 + top_pos.height - bot_pos.y0
+        cax = fig.add_axes([cbar_x, cbar_bottom, cbar_width, cbar_height])
+        label = get_field_str(column_labels[col]) if column_labels[col] else ""
+        fig.colorbar(mappable, cax=cax, label=label)
+
+
 def _format_grid_panels(
     axes_flat: np.ndarray,
     npanels: int,
@@ -316,6 +346,181 @@ def _format_grid_panels(
             ax.set_ylabel("")
 
 
+def _plot_file_field_grid(
+    config: VisualizationConfig,
+    files: Sequence[str],
+    fields: Sequence[str],
+    nrows: int,
+    ncols: int,
+    npanels: int,
+    panel_labels: Optional[Sequence[str]] = None,
+    auto_label: bool = False,
+    shared_colorbar: bool = True,
+    annotate_inside: bool = False,
+    wspace: Optional[float] = None,
+    hspace: Optional[float] = None,
+    save_as: Optional[str] = None,
+    show: bool = True,
+    component_props: Optional[dict[str, ComponentProps]] = None,
+    panel_overrides: Optional[dict[int, dict]] = None,
+    **kwargs,
+) -> MplFigure:
+    """
+    file-field grid: rows = files, cols = fields.
+
+    panel index = row * ncols + col, where row indexes files and col indexes
+    fields. colorbars are per-column (one per field) when shared_colorbar is
+    true, since each column shows the same physical quantity across files.
+    """
+    nfiles = len(files)
+    nfields = len(fields)
+
+    # load each file once; prepare fields for all requested field names
+    file_sim_data = []
+    file_panel_data: list[list[tuple[PlotData, list[FieldData]]]] = []
+    for file_path in files:
+        sim_data = load_data(str(file_path))
+        file_sim_data.append(sim_data)
+        per_field = []
+        for field_name in fields:
+            plot_data, final_fields = _prepare_panel_fields(
+                sim_data, [field_name], config,
+            )
+            per_field.append((plot_data, final_fields))
+        file_panel_data.append(per_field)
+
+    # per-column global color range (same field across files)
+    column_ranges: list[Optional[tuple[float, float]]] = [None] * nfields
+    if shared_colorbar:
+        for col in range(nfields):
+            col_2d = []
+            for row in range(nfiles):
+                _, flds = file_panel_data[row][col]
+                col_2d.append([f for f in flds if f.ndim == 2])
+            if any(col_2d):
+                gmin, gmax = _compute_global_range(col_2d)
+                column_ranges[col] = (gmin, gmax)
+
+    # detect projection from first panel
+    first_fields = file_panel_data[0][0][1] if file_panel_data else []
+    first_coord = (
+        file_sim_data[0].metadata.coord_system
+        if file_sim_data
+        else "cartesian"
+    )
+    is_polar = (
+        first_fields
+        and first_fields[0].ndim == 2
+        and first_coord == "spherical"
+    )
+
+    fig, axes_flat = _create_grid_figure(
+        config, nrows, ncols, is_polar, annotate_inside, wspace, hspace
+    )
+
+    column_mappables: list[Any] = [None] * nfields
+    column_labels: list[str] = [""] * nfields
+    has_colormapped = False
+
+    for row in range(nfiles):
+        sim_data = file_sim_data[row]
+        for col in range(nfields):
+            panel_idx = row * ncols + col
+            ax = axes_flat[panel_idx]
+            plot_data, final_fields = file_panel_data[row][col]
+            nlvls, use_polygons = refinement_info(plot_data.fields, config)
+            panel_props = resolve_per_file_props(
+                component_props, panel_overrides, panel_idx
+            )
+
+            apply_scaling(ax, config.figure)
+
+            for field_data in final_fields:
+                component, props_key = create_scalar_component(
+                    field_data, panel_props, use_polygons,
+                    bodies=plot_data.body_collection,
+                )
+
+                col_range = column_ranges[col]
+                if col_range and shared_colorbar:
+                    component.props = _override_color_range(
+                        component.props, *col_range
+                    )
+
+                component.initialize(fig, ax)
+                result = component.render(field_data, config.figure)
+
+                if hasattr(result, "metadata") and result.metadata:
+                    mappable = result.metadata.get("mappable")
+                    if mappable is not None:
+                        column_mappables[col] = mappable
+
+                if props_key in ("polygon", "quad"):
+                    has_colormapped = True
+
+                if not column_labels[col]:
+                    name = field_data.name
+                    if "_polygons" in name:
+                        name = name.split("_polygons")[0]
+                    if name.endswith("_L"):
+                        name = name.rsplit("_L", 1)[0]
+                    column_labels[col] = name
+
+            # apply axis limits from config or panel overrides
+            panel_spec = (
+                (panel_overrides or {}).get(panel_idx, {})
+            )
+            _apply_panel_limits(ax, panel_spec, config.figure)
+
+            # panel label: panel_labels are per-row (per-file) and
+            # broadcast across all columns in that row
+            if panel_labels and row < len(panel_labels):
+                label = panel_labels[row]
+            elif panel_overrides and panel_idx in panel_overrides:
+                label = panel_overrides[panel_idx].get("label", "")
+            else:
+                label = _extract_panel_label(
+                    str(files[row]), sim_data, auto_label
+                )
+            _annotate_panel(ax, label, inside=annotate_inside)
+
+    # hide unused axes
+    for jj in range(npanels, nrows * ncols):
+        axes_flat[jj].set_visible(False)
+
+    if has_colormapped:
+        if shared_colorbar:
+            _add_per_column_colorbars(
+                fig, axes_flat, nrows, ncols,
+                column_mappables, column_labels,
+            )
+        else:
+            _add_colorbar(
+                fig, axes_flat, npanels, nrows, ncols,
+                column_mappables[-1], column_labels[-1], False,
+            )
+
+    _format_grid_panels(
+        axes_flat, npanels, nrows, ncols, config, has_colormapped, **kwargs
+    )
+
+    eff_ws = wspace if wspace is not None else (0.05 if annotate_inside else 0.15)
+    eff_hs = hspace if hspace is not None else (0.05 if annotate_inside else 0.2)
+    fig.subplots_adjust(wspace=eff_ws, hspace=eff_hs)
+
+    if save_as:
+        fig.savefig(
+            save_as,
+            dpi=config.figure.dpi,
+            bbox_inches="tight",
+            transparent=config.figure.transparent,
+        )
+    if show:
+        plt.show()
+
+    return fig
+
+
 def plot_grid(
     config: VisualizationConfig,
     files: Sequence[str],
@@ -345,13 +550,54 @@ def plot_grid(
     if not files:
         raise ValueError("no files provided")
 
-    npanels = len(files)
-    nrows, ncols = layout if layout else _compute_grid_shape(npanels)
+    nfiles = len(files)
+    nfields = len(fields)
+    multi_field = nfields > 1
 
-    if nrows * ncols < npanels:
-        raise ValueError(f"layout {nrows}x{ncols} too small for {npanels} files")
+    if multi_field:
+        # file-field grid: rows = files, cols = fields
+        npanels = nfiles * nfields
+        nrows = nfiles
+        ncols = nfields
+        if layout:
+            nrows, ncols = layout
+            if nrows * ncols < npanels:
+                raise ValueError(
+                    f"layout {nrows}x{ncols} too small for "
+                    f"{nfiles} files x {nfields} fields = {npanels} panels"
+                )
+    else:
+        npanels = nfiles
+        nrows, ncols = layout if layout else _compute_grid_shape(npanels)
+        if nrows * ncols < npanels:
+            raise ValueError(
+                f"layout {nrows}x{ncols} too small for {npanels} files"
+            )
 
-    config.theme.apply(nfiles=npanels, nfields=len(fields), overlay_mode=False)
+    config.theme.apply(nfiles=npanels, nfields=nfields, overlay_mode=False)
+
+    if multi_field:
+        return _plot_file_field_grid(
+            config=config,
+            files=files,
+            fields=fields,
+            nrows=nrows,
+            ncols=ncols,
+            npanels=npanels,
+            panel_labels=panel_labels,
+            auto_label=auto_label,
+            shared_colorbar=shared_colorbar,
+            annotate_inside=annotate_inside,
+            wspace=wspace,
+            hspace=hspace,
+            save_as=save_as,
+            show=show,
+            component_props=component_props,
+            panel_overrides=panel_overrides,
+            **kwargs,
+        )
+
+    # --- single-field grid (original behavior) ---
 
     # build per-panel specs and load data with per-panel slicing
     panel_specs = _build_panel_specs(files, panel_overrides, npanels)

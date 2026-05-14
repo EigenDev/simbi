@@ -109,6 +109,15 @@ class TemporalSpectrumConfig(BaseModel):
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
 
 
+class PhaseFoldConfig(BaseModel):
+    """configuration for phase-folded time series plots."""
+
+    n_bins: int = 50
+    show_orbits: bool = False
+
+    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+
+
 class AnimationConfig(BaseModel):
     """Configuration for animations."""
 
@@ -222,6 +231,7 @@ class VisualizationConfig(BaseModel):
     temporal_spectrum: TemporalSpectrumConfig = Field(
         default_factory=TemporalSpectrumConfig
     )
+    phase_fold: PhaseFoldConfig = Field(default_factory=PhaseFoldConfig)
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
     overlays: list[OverlayConfig] = Field(default_factory=list)
