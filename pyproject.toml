@@ -45,8 +45,9 @@ cli = ["rich-argparse"]
 [project.scripts]
 simbi = "simbi.cli.__main__:main"
 
-[tool.setuptools]
-packages = ["simbi"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["simbi*"]
 
 [tool.setuptools_scm]
 write_to = "simbi/version.py"
