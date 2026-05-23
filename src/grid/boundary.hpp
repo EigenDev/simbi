@@ -81,7 +81,7 @@ namespace simbi::grid {
 namespace simbi {
     REGISTER_ENUM_BIMAP(
         grid::boundary_type_t,
-        {grid::boundary_type_t::dynamic, "dynamics"},
+        {grid::boundary_type_t::dynamic, "dynamic"},
         {grid::boundary_type_t::outflow, "outflow"},
         {grid::boundary_type_t::periodic, "periodic"},
         {grid::boundary_type_t::reflect, "reflecting"},
