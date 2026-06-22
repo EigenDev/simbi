@@ -16,6 +16,8 @@
 import numpy as np
 from scipy.stats import binned_statistic
 
+from simbi.reader.computation import sound_speed as _sound_speed
+
 
 def _cell_radii(stitched_data: dict[str, np.ndarray]) -> np.ndarray:
     """compute radial distance of each leaf cell from the origin."""
@@ -328,6 +330,7 @@ def sound_speed_profile(
     stitched_data: dict[str, np.ndarray],
     n_bins: int,
     gamma: float,
+    regime: str = "newtonian",
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     volume-weighted spherically-averaged sound speed profile.
@@ -336,6 +339,7 @@ def sound_speed_profile(
         stitched_data: flat arrays from stitch_leaf_cells()
         n_bins: number of radial bins
         gamma: adiabatic index
+        regime: 'newtonian', 'srhd', or 'srmhd'
 
     returns:
         (bin_centers, mean_cs)
@@ -345,7 +349,7 @@ def sound_speed_profile(
 
     rho_flat = stitched_data["rho_flat"]
     p_flat = stitched_data.get("p_flat", rho_flat)
-    cs_flat = np.sqrt(gamma * p_flat / (rho_flat + 1e-10))
+    cs_flat = _sound_speed(rho_flat + 1e-10, p_flat, gamma, regime)
 
     bins = _log_bins(r_flat, n_bins)
     centers, mean_cs, _ = _volume_weighted_mean(r_flat, cs_flat, volume, bins)

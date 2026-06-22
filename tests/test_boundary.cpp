@@ -12,6 +12,7 @@
 #include "grid/patch_id.hpp"
 #include "grid/skeleton.hpp"
 #include "test_helpers.hpp"
+#include "utility/bimap.hpp"
 #include "xpu/xpu.hpp"
 
 #include <cassert>
@@ -101,5 +102,31 @@ int main()
     std::cout << "  corner cascade ✓" << std::endl;
 
     std::cout << "[PASS] boundary driver verified" << std::endl;
+
+    // regression: boundary_type_t bimap must round-trip and accept the exact
+    // strings the python BoundaryCondition enum emits. a typo in the bimap
+    // ("dynamics" vs "dynamic") previously broke deserialization at runtime.
+    {
+        constexpr boundary_type_t variants[] = {
+            boundary_type_t::periodic,
+            boundary_type_t::outflow,
+            boundary_type_t::reflect,
+            boundary_type_t::dynamic,
+            boundary_type_t::partition,
+        };
+        for (auto bt : variants) {
+            assert(deserialize<boundary_type_t>(serialize(bt)) == bt);
+        }
+
+        // python BoundaryCondition values (simbi/types/input.py)
+        assert(deserialize<boundary_type_t>("outflow") == boundary_type_t::outflow);
+        assert(deserialize<boundary_type_t>("reflecting") == boundary_type_t::reflect);
+        assert(deserialize<boundary_type_t>("dynamic") == boundary_type_t::dynamic);
+        assert(deserialize<boundary_type_t>("periodic") == boundary_type_t::periodic);
+
+        std::cout << "  boundary_type_t bimap round-trip ✓" << std::endl;
+    }
+
+    std::cout << "[PASS] boundary bimap verified" << std::endl;
     return 0;
 }

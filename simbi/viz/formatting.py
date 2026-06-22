@@ -38,6 +38,7 @@ def set_title(
     if time_scale and title_time is not None:
         title_time /= time_scale
 
+    print(time_scale, title_time)
     title_str = (
         f"{title}, t={title_time:.2f} {time_units}"
         if title_time is not None

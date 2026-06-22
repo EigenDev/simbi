@@ -142,7 +142,7 @@ def create_coordinate_profile_data(
             )
         elif name == "cs":
             bin_centers, cs_vals = sound_speed_profile(
-                stitched_data, n_bins, data.metadata.gamma
+                stitched_data, n_bins, data.metadata.gamma, data.metadata.regime
             )
             final_fields.append(
                 FieldData(

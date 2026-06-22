@@ -78,6 +78,20 @@ def _enthalpy(
     return 1.0 + gamma * pre / (rho * (gamma - 1.0))
 
 
+def sound_speed(
+    rho: Array, pre: Array, gamma: float, regime: str
+) -> Array:
+    """
+    adiabatic sound speed.
+
+    newtonian:    cs^2 = gamma * p / rho
+    relativistic: cs^2 = gamma * p / (rho * h),
+                  h = 1 + gamma * p / (rho * (gamma - 1))
+    """
+    h = _enthalpy(rho, pre, gamma, regime)
+    return np.sqrt(gamma * pre / (rho * h))
+
+
 def labframe_density(
     rho: Array, velocity: Sequence[Array], regime: str
 ) -> Array:
@@ -531,9 +545,12 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             get_b_fields(fields), get_velocities(fields), regime
         )
 
+    def compute_sound_speed(fields: dict[str, Array]) -> Array:
+        return sound_speed(fields["rho"], fields["p"], gamma, regime)
+
     def compute_mach_number(fields: dict[str, Array]) -> Array:
         v_mag = compute_velocity_magnitude(fields)
-        cs = np.sqrt(gamma * fields["p"] / fields["rho"])
+        cs = compute_sound_speed(fields)
         return np.asanyarray(v_mag / cs)
 
     def compute_chi_density(fields: dict[str, Array]) -> Array:
@@ -927,6 +944,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "sigma": compute_magnetization,
         "ptot": compute_total_pressure,
         "pmag": compute_magnetic_pressure,
+        "cs": compute_sound_speed,
         "mach": compute_mach_number,
         "chi_dens": compute_chi_density,
         "j": angular_momentum_density,

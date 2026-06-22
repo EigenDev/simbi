@@ -98,8 +98,6 @@ namespace simbi::geometry {
 
             if (dconf.type == map_type_t::uniform) {
                 real dx = block_width_phys / static_cast<real>(n_cells);
-                std::cout << "uniform dx: " << dx << "\n";
-                std::cin.get();
                 return uniform_map_t(block_start_phys, dx);
             }
             else {
