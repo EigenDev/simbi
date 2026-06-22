@@ -1,0 +1,13 @@
+[package]
+name = "symbi-ib"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-geometry = { path = "../symbi-geometry" }
+symbi-hydro = { path = "../symbi-hydro" }
+symbi-ir = { path = "../symbi-ir" }
+
+[lints]
+workspace = true

@@ -1,0 +1,54 @@
+[package]
+name = "symbi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+bench = false
+
+[features]
+default = []
+cuda = ["symbi-xpu/cuda", "symbi-grid/cuda", "symbi-exec/cuda", "symbi-sim/cuda", "symbi-substrate/cuda", "symbi-amr/cuda"]
+hdf5 = []  # placeholder for symbi-py compat
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-geometry = { path = "../symbi-geometry" }
+symbi-hydro = { path = "../symbi-hydro" }
+symbi-xpu = { path = "../symbi-xpu" }
+symbi-grid = { path = "../symbi-grid" }
+symbi-ib = { path = "../symbi-ib" }
+symbi-ir = { path = "../symbi-ir" }
+symbi-aot = { path = "../symbi-aot" }
+symbi-exec = { path = "../symbi-exec" }
+symbi-sim = { path = "../symbi-sim" }
+symbi-substrate = { path = "../symbi-substrate" }
+symbi-amr = { path = "../symbi-amr" }
+# Gap B (Path B): runtime user-source kernels. the SAME gv builder build.rs AOT-bakes
+# (source_apply_from_built_gv) is invoked at runtime to JIT a loaded-DAG source into the
+# substrate IR -> NVRTC, so a python-authored source runs on-device with no recompile.
+symbi-discretize = { path = "../symbi-discretize" }
+# the CPU's NVRTC — Cranelift JIT of the fused godunov+source GvKernel, so a runtime user
+# source runs COMPILED + fused into the godunov stage on host (symmetric with the device NVRTC
+# path). see docs/design/36_source_jit_cranelift.md.
+symbi-jit = { path = "../symbi-jit" }
+symbi-display = { path = "../symbi-display" }
+symbi-io = { path = "../symbi-io" }
+hdf5-metno = "0.12"
+rayon = "1"
+# stack-resident small vectors for the per-dispatch buffer-layout list (bounded
+# by buffer count), so `dispatch_fields_each` doesn't heap-allocate per call.
+smallvec = "1"
+
+[build-dependencies]
+# the stub-PTX compile in build.rs shares the nvcc host-compiler probe
+# (which_first / ccbin_retry_candidate) with the runtime AOT path — one copy.
+symbi-xpu = { path = "../symbi-xpu" }
+
+[dev-dependencies]
+hdf5-metno = "0.12"
+symbi-display = { path = "../symbi-display" }
+
+
+[lints]
+workspace = true

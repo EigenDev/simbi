@@ -1,0 +1,23 @@
+[package]
+name = "symbi-amr"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+cuda = ["symbi-xpu/cuda", "symbi-grid/cuda", "symbi-sim/cuda", "symbi-substrate/cuda"]
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-geometry = { path = "../symbi-geometry" }
+symbi-hydro = { path = "../symbi-hydro" }
+symbi-grid = { path = "../symbi-grid" }
+symbi-ir = { path = "../symbi-ir" }
+symbi-ib = { path = "../symbi-ib" }
+symbi-xpu = { path = "../symbi-xpu" }
+symbi-sim = { path = "../symbi-sim" }
+symbi-substrate = { path = "../symbi-substrate" }
+rayon = "1"
+
+[lints]
+workspace = true

@@ -1,0 +1,70 @@
+// =============================================================================
+// emit_rmhd_cuda.rs
+//
+// emit the substrate RMHD kernels as CUDA source — the GPU portability gate for
+// P1/P2/P3. the three production builders cover every RMHD-specific feature:
+//   - rmhd_c2p:        the KKC false-position (inline iterate loop) + recovery
+//   - rmhd_hlle_flux:  the quartic wave speeds (sinh/asinh/cosh/acosh/cos/acos/pow
+//                      + (double)INFINITY / nan("") sentinels) + RMHD U/F + HLLE
+//   - rmhd_ct_curl_2d: the constrained-transport curl (integer-offset load_at)
+// nvcc-compile the output to PTX (sm_75) to prove the GPU codegen is well-formed.
+//
+// usage: cargo run -p symbi-discretize --example emit_rmhd_cuda -- <out_dir>
+// =============================================================================
+
+use std::fs;
+
+use symbi_discretize::GvKernel;
+use symbi_discretize::{rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_flux_gv};
+use symbi_ir::emit::{Precision, Target, TargetConfig};
+use symbi_ir::graph::NodeId;
+use symbi_ir::{emit_kernel_from_lowering, KernelEmitInputs};
+
+type Writes = Vec<(String, symbi_ir::FieldBind, NodeId)>;
+
+// emit a Gv-traced kernel (graph + ABI manifest already carried) -> CUDA source.
+fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: Writes) {
+    assert!(!k.graph.has_errors(), "{name} graph errors: {:?}", k.graph.errors());
+    // thread the kernel's declared smem tile intent (Gate 3) so the emitted CUDA
+    // exercises the smem prelude + redirected stencil reads through the PTX gate.
+    let tile_spec = k.infer_tile_spec();
+    let desc = emit_kernel_from_lowering(&k.graph, &KernelEmitInputs {
+        kernel_name: name,
+        ndim,
+        target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+        field_inputs: &k.field_inputs,
+        scalar_params: &k.scalar_params,
+        field_writes: &writes,
+        coord_components: &k.coord_components,
+        device_preamble: &[],
+        tile_spec: tile_spec.as_ref(),
+    });
+    let path = format!("{out_dir}/{name}.cu");
+    fs::write(&path, &desc.source).unwrap_or_else(|e| panic!("write {path}: {e}"));
+    println!("emitted {path}");
+}
+
+fn main() {
+    let out_dir = std::env::args().nth(1).expect("usage: emit_rmhd_cuda <out_dir>");
+
+    // the KKC false-position c2p is the gv single-source physics (symbi-hydro's
+    // `rmhd_recover` at S=Gv — the 6-state bracketed iterate -> multi-acc IterateInline).
+    let (rmhd_k, rmhd_writes) = rmhd_c2p_gv(100);
+    emit_gv(&out_dir, "rmhd_c2p", 1, rmhd_k, rmhd_writes);
+
+    // theta-MC PLM (Gv stencil) + riemann::hlle at the Rmhd regime — the gv single source.
+    let (rmhd_f, rmhd_fw) = rmhd_flux_gv(1, 0, 0);
+    emit_gv(&out_dir, "rmhd_hlle_flux", 1, rmhd_f, rmhd_fw);
+
+    // the 3D direction-0 flux — the hottest GPU kernel + the Gate 3 smem slab target.
+    let (rmhd_f3, rmhd_f3w) = rmhd_flux_gv(3, 0, 0);
+    emit_gv(&out_dir, "rmhd_face_flux_3d_0", 3, rmhd_f3, rmhd_f3w);
+
+    // the constrained-transport curl — the gv staggered stencil (div(B)=0 preserved). the old
+    // combined 2d curl was split per in-plane direction (dir=0 -> B_x, dir=1 -> B_y, both from
+    // the corner E_z). emit both.
+    for dir in 0..2 {
+        let (ct_k, ct_w) = rmhd_ct_curl_2d_dir_gv(dir);
+        emit_gv(&out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, ct_k, ct_w);
+    }
+}

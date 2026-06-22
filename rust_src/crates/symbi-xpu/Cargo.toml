@@ -1,0 +1,22 @@
+[package]
+name = "symbi-xpu"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+rayon = "1"
+
+[dev-dependencies]
+# the AOT-generated kernels (CPU fn + its neutral IR blob const) for the GPU<->CPU
+# runtime validation. acyclic: symbi-aot does not depend on symbi-xpu. symbi-ir
+# renders the IR blob to CUDA source at test time (render_from_ir).
+symbi-aot = { path = "../symbi-aot" }
+symbi-ir = { path = "../symbi-ir" }
+
+[features]
+default = []
+cuda = []
+
+[lints]
+workspace = true

@@ -144,8 +144,24 @@ def setup_lightcurve_parser(subparsers) -> None:
     )
 
     parser.add_argument(
-        "events",
-        help="photon events HDF5 file",
+        "files",
+        nargs="+",
+        help="hydro checkpoint HDF5 file(s) — the rust afterglow reads them "
+        "directly and integrates the EATS over all frames",
+    )
+
+    parser.add_argument(
+        "--scale",
+        default="solar",
+        help="unit scale model (code -> cgs): length/density/pressure/time",
+    )
+    parser.add_argument("--eps-e", type=float, default=0.1, help="electron energy fraction")
+    parser.add_argument("--eps-b", type=float, default=0.01, help="magnetic energy fraction")
+    parser.add_argument("--p", type=float, default=2.5, help="electron power-law index")
+    parser.add_argument("--redshift", type=float, default=0.0, help="source redshift z")
+    parser.add_argument(
+        "--d-l", type=float, default=None,
+        help="luminosity distance [cm] (auto from z if omitted)",
     )
 
     parser.add_argument(
@@ -215,9 +231,19 @@ def setup_skymap_parser(subparsers) -> None:
     )
 
     parser.add_argument(
-        "events",
-        help="photon events HDF5 file",
+        "checkpoint",
+        help="hydro checkpoint HDF5 file (the rust afterglow reads it directly)",
     )
+
+    parser.add_argument(
+        "--scale",
+        default="solar",
+        help="unit scale model (code -> cgs)",
+    )
+    parser.add_argument("--eps-e", type=float, default=0.1, help="electron energy fraction")
+    parser.add_argument("--eps-b", type=float, default=0.01, help="magnetic energy fraction")
+    parser.add_argument("--p", type=float, default=2.5, help="electron power-law index")
+    parser.add_argument("--observer-angle", type=float, default=0.0, help="viewing angle [deg]")
 
     parser.add_argument(
         "--time",
@@ -227,31 +253,10 @@ def setup_skymap_parser(subparsers) -> None:
     )
 
     parser.add_argument(
-        "--energy-min",
-        type=float,
-        default=0.0,
-        help="minimum energy [erg]",
-    )
-
-    parser.add_argument(
-        "--energy-max",
-        type=float,
-        default=1e10,
-        help="maximum energy [erg]",
-    )
-
-    parser.add_argument(
-        "--n-theta",
-        type=int,
-        default=128,
-        help="polar resolution",
-    )
-
-    parser.add_argument(
-        "--n-phi",
+        "--n-pix",
         type=int,
         default=256,
-        help="azimuthal resolution",
+        help="image resolution (n_pix x n_pix, cartesian sky plane)",
     )
 
     parser.add_argument(
@@ -259,6 +264,12 @@ def setup_skymap_parser(subparsers) -> None:
         type=float,
         default=0.1,
         help="integration window [day]",
+    )
+
+    parser.add_argument(
+        "--bolometric",
+        action="store_true",
+        help="bolometric beaming (doppler^4) instead of in-band (doppler^3)",
     )
 
     parser.add_argument(
@@ -449,81 +460,136 @@ def execute_generate(args: Namespace, remaining: Optional[list] = None) -> None:
 
 
 def execute_lightcurve(args: Namespace, remaining: Optional[list] = None) -> None:
-    """execute lightcurve subcommand"""
-    from ...afterglow.plotting import plot_lightcurve
-    from ...afterglow.postprocess import compute_lightcurve, read_photon_events
+    """compute the observer light curve F_nu(t) directly from hydro checkpoints
+    via the rust afterglow (read_cells -> synchrotron catalog -> EATS reduce)."""
+    import h5py
 
-    print(f"loading photon events from {args.events}...")
-    events, meta = read_photon_events(args.events)
-    print(f"loaded {meta.n_events} events")
+    from simbi import afterglow_lightcurve
+    from simbi.reader import read_simulation
 
-    print(f"computing lightcurve for observer angle {args.observer_angle}°...")
+    from ...afterglow.scales import get_scale_model
 
-    # time bins
-    if args.time_range:
-        time_bins = np.geomspace(args.time_range[0], args.time_range[1], args.n_bins + 1)
+    if afterglow_lightcurve is None:
+        raise SystemExit("rad_hydro (rust afterglow) not installed in simbi/libs")
+
+    scales = get_scale_model(args.scale)
+    meta0 = read_simulation(args.files[0]).metadata
+    # luminosity distance: explicit, else from z (0 -> a 10 pc reference).
+    if args.d_l is not None:
+        d_l = args.d_l
+    elif args.redshift > 0.0:
+        from ...afterglow.radiation import get_dL
+        d_l = float(get_dL(args.redshift).value)
     else:
-        time_bins = None
+        d_l = 3.086e19  # 10 pc in cm
 
-    lc = compute_lightcurve(
-        events,
-        meta,
-        observer_angle=np.deg2rad(args.observer_angle),
-        frequencies=args.frequencies,
-        time_bins=time_bins,
-        n_bins=args.n_bins,
-        energy_cut=args.energy_cut,
+    # observer-time bin edges [day].
+    if args.time_range:
+        time_edges = np.geomspace(args.time_range[0], args.time_range[1], args.n_bins + 1)
+    else:
+        # default: a couple decades around the checkpoint light-crossing scale.
+        time_edges = np.geomspace(1e-3, 1e3, args.n_bins + 1)
+
+    print(f"computing light curve from {len(args.files)} checkpoint(s)...")
+    times, fluxes_flat, freqs = afterglow_lightcurve(
+        list(args.files),
+        scales.length_scale.value,
+        scales.rho_scale.value,
+        scales.pre_scale.value,
+        scales.time_scale.value,
+        args.p,
+        args.eps_e,
+        args.eps_b,
+        meta0.gamma,
+        meta0.dt,
+        np.deg2rad(args.observer_angle),
+        [float(f) for f in args.frequencies],
+        args.redshift,
+        d_l,
+        [float(t) for t in time_edges],
     )
-
-    print(f"computed {len(lc.times)} time bins, {len(lc.frequencies)} frequencies")
+    fluxes = np.array(fluxes_flat).reshape(len(times), len(freqs))[: args.n_bins]
+    times = np.asarray(times)[: args.n_bins]
+    print(f"computed {len(times)} time bins x {len(freqs)} frequencies")
 
     if args.output:
-        import h5py
-        with h5py.File(args.output, 'w') as f:
-            f.create_dataset('times', data=lc.times)
-            f.create_dataset('frequencies', data=lc.frequencies)
-            for nu, flux in lc.fluxes.items():
-                f.create_dataset(f'flux_{nu:.2e}', data=flux)
+        with h5py.File(args.output, "w") as f:
+            f.create_dataset("times", data=times)
+            f.create_dataset("frequencies", data=freqs)
+            for i, nu in enumerate(freqs):
+                f.create_dataset(f"flux_{nu:.2e}", data=fluxes[:, i])
         print(f"saved lightcurve to {args.output}")
 
     if args.plot or args.save_fig:
-        plot_lightcurve(lc, save=args.save_fig)
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        for i, nu in enumerate(freqs):
+            ax.loglog(times, fluxes[:, i], label=f"{nu:.2e} Hz")
+        ax.set_xlabel("observer time [day]")
+        ax.set_ylabel(r"$F_\nu$ [mJy]")
+        ax.legend()
+        if args.save_fig:
+            fig.savefig(args.save_fig, dpi=150, bbox_inches="tight")
+            print(f"saved figure to {args.save_fig}")
+        if args.plot:
+            plt.show()
 
 
 def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
-    """execute skymap subcommand"""
-    from ...afterglow.plotting import plot_skymap
-    from ...afterglow.postprocess import compute_skymap, read_photon_events
+    """compute the sky intensity map directly from a hydro checkpoint via the
+    rust afterglow (read_cells -> synchrotron catalog -> sky-plane reduce)."""
+    from simbi import afterglow_skymap
+    from simbi.reader import read_simulation
 
-    print(f"loading photon events from {args.events}...")
-    events, meta = read_photon_events(args.events)
+    from ...afterglow.scales import get_scale_model
 
-    print(f"computing skymap at t={args.time} day...")
+    if afterglow_skymap is None:
+        raise SystemExit("rad_hydro (rust afterglow) not installed in simbi/libs")
 
-    skymap = compute_skymap(
-        events,
-        meta,
-        time=args.time,
-        energy_min=args.energy_min,
-        energy_max=args.energy_max,
-        n_theta=args.n_theta,
-        n_phi=args.n_phi,
-        time_window=args.time_window,
+    scales = get_scale_model(args.scale)
+    meta0 = read_simulation(args.checkpoint).metadata
+
+    print(f"computing skymap at t={args.time} day from {args.checkpoint}...")
+    flat, n_pix = afterglow_skymap(
+        args.checkpoint,
+        scales.length_scale.value,
+        scales.rho_scale.value,
+        scales.pre_scale.value,
+        scales.time_scale.value,
+        args.p,
+        args.eps_e,
+        args.eps_b,
+        meta0.gamma,
+        meta0.dt,
+        np.deg2rad(args.observer_angle),
+        args.time,
+        args.time_window,
+        args.n_pix,
+        bolometric=args.bolometric,
     )
-
-    print(f"computed {args.n_theta}x{args.n_phi} skymap")
+    image = np.array(flat).reshape(n_pix, n_pix)
+    print(f"computed {n_pix}x{n_pix} skymap (max={image.max():.3e})")
 
     if args.output:
         import h5py
-        with h5py.File(args.output, 'w') as f:
-            f.create_dataset('theta', data=skymap.theta)
-            f.create_dataset('phi', data=skymap.phi)
-            f.create_dataset('intensity', data=skymap.intensity)
-            f.attrs['time'] = skymap.time
+        with h5py.File(args.output, "w") as f:
+            f.create_dataset("intensity", data=image)
+            f.attrs["time"] = args.time
+            f.attrs["n_pix"] = n_pix
         print(f"saved skymap to {args.output}")
 
     if args.plot or args.save_fig:
-        plot_skymap(skymap, save=args.save_fig)
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.imshow(image, origin="lower", cmap="inferno")
+        ax.set_title(f"t = {args.time} day")
+        if args.save_fig:
+            fig.savefig(args.save_fig, dpi=150, bbox_inches="tight")
+            print(f"saved figure to {args.save_fig}")
+        if args.plot:
+            plt.show()
 
 
 def execute_polarization(args: Namespace, remaining: Optional[list] = None) -> None:

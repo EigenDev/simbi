@@ -1,0 +1,22 @@
+[package]
+name = "symbi-exec"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+cuda = ["symbi-xpu/cuda"]
+
+[dependencies]
+symbi-algebra = { path = "../symbi-algebra" }
+symbi-grid = { path = "../symbi-grid" }
+symbi-aot = { path = "../symbi-aot" }
+symbi-ir = { path = "../symbi-ir" }
+symbi-xpu = { path = "../symbi-xpu" }
+rayon = "1"
+# stack-resident small vectors for the per-dispatch buffer-layout list (bounded
+# by buffer count), so the per-buffer-layout executors don't heap-allocate per call.
+smallvec = "1"
+
+[lints]
+workspace = true

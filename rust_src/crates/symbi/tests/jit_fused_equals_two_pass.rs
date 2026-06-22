@@ -1,0 +1,168 @@
+// =============================================================================
+// jit_fused_equals_two_pass.rs
+//
+// **v2 inc 3+4 evolve oracle** — the gate that lets the fused runtime-source host
+// path go live. it is the runtime-user-source twin of
+// `additive_source_equals_fused_evolve` (which proves it for AOT-baked sources):
+// the SAME runtime-loaded user source (python -> json -> build_user_source DAG) is
+// run two ways through the production `evolve()` loop —
+//   - TWO-PASS: `with_runtime_source(..)`        -> plain AOT godunov + the per-cell
+//                                                   `apply_runtime_source` pass
+//   - FUSED:    `with_fused_runtime_source(..)`  -> ONE Cranelift-JIT'd godunov+source
+//                                                   host kernel (run_parallel_raw)
+// and must produce bit-for-bit identical conserved state at every interior cell.
+//
+// it stresses the FP-sensitive seams: SSP-RK2 (a0=ac=0.5 corrector every step), a
+// non-uniform density (nonzero flux divergence — a uniform state would hide an
+// ordering bug behind a zero divergence) and a nonzero velocity (so the energy-side
+// `v . a` source term is live from step one). a single-ULP drift in the godunov
+// arithmetic, the snapshot, the `ac*dt` weight, or the source eval makes a
+// trajectory diverge and `assert_eq!` on the bits fails.
+//
+// run: cargo test -p symbi --test jit_fused_equals_two_pass
+// =============================================================================
+
+use symbi::prelude::*;
+use symbi_algebra::Domain;
+use symbi_grid::Field;
+use symbi_xpu::HostMemory;
+use symbi_hydro::expr_bridge::build_user_source;
+use symbi_hydro::isothermal::IsoNewtonian;
+use symbi_hydro::energy::IsoModel;
+use symbi_hydro::state::PrimG;
+use symbi_hydro::{SourceConfig, ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
+
+// assert two conserved fields are bit-for-bit equal over the interior.
+fn assert_cons_bit_identical<const D: usize>(
+    interior: &Domain<D>,
+    a: &Field<f64, D, HostMemory>,
+    b: &Field<f64, D, HostMemory>,
+    label: &str,
+) {
+    for c in interior.iter() {
+        let (va, vb) = (*a.view().at(c), *b.view().at(c));
+        assert_eq!(
+            va.to_bits(), vb.to_bits(),
+            "{label} differs at {c:?}: fused={va:?} two_pass={vb:?} (delta={:?})", va - vb,
+        );
+    }
+}
+
+#[test]
+fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
+    type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
+    const GAMMA: f64 = 1.4;
+    let n = 24usize;
+    let t_final = 0.04;
+
+    // the runtime user source: external acceleration a = [p0, p1] (force kind). for an
+    // energy regime build_user_source wraps it into BOTH the momentum overlay (S_mom = rho*a)
+    // and the energy overlay (S_nrg = rho*v.a) — so this exercises the in-place mom_k AND nrg
+    // writes of the fused godunov.
+    let json = r#"{
+        "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5, -0.3],
+        "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
+    }"#;
+    let cfg = SourceConfig::from_json(json).expect("parse config");
+
+    let build = || -> Sim {
+        let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([n, n])
+            .bounds([0.0, 0.0], [1.0, 1.0])
+            .boundaries(BoundaryType::Periodic)
+            .finish()
+            .unwrap();
+        // non-uniform density (nonzero divergence) + nonzero velocity (live v.a energy term).
+        sim.seed_cells(|p| {
+            let (x, y) = (p[0], p[1]);
+            let rho = 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
+            Prim { rho, vel: Tensor::new([0.1, -0.05]), pre: 1.0 }
+        });
+        sim
+    };
+
+    // TWO-PASS: plain AOT godunov + the per-cell apply_runtime_source pass.
+    let mut sim_two = build();
+    let sub_two = sim_two.substrate()
+        .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    evolve(&mut sim_two, &sub_two, t_final).expect("two-pass evolve");
+
+    // FUSED: one Cranelift-JIT'd godunov+source launch.
+    let mut sim_fused = build();
+    let sub_fused = sim_fused.substrate()
+        .with_fused_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve");
+
+    // GUARD: the fused kernel actually JIT-compiled + ran (else this would compare two-pass vs
+    // two-pass and pass vacuously — the exact trap this oracle exists to avoid).
+    assert_eq!(
+        sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(), Some(true),
+        "fused godunov+source kernel did not compile — fused path silently fell back to two-pass",
+    );
+
+    // same source, two execution strategies -> identical trajectory, bit-for-bit.
+    let interior = &sim_fused.geom.interior;
+    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_two.fields.cons.den, "cons.den");
+    for k in 0..2 {
+        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
+    }
+    let (nf, nt) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_two.fields.cons.nrg_field().unwrap());
+    assert_cons_bit_identical(interior, nf, nt, "cons.nrg");
+
+    // sanity: the run actually moved (else the test exercised nothing).
+    let moved = sim_fused.geom.interior.iter()
+        .any(|c| (*sim_fused.fields.prim.vel[0].view().at(c) - 0.1).abs() > 1e-9);
+    assert!(moved, "gas never accelerated — the test exercised nothing");
+}
+
+#[test]
+fn iso_runtime_force_fused_equals_two_pass_rk2() {
+    // the iso analogue: no energy law, so the fused kernel writes only den + mom_k (no nrg).
+    // proves the has_energy=false fused path matches the iso two-pass bit-for-bit.
+    type Sim = SimCpu<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
+    let n = 24usize;
+    let cs = 0.05;
+    let t_final = 0.04;
+
+    let json = r#"{
+        "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.4, -0.25],
+        "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
+    }"#;
+    let cfg = SourceConfig::from_json(json).expect("parse config");
+
+    let build = || -> Sim {
+        let sim = Sim::build(IsoNewtonian, Isothermal { cs }, Cartesian)
+            .cells([n, n])
+            .bounds([0.0, 0.0], [1.0, 1.0])
+            .boundaries(BoundaryType::Periodic)
+            .finish()
+            .unwrap();
+        sim.seed_cells(|p| {
+            let (x, y) = (p[0], p[1]);
+            let rho = 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
+            PrimG::<f64, 2, IsoModel> { rho, vel: Tensor::new([0.1, -0.05]), pre: Default::default() }
+        });
+        sim
+    };
+
+    let mut sim_two = build();
+    let sub_two = sim_two.substrate()
+        .with_runtime_source(build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    evolve(&mut sim_two, &sub_two, t_final).expect("iso two-pass evolve");
+
+    let mut sim_fused = build();
+    let sub_fused = sim_fused.substrate()
+        .with_fused_runtime_source(build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    evolve(&mut sim_fused, &sub_fused, t_final).expect("iso fused evolve");
+
+    assert_eq!(
+        sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(), Some(true),
+        "iso fused godunov+source kernel did not compile — fell back to two-pass",
+    );
+
+    let interior = &sim_fused.geom.interior;
+    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_two.fields.cons.den, "cons.den");
+    for k in 0..2 {
+        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
+    }
+}

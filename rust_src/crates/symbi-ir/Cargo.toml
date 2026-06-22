@@ -1,0 +1,24 @@
+[package]
+name = "symbi-ir"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits", "visit", "visit-mut"] }
+quote = "1"
+proc-macro2 = "1"
+# the lowered IR (Prepared, docs/design/15 §3) is the durable backend-neutral
+# artifact: build.rs serializes it into the binary, the runtime renders+JITs any
+# accelerator from it. serde derives the round-trip; serde_json is the wire format.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# the `Gv` carrier (gv.rs) impls `symbi_algebra::Scalar` to trace carrier-generic
+# physics into this crate's tensor IR. consolidated 2026-05-30: symbi-core folded in.
+symbi-algebra = { path = "../symbi-algebra" }
+
+[features]
+# debug-emit-knobs: opt-in reading of SYMBI_TILE_CPU / SYMBI_VEC_LOOP / SYMBI_GEN_SERIAL a/b perf knobs. off by default = canonical env-unset emission shape.
+debug-emit-knobs = []
+
+[lints]
+workspace = true

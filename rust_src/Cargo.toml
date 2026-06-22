@@ -1,0 +1,59 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/symbi",
+    "crates/symbi-algebra",
+    "crates/symbi-geometry",
+    "crates/symbi-hydro",
+    "crates/symbi-grid",
+    "crates/symbi-ir",
+    "crates/symbi-jit",
+    "crates/symbi-discretize",
+    "crates/symbi-aot",
+    "crates/symbi-exec",
+    "crates/symbi-sim",
+    "crates/symbi-substrate",
+    "crates/symbi-amr",
+    "crates/symbi-afterglow",
+    "crates/symbi-afterglow-io",
+    "crates/symbi-xpu",
+    "crates/symbi-expr",
+    "crates/symbi-ib",
+    "crates/symbi-display",
+    "crates/symbi-io",
+    "crates/symbi-py",
+    "crates/symbi-rad-py",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+# warnings are errors across every workspace crate (each crate opts in via
+# `[lints] workspace = true`). `deny` (not `forbid`) so a deliberate, documented
+# `#[allow(...)]` at a specific site can still override it — e.g. the emitted
+# kernels' allow attrs, or a kept-but-orphaned reference fn. dependencies are
+# unaffected (workspace lints apply only to our own crates).
+[workspace.lints.rust]
+warnings = "deny"
+
+# thin LTO + single codegen unit lets the compiler inline across the
+# kernel-dispatch hot path (substrate_kernels -> substrate_gpu -> symbi-xpu)
+# that otherwise crosses crate boundaries on every launch. measured wins on
+# AOT-compiled scalar kernels (CPU per-cell loops) and on the launch glue.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# debug-build size control (docs: the 134 test+example binaries x full DWARF of a heavily
+# monomorphized generic codebase = a ~200GB target/). `line-tables-only` keeps panic file:line +
+# backtraces (the nan-locator / check_dt_or_panic / manifest-slot panics all still resolve) while
+# dropping the heavy type/local-variable DWARF that explodes per monomorphization; deps carry no
+# debuginfo at all (we never step into serde/rayon/hdf5); split-debuginfo keeps DWARF out of the
+# linked binaries. lose only debugger LOCAL-variable inspection, which this CFD work rarely uses.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = false

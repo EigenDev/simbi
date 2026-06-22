@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from astropy import units
 
-from simbi import find_nearest, py_calc_fnu, py_log_events
+from simbi import afterglow_lightcurve, find_nearest
 
 from ..detail import get_subparser
 from ..tools import utility as util
@@ -265,96 +265,59 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
         dim = util.get_dimensionality(files)
         nbins = args.ntbins
         nbin_edges = nbins + 1
-        if args.mode == "fnu":
-            tbin_edge = args.tbins or get_tbin_edges(
-                args, files, scales.time_scale
+        if args.mode != "fnu":
+            raise SystemExit(
+                "the 'events' mode used the legacy C++ photon logger, which the "
+                "rust afterglow replaces with skymap()/lightcurve(). use --mode fnu "
+                "for a light curve, or simbi.afterglow_skymap(checkpoint, ...) for "
+                "an image."
             )
-            tbin_edges = np.geomspace(
-                tbin_edge[0] * 0.9, tbin_edge[1] * 1.1, nbin_edges
-            )
-            time_bins = np.sqrt(tbin_edges[1:] * tbin_edges[:-1])
-            fnu = {i: np.zeros(nbins) * units.mJy for i in args.nu}
-            fnu_contig = np.array(
-                [fnu[key].value.flatten() for key in fnu.keys()], dtype=float
-            ).flatten()
 
-        scales_dict = {
-            "time_scale": scales.time_scale.value,
-            "length_scale": scales.length_scale.value,
-            "rho_scale": scales.rho_scale.value,
-            "pre_scale": scales.pre_scale.value,
-            "v_scale": 1.0,
+        # observer-time bin edges (seconds), as before.
+        tbin_edge = args.tbins or get_tbin_edges(args, files, scales.time_scale)
+        tbin_edges = np.geomspace(
+            tbin_edge[0] * 0.9, tbin_edge[1] * 1.1, nbin_edges
+        )
+        time_bins = np.sqrt(tbin_edges[1:] * tbin_edges[:-1])
+
+        # the rust afterglow reads every checkpoint itself and integrates the
+        # equal-arrival-time surface over ALL frames in ONE call — no per-frame
+        # field marshaling. gamma/dt come from the first frame's metadata.
+        seconds_per_day = 86400.0
+        meta0 = read_simulation(files[0]).metadata
+        t1 = pytime.time()
+        _times, fluxes_flat, freqs_out = afterglow_lightcurve(
+            list(files),
+            scales.length_scale.value,
+            scales.rho_scale.value,
+            scales.pre_scale.value,
+            scales.time_scale.value,
+            args.p,
+            args.eps_e,
+            args.eps_b,
+            meta0.gamma,
+            meta0.dt,
+            float(args.theta_obs),
+            [float(f) for f in freqs.value],
+            float(args.z),
+            float(get_dL(args.z).value),
+            [float(t) / seconds_per_day for t in tbin_edges.value],  # days
+        )
+        print(
+            f"Computed light curve over {len(files)} frames in "
+            f"{pytime.time() - t1:.2f} s",
+            flush=True,
+        )
+
+        # fluxes are row-major (n_time_edges, n_freqs); the bins are the
+        # nbins intervals between the edges, redshift-dilated.
+        fluxes_2d = np.array(fluxes_flat).reshape(
+            len(_times), len(freqs_out)
+        )[:nbins]
+        fnu = {
+            nu: fluxes_2d[:, i] * (1.0 + args.z) * units.mJy
+            for i, nu in enumerate(args.nu)
         }
-
-        sim_info = {
-            "theta_obs": args.theta_obs,
-            "nus": freqs.value,
-            "z": args.z,
-            "d_L": get_dL(args.z).value,
-            "eps_e": args.eps_e,
-            "eps_b": args.eps_b,
-            "p": args.p,
-        }
-
-        for idx, file in enumerate(files):
-            data = read_simulation(file)
-
-            # extract fields as dict[str, array]
-            fields = {
-                name: data.get_field(name)
-                for name in data.available_fields()
-            }
-
-            # build mesh dict from mesh adapter
-            mesh = {
-                "x1": 0.5 * (data.mesh.x1v[:-1] + data.mesh.x1v[1:]),
-            }
-            if data.metadata.dimensions >= 2:
-                mesh["x2"] = 0.5 * (data.mesh.x2v[:-1] + data.mesh.x2v[1:])
-            if data.metadata.dimensions >= 3:
-                mesh["x3"] = 0.5 * (data.mesh.x3v[:-1] + data.mesh.x3v[1:])
-
-            # generate a pseudo mesh if computing off-axis afterglows
-            generate_pseudo_mesh(
-                args,
-                mesh,
-                full_sphere=True,
-                full_threed=False,
-            )
-
-            sim_info["dt"] = data.metadata.dt
-            sim_info["adiabatic_index"] = data.metadata.gamma
-            sim_info["current_time"] = data.metadata.time
-            t1 = pytime.time()
-            if args.mode == "fnu":
-                py_calc_fnu(
-                    fields=fields,
-                    tbin_edges=tbin_edges.value,
-                    flux_array=fnu_contig,
-                    mesh=mesh,
-                    qscales=scales_dict,
-                    sim_info=sim_info,
-                    checkpoint_index=idx,
-                    data_dim=dim,
-                )
-            else:
-                py_log_events(
-                    fields=fields,
-                    photon_distro=photon_distro,
-                    x_mu=x_mu,
-                    mesh=mesh,
-                    qscales=scales_dict,
-                    sim_info=sim_info,
-                    data_dim=dim,
-                )
-            print(
-                f"Processed file {file} in {pytime.time() - t1:.2f} s",
-                flush=True,
-            )
-
-        fnu_contig = fnu_contig.reshape(len(args.nu), nbins) * (1.0 + args.z)
-        for idx, key in enumerate(fnu.keys()):
-            fnu[key] = fnu_contig[idx] * units.mJy
 
         # Save the data
         file_name = args.output

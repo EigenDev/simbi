@@ -101,14 +101,6 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         ),
     )
 
-    # derive isothermal from adiabatic_index (gamma) if not explicitly provided
-    gamma_val = model_dict.get("adiabatic_index", model_dict.get("gamma", None))
-    try:
-        if gamma_val is not None:
-            model_dict.setdefault("isothermal", float(gamma_val) == 1.0)
-    except Exception:
-        # leave isothermal absent if gamma cannot be parsed
-        pass
 
     # ensure dimensionality exists (prefer explicit dimensionality, else infer from resolution)
     if (

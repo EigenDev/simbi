@@ -1,4 +1,12 @@
 option(
+    'hydro_backend',
+    type: 'combo',
+    choices: ['rust', 'cpp'],
+    value: 'rust',
+    description: 'hydro compute backend: rust (symbi-py cdylib) or cpp (legacy pybind11 cpu_ext)',
+)
+
+option(
     'gpu_compilation',
     type: 'feature',
     value: 'disabled'

@@ -49,12 +49,15 @@ from .types.typing import (
 )
 from .version import __version_tuple__
 
-# optional: backend extensions (may not be available)
+# optional: radiation post-processing (rust symbi-afterglow via rad_hydro). the
+# rust module exposes the self-contained `lightcurve` / `skymap` pipeline (it
+# reads the checkpoint itself), replacing the legacy C++ py_calc_fnu/py_log_events.
 try:
-    from .libs.rad_hydro import py_calc_fnu, py_log_events
+    from .libs.rad_hydro import lightcurve as afterglow_lightcurve
+    from .libs.rad_hydro import skymap as afterglow_skymap
 except ImportError:
-    py_calc_fnu = None
-    py_log_events = None
+    afterglow_lightcurve = None
+    afterglow_skymap = None
 
 __version__ = ".".join(map(str, __version_tuple__))
 
@@ -88,8 +91,8 @@ __all__ = [
     "calc_any_mean",
     "calc_dlogt",
     # optional
-    "py_calc_fnu",
-    "py_log_events",
+    "afterglow_lightcurve",
+    "afterglow_skymap",
     # version
     "__version__",
 ]

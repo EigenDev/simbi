@@ -76,7 +76,23 @@ class SimbiProblem(BaseModel):
         ProblemParam(..., description="domain bounds"),
     ]
     adiabatic_index: Annotated[
-        float, ProblemParam(..., ge=1.0, le=2.0, description="adiabatic index")
+        Optional[float],
+        ProblemParam(
+            None,
+            ge=1.0,
+            le=2.0,
+            description="adiabatic index; required for energy-bearing regimes, "
+            "irrelevant for isothermal ones (which use sound_speed)",
+        ),
+    ]
+    sound_speed: Annotated[
+        Optional[float],
+        ProblemParam(
+            None,
+            gt=0.0,
+            description="constant isothermal sound speed; required for isothermal "
+            "regimes unless locally_isothermal (then cs^2(x) is derived per cell)",
+        ),
     ]
 
     # =========================================================================
@@ -270,9 +286,12 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def dimensionality(self) -> int:
-        """compute dimensionality from resolution."""
-        if self.regime in [Regime.SRMHD]:
-            return 3
+        """compute dimensionality from resolution.
+
+        mhd is genuine 1.5d / 2.5d / 3d (spatial d in {1,2,3}, vector dof=3), so
+        it no longer forces 3d — the spatial dimensionality is read from the
+        resolution like every other regime.
+        """
         if self.resolution is None:
             return 3  # default assumption for uninitialized resolution
         if isinstance(self.resolution, int):
@@ -283,13 +302,16 @@ class SimbiProblem(BaseModel):
     @property
     def is_mhd(self) -> bool:
         """check if simulation involves mhd."""
-        return self.regime in [Regime.SRMHD]
+        return self.regime in [Regime.SRMHD, Regime.NMHD, Regime.IMHD]
 
     @computed_field
     @property
     def isothermal(self) -> bool:
-        """check if simulation is isothermal."""
-        return self.adiabatic_index == 1.0
+        """isothermal is a REGIME, not a gamma value. the isothermal closure
+        (p = cs^2 rho, no energy equation) is a structurally different eos — NOT
+        the gamma->1 limit of the adiabatic path — so it is keyed on the regime,
+        never on adiabatic_index == 1."""
+        return self.regime in [Regime.ISOTHERMAL, Regime.IMHD]
 
     @computed_field
     @property
@@ -348,8 +370,10 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def ambient_sound_speed(self) -> float:
-        """ambient sound speed for isothermal simulations."""
-        return 0.0
+        """ambient (constant) isothermal sound speed — derived from the
+        `sound_speed` field. kept as the wire/checkpoint name the backends read;
+        disk configs may still override it directly for a reference cs_0."""
+        return self.sound_speed if self.sound_speed is not None else 0.0
 
     @computed_field
     @property
@@ -581,8 +605,14 @@ class SimbiProblem(BaseModel):
             and not self.locally_isothermal
         ):
             raise ValueError(
-                "ambient_sound_speed must be positive for isothermal simulations "
-                "unless locally_isothermal is True"
+                "isothermal runs require a positive sound_speed (set "
+                "`sound_speed=...`), unless locally_isothermal is True (then "
+                "cs^2(x) is derived per cell from the initial pressure profile)"
+            )
+        if not self.isothermal and self.adiabatic_index is None:
+            raise ValueError(
+                "energy-bearing (non-isothermal) regimes require an "
+                "adiabatic_index (set `adiabatic_index=...`)"
             )
         return self
 

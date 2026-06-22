@@ -1,0 +1,11 @@
+[package]
+name = "symbi-display"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+symbi-io = { path = "../symbi-io" }
+libc = "0.2"
+
+[lints]
+workspace = true

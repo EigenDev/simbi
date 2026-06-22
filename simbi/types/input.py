@@ -40,6 +40,9 @@ class Regime(str, ExtendedEnum):
     NEWTONIAN = "newtonian"
     SRHD = "srhd"
     SRMHD = "srmhd"
+    NMHD = "nmhd"
+    IMHD = "imhd"
+    ISOTHERMAL = "isothermal"
 
 
 class BoundaryCondition(str, ExtendedEnum):

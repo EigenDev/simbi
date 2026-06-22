@@ -1,0 +1,372 @@
+// =============================================================================
+// collection.rs
+//
+// heterogeneous body container with subcycle interpolation. holds up to
+// MAX_BODIES bodies, provides capability-filtered iteration, and supports
+// snapshot/interpolate/finalize for AMR subcycling.
+//
+// usage:
+//   let coll = BodyCollection::new()
+//       .add(body1)
+//       .add(body2)
+//       .with_name("binary_system");
+//   coll.visit_gravitational(|b| { ... });
+// =============================================================================
+
+use symbi_algebra::{Tensor, OrderedNumeric};
+use symbi_ir::algebra::Scalar;
+use crate::body::Body;
+
+/// maximum number of bodies in a collection. 2 covers binary systems.
+pub const MAX_BODIES: usize = 2;
+
+/// orbital parameters for a binary system.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BinaryParams<S: Scalar> {
+    pub total_mass: S,
+    pub semi_major: S,
+    pub eccentricity: S,
+    pub mass_ratio: S,
+    pub orbital_period: S,
+    pub is_circular: bool,
+    pub prescribed_motion: bool,
+}
+
+impl<S: Scalar + OrderedNumeric> BinaryParams<S> {
+    pub fn new(total_mass: S, semi_major: S, eccentricity: S, mass_ratio: S) -> Self {
+        let two_pi = S::from_f64(2.0 * std::f64::consts::PI);
+        let a3 = semi_major * semi_major * semi_major;
+        let orbital_period = two_pi * (a3 / total_mass).sqrt();
+        let is_circular = eccentricity < S::from_f64(1e-10);
+        Self {
+            total_mass, semi_major, eccentricity, mass_ratio,
+            orbital_period, is_circular, prescribed_motion: true,
+        }
+    }
+}
+
+/// reference frame for the body system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReferenceFrame {
+    Inertial,
+    Corotating,
+    Stationary,
+}
+
+/// collection of immersed bodies with subcycle interpolation.
+#[derive(Clone, Debug)]
+pub struct BodyCollection<S: Scalar, const D: usize> {
+    bodies: Vec<Body<S, D>>,
+    pub name: String,
+    pub frame: ReferenceFrame,
+    pub binary_params: Option<BinaryParams<S>>,
+
+    // explicit binary-system capability flag: selects the dittmann & ryan (2020)
+    // 2d accretion weight and enables prescribed orbital advance. NOT derived from
+    // the display `name` (renaming the collection must not silently change physics).
+    binary: bool,
+
+    // subcycle snapshot
+    bodies_n: Vec<Body<S, D>>,
+    bodies_next: Vec<Body<S, D>>,
+    has_snapshot: bool,
+}
+
+impl<S: Scalar, const D: usize> BodyCollection<S, D> {
+    pub fn new() -> Self {
+        Self {
+            bodies: Vec::new(),
+            name: "untitled".to_string(),
+            frame: ReferenceFrame::Inertial,
+            binary_params: None,
+            binary: false,
+            bodies_n: Vec::new(),
+            bodies_next: Vec::new(),
+            has_snapshot: false,
+        }
+    }
+
+    // -- builder pattern --
+
+    pub fn add(mut self, body: Body<S, D>) -> Self {
+        assert!(self.bodies.len() < MAX_BODIES, "body collection is full");
+        self.bodies.push(body);
+        self
+    }
+
+    pub fn with_name(mut self, name: &str) -> Self {
+        self.name = name.to_string();
+        self
+    }
+
+    pub fn with_frame(mut self, frame: ReferenceFrame) -> Self {
+        self.frame = frame;
+        self
+    }
+
+    pub fn with_binary_params(mut self, params: BinaryParams<S>) -> Self {
+        self.binary_params = Some(params);
+        self
+    }
+
+    /// flag this collection as a binary system (accretion-weight + orbital-advance
+    /// capability). explicit, not inferred from the display name.
+    pub fn as_binary(mut self) -> Self {
+        self.binary = true;
+        self
+    }
+
+    // -- accessors --
+
+    pub fn len(&self) -> usize { self.bodies.len() }
+    pub fn is_empty(&self) -> bool { self.bodies.is_empty() }
+
+    pub fn get(&self, idx: usize) -> &Body<S, D> {
+        &self.bodies[idx]
+    }
+
+    pub fn get_mut(&mut self, idx: usize) -> &mut Body<S, D> {
+        &mut self.bodies[idx]
+    }
+
+    pub fn bodies(&self) -> &[Body<S, D>] {
+        &self.bodies
+    }
+
+    pub fn is_binary(&self) -> bool {
+        self.binary
+    }
+
+    // -- capability-filtered visitors --
+
+    pub fn visit_all(&self, mut visitor: impl FnMut(&Body<S, D>)) {
+        for body in &self.bodies {
+            visitor(body);
+        }
+    }
+
+    pub fn visit_all_mut(&mut self, mut visitor: impl FnMut(&mut Body<S, D>)) {
+        for body in &mut self.bodies {
+            visitor(body);
+        }
+    }
+
+    pub fn visit_gravitational(&self, mut visitor: impl FnMut(&Body<S, D>)) {
+        for body in &self.bodies {
+            if body.has_gravity() {
+                visitor(body);
+            }
+        }
+    }
+
+    pub fn visit_accretion(&self, mut visitor: impl FnMut(&Body<S, D>)) {
+        for body in &self.bodies {
+            if body.has_accretion() {
+                visitor(body);
+            }
+        }
+    }
+
+    pub fn visit_rigid(&self, mut visitor: impl FnMut(&Body<S, D>)) {
+        for body in &self.bodies {
+            if body.has_rigid() {
+                visitor(body);
+            }
+        }
+    }
+
+    pub fn gravitational_count(&self) -> usize {
+        self.bodies.iter().filter(|b| b.has_gravity()).count()
+    }
+
+    pub fn accretion_count(&self) -> usize {
+        self.bodies.iter().filter(|b| b.has_accretion()).count()
+    }
+
+    pub fn rigid_count(&self) -> usize {
+        self.bodies.iter().filter(|b| b.has_rigid()).count()
+    }
+
+    // -- subcycle interpolation --
+
+    /// store current bodies as t^n, `advanced` as t^{n+1}.
+    pub fn snapshot(&mut self, advanced: &[Body<S, D>]) {
+        self.bodies_n = self.bodies.clone();
+        self.bodies_next = advanced.to_vec();
+        self.has_snapshot = true;
+    }
+
+    pub fn has_snapshot(&self) -> bool {
+        self.has_snapshot
+    }
+
+    /// set bodies to lerp between t^n and t^{n+1}.
+    /// alpha=0 -> t^n, alpha=1 -> t^{n+1}.
+    pub fn interpolate_to(&mut self, alpha: S) {
+        if !self.has_snapshot { return; }
+        let one_minus = S::ONE - alpha;
+        for ii in 0..self.bodies.len() {
+            self.bodies[ii].position =
+                self.bodies_n[ii].position.scale(one_minus) +
+                self.bodies_next[ii].position.scale(alpha);
+            self.bodies[ii].velocity =
+                self.bodies_n[ii].velocity.scale(one_minus) +
+                self.bodies_next[ii].velocity.scale(alpha);
+        }
+    }
+
+    /// finalize to t^{n+1} state, clear snapshot.
+    pub fn finalize_advance(&mut self) {
+        if !self.has_snapshot { return; }
+        self.bodies = self.bodies_next.clone();
+        self.has_snapshot = false;
+    }
+
+    /// restore to t^n state.
+    pub fn restore_from_snapshot(&mut self) {
+        if !self.has_snapshot { return; }
+        self.bodies = self.bodies_n.clone();
+    }
+}
+
+impl<S: Scalar, const D: usize> Default for BodyCollection<S, D> {
+    fn default() -> Self { Self::new() }
+}
+
+// -- binary system factory --
+
+/// create a binary system from individual body parameters.
+/// dispatches to black_hole or gravitational body based on sink rates.
+#[allow(clippy::too_many_arguments)]
+pub fn create_binary_system<S: Scalar + OrderedNumeric, const D: usize>(
+    pos1: Tensor<S, D>, vel1: Tensor<S, D>, mass1: S, radius1: S, softening1: S,
+    pos2: Tensor<S, D>, vel2: Tensor<S, D>, mass2: S, radius2: S, softening2: S,
+    sink_rate1: S, sink_rate2: S,
+    accr_radius1: S, accr_radius2: S,
+    sink_delta1: S, sink_delta2: S,
+) -> BodyCollection<S, D> {
+    let make = |idx, pos, vel, mass, radius, softening, sr, sd, ar| {
+        if sr > S::ZERO {
+            Body::black_hole(idx, pos, vel, mass, radius, softening, sr, sd, ar)
+        } else {
+            Body::gravitational(idx, pos, vel, mass, radius, softening)
+        }
+    };
+
+    let b1 = make(0, pos1, vel1, mass1, radius1, softening1, sink_rate1, sink_delta1, accr_radius1);
+    let b2 = make(1, pos2, vel2, mass2, radius2, softening2, sink_rate2, sink_delta2, accr_radius2);
+
+    BodyCollection::new()
+        .add(b1)
+        .add(b2)
+        .with_name("binary_system")
+        .as_binary()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    type V2 = Tensor<f64, 2>;
+
+    fn grav(idx: usize, x: f64, y: f64) -> Body<f64, 2> {
+        Body::gravitational(idx, V2::new([x, y]), V2::zeros(), 1.0, 0.1, 0.04)
+    }
+
+    #[test]
+    fn builder() {
+        let coll = BodyCollection::new()
+            .add(grav(0, 1.0, 0.0))
+            .add(grav(1, -1.0, 0.0))
+            .with_name("binary_system")
+            .as_binary()
+            .with_frame(ReferenceFrame::Inertial);
+        assert_eq!(coll.len(), 2);
+        assert!(coll.is_binary());
+        assert_eq!(coll.frame, ReferenceFrame::Inertial);
+    }
+
+    #[test]
+    #[should_panic(expected = "body collection is full")]
+    fn add_overflow() {
+        BodyCollection::new()
+            .add(grav(0, 0.0, 0.0))
+            .add(grav(1, 1.0, 0.0))
+            .add(grav(2, 2.0, 0.0));
+    }
+
+    #[test]
+    fn capability_counts() {
+        let coll = BodyCollection::new()
+            .add(grav(0, 1.0, 0.0))
+            .add(Body::passive(1, V2::zeros(), V2::zeros(), 1.0, 0.1));
+        assert_eq!(coll.gravitational_count(), 1);
+        assert_eq!(coll.accretion_count(), 0);
+    }
+
+    #[test]
+    fn visit_gravitational() {
+        let coll = BodyCollection::new()
+            .add(grav(0, 1.0, 0.0))
+            .add(Body::passive(1, V2::zeros(), V2::zeros(), 1.0, 0.1));
+        let mut count = 0;
+        coll.visit_gravitational(|_| count += 1);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn subcycle_interpolation() {
+        let b0 = grav(0, 0.0, 0.0);
+        let b1 = grav(1, 2.0, 0.0);
+        let mut coll = BodyCollection::new().add(b0).add(b1);
+
+        let advanced = vec![
+            grav(0, 1.0, 0.0),
+            grav(1, 3.0, 0.0),
+        ];
+        coll.snapshot(&advanced);
+        assert!(coll.has_snapshot());
+
+        coll.interpolate_to(0.5);
+        assert!((coll.get(0).position[0] - 0.5).abs() < 1e-14);
+        assert!((coll.get(1).position[0] - 2.5).abs() < 1e-14);
+
+        coll.finalize_advance();
+        assert!(!coll.has_snapshot());
+        assert!((coll.get(0).position[0] - 1.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn restore_from_snapshot() {
+        let mut coll = BodyCollection::new().add(grav(0, 0.0, 0.0));
+        let advanced = vec![grav(0, 5.0, 0.0)];
+        coll.snapshot(&advanced);
+        coll.interpolate_to(1.0);
+        coll.restore_from_snapshot();
+        assert!((coll.get(0).position[0]).abs() < 1e-14);
+    }
+
+    #[test]
+    fn binary_params_kepler() {
+        let bp = BinaryParams::new(2.0_f64, 1.0, 0.0, 1.0);
+        // T = 2 pi sqrt(a^3 / M) = 2 pi sqrt(1/2)
+        let expected = 2.0 * std::f64::consts::PI * (0.5_f64).sqrt();
+        assert!((bp.orbital_period - expected).abs() < 1e-13);
+        assert!(bp.is_circular);
+    }
+
+    #[test]
+    fn create_binary_system_mixed() {
+        let coll = create_binary_system(
+            V2::new([0.5, 0.0]), V2::new([0.0, 1.0]), 0.5, 0.1, 0.04,
+            V2::new([-0.5, 0.0]), V2::new([0.0, -1.0]), 0.5, 0.1, 0.04,
+            10.0, 0.0,     // body 0 accretes, body 1 doesn't
+            0.2, 0.0,
+            0.0, 0.0,
+        );
+        assert_eq!(coll.len(), 2);
+        assert!(coll.get(0).has_accretion());
+        assert!(!coll.get(1).has_accretion());
+        assert!(coll.get(1).has_gravity());
+    }
+}
