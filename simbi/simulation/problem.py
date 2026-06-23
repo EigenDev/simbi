@@ -21,7 +21,13 @@ from typing import Annotated, Any, Callable, ClassVar, Optional, Sequence, Union
 
 import numpy as np
 from numpy.typing import NDArray
-from pydantic import BaseModel, ConfigDict, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    computed_field,
+    model_validator,
+)
 
 from simbi.types.bodies import BodySystemConfig, ImmersedBodyConfig
 
@@ -43,6 +49,81 @@ from simbi.types.typing import (
 )
 
 from .param import ProblemParam, get_param_metadata
+
+
+class ConfigError(Exception):
+    """a user-facing configuration error.
+
+    carries a pre-formatted, traceback-free message; the cli boundary prints it
+    verbatim and exits non-zero instead of dumping a pydantic stack trace.
+    """
+
+
+def _to_enum(enum_type: Any, value: str, field_name: str) -> Any:
+    """look up an enum member by case-insensitive name, raising a ValueError that
+    names the field and LISTS the valid choices. a plain `enum_type[name]` raises
+    a bare KeyError that pydantic does NOT wrap — it escapes as a raw traceback.
+    """
+    try:
+        return enum_type[value.upper()]
+    except KeyError:
+        choices = ", ".join(e.name.lower() for e in enum_type)
+        raise ValueError(
+            f"{field_name}: '{value}' is not a valid choice; pick one of: {choices}"
+        ) from None
+
+
+def _error_hint(field: str, err: dict) -> Optional[str]:
+    """a targeted, actionable hint for a single pydantic error, or None."""
+    etype = err.get("type", "")
+    flag = "--" + field.replace("_", "-")
+    if field == "resolution":
+        return (
+            f"pass comma-separated axis sizes, e.g. `{flag} 256,256`; trailing "
+            "axes default to 1, so a 2d run needs only nx,ny"
+        )
+    if field == "bounds":
+        return f"pass `{flag} [[x0,x1],[y0,y1]]` — one [min,max] pair per axis"
+    if etype == "missing":
+        return f"this field is required — pass `{flag} <value>`"
+    if etype in ("int_parsing", "float_parsing", "int_from_float"):
+        return f"expected a number — check the value passed to `{flag}`"
+    if etype in ("too_long", "too_short"):
+        ctx = err.get("ctx", {})
+        want = ctx.get("actual_length") or ctx.get("field_type")
+        return f"wrong number of values{f' (need {want})' if want else ''} for `{flag}`"
+    return None
+
+
+def _humanize_validation_error(setup_name: str, exc: ValidationError) -> str:
+    """render a pydantic ValidationError as a clinical, actionable report:
+    one line per offending field with the bad value and a fix hint."""
+    n = exc.error_count()
+    header = f"{n} invalid setting{'s' if n != 1 else ''} for '{setup_name}':"
+    lines = [header, ""]
+    for err in exc.errors():
+        field = str(err["loc"][0]) if err["loc"] else ""
+        # strip pydantic's wrapping prefix on validator-raised errors.
+        msg = err["msg"]
+        for prefix in ("Value error, ", "Assertion failed, "):
+            if msg.startswith(prefix):
+                msg = msg[len(prefix):]
+                break
+        # field-scoped errors get a `field:` prefix; model-level errors (raised
+        # in the before-validator) already name the field in the message.
+        loc = ".".join(str(p) for p in err["loc"])
+        line = f"  {loc}: {msg}" if loc else f"  {msg}"
+        # echo the offending value only for FIELD-scoped errors; a model-level
+        # error carries the whole input dict as `input`, which is noise.
+        if "input" in err and err["loc"] and not isinstance(err["input"], dict):
+            line += f"  (got: {err['input']!r})"
+        lines.append(line)
+        hint = _error_hint(field, err)
+        if hint:
+            lines.append(f"      hint: {hint}")
+    lines.append("")
+    lines.append("run with `--info` to list every parameter and its default.")
+    return "\n".join(lines)
 
 
 class SimbiProblem(BaseModel):
@@ -519,8 +600,27 @@ class SimbiProblem(BaseModel):
 
         # resolution: "256,256" -> (256, 256)
         if "resolution" in data and isinstance(data["resolution"], str):
-            parts = data["resolution"].split(",")
-            data["resolution"] = tuple(int(p.strip()) for p in parts)
+            raw = data["resolution"]
+            try:
+                data["resolution"] = tuple(
+                    int(p.strip()) for p in raw.split(",")
+                )
+            except ValueError:
+                raise ValueError(
+                    f"resolution: expected comma-separated integers "
+                    f"(e.g. 256,256), got {raw!r}"
+                ) from None
+
+        # pad a SHORT resolution to the field's declared tuple arity with singleton
+        # trailing axes: a 2d input (1024,1024) satisfies a 3-component field as
+        # (1024,1024,1). this scrubs the requirement that a 2d problem stored as a
+        # flat 3d slab (the mhd convention, nz=1) must spell out the unused axis.
+        # an OVER-long input is left for validation to reject with a clear message.
+        if "resolution" in data and isinstance(data["resolution"], tuple):
+            arity = cls._tuple_field_arity("resolution")
+            res = data["resolution"]
+            if arity is not None and len(res) < arity:
+                data["resolution"] = res + (1,) * (arity - len(res))
 
         # bounds: "[[0,1],[0,1]]" -> [[0, 1], [0, 1]]
         if "bounds" in data and isinstance(data["bounds"], str):
@@ -565,13 +665,13 @@ class SimbiProblem(BaseModel):
             bc_str = data["boundary_conditions"]
             if "," in bc_str:
                 data["boundary_conditions"] = [
-                    BoundaryCondition[bc.strip().upper()]
+                    _to_enum(BoundaryCondition, bc.strip(), "boundary_conditions")
                     for bc in bc_str.split(",")
                 ]
             else:
-                data["boundary_conditions"] = BoundaryCondition[
-                    bc_str.strip().upper()
-                ]
+                data["boundary_conditions"] = _to_enum(
+                    BoundaryCondition, bc_str.strip(), "boundary_conditions"
+                )
 
         # enum fields: convert string to enum
         enum_fields = {
@@ -589,7 +689,9 @@ class SimbiProblem(BaseModel):
 
         for field_name, enum_type in enum_fields.items():
             if field_name in data and isinstance(data[field_name], str):
-                data[field_name] = enum_type[data[field_name].upper()]
+                data[field_name] = _to_enum(
+                    enum_type, data[field_name], field_name
+                )
 
         # path fields: convert string to Path
         path_fields = ["data_directory", "checkpoint_file"]
@@ -806,6 +908,27 @@ class SimbiProblem(BaseModel):
         return False
 
     @classmethod
+    def _tuple_field_arity(cls, field_name: str) -> Optional[int]:
+        """the fixed arity of a tuple-typed field, or None when it is variadic
+        (`tuple[int, ...]`) or not a tuple. resolves across the mro so a subclass
+        that re-declares the field is honored. used to pad a short resolution
+        input to the declared number of axes.
+        """
+        from typing import get_args, get_origin
+
+        for klass in cls.__mro__:
+            fields = getattr(klass, "model_fields", None)
+            if not fields or field_name not in fields:
+                continue
+            ann = fields[field_name].annotation
+            if get_origin(ann) is tuple:
+                args = get_args(ann)
+                if args and Ellipsis not in args:
+                    return len(args)
+            return None
+        return None
+
+    @classmethod
     def _add_type_info(cls, kwargs: dict[str, Any], field_info: Any) -> None:
         """add type information to argparse kwargs."""
         from typing import Union, get_args, get_origin
@@ -852,7 +975,14 @@ class SimbiProblem(BaseModel):
                 value = getattr(namespace, field_name)
                 if value is not None:
                     data[field_name] = value
-        return cls(**data)
+        try:
+            return cls(**data)
+        except ValidationError as exc:
+            # convert pydantic's raw traceback into a clinical, actionable report
+            # the cli prints without a stack trace.
+            raise ConfigError(
+                _humanize_validation_error(cls.__name__, exc)
+            ) from None
 
     # =========================================================================
     # checkpoint support
