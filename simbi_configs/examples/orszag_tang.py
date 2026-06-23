@@ -141,13 +141,18 @@ class OrszagTang(SimbiProblem):
 
             for kk in range(nk + (bn == "bz")):
                 for jj in range(nj + (bn == "by")):
-                    y = ybounds[0] + jj * dy
                     for ii in range(ni + (bn == "bx")):
-                        x = xbounds[0] + ii * dx
-
                         if bn == "bx":
+                            # bx lives on the x-face: sample the TRANSVERSE y at
+                            # the cell center (jj+0.5), so the discrete field is
+                            # symmetric about the domain center. sampling y at the
+                            # edge (jj*dy) breaks the OT 180-degree point symmetry
+                            # and misaligns b against the cell-centered velocity.
+                            y = ybounds[0] + (jj + 0.5) * dy
                             yield -b0 * math.sin(2.0 * math.pi * y)
                         elif bn == "by":
+                            # by lives on the y-face: transverse x at the cell center.
+                            x = xbounds[0] + (ii + 0.5) * dx
                             yield +b0 * math.sin(4.0 * math.pi * x)
                         else:
                             yield 0.0

@@ -519,6 +519,13 @@ where
     // re-render one static final frame so the result persists.
     let mut screen = ScreenGuard::enter();
 
+    // prime the IC: derive primitives (c2p) + cell-centered B (bcell-from-bface)
+    // from the seeded conserved/face state BEFORE snapshotting, so the t=0
+    // checkpoint carries real primitives instead of the zeroed scratch buffers
+    // (the reader reads primitives — an unprimed IC plots as all zeros). idempotent
+    // with the prime the evolve driver runs at its own start.
+    hier.prime();
+
     // save the initial condition (t = 0) as the start-index checkpoint, matching
     // the c++ driver: a fresh run (clock at zero, or index 0) writes its IC so the
     // first output is the un-evolved state. then render the opening frame.

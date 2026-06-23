@@ -424,6 +424,16 @@ where
         Ok(())
     }
 
+    /// run the one-time IC preparation WITHOUT advancing time: bcell-from-bface,
+    /// c2p to populate the primitive buffer from the seeded conserved state, the
+    /// coarse-fine prolong, and the ghost fill. the drivers call this internally
+    /// at evolve start; a caller that snapshots state at t=0 (the binding's
+    /// initial-condition checkpoint) must call it first, else that snapshot
+    /// captures the ZEROED primitive + cell-centered-B scratch buffers. idempotent.
+    pub fn prime(&mut self) {
+        self.init_levels();
+    }
+
     /// advance exactly `nsteps` root steps (the smoke/diagnostic driver).
     pub fn evolve_steps(&mut self, nsteps: u64) -> symbi_xpu::Result<()> {
         self.init_levels();

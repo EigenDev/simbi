@@ -98,13 +98,17 @@ class NewtonianOrszagTang(SimbiProblem):
     ]
 
     def initial_primitive_state(self) -> InitialStateType:
-        """canonical orszag-tang: rho=gamma^2, p=gamma, v0-scaled vortex."""
+        """canonical athena newtonian orszag-tang: rho = 25/(36 pi),
+        p = 5/(12 pi) so cs^2 = gamma p / rho = 1, v0-scaled vortex. matches
+        examples/nmhd_orszag_tang.rs exactly (NOT the relativistic rho=gamma^2,
+        p=gamma state, which is correct only for the srmhd orszag_tang config).
+        """
 
         def gas_state() -> GasStateGenerator:
             ni, nj, nk = self.resolution
             xbounds, ybounds = self.bounds[0], self.bounds[1]
-            p0 = float(self.adiabatic_index)
-            rho0 = float(self.adiabatic_index) ** 2
+            rho0 = 25.0 / (36.0 * math.pi)
+            p0 = 5.0 / (12.0 * math.pi)
             v0 = self.v0
             dx = (xbounds[1] - xbounds[0]) / ni
             dy = (ybounds[1] - ybounds[0]) / nj
@@ -127,12 +131,18 @@ class NewtonianOrszagTang(SimbiProblem):
 
             for kk in range(nk + (bn == "bz")):
                 for jj in range(nj + (bn == "by")):
-                    y = ybounds[0] + jj * dy
                     for ii in range(ni + (bn == "bx")):
-                        x = xbounds[0] + ii * dx
                         if bn == "bx":
+                            # bx lives on the x-face: sample the TRANSVERSE y at
+                            # the cell center (jj+0.5), so the discrete field is
+                            # symmetric about the domain center. sampling y at the
+                            # edge (jj*dy) breaks the OT 180-degree point symmetry
+                            # and misaligns b against the cell-centered velocity.
+                            y = ybounds[0] + (jj + 0.5) * dy
                             yield -b0 * math.sin(2.0 * math.pi * y)
                         elif bn == "by":
+                            # by lives on the y-face: transverse x at the cell center.
+                            x = xbounds[0] + (ii + 0.5) * dx
                             yield +b0 * math.sin(4.0 * math.pi * x)
                         else:
                             yield 0.0

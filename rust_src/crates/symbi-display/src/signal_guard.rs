@@ -38,22 +38,62 @@ const SHOW_CURSOR: &[u8] = b"\x1b[?25h";
 //   ?1049h  switch to the scratch buffer
 //   ?7l     disable auto-wrap (a glyph at the right margin overwrites, never
 //           wraps+scrolls — otherwise a too-wide row smears the redraw)
-//   ?1002h  enable mouse button/drag tracking and ?1006h SGR encoding. this is
-//           what actually PINS the view: the terminal forwards wheel events to
-//           the app as input instead of scrolling its buffer, so the user cannot
-//           scroll the live TUI (the alternate screen alone does NOT stop the
-//           wheel on macOS Terminal.app / iTerm2).
 //   ?25l    hide the cursor; then clear + home.
-// leaving reverses every mode and restores the primary buffer + cursor. the
-// `_STR` forms drive the normal buffered path; the `_BYTES` form is the
+// we deliberately do NOT enable mouse tracking (?1002h/?1006h). it would "pin"
+// the wheel, but it also makes iTerm2 nag ("mouse reporting was left on…") and
+// turns clicks/scrolls into input bytes. instead: ECHO is disabled in termios
+// (so typed/forwarded bytes never print), and each frame repaints from a cleared
+// home (CLEAR_SCREEN), so a stray wheel scroll self-heals on the next refresh.
+// leaving reverses the modes and restores the primary buffer + cursor. the `_STR`
+// forms drive the normal buffered path; the `_BYTES` form is the
 // async-signal-safe restore written from the handler.
-const ENTER_ALT_STR: &str = "\x1b[?1049h\x1b[?7l\x1b[?1002h\x1b[?1006h\x1b[?25l\x1b[2J\x1b[H";
-const LEAVE_ALT_STR: &str = "\x1b[?1002l\x1b[?1006l\x1b[?7h\x1b[?25h\x1b[?1049l";
-const LEAVE_ALT_BYTES: &[u8] = b"\x1b[?1002l\x1b[?1006l\x1b[?7h\x1b[?25h\x1b[?1049l";
+const ENTER_ALT_STR: &str = "\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J\x1b[H";
+const LEAVE_ALT_STR: &str = "\x1b[?7h\x1b[?25h\x1b[?1049l";
+const LEAVE_ALT_BYTES: &[u8] = b"\x1b[?7h\x1b[?25h\x1b[?1049l";
 
 // whether the alternate screen is currently active, so the signal handler knows
 // to leave it (not merely show the cursor) on an interrupt.
 static IN_ALT: AtomicBool = AtomicBool::new(false);
+
+// terminal line-discipline control. the alternate screen + mouse tracking PIN
+// the view, but with the tty's default ECHO on, every keystroke and every mouse
+// /scroll report (which `?1002h` forwards to us as input) is ECHOED onto the
+// live dashboard as ascii garbage. disabling ECHO + ICANON on stdin suppresses
+// that echo for both keys and mouse reports; ISIG is LEFT SET so Ctrl-C still
+// raises SIGINT for the graceful-interrupt path. the original discipline is
+// saved and restored on leave AND from the signal handler, so neither a clean
+// exit nor a hard-kill ever strands the shell with echo off.
+static RAW_ACTIVE: AtomicBool = AtomicBool::new(false);
+static mut SAVED_TERMIOS: std::mem::MaybeUninit<libc::termios> =
+    std::mem::MaybeUninit::uninit();
+
+/// disable echo + canonical input on stdin (fd 0), preserving the prior
+/// discipline for restore. no-op when stdin is not a tty.
+unsafe fn disable_input_echo() {
+    unsafe {
+        let saved = std::ptr::addr_of_mut!(SAVED_TERMIOS) as *mut libc::termios;
+        if libc::tcgetattr(0, saved) != 0 {
+            return; // not a terminal
+        }
+        RAW_ACTIVE.store(true, Ordering::SeqCst);
+        // apply to a COPY so the saved original is untouched for restore.
+        let mut raw = std::ptr::read(saved);
+        raw.c_lflag &= !(libc::ICANON | libc::ECHO);
+        libc::tcsetattr(0, libc::TCSANOW, &raw);
+    }
+}
+
+/// restore the saved line discipline. idempotent (gated on `RAW_ACTIVE`) and
+/// async-signal-safe (a `tcsetattr` from a static buffer), so the signal handler
+/// can call it on a hard-kill.
+unsafe fn restore_input_echo() {
+    unsafe {
+        if RAW_ACTIVE.swap(false, Ordering::SeqCst) {
+            let saved = std::ptr::addr_of!(SAVED_TERMIOS) as *const libc::termios;
+            libc::tcsetattr(0, libc::TCSANOW, saved);
+        }
+    }
+}
 
 /// the trapped signals: interactive (INT/QUIT), termination (TERM/HUP), and the
 /// cluster pre-emption warnings (USR1/USR2).
@@ -91,6 +131,9 @@ unsafe extern "C" fn handler(signum: i32) {
         } else {
             libc::write(2, SHOW_CURSOR.as_ptr() as *const _, SHOW_CURSOR.len());
         }
+        // re-enable echo no matter how we leave, so a hard-kill never strands the
+        // shell with a silent (no-echo) prompt.
+        restore_input_echo();
         libc::signal(signum, libc::SIG_DFL);
     }
     GOT.store(signum, Ordering::SeqCst);
@@ -171,6 +214,10 @@ impl ScreenGuard {
             IN_ALT.store(true, Ordering::SeqCst);
             print!("{ENTER_ALT_STR}");
             let _ = std::io::stdout().flush();
+            // suppress echo of keystrokes (and any wheel/arrow bytes the terminal
+            // forwards under alternate-scroll mode), so input never prints onto the
+            // live dashboard. SAFETY: single run at a time (GIL released); no-op off a tty.
+            unsafe { disable_input_echo() };
         }
         ScreenGuard { active }
     }
@@ -188,9 +235,10 @@ impl ScreenGuard {
             print!("{LEAVE_ALT_STR}");
             let _ = std::io::stdout().flush();
         }
-        // drain queued mouse/scroll reports so they don't leak to the shell.
-        // SAFETY: tcflush on the stdin fd; ENOTTY on a pipe is harmless.
+        // restore echo, then drain queued mouse/scroll reports so they don't
+        // leak to the shell. SAFETY: stdin fd; ENOTTY on a pipe is harmless.
         unsafe {
+            restore_input_echo();
             libc::tcflush(0, libc::TCIFLUSH);
         }
     }
