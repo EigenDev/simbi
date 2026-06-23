@@ -1,7 +1,29 @@
 from __future__ import annotations
 
+import enum
 import math
 from typing import Any, Callable, Optional, Set, TypeVar, Union
+
+
+class SourceKind(str, enum.Enum):
+    """the conservation LAW the rust framework wraps a user source field in.
+    typo-proof front for the `kind` string crossing into rust's `SourceConfig`
+    (str subclass -> serializes to its `.value`). FORCE/COOLING/RELAX are the
+    safe primitive-lifted constructors; RAW writes conserved components directly
+    (the regime-agnostic escape hatch — the only kind valid on relativistic/MHD)."""
+
+    FORCE = "force"
+    COOLING = "cooling"
+    RELAX = "relax"
+    RAW = "raw"
+
+
+class ConservedField(str, enum.Enum):
+    """conserved slot a `kind=RAW` source targets (`target` field)."""
+
+    DENSITY = "den"
+    MOMENTUM = "mom"
+    ENERGY = "nrg"
 
 # type defs for clarity
 NodeId = int
@@ -59,6 +81,18 @@ __all__ = [
 X1_ALIASES = ["x", "r", "x1"]
 X2_ALIASES = ["y", "theta", "x2", "phi"]
 X3_ALIASES = ["z", "phi", "x3"]
+
+# per-cell FLUID-STATE leaves — let a source read the local state, so the physics
+# (not just the position/time) is in the user's hands: e.g. cooling ~ rho^2,
+# velocity drag ~ -k*vel. these map to the rust `VARIABLE_RHO/VEL{1,2,3}/PRESSURE`
+# ops (symbi-hydro::expr_bridge lowers them to the per-cell rho / vel_k / pre reads).
+# NOTE regime validity is the user's responsibility: `pressure` on an isothermal
+# regime (no energy) has no `pre` field and is rejected at lower time.
+RHO_ALIASES = ["rho", "density"]
+PRE_ALIASES = ["pre", "pressure", "p"]
+VEL1_ALIASES = ["vel1", "vx", "v1"]
+VEL2_ALIASES = ["vel2", "vy", "v2"]
+VEL3_ALIASES = ["vel3", "vz", "v3"]
 
 
 class ExprGraph:
@@ -276,6 +310,26 @@ def parameter(idx: int, graph: Optional[ExprGraph] = None) -> Expr:
     """Create a parameter expression."""
     g = graph or ExprGraph()
     return Expr(g, g.add_node("parameter", param_idx=idx))
+
+
+def density(graph: Optional[ExprGraph] = None) -> Expr:
+    """the per-cell density rho (a fluid-state leaf for state-dependent sources)."""
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name="rho"))
+
+
+def velocity(axis: int, graph: Optional[ExprGraph] = None) -> Expr:
+    """the per-cell velocity component `vel[axis]` (0-indexed: 0->vx, 1->vy, 2->vz)."""
+    if axis not in (0, 1, 2):
+        raise ValueError(f"velocity axis must be 0, 1, or 2, got {axis}")
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name=f"vel{axis + 1}"))
+
+
+def pressure(graph: Optional[ExprGraph] = None) -> Expr:
+    """the per-cell pressure (energy-bearing regimes only; rejected on isothermal)."""
+    g = graph or ExprGraph()
+    return Expr(g, g.add_node("variable", name="pre"))
 
 
 # math functions
@@ -732,14 +786,27 @@ class CompiledExpr:
             if op == "constant":
                 expressions.append({"op": "CONSTANT", "value": attrs["value"]})
             elif op == "variable":
-                if attrs["name"] in X1_ALIASES:
+                name = attrs["name"]
+                if name in X1_ALIASES:
                     expressions.append({"op": "VARIABLE_X1"})
-                elif attrs["name"] in X2_ALIASES:
+                elif name in X2_ALIASES:
                     expressions.append({"op": "VARIABLE_X2"})
-                elif attrs["name"] in X3_ALIASES:
+                elif name in X3_ALIASES:
                     expressions.append({"op": "VARIABLE_X3"})
-                elif attrs["name"] == "t":
+                elif name == "t":
                     expressions.append({"op": "VARIABLE_T"})
+                elif name in RHO_ALIASES:
+                    expressions.append({"op": "VARIABLE_RHO"})
+                elif name in VEL1_ALIASES:
+                    expressions.append({"op": "VARIABLE_VEL1"})
+                elif name in VEL2_ALIASES:
+                    expressions.append({"op": "VARIABLE_VEL2"})
+                elif name in VEL3_ALIASES:
+                    expressions.append({"op": "VARIABLE_VEL3"})
+                elif name in PRE_ALIASES:
+                    expressions.append({"op": "VARIABLE_PRESSURE"})
+                else:
+                    raise ValueError(f"unknown variable '{name}'")
             elif op == "parameter":
                 expressions.append(
                     {"op": "PARAMETER", "param_idx": attrs["param_idx"]}
@@ -1073,3 +1140,43 @@ class CompiledExpr:
             "output_indices": output_indices,
             "param_count": max_param_idx + 1,
         }
+
+    def serialize_source(
+        self,
+        kind: "SourceKind | str",
+        dim: int,
+        *,
+        params: "list[float] | tuple[float, ...] | None" = None,
+        region: int | None = None,
+        target: "ConservedField | str | None" = None,
+    ) -> dict[str, object]:
+        """serialize to the rust `SourceConfig` wire format consumed by
+        symbi-expr (`load.rs::SourceConfig::from_json`) and lowered by
+        symbi-hydro's `build_user_source`. the node encoding is byte-identical
+        to `serialize()`; this only re-wraps it with the source SEMANTICS the
+        rust side needs:
+          kind   -- 'force' | 'cooling' | 'relax' | 'raw' (conservation-law wrap)
+          dim    -- spatial dimensionality (force needs `dim` accel outputs,
+                    cooling 1, relax 1+dim)
+          params -- runtime scalar VALUES for the parameter() nodes (p0, p1, ...)
+          region -- optional node index of a chi(x) mask folded into the source
+          target -- for kind='raw' only: the conserved slot ('den'|'mom'|'nrg')
+        the bare `serialize()` form is kept for local evaluation + back-compat.
+        """
+        base = self.serialize()
+        # normalize the enums to their canonical rust strings at the boundary.
+        kind_str = kind.value if isinstance(kind, SourceKind) else str(kind)
+        cfg: dict[str, object] = {
+            "kind": kind_str,
+            "dim": int(dim),
+            "outputs": base["output_indices"],
+            "params": [float(p) for p in (params or [])],
+            "nodes": base["expressions"],
+        }
+        if region is not None:
+            cfg["region"] = int(region)
+        if target is not None:
+            cfg["target"] = (
+                target.value if isinstance(target, ConservedField) else str(target)
+            )
+        return cfg

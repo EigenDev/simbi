@@ -435,6 +435,23 @@ mod tests {
     }
 
     #[test]
+    fn python_serialize_source_json_loads_and_lowers() {
+        // pins the cross-language wire: this is the EXACT json the python
+        // CompiledExpr.serialize_source('force', 2) emits for a = (0, -1) gravity.
+        // if the python adapter and this loader ever drift, this fails.
+        let cfg = cfg_from(
+            r#"{"kind": "force", "dim": 2, "outputs": [0, 1], "params": [],
+                "nodes": [{"op": "CONSTANT", "value": 0.0},
+                          {"op": "CONSTANT", "value": -1.0}]}"#,
+        );
+        assert_eq!(cfg.kind, "force");
+        assert_eq!(cfg.dim, 2);
+        assert_eq!(cfg.outputs, vec![0, 1]);
+        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python force config lowers");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom", "nrg"]);
+    }
+
+    #[test]
     fn force_on_newtonian_is_accepted() {
         // mom + nrg overlays (newtonian has energy).
         let cfg = cfg_from(

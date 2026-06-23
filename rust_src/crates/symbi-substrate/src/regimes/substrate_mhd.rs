@@ -31,10 +31,13 @@ use symbi_hydro::regime::Regime;
 use symbi_xpu::MemorySpace;
 
 use crate::kernels::support::cfl_from_lambda;
+use std::sync::Arc;
+
 use crate::regimes::substrate_kernels::{
-    dispatch_named, geom_scalar, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom,
-    scalars_for, RegimeKind, ScalarBind, Solver,
+    dispatch_named, dispatch_runtime_source, geom_scalar, mhd_flux_suffix, mhd_geom_suffix,
+    motion_scalar, physical_geom, scalars_for, RegimeKind, RuntimeSource, ScalarBind, Solver,
 };
+use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::state::FieldStore;
 
@@ -49,6 +52,12 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     pub cfl_scratch: Field<Sc, D, Mem>,
     /// Riemann solver — HLLE (default) / HLLC / HLLD; validated against the regime at attach.
     pub solver: Solver,
+    /// a runtime user source (python -> json `SourceConfig` -> `build_user_source`),
+    /// applied two-pass via the regime-agnostic `dispatch_runtime_source`. nmhd/imhd
+    /// take the newtonian force/cooling/relax lifts; rmhd is relativistic so only
+    /// `kind="raw"` reaches here. targets the hydro conserved slots (den/mom/nrg);
+    /// B is evolved by CT, not a cell source. None for source-free runs.
+    pub runtime_source: Option<Arc<RuntimeSource>>,
     _r: PhantomData<R>,
 }
 
@@ -61,7 +70,16 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, _r: PhantomData }
+        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, runtime_source: None, _r: PhantomData }
+    }
+
+    /// attach a runtime user source from already-lowered `(target, BuiltSource)` pairs
+    /// (the `build_user_source` output of a `SourceConfig`). applied two-pass in
+    /// `source_apply`. has_energy is read from the regime spec (rmhd/nmhd carry it,
+    /// imhd does not), so the source pass writes only the slots the regime owns.
+    pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+        self.runtime_source = Some(RuntimeSource::new(built, params, R::SPEC.has_energy));
+        self
     }
 
     /// pick the Riemann solver; rejects one invalid for this regime. fluent.
@@ -211,5 +229,25 @@ where
     }
     fn post_godunov(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, stage: u8) {
         crate::regimes::mhd_substrate::post_godunov(sim, R::SPEC.has_energy, dt, stage);
+    }
+
+    fn has_additive_source(&self) -> bool {
+        self.runtime_source.is_some()
+    }
+
+    fn snapshot_stage(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        // capture the stage-input gas cons into u_stage so source_apply reads the
+        // pre-godunov state (S2 invariant). without this, u_stage is zero and the
+        // force lift S_mom = rho*a reads rho=0 -> NaN.
+        crate::regimes::mhd_substrate::snapshot_stage(sim, R::SPEC.has_energy);
+    }
+
+    fn source_apply(&self, sim: &FieldStore<D, 3, Mem, Sc>, weight: f64) {
+        // two-pass: add the user source increment to the hydro conserved slots after
+        // the gas godunov. dispatch_runtime_source is regime-agnostic (targets
+        // den/mom/nrg by name); B stays under CT, untouched here.
+        if let Some(rs) = &self.runtime_source {
+            dispatch_runtime_source(sim, rs, weight);
+        }
     }
 }

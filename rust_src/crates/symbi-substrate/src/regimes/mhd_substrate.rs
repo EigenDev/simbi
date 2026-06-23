@@ -377,6 +377,61 @@ pub(crate) fn snapshot<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
+/// snapshot the stage-INPUT GAS conserved (den, mom, [nrg]) into `u_stage`, the
+/// pre-godunov state the additive `source_apply` evaluates `S` at (the S2 invariant
+/// shared with the fused path). gas-only: B is not a source target, so bcell is NOT
+/// captured here. mirrors `snapshot` (which targets u_n) but writes u_stage.
+pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    has_energy: bool,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let (alo, aext, vol) = alloc_layout(&sim.geom.allocated);
+    let (grid, dlo) = exec_layout(&sim.geom.allocated);
+    let inb = |f: &Field<Sc, D, Mem>| Buf {
+        handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(f.as_ptr(), vol) }),
+        lo: &alo,
+        extent: &aext,
+    };
+    let outb = |f: &Field<Sc, D, Mem>| Buf {
+        handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(f.as_mut_ptr(), vol) }),
+        lo: &alo,
+        extent: &aext,
+    };
+
+    let u = &sim.workspace.u_stage;
+    let mut pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
+        vec![(&sim.fields.cons.den, &u.den)];
+    for k in 0..DOF {
+        pairs.push((&sim.fields.cons.mom[k], &u.mom[k]));
+    }
+    if has_energy {
+        pairs.push((
+            sim.fields.cons.nrg_field().expect("MHD with energy requires cons.nrg"),
+            u.nrg_field().expect("u_stage with energy requires nrg"),
+        ));
+    }
+
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        let sname = format!("rmhd_save_efield_{D}d");
+        let (sf, sir) = expect_kernel::<Sc>(&sname);
+        for (src, dst) in &pairs {
+            let inv = KernelInvocation {
+                buffers: vec![inb(src), outb(dst)],
+                grid: &grid,
+                dom_lo: &dlo,
+                ints: &[],
+                scalars: &[],
+            };
+            invoke::<Sc, Mem, _>(inv, sir, &sname, sf);
+        }
+    } else {
+        fused_save_buffers(&pairs);
+    }
+}
+
 // =============================================================================
 // the staggered de Rham complex for D-dimensional constrained transport.
 //

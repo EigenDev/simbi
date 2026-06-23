@@ -252,15 +252,18 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
 
             match field.as_str() {
                 "mom" => {
-                    // the structural DOF gate: a `mom` overlay MUST emit exactly DOF components
-                    // (the regime's velocity DOF). a config declaring the wrong `dim` fails HERE,
-                    // loudly, not as a silent mis-index. (the const-generic DOF is known only here.)
-                    assert_eq!(
-                        n_out, DOF,
-                        "runtime source 'mom' emits {n_out} components, regime DOF is {DOF} \
-                         (config `dim` mismatch)",
+                    // the structural gate: a `mom` overlay emits either the SPATIAL dim D
+                    // components (an in-plane force on a 2.5D MHD grid where DOF=3 > D — the
+                    // out-of-plane momentum is left untouched) or the full regime DOF (raw, or
+                    // hydro where D == DOF). any other count is a config `dim` mismatch and fails
+                    // HERE, loudly, not as a silent mis-index. (D/DOF are known only at dispatch.)
+                    assert!(
+                        n_out == D || n_out == DOF,
+                        "runtime source 'mom' emits {n_out} components; expected the spatial dim \
+                         {D} (in-plane force) or the regime DOF {DOF} (full momentum) — config \
+                         `dim` mismatch",
                     );
-                    for k in 0..DOF {
+                    for k in 0..n_out {
                         sim.fields.cons.mom[k].add_assign_checked(c, Sc::from_f64(weight * out[k]));
                     }
                 }

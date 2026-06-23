@@ -88,6 +88,9 @@ struct Config {
     // `immersed_bodies` list; empty for body-free runs. dimension-agnostic raw
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
     bodies:              Vec<BodyParams>,
+    // a single user source expression in the rust `SourceConfig` wire format
+    // (json string), or None. lowered + attached on the hydro path.
+    source_json:         Option<String>,
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
@@ -157,6 +160,96 @@ fn enum_str_or(dict: &Bound<'_, PyDict>, key: &str, default: &str) -> String {
         Err(_) => obj.extract().ok(),
     };
     s.map(|s| s.to_lowercase()).unwrap_or_else(|| default.to_string())
+}
+
+/// read a user source-expression field (already in the rust `SourceConfig` wire
+/// format, emitted by python's `CompiledExpr.serialize_source`) and return it as a
+/// json string ready for `SourceConfig::from_json`. an empty dict (the default for
+/// configs with no source) -> None. the conversion goes through python's
+/// `json.dumps`, so the node DAG crosses the boundary without a hand-written
+/// PyDict -> serde walk.
+fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
+    let Some(obj) = dict.get_item(key)? else {
+        return Ok(None);
+    };
+    // skip the empty-dict default (`return {}` in the base SimbiProblem).
+    if let Ok(d) = obj.downcast::<PyDict>() {
+        if d.is_empty() {
+            return Ok(None);
+        }
+    }
+    let json = obj.py().import("json")?;
+    let s: String = json.call_method1("dumps", (obj,))?.extract()?;
+    Ok(Some(s))
+}
+
+/// uniform runtime-source attach across the substrate kernel sets the hydro
+/// dispatch macro instantiates. the macro body monomorphizes for EVERY regime it
+/// covers (newtonian/adiabatic AND srhd), but `with_runtime_source` is inherent
+/// only on the substrates that carry a source slot — so the call must go through
+/// a trait that ALL of them implement. the relativistic set has no slot yet and
+/// reports a clear error rather than failing to compile.
+trait AttachRuntimeSource: Sized {
+    fn attach_runtime_source(
+        self,
+        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Result<Self, String>;
+}
+
+impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize>
+    AttachRuntimeSource for AdiabaticSubstrateKernelSet<Mem, Sc, D>
+{
+    fn attach_runtime_source(
+        self,
+        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Result<Self, String> {
+        Ok(self.with_runtime_source(built, params))
+    }
+}
+
+impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize>
+    AttachRuntimeSource for SrhdSubstrateKernelSet<Mem, Sc, D>
+{
+    fn attach_runtime_source(
+        self,
+        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Result<Self, String> {
+        Ok(self.with_runtime_source(built, params))
+    }
+}
+
+impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize>
+    AttachRuntimeSource for IsoSubstrateKernelSet<Mem, Sc, D>
+{
+    fn attach_runtime_source(
+        self,
+        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Result<Self, String> {
+        Ok(self.with_runtime_source(built, params))
+    }
+}
+
+// the unified MHD kernel set is generic over the regime R, so this one impl covers
+// the nmhd / imhd / rmhd aliases. sources target the hydro slots (den/mom/nrg); the
+// per-regime kind validity (rmhd -> raw only) is enforced upstream by build_user_source.
+impl<R, Mem, Sc, const D: usize> AttachRuntimeSource
+    for symbi::regimes::substrate_mhd::MhdSubstrateKernelSet<R, Mem, Sc, D>
+where
+    R: Regime<Sc, D>,
+    Mem: MemorySpace,
+    Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric,
+{
+    fn attach_runtime_source(
+        self,
+        built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Result<Self, String> {
+        Ok(self.with_runtime_source(built, params))
+    }
 }
 
 fn solver_from_str(s: &str) -> PyResult<Solver> {
@@ -341,6 +434,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_else(|| "t".to_string()),
         bodies: parse_bodies(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
+        // user source expressions (force/cooling/relax/raw) -> the rust source
+        // front door. `gravity_source_expressions` is the conventional force slot;
+        // `hydro_source_expressions` is the generic self-describing source. one
+        // runtime source per run for now (the kernel set holds a single slot).
+        source_json: get_source_json(dict, "gravity_source_expressions")?
+            .or(get_source_json(dict, "hydro_source_expressions")?),
     })
 }
 
@@ -1018,6 +1117,24 @@ macro_rules! build_and_run_hydro {
         let theta = build_theta(cfg);
         let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
+        // attach a user source expression (force/cooling/relax/raw) when present.
+        // lowered against THIS regime's spec via the source front door — the bridge
+        // rejects force/cooling/relax on relativistic regimes (use raw). single-grid
+        // only: fine levels would not see the source, so refuse the combination.
+        let sub = match &cfg.source_json {
+            Some(json) => {
+                if cfg.refinement_enabled {
+                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                }
+                let scfg = symbi_hydro::SourceConfig::from_json(json)
+                    .map_err(|e| format!("source expression parse: {e}"))?;
+                let built = symbi_hydro::expr_bridge::build_user_source(
+                    &scfg, <$regime_ty as Regime<f64, $d>>::SPEC,
+                ).map_err(|e| format!("source expression lower: {e}"))?;
+                sub.attach_runtime_source(built, scfg.params.clone())?
+            }
+            None => sub,
+        };
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d,
             |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
@@ -1113,6 +1230,23 @@ macro_rules! build_and_run_mhd {
         let theta = build_theta(cfg);
         let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
+        // attach a user source expression to the MHD hydro slots (den/mom/nrg).
+        // rmhd is relativistic -> only kind="raw"; nmhd takes force/cooling/relax.
+        // B is CT-evolved, not a cell source. single-grid only.
+        let sub = match &cfg.source_json {
+            Some(json) => {
+                if cfg.refinement_enabled {
+                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                }
+                let scfg = symbi_hydro::SourceConfig::from_json(json)
+                    .map_err(|e| format!("source expression parse: {e}"))?;
+                let built = symbi_hydro::expr_bridge::build_user_source(
+                    &scfg, <$regime_ty as Regime<f64, $d>>::SPEC,
+                ).map_err(|e| format!("source expression lower: {e}"))?;
+                sub.attach_runtime_source(built, scfg.params.clone())?
+            }
+            None => sub,
+        };
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d,
             |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
@@ -1173,6 +1307,22 @@ macro_rules! build_and_run_imhd {
         let theta = build_theta(cfg);
         let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
+        // attach a user source. iso MHD has no energy -> momentum-only force/relax,
+        // raw den/mom (raw->nrg rejected); B is CT-evolved. single-grid only.
+        let sub = match &cfg.source_json {
+            Some(json) => {
+                if cfg.refinement_enabled {
+                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                }
+                let scfg = symbi_hydro::SourceConfig::from_json(json)
+                    .map_err(|e| format!("source expression parse: {e}"))?;
+                let built = symbi_hydro::expr_bridge::build_user_source(
+                    &scfg, <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                ).map_err(|e| format!("source expression lower: {e}"))?;
+                sub.attach_runtime_source(built, scfg.params.clone())?
+            }
+            None => sub,
+        };
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d,
             |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
@@ -1283,6 +1433,23 @@ macro_rules! build_and_run_iso {
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
         let theta = build_theta(cfg);
         let sub = sim.substrate().theta(theta);
+        // attach a user source expression. iso has NO energy, so build_user_source
+        // (against the iso spec) drops the energy overlay for force/relax and rejects
+        // raw->nrg; den/mom sources work. single-grid only.
+        let sub = match &cfg.source_json {
+            Some(json) => {
+                if cfg.refinement_enabled {
+                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                }
+                let scfg = symbi_hydro::SourceConfig::from_json(json)
+                    .map_err(|e| format!("source expression parse: {e}"))?;
+                let built = symbi_hydro::expr_bridge::build_user_source(
+                    &scfg, <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                ).map_err(|e| format!("source expression lower: {e}"))?;
+                sub.attach_runtime_source(built, scfg.params.clone())?
+            }
+            None => sub,
+        };
 
         if cfg.locally_isothermal {
             // derive cs^2(x) = p(x)/rho(x) from the per-cell initial pressure, then HOLD it.

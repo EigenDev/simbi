@@ -30,11 +30,14 @@ use symbi_ir::ScalarRef;
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 
+use std::sync::Arc;
+
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
 use crate::regimes::substrate_kernels::{
-    cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_godunov, resolve_params, scalars_for,
-    ScalarBind, Solver,
+    cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_godunov, dispatch_runtime_source,
+    resolve_params, scalars_for, RuntimeSource, ScalarBind, Solver,
 };
+use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::state::FieldStore;
 
@@ -48,13 +51,29 @@ pub struct SrhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric,
     /// Riemann solver — HLLE (default) or HLLC (contact-resolving, Mignone-Bodo
     /// 2005). tunable via `.with_solver(Solver::Hllc)`.
     pub solver: Solver,
+    /// a runtime user source (python -> json `SourceConfig` -> `build_user_source`).
+    /// SRHD is relativistic, so only `kind="raw"` reaches here (the bridge rejects
+    /// the newtonian force/cooling/relax lifts); the user supplies the conserved
+    /// increment directly and it is added in `source_apply` via the regime-agnostic
+    /// `dispatch_runtime_source`. None for source-free runs.
+    pub runtime_source: Option<Arc<RuntimeSource>>,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> SrhdSubstrateKernelSet<Mem, Sc, D> {
     pub fn new(gamma: f64, cfl_number: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate SRHD CFL scratch field");
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, solver: Solver::Hlle }
+        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, solver: Solver::Hlle, runtime_source: None }
+    }
+
+    /// attach a runtime user source from already-lowered `(target, BuiltSource)`
+    /// pairs (the `build_user_source` output of a `kind="raw"` SRHD `SourceConfig`).
+    /// applied two-pass in `source_apply` (plain godunov + `dispatch_runtime_source`).
+    pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+        // has_energy = true (SRHD carries tau); validation happened at
+        // `build_user_source(cfg, &SRHD_SPEC)`.
+        self.runtime_source = Some(RuntimeSource::new(built, params, true));
+        self
     }
 
     /// pick the Riemann solver. default is HLLE; HLLC routes to the
@@ -113,6 +132,20 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         let pre = sim.fields.prim.pre_field().expect("Srhd requires prim.pre");
         dispatch_godunov(sim, pre, "srhd", dt, a0, ac);
+    }
+
+    fn has_additive_source(&self) -> bool {
+        self.runtime_source.is_some()
+    }
+
+    fn source_apply(&self, sim: &FieldStore<D, D, Mem, Sc>, weight: f64) {
+        // two-pass: plain godunov already ran; add the raw user source increment to
+        // the conserved fields. dispatch_runtime_source is regime-agnostic (it adds
+        // the BuiltSource outputs to their target conserved slots), so no SRHD-specific
+        // source code — the relativistic conservation law lives in the godunov stage.
+        if let Some(rs) = &self.runtime_source {
+            dispatch_runtime_source(sim, rs, weight);
+        }
     }
 
     fn cfl(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
