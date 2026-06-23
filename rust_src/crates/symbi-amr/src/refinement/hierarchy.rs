@@ -376,7 +376,7 @@ where
     /// recurses through the levels, then the root advances its clock and body
     /// state (mirroring evolve_with_callback).
     pub fn evolve(&mut self, t_final: f64) -> symbi_xpu::Result<()> {
-        self.evolve_with_callback(t_final, u64::MAX, |_| {})
+        self.evolve_with_callback(t_final, u64::MAX, |_| std::ops::ControlFlow::Continue(()))
     }
 
     /// evolve with a periodic observer: the callback fires every `interval`
@@ -387,7 +387,7 @@ where
         &mut self,
         t_final: f64,
         interval: u64,
-        mut callback: impl FnMut(&Self),
+        mut callback: impl FnMut(&Self) -> std::ops::ControlFlow<()>,
     ) -> symbi_xpu::Result<()> {
         // homologous mesh motion is single-grid only: the hierarchy's flux
         // registers and transfer operators have no a(t) bookkeeping yet. a
@@ -407,13 +407,20 @@ where
             if self.levels[0].state.iteration.saturating_sub(last_cb) >= interval {
                 last_cb = self.levels[0].state.iteration;
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-                callback(self);
+                // a `Break` from the observer (e.g. a caught signal) stops the
+                // march early; the observer has already snapshotted state for
+                // restart. drain the queue so the host read in the caller is
+                // coherent, then return.
+                if callback(self).is_break() {
+                    symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+                    return Ok(());
+                }
             }
         }
         // the caller reads fields next: drain the device queue (the B12
         // host-read barrier; no-op on a host backend).
         symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-        callback(self);
+        let _ = callback(self);
         Ok(())
     }
 
@@ -504,7 +511,17 @@ where
         if self.levels[0].state.has_bodies() {
             let fi = self.levels.len() - 1;
             let finest = &mut self.levels[fi];
-            finest.kernels.body_feedback(&finest.state, dt);
+            // the backward feedback reduction (force/torque/accreted-mass) is only
+            // needed for bodies whose dynamics consume it — two-way-coupled or
+            // accreting. a one-way fixed gravitational mass skips the entire pass.
+            let needs_fb = finest
+                .state
+                .immersed
+                .as_ref()
+                .is_some_and(|im| im.bodies.needs_feedback());
+            if needs_fb {
+                finest.kernels.body_feedback(&finest.state, dt);
+            }
             finest.state.dt = dt;
             evolve_bodies(&mut finest.state);
 

@@ -20,7 +20,9 @@ pub mod renderer;
 pub mod table;
 pub mod meta_table;
 pub mod term_guard;
+pub mod signal_guard;
 
 pub use renderer::{Alignment, Renderer, align_text, truncate};
 pub use table::{MessageType, Table};
 pub use meta_table::{render_metadata, render_tree_buf};
+pub use signal_guard::{ScreenGuard, SignalGuard};

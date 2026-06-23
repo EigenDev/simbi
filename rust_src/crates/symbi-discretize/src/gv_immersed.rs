@@ -28,6 +28,10 @@ use super::coords::{Coords, Spacing};
 use super::gv::{cell_geometry_gv, CellGeometryGv};
 use symbi_ir::{begin_trace, end_trace, Gv, GvKernel};
 
+use symbi_hydro::regime_spec::law_params;
+use symbi_hydro::source_spec::{lift_to_built, source_params, BuiltSource};
+use symbi_hydro::source_term::BodySource;
+
 type Writes = Vec<(String, FieldBind, NodeId)>;
 
 #[inline]
@@ -346,4 +350,285 @@ pub fn body_feedback_gv(
         writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (bc.den_dot * dv_dt).node()));
     }
     (end_trace(), writes)
+}
+
+// =============================================================================
+// isothermal variants (docs/design/19; no energy equation)
+//
+// the immersed-body PHYSICS is EOS-independent — softened gravity + Bondi-Hoyle
+// accretion are functions of (den, mom, cs) only via the SHARED `body_contribution`.
+// the single difference from the adiabatic kernels is the closure for `cs` and
+// the absence of an energy update:
+//   - adiabatic: cs / e_int are recovered from `cons.nrg` (`gas_state`), and the
+//     source updates `cons.nrg` (gravity work + accreted internal+kinetic energy).
+//   - isothermal: there is no `cons.nrg`. cs comes from `prim.pre` (= cs^2(x)*rho,
+//     the substrate's iso pressure encoding — EXACTLY what the iso FLUX reads), so
+//     a locally-isothermal cs^2(x) flows through identically; no energy is updated.
+// future media (porous / deformable) extend `body_contribution`, so BOTH the
+// adiabatic and isothermal kernels inherit them with no further duplication.
+// =============================================================================
+
+// iso gas state from cons + the substrate pressure: (vel_physical[ncomp], cs).
+// `pre = cs^2(x)*rho` so `cs = sqrt(pre/rho)`. no internal energy (isothermal).
+fn gas_state_iso(ncomp: usize, den: Gv, mom: &[Gv], pre: Gv) -> (Vec<Gv>, Gv) {
+    let inv_den = Gv::ONE / den;
+    let vel: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] * inv_den).collect();
+    let cs = (pre * inv_den).sqrt();
+    (vel, cs)
+}
+
+/// the iso counterpart of `cell_scaffold`: identical geometry + velocity scaffold,
+/// but cs comes from `prim.pre` and there is no e_int.
+#[allow(clippy::too_many_arguments)]
+fn cell_scaffold_iso(
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+    den: Gv,
+    mom: &[Gv],
+    pre: Gv,
+) -> ([Gv; 3], [Gv; 3], [Gv; 3], Gv, Gv) {
+    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    let mut coord3 = [Gv::ZERO; 3];
+    for (g, &coord_idx) in axes.iter().enumerate() {
+        if coord_idx < 3 {
+            coord3[coord_idx] = geo.centroid[g];
+        }
+    }
+    let cell_cart = to_cartesian_gv(coords, &coord3);
+    let (vel_phys, cs) = gas_state_iso(ncomp, den, mom, pre);
+    let vel_cart = vector_to_cartesian_gv(coords, &coord3, &vel_phys);
+    let mut min_w = Gv::scalar("dx_0");
+    for ax in 1..ndim {
+        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+    }
+    (coord3, cell_cart, vel_cart, min_w, cs)
+}
+
+/// FORWARD iso source: `cons += dt * (S_grav + S_accretion)` with NO energy update.
+/// reads cons (den/mom) + prim.pre; writes den/mom (no nrg). gravity + accretion via
+/// the SHARED `body_contribution`.
+pub fn body_source_iso_gv(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let inv_dt = Gv::ONE / dt;
+    let den = Gv::field("den", FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .collect();
+    let pre = Gv::field("pre", FieldRef::PrimPre);
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let (coord3, cell_cart, vel_cart, min_w, cs) =
+        cell_scaffold_iso(coords, ndim, ncomp, axes, den, &mom, pre);
+
+    let mut d_den = Gv::ZERO;
+    let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
+    for b in 0..n_bodies {
+        let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+        let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
+        let vstar_phys = vector_from_cartesian_gv(coords, &coord3, &bc.vstar, ncomp);
+        d_den = d_den - bc.den_dot;
+        for comp in 0..ncomp {
+            d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity
+            d_mom[comp] = d_mom[comp] - vstar_phys[comp] * bc.den_dot; // accreted momentum
+        }
+    }
+
+    let den_new = den + dt * d_den;
+    let mom_new: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] + dt * d_mom[comp]).collect();
+
+    let mut writes = vec![("den_new".to_string(), FieldRef::cons_den().into(), den_new.node())];
+    for (comp, m) in mom_new.iter().enumerate() {
+        writes.push((format!("mom_{comp}_new"), FieldRef::cons_mom(comp as u8).into(), m.node()));
+    }
+    (end_trace(), writes)
+}
+
+/// BACKWARD iso feedback: identical force/torque/mass writes as the adiabatic
+/// kernel; cs comes from prim.pre rather than nrg. 2D+ only.
+pub fn body_feedback_iso_gv(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let inv_dt = Gv::ONE / dt;
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let den = Gv::field("den", FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .collect();
+    let pre = Gv::field("pre", FieldRef::PrimPre);
+    let (_coord3, cell_cart, vel_cart, min_w, cs) =
+        cell_scaffold_iso(coords, ndim, ncomp, axes, den, &mom, pre);
+
+    let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    let dv = Gv::ONE / geo.inv_volume;
+    let dv_dt = dv * dt;
+
+    let mut writes: Writes = Vec::new();
+    for b in 0..n_bodies {
+        let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+        let mut force_cart = [Gv::ZERO; 3];
+        let mut fa = [Gv::ZERO; 3];
+        for i in 0..3 {
+            let vd = bc.vstar[i] * bc.den_dot;
+            force_cart[i] = -(den * bc.g[i] + vd) * dv;
+            fa[i] = -vd * dv;
+        }
+        for ax in 0..ndim {
+            let fc = force_cart[cart_axes[ax]];
+            writes.push((format!("b{b}_f{ax}"), format!("fb_{b}_force_{ax}").into(), fc.node()));
+        }
+        let cross = |a: usize, bb: usize| bc.rvec[a] * fa[bb] - bc.rvec[bb] * fa[a];
+        for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)].into_iter().enumerate() {
+            writes.push((format!("b{b}_t{t}"), format!("fb_{b}_torque_{t}").into(), tc.node()));
+        }
+        writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (bc.den_dot * dv_dt).node()));
+    }
+    (end_trace(), writes)
+}
+
+// =============================================================================
+// fused additive body source (the frame-correct twin of `body_source_gv`)
+//
+// re-expresses the body source as `BuiltSource`s so it FUSES into the godunov
+// stage (one launch, no separate pass) via `godunov_stage_gv_with_fused_built`.
+// frame-correct for any geometry: the cell coord is lifted to Cartesian, the
+// shared `BodySource` carrier does the physics, and the Cartesian momentum source
+// is projected onto the physical coordinate basis. additive convention: reads the
+// SSP-stage prim (rho/vel/pre), applied with the `ac*dt` weight by the composer.
+// =============================================================================
+
+/// declare the shared per-cell leaves (INSIDE `lift_to_built`'s trace): gas state
+/// (rho, vel in CARTESIAN, cs), the cell CARTESIAN position, and the grid (min
+/// width, 1/dt). `has_energy` picks the cs closure: adiabatic = sqrt(gamma*pre/rho),
+/// iso = the constant `cs` scalar (exact for globally-isothermal; the cs only enters
+/// the accretion rate cap).
+fn body_scaffold(
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+    has_energy: bool,
+) -> (Gv, [Gv; 3], [Gv; 3], Gv, Gv, Gv, [Gv; 3]) {
+    let rho = Gv::scalar(law_params::RHO);
+    let vel_phys: Vec<Gv> = (0..ncomp).map(|k| Gv::scalar(&law_params::vel(k))).collect();
+    let mut coord3 = [Gv::ZERO; 3];
+    for (g, &coord_idx) in axes.iter().enumerate() {
+        if coord_idx < 3 {
+            coord3[coord_idx] = Gv::scalar(&source_params::x(g));
+        }
+    }
+    let x_cart = to_cartesian_gv(coords, &coord3);
+    let vel_cart = vector_to_cartesian_gv(coords, &coord3, &vel_phys);
+    let cs = if has_energy {
+        let gamma = Gv::scalar("gamma");
+        let pre = Gv::scalar(law_params::PRE);
+        (gamma * pre / rho).sqrt()
+    } else {
+        Gv::scalar("cs")
+    };
+    let mut min_w = Gv::scalar("dx_0");
+    for g in 1..ndim {
+        min_w = min_w.min(Gv::scalar(&format!("dx_{g}")));
+    }
+    let inv_dt = Gv::ONE / Gv::scalar("dt");
+    (rho, vel_cart, x_cart, cs, min_w, inv_dt, coord3)
+}
+
+/// the b-th body's carrier (Cartesian Gv leaves) — params resolved by name from
+/// the immersed side-car at dispatch. `body_vec3` places the ndim pos/vel
+/// components on their Cartesian axes (the grid-plane convention).
+fn body_at(b: usize, ndim: usize, cart_axes: &[usize]) -> BodySource<Gv> {
+    BodySource {
+        mass: Gv::scalar(&format!("body_{b}_mass")),
+        xm: body_vec3(b, ndim, cart_axes, "pos"),
+        vm: body_vec3(b, ndim, cart_axes, "vel"),
+        soft: Gv::scalar(&format!("body_{b}_soft")),
+        racc: Gv::scalar(&format!("body_{b}_racc")),
+        sink: Gv::scalar(&format!("body_{b}_sink")),
+        delta: Gv::scalar(&format!("body_{b}_delta")),
+    }
+}
+
+/// the immersed-body source as FUSED-source `BuiltSource`s (gravity + Bondi
+/// accretion). returns (target_field, BuiltSource): "mom" (ncomp), "den" (1), and
+/// for energy-bearing regimes "nrg" (1).
+pub fn body_source_built(
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+    n_bodies: usize,
+    has_energy: bool,
+) -> Vec<(String, BuiltSource)> {
+    let axes = axes.to_vec();
+    let cart_axes = body_cart_axes(coords, ndim, &axes);
+
+    let mom = {
+        let (axes, cart_axes) = (axes.clone(), cart_axes.clone());
+        lift_to_built(move || {
+            let (rho, vel_cart, x_cart, cs, min_w, inv_dt, coord3) =
+                body_scaffold(coords, ndim, ncomp, &axes, has_energy);
+            let mut s_cart = [Gv::ZERO; 3];
+            for b in 0..n_bodies {
+                let sm = body_at(b, ndim, &cart_axes)
+                    .momentum_cartesian(rho, &vel_cart, &x_cart, cs, min_w, inv_dt);
+                for k in 0..3 {
+                    s_cart[k] = s_cart[k] + sm[k];
+                }
+            }
+            vector_from_cartesian_gv(coords, &coord3, &s_cart, ncomp)
+        })
+    };
+
+    let den = {
+        let (axes, cart_axes) = (axes.clone(), cart_axes.clone());
+        lift_to_built(move || {
+            let (rho, _v, x_cart, cs, min_w, inv_dt, _c3) =
+                body_scaffold(coords, ndim, ncomp, &axes, has_energy);
+            let mut s = Gv::ZERO;
+            for b in 0..n_bodies {
+                s = s + body_at(b, ndim, &cart_axes).density(rho, cs, &x_cart, min_w, inv_dt);
+            }
+            vec![s]
+        })
+    };
+
+    let mut out = vec![("mom".to_string(), mom), ("den".to_string(), den)];
+
+    if has_energy {
+        let (axes, cart_axes) = (axes.clone(), cart_axes.clone());
+        let nrg = lift_to_built(move || {
+            let (rho, vel_cart, x_cart, cs, min_w, inv_dt, _c3) =
+                body_scaffold(coords, ndim, ncomp, &axes, has_energy);
+            let gamma = Gv::scalar("gamma");
+            let pre = Gv::scalar(law_params::PRE);
+            let e_int = pre / ((gamma - Gv::ONE) * rho);
+            let mut d_nrg = Gv::ZERO;
+            for b in 0..n_bodies {
+                let bsrc = body_at(b, ndim, &cart_axes);
+                let a = bsrc.accel(&x_cart);
+                let den_dot = bsrc.accretion_rate(rho, cs, &x_cart, min_w, inv_dt);
+                let vstar = bsrc.sink_velocity(&vel_cart, &x_cart);
+                let work = rho * (a[0] * vel_cart[0] + a[1] * vel_cart[1] + a[2] * vel_cart[2]);
+                let vstar2 = vstar[0] * vstar[0] + vstar[1] * vstar[1] + vstar[2] * vstar[2];
+                d_nrg = d_nrg + work - (Gv::from_f64(0.5) * vstar2 + e_int) * den_dot;
+            }
+            vec![d_nrg]
+        });
+        out.push(("nrg".to_string(), nrg));
+    }
+    out
 }

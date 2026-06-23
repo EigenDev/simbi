@@ -118,10 +118,12 @@ impl Renderer {
         self.layout.padding = terminal::padding_for_width(term_width);
         self.layout.widths = vec![0; n_cols];
 
-        // step 1: minimum widths = max(header_len, data_len)
+        // step 1: minimum widths = max(header_len, data_len). measure DISPLAY
+        // columns (char count), not bytes — cells may carry multibyte glyphs
+        // (em-dash, unicode paths) and a byte count would over-reserve width.
         for ii in 0..n_cols {
-            let header_len = headers[ii].len();
-            let data_len = if ii < data.len() { data[ii].len() } else { 0 };
+            let header_len = headers[ii].chars().count();
+            let data_len = if ii < data.len() { data[ii].chars().count() } else { 0 };
             self.layout.widths[ii] = header_len.max(data_len);
         }
 
@@ -240,7 +242,7 @@ impl Renderer {
     pub fn render_title(&self, buf: &mut String, title: &str, width: usize) {
         let inner_width = width.saturating_sub(2);
         let title_text = format!(" {} ", title);
-        let title_len = title_text.len();
+        let title_len = title_text.chars().count();
         let left_fill = 1; // single dash before title
         let right_fill = inner_width.saturating_sub(title_len + left_fill);
 
@@ -362,12 +364,13 @@ impl Renderer {
     }
 }
 
-/// align text within a fixed width. truncates if text exceeds width.
+/// align text within a fixed display width (char-measured). truncates by
+/// characters (never mid-codepoint) if the text exceeds the width.
 pub fn align_text(text: &str, width: usize, align: Alignment) -> String {
-    let text_len = text.len();
+    let text_len = text.chars().count();
 
     if text_len >= width {
-        return text[..width].to_string();
+        return text.chars().take(width).collect();
     }
 
     let pad = width - text_len;
@@ -404,15 +407,18 @@ pub fn align_text(text: &str, width: usize, align: Alignment) -> String {
     }
 }
 
-/// truncate text, appending "..." if it exceeds max_width.
+/// truncate text to a display width (char-measured), appending "..." if it
+/// exceeds max_width. slices on character boundaries so multibyte glyphs never
+/// panic the byte-index path.
 pub fn truncate(text: &str, max_width: usize) -> String {
-    if text.len() <= max_width {
+    if text.chars().count() <= max_width {
         return text.to_string();
     }
     if max_width < 3 {
-        return text[..max_width].to_string();
+        return text.chars().take(max_width).collect();
     }
-    format!("{}...", &text[..max_width - 3])
+    let kept: String = text.chars().take(max_width - 3).collect();
+    format!("{kept}...")
 }
 
 #[cfg(test)]
@@ -539,6 +545,33 @@ mod tests {
     #[test]
     fn truncate_tiny_max() {
         assert_eq!(truncate("hello", 2), "he");
+    }
+
+    // -- multibyte (display-width) regression: the em-dash in run messages is
+    //    3 utf-8 bytes but 1 column; byte-measured padding/slicing drifts the
+    //    box border and can panic on a mid-codepoint boundary. --
+
+    #[test]
+    fn align_text_pads_by_display_width_not_bytes() {
+        // "a—b" is 1+3+1 = 5 bytes but 3 columns; right-align to 6 => 3 spaces.
+        let out = align_text("a—b", 6, Alignment::Right);
+        assert_eq!(out.chars().count(), 6);
+        assert_eq!(out, "   a—b");
+    }
+
+    #[test]
+    fn align_text_overflow_multibyte_no_panic() {
+        // width cut falls inside the em-dash; must slice on a char boundary.
+        let out = align_text("aa—bb", 3, Alignment::Right);
+        assert_eq!(out.chars().count(), 3);
+        assert_eq!(out, "aa—");
+    }
+
+    #[test]
+    fn truncate_multibyte_is_char_bounded() {
+        let out = truncate("done — final checkpoint", 8);
+        assert_eq!(out.chars().count(), 8);
+        assert!(out.ends_with("..."));
     }
 
     // -- border snapshot --

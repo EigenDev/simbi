@@ -793,7 +793,7 @@ pub fn user_defined_source(
 /// `Gv`s. `Gv::scalar` dedups by name in first-seen order, which IS the `BuiltSource.params`
 /// contract — so the param manifest falls out of the trace. this is the same begin/end_trace
 /// idiom the substrate kernels use; it builds IR ONCE per source, never runs per-cell.
-fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
+pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
     // isolate the trace: these builders run BOTH standalone (config-time, no active trace) AND
     // partway through the godunov trace (the AOT/substrate fused-source bake calls `build_source`
     // mid-trace). `in_isolated_trace` saves/restores any open outer trace so the inner build

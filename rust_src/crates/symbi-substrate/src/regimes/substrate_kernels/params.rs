@@ -150,7 +150,7 @@ pub(crate) fn motion_scalar(
 /// the per-axis `{pos,vel}_{ax}`. the branch-free-loop conventions: an INACTIVE slot
 /// (idx >= n_bodies) or a non-gravitating body -> mass=0 (zero gravity), soft=1 (r_eff>=1);
 /// a non-accreting body -> sink=0 (zero accretion), racc=1, delta=1.
-fn body_scalar<const D: usize>(
+pub(crate) fn body_scalar<const D: usize>(
     bodies: Option<&symbi_ib::BodyCollection<f64, D>>,
     idx: u8,
     field: BodyScalar,

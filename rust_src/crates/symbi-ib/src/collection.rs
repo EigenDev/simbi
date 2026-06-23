@@ -15,7 +15,7 @@
 
 use symbi_algebra::{Tensor, OrderedNumeric};
 use symbi_ir::algebra::Scalar;
-use crate::body::Body;
+use crate::body::{Body, BodyKind};
 
 /// maximum number of bodies in a collection. 2 covers binary systems.
 pub const MAX_BODIES: usize = 2;
@@ -120,6 +120,17 @@ impl<S: Scalar, const D: usize> BodyCollection<S, D> {
 
     pub fn len(&self) -> usize { self.bodies.len() }
     pub fn is_empty(&self) -> bool { self.bodies.is_empty() }
+
+    /// whether ANY body needs the backward feedback reduction: a two-way-coupled
+    /// body (it moves in response to the gas) or a black-hole sink (its accreted
+    /// mass + rate come from the reduction). a one-way fixed gravitational mass
+    /// does NOT — feedback would only feed force/torque DIAGNOSTICS, so the whole
+    /// reduction pass can be skipped for it (a large saving: kepler-like setups).
+    pub fn needs_feedback(&self) -> bool {
+        self.bodies
+            .iter()
+            .any(|b| b.two_way_coupling || matches!(b.kind, BodyKind::BlackHole { .. }))
+    }
 
     pub fn get(&self, idx: usize) -> &Body<S, D> {
         &self.bodies[idx]

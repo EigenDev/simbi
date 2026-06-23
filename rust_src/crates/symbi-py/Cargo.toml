@@ -22,4 +22,6 @@ symbi-hydro = { path = "../symbi-hydro" }
 symbi-geometry = { path = "../symbi-geometry" }
 symbi-algebra = { path = "../symbi-algebra" }
 symbi-io = { path = "../symbi-io" }
+symbi-ib = { path = "../symbi-ib" }
+symbi-display = { path = "../symbi-display" }
 pyo3 = { version = "0.23", features = ["extension-module"] }

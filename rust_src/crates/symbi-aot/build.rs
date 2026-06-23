@@ -35,7 +35,7 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 // hlle_flux, srhd_hlle_flux, godunov_euler/snapshot/rk2, ...). build.rs only
 // drives them: build the graph via a builder, then emit (CPU Rust + CUDA source).
 use symbi_discretize::{
-    body_feedback_gv, body_source_gv,
+    body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
     inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
     nmhd_wave_speed_map_gv,
@@ -479,6 +479,25 @@ fn gen_godunov_stage(
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
         geom.coords, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
         geo_source(prefix), sources, /* mag_from_bcell = */ false, // unfused: geo source reads prim.mag
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the IMMERSED-BODY source fused into the godunov stage (frame-correct: Cartesian
+// physics projected onto the physical basis). its own bake — the body source is a
+// set of coord-dependent `BuiltSource`s (`body_source_built`), not a coord-agnostic
+// `SourceSpec` family, so it doesn't ride the FUSED_FAMILIES loop. one launch:
+// `cons_new = godunov(cons) + ac*dt*(gravity + accretion)` for MAX_BODIES bodies.
+fn gen_godunov_with_body_source(out_dir: &str, ndim: u8, prefix: &str, has_energy: bool, geom: Geom) {
+    let name = format!("{prefix}_godunov_stage_with_body_source{}_{ndim}d", geom.suffix());
+    let built = symbi_discretize::body_source_built(
+        geom.coords, ndim as usize, geom.ncomp as usize, &geom.axes, MAX_BODIES, has_energy,
+    );
+    let refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
+        built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
+        geom.coords, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
+        geo_source(prefix), &refs, /* mag_from_bcell = */ false,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1087,6 +1106,23 @@ fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// immersed-body ISOTHERMAL forward/backward: identical physics, but cs comes from
+// prim.pre (= cs^2(x)*rho) and there is no energy slot. emitted as `body_source_iso`
+// / `body_feedback_iso` so the iso substrate dispatches them by name.
+fn gen_body_source_iso(out_dir: &str, ndim: u8, coords: Coords) {
+    let name = format!("body_source_iso{}_{ndim}d", coords_suffix(coords));
+    let g = Geom::identity(coords, ndim);
+    let (k, writes) = body_source_iso_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+fn gen_body_feedback_iso(out_dir: &str, ndim: u8, coords: Coords) {
+    let name = format!("body_feedback_iso{}_{ndim}d", coords_suffix(coords));
+    let g = Geom::identity(coords, ndim);
+    let (k, writes) = body_feedback_iso_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     gen_godunov_mass_1d(&out_dir);
@@ -1198,6 +1234,10 @@ fn main() {
                     Geom::cart(ndim), family.slug(), &refs,
                 );
             }
+            // the immersed-body source, fused (Cartesian for now; cyl/sph below).
+            gen_godunov_with_body_source(
+                &out_dir, ndim, regime.prefix, regime.has_energy, Geom::cart(ndim),
+            );
         }
     }
     // the CYLINDRICAL r-z AXISYMMETRIC adiabatic family (docs/design/18): a 2-axis
@@ -1246,6 +1286,19 @@ fn main() {
     for &cc in &[Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
         gen_body_feedback(&out_dir, 2, cc);
         gen_body_feedback(&out_dir, 3, cc);
+    }
+    // isothermal body source/feedback (no energy slot; cs from prim.pre): same grid
+    // x geometry matrix, so an iso run with bodies has gravity + accretion + feedback.
+    for ndim in 1u8..=3 {
+        gen_body_source_iso(&out_dir, ndim, Coords::Cartesian);
+    }
+    gen_body_source_iso(&out_dir, 2, Coords::Cylindrical);
+    gen_body_source_iso(&out_dir, 3, Coords::Cylindrical);
+    gen_body_source_iso(&out_dir, 2, Coords::Spherical);
+    gen_body_source_iso(&out_dir, 3, Coords::Spherical);
+    for &cc in &[Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
+        gen_body_feedback_iso(&out_dir, 2, cc);
+        gen_body_feedback_iso(&out_dir, 3, cc);
     }
     // RMHD (relativistic MHD): the KKC false-position c2p (100-step bracket), the
     // quartic-wave-speed HLLE flux, and the constrained-transport curl B-update.

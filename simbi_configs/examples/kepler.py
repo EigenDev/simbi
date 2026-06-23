@@ -62,7 +62,11 @@ class KeplerianRingTest(SimbiProblem):
         ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
     ]
     regime: Annotated[
-        Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
+        Regime,
+        ProblemParam(
+            Regime.ISOTHERMAL,
+            description="physics regime (isothermal: p = rho cs^2, cs = 0.01)",
+        ),
     ]
     x1_spacing: Annotated[
         CellSpacing,
@@ -111,6 +115,16 @@ class KeplerianRingTest(SimbiProblem):
             cli=True,
             checkpoint_safe=True,
             description="checkpoint interval",
+        ),
+    ]
+    diagnostic_interval: Annotated[
+        float,
+        ProblemParam(
+            0.1 * math.pi,
+            cli=True,
+            checkpoint_safe=True,
+            description="body-diagnostics cadence (every 0.05 orbit); writes "
+            "<data_dir>diagnostics.dat with the central mass's force/torque",
         ),
     ]
 

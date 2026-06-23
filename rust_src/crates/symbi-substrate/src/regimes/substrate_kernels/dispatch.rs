@@ -25,7 +25,8 @@ use super::binding::{bind_manifest, kernel_bindings, resolve_path};
 use super::exec::dispatch_fields;
 use super::layout::geom_suffix;
 use super::params::{
-    geom_scalar, motion_scalar, physical_geom, resolve_body_scalars, scalars_for, ScalarBind,
+    body_scalar, geom_scalar, motion_scalar, physical_geom, resolve_body_scalars, scalars_for,
+    ScalarBind,
 };
 use super::types::Solver;
 
@@ -183,6 +184,126 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
             });
         }
     }
+}
+
+/// ISOTHERMAL forward body source: like `dispatch_body_source` but the kernel reads
+/// `prim.pre` (= cs^2(x)*rho) for the sound speed and updates only den/mom (no energy).
+/// `pre` is the substrate's iso pressure field, bound as the `prim.pre` override.
+pub fn dispatch_body_source_iso<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    dt: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let sfx = geom_suffix(sim.geom.coords, DOF, D);
+    let name = format!("body_source_iso{sfx}_{D}d");
+    // the iso kernel declares dt + grid + per-body scalars only (cs comes from the
+    // prim.pre FIELD, no gamma); `resolve_body_scalars` walks the manifest, so the
+    // unused gamma is never requested.
+    let scalars = resolve_body_scalars(sim, dt, 0.0, &name);
+    dispatch_named(sim, pre, None, 0, &name, &sim.geom.interior, &[], &scalars);
+}
+
+/// ISOTHERMAL backward feedback: like `dispatch_body_feedback` but reads `prim.pre`
+/// instead of `cons.nrg` (manifest order: cons.den, mom_0.., prim.pre).
+pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    dt: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    if D < 2 {
+        return;
+    }
+    let geom = &sim.geom;
+    let sfx = geom_suffix(geom.coords, DOF, D);
+    let name = format!("body_feedback_iso{sfx}_{D}d");
+    let scalars = resolve_body_scalars(sim, dt, 0.0, &name);
+    let per_body = D + 4;
+    let n_out = symbi_ib::MAX_BODIES * per_body;
+
+    // inputs in the manifest order: cons.den, mom_0.., prim.pre (pure reads).
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+    for comp in 0..DOF {
+        inputs.push(&sim.fields.cons.mom[comp]);
+    }
+    inputs.push(pre);
+    let scratch: Vec<Field<Sc, D, Mem>> = (0..n_out)
+        .map(|_| Field::<Sc, D, Mem>::zeros(&geom.allocated).expect("feedback scratch alloc"))
+        .collect();
+    let outputs: Vec<&Field<Sc, D, Mem>> = scratch.iter().collect();
+    dispatch_fields::<Sc, Mem, D>(&name, &geom.allocated, &geom.interior, &inputs, &outputs, &[], &scalars);
+
+    let sums: Vec<f64> = scratch.iter().map(|s| field_reduce(s, &geom.interior, ReductionOp::Add)).collect();
+    if let Some(ref im) = sim.immersed {
+        for b in 0..symbi_ib::MAX_BODIES {
+            let base = b * per_body;
+            let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
+            for g in 0..D {
+                force[g] = sums[base + g];
+            }
+            let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
+            for t in 0..3 {
+                torque[t] = sums[base + D + t];
+            }
+            im.diagnostics.accumulate(symbi_ib::BodyDelta {
+                idx: b,
+                force_delta: force,
+                torque_delta: torque,
+                mass_delta: sums[base + D + 3],
+                prev_mass_delta: 0.0,
+            });
+        }
+    }
+}
+
+/// dispatch the IMMERSED-BODY-fused godunov stage `{prefix}_godunov_stage_with_body_source...`:
+/// gravity + accretion are folded INTO the godunov update (additive convention, `ac*dt` weight) —
+/// one launch, no separate body_source pass. resolves the stage scalars (dt/a0/ac/motion/geom) +
+/// the EOS param (`gamma` adiabatic / `cs` iso) + the per-body params FROM THE LIVE SIDE-CAR (the
+/// bodies move, so this reads their current state each step — no static binding to refresh).
+pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    prefix: &str,
+    dt: f64,
+    a0: f64,
+    ac: f64,
+    eos_param: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    let sfx = geom_suffix(geom.coords, DOF, D);
+    let name = format!("{prefix}_godunov_stage_with_body_source{sfx}_{D}d");
+    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, geom.coords, sim.motion.a);
+    let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
+    let scalars = scalars_for(&name, |bind| {
+        let v: f64 = match bind {
+            ScalarBind::Ref(ScalarRef::Dt) => dt,
+            ScalarBind::Ref(ScalarRef::A0) => a0,
+            ScalarBind::Ref(ScalarRef::Ac) => ac,
+            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => eos_param,
+            ScalarBind::Ref(ScalarRef::Body { idx, field }) => {
+                body_scalar::<D>(bodies, *idx, *field)
+            }
+            ScalarBind::Ref(sref) => motion_scalar(&sim.motion, geom.coords, D, *sref)
+                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, *sref))
+                .unwrap_or_else(|| {
+                    panic!("dispatch_godunov_with_body_source: unexpected scalar {sref:?} for '{name}'")
+                }),
+            ScalarBind::Spec(s) => {
+                panic!("dispatch_godunov_with_body_source: unexpected spec scalar '{s}' for '{name}'")
+            }
+        };
+        Sc::from_f64(v)
+    });
+    dispatch_named(sim, pre, None, 0, &name, &geom.interior, &[], &scalars);
 }
 
 pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(

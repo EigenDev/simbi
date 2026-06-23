@@ -13,6 +13,13 @@ option(
 )
 
 option(
+    'cargo_features',
+    type: 'string',
+    value: '',
+    description: 'comma-separated cargo features for the rust hydro cdylib (symbi-py); gpu_compilation auto-adds cuda',
+)
+
+option(
     'precision',
     type: 'combo',
     choices: ['single', 'double'],

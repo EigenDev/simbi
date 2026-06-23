@@ -151,6 +151,40 @@ class SimbiProblem(BaseModel):
             description="checkpoint interval",
         ),
     ]
+    time_unit: Annotated[
+        float,
+        ProblemParam(
+            1.0,
+            gt=0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="natural time unit (code units per unit); checkpoint "
+            "names + the live display report time / time_unit. e.g. set to the "
+            "orbital period for a binary so output reads in orbits",
+        ),
+    ]
+    time_unit_label: Annotated[
+        str,
+        ProblemParam(
+            "t",
+            cli=True,
+            checkpoint_safe=True,
+            description="label for the natural time unit (e.g. 'orbit'); 't' "
+            "means code units and is omitted from checkpoint names",
+        ),
+    ]
+    diagnostic_interval: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            ge=0.0,
+            cli=True,
+            checkpoint_safe=True,
+            description="body-diagnostics output cadence (natural units, "
+            "× time_unit). 0 disables. only emitted when the problem has "
+            "immersed bodies; writes <data_dir>diagnostics.dat",
+        ),
+    ]
     checkpoint_index: Annotated[
         int,
         ProblemParam(
@@ -732,7 +766,7 @@ class SimbiProblem(BaseModel):
                 continue
 
             metadata = get_param_metadata(field_info)
-            if not metadata.cli:
+            if not cls._field_is_cli(field_name):
                 continue
 
             cli_name = metadata.cli_name or field_name.replace("_", "-")
@@ -750,6 +784,26 @@ class SimbiProblem(BaseModel):
                 group.add_argument(f"--{cli_name}", **kwargs)
             except argparse.ArgumentError:
                 pass  # already registered
+
+    @classmethod
+    def _field_is_cli(cls, field_name: str) -> bool:
+        """whether a field is cli-exposed, inheriting the flag across the mro.
+
+        a core knob declared `cli=True` in a base class (e.g. `solver`,
+        `reconstruction`, `cfl_number`) stays exposed even when a subclass
+        overrides the field ONLY to change its default — the common config
+        pattern `solver: Annotated[Solver, ProblemParam(Solver.HLLC)]` would
+        otherwise silently drop `--solver` (the override replaces the base's
+        Annotated metadata wholesale, losing `cli=True`). the child's default /
+        type / help still win; only the cli exposure is inherited.
+        """
+        for klass in cls.__mro__:
+            fields = getattr(klass, "model_fields", None)
+            if not fields or field_name not in fields:
+                continue
+            if get_param_metadata(fields[field_name]).cli:
+                return True
+        return False
 
     @classmethod
     def _add_type_info(cls, kwargs: dict[str, Any], field_info: Any) -> None:

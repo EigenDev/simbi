@@ -28,6 +28,7 @@ pub enum MessageType {
     Success,
     Warning,
     Error,
+    Diagnostic,
 }
 
 struct Message {
@@ -110,6 +111,14 @@ impl Table {
         self.progress = percent.min(100);
     }
 
+    /// toggle the clearing redraw. flip to `false` to render a single STATIC
+    /// frame (no screen clear) onto the primary buffer after an alternate-screen
+    /// live session ends, so the run's final state persists in scrollback. only
+    /// ever dynamic on a tty.
+    pub fn set_dynamic(&mut self, on: bool) {
+        self.dynamic = on && terminal::is_tty();
+    }
+
     pub fn post_info(&mut self, msg: &str) {
         self.post_message(MessageType::Info, msg);
     }
@@ -124,6 +133,10 @@ impl Table {
 
     pub fn post_error(&mut self, msg: &str) {
         self.post_message(MessageType::Error, msg);
+    }
+
+    pub fn post_diagnostic(&mut self, msg: &str) {
+        self.post_message(MessageType::Diagnostic, msg);
     }
 
     /// attach a log file. all posted messages are mirrored to disk.
@@ -184,6 +197,9 @@ impl Table {
         }
 
         print!("{}", buf);
+        // flush so the frame can never linger in the stdout buffer past an
+        // alternate-screen leave (which would garble the primary buffer).
+        let _ = io::stdout().flush();
     }
 
     /// **B10** — render a 3-col (Category | Property | Value) sub-table at
@@ -199,7 +215,10 @@ impl Table {
         let mut widest: [&str; 3] = headers;
         for r in rows {
             for i in 0..3 {
-                if r[i].len() > widest[i].len() { widest[i] = r[i].as_str(); }
+                // compare DISPLAY width (chars), not utf-8 byte length.
+                if r[i].chars().count() > widest[i].chars().count() {
+                    widest[i] = r[i].as_str();
+                }
             }
         }
         sub.calculate_layout(&headers, &widest, term_width);
@@ -263,17 +282,22 @@ impl Table {
                 msg.text,
             );
 
-            // truncate if too long
-            if line.len() > inner_width {
-                if inner_width >= 3 {
-                    line = format!("{}...", &line[..inner_width - 3]);
+            // measure DISPLAY columns (char count), not bytes — messages carry
+            // em-dashes / arrows whose utf-8 byte length exceeds their width,
+            // which would otherwise under-pad and drift the right border left.
+            let mut cols = line.chars().count();
+            if cols > inner_width {
+                line = if inner_width >= 3 {
+                    let kept: String = line.chars().take(inner_width - 3).collect();
+                    format!("{kept}...")
                 } else {
-                    line = line[..inner_width].to_string();
-                }
+                    line.chars().take(inner_width).collect()
+                };
+                cols = line.chars().count();
             }
 
-            // pad to full width
-            let pad_len = inner_width.saturating_sub(line.len());
+            // pad to full width (in display columns)
+            let pad_len = inner_width.saturating_sub(cols);
 
             buf.push_str(color::BORDER);
             buf.push_str("\u{2502}"); // │
@@ -310,6 +334,7 @@ fn message_type_string(kind: MessageType) -> &'static str {
         MessageType::Success => "SUCCESS",
         MessageType::Warning => "WARNING",
         MessageType::Error => "ERROR",
+        MessageType::Diagnostic => "DIAGNOSTIC",
     }
 }
 
@@ -319,6 +344,7 @@ fn message_color(kind: MessageType) -> &'static str {
         MessageType::Success => color::SUCCESS,
         MessageType::Warning => color::WARNING,
         MessageType::Error => color::ERROR,
+        MessageType::Diagnostic => color::DIAGNOSTIC,
     }
 }
 

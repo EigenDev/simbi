@@ -95,6 +95,12 @@ impl CheckpointSchedule {
 /// hand-spells "m1..mD".
 struct Snapshot<const D: usize> {
     resolution: Vec<u64>,
+    // the ALLOCATED (padded) cell extent per axis = interior + 2*ng. cell-centered
+    // field datasets are written at this full extent so a restart restores the
+    // entire field — ghost zones included — not just the interior (which would
+    // truncate the halo the next step's stencil reads before the first ghost-fill).
+    // the reader trims `halo_radius` (= ng) back to the interior for plotting.
+    data_shape: Vec<u64>,
     dx_phys:    Vec<f64>,
     x_lo_phys:  Vec<f64>,
     conserved:  Vec<(String, Vec<f64>)>,
@@ -141,10 +147,11 @@ fn extract_field<const D: usize, Mem: MemorySpace>(
 /// (FieldSpec × component-idx), the closure dispatches to the right struct
 /// member or returns `None` when the field isn't allocated for this regime
 /// (e.g. iso has no cons.nrg, non-MHD has no mhd.bcell). returns the
-/// `(name, data)` vec the snapshot uses.
+/// `(name, data)` vec the snapshot uses. each cell-centered field is gathered
+/// over its OWN allocated domain (`field.domain()` — interior + ghosts), so the
+/// written buffer carries the halo and a restart is not truncated.
 fn collect_bucket<'a, F, const D: usize, Mem: MemorySpace>(
     fields:    &[FieldSpec],
-    interior:  &symbi_algebra::Domain<D>,
     mut pick:  F,
 ) -> Vec<(String, Vec<f64>)>
 where
@@ -156,7 +163,7 @@ where
         for idx in 0..n {
             if let Some(field) = pick(fs, idx) {
                 let name = symbi_io::dataset_name(fs, idx);
-                out.push((name, extract_field(field, interior)));
+                out.push((name, extract_field(field, field.domain())));
             }
         }
     }
@@ -186,10 +193,15 @@ where
     let interior = &sim.geom.interior;
     let a = sim.motion.a;
     let resolution: Vec<u64> = (0..D).map(|ax| interior.spaces[ax].size() as u64).collect();
+    // the allocated (padded) cell extent — `den` exists in every regime, so its
+    // domain is the canonical cell domain (interior + ng ghosts on every side).
+    // cell-centered datasets are written at this extent; the reader trims ng back.
+    let alloc = sim.fields.cons.den.domain();
+    let data_shape: Vec<u64> = (0..D).map(|ax| alloc.spaces[ax].size() as u64).collect();
     let dx_phys:   Vec<f64>  = sim.geom.dx[..D].iter().map(|&d| d * a).collect();
     let x_lo_phys: Vec<f64>  = sim.geom.x_lo[..D].iter().map(|&x| x * a).collect();
     // ----- RegimeSpec-driven conserved iteration ------
-    let conserved = collect_bucket(R::SPEC.fields, interior, |fs, idx| {
+    let conserved = collect_bucket(R::SPEC.fields, |fs, idx| {
         match fs.name {
             "den" => Some(&sim.fields.cons.den),
             "mom" => Some(&sim.fields.cons.mom[idx]),
@@ -200,7 +212,7 @@ where
     });
 
     // ----- RegimeSpec-driven primitive iteration ------
-    let primitive = collect_bucket(R::SPEC.primitive_fields, interior, |fs, idx| {
+    let primitive = collect_bucket(R::SPEC.primitive_fields, |fs, idx| {
         match fs.name {
             "rho"   => Some(&sim.fields.prim.rho),
             "vel"   => Some(&sim.fields.prim.vel[idx]),
@@ -227,7 +239,7 @@ where
     let owned_start: Vec<i64> = vec![0; D];
     let owned_fin:   Vec<i64> = resolution.iter().map(|&n| n as i64).collect();
 
-    Snapshot { resolution, dx_phys, x_lo_phys, conserved, primitive, bface, bface_dom, owned_start, owned_fin }
+    Snapshot { resolution, data_shape, dx_phys, x_lo_phys, conserved, primitive, bface, bface_dom, owned_start, owned_fin }
 }
 
 // =============================================================================
@@ -362,8 +374,10 @@ where
     // `extract_field` produces (axis-0-fastest in memory → axis-0 is the LAST
     // dim of the numpy shape). numpy/matplotlib then put physical x on the
     // horizontal screen axis. for 2D OT: shape = [Ny, Nx]; for 3D: [Nz, Ny, Nx].
+    // cell datasets carry the PADDED extent (interior + 2*ng); the reader trims
+    // `halo_width` per side back to the interior `global_cells` for plotting.
     let shape: Vec<usize> = (0..D).rev()
-        .map(|ax| sim.geom.interior.spaces[ax].size() as usize)
+        .map(|ax| snap.data_shape[ax] as usize)
         .collect();
 
     // ---- partition_0/hydro/primitives (RegimeSpec-driven) ----
@@ -588,13 +602,13 @@ where
         for idx in 0..n {
             let name = symbi_io::dataset_name(fs, idx);
             match fs.name {
-                "den" => restore_field(cons, &name, &sim.fields.cons.den, &interior)?,
-                "mom" => restore_field(cons, &name, &sim.fields.cons.mom[idx], &interior)?,
+                "den" => restore_field(cons, &name, &sim.fields.cons.den, sim.fields.cons.den.domain())?,
+                "mom" => restore_field(cons, &name, &sim.fields.cons.mom[idx], sim.fields.cons.mom[idx].domain())?,
                 "nrg" => if let Some(nrg) = sim.fields.cons.nrg_field() {
-                    restore_field(cons, &name, nrg, &interior)?;
+                    restore_field(cons, &name, nrg, nrg.domain())?;
                 },
                 "mag" => if let Some(ref mhd) = sim.fields.mhd {
-                    restore_field(cons, &name, &mhd.bcell[idx], &interior)?;
+                    restore_field(cons, &name, &mhd.bcell[idx], mhd.bcell[idx].domain())?;
                 },
                 other => panic!("checkpoint read: unknown conserved field '{other}'"),
             }
@@ -608,14 +622,14 @@ where
             for idx in 0..n {
                 let name = symbi_io::dataset_name(fs, idx);
                 match fs.name {
-                    "rho" => restore_field(prim, &name, &sim.fields.prim.rho, &interior)?,
-                    "vel" => restore_field(prim, &name, &sim.fields.prim.vel[idx], &interior)?,
+                    "rho" => restore_field(prim, &name, &sim.fields.prim.rho, sim.fields.prim.rho.domain())?,
+                    "vel" => restore_field(prim, &name, &sim.fields.prim.vel[idx], sim.fields.prim.vel[idx].domain())?,
                     "pre" => if let Some(pre) = sim.fields.prim.pre_field() {
-                        restore_field(prim, &name, pre, &interior)?;
+                        restore_field(prim, &name, pre, pre.domain())?;
                     },
                     "bcell" => if let Some(ref mhd) = sim.fields.mhd {
                         if prim.find_dataset(&name).is_some() {
-                            restore_field(prim, &name, &mhd.bcell[idx], &interior)?;
+                            restore_field(prim, &name, &mhd.bcell[idx], mhd.bcell[idx].domain())?;
                         }
                     },
                     other => panic!("checkpoint read: unknown primitive field '{other}'"),
@@ -792,5 +806,58 @@ mod tests {
             }
             assert_eq!(*lnrg.view().at(c), *nrg.view().at(c), "cons.nrg transposed/garbled at {c:?}");
         }
+    }
+
+    #[test]
+    fn checkpoint_saves_full_allocated_field_including_ghosts() {
+        // **truncation gate**: a cell-centered dataset must carry the FULL allocated extent
+        // (interior + 2*ng), NOT just the interior — otherwise a restart loses the halo the
+        // next stencil reads before the first ghost-fill, and the reader's `halo_width` trim
+        // would over-cut interior-only data. seed EVERY allocated cell (ghosts included) with a
+        // coord-unique value; assert (a) the on-disk dataset volume is the padded volume, and
+        // (b) every ghost cell survives the write -> load round-trip byte-for-byte.
+        type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+        let ng = 2usize;
+        let build = || Sim2::new_at(
+            Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian,
+            [0isize, 0], [5usize, 3], [0.0, 0.0], [0.2, 1.0 / 3.0], ng,
+            Boundaries::uniform(BoundaryType::Outflow), 0.4, Timestepping::Rk2, 0,
+        ).unwrap();
+
+        let sim = build();
+        // a value unique per (coord) so a misplaced or dropped ghost is a loud failure.
+        let seed = |c: [isize; 2]| 1000.0 + c[0] as f64 + 31.0 * c[1] as f64;
+        let alloc = sim.fields.cons.den.domain().clone();
+        for c in alloc.iter() {
+            sim.fields.cons.den.view_mut().set(c, seed(c));
+        }
+
+        let dir = std::env::temp_dir().join("symbi_checkpoint_fullfield");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("full.h5");
+        let path = path.to_str().unwrap();
+        write_checkpoint(&sim, path, &Metadata::new()).unwrap();
+
+        // (a) the den dataset must hold the PADDED volume (5+2*ng)x(3+2*ng), not 5x3.
+        let tree = Hdf5Backend.read(std::path::Path::new(path)).unwrap();
+        let den_ds = tree.find_group("level_0").unwrap()
+            .find_group("conserved").unwrap()
+            .find_dataset("den").unwrap();
+        let on_disk = den_ds.data.as_f64().unwrap().len();
+        assert_eq!(on_disk, alloc.volume(),
+            "den dataset holds {on_disk} cells but the allocated field has {} (interior would be 15)",
+            alloc.volume());
+
+        // (b) every allocated cell — ESPECIALLY the ghosts outside the interior — round-trips.
+        let mut loaded = build();
+        load_checkpoint(&mut loaded, path).unwrap();
+        let interior = sim.geom.interior.clone();
+        let mut ghost_checked = 0usize;
+        for c in alloc.iter() {
+            assert_eq!(*loaded.fields.cons.den.view().at(c), seed(c),
+                "cons.den lost/garbled at {c:?} (ghost={})", !interior.contains(c));
+            if !interior.contains(c) { ghost_checked += 1; }
+        }
+        assert!(ghost_checked > 0, "test seeded no ghosts — allocation has no halo");
     }
 }

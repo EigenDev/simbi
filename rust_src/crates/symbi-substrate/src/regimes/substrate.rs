@@ -31,10 +31,12 @@ use std::sync::Arc;
 
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
 use crate::regimes::substrate_kernels::{
-    cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu,
-    dispatch_godunov_maybe_fused, dispatch_runtime_source, dispatch_source_apply,
+    cfl_wave_speed, dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_fields,
+    dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
+    dispatch_godunov_with_body_source, dispatch_runtime_source, dispatch_source_apply,
     fused_runtime_cpu_kernel, resolve_params, FusedSourceBinding, RuntimeSource, ScalarBind, Solver,
 };
+use symbi_geometry::Geometry;
 use symbi_discretize::gv::GeoSource;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::state::FieldStore;
@@ -197,6 +199,15 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        // immersed bodies: gravity + accretion are FUSED into the godunov update
+        // (one launch, additive convention), so `body_source` is a no-op. cs feeds
+        // the accretion rate cap (iso passes the constant self.cs). the fused kernel
+        // is baked for Cartesian; curvilinear falls back to the separate body_source
+        // pass (the fused cyl/sph bake is a follow-up).
+        if sim.immersed.is_some() && sim.geom.coords == Geometry::Cartesian {
+            dispatch_godunov_with_body_source(sim, &self.pre, "iso", dt, a0, ac, self.cs);
+            return;
+        }
         // the geometric-source pressure is the substrate-owned self.pre (= cs^2*rho).
         // fused_source: None => unfused kernel (the prior default), Some => AOT-baked
         // fused variant in one launch (`iso_godunov_stage_with_{source_id}_{D}d`).
@@ -303,5 +314,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             }
             dispatch_runtime_source(sim, rs, weight);
         }
+    }
+
+    fn body_source(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+        // Cartesian: fused into the godunov stage (no-op here). curvilinear: the
+        // fused kernel isn't baked yet, so run the separate frame-correct pass.
+        if sim.geom.coords != Geometry::Cartesian {
+            dispatch_body_source_iso(sim, &self.pre, dt);
+        }
+    }
+
+    fn body_feedback(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+        // backward feedback (force/torque/accreted-mass -> diagnostics), isothermal.
+        dispatch_body_feedback_iso(sim, &self.pre, dt);
     }
 }

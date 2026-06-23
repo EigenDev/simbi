@@ -623,6 +623,7 @@ where
             last_refresh_iter = root.iteration;
             last_refresh_time = now;
             last_refresh_io = io_time;
+            std::ops::ControlFlow::Continue(())
         })?;
     }
 

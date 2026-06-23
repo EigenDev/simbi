@@ -100,22 +100,39 @@ else
   rust_src_dir = meson.current_source_dir() / 'rust_src'
   rust_build = files('scripts/build_rust_backend.py')
 
+  # cargo feature set for the hydro cdylib. user-supplied (`-Drust_features=`)
+  # plus the `cuda` feature when gpu compilation is enabled — the rust backend's
+  # gpu path is a cargo feature, not the c++ `gpu/` subdir.
+  rust_feats = get_option('cargo_features')
+  if get_option('gpu_compilation').enabled()
+    rust_feats = rust_feats == '' ? 'cuda' : rust_feats + ',cuda'
+  endif
+
+  # cargo is the incremental authority: `build_always_stale` makes ninja delegate
+  # to cargo on every `meson compile`, so a `.rs` edit is always picked up (cargo
+  # no-ops in well under a second when nothing changed). without it the no-input
+  # custom_target is cached on its existing output and `.rs` edits are missed.
+
   # the hydro backend -> simbi.libs.cpu_ext
   custom_target(
     'cpu_ext_rust',
     output: 'cpu_ext' + ext_suffix,
-    command: [py3, rust_build, '@OUTPUT@', 'cpu_ext', rust_src_dir, 'symbi-py'],
+    command: [py3, rust_build, '@OUTPUT@', 'cpu_ext', rust_src_dir, 'symbi-py', rust_feats],
     build_by_default: true,
+    build_always_stale: true,
     install: true,
     install_dir: py_install_dir,
   )
 
-  # the radiation post-processing module (rust symbi-afterglow) -> simbi.libs.rad_hydro
+  # the radiation post-processing module (rust symbi-afterglow) -> simbi.libs.rad_hydro.
+  # symbi-rad-py exposes no cargo features, so the gpu/user feature set is NOT
+  # forwarded here.
   custom_target(
     'rad_hydro_rust',
     output: 'rad_hydro' + ext_suffix,
     command: [py3, rust_build, '@OUTPUT@', 'rad_hydro', rust_src_dir, 'symbi-rad-py'],
     build_by_default: true,
+    build_always_stale: true,
     install: true,
     install_dir: py_install_dir,
   )

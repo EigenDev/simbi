@@ -32,6 +32,7 @@ pub mod color {
     pub const SUCCESS: &str = "\x1b[38;5;158m"; // mint green
     pub const WARNING: &str = "\x1b[38;5;215m"; // warm amber
     pub const ERROR: &str = "\x1b[38;5;210m"; // soft red
+    pub const DIAGNOSTIC: &str = "\x1b[38;5;141m"; // medium purple
 
     // progress bar
     pub const PROGRESS_FILLED: &str = "\x1b[38;5;183m"; // lavender

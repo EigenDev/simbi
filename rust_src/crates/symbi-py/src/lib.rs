@@ -36,6 +36,8 @@ use symbi_hydro::state::PrimG;
 use symbi_geometry::MotionState;
 use symbi_io::Metadata;
 use symbi_sim::checkpoint::write_hierarchy_checkpoint;
+use symbi_display::{ScreenGuard, SignalGuard, Table};
+use symbi_ib::{Body, BodyCollection, BodyKind};
 
 // =============================================================================
 // parsed configuration — a plain-rust mirror of the python exec_dict. the
@@ -43,6 +45,7 @@ use symbi_sim::checkpoint::write_hierarchy_checkpoint;
 // =============================================================================
 
 struct Config {
+    name:                String,
     regime:              String,
     coord_system:        String,
     cyl_plane:           CylPlane,
@@ -77,6 +80,32 @@ struct Config {
     t_final:             f64,
     checkpoint_interval: f64,
     data_dir:            String,
+    // natural time unit for checkpoint names + display: reported time is
+    // `time / time_unit`, labeled `time_unit_label` ("t" = code units).
+    time_unit:           f64,
+    time_unit_label:     String,
+    // immersed bodies (gravity / accretion sinks) parsed from the config's
+    // `immersed_bodies` list; empty for body-free runs. dimension-agnostic raw
+    // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
+    bodies:              Vec<BodyParams>,
+    // body-diagnostic output cadence in natural units (× time_unit -> code);
+    // 0 disables the diagnostics file.
+    diagnostic_interval: f64,
+}
+
+/// dimension-agnostic raw body parameters from the python `immersed_bodies`
+/// list. `capability` is the BodyCapability bitflag (GRAVITATIONAL=1,
+/// ACCRETION=2). accretion fields are only meaningful when the ACCRETION bit
+/// is set (a black-hole sink); otherwise the body is a fixed-potential mass.
+struct BodyParams {
+    capability:       u64,
+    mass:             f64,
+    radius:           f64,
+    position:         Vec<f64>,
+    velocity:         Vec<f64>,
+    softening:        f64,
+    accretion_radius: f64,
+    sink_rate:        f64,
 }
 
 // =============================================================================
@@ -141,7 +170,8 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
 
 fn timestepping_from_str(s: &str) -> PyResult<Timestepping> {
     match s {
-        "euler" => Ok(Timestepping::Euler),
+        // rk1 is forward euler (first-order); the python `order=1` path emits it.
+        "euler" | "rk1" => Ok(Timestepping::Euler),
         "rk2" => Ok(Timestepping::Rk2),
         "rk3" => Ok(Timestepping::Rk3),
         other => Err(PyValueError::new_err(format!("unknown timestepping '{other}'"))),
@@ -222,6 +252,13 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     };
 
     Ok(Config {
+        // the problem class name (preserve case); blank when not supplied.
+        name: dict
+            .get_item("name")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<String>().ok())
+            .unwrap_or_default(),
         regime: enum_str(dict, "regime")?,
         coord_system,
         cyl_plane,
@@ -292,7 +329,73 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .get_item("data_directory")?
             .ok_or_else(|| PyValueError::new_err("sim_info missing 'data_directory'"))?
             .extract()?,
+        time_unit: {
+            let u = get_f64_or(dict, "time_unit", 1.0);
+            if u > 0.0 { u } else { 1.0 }
+        },
+        time_unit_label: dict
+            .get_item("time_unit_label")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<String>().ok())
+            .unwrap_or_else(|| "t".to_string()),
+        bodies: parse_bodies(dict),
+        diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
     })
+}
+
+/// parse the python `immersed_bodies` list (each a serialized ImmersedBodyConfig
+/// dict) into dimension-agnostic `BodyParams`. missing / malformed entries are
+/// skipped; a body-free config yields an empty vec.
+fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
+    let Ok(Some(obj)) = dict.get_item("immersed_bodies") else {
+        return Vec::new();
+    };
+    let Ok(list) = obj.extract::<Vec<Bound<'_, PyAny>>>() else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(list.len());
+    for item in &list {
+        let Ok(b) = item.downcast::<PyDict>() else { continue };
+        let f = |k: &str| -> f64 {
+            b.get_item(k).ok().flatten().and_then(|v| v.extract().ok()).unwrap_or(0.0)
+        };
+        let v = |k: &str| -> Vec<f64> {
+            b.get_item(k).ok().flatten().and_then(|x| x.extract().ok()).unwrap_or_default()
+        };
+        let capability: u64 = b
+            .get_item("capability")
+            .ok()
+            .flatten()
+            .and_then(|x| x.extract().ok())
+            .unwrap_or(1);
+        let softening = sub_f64(b, "gravitational", "softening_length", 0.0);
+        let accretion_radius = sub_f64(b, "accretion", "accretion_radius", 0.0);
+        let sink_rate = sub_f64(b, "accretion", "sink_rate", 0.0);
+        out.push(BodyParams {
+            capability,
+            mass: f("mass"),
+            radius: f("radius"),
+            position: v("position"),
+            velocity: v("velocity"),
+            softening,
+            accretion_radius,
+            sink_rate,
+        });
+    }
+    out
+}
+
+/// read `body[group][key]` as f64 (the nested ImmersedBodyConfig sub-dicts like
+/// `gravitational` / `accretion`), returning `default` when absent or null.
+fn sub_f64(body: &Bound<'_, PyDict>, group: &str, key: &str, default: f64) -> f64 {
+    body.get_item(group)
+        .ok()
+        .flatten()
+        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|gd| gd.get_item(key).ok().flatten())
+        .and_then(|val| val.extract().ok())
+        .unwrap_or(default)
 }
 
 /// drain a python primitive-generator into a flat per-cell buffer. each yielded
@@ -357,28 +460,350 @@ where
     K:   KernelSet<D, DOF, Mem, f64>,
 {
     let data_dir = &cfg.data_dir;
+    // the checkpoint cadence is in NATURAL units: `checkpoint_interval * time_unit`
+    // is the code-unit spacing, so `checkpoint_interval = 0.1` with a binary's
+    // orbital `time_unit` means "every 0.1 orbits". default time_unit = 1.0 keeps
+    // the cadence in code units, unchanged for ordinary runs.
     let cp_interval = if cfg.checkpoint_interval > 0.0 {
-        cfg.checkpoint_interval
+        cfg.checkpoint_interval * cfg.time_unit
     } else {
         f64::INFINITY
     };
     let mut next_cp = cp_interval;
     let mut cp_index: u64 = cfg.checkpoint_index + 1;
 
+    // the live monitor. dynamic mode self-detects a tty (clearing redraw on a
+    // terminal, plain appended frames when piped to a file). the row tracks the
+    // root level's clock; checkpoint writes post to the message board.
+    let t_final = cfg.t_final;
+    let setup = problem_setup_rows(cfg);
+    let setup_ref: Vec<[&str; 3]> =
+        setup.iter().map(|r| [r[0].as_str(), r[1].as_str(), r[2].as_str()]).collect();
+    let title = if cfg.name.is_empty() {
+        "SIMBI".to_string()
+    } else {
+        format!("SIMBI  -  {}", cfg.name)
+    };
+    let mut table = Table::new(&title, true);
+    table.set_problem_setup(&setup_ref);
+    table.set_header(&["Iteration", "Time", "dt", "zone-cyc/s"]);
+    if let Some(p) = log_path(cfg) {
+        let _ = table.set_log_file(std::path::Path::new(&p));
+    }
+
+    // zone-cycle throughput: the interior cell count per root step. wall-clock
+    // deltas across the row cadence give the instantaneous update rate; the run
+    // total gives the average. this is the number a user watches.
+    let n_zones: u64 = (0..cfg.dims).map(|ax| cfg.n_cells[ax] as u64).product();
+    let cp_width = checkpoint_time_width(cfg);
+    // body diagnostics: a separate, user-defined cadence (natural units), only
+    // when the run has bodies and a positive interval. one `<dir>diagnostics.dat`
+    // table for the whole run.
+    let diag_path = if cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+        Some(format!("{data_dir}diagnostics.dat"))
+    } else {
+        None
+    };
+    let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
+    let mut next_diag = diag_interval;
+    let start = std::time::Instant::now();
+    let mut last_inst = start;
+    let mut last_iter = hier.levels[0].state.iteration;
+
+    // graceful-interrupt trap: a caught signal (Ctrl-C, scheduler eviction)
+    // flips `stop_requested`; we then snapshot a restart checkpoint and break.
+    // Drop restores python's handlers + the cursor no matter how the run ends.
+    let guard = SignalGuard::install();
+    // btop-style live TUI: draw the dashboard in the alternate screen so it
+    // leaves no scrollback trail; on exit we restore the primary buffer and
+    // re-render one static final frame so the result persists.
+    let mut screen = ScreenGuard::enter();
+
+    // save the initial condition (t = 0) as the start-index checkpoint, matching
+    // the c++ driver: a fresh run (clock at zero, or index 0) writes its IC so the
+    // first output is the un-evolved state. then render the opening frame.
+    {
+        let (i0, t0, d0) = {
+            let r = &hier.levels[0].state;
+            (r.iteration, r.time, r.dt)
+        };
+        if t0 == 0.0 || cfg.checkpoint_index == 0 {
+            let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
+            let ic = checkpoint_name(cfg, &format_sim_time(t0 / cfg.time_unit, cp_width));
+            match write_hierarchy_checkpoint(&states, &ic, &checkpoint_metadata(cfg, cfg.checkpoint_index)) {
+                Ok(_) => table.post_success(&format!(
+                    "checkpoint {ic}  ({}, initial condition)", fmt_time_msg(cfg, t0),
+                )),
+                Err(e) => table.post_error(&format!("initial checkpoint failed: {e:?}")),
+            }
+        }
+        if let Some(dp) = &diag_path {
+            if let Some(im) = hier.levels.last().and_then(|l| l.state.immersed.as_ref()) {
+                let _ = append_diagnostics(dp, t0, &im.bodies);
+                table.post_diagnostic(&format!("diagnostics {dp}  ({}, initial)", fmt_time_msg(cfg, t0)));
+            }
+        }
+        set_row(&mut table, i0, t0, d0, t_final, 0.0);
+        table.refresh();
+    }
+
     hier.evolve_with_callback(cfg.t_final, 1, |h| {
-        while h.levels[0].state.time + 1e-12 >= next_cp && next_cp.is_finite() {
+        let st = &h.levels[0].state;
+        let (iter, time, dt) = (st.iteration, st.time, st.dt);
+
+        // signal observed: write a numbered + canonical restart checkpoint so a
+        // cluster eviction can resume, then ask the march to stop. the handler
+        // has already left the alternate screen, so switch the table to static
+        // (no clearing redraw) before any further render of the primary buffer.
+        if guard.stop_requested() {
+            table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let path = format!("{data_dir}{cp_index:04}.h5");
-            let _ = write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index));
+            let restart = checkpoint_name(cfg, "interrupted");
+            let _ = write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
+            let _ = write_hierarchy_checkpoint(
+                &states, &format!("{data_dir}final.h5"), &checkpoint_metadata(cfg, cp_index),
+            );
+            table.post_warning(&format!(
+                "interrupted ({}) at {}, step {iter} — restart checkpoint {restart}",
+                guard.signal_name(), fmt_time_msg(cfg, time),
+            ));
+            return std::ops::ControlFlow::Break(());
+        }
+
+        // MESSAGE BOARD cadence: checkpoints fire on the time schedule. each one
+        // posts to the board and marks the frame dirty so it shows promptly —
+        // independent of the row's iteration cadence below.
+        let mut dirty = false;
+        while time + 1e-12 >= next_cp && next_cp.is_finite() {
+            let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
+            let path = checkpoint_name(cfg, &format_sim_time(time / cfg.time_unit, cp_width));
+            match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
+                Ok(_) => table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time))),
+                Err(e) => table.post_error(&format!("checkpoint {cp_index:04} failed: {e:?}")),
+            }
             cp_index += 1;
             next_cp += cp_interval;
+            dirty = true;
         }
+
+        // DIAGNOSTICS cadence: sample body state on its own (finer) schedule,
+        // independent of checkpoints — append a row per body to diagnostics.dat.
+        // post ONE board line per callback that wrote (not per missed interval, so
+        // a dt that spans several intervals collapses to a single notice) and mark
+        // the frame dirty so the write is visible the moment it happens.
+        if let Some(dp) = &diag_path {
+            let mut wrote = false;
+            while time + 1e-12 >= next_diag {
+                if let Some(im) = h.levels.last().and_then(|l| l.state.immersed.as_ref()) {
+                    let _ = append_diagnostics(dp, time, &im.bodies);
+                }
+                next_diag += diag_interval;
+                wrote = true;
+            }
+            if wrote {
+                table.post_diagnostic(&format!("diagnostics {dp}  ({})", fmt_time_msg(cfg, time)));
+                dirty = true;
+            }
+        }
+
+        // BENCHMARK ROW cadence: update the live row every 100 root iterations,
+        // faithfully and INDEPENDENT of the checkpoint cadence — the table need
+        // not move in lockstep with the message board (this mirrors the c++
+        // driver). the rate is measured over the elapsed 100-iteration window.
+        if iter % 100 == 0 {
+            let now = std::time::Instant::now();
+            let elapsed = now.duration_since(last_inst).as_secs_f64();
+            let d_iter = iter.saturating_sub(last_iter);
+            let rate = if elapsed > 1e-9 && d_iter > 0 {
+                n_zones as f64 * d_iter as f64 / elapsed
+            } else {
+                0.0
+            };
+            last_inst = now;
+            last_iter = iter;
+            set_row(&mut table, iter, time, dt, t_final, rate);
+            dirty = true;
+        }
+
+        if dirty {
+            table.refresh();
+        }
+        std::ops::ControlFlow::Continue(())
     })?;
+
+    // interrupted: the restart checkpoint is already written and the alternate
+    // screen is already torn down by the handler. surface the halt as one static
+    // frame on the primary buffer (guard Drop restores python's handlers).
+    if guard.stop_requested() {
+        screen.leave();
+        table.set_dynamic(false);
+        let root = &hier.levels[0].state;
+        table.post_warning(&format!(
+            "run halted at t = {:.4} after {} steps", root.time, root.iteration,
+        ));
+        table.refresh();
+        return Ok(());
+    }
 
     let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
     let final_path = format!("{data_dir}final.h5");
     write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))?;
+    let root = &hier.levels[0].state;
+    let wall = start.elapsed().as_secs_f64();
+    let avg = if wall > 1e-9 { n_zones as f64 * root.iteration as f64 / wall } else { 0.0 };
+    // leave the alternate screen, then render ONE static final frame so the
+    // completed dashboard persists on the primary buffer. post the summary
+    // first so `draw_row`'s single refresh carries it.
+    screen.leave();
+    table.set_dynamic(false);
+    table.post_success(&format!(
+        "done — {} steps to t = {:.4} in {:.2}s (avg {} zone-cyc/s); final checkpoint {final_path}",
+        root.iteration, root.time, wall, humanize_rate(avg),
+    ));
+    draw_row(&mut table, root.iteration, root.time, root.dt, t_final, avg);
     Ok(())
+}
+
+/// set the live monitor's benchmark row + progress bar WITHOUT rendering — the
+/// caller decides when to refresh (the row cadence is decoupled from the message
+/// board). takes primitives (not the generic state) so it is monomorphization-free.
+fn set_row(table: &mut Table, iteration: u64, time: f64, dt: f64, t_final: f64, rate_zcps: f64) {
+    let frac = (time / t_final).clamp(0.0, 1.0);
+    table.update_row(&[
+        &iteration.to_string(),
+        &format!("{time:.6e}"),
+        &format!("{dt:.3e}"),
+        &humanize_rate(rate_zcps),
+    ]);
+    table.set_progress((frac * 100.0) as usize);
+}
+
+/// set the row + progress and render one frame (used at start + finalize).
+fn draw_row(table: &mut Table, iteration: u64, time: f64, dt: f64, t_final: f64, rate_zcps: f64) {
+    set_row(table, iteration, time, dt, t_final, rate_zcps);
+    table.refresh();
+}
+
+/// si-suffix a zone-cycle rate (k/M/G) for compact display. zero/undefined
+/// rate (first frame, no elapsed wall time yet) shows as a dash.
+fn humanize_rate(r: f64) -> String {
+    if r <= 0.0 {
+        "—".to_string()
+    } else if r >= 1e9 {
+        format!("{:.2}G", r / 1e9)
+    } else if r >= 1e6 {
+        format!("{:.2}M", r / 1e6)
+    } else if r >= 1e3 {
+        format!("{:.2}k", r / 1e3)
+    } else {
+        format!("{r:.0}")
+    }
+}
+
+/// the live-monitor "PROBLEM SETUP" sub-table rows (category, property, value).
+/// the single source of truth for run identification — it absorbs the parts of
+/// the old python rich summary a user actually watches: regime + eos, geometry
+/// + zone count, the numerical scheme, boundaries, and the resource estimate.
+fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
+    let n_zones: u64 = (0..cfg.dims).map(|ax| cfg.n_cells[ax] as u64).product();
+    let res = (0..cfg.dims)
+        .map(|ax| cfg.n_cells[ax].to_string())
+        .collect::<Vec<_>>()
+        .join(" x ");
+    // the run reports time in the natural unit. for code units (label "t") the
+    // suffix is dropped; otherwise the cadence + t_final read in that unit (the
+    // cadence is stored in natural units; t_final in code units -> /time_unit).
+    let unit = &cfg.time_unit_label;
+    let custom_unit = unit != "t" && cfg.time_unit != 1.0;
+    let suffix = if custom_unit { format!(" {unit}") } else { String::new() };
+    let cp = if cfg.checkpoint_interval > 0.0 {
+        format!("{:.4}{suffix}", cfg.checkpoint_interval)
+    } else {
+        "final only".to_string()
+    };
+    let t_final_disp = format!("{:.4}{suffix}", cfg.t_final / cfg.time_unit);
+    let mut rows = vec![
+        ["Regime".into(), "type".into(), cfg.regime.clone()],
+        ["Regime".into(), "eos".into(), eos_label(cfg)],
+        ["Geometry".into(), "coords".into(), cfg.coord_system.clone()],
+        ["Geometry".into(), "dimensions".into(), format!("{}D", cfg.dims)],
+        ["Geometry".into(), "resolution".into(), format!("{res}  ({n_zones} zones)")],
+        ["Geometry".into(), "boundaries".into(), boundary_label(cfg)],
+        ["Scheme".into(), "solver".into(), cfg.solver_name.clone()],
+        ["Scheme".into(), "reconstruction".into(), cfg.reconstruction_name.clone()],
+        ["Scheme".into(), "timestepping".into(), timestepping_label(cfg.timestepping)],
+        ["Scheme".into(), "cfl".into(), format!("{:.3}", cfg.cfl)],
+        ["Run".into(), "t_final".into(), t_final_disp],
+        ["Run".into(), "checkpoint dt".into(), cp],
+        ["Run".into(), "est. memory".into(), format!("{:.3} GB", est_memory_gb(cfg))],
+        ["Run".into(), "output".into(), cfg.data_dir.clone()],
+    ];
+    // document the time unit only when it is not plain code units.
+    if custom_unit {
+        rows.push(["Run".into(), "time unit".into(),
+            format!("1 {unit} = {:.4} code", cfg.time_unit)]);
+    }
+    rows
+}
+
+/// equation-of-state one-liner: ideal gas carries gamma; isothermal regimes
+/// carry the (global or position-dependent) sound speed instead.
+fn eos_label(cfg: &Config) -> String {
+    let isothermal = cfg.regime.contains("iso") || cfg.regime == "imhd";
+    if cfg.locally_isothermal {
+        "locally isothermal cs(x)".to_string()
+    } else if isothermal {
+        format!("isothermal (cs = {:.4})", cfg.cs)
+    } else {
+        format!("ideal gas (gamma = {:.4})", cfg.gamma)
+    }
+}
+
+/// per-axis boundary tags joined for display (e.g. "reflecting | outflow").
+fn boundary_label(cfg: &Config) -> String {
+    if cfg.boundaries.is_empty() {
+        "—".to_string()
+    } else {
+        cfg.boundaries
+            .iter()
+            .map(|b| format!("{b:?}").to_lowercase())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+}
+
+fn timestepping_label(ts: Timestepping) -> String {
+    match ts {
+        Timestepping::Euler => "euler (rk1)".to_string(),
+        Timestepping::Rk2 => "rk2".to_string(),
+        Timestepping::Rk3 => "rk3".to_string(),
+    }
+}
+
+/// the working-set memory estimate (GB), mirroring the python rich summary:
+/// (cons + prim + flux) buffers of `nvars` f64 per zone, plus the rk2 stage
+/// copy. mhd carries 9 vars (rho, v3, B3, e, chi); hydro carries dims + 3.
+fn est_memory_gb(cfg: &Config) -> f64 {
+    let n_zones: f64 = (0..cfg.dims).map(|ax| cfg.n_cells[ax] as f64).product();
+    let is_mhd = cfg.regime.contains("mhd");
+    let nvars = if is_mhd { 9.0 } else { cfg.dims as f64 + 3.0 };
+    let zbytes = 8.0 * nvars * n_zones;
+    let (ncons, nprims, nfluxes) = (1.0, 1.0, cfg.dims as f64);
+    let mut bytes = (ncons + nprims + nfluxes) * zbytes;
+    if matches!(cfg.timestepping, Timestepping::Rk2) {
+        bytes += 2.0 * ncons * zbytes;
+    }
+    bytes / 1024f64.powi(3)
+}
+
+/// the on-disk message log path: `<data_dir>simbi.log`. mirrors every posted
+/// message so a redirected/headless run keeps an auditable record.
+fn log_path(cfg: &Config) -> Option<String> {
+    if cfg.data_dir.is_empty() {
+        None
+    } else {
+        Some(format!("{}simbi.log", cfg.data_dir))
+    }
 }
 
 /// build `RefinementRegion<D>` boxes from the flat per-region [lo_0, hi_0, lo_1,
@@ -404,6 +829,83 @@ fn refinement_regions_nd<const D: usize>(
         });
     }
     Ok(out)
+}
+
+/// the effective slope-limiter theta passed to the substrate. PLM uses the
+/// config `plm_theta` (default 1.5, theta-MC limiter); PCM — i.e. first-order /
+/// `order=1` — maps to theta = 0, which collapses minmod3 to a zero slope, so
+/// the reconstruction degenerates to piecewise-constant. the substrate has no
+/// separate PCM kernel; this IS how first-order space is selected.
+fn build_theta(cfg: &Config) -> f64 {
+    if cfg.reconstruction_name == "pcm" {
+        0.0
+    } else {
+        cfg.plm_theta
+    }
+}
+
+/// build a typed `BodyCollection<f64, D>` from the parsed params. an ACCRETION
+/// body becomes a black-hole sink (gravity + accretion onto the body);
+/// otherwise it is a fixed-potential gravitating mass. `sink_delta` (the sink
+/// smoothing width) uses the example default of 1.0.
+fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D> {
+    const ACCRETION: u64 = 2;
+    let mut coll = BodyCollection::new();
+    for (idx, b) in params.iter().enumerate() {
+        let pos = Tensor::new(std::array::from_fn(|ax| b.position.get(ax).copied().unwrap_or(0.0)));
+        let vel = Tensor::new(std::array::from_fn(|ax| b.velocity.get(ax).copied().unwrap_or(0.0)));
+        let body = if b.capability & ACCRETION != 0 {
+            Body::black_hole(
+                idx, pos, vel, b.mass, b.radius, b.softening, b.sink_rate, 1.0, b.accretion_radius,
+            )
+        } else {
+            Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
+        };
+        coll = coll.add(body);
+    }
+    coll
+}
+
+/// append one diagnostics row PER BODY to a whitespace-separated table (with a
+/// `#`-commented header on first write): the instantaneous body state sampled at
+/// the diagnostic cadence — position, velocity, the gas reaction force + torque
+/// (the body-feedback accumulator's per-step consolidation), mass, and for
+/// black-hole sinks the cumulative accreted mass + instantaneous accretion rate.
+/// a plain table (not hdf5): diagnostics are a flat scalar time series, trivially
+/// loaded with `numpy.loadtxt`.
+fn append_diagnostics<const D: usize>(
+    path: &str,
+    time: f64,
+    bodies: &BodyCollection<f64, D>,
+) -> std::io::Result<()> {
+    use std::io::Write;
+    let fresh = !std::path::Path::new(path).exists();
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    if fresh {
+        writeln!(
+            f,
+            "# time body x y vx vy fx fy torque_z mass accreted_mass accretion_rate"
+        )?;
+    }
+    let comp = |t: &Tensor<f64, D>, ax: usize| if ax < D { t[ax] } else { 0.0 };
+    for bb in 0..bodies.len() {
+        let b = bodies.get(bb);
+        let (accreted, rate) = match b.kind {
+            BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
+                (total_accreted_mass, accretion_rate)
+            }
+            _ => (0.0, 0.0),
+        };
+        writeln!(
+            f,
+            "{time:.8e} {bb} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {accreted:.8e} {rate:.8e}",
+            comp(&b.position, 0), comp(&b.position, 1),
+            comp(&b.velocity, 0), comp(&b.velocity, 1),
+            comp(&b.force, 0), comp(&b.force, 1),
+            b.torque[2], b.mass,
+        )?;
+    }
+    Ok(())
 }
 
 /// the coarse->fine prolongation order: ONE above the interior reconstruction
@@ -499,11 +1001,19 @@ macro_rules! build_and_run_hydro {
             })
             .build();
 
-        let sub = sim.substrate().with_solver(cfg.solver)
+        // attach immersed bodies (gravity / accretion sinks) when the config
+        // declares any; body-free runs keep the original sim untouched.
+        let sim = if cfg.bodies.is_empty() {
+            sim
+        } else {
+            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+        };
+        let theta = build_theta(cfg);
+        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().with_solver(solver).expect("fine-level kernel set"));
+            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -586,11 +1096,19 @@ macro_rules! build_and_run_mhd {
             .seed_faces_indexed(&bufs[0..$d])
             .build();
 
-        let sub = sim.substrate().with_solver(cfg.solver)
+        // attach immersed bodies (gravity / accretion sinks) when the config
+        // declares any; body-free runs keep the original sim untouched.
+        let sim = if cfg.bodies.is_empty() {
+            sim
+        } else {
+            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+        };
+        let theta = build_theta(cfg);
+        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().with_solver(solver).expect("fine-level kernel set"));
+            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -638,11 +1156,19 @@ macro_rules! build_and_run_imhd {
             .seed_faces_indexed(&bufs[0..$d])
             .build();
 
-        let sub = sim.substrate().with_solver(cfg.solver)
+        // attach immersed bodies (gravity / accretion sinks) when the config
+        // declares any; body-free runs keep the original sim untouched.
+        let sim = if cfg.bodies.is_empty() {
+            sim
+        } else {
+            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+        };
+        let theta = build_theta(cfg);
+        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().with_solver(solver).expect("fine-level kernel set"));
+            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -741,8 +1267,15 @@ macro_rules! build_and_run_iso {
             })
             .build();
 
+        // attach immersed bodies (gravity / accretion sinks) when declared.
+        let sim = if cfg.bodies.is_empty() {
+            sim
+        } else {
+            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+        };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
-        let sub = sim.substrate();
+        let theta = build_theta(cfg);
+        let sub = sim.substrate().theta(theta);
 
         if cfg.locally_isothermal {
             // derive cs^2(x) = p(x)/rho(x) from the per-cell initial pressure, then HOLD it.
@@ -761,7 +1294,7 @@ macro_rules! build_and_run_iso {
             sub.compute_isothermal_cs2(&sim.fields.cons.den, &pre_ic, &interior);
         }
 
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s.substrate());
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s.substrate().theta(theta));
 
         // locally isothermal + refinement: the per-cell cs^2(x) "temperature"
         // lives in the iso kernel-set (not the SimState), so prolong it coarse ->
@@ -824,6 +1357,12 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             return Err("mesh motion is not wired for MHD (comoving-field convention pending)".to_string());
         }
     }
+    // immersed bodies attach to level 0; the AMR body sync (finest-owns-bodies)
+    // is not wired through the binding yet, so refined body runs are rejected.
+    if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+        return Err("immersed bodies are single-grid only in the binding \
+                    (AMR body sync not wired yet)".to_string());
+    }
     match cfg.regime.as_str() {
         "newtonian"  => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
         "srhd"       => hydro_dispatch!(cfg, prims, Srhd, Srhd),
@@ -852,6 +1391,75 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
         .with("checkpoint_interval", cfg.checkpoint_interval)
         .with("x1_spacing", cfg.x1_spacing.as_str())
         .with("initial_time", cfg.start_time)
+        .with("time_unit", cfg.time_unit)
+        .with("time_unit_label", cfg.time_unit_label.as_str())
+}
+
+/// the integer-digit width for the time portion of a checkpoint name, sized
+/// from `t_final / time_unit` so every file in a run shares the same width and
+/// a directory listing sorts chronologically. minimum 3 (the c++ default).
+fn checkpoint_time_width(cfg: &Config) -> usize {
+    let t_units = (cfg.t_final / cfg.time_unit).max(1.0);
+    let digits = t_units.log10().floor() as usize + 1;
+    digits.max(3)
+}
+
+/// the time portion of a checkpoint name: the sim time in the natural unit,
+/// decimal point rendered as an underscore (a comma stand-in), fixed 3-digit
+/// fraction. e.g. t/unit = 1.0 -> "001_000", 0.5 -> "000_500". carries on the
+/// .9995+ rounding edge so the fraction never reads "1000".
+fn format_sim_time(value: f64, int_width: usize) -> String {
+    let v = value.max(0.0);
+    let mut int_part = v.floor() as u64;
+    let mut frac = ((v - v.floor()) * 1000.0).round() as u64;
+    if frac >= 1000 {
+        int_part += 1;
+        frac -= 1000;
+    }
+    format!("{int_part:0int_width$}_{frac:03}")
+}
+
+/// the full checkpoint path: `<dir><zones>.chkpt.<tnow>[.<unit>].h5`. `tnow` is
+/// either a formatted time or a status word (interrupted / crashed). the unit
+/// segment is appended only for a non-default time unit, so ordinary runs keep
+/// the terse `<zones>.chkpt.<time>.h5` form (e.g. `262144.chkpt.000_500.h5`).
+fn checkpoint_name(cfg: &Config, tnow: &str) -> String {
+    let label = sanitize_unit_label(&cfg.time_unit_label);
+    let unit = if label.is_empty() || label == "t" {
+        String::new()
+    } else {
+        format!(".{label}")
+    };
+    format!("{}{}.chkpt.{tnow}{unit}.h5", cfg.data_dir, resolution_tag(cfg))
+}
+
+/// the per-axis resolution tag for a checkpoint name: the interior cell counts
+/// joined by `x` (the standard resolution notation, distinct from the `_`
+/// decimal in the time). e.g. 1d 100 -> "100", 2d 256x256 -> "256x256",
+/// 3d 64x64x64 -> "64x64x64".
+fn resolution_tag(cfg: &Config) -> String {
+    (0..cfg.dims)
+        .map(|ax| cfg.n_cells[ax].to_string())
+        .collect::<Vec<_>>()
+        .join("x")
+}
+
+/// make a user time-unit label safe as a filename segment: keep alphanumerics
+/// and underscores, drop everything else (so `t_bondi`, `tjet`, `t/ff`, `t dyn`
+/// all become valid path components). the RAW label is still used verbatim in
+/// the live display, messages, and checkpoint metadata.
+fn sanitize_unit_label(label: &str) -> String {
+    label.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect()
+}
+
+/// the natural-unit time string for a checkpoint message: "t = 1.0000" in code
+/// units, or "t = 0.5000 orbit" when a custom unit is set.
+fn fmt_time_msg(cfg: &Config, time: f64) -> String {
+    if cfg.time_unit_label == "t" || cfg.time_unit == 1.0 {
+        format!("t = {time:.4}")
+    } else {
+        format!("t = {:.4} {}", time / cfg.time_unit, cfg.time_unit_label)
+    }
 }
 
 // =============================================================================

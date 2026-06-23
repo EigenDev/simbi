@@ -166,6 +166,91 @@ impl<S: Scalar, const D: usize> PointMassGravity<S, D> {
     }
 }
 
+/// ONE immersed body's source contribution in **3D Cartesian** (coord-free),
+/// carrier-generic: softened gravity + Bondi-Hoyle accretion. this is the SINGLE
+/// source of truth for the body forcing — instantiated at `S = Gv` to build the
+/// fused kernel, at `S = f64` for the analytic reference test, and shared by the
+/// backward feedback. the physics is done in CARTESIAN (frame-independent); the
+/// composing layer supplies the cell's Cartesian position + gas velocity (via the
+/// metric's to_cartesian) and projects the Cartesian momentum source back onto the
+/// physical coordinate basis (vector_from_cartesian) — so it is correct in
+/// Cartesian, cylindrical, AND spherical. the per-body MAX_BODIES sum lives one
+/// layer up. future media (porous drag, deformable stress) extend THIS struct's
+/// methods, inheriting the frame handling + fused machinery for free.
+pub struct BodySource<S> {
+    /// gravitating mass (0 for an inactive body — a branch-free no-op).
+    pub mass: S,
+    /// body position (Cartesian, 3D embedding).
+    pub xm: [S; 3],
+    /// body velocity (Cartesian, 3D) — the sink frame.
+    pub vm: [S; 3],
+    /// Plummer softening length.
+    pub soft: S,
+    /// accretion radius (the Gaussian sink kernel scale).
+    pub racc: S,
+    /// sink rate cap (0 disables accretion).
+    pub sink: S,
+    /// angular-momentum retention of accreted gas (0 = radial sink, 1 = full).
+    pub delta: S,
+}
+
+impl<S: Scalar> BodySource<S> {
+    /// softened gravity accel `a = -mass (x-xm) / (|x-xm|^2 + soft^2)^{3/2}`
+    /// (Cartesian; identical form to `PointMassGravity`).
+    pub fn accel(&self, x: &[S; 3]) -> [S; 3] {
+        let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
+        let r_sq = dot(&dx, &dx) + self.soft * self.soft;
+        let inv_r3 = self.mass / (r_sq * r_sq.sqrt());
+        std::array::from_fn(|k| S::ZERO - inv_r3 * dx[k])
+    }
+
+    /// Bondi-Hoyle accretion rate `den_dot = rho * min(sink, 1/t_nat, 1/dt) * w(r)`,
+    /// `w = exp(-(r/(racc/2))^2)`, `t_nat = min(min_w/cs, sqrt(r^3/(2 mass)))`. reads
+    /// the LOCAL `rho` + `cs` — the state dependence the fused source must carry.
+    pub fn accretion_rate(&self, rho: S, cs: S, x: &[S; 3], min_w: S, inv_dt: S) -> S {
+        let tiny = S::from_f64(1e-30);
+        let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
+        let r_mag = dot(&dx, &dx).sqrt();
+        let r_norm = r_mag / (S::from_f64(0.5) * self.racc);
+        let weight = (S::ZERO - r_norm * r_norm).exp();
+        let sound_crossing = min_w / cs;
+        let t_ff = (r_mag * r_mag * r_mag / (S::from_f64(2.0) * self.mass + tiny)).sqrt();
+        let nat_rate = S::ONE / (sound_crossing.min(t_ff) + tiny);
+        let sr = self.sink.min(nat_rate).min(inv_dt);
+        rho * sr * weight
+    }
+
+    /// the sink velocity `v_star` (Cartesian): radial + `delta`*angular, in the body
+    /// frame. the accreted momentum sink is `-v_star * den_dot`.
+    pub fn sink_velocity(&self, vel: &[S; 3], x: &[S; 3]) -> [S; 3] {
+        let eps_r = S::from_f64(1e-24);
+        let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
+        let inv_safe = S::ONE / (dot(&dx, &dx) + eps_r).sqrt();
+        let rhat: [S; 3] = std::array::from_fn(|k| dx[k] * inv_safe);
+        let vrel: [S; 3] = std::array::from_fn(|k| vel[k] - self.vm[k]);
+        let vrad_comp = dot(&vrel, &rhat);
+        std::array::from_fn(|k| {
+            let vrad = vrad_comp * rhat[k];
+            let vang = vrel[k] - vrad;
+            vrad + self.delta * vang + self.vm[k]
+        })
+    }
+
+    /// the Cartesian momentum source `S = rho*a - v_star*den_dot` (gravity + sink).
+    /// the composer projects this onto the physical coordinate basis.
+    pub fn momentum_cartesian(&self, rho: S, vel: &[S; 3], x: &[S; 3], cs: S, min_w: S, inv_dt: S) -> [S; 3] {
+        let a = self.accel(x);
+        let den_dot = self.accretion_rate(rho, cs, x, min_w, inv_dt);
+        let vstar = self.sink_velocity(vel, x);
+        std::array::from_fn(|k| rho * a[k] - vstar[k] * den_dot)
+    }
+
+    /// the density source `S_den = -den_dot` (mass removed by accretion).
+    pub fn density(&self, rho: S, cs: S, x: &[S; 3], min_w: S, inv_dt: S) -> S {
+        S::ZERO - self.accretion_rate(rho, cs, x, min_w, inv_dt)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,6 +305,53 @@ mod tests {
         for k in 0..2 {
             assert!(a[k].is_finite() && a[k] == 0.0, "a_{k} at the mass must be finite (0): {}", a[k]);
         }
+    }
+
+    #[test]
+    fn body_source_f64_matches_immersed_spec() {
+        // at S=f64 BodySource IS the analytic reference (the same spec the
+        // gv_immersed kernel + immersed_iso test validate): softened gravity +
+        // Bondi accretion + sink-velocity momentum loss. Cartesian 3D (z=0 plane).
+        let b = BodySource::<f64> {
+            mass: 1.2, xm: [0.1, -0.2, 0.0], vm: [0.0, 0.0, 0.0],
+            soft: 0.1, racc: 0.6, sink: 5.0, delta: 0.3,
+        };
+        let (rho, cs) = (1.5_f64, 0.5_f64);
+        let vel = [0.4 / 1.5_f64, -0.3 / 1.5, 0.0];
+        let x = [0.37_f64, 0.31, 0.0];
+        let (min_w, inv_dt) = (0.18_f64, 1.0 / 0.01);
+
+        let dx = [x[0] - b.xm[0], x[1] - b.xm[1], 0.0];
+        let r_sq = dx[0] * dx[0] + dx[1] * dx[1] + b.soft * b.soft;
+        let inv_r3 = b.mass / (r_sq * r_sq.sqrt());
+        let g = [-inv_r3 * dx[0], -inv_r3 * dx[1]];
+
+        let r_mag = (dx[0] * dx[0] + dx[1] * dx[1]).sqrt();
+        let weight = (-(r_mag / (0.5 * b.racc)).powi(2)).exp();
+        let t_ff = (r_mag.powi(3) / (2.0 * b.mass + 1e-30)).sqrt();
+        let nat = 1.0 / ((min_w / cs).min(t_ff) + 1e-30);
+        let den_dot = rho * b.sink.min(nat).min(inv_dt) * weight;
+
+        let inv_safe = 1.0 / (r_mag * r_mag + 1e-24).sqrt();
+        let rhat = [dx[0] * inv_safe, dx[1] * inv_safe];
+        let vrad_c = vel[0] * rhat[0] + vel[1] * rhat[1];
+        let vstar: Vec<f64> = (0..2)
+            .map(|k| {
+                let vrad = vrad_c * rhat[k];
+                vrad + b.delta * (vel[k] - vrad)
+            })
+            .collect();
+
+        let mom = b.momentum_cartesian(rho, &vel, &x, cs, min_w, inv_dt);
+        for k in 0..2 {
+            let want = rho * g[k] - vstar[k] * den_dot;
+            assert!((mom[k] - want).abs() < 1e-12, "S_mom_{k}: {} vs {want}", mom[k]);
+        }
+        assert!((b.density(rho, cs, &x, min_w, inv_dt) - (-den_dot)).abs() < 1e-12, "S_den");
+        // an inactive body (mass=0, sink=0) contributes exactly nothing.
+        let off = BodySource::<f64> { mass: 0.0, sink: 0.0, ..b };
+        let m0 = off.momentum_cartesian(rho, &vel, &x, cs, min_w, inv_dt);
+        assert!(m0[0] == 0.0 && m0[1] == 0.0 && off.density(rho, cs, &x, min_w, inv_dt) == 0.0);
     }
 
     #[test]

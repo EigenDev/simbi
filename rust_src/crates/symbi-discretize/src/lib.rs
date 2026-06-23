@@ -34,7 +34,9 @@ pub use coords::{Coords, Spacing};
 // 2026-05-30; symbi-core was folded in). re-export them so the builder return
 // types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use symbi_ir::{Gv, GvKernel};
-pub use gv_immersed::{body_feedback_gv, body_source_gv};
+pub use gv_immersed::{
+    body_feedback_gv, body_feedback_iso_gv, body_source_built, body_source_gv, body_source_iso_gv,
+};
 pub use gv::{
     adiabatic_c2p_gv, adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, adiabatic_hllc_flux_gv,
     geometric_momentum_source_probe_gv,

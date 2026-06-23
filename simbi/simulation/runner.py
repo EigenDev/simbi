@@ -51,6 +51,9 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     # get all model fields
     model_dict = problem.model_dump()
 
+    # the problem's class name — shown in the rust run dashboard header.
+    model_dict["name"] = type(problem).__name__
+
     # ensure data_directory is string with trailing slash
     data_dir = model_dict.get("data_directory", "data/")
     if isinstance(data_dir, Path):
@@ -344,8 +347,11 @@ def run(
             print(f"  {key}: {value}")
         return
 
-    # print simulation info
-    _print_simulation_info(exec_dict, gpu_blocks)
+    # forward gpu block dims for the (future) gpu backend; the run dashboard —
+    # problem setup, live benchmarks, progress, messages — is rendered by the
+    # rust backend (symbi_display::Table), so no python-side summary is printed.
+    if gpu_blocks is not None:
+        exec_dict["gpu_block_dims"] = tuple(gpu_blocks)
 
     # get fresh iterators
     prim_iterator = _get_primitive_iterator(problem)
@@ -421,34 +427,3 @@ def _validate_generator(
         return f"generator exhausted after {num_samples} samples"
     except Exception as e:
         return f"unexpected error: {e}"
-
-
-def _print_simulation_info(
-    exec_dict: dict[str, Any],
-    gpu_blocks: Optional[tuple[int, int, int]] = None,
-) -> None:
-    """print simulation parameters."""
-    # defer to existing print function if available
-    try:
-        from simbi.functional.helpers import print_progress
-        from simbi.reader.rich_summary import print_rich_simulation_parameters
-
-        params = exec_dict
-        params["gpu_block_dims"] = gpu_blocks
-        print_rich_simulation_parameters(params)
-        print_progress()  # articificial progress bar for startup
-    except ImportError:
-        # fallback to simple print
-        print("=" * 60)
-        print("simulation parameters:")
-        print("=" * 60)
-        for key in [
-            "resolution",
-            "regime",
-            "coord_system",
-            "end_time",
-            "cfl_number",
-        ]:
-            if key in exec_dict:
-                print(f"  {key}: {exec_dict[key]}")
-        print("=" * 60)
