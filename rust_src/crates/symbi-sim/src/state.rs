@@ -505,16 +505,18 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         let bcell_n = BcellFields { b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? };
 
         // face-centered B: one extra in normal direction; for MHD the CT
-        // stencil also needs ±1 transverse halo so bface→bcell interpolation
-        // and curl-of-E can address neighbour faces along transverse axes.
-        // mirrors cpp_src/ecs/creation/checkpoint_reader.hpp::compute_face_domains
-        // (R == MHD || RMHD branch).
+        // stencil needs a TRANSVERSE halo. ±2 (not ±1): the faithful UCT edge EMF
+        // (Mignone & Del Zanna) PLM-reconstructs the staggered transverse field to
+        // the edge, whose minmod slope reaches the second transverse neighbour. ±1
+        // suffices for bface→bcell + curl-of-E (which read 1 neighbour); the extra
+        // layer is filled by the same owned→alloc ghost-fill driver and is harmless
+        // to the narrower readers. on-disk checkpoint is interior-only, unaffected.
         let mut bface_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         for dd in 0..D {
             let mut face_dom = interior.extend(dd, 0, 1);
             for tt in 0..D {
                 if tt != dd {
-                    face_dom = face_dom.extend(tt, -1, 1);
+                    face_dom = face_dom.extend(tt, -2, 2);
                 }
             }
             bface_vec.push(Field::zeros(&face_dom)?);

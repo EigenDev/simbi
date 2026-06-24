@@ -3017,13 +3017,43 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec
     let eps = Gv::from_f64(1.0e-30);
     let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
     let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
-    // staggered face B at the edge: B_y on the East/West y-faces, B_x on the North/South x-faces.
-    let by_e = gv_field_at("edge_bface_b", "bface_b", ndim, &zero);
-    let by_w = gv_field_at("edge_bface_b", "bface_b", ndim, &cm(&[g1]));
-    let bx_n = gv_field_at("edge_bface_a", "bface_a", ndim, &zero);
-    let bx_s = gv_field_at("edge_bface_a", "bface_a", ndim, &cm(&[g2]));
+    // staggered face B PLM-reconstructed a half-cell to the EDGE (M&DZ: the staggered transverse
+    // field reconstructed from the adjacent interface — the load-bearing 2nd-order piece). geometry
+    // VERIFIED vs the CT curl: Ez[i,j] is the corner (i-1/2,j-1/2); B_y is at the corner's y but
+    // offset +-1/2 in x (recon along x = its transverse), B_x at the corner's x offset +-1/2 in y.
+    // one-sided minmod-theta extrapolation: +1/2 toward the edge from the lower face, -1/2 from the
+    // upper. needs the 2nd transverse neighbour -> bface allocated with +-2 transverse halo.
+    let theta = Gv::scalar("theta");
+    let recon = |key: &str, rt: &str, base: &[i32], axis: usize, sign: f64| -> Gv {
+        let off = |d: i32| -> Vec<i32> { let mut o = base.to_vec(); o[axis] += d; o };
+        let q0 = gv_field_at(key, rt, ndim, base);
+        let qm = gv_field_at(key, rt, ndim, &off(-1));
+        let qp = gv_field_at(key, rt, ndim, &off(1));
+        let slope = minmod3((q0 - qm) * theta, half * (qp - qm), (qp - q0) * theta);
+        q0 + Gv::from_f64(0.5 * sign) * slope
+    };
+    let by_e = recon("edge_bface_b", "bface_b", &zero, g1, -1.0); // B_y[i,j],   recon -1/2 in x
+    let by_w = recon("edge_bface_b", "bface_b", &cm(&[g1]), g1, 1.0); // B_y[i-1,j], recon +1/2 in x
+    let bx_n = recon("edge_bface_a", "bface_a", &zero, g2, -1.0); // B_x[i,j],   recon -1/2 in y
+    let bx_s = recon("edge_bface_a", "bface_a", &cm(&[g2]), g2, 1.0); // B_x[i,j-1], recon +1/2 in y
     let emf = uct_master_emf(&cx, &cy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s);
     (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+/// PLM-reconstruct a staggered face field a half-cell to the EDGE (M&DZ: the staggered transverse
+/// field reconstructed from the adjacent interface — the 2nd-order piece that preserves smooth fields,
+/// VERIFIED on the field-loop test). `base` the face offset; `axis` the reconstruction direction (the
+/// face's TRANSVERSE: x for B_y on y-faces, y for B_x on x-faces); `sign` = +1 reconstructs +1/2
+/// toward the edge from the lower face, -1 reconstructs -1/2 from the upper. minmod-theta slope;
+/// needs the 2nd transverse neighbour, hence bface's +-2 transverse halo.
+fn recon_face_to_edge(ndim: usize, theta: Gv, key: &str, rt: &str, base: &[i32], axis: usize, sign: f64) -> Gv {
+    let half = Gv::from_f64(0.5);
+    let off = |d: i32| -> Vec<i32> { let mut o = base.to_vec(); o[axis] += d; o };
+    let q0 = gv_field_at(key, rt, ndim, base);
+    let qm = gv_field_at(key, rt, ndim, &off(-1));
+    let qp = gv_field_at(key, rt, ndim, &off(1));
+    let slope = minmod3((q0 - qm) * theta, half * (qp - qm), (qp - q0) * theta);
+    q0 + Gv::from_f64(0.5 * sign) * slope
 }
 
 /// the master-formula edge EMF combination (Eq. 33), shared by every UCT coefficient family. given
@@ -3172,10 +3202,12 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     let vy_n = avg2(vp2(&nw), vp2(&ne));
     let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
     let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
-    let by_e = gv_field_at("e_bface_b", "bface_b", ndim, &zero);
-    let by_w = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
-    let bx_n = gv_field_at("e_bface_a", "bface_a", ndim, &zero);
-    let bx_s = gv_field_at("e_bface_a", "bface_a", ndim, &se);
+    // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction).
+    let theta = Gv::scalar("theta");
+    let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
+    let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
+    let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
+    let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
     let emf = uct_master_emf(&cx, &cy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s);
     (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
 }
@@ -3285,11 +3317,13 @@ pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         let dr = half * (vsr - vstar) * chitr + half * (lrr.abs() - vstar * lrr);
         (half * (one + vstar), dl, dr)
     };
-    // staggered face B at the edge (also the master diffusion jumps): x-faces = bface_a, y = bface_b.
-    let bx_n = gv_field_at("e_bface_a", "bface_a", ndim, &zero);
-    let bx_s = gv_field_at("e_bface_a", "bface_a", ndim, &se);
-    let by_w = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
-    let by_e = gv_field_at("e_bface_b", "bface_b", ndim, &zero);
+    // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction);
+    // x-faces (bface_a, recon in y), y-faces (bface_b, recon in x). also the master diffusion jumps.
+    let theta = Gv::scalar("theta");
+    let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
+    let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
+    let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
+    let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
     // x-faces (normal p1): North NW->NE, South SW->SE.
     let (aln, dln, drn) = hlld_face(&nw, &ne, &vp1, &bp1, bx_n, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
     let (als, dls, drs) = hlld_face(&sw, &se, &vp1, &bp1, bx_s, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
@@ -3373,11 +3407,12 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         b[t_idx] = bt;
         MhdPrim::<Gv, 3> { hydro: Prim { rho, vel: Tensor::new(v), pre }, mag: Tensor::new(b) }
     };
-    // staggered face B at the edge: B_y on the East/West y-faces, B_x on the North/South x-faces.
-    let bx_n = gv_field_at("e_bface_a", "bface_a", ndim, &zero);
-    let bx_s = gv_field_at("e_bface_a", "bface_a", ndim, &se);
-    let by_w = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
-    let by_e = gv_field_at("e_bface_b", "bface_b", ndim, &zero);
+    // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction).
+    let theta = Gv::scalar("theta");
+    let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
+    let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
+    let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
+    let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
     // edge normal fields (the single div-free B threading the edge in each direction).
     let bx_edge = avg2(bx_n, bx_s);
     let by_edge = avg2(by_w, by_e);
