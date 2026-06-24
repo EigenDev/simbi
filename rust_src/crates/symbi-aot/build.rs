@@ -41,7 +41,7 @@ use symbi_discretize::{
     nmhd_wave_speed_map_gv,
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
     rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv,
-    rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv,
+    rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     snapshot_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing,
 };
@@ -805,6 +805,11 @@ fn gen_nmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2
     emit_gv(out_dir, &format!("nmhd_edge_emf_uct_hlld_{ndim}d_{name_k}"), ndim, &k, &writes);
 }
 
+fn gen_rmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
+    let (k, writes) = rmhd_edge_emf_uct_hlld_gv(ndim as usize, g1, g2);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld_{ndim}d_{name_k}"), ndim, &k, &writes);
+}
+
 // the RMHD CFL wave-speed map (3D): per-cell max over axes of the quartic
 // max(|lambda_-|,|lambda_+|). host folds max + cfl_from_smax.
 fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
@@ -1451,6 +1456,8 @@ fn main() {
         gen_nmhd_edge_emf_uct_hllc(&out_dir, 2, 2, 0, 1);
         // UCT-HLLD (classical ideal-gas, five-wave fan); geometry-agnostic.
         gen_nmhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
+        // UCT-HLLD (relativistic, MUB09 fan via hlld_rmhd_states); geometry-agnostic.
+        gen_rmhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
         // device RK2 efield save/avg + the bcell^n snapshot copy on a 2D field need the 2d
         // index ABI (the 3d copy kernel OOBs on a 2d field — CUDA_ERROR_LAUNCH_FAILED).
         gen_rmhd_save_efield(&out_dir, 2);

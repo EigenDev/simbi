@@ -172,6 +172,93 @@ whenever `|lambda^{sR} - lambda^{sL}| <= eps |lambda^R - lambda^L|`, eps = 1e-9.
 least diffusive: the Alfvén speeds bound the transverse-field diffusion, far
 below the fast speed.
 
+### 3.5 RMHD HLLD — the BOUNDED DISSIPATIVE-FLUX form (derived 2026-06-24)
+
+**Why the classical coefficients can't be ported.** the classical `d^s` (Eq. 44)
+contains `chi~^s = (lambda^{ss}-lambda^s) chi^s`, with `chi^s = (B_t^{ss}-B_t^s)/B_t^s`
+the FRACTIONAL transverse-field jump. classically this is SPEED-ONLY because the
+single-star transverse field is a SCALAR multiple of the upstream:
+```
+classical:   B_t^s* = B_t^s · f(speeds, rho)      ->   chi^s = f - 1   (B_t cancels; finite)
+```
+relativistically it is NOT. expanding MUB09 Eq. (21) with the wave-bracket
+`R_{By} = lambda B_y - F_{By} = B_y(lambda - v_x) + v_y B^x`:
+```
+relativistic:  B_y^s* = B_y^s  +  B^x (v_y^s - v_y^{s*}) / (lambda^s - v_x^{s*})
+                              \________ additive; does NOT scale with B_y ________/
+->  chi^s = B^x (v_y^s - v_y^{s*}) / [ B_y^s (lambda^s - v_x^{s*}) ]
+```
+the magnetic-velocity coupling `B^x (v_y - v_y*)` (the Lorentz-factor remnant; it
+vanishes in MUB09's non-rel limit Section 3.4.2, and at `B^x=0`) breaks the
+cancellation: as `B_y^s -> 0` the numerator stays finite (it is `prop B^x`, nonzero
+exactly where HLLD beats HLL), so `chi^s -> infinity`. the coefficient `d^s` is
+GENUINELY SINGULAR at every transverse-field zero (OT current sheets, the wind
+equator). a closed form for `d^s` would need a B_FLOOR regularization — masking,
+not robustness. **the singularity is in the RATIO, and the EMF never needs the
+ratio.**
+
+**The fix: the WAVE-SUM dissipative flux (M&DZ Eq. 39), not the coefficient form.**
+the `d^s` COEFFICIENT form (Eq. 44) bakes in `chi~^s` as the VELOCITY closed-form
+(Eq. 42) — derived from the CLASSICAL Miyoshi-Kusano jump conditions, NOT valid
+relativistically. substituting a relativistic B-ratio `chi` into Eq. 44 does NOT
+reproduce the RMHD flux (VERIFIED: telescoping test gave F_hat=1.03 vs 0.144). the
+ROBUST, relativistically-EXACT object is the wave-sum form, M&DZ Eq. 39 — the HLLD
+flux written as central minus the per-wave dissipation over the ACTUAL star fields:
+```
+F^[By]  =  (1/2)[ F^L + F^R
+                  - |lambda^L|  (B_y^{sL} - B_y^L)
+                  - |lambda^{sL}|(B_c^y    - B_y^{sL})
+                  - |lambda^{sR}|(B_y^{sR} - B_c^y)
+                  - |lambda^R|  (B_y^R    - B_y^{sR}) ]
+   F^s = v_x^s B_y^s - v_y^s B^x   (per-side induction flux)
+```
+`B_y^{sL},B_y^{sR}` = single-star fields (MUB09 Eq. 21, `hlld_rmhd_states.bstar`);
+`B_c^y` = double-star == contact field (MUB09 Eq. 45, `hlld_rmhd_states.bc`);
+`lambda^{L,R}` fast (`lam`), `lambda^{sL,sR}` Alfvén (`alf`). this is BOUNDED (all
+FIELD DIFFERENCES weighted by `|speed|`; no ratio, no `1/B_y`), and the wave-fan
+telescoping identity `F = (1/2)(F^L+F^R) - (1/2)sum|lambda_k| dU_k` makes it the
+EXACT Godunov flux for ANY consistent fan. the dissipative part is just
+`Phi^[By] = (1/2)(F^L+F^R) - F^[By] = (1/2) sum_k |lambda_k| (dB_y)_k` (M&DZ Eq. 18).
+
+**Three checks (the gate before any rebuild):**
+
+1. **finite as `B_y -> 0`** ✓ — `Phi` is `sum |lambda_k| (B_y star-field jumps)`; every
+   term is a bounded field difference. no ratio anywhere.
+
+2. **exact HLLD flux** ✓ — the telescoping identity holds for any consistent wave fan,
+   so `F^[By]` (Eq. 39) IS the HLLD flux by construction (not an approximation).
+
+3. **grid-aligned reduction** ✓ VERIFIED (test `hlld_rmhd_uct_telescopes_to_flux`):
+   `F^[By]` (Eq. 39, from `bstar` + `bc`) == `hlld_rmhd().mag[1]` to MACHINE PRECISION
+   (diff 0.0e0). the contact identity `hlld_rmhd.mag[1] == lambda* B_c^y - v_c^y B^x`
+   also holds to 1e-10 (test `hlld_rmhd_emf_reduces_to_by_flux`). the star-field
+   extraction (`bstar`, `bc`, `vc`) is fully validated.
+
+**2D edge EMF (the implementation target).** in 1D the EMF is `E_z = -F^[By]`. for the
+2D corner, follow the UCT framework (M&DZ Eq. 23-24, the CT-Flux composition): the
+dissipative flux `Phi` is BOUNDED, reconstruct it to the edge and add to the centered
+advective:
+```
+E_z = -[centered advective]  +  (1/2)(Phi_x^N + Phi_x^S)  -  (1/2)(Phi_y^W + Phi_y^E)
+```
+where each face `Phi` is the Eq.-39 wave-sum dissipation computed from `hlld_rmhd_states`
+called with the STAGGERED transverse face fields as the Riemann L/R (so `Phi` damps the
+staggered checkerboard, M&DZ point 1-2 p.8) + the cell velocities/rho/pre. reduces to
+`-F^[By]` in 1D; less diffusive than HLL because the Alfven waves split the jump;
+bounded by construction. div(B)=0 preserved (single-valued edge EMF).
+
+**Why this is robust, not a hack:** `Phi` is the EXACT HLLD numerical dissipation (Eq.
+39 verified == the solver flux). no coefficient back-calculation, no `1/B_y`, no floor,
+no clamp. the only modelling choice is the standard UCT one: use the STAGGERED transverse
+field in the EMF Riemann (a CT-consistency requirement, not an approximation).
+
+**Implementation delta** (one rebuild): `hlld_rmhd_states` now returns `bc, vc` [DONE].
+rewrite `rmhd_edge_emf_uct_hlld_gv`: per face, call `hlld_rmhd_states` with staggered
+transverse B as L/R, form `Phi` (Eq. 39 wave-sum), compose per the 2D formula above.
+DROP the entire `side_d`/`d^s`/B-ratio/d-clamp/straddle/FORCE_HLL scaffolding — the
+wave-sum is bounded and correct by construction. gate `Phi` on `success` (HLL `Phi`
+where the secant fails).
+
 ## 4. REGIME NOTES (what works where)
 
 - **HLL is regime-generic** — only the two fast speeds; identical for NMHD / IMHD

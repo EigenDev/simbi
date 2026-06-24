@@ -25,7 +25,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
 use symbi_hydro::isothermal_mhd::{imhd_recover, IsothermalMhd};
 use symbi_hydro::regime::Regime;
-use symbi_hydro::riemann::{hlle, hlle_with_speeds, hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_newtonian, hlld_isothermal};
+use symbi_hydro::riemann::{hlle, hlle_with_speeds, hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_rmhd_states, HlldStates, hlld_newtonian, hlld_isothermal};
 use symbi_hydro::ShockwaveLimiter;
 use symbi_hydro::rmhd::{rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities, Rmhd};
 use symbi_hydro::srhd::{srhd_recover, Srhd};
@@ -3239,22 +3239,6 @@ pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     let nw = cm(&[g1]);
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
-    let max4 = |key: &str, path: &str| -> Gv {
-        gv_field_at(key, path, ndim, &ne)
-            .max(gv_field_at(key, path, ndim, &nw))
-            .max(gv_field_at(key, path, ndim, &se))
-            .max(gv_field_at(key, path, ndim, &sw))
-    };
-    let neg_min4 = |key: &str, path: &str| -> Gv {
-        (zero_g - gv_field_at(key, path, ndim, &ne))
-            .max(zero_g - gv_field_at(key, path, ndim, &nw))
-            .max(zero_g - gv_field_at(key, path, ndim, &se))
-            .max(zero_g - gv_field_at(key, path, ndim, &sw))
-    };
-    let apx = zero_g.max(max4("e_wsr1", "wsr_p1"));
-    let amx = zero_g.max(neg_min4("e_wsl1", "wsl_p1"));
-    let apy = zero_g.max(max4("e_wsr2", "wsr_p2"));
-    let amy = zero_g.max(neg_min4("e_wsl2", "wsl_p2"));
     // per-FACE HLLD coefficients -> (a^L, d^L, d^R). `bn_face` is the STAGGERED div-free normal B at
     // this face (continuous across the fan); `vn`/`bnc` read the normal velocity / normal CELL-B.
     let hlld_face = |l: &[i32], r: &[i32], vn: &dyn Fn(&[i32]) -> Gv, bnc: &dyn Fn(&[i32]) -> Gv,
@@ -3318,6 +3302,118 @@ pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     let vy_s = avg2(vp2(&sw), vp2(&se));
     let vy_n = avg2(vp2(&nw), vp2(&ne));
     let emf = uct_master_emf_perside(&cx, &cy, vx_e, vx_w, vy_n, vy_s, by_e, by_w, bx_n, bx_s);
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+/// the RELATIVISTIC UCT-HLLD edge EMF (RMHD). built from the WAVE-SUM dissipative flux (Mignone &
+/// Del Zanna 2020 Eq. 39 + MUB09 star states), NOT the classical coefficient form (Eq. 44) — that
+/// bakes in a CLASSICAL velocity-chi that is invalid relativistically and was VERIFIED wrong
+/// (telescoping test, 2026-06-24). derivation + paper proof in `literature/uct_algorithm.md` 3.5.
+///
+/// the EMF is the centered advection minus the per-direction dissipative flux Phi:
+/// ```text
+///   E_z = -1/2 (v_x^E B_y^E + v_x^W B_y^W) + 1/2 (v_y^N B_x^N + v_y^S B_x^S) + Phi_x - Phi_y
+/// ```
+/// where Phi is the EXACT HLLD induction-flux dissipation over the ACTUAL star fields (M&DZ Eq. 39):
+/// ```text
+///   Phi = 1/2 [ |lambda^L|(B_t^{sL}-B_t^L) + |lambda^{sL}|(B_c-B_t^{sL})
+///             + |lambda^{sR}|(B_t^{sR}-B_c) + |lambda^R|(B_t^R-B_t^{sR}) ]
+/// ```
+/// `B_t^{sL,sR}` single-star (`hlld_rmhd_states.bstar`), `B_c` contact (`.bc`); `lambda` fast (`lam`),
+/// `lambda^{s}` Alfven (`alf`). BOUNDED by construction (field differences times |speed| — no ratio,
+/// no 1/B_t, no floor, no clamp). reduces EXACTLY to `-F_hlld_rmhd[B_t]` in 1D (verified to machine
+/// precision). the STAGGERED transverse face fields are the Riemann L/R (CT consistency, M&DZ p.8) so
+/// Phi damps the staggered checkerboard; cell velocities/rho/pre are the 2-cell edge average. gated on
+/// `success`: where the secant fails, Phi -> the finite HLL dissipation (the lam are always finite).
+pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    gv_register_field("e_rho", "rho");
+    gv_register_field("e_vp1", "vel_p1");
+    gv_register_field("e_vp2", "vel_p2");
+    gv_register_field("e_vout", "vel_out");
+    gv_register_field("e_pre", "pre");
+    gv_register_field("e_bp1", "bcell_p1");
+    gv_register_field("e_bp2", "bcell_p2");
+    gv_register_field("e_bout", "bcell_out");
+    gv_register_field("e_bface_a", "bface_a");
+    gv_register_field("e_bface_b", "bface_b");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let eps = Gv::from_f64(1.0e-30);
+    let zero_g = Gv::ZERO;
+    let gamma = Gv::scalar("gamma");
+    let eos = IdealGas { gamma };
+    let avg2 = |a: Gv, b: Gv| (a + b) * half;
+    let ne = zero.clone();
+    let nw = cm(&[g1]);
+    let se = cm(&[g2]);
+    let sw = cm(&[g1, g2]);
+    // 2-cell-averaged RMHD prim straddling the edge, LOCAL (p1, p2, out) RH basis. the face-NORMAL
+    // and the dissipated TRANSVERSE B are both OVERRIDDEN with the staggered div-free face values
+    // (the Riemann assumes constant B_n; the transverse is the staggered face that gets dissipated).
+    let prim_avg = |o1: &[i32], o2: &[i32], n_idx: usize, bn: Gv, t_idx: usize, bt: Gv| -> MhdPrim<Gv, 3> {
+        let avg = |key: &str, path: &str| (gv_field_at(key, path, ndim, o1) + gv_field_at(key, path, ndim, o2)) * half;
+        let rho = avg("e_rho", "rho");
+        let pre = avg("e_pre", "pre");
+        let v = [avg("e_vp1", "vel_p1"), avg("e_vp2", "vel_p2"), avg("e_vout", "vel_out")];
+        let mut b = [avg("e_bp1", "bcell_p1"), avg("e_bp2", "bcell_p2"), avg("e_bout", "bcell_out")];
+        b[n_idx] = bn;
+        b[t_idx] = bt;
+        MhdPrim::<Gv, 3> { hydro: Prim { rho, vel: Tensor::new(v), pre }, mag: Tensor::new(b) }
+    };
+    // staggered face B at the edge: B_y on the East/West y-faces, B_x on the North/South x-faces.
+    let bx_n = gv_field_at("e_bface_a", "bface_a", ndim, &zero);
+    let bx_s = gv_field_at("e_bface_a", "bface_a", ndim, &se);
+    let by_w = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
+    let by_e = gv_field_at("e_bface_b", "bface_b", ndim, &zero);
+    // edge normal fields (the single div-free B threading the edge in each direction).
+    let bx_edge = avg2(bx_n, bx_s);
+    let by_edge = avg2(by_w, by_e);
+    // the wave-sum dissipative flux Phi (M&DZ Eq. 39) for a Riemann whose transverse component is `t`,
+    // with staggered endpoints `bt_l`,`bt_r` and the single-/double-star fields from `st`. gated on
+    // `success` -> HLL dissipation (NaN-safe true select; the HLL branch uses only the finite lam).
+    let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv| -> Gv {
+        let phi_hlld = half
+            * (st.lam[0].abs() * (st.bstar[0][t] - bt_l)
+                + st.alf[0].abs() * (st.bc[t] - st.bstar[0][t])
+                + st.alf[1].abs() * (st.bstar[1][t] - st.bc[t])
+                + st.lam[1].abs() * (bt_r - st.bstar[1][t]));
+        let ap = zero_g.max(st.lam[1]);
+        let am = zero_g.max(zero_g - st.lam[0]);
+        let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
+        Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
+    };
+    // x-Riemann (normal p1=0, dissipate B_y=component 1): West (NW,SW) vs East (NE,SE), staggered
+    // transverse B_y = by_w / by_e, normal B_x = bx_edge.
+    let x_l = prim_avg(&nw, &sw, 0, bx_edge, 1, by_w);
+    let x_r = prim_avg(&ne, &se, 0, bx_edge, 1, by_e);
+    let st_x = hlld_rmhd_states(&Rmhd, &eos, &x_l, &x_r, &Tensor::<Gv, 3>::unit(0));
+    let phi_x = wave_sum(&st_x, 1, by_w, by_e);
+    // y-Riemann (normal p2=1, dissipate B_x=component 0): South (SE,SW) vs North (NE,NW), staggered
+    // transverse B_x = bx_s / bx_n, normal B_y = by_edge.
+    let y_l = prim_avg(&se, &sw, 1, by_edge, 0, bx_s);
+    let y_r = prim_avg(&ne, &nw, 1, by_edge, 0, bx_n);
+    let st_y = hlld_rmhd_states(&Rmhd, &eos, &y_l, &y_r, &Tensor::<Gv, 3>::unit(1));
+    let phi_y = wave_sum(&st_y, 0, bx_s, bx_n);
+    // centered advective velocities (2-cell averages straddling the edge).
+    let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
+    let vx_w = avg2(vp1(&nw), vp1(&sw));
+    let vx_e = avg2(vp1(&ne), vp1(&se));
+    let vy_s = avg2(vp2(&sw), vp2(&se));
+    let vy_n = avg2(vp2(&nw), vp2(&ne));
+    // E_z = -1/2(v_x^E B_y^E + v_x^W B_y^W) + 1/2(v_y^N B_x^N + v_y^S B_x^S) + Phi_x - Phi_y.
+    let emf = zero_g - half * (vx_e * by_e + vx_w * by_w)
+        + half * (vy_n * bx_n + vy_s * bx_s)
+        + phi_x
+        - phi_y;
     (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
 }
 

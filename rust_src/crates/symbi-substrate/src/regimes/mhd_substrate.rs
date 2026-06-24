@@ -522,10 +522,20 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     ct_method: CtMethod,
     solver: Solver,
     prefix: &str,
+    gamma: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    // the RMHD UCT-HLLD edge EMF calls the relativistic Riemann fan in-kernel, so it declares the
+    // EOS scalar (gamma); every other edge-EMF kernel has an empty scalar manifest. resolve BY
+    // MANIFEST so the same call serves both — `scalars_for` returns [] when no scalar is declared.
+    let scalar = |bind: &ScalarBind| -> Sc {
+        match bind {
+            ScalarBind::Ref(ScalarRef::Gamma | ScalarRef::Cs) => Sc::from_f64(gamma),
+            o => panic!("mhd efield: unexpected scalar {o:?}"),
+        }
+    };
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
     let axes = sim.geom.axes;
 
@@ -546,6 +556,8 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             // EMF (which IS the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
             CtMethod::Uct => match (solver, prefix) {
                 (Solver::Hlld, "nmhd") => format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
+                // relativistic HLLD: the MUB09 five-wave fan (the genuine less-diffusive RMHD EMF).
+                (Solver::Hlld, "rmhd") => format!("rmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
                 _ => format!("rmhd_edge_emf_uct_{D}d_{}", edge.name_k),
             },
         };
@@ -559,6 +571,8 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             match s {
                 "vel_p1" => &sim.fields.prim.vel[p1],
                 "vel_p2" => &sim.fields.prim.vel[p2],
+                // out-of-plane velocity (RMHD-HLLD: the full relativistic prim for the MUB09 fan).
+                "vel_out" => &sim.fields.prim.vel[p_out],
                 "bcell_p1" => &mhd.bcell[p1],
                 "bcell_p2" => &mhd.bcell[p2],
                 "bflux_a" => &mhd.bflux[g1][p2],
@@ -588,7 +602,8 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             let fld = slot(&bind.name());
             if *is_out { outputs.push(fld); } else { inputs.push(fld); }
         }
-        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &[]);
+        let scalars = scalars_for(&name, &scalar);
+        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &scalars);
     }
 }
 

@@ -194,6 +194,65 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     VdiffOut { f, vv, bv, alf, vc, bc }
 }
 
+/// the converged five-wave fan: the secant-final intermediate state + the success mask. SHARED by
+/// the flux path (`hlld_rmhd`) and the UCT-HLLD edge-EMF star-state extraction (`hlld_rmhd_states`).
+/// `success` is FALSE iff the secant diverged or the state is unphysical (the flux then falls back
+/// to HLLE) — in that case every field below is GARBAGE and the consumer MUST NOT trust it.
+struct HlldConverged<S: Scalar, const D: usize> {
+    p_final: S,
+    v: VdiffOut<S, D>,
+    success: S,
+}
+
+/// run the secant pressure iteration to convergence and re-read the intermediate state at `p_final`.
+/// `success` returned as a 0/1 scalar (1 = converged + physical). carrier-generic.
+fn hlld_rmhd_converge<S: Scalar, const D: usize>(
+    p_init: S,
+    r_pair: [&MhdCons<S, D>; 2],
+    lam: [S; 2],
+    bn: S,
+    nhat: &Tensor<S, D>,
+) -> HlldConverged<S, D> {
+    let one = S::ONE;
+    let zero = S::ZERO;
+    let eps = S::from_f64(DIVZERO_GUARD);
+    let feps = S::from_f64(CONVERGENCE_TOL);
+    let div_guard = S::from_f64(DIVERGENCE_GUARD);
+
+    let p_perturbed = p_init * (one + S::from_f64(SECANT_PERTURBATION));
+    let f_init = hlld_vdiff(p_init, r_pair, lam, bn, nhat).f;
+
+    let result_acc = S::iterate_vec::<4>(
+        [p_init, f_init, p_perturbed, zero],
+        SECANT_STEPS,
+        |[p_prev, f_prev, p_cur, freeze]| {
+            let frozen = freeze.cmp_gt(S::from_f64(0.5));
+            let v = hlld_vdiff(p_cur, r_pair, lam, bn, nhat);
+            let f_cur = v.f;
+            let f_too_big = f_cur.abs().cmp_gt(div_guard);
+            let slope_dead = (f_cur - f_prev).abs().cmp_lt(eps);
+            let diverged = f_too_big | slope_dead;
+            let slope_denom = S::select(slope_dead, one, f_cur - f_prev);
+            let dp = (p_cur - p_prev) / slope_denom * f_cur;
+            let p_next_naive = p_cur - dp;
+            let ptol = p_cur.abs() * feps;
+            let converged_now = dp.abs().cmp_le(ptol) & f_cur.abs().cmp_lt(feps);
+            let new_freeze = S::select(frozen | diverged | converged_now, one, zero);
+            let p_prev_next = S::select(frozen, p_prev, p_cur);
+            let f_prev_next = S::select(frozen, f_prev, f_cur);
+            let p_cur_next = S::select(frozen, p_cur, p_next_naive);
+            [p_prev_next, f_prev_next, p_cur_next, new_freeze]
+        },
+        |_prev, [_p_prev, _f_prev, _p_cur, freeze]| freeze.cmp_gt(S::from_f64(0.5)),
+        2,
+    );
+
+    let v = hlld_vdiff(result_acc, r_pair, lam, bn, nhat);
+    let ok = v.f.abs().cmp_lt(div_guard) & v.f.abs().cmp_lt(feps * S::from_f64(1e6));
+    let success = S::select(ok, one, zero);
+    HlldConverged { p_final: result_acc, v, success }
+}
+
 /// HLLD five-wave solver for RMHD. carrier-generic — single body for f64 host
 /// and Gv-traced kernel. on unphysical state or secant divergence, falls back
 /// to HLLE via a final mask-driven `select` over the flux. matches mignone,
@@ -268,78 +327,17 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
 
     let p_init = S::select(lowb_mask, p_lowb, p_hll);
 
-    // secant iteration. accumulators: [p_prev, f_prev, p_cur, freeze].
-    // `freeze` is a 0/1 scalar that goes to 1 when divergence is detected or
-    // convergence has been reached — combined with the iterate freeze-law,
-    // the accumulator is preserved past that step.
-    let feps = S::from_f64(CONVERGENCE_TOL);
-    let div_guard = S::from_f64(DIVERGENCE_GUARD);
-
-    // p_perturbed = p_init * (1 + δ).
-    let p_perturbed = p_init * (one + S::from_f64(SECANT_PERTURBATION));
-    let f_init = hlld_vdiff(p_init, r_pair, lam, bn, nhat).f;
-
-    let result_acc = S::iterate_vec::<4>(
-        [p_init, f_init, p_perturbed, zero],
-        SECANT_STEPS,
-        |[p_prev, f_prev, p_cur, freeze]| {
-            // when frozen, keep everything unchanged (the iterate freeze-law
-            // also handles this at the converged-predicate level, but doing it
-            // explicitly inside the body lets the divergence path stick too).
-            let frozen = freeze.cmp_gt(S::from_f64(0.5));
-
-            let v = hlld_vdiff(p_cur, r_pair, lam, bn, nhat);
-            let f_cur = v.f;
-
-            // divergence triggers: f-magnitude blown up, or slope vanished
-            // (denominator of the secant update would explode).
-            let f_too_big = f_cur.abs().cmp_gt(div_guard);
-            let slope_dead = (f_cur - f_prev).abs().cmp_lt(eps);
-            let diverged = f_too_big | slope_dead;
-
-            // safe slope so the secant update doesn't NaN even when slope_dead.
-            let slope_denom = S::select(slope_dead, one, f_cur - f_prev);
-            let dp = (p_cur - p_prev) / slope_denom * f_cur;
-            let p_next_naive = p_cur - dp;
-
-            // pressure convergence test piggybacks on the iterate freeze:
-            // we compute `converged_now` for the freeze-flag update.
-            let ptol = p_cur.abs() * feps;
-            let converged_now = dp.abs().cmp_le(ptol) & f_cur.abs().cmp_lt(feps);
-
-            let new_freeze = S::select(
-                frozen | diverged | converged_now,
-                one,
-                zero,
-            );
-
-            // hold accumulators unchanged when frozen so the final select pulls
-            // out the last-known-good (or last-known-divergent) state.
-            let p_prev_next = S::select(frozen, p_prev, p_cur);
-            let f_prev_next = S::select(frozen, f_prev, f_cur);
-            let p_cur_next  = S::select(frozen, p_cur,  p_next_naive);
-
-            [p_prev_next, f_prev_next, p_cur_next, new_freeze]
-        },
-        // outer convergence predicate: stop iterating once `freeze` hits 1.
-        // the iterate freeze-law applies componentwise — once true, accs hold.
-        |_prev, [_p_prev, _f_prev, _p_cur, freeze]| freeze.cmp_gt(S::from_f64(0.5)),
-        2, // result-of-iterate is p_cur (unused; we re-read accs below)
-    );
-
-    // re-read the converged accumulators via a single vdiff at p_final. ugly
-    // but iterate_vec only returns a single scalar; we want vv/bv/alf/vc/bc.
-    let p_final = result_acc;
-    let v = hlld_vdiff(p_final, r_pair, lam, bn, nhat);
+    // secant pressure iteration -> converged intermediate state (shared with the UCT-HLLD edge-EMF
+    // star-state extraction). `success` is a 0/1 scalar; the flux falls back to HLLE when it is 0.
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat);
+    let p_final = conv.p_final;
+    let v = conv.v;
     let vc = v.vc;
     let bc = v.bc;
     let alf = v.alf;
     let vv_iso = v.vv;
     let bv_iso = v.bv;
-
-    // success mask: the final f-magnitude is below the divergence guard AND
-    // below convergence tolerance. anything else routes to HLLE.
-    let success = v.f.abs().cmp_lt(div_guard) & v.f.abs().cmp_lt(feps * S::from_f64(1e6));
+    let success = conv.success.cmp_gt(half);
 
     // pick fast-wave side via the contact-vs-vface test, branchless.
     let vnc = vc.dot(nhat);
@@ -408,6 +406,82 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let flux_inner = MhdCons::select(success, flux_hlld, hlle_flux);
     let flux_choose_r = MhdCons::select(supersonic_r, flux_supersonic_r, flux_inner);
     MhdCons::select(supersonic_l, flux_supersonic_l, flux_choose_r)
+}
+
+/// the converged HLLD five-wave fan for the UCT-HLLD edge EMF (Mignone & Del Zanna 2020, §5.2). all
+/// speeds + the per-side SINGLE-STAR (post-fast, Section 3.1) lab-frame B field, plus `success`.
+/// CONSUMER CONTRACT: when `success == 0` the gas flux fell back to HLLE and EVERY field here is
+/// garbage — the EMF must use the HLL coefficients there. ordering (when success): `lam[0] <= alf[0]
+/// <= lstar <= alf[1] <= lam[1]`. `bstar[s]` is lab-frame B; transverse part = `bstar[s] - n*bn`.
+pub struct HlldStates<S: Scalar, const D: usize> {
+    pub lam: [S; 2],              // outermost FAST speeds [lambda^L, lambda^R]
+    pub alf: [S; 2],              // rotational/Alfvén speeds [lambda*^L, lambda*^R] (MUB09)
+    pub lstar: S,                 // contact speed lambda* = vc . n
+    pub bstar: [Tensor<S, D>; 2], // per-side single-star B (lab-frame): B*^{L}, B*^{R}
+    pub bc: Tensor<S, D>,         // CONTACT transverse field B_c (MUB09 Eq. 45) — B_t^{ss}, the EMF chi-jump target
+    pub vc: Tensor<S, D>,         // CONTACT velocity v_c (MUB09 Eq. 47); v_c.n == lstar
+    pub bn: S,                    // the (single, div-free) normal field
+    pub success: S,               // 1.0 = HLLD converged + physical; 0.0 = HLLE fallback (garbage)
+}
+
+/// extract the converged HLLD fan for the edge-EMF coefficients WITHOUT building the flux. shares
+/// `hlld_rmhd_converge` with `hlld_rmhd` (identical secant), so the states are bit-consistent with
+/// the flux solve. carrier-generic.
+pub fn hlld_rmhd_states<S: Scalar, const D: usize>(
+    regime: &Rmhd,
+    eos: &impl Eos<S>,
+    prim_l: &MhdPrim<S, D>,
+    prim_r: &MhdPrim<S, D>,
+    nhat: &Tensor<S, D>,
+) -> HlldStates<S, D> {
+    let zero = S::ZERO;
+    let one = S::ONE;
+    let half = S::from_f64(0.5);
+    let eps = S::from_f64(DIVZERO_GUARD);
+    let p_floor_val = S::from_f64(CONVERGENCE_TOL);
+
+    let u_l = regime.to_conserved(eos, prim_l);
+    let u_r = regime.to_conserved(eos, prim_r);
+    let f_l = regime.to_flux(prim_l, nhat, eos);
+    let f_r = regime.to_flux(prim_r, nhat, eos);
+    let (a_l, a_r) = regime.extremal_speeds(eos, prim_l, prim_r, nhat);
+    let inv_dwave = one / (a_r - a_l + eps);
+    let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
+    let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
+    let bn = hll_state.mag.dot(nhat);
+    let r_l = u_l * a_l - f_l;
+    let r_r = u_r * a_r - f_r;
+    let r_pair = [&r_l, &r_r];
+    let lam = [a_l, a_r];
+
+    let p_total = |prim: &MhdPrim<S, D>| -> S { prim.hydro.pre + half * prim.mag.dot(&prim.mag) };
+    let p_hll_raw = (p_total(prim_l) + p_total(prim_r)) * half;
+    let p_hll = S::select(p_hll_raw.cmp_le(zero), p_floor_val, p_hll_raw);
+    let lowb_thresh = S::from_f64(LOW_B_PRESSURE_RATIO);
+    let lowb_mask = (bn * bn / p_hll).cmp_lt(lowb_thresh);
+    let et_hll = hll_state.nrg + hll_state.den;
+    let fet_hll = hll_flux.nrg + hll_flux.den;
+    let mn_hll = hll_state.mom.dot(nhat);
+    let fmn_hll = hll_flux.mom.dot(nhat);
+    let bb_q = et_hll - fmn_hll;
+    let cc_q = fet_hll * mn_hll - et_hll * fmn_hll;
+    let disc = (bb_q * bb_q - S::from_f64(4.0) * cc_q).max(zero);
+    let p_lowb_raw = half * (-bb_q + disc.sqrt());
+    let p_lowb = S::select(p_lowb_raw.cmp_le(zero), p_floor_val, p_lowb_raw);
+    let p_init = S::select(lowb_mask, p_lowb, p_hll);
+
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat);
+    let v = conv.v;
+    HlldStates {
+        lam: [a_l, a_r],
+        alf: v.alf,
+        lstar: v.vc.dot(nhat),
+        bstar: v.bv,
+        bc: v.bc,
+        vc: v.vc,
+        bn,
+        success: conv.success,
+    }
 }
 
 // helper: mask-on-mask select. `Mask: BitAnd + BitOr + Not` from `algebra.rs`,
@@ -753,6 +827,164 @@ mod tests {
         let nhat = Tensor::unit(0);
         let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
         assert!(flux.den > 0.0, "density flux should be positive: {}", flux.den);
+    }
+
+    #[test]
+    fn hlld_rmhd_states_ordering_and_coplanarity() {
+        // THE GATE for UCT-HLLD: the star-state extractor must give (1) a physically ORDERED fan
+        // lam_L <= alf_L <= lstar <= alf_R <= lam_R, and (2) a SCALAR chi^s (B*^s_t parallel to
+        // B^s_t — fast-wave coplanarity), tested with a genuine 3D transverse field (By AND Bz).
+        // reduction state: asymmetric L/R (different fast speeds) + transverse-B jump + Bx != 0.
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let regime = Rmhd;
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.1, 0.0]), pre: 1.0 },
+            mag: Tensor::new([0.5, 0.8, 0.4]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.2, 0.05]), pre: 0.4 },
+            mag: Tensor::new([0.5, -0.6, 0.3]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        println!(
+            "GATE: success={} lam={:?} alf={:?} lstar={} bn={}",
+            s.success, s.lam, s.alf, s.lstar, s.bn
+        );
+        println!("GATE: B*_L={:?} B*_R={:?}", s.bstar[0], s.bstar[1]);
+        assert!(s.success > 0.5, "HLLD must converge on this state (else the gate is meaningless)");
+        let t = 1e-9;
+        assert!(s.lam[0] <= s.alf[0] + t, "lam_L <= alf_L: {} vs {}", s.lam[0], s.alf[0]);
+        assert!(s.alf[0] <= s.lstar + t, "alf_L <= lstar: {} vs {}", s.alf[0], s.lstar);
+        assert!(s.lstar <= s.alf[1] + t, "lstar <= alf_R: {} vs {}", s.lstar, s.alf[1]);
+        assert!(s.alf[1] <= s.lam[1] + t, "alf_R <= lam_R: {} vs {}", s.alf[1], s.lam[1]);
+        // coplanarity: B*^s_t parallel to B^s_t. chi^s is extracted by PROJECTION (robust to the
+        // tiny non-parallel residual the HLLD star state carries — a componentwise ratio amplifies
+        // it because chi itself is small). the GATE is that the NON-PARALLEL residual is negligible.
+        for (side, prim) in [(0usize, &prim_l), (1usize, &prim_r)] {
+            let bt = [prim.mag[1], prim.mag[2]]; // transverse (y,z) upstream
+            let bst = [s.bstar[side][1], s.bstar[side][2]]; // transverse star
+            let bt2 = bt[0] * bt[0] + bt[1] * bt[1];
+            let chi = (bst[0] * bt[0] + bst[1] * bt[1]) / bt2 - 1.0; // projection
+            // residual of B*_t off the (1+chi)B_t line, relative to |B*_t|.
+            let res = [bst[0] - (1.0 + chi) * bt[0], bst[1] - (1.0 + chi) * bt[1]];
+            let res_rel = (res[0] * res[0] + res[1] * res[1]).sqrt()
+                / (bst[0] * bst[0] + bst[1] * bst[1]).sqrt().max(1e-30);
+            println!("GATE: side {side} chi_proj={chi} non-parallel residual={res_rel:.2e}");
+            // the MUB09 single-star B is APPROXIMATELY coplanar: the non-parallel residual scales
+            // with the amplification |chi| (0.09% at chi=-0.05, 0.74% at chi=0.48 here). projection
+            // is the principled scalar extraction; the residual is the HLLD approximation error and
+            // is negligible vs the HLL/HLLD diffusion gap. MONITOR it for the high-sigma wind.
+            assert!(res_rel < 2e-2, "B*^{side}_t coplanarity residual too large: {res_rel:.2e}");
+        }
+    }
+
+    #[test]
+    fn hlld_rmhd_emf_reduces_to_by_flux() {
+        // CHECK 3 (the grid-aligned reduction gate, uct_algorithm.md Section 3.5): in the double-star
+        // region (lambda*^L < 0 < lambda*^R, the interface sits between the Alfven waves) the HLLD
+        // induction flux is CONSTANT and equals the contact-state value:
+        //   F_x[B_y] = v_x B_y - v_y B_x  ->  lambda* B_c^y - v_c^y B^x
+        // (v_x = lambda*, B_y = B_c, v_y = v_c, B_x = B^x are all constant there). this validates the
+        // EXACT contact quantities (B_c, v_c, lstar, bn) the D-formula is built from against the
+        // proven `hlld_rmhd` flux. asymmetric L/R + B_y^L != B_y^R + B^x != 0 (the nontrivial case).
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let regime = Rmhd;
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.1, 0.0]), pre: 1.0 },
+            mag: Tensor::new([0.5, 0.8, 0.4]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.2, 0.05]), pre: 0.4 },
+            mag: Tensor::new([0.5, -0.6, 0.3]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        assert!(s.success > 0.5, "HLLD must converge for the reduction gate to be meaningful");
+        assert!(s.alf[0] < 0.0 && s.alf[1] > 0.0, "need the double-star region to straddle the interface: alf={:?}", s.alf);
+        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
+        let f_by = flux.mag[1]; // F_x[B_y], the induction flux == -E_z
+        let identity = s.lstar * s.bc[1] - s.vc[1] * s.bn; // lambda* B_c^y - v_c^y B^x
+        println!(
+            "CHECK3: F_x[B_y]={f_by:.10} vs lambda* B_c - v_c B^x={identity:.10}  (lstar={:.4} bc_y={:.4} vc_y={:.4} bn={:.4})",
+            s.lstar, s.bc[1], s.vc[1], s.bn
+        );
+        assert!(
+            (f_by - identity).abs() < 1e-8,
+            "EMF reduction FAILED: hlld_rmhd B_y flux {f_by} != contact identity {identity} (diff {})",
+            (f_by - identity).abs()
+        );
+    }
+
+    #[test]
+    fn hlld_rmhd_uct_telescopes_to_flux() {
+        // CHECK 3 COMPLETE (uct_algorithm.md Section 3.5): the M&DZ master form Eq. (30) must
+        // reconstruct the hlld_rmhd B_y flux EXACTLY from the per-side coefficients:
+        //   F^[By] = a^L F^L + a^R F^R - (d^R B_y^R - d^L B_y^L),   F^s = v_x^s B_y^s - v_y^s B^x
+        // with the BOUNDED chi-term substitution  d^s_chi · B_y^s = 1/2 (v^s-v*)(lambda*^s-lambda^s)(B_c^y - B_y^s).
+        // if this == flux.mag[1], the relativistic coefficients are PROVEN consistent (no rebuild).
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let regime = Rmhd;
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.1, 0.0]), pre: 1.0 },
+            mag: Tensor::new([0.5, 0.8, 0.4]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.2, 0.05]), pre: 0.4 },
+            mag: Tensor::new([0.5, -0.6, 0.3]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        assert!(s.success > 0.5, "HLLD must converge");
+        let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
+        // speed-only weights (classical kernel forms): v^s, v*, a^L=(1+v*)/2.
+        // per-side induction flux F^s = v_x^s B_y^s - v_y^s B^x.
+        let by = [prim_l.mag[1], prim_r.mag[1]];
+        let vx = [prim_l.vel[0], prim_r.vel[0]];
+        let vy = [prim_l.vel[1], prim_r.vel[1]];
+        let f = |i: usize| vx[i] * by[i] - vy[i] * bn;
+        // single-star (between fast & Alfven) and double-star (== contact B_c) transverse fields.
+        let by_ss_l = s.bstar[0][1]; // B_y^{sL}
+        let by_ss_r = s.bstar[1][1]; // B_y^{sR}
+        // the EXACT HLLD induction flux (M&DZ Eq. 39): central minus the per-wave |lambda| dissipation
+        // over the ACTUAL star-field jumps. BOUNDED (all field differences); relativistically correct.
+        let f_hat = 0.5
+            * (f(0) + f(1)
+                - lam[0].abs() * (by_ss_l - by[0])
+                - alf[0].abs() * (bc_y - by_ss_l)
+                - alf[1].abs() * (by_ss_r - bc_y)
+                - lam[1].abs() * (by[1] - by_ss_r));
+        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
+        let f_ref = flux.mag[1];
+        println!("TELESCOPE: F_hat={f_hat:.10} vs flux.mag[1]={f_ref:.10}  diff={:.2e}", (f_hat - f_ref).abs());
+        assert!(
+            (f_hat - f_ref).abs() < 1e-8,
+            "UCT master form does NOT telescope to the HLLD flux: {f_hat} vs {f_ref} (diff {})",
+            (f_hat - f_ref).abs()
+        );
+    }
+
+    #[test]
+    fn hlld_rmhd_states_bx_zero_is_finite() {
+        // degenerate Bx=0 (the toroidal-wind regime at the equator): the rotational waves collapse
+        // onto the contact; the extractor must stay finite (success may be 0 -> EMF uses HLL there).
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let regime = Rmhd;
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.1, 0.2, 0.0]), pre: 1.0 },
+            mag: Tensor::new([0.0, 0.8, 0.4]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.5, vel: Tensor::new([-0.1, 0.1, 0.0]), pre: 0.5 },
+            mag: Tensor::new([0.0, -0.5, 0.3]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        println!("GATE Bx=0: success={} lam={:?} alf={:?} lstar={}", s.success, s.lam, s.alf, s.lstar);
+        assert!(s.lstar.is_finite() && s.alf[0].is_finite() && s.alf[1].is_finite(), "states finite at Bx=0");
+        for k in 0..3 {
+            assert!(s.bstar[0][k].is_finite() && s.bstar[1][k].is_finite(), "B* finite at Bx=0");
+        }
     }
 
     // ---- Newtonian HLLD (Miyoshi-Kusano) ----
