@@ -160,6 +160,13 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fields", nargs="+", default=["rho"], help="field(s) to visualize"
     )
+    parser.add_argument(
+        "--norm",
+        default=None,
+        metavar="VALUE|max|min",
+        help="normalize each field by: a number (e.g. 5e-7), or 'max'/'min' (the field's own "
+        "extremum). for M&DZ-style 'relative to max initial value', pass that number.",
+    )
 
     # =========================================================================
     # file filtering

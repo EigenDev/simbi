@@ -47,6 +47,9 @@ class PlotConfig(BaseModel):
     fields: list[str]
     ndim: int = 1
     slice: Optional[dict[str, float]] = None
+    # field-value normalization: a numeric string (divide by the constant), or "max"/"min"
+    # (divide by the field's own extremum). None = no normalization.
+    norm: Optional[str] = None
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True}
 

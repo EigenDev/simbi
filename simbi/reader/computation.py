@@ -491,6 +491,12 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             get_b_fields(fields), get_velocities(fields), regime
         )
 
+    def compute_magnetic_energy(fields: dict[str, Array]) -> Array:
+        """lab-frame magnetic energy density 1/2 |B|^2 (cell-centered B). distinct from `pmag`,
+        which carries the relativistic (comoving) magnetic pressure for srmhd."""
+        b = get_b_fields(fields)
+        return np.asarray(0.5 * _dot_product(b, b))
+
     def compute_mach_number(fields: dict[str, Array]) -> Array:
         v_mag = compute_velocity_magnitude(fields)
         cs = np.sqrt(gamma * fields["p"] / fields["rho"])
@@ -848,6 +854,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         "sigma": compute_magnetization,
         "ptot": compute_total_pressure,
         "pmag": compute_magnetic_pressure,
+        "emag": compute_magnetic_energy,
         "mach": compute_mach_number,
         "chi_dens": compute_chi_density,
         "j": angular_momentum_density,

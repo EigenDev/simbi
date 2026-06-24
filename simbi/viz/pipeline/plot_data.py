@@ -141,6 +141,31 @@ def create_plot_data(
     # Apply Slicing
     sliced_fields = apply_slicing(full_dim_fields, slice_spec)
 
+    # field-value normalization: divide each field by a constant, or its own "max"/"min"
+    # (M&DZ-style "relative to max value": pass the number, e.g. max(initial)).
+    norm = getattr(getattr(config, "plot", None), "norm", None)
+    if norm is not None and sliced_fields:
+        import numpy as np
+
+        def _denom(arr: "np.ndarray") -> float:
+            if norm == "max":
+                d = float(np.nanmax(arr))
+            elif norm == "min":
+                d = float(np.nanmin(arr))
+            else:
+                try:
+                    d = float(norm)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        f"--norm must be a number, 'max', or 'min'; got '{norm}'"
+                    )
+            return d if d != 0.0 else 1.0
+
+        sliced_fields = [
+            fd.model_copy(update={"values": fd.values / _denom(fd.values)})
+            for fd in sliced_fields
+        ]
+
     # Package and return the (potentially un-stitched) fields
     return PlotData(
         fields=sliced_fields,

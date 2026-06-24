@@ -3190,11 +3190,11 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     // x-faces (normal p1): North NW->NE, South SW->SE; MAX-combine d to the edge.
     let (dln, drn) = face_d(&nw, &ne, &vp1, &bp1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
     let (dls, drs) = face_d(&sw, &se, &vp1, &bp1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
-    let cx = UctDir { al: half, ar: half, dl: dln.max(dls), dr: drn.max(drs) };
+    let cx = UctDir { al: half, ar: half, dl: avg2(dln, dls), dr: avg2(drn, drs) };
     // y-faces (normal p2): West SW->NW, East SE->NE.
     let (dlw, drw) = face_d(&sw, &nw, &vp2, &bp2, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
     let (dle, dre) = face_d(&se, &ne, &vp2, &bp2, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
-    let cy = UctDir { al: half, ar: half, dl: dlw.max(dle), dr: drw.max(dre) };
+    let cy = UctDir { al: half, ar: half, dl: avg2(dlw, dle), dr: avg2(drw, dre) };
     // upwind transverse velocities (Eq. 29) for the advective part: alpha^+ carries West / South.
     let vx_w = avg2(vp1(&nw), vp1(&sw));
     let vx_e = avg2(vp1(&ne), vp1(&se));
@@ -3328,12 +3328,12 @@ pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     let (aln, dln, drn) = hlld_face(&nw, &ne, &vp1, &bp1, bx_n, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
     let (als, dls, drs) = hlld_face(&sw, &se, &vp1, &bp1, bx_s, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
     let alx = avg2(aln, als);
-    let cx = UctDir { al: alx, ar: one - alx, dl: dln.max(dls), dr: drn.max(drs) };
+    let cx = UctDir { al: alx, ar: one - alx, dl: avg2(dln, dls), dr: avg2(drn, drs) };
     // y-faces (normal p2): West SW->NW, East SE->NE.
     let (alw, dlw, drw) = hlld_face(&sw, &nw, &vp2, &bp2, by_w, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
     let (ale, dle, dre) = hlld_face(&se, &ne, &vp2, &bp2, by_e, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
     let aly = avg2(alw, ale);
-    let cy = UctDir { al: aly, ar: one - aly, dl: dlw.max(dle), dr: drw.max(dre) };
+    let cy = UctDir { al: aly, ar: one - aly, dl: avg2(dlw, dle), dr: avg2(drw, dre) };
     // PER-SIDE advective velocities (East/West x-vel, North/South y-vel) — the conservative form the
     // asymmetric a^L = (1+v*)/2 requires (a single vbar would make the v* term anti-diffusive).
     let vx_w = avg2(vp1(&nw), vp1(&sw));

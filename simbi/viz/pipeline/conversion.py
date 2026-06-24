@@ -66,6 +66,7 @@ def plot_config_from_args(args: Namespace) -> PlotConfig:
         fields=getattr(args, "fields", ["rho"]),
         ndim=get_dimensionality(files),
         slice=slice_spec,
+        norm=getattr(args, "norm", None),
     )
 
 
