@@ -101,6 +101,10 @@ struct Snapshot<const D: usize> {
     // truncate the halo the next step's stencil reads before the first ghost-fill).
     // the reader trims `halo_radius` (= ng) back to the interior for plotting.
     data_shape: Vec<u64>,
+    // interior cell counts in STORAGE (reversed) axis order for the reader's
+    // `mesh/global_cells` ([nx3,nx2,nx1]); matches the reversed field `shape` so the
+    // plot axes are not transposed (a non-square grid otherwise crashes pcolormesh).
+    mesh_cells: Vec<u64>,
     dx_phys:    Vec<f64>,
     x_lo_phys:  Vec<f64>,
     conserved:  Vec<(String, Vec<f64>)>,
@@ -198,6 +202,7 @@ where
     // cell-centered datasets are written at this extent; the reader trims ng back.
     let alloc = sim.fields.cons.den.domain();
     let data_shape: Vec<u64> = (0..D).map(|ax| alloc.spaces[ax].size() as u64).collect();
+    let mesh_cells: Vec<u64> = (0..D).rev().map(|ax| interior.spaces[ax].size() as u64).collect();
     let dx_phys:   Vec<f64>  = sim.geom.dx[..D].iter().map(|&d| d * a).collect();
     let x_lo_phys: Vec<f64>  = sim.geom.x_lo[..D].iter().map(|&x| x * a).collect();
     // ----- RegimeSpec-driven conserved iteration ------
@@ -239,7 +244,7 @@ where
     let owned_start: Vec<i64> = vec![0; D];
     let owned_fin:   Vec<i64> = resolution.iter().map(|&n| n as i64).collect();
 
-    Snapshot { resolution, data_shape, dx_phys, x_lo_phys, conserved, primitive, bface, bface_dom, owned_start, owned_fin }
+    Snapshot { resolution, data_shape, mesh_cells, dx_phys, x_lo_phys, conserved, primitive, bface, bface_dom, owned_start, owned_fin }
 }
 
 // =============================================================================
@@ -349,7 +354,13 @@ where
     // from this group, so this layout serves the reader without breaking restart.
     let mut geometry = Tree::new("geometry")
         .with_attr("metric", coord_name(sim.physics.metric.geometry()));
-    for ax in 0..D {
+    // mesh metadata (global_cells + per-dim geometry) is written in STORAGE
+    // (reversed) axis order so it matches the reversed field `shape` below and the
+    // reader's [nx3,nx2,nx1] expectation: dim_0 is the SLOWEST-varying screen axis,
+    // dim_{D-1} the fastest (x1). without the reverse, global_cells/dims are
+    // transposed vs the data -> a SQUARE grid plots mis-oriented and a NON-square
+    // grid crashes pcolormesh ("C dims should be one smaller than X and Y").
+    for (slot, ax) in (0..D).rev().enumerate() {
         // the interior lower edge — honors an AMR fine level whose interior
         // starts at a non-zero global index (start = global origin offset by
         // the interior origin), so the reader rebuilds cell centers correctly.
@@ -357,7 +368,7 @@ where
             + sim.geom.interior.spaces[ax].lo as f64 * snap.dx_phys[ax];
         let end   = start + snap.dx_phys[ax] * snap.resolution[ax] as f64;
         geometry.push_group(
-            Tree::new(format!("dim_{ax}"))
+            Tree::new(format!("dim_{slot}"))
                 .with_attr("start", start)
                 .with_attr("end", end)
                 // uniform computational spacing; the physical spacing label
@@ -367,7 +378,7 @@ where
     }
     let mesh = Tree::new("mesh")
         .with_attr("halo_width", sim.geom.ng as u64)
-        .with_dataset(Dataset::new("global_cells", vec![D], DataRef::U64(&snap.resolution)))
+        .with_dataset(Dataset::new("global_cells", vec![D], DataRef::U64(&snap.mesh_cells)))
         .with_group(geometry);
 
     // declare shape in REVERSED axis order so it matches the on-disk layout

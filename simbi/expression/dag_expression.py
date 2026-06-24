@@ -1127,6 +1127,15 @@ class CompiledExpr:
         # map output indices
         output_indices = [node_map[out_id] for out_id in self._output_ids]
 
+        # unary ops emit a `right: -1` "no operand" sentinel; the rust NodeDesc index
+        # fields are Option<usize> and reject -1. drop any -1 index key so the absent
+        # field deserializes to None (the correct "no operand"). value (a float) is
+        # never an index, so a legitimate -1.0 constant is untouched.
+        for node in expressions:
+            for key in ("left", "right", "condition", "true_case", "false_case"):
+                if node.get(key) == -1:
+                    del node[key]
+
         max_param_idx = -1
         for node_id in self._eval_order:
             node_def = self._graph.get_node(node_id)
@@ -1180,3 +1189,22 @@ class CompiledExpr:
                 target.value if isinstance(target, ConservedField) else str(target)
             )
         return cfg
+
+    def serialize_boundary(self, dim: int) -> dict[str, object]:
+        """serialize a DRIVEN (Dirichlet) boundary prescription to the rust
+        `SourceConfig` wire format (`kind="dirichlet"`). the compiled outputs must
+        be the COMPLETE primitive state in order:
+          hydro: [rho, vel_0..vel_{dim-1}, (pre)]
+          mhd:   [rho, vel_0..vel_{dim-1}, (pre), B_0..B_{dim-1}]
+        `dim` is the VECTOR component count (= the regime DOF: 2.5D MHD -> 3). the
+        rust side splits these into the den/mom/nrg/bcell ghost-fill slots. for a
+        purely toroidal injection set the in-plane B to 0 and the out-of-plane
+        component to B_phi (cell-centered, div-free by axisymmetry)."""
+        base = self.serialize()
+        return {
+            "kind": "dirichlet",
+            "dim": int(dim),
+            "outputs": base["output_indices"],
+            "params": [],
+            "nodes": base["expressions"],
+        }

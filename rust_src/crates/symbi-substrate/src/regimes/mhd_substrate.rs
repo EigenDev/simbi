@@ -30,8 +30,9 @@ use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use symbi_algebra::Domain;
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
-use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, mhd_geom_suffix, push_curvilinear_geom, scalars_for, ScalarBind};
+use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, mhd_geom_suffix, push_curvilinear_geom, scalars_for, ScalarBind, Solver};
 use symbi_sim::state::FieldStore;
+use symbi_sim::state::CtMethod;
 
 // per-axis allocated lo / extent (where every buffer lives) + the volume.
 pub(crate) fn alloc_layout<const D: usize>(allocated: &Domain<D>) -> ([i32; D], [u32; D], usize) {
@@ -518,6 +519,9 @@ fn ct_face_curl(dir: usize, axes: &[usize]) -> (Vec<usize>, Vec<usize>) {
 /// E is the contact-formula EMF from its two in-plane neighbours' vel/bcell/bflux/fden.
 pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
+    ct_method: CtMethod,
+    solver: Solver,
+    prefix: &str,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -529,7 +533,22 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         // p1/p2 = in-plane physical components (vel/bcell, cyclic for sign);
         // g1/g2 = the grid axes carrying them (flux / bflux-outer / stencil offsets).
         let (p1, p2, g1, g2) = (edge.p1, edge.p2, edge.g1, edge.g2);
-        let name = format!("rmhd_edge_emf_{D}d_{}", edge.name_k);
+        // out-of-plane B component (the third of {0,1,2}), for the HLLC |B|^2 momentum flux.
+        let p_out = 3 - p1 - p2;
+        // UCT swaps the contact's mass-flux soft-sign blend for the master-formula edge EMF; the
+        // coefficient family follows the gas Riemann solver. HLL is regime-generic; HLLC needs the
+        // classical ideal-gas lambda* kernel (NMHD only for now). the kernel manifest declares the
+        // slots it reads (bface_a/b, wsr/wsl, + rho/pre/bcell for HLLC), bound below.
+        let name = match ct_method {
+            CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k),
+            // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
+            // less-diffusive one, classical NMHD for now); everything else -> the regime-generic HLL
+            // EMF (which IS the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
+            CtMethod::Uct => match (solver, prefix) {
+                (Solver::Hlld, "nmhd") => format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
+                _ => format!("rmhd_edge_emf_uct_{D}d_{}", edge.name_k),
+            },
+        };
         // bind BY MANIFEST: the kernel declares COMPONENT-AGNOSTIC generic slots (`vel_p1`,
         // `bflux_a`, `emf`, ...); map each to THIS edge's actual field, then order inputs/outputs
         // by the recorded manifest so the bind cannot drift from the producer's slot sequence (a
@@ -546,6 +565,19 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                 "bflux_b" => &mhd.bflux[g2][p1],
                 "fden_p1" => &sim.fields.flux[g1].den,
                 "fden_p2" => &sim.fields.flux[g2].den,
+                // UCT-only slots: the staggered FACE B (for the resistive jumps) and the per-cell
+                // Riemann wave speeds in both transverse grid directions (for the HLL weights).
+                "bface_a" => &mhd.bface[g1],
+                "bface_b" => &mhd.bface[g2],
+                "wsr_p1" => &mhd.wave_speed_r[g1],
+                "wsl_p1" => &mhd.wave_speed_l[g1],
+                "wsr_p2" => &mhd.wave_speed_r[g2],
+                "wsl_p2" => &mhd.wave_speed_l[g2],
+                // UCT-HLLC-only slots: the full cell prim (rho/pre + the out-of-plane B) for the
+                // in-kernel classical contact speed lambda* = m_n^hll/rho^hll.
+                "rho" => &sim.fields.prim.rho,
+                "pre" => sim.fields.prim.pre_field().expect("UCT-HLLC needs prim.pre (ideal gas)"),
+                "bcell_out" => &mhd.bcell[p_out],
                 "emf" => &mhd.efield[edge.slot],
                 o => panic!("rmhd_edge_emf: unknown manifest slot '{o}'"),
             }

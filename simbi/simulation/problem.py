@@ -36,6 +36,7 @@ from simbi.types.input import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
+    CtMethod,
     Reconstruction,
     RefinementMode,
     Regime,
@@ -305,6 +306,14 @@ class SimbiProblem(BaseModel):
     solver: Annotated[
         Solver,
         ProblemParam(Solver.HLLE, cli=True, description="numerical solver"),
+    ]
+    ct_method: Annotated[
+        CtMethod,
+        ProblemParam(
+            CtMethod.CONTACT,
+            cli=True,
+            description="CT edge-EMF scheme (contact | uct); MHD only",
+        ),
     ]
     reconstruction: Annotated[
         Reconstruction,
@@ -676,6 +685,7 @@ class SimbiProblem(BaseModel):
         # enum fields: convert string to enum
         enum_fields = {
             "solver": Solver,
+            "ct_method": CtMethod,
             "coord_system": CoordSystem,
             "regime": Regime,
             "reconstruction": Reconstruction,

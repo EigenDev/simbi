@@ -73,6 +73,13 @@ class Solver(str, ExtendedEnum):
     HLLD = "hlld"
 
 
+class CtMethod(str, ExtendedEnum):
+    """constrained-transport edge-EMF scheme (MHD only)."""
+
+    CONTACT = "contact"  # Gardiner & Stone 2005 (default)
+    UCT = "uct"  # Del Zanna 2007 / Mignone & Del Zanna 2021 (kills the checkerboard)
+
+
 class SubCycleMode(str, ExtendedEnum):
     STANDARD = "standard"
     ADAPTIVE = "adaptive"

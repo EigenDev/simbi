@@ -1066,6 +1066,34 @@ pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     (end_trace(), writes)
 }
 
+/// the CLASSICAL (Newtonian ideal-gas) per-cell wave speeds (`NewtonianMhd::wave_speeds` = the fast
+/// magnetosonic bound, lmin/lmax = v_n -/+ c_f). materializes `wave_speed_l/r[dir]` so UCT (which
+/// reads them for the edge-EMF coefficients) works for NMHD — the classical regimes compute speeds
+/// inline in the flux and otherwise do NOT store them. mirror of `rmhd_wave_speeds_cell_gv`.
+pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let vel: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+    let mag: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = Gv::scalar("gamma");
+    let eos = IdealGas { gamma };
+    let prim = MhdPrim::<Gv, 3> {
+        hydro: Prim { rho, vel: Tensor::new(vel), pre },
+        mag: Tensor::new(mag),
+    };
+    let mut writes = Vec::with_capacity(2 * ndim);
+    for d in 0..ndim {
+        let nhat = Tensor::<Gv, 3>::unit(d);
+        let (lmin, lmax) = NewtonianMhd.wave_speeds(&eos, &prim, &nhat);
+        writes.push((format!("ws_l_{d}"), format!("wave_speed_l[{d}]").into(), lmin.node()));
+        writes.push((format!("ws_r_{d}"), format!("wave_speed_r[{d}]").into(), lmax.node()));
+    }
+    (end_trace(), writes)
+}
+
 // =============================================================================
 // the conserved-update GODUNOV family in Gv — the finite-volume divergence (the Gv stencil
 // `field_shifted(F_i, +e_i) - field(F_i)`, no `MorphismKind::Diff`) composed with the
@@ -1300,9 +1328,12 @@ fn gv_geometric_source(
                 mag: Tensor::new(mag),
             };
             let (wgam2, bmu, ptot) = rmhd_source_quantities(&eos, &prim);
-            let gas_mom: Vec<Gv> = (0..ndim).map(|k| wgam2 * vel[k]).collect();
-            let vel_n: Vec<Gv> = vel[..ndim].to_vec();
-            let bmu_n: Vec<Gv> = (0..ndim).map(|k| bmu[k]).collect();
+            // the inertial + magnetic geometric sources need ALL `ncomp` (DOF) components, not
+            // just the `ndim` gridded ones: a 2.5D spherical (r,theta) grid has DOF=3 and the
+            // out-of-plane phi momentum (mom[2]) drives the S_theta cot term + the S_phi source.
+            let gas_mom: Vec<Gv> = (0..ncomp).map(|k| wgam2 * vel[k]).collect();
+            let vel_n: Vec<Gv> = vel[..ncomp].to_vec();
+            let bmu_n: Vec<Gv> = (0..ncomp).map(|k| bmu[k]).collect();
             geometric_momentum_sources_gv(
                 coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel_n, Some(&bmu_n),
             )
@@ -1312,15 +1343,17 @@ fn gv_geometric_source(
             // pure gas); magnetic tension via the lab-frame B (the Maxwell stress -B_i B_j has
             // the SAME christoffel form as the inertial, so it reuses the inertial builder, then
             // is subtracted by geometric_momentum_sources_gv). no wgam2 / four-vector.
-            let vel: Vec<Gv> = (0..ndim)
+            // ALL `ncomp` (DOF) components: a 2.5D spherical grid (DOF=3 > ndim=2) needs the
+            // out-of-plane phi velocity/momentum/B for the S_theta cot + S_phi geometric sources.
+            let vel: Vec<Gv> = (0..ncomp)
                 .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                 .collect();
             let mag: [Gv; 3] = std::array::from_fn(|k| mag_field(k));
             let pre = Gv::field("prim_pre", FieldRef::PrimPre);
             let bsq = mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2];
             let ptot = pre + Gv::from_f64(0.5) * bsq;
-            let gas_mom: Vec<Gv> = cons_mom[..ndim].to_vec();
-            let mag_n: Vec<Gv> = (0..ndim).map(|k| mag[k]).collect();
+            let gas_mom: Vec<Gv> = cons_mom[..ncomp].to_vec();
+            let mag_n: Vec<Gv> = (0..ncomp).map(|k| mag[k]).collect();
             geometric_momentum_sources_gv(
                 coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel, Some(&mag_n),
             )
@@ -1328,7 +1361,8 @@ fn gv_geometric_source(
         GeoSource::IsothermalMhd => {
             // isothermal MHD stress: ptot = cs^2 rho + 1/2|B|^2 (no prim.pre; cs is a scalar).
             // otherwise identical to NewtonianMhd (gas inertial via cons.mom, lab-frame B tension).
-            let vel: Vec<Gv> = (0..ndim)
+            // ALL `ncomp` (DOF) components (see NewtonianMhd) for the spherical 2.5D out-of-plane source.
+            let vel: Vec<Gv> = (0..ncomp)
                 .map(|d| Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8)))
                 .collect();
             let mag: [Gv; 3] = std::array::from_fn(|k| mag_field(k));
@@ -1336,8 +1370,8 @@ fn gv_geometric_source(
             let cs = Gv::scalar("cs");
             let bsq = mag[0] * mag[0] + mag[1] * mag[1] + mag[2] * mag[2];
             let ptot = cs * cs * rho + Gv::from_f64(0.5) * bsq;
-            let gas_mom: Vec<Gv> = cons_mom[..ndim].to_vec();
-            let mag_n: Vec<Gv> = (0..ndim).map(|k| mag[k]).collect();
+            let gas_mom: Vec<Gv> = cons_mom[..ncomp].to_vec();
+            let mag_n: Vec<Gv> = (0..ncomp).map(|k| mag[k]).collect();
             geometric_momentum_sources_gv(
                 coords, axes, ndim, ncomp, geo, ptot, &gas_mom, &vel, Some(&mag_n),
             )
@@ -1442,6 +1476,10 @@ struct FusedContribs {
     mom: Vec<Vec<NodeId>>,
     /// each entry is a `S_nrg` NodeId to add to `nrg_new`.
     nrg: Vec<NodeId>,
+    /// `mag[k]` is the per-component cell-B prescription, ONLY for a driven-boundary
+    /// (`WriteMode::Assign`) MHD `bcell` slot. unused (empty) for hydro and for the
+    /// accumulate (godunov source) path — the conservation-law lifts never target B.
+    mag: Vec<Vec<NodeId>>,
 }
 
 /// **B6-iv Phase 4c/2c — fused-source splice helper**. requires an ACTIVE Gv trace
@@ -1470,7 +1508,7 @@ fn splice_fused_sources_to_contribs(
     use std::collections::HashMap;
 
     if sources.is_empty() {
-        return FusedContribs { den: Vec::new(), mom: vec![Vec::new(); ncomp], nrg: Vec::new() };
+        return FusedContribs { den: Vec::new(), mom: vec![Vec::new(); ncomp], nrg: Vec::new(), mag: vec![Vec::new(); ncomp] };
     }
 
     // ----- shared primitive vocabulary, declared ONCE; CSE collapses the
@@ -1521,6 +1559,7 @@ fn splice_fused_sources_to_contribs(
         den: Vec::new(),
         mom: vec![Vec::new(); ncomp],
         nrg: Vec::new(),
+        mag: vec![Vec::new(); ncomp],
     };
     for (target_field, built) in sources {
         let mut name_to_node = shared_params.clone();
@@ -1553,6 +1592,15 @@ fn splice_fused_sources_to_contribs(
                 assert_eq!(spliced.len(), 1,
                     "splice_fused_sources: nrg overlay must emit 1 scalar, got {}", spliced.len());
                 out.nrg.push(spliced[0]);
+            }
+            // cell-B prescription (MHD driven boundary): the ncomp-component bcell vector.
+            // only valid in the Assign (prescription) mode — the conservation-law source lifts
+            // never target B, so the accumulate path asserts mag stays empty.
+            "bcell" => {
+                assert_eq!(spliced.len(), ncomp,
+                    "splice_fused_sources: bcell overlay must emit {ncomp} components, got {}",
+                    spliced.len());
+                for k in 0..ncomp { out.mag[k].push(spliced[k]); }
             }
             other => panic!("splice_fused_sources: unsupported target_field {other:?}"),
         }
@@ -1803,6 +1851,13 @@ fn apply_dag_core_gv(
                 }
                 writes.push(("nrg".to_string(), FieldRef::cons_nrg().into(), nrg_new.node()));
             }
+            // the godunov-source (accumulate) path never targets B — the safe conservation-law
+            // lifts touch only den/mom/nrg, and `raw` is gated to those slots. a bcell contrib
+            // here means a mis-routed source; fail loud rather than silently drop it.
+            debug_assert!(
+                contribs.mag.iter().all(|m| m.is_empty()),
+                "accumulate (godunov source) path does not support a `bcell` target",
+            );
             writes
         }
         WriteMode::Assign => {
@@ -1818,6 +1873,17 @@ fn apply_dag_core_gv(
             if has_energy {
                 assert_eq!(contribs.nrg.len(), 1, "Assign: prim.pre needs exactly one source DAG");
                 writes.push(("pre".to_string(), FieldRef::PrimPre.into(), contribs.nrg[0]));
+            }
+            // MHD driven boundary: prescribe the cell-B vector (prim.mag). out-of-plane B_phi
+            // (cell-centered, flux-evolved) is the SAFE toroidal case; in-plane components are
+            // the user's responsibility to keep div-compatible (=0 for a purely toroidal field).
+            // absent for a hydro prescription (no bcell slot -> empty mag buckets).
+            if contribs.mag.iter().any(|m| !m.is_empty()) {
+                for k in 0..ncomp {
+                    assert_eq!(contribs.mag[k].len(), 1,
+                        "Assign: prim.mag_{k} needs exactly one source DAG");
+                    writes.push((format!("mag_{k}"), FieldRef::PrimMag(k as u8).into(), contribs.mag[k][0]));
+                }
             }
             writes
         }
@@ -2254,7 +2320,10 @@ pub fn geometric_momentum_source_probe_gv(
     // gas momentum density from prim (cons.mom carries B-momentum), so it reads no cons.mom.
     let cons_mom: Vec<Gv> = match source {
         // hydro + newtonian MHD: cons.mom IS the gas momentum density (rho v), read directly.
-        GeoSource::Hydro { .. } | GeoSource::NewtonianMhd | GeoSource::IsothermalMhd => (0..ndim)
+        // read ALL `ncomp` (DOF) components, not just `ndim`: a 2.5D spherical (r,theta) MHD grid
+        // has DOF=3 and the geometric S_theta/S_phi need the out-of-plane phi momentum (mom[2]).
+        // hydro has ncomp==ndim so this is unchanged there.
+        GeoSource::Hydro { .. } | GeoSource::NewtonianMhd | GeoSource::IsothermalMhd => (0..ncomp)
             .map(|k| Gv::field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
             .collect(),
         GeoSource::Rmhd => Vec::new(),
@@ -2616,6 +2685,51 @@ pub fn rmhd_ct_curl_cyl_rphi_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, V
     (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
 }
 
+/// the 2.5D SPHERICAL (r-theta plane, out-of-plane phi) CT curl from the single corner EMF
+/// E_phi (efield[0]), in-place on `b` (bface[dir]). Faraday dB/dt = -curl E with E = E_phi phi-hat
+/// (axisymmetric) gives the spherical-metric in-plane update:
+///   dir=0 (B_r,   r-face):     dB_r/dt   = -(1/(r_f sin th_c)) d_th(sin th * E_phi)   (th = grid axis 1)
+///   dir=1 (B_th, theta-face):  dB_th/dt  = +(1/r_c) d_r(r * E_phi)                     (r  = grid axis 0)
+/// r_f is the r-FACE radius (where B_r lives); r_c / th_c are the staggered cell centers. mirrors
+/// `rmhd_ct_curl_cyl_rz_gv` with the added sin(theta) area weight on the B_r update (and the
+/// opposite B_theta sign vs the cylinder's B_z). VALIDATION NOTE: derived from the continuous curl;
+/// the staggered div(B)=0 preservation for a POLOIDAL field still needs a dedicated test (the
+/// toroidal-injection case exercises this on a zero in-plane field, so it is trivially div-free).
+pub fn rmhd_ct_curl_2d_sph_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let b = Gv::field("b", "b");
+    let ez = Gv::field("ez", "ez"); // the out-of-plane corner EMF E_phi
+    let dt = Gv::scalar("dt");
+    // POSITIONAL scalar ABI: the runtime curl dispatch pushes [dt, x_lo_0, dx_0, x_lo_1, dx_1]
+    // every dir (see rmhd_ct_curl_cyl_rz_gv). pin the full geom set in canonical order up front.
+    for ax in 0..2 {
+        let _ = gv_axis_face_at(ax, spacing[ax], 0);
+        let _ = gv_axis_face_at(ax, spacing[ax], 1);
+    }
+    let half = Gv::from_f64(0.5);
+    let b_new = if dir == 0 {
+        // dB_r/dt = -(1/(r_f sin th_c)) d_th(sin th E_phi). r_f = the low r-face (B_r lives there);
+        // th_lo/th_hi are the corner thetas bounding this r-face, th_c the cell-center theta.
+        let r_f = gv_axis_face_at(0, spacing[0], 0);
+        let th_lo = gv_axis_face_at(1, spacing[1], 0);
+        let th_hi = gv_axis_face_at(1, spacing[1], 1);
+        let th_c = (th_lo + th_hi) * half;
+        let inv_dth = Gv::ONE / (th_hi - th_lo);
+        let ez_thp = gv_field_at("ez", "ez", 2, &[0, 1]);
+        b - dt * (Gv::ONE / (r_f * th_c.sin())) * inv_dth * (th_hi.sin() * ez_thp - th_lo.sin() * ez)
+    } else {
+        // dB_th/dt = +(1/r_c) d_r(r E_phi). r_lo/r_hi are the corner radii bounding this theta-face,
+        // r_c the cell-center radius (opposite sign to the cylinder's B_z update).
+        let r_lo = gv_axis_face_at(0, spacing[0], 0);
+        let r_hi = gv_axis_face_at(0, spacing[0], 1);
+        let r_c = (r_lo + r_hi) * half;
+        let inv_dr = Gv::ONE / (r_hi - r_lo);
+        let ez_rp = gv_field_at("ez", "ez", 2, &[1, 0]);
+        b + dt * (Gv::ONE / r_c) * inv_dr * (r_hi * ez_rp - r_lo * ez)
+    };
+    (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
+}
+
 /// the 3D CT curl B-update along face axis `dir` (in-place on `b`), mirror of
 /// `rmhd::rmhd_ct_curl_3d_dir`: `B_dir += dt*curl`, `curl = dE_p1/dx_p2 - dE_p2/dx_p1`
 /// (cartesian, uniform `id_p1`/`id_p2`) or the orthogonal h-weighted curl (curvilinear, via
@@ -2769,6 +2883,441 @@ pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(St
     let fe = gv_field_at("edge_fden_p2", "fden_p2", ndim, &zero);
     let fw = gv_field_at("edge_fden_p2", "fden_p2", ndim, &cm(&[g1]));
     let emf = ct_contact_emf_gv([en, es, ee, ew], [ene, enw, ese, esw], [fnf, fs, fe, fw]);
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+/// the per-direction UCT flux/diffusion coefficients at the edge — the (a^L, a^R, d^L, d^R) of the
+/// master formula (Mignone & Del Zanna 2020, Eq. 30). `al`/`ar` are the advective flux weights of the
+/// upwind/downwind states (a^L + a^R = 1); `dl`/`dr` the dissipative diffusion coefficients (equal
+/// for HLL/HLLC's symmetric advection, distinct for HLLD). THIS is the only solver-specific piece:
+/// HLL fills it from the fast speeds (regime-generic); HLLC/HLLD swap it for the contact/Alfvén-aware
+/// coefficients (Eq. 38 / 44) — the SAME master EMF kernel consumes it.
+struct UctDir {
+    al: Gv,
+    ar: Gv,
+    dl: Gv,
+    dr: Gv,
+}
+
+/// HLL coefficients (Eq. 32) from the edge signal speeds `ap = max(0, lambda_max)`,
+/// `am = max(0, -lambda_min)`: a^L = ap/(ap+am), a^R = am/(ap+am), d^L = d^R = ap*am/(ap+am).
+fn uct_hll_coeffs(ap: Gv, am: Gv) -> UctDir {
+    let eps = Gv::from_f64(1.0e-30);
+    let sum = ap + am + eps;
+    let d = ap * am / sum;
+    UctDir { al: ap / sum, ar: am / sum, dl: d, dr: d }
+}
+
+/// HLLC coefficients (Eq. 37-38). the three-wave fan (two fast `ll<=0<=lr` + the contact `lstar`)
+/// gives a^L = a^R = 1/2 and the contact-aware diffusion
+///   chi^s = -(vx^s - lambda^s)/(lambda^s - lstar),   d^s = ((|lstar|-|lambda^s|)/2) chi^s + |lambda^s|/2
+/// (s = L,R). less dissipative than HLL because the transverse-field jump is resolved across the
+/// contact, not the fast wave. `vxl`/`vxr` are the L/R normal velocities. classical & relativistic
+/// share this algebra; only `lstar` (the contact speed) is regime-specific (computed upstream).
+fn uct_hllc_coeffs(ll: Gv, lr: Gv, lstar: Gv, vxl: Gv, vxr: Gv) -> UctDir {
+    let half = Gv::from_f64(0.5);
+    let eps = Gv::from_f64(1.0e-30);
+    // guard the (lambda^s - lstar) denominators away from zero (preserve sign).
+    let den_l = ll - lstar;
+    let den_r = lr - lstar;
+    let den_l = den_l + eps * sign_gv(den_l);
+    let den_r = den_r + eps * sign_gv(den_r);
+    let chi_l = (Gv::ZERO - (vxl - ll)) / den_l;
+    let chi_r = (Gv::ZERO - (vxr - lr)) / den_r;
+    // Eq. 38: d^s = ((|lstar| - |lambda^s|)/2) chi^s + |lstar|/2  (the LAST term is |lstar|, the
+    // contact speed, NOT |lambda^s|). this is the B_x = 0 DEGENERATE case (for B_x != 0 HLLC == HLL);
+    // it is the building block for the HLLD singular limit (Eq. 46, v* = 0), not a standalone solver.
+    let dl = ((lstar.abs() - ll.abs()) * half) * chi_l + lstar.abs() * half;
+    let dr = ((lstar.abs() - lr.abs()) * half) * chi_r + lstar.abs() * half;
+    // clamp to [0, d_HLL]: the HLL diffusion is the stable upper bound (so HLLC is never MORE
+    // dissipative than HLL), and 0 the lower bound (no ANTI-diffusion). this also tames the fan
+    // degeneracy lambda^s -> lstar where chi^s blows up (an approximate edge-level lstar can push
+    // d^s hugely negative -> anti-diffusion -> blow-up; the proper per-face lstar would not, but
+    // the clamp is a robust guard regardless).
+    // FLOOR (d >= 0): the diffusion coefficient must be DISSIPATIVE. with the per-face lstar, d^s can
+    // still dip slightly negative where lstar approaches lambda^s (chi^s grows); allowing it (no
+    // floor) yields an unphysically "sharp" result from anti-diffusion (the checkerboard-prone
+    // direction). flooring at 0 is the correct physical guard. NO upper cap — HLLC's d legitimately
+    // differs from HLL's, and capping at d_HLL artificially over-diffuses.
+    let floor = |d: Gv| Gv::ZERO.max(d);
+    UctDir { al: half, ar: half, dl: floor(dl), dr: floor(dr) }
+}
+
+/// smooth sign (for the HLLC/HLLD denominator guards): f/(|f|+eps), in [-1,1], 0 at f=0.
+fn sign_gv(f: Gv) -> Gv {
+    let eps = Gv::from_f64(1.0e-300);
+    f / (f.abs() + eps)
+}
+
+/// the UCT edge EMF in MASTER form (Mignone & Del Zanna 2020, Eq. 33) — the structure that
+/// generalizes across Riemann solvers by swapping only the per-direction (a^L, a^R, d) coefficients
+/// (`uct_*_coeffs`). for the out-of-plane (z) edge:
+/// ```text
+///   Ez = -vbar_x (a^L_x B_y^E + a^R_x B_y^W) + d_x (B_y^E - B_y^W)   [x: advect + diffuse B_y]
+///       + vbar_y (a^L_y B_x^N + a^R_y B_x^S) - d_y (B_x^N - B_x^S)   [y: advect + diffuse B_x]
+/// ```
+/// `vbar_t` is the upwind transverse velocity (Eq. 29, from the edge speeds); the `B` are the
+/// STAGGERED div-free FACE fields (B_y on y-faces E/W, B_x on x-faces N/S); the edge speeds are the
+/// MAX over the 4 surrounding cells (the paper-sanctioned maximal-diffusion edge reconstruction).
+/// reduces to `v_y B_x - v_x B_y` in the symmetric-speed limit; the diffusion matches the verified
+/// compact Eq. 27. div(B)=0 preserved (a CT curl of one edge EMF, independent of the coefficients).
+/// component-agnostic: only the gather offsets are geometric (g1/g2 = the perpendicular grid plane).
+pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    gv_register_field("edge_vp1", "vel_p1");
+    gv_register_field("edge_vp2", "vel_p2");
+    gv_register_field("edge_bface_a", "bface_a");
+    gv_register_field("edge_bface_b", "bface_b");
+    gv_register_field("edge_wsr1", "wsr_p1");
+    gv_register_field("edge_wsl1", "wsl_p1");
+    gv_register_field("edge_wsr2", "wsr_p2");
+    gv_register_field("edge_wsl2", "wsl_p2");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let zero_g = Gv::ZERO;
+    // cell velocity gathers. corners about the edge (lower-left of cell NE): NE=0, NW=-g1, SE=-g2,
+    // SW=-g1-g2. the side velocities are the 2-cell averages straddling the edge.
+    let vp1 = |o: &[i32]| gv_field_at("edge_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("edge_vp2", "vel_p2", ndim, o);
+    let vx_e = (vp1(&zero) + vp1(&cm(&[g2]))) * half; // East cells (NE, SE)
+    let vx_w = (vp1(&cm(&[g1])) + vp1(&cm(&[g1, g2]))) * half; // West (NW, SW)
+    let vy_n = (vp2(&zero) + vp2(&cm(&[g1]))) * half; // North (NE, NW)
+    let vy_s = (vp2(&cm(&[g2])) + vp2(&cm(&[g1, g2]))) * half; // South (SE, SW)
+    // edge signal speeds: MAX over the 4 surrounding cells (maximal-diffusion edge reconstruction).
+    let max4 = |key: &str, path: &str| -> Gv {
+        let v0 = gv_field_at(key, path, ndim, &zero);
+        let v1 = gv_field_at(key, path, ndim, &cm(&[g1]));
+        let v2 = gv_field_at(key, path, ndim, &cm(&[g2]));
+        let v3 = gv_field_at(key, path, ndim, &cm(&[g1, g2]));
+        v0.max(v1).max(v2).max(v3)
+    };
+    let neg_min4 = |key: &str, path: &str| -> Gv {
+        let v0 = zero_g - gv_field_at(key, path, ndim, &zero);
+        let v1 = zero_g - gv_field_at(key, path, ndim, &cm(&[g1]));
+        let v2 = zero_g - gv_field_at(key, path, ndim, &cm(&[g2]));
+        let v3 = zero_g - gv_field_at(key, path, ndim, &cm(&[g1, g2]));
+        v0.max(v1).max(v2).max(v3)
+    };
+    let apx = zero_g.max(max4("edge_wsr1", "wsr_p1"));
+    let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
+    let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
+    let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
+    // SOLVER-SPECIFIC coefficients (HLL here; swap uct_hll_coeffs -> hllc/hlld later).
+    let cx = uct_hll_coeffs(apx, amx);
+    let cy = uct_hll_coeffs(apy, amy);
+    // upwind transverse velocities (Eq. 29): vbar_x upwind in x (alpha^+ carries the West/left state),
+    // vbar_y upwind in y (alpha^+ carries the South/lower state).
+    let eps = Gv::from_f64(1.0e-30);
+    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
+    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    // staggered face B at the edge: B_y on the East/West y-faces, B_x on the North/South x-faces.
+    let by_e = gv_field_at("edge_bface_b", "bface_b", ndim, &zero);
+    let by_w = gv_field_at("edge_bface_b", "bface_b", ndim, &cm(&[g1]));
+    let bx_n = gv_field_at("edge_bface_a", "bface_a", ndim, &zero);
+    let bx_s = gv_field_at("edge_bface_a", "bface_a", ndim, &cm(&[g2]));
+    let emf = uct_master_emf(&cx, &cy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s);
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+/// the master-formula edge EMF combination (Eq. 33), shared by every UCT coefficient family. given
+/// the per-direction coefficients + the upwind transverse velocities + the staggered face B at the
+/// edge:
+/// ```text
+///   Ez = -vbar_x (a^L_x B_y^E + a^R_x B_y^W) + (d^R_x B_y^E - d^L_x B_y^W)
+///       + vbar_y (a^L_y B_x^N + a^R_y B_x^S) - (d^R_y B_x^N - d^L_y B_x^S)
+/// ```
+/// (signs verified against the compact Eq. 27 diffusion + the symmetric-speed reduction v_y B_x - v_x B_y.)
+fn uct_master_emf(cx: &UctDir, cy: &UctDir, vbar_x: Gv, vbar_y: Gv, by_e: Gv, by_w: Gv, bx_n: Gv, bx_s: Gv) -> Gv {
+    let zero_g = Gv::ZERO;
+    let adv_x = zero_g - vbar_x * (cx.al * by_e + cx.ar * by_w);
+    let dif_x = cx.dr * by_e - cx.dl * by_w;
+    let adv_y = vbar_y * (cy.al * bx_n + cy.ar * bx_s);
+    let dif_y = zero_g - (cy.dr * bx_n - cy.dl * bx_s);
+    adv_x + dif_x + adv_y + dif_y
+}
+
+/// the master EMF with PER-SIDE velocities (the conservative-flux advective form, Eq. 33 exactly).
+/// required when `a^L != a^R` (HLLD): factoring a single `vbar` out turns the asymmetry into a
+/// `v* (B^E - B^W)` term that is anti-diffusive and blows up. here each face flux carries its OWN
+/// upwind velocity: `adv_x = -[a^L_x v_x^E B_y^E + a^R_x v_x^W B_y^W]`, etc.
+fn uct_master_emf_perside(
+    cx: &UctDir, cy: &UctDir, vx_e: Gv, vx_w: Gv, vy_n: Gv, vy_s: Gv, by_e: Gv, by_w: Gv, bx_n: Gv, bx_s: Gv,
+) -> Gv {
+    let zero_g = Gv::ZERO;
+    let adv_x = zero_g - (cx.al * vx_e * by_e + cx.ar * vx_w * by_w);
+    let dif_x = cx.dr * by_e - cx.dl * by_w;
+    let adv_y = cy.al * vy_n * bx_n + cy.ar * vy_s * bx_s;
+    let dif_y = zero_g - (cy.dr * bx_n - cy.dl * bx_s);
+    adv_x + dif_x + adv_y + dif_y
+}
+
+/// the UCT-HLLC edge EMF (master Eq. 33 + HLLC coefficients Eq. 37-38). same master formula as the
+/// HLL kernel, but the diffusion uses the CONTACT speed `lstar` (the three-wave fan) -> less
+/// dissipative. CLASSICAL ideal-gas (NMHD): `lstar = m_n^hll/rho^hll` is the HLL-average normal
+/// velocity, computed in-kernel from the cell prims with the classical momentum flux
+/// `F[m_n] = rho v_n^2 + p + |B|^2/2 - B_n^2`. edge speeds & per-side states use the MAX-over-4-cells
+/// / 2-cell-average reconstruction. (IMHD: p = cs^2*rho; RMHD: relativistic conserved/flux.)
+pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    gv_register_field("e_rho", "rho");
+    gv_register_field("e_vp1", "vel_p1");
+    gv_register_field("e_vp2", "vel_p2");
+    gv_register_field("e_pre", "pre");
+    gv_register_field("e_bp1", "bcell_p1");
+    gv_register_field("e_bp2", "bcell_p2");
+    gv_register_field("e_bout", "bcell_out");
+    gv_register_field("e_bface_a", "bface_a");
+    gv_register_field("e_bface_b", "bface_b");
+    gv_register_field("e_wsr1", "wsr_p1");
+    gv_register_field("e_wsl1", "wsl_p1");
+    gv_register_field("e_wsr2", "wsr_p2");
+    gv_register_field("e_wsl2", "wsl_p2");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let eps = Gv::from_f64(1.0e-30);
+    let zero_g = Gv::ZERO;
+    let rho = |o: &[i32]| gv_field_at("e_rho", "rho", ndim, o);
+    let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
+    let pre = |o: &[i32]| gv_field_at("e_pre", "pre", ndim, o);
+    let bp1 = |o: &[i32]| gv_field_at("e_bp1", "bcell_p1", ndim, o);
+    let bp2 = |o: &[i32]| gv_field_at("e_bp2", "bcell_p2", ndim, o);
+    let bout = |o: &[i32]| gv_field_at("e_bout", "bcell_out", ndim, o);
+    let bsq = |o: &[i32]| {
+        let a = bp1(o);
+        let b = bp2(o);
+        let c = bout(o);
+        a * a + b * b + c * c
+    };
+    let avg2 = |a: Gv, b: Gv| (a + b) * half;
+    // corners about the edge: NE=0, NW=-g1, SE=-g2, SW=-g1-g2.
+    let ne = zero.clone();
+    let nw = cm(&[g1]);
+    let se = cm(&[g2]);
+    let sw = cm(&[g1, g2]);
+    // edge signal speeds: MAX over the 4 cells.
+    let max4 = |key: &str, path: &str| -> Gv {
+        let v0 = gv_field_at(key, path, ndim, &ne);
+        let v1 = gv_field_at(key, path, ndim, &nw);
+        let v2 = gv_field_at(key, path, ndim, &se);
+        let v3 = gv_field_at(key, path, ndim, &sw);
+        v0.max(v1).max(v2).max(v3)
+    };
+    let neg_min4 = |key: &str, path: &str| -> Gv {
+        let v0 = zero_g - gv_field_at(key, path, ndim, &ne);
+        let v1 = zero_g - gv_field_at(key, path, ndim, &nw);
+        let v2 = zero_g - gv_field_at(key, path, ndim, &se);
+        let v3 = zero_g - gv_field_at(key, path, ndim, &sw);
+        v0.max(v1).max(v2).max(v3)
+    };
+    let apx = zero_g.max(max4("e_wsr1", "wsr_p1"));
+    let amx = zero_g.max(neg_min4("e_wsl1", "wsl_p1"));
+    let apy = zero_g.max(max4("e_wsr2", "wsr_p2"));
+    let amy = zero_g.max(neg_min4("e_wsl2", "wsl_p2"));
+    // per-FACE HLLC coefficients: each face uses ITS OWN two cells (first-order L/R) + Davis face
+    // speeds (s_r = max(0, ws_r^L, ws_r^R), s_l = min(0, ws_l^L, ws_l^R)) so lstar = m_n^hll/rho^hll
+    // is CONSISTENT (the contact stays inside the fan -> no degeneracy blow-up). then the diffusion
+    // is MAX-combined to the edge (the maximal-diffusion edge reconstruction). vn/bn read the normal
+    // velocity / normal cell-B; wsr/wsl are the direction's per-cell speed fields.
+    let face_d = |l: &[i32], r: &[i32], vn: &dyn Fn(&[i32]) -> Gv, bn: &dyn Fn(&[i32]) -> Gv,
+                  wsr_k: &str, wsr_p: &str, wsl_k: &str, wsl_p: &str| -> (Gv, Gv) {
+        let (rl, rr) = (rho(l), rho(r));
+        let (vl, vr) = (vn(l), vn(r));
+        let (pl, pr) = (pre(l), pre(r));
+        let (bsl, bsr) = (bsq(l), bsq(r));
+        let (bnl, bnr) = (bn(l), bn(r));
+        let sr = zero_g.max(gv_field_at(wsr_k, wsr_p, ndim, l).max(gv_field_at(wsr_k, wsr_p, ndim, r)));
+        let sl = zero_g.min(gv_field_at(wsl_k, wsl_p, ndim, l).min(gv_field_at(wsl_k, wsl_p, ndim, r)));
+        let (mxl, mxr) = (rl * vl, rr * vr);
+        let fl = rl * vl * vl + pl + half * bsl - bnl * bnl;
+        let fr = rr * vr * vr + pr + half * bsr - bnr * bnr;
+        let inv = Gv::ONE / (sr - sl + eps);
+        let rho_hll = (sr * rr - sl * rl + mxl - mxr) * inv;
+        let mx_hll = (sr * mxr - sl * mxl + fl - fr) * inv;
+        let lstar = mx_hll / (rho_hll + eps * sign_gv(rho_hll));
+        let c = uct_hllc_coeffs(sl, sr, lstar, vl, vr);
+        (c.dl, c.dr)
+    };
+    // x-faces (normal p1): North NW->NE, South SW->SE; MAX-combine d to the edge.
+    let (dln, drn) = face_d(&nw, &ne, &vp1, &bp1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
+    let (dls, drs) = face_d(&sw, &se, &vp1, &bp1, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
+    let cx = UctDir { al: half, ar: half, dl: dln.max(dls), dr: drn.max(drs) };
+    // y-faces (normal p2): West SW->NW, East SE->NE.
+    let (dlw, drw) = face_d(&sw, &nw, &vp2, &bp2, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
+    let (dle, dre) = face_d(&se, &ne, &vp2, &bp2, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
+    let cy = UctDir { al: half, ar: half, dl: dlw.max(dle), dr: drw.max(dre) };
+    // upwind transverse velocities (Eq. 29) for the advective part: alpha^+ carries West / South.
+    let vx_w = avg2(vp1(&nw), vp1(&sw));
+    let vx_e = avg2(vp1(&ne), vp1(&se));
+    let vy_s = avg2(vp2(&sw), vp2(&se));
+    let vy_n = avg2(vp2(&nw), vp2(&ne));
+    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
+    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    let by_e = gv_field_at("e_bface_b", "bface_b", ndim, &zero);
+    let by_w = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
+    let bx_n = gv_field_at("e_bface_a", "bface_a", ndim, &zero);
+    let bx_s = gv_field_at("e_bface_a", "bface_a", ndim, &se);
+    let emf = uct_master_emf(&cx, &cy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s);
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+/// the UCT-HLLD edge EMF (master Eq. 33 + the five-wave HLLD coefficients Eq. 40-46). the GENUINELY
+/// less-diffusive EMF: its rotational/Alfvén waves resolve the transverse field for B_x != 0, which
+/// HLL/HLLC cannot. per-face fan (classical ideal-gas NMHD):
+///   lambda* = m_n^hll/rho^hll                         (contact, Eq. 41)
+///   rho*^s  = rho^s (lambda^s - v_n^s)/(lambda^s - lambda*)
+///   lambda*^{L,R} = lambda* -/+ |B_n|/sqrt(rho*^{L,R}) (rotational, Eq. 40; B_n = STAGGERED face)
+///   chitilde^s = (v_n^s - lambda*)(lambda^s - lambda*)/(lambda*^s + lambda^s - 2 lambda*)  [Eq. 42,
+///                the singular (lambda*^s - lambda^s) factor cancelled; verified vs both stated limits]
+///   v^s = (lambda*^s + lambda^s)/(|lambda*^s| + |lambda^s|)              (per side, Eq. 45)
+///   v*  = (lambda*^R + lambda*^L)/(|lambda*^R| + |lambda*^L|)            (Eq. 45) -> 0 when the
+///         rotational waves collapse (Eq. 46 degenerate guard, B_x -> 0, recovers HLLC == HLL)
+///   d^s = (v^s - v*)/2 * chitilde^s + (|lambda*^s| - v* lambda*^s)/2     (Eq. 44)
+///   a^L = (1 + v*)/2 ,  a^R = (1 - v*)/2                                 (asymmetric advection)
+/// per-face d^{L,R} MAX-combined to the edge; a^L averaged. NO floor (the cancellation + guard keep
+/// d well-behaved). (IMHD: isothermal p; RMHD: relativistic fan.)
+pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    gv_register_field("e_rho", "rho");
+    gv_register_field("e_vp1", "vel_p1");
+    gv_register_field("e_vp2", "vel_p2");
+    gv_register_field("e_pre", "pre");
+    gv_register_field("e_bp1", "bcell_p1");
+    gv_register_field("e_bp2", "bcell_p2");
+    gv_register_field("e_bout", "bcell_out");
+    gv_register_field("e_bface_a", "bface_a");
+    gv_register_field("e_bface_b", "bface_b");
+    gv_register_field("e_wsr1", "wsr_p1");
+    gv_register_field("e_wsl1", "wsl_p1");
+    gv_register_field("e_wsr2", "wsr_p2");
+    gv_register_field("e_wsl2", "wsl_p2");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let one = Gv::ONE;
+    let two = Gv::from_f64(2.0);
+    let eps = Gv::from_f64(1.0e-30);
+    let eps_deg = Gv::from_f64(1.0e-9);
+    let tiny = Gv::from_f64(1.0e-30);
+    let zero_g = Gv::ZERO;
+    let rho = |o: &[i32]| gv_field_at("e_rho", "rho", ndim, o);
+    let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
+    let pre = |o: &[i32]| gv_field_at("e_pre", "pre", ndim, o);
+    let bp1 = |o: &[i32]| gv_field_at("e_bp1", "bcell_p1", ndim, o);
+    let bp2 = |o: &[i32]| gv_field_at("e_bp2", "bcell_p2", ndim, o);
+    let bout = |o: &[i32]| gv_field_at("e_bout", "bcell_out", ndim, o);
+    let bsq = |o: &[i32]| {
+        let a = bp1(o);
+        let b = bp2(o);
+        let c = bout(o);
+        a * a + b * b + c * c
+    };
+    let avg2 = |a: Gv, b: Gv| (a + b) * half;
+    let guard = |x: Gv| x + eps * sign_gv(x);
+    let ne = zero.clone();
+    let nw = cm(&[g1]);
+    let se = cm(&[g2]);
+    let sw = cm(&[g1, g2]);
+    let max4 = |key: &str, path: &str| -> Gv {
+        gv_field_at(key, path, ndim, &ne)
+            .max(gv_field_at(key, path, ndim, &nw))
+            .max(gv_field_at(key, path, ndim, &se))
+            .max(gv_field_at(key, path, ndim, &sw))
+    };
+    let neg_min4 = |key: &str, path: &str| -> Gv {
+        (zero_g - gv_field_at(key, path, ndim, &ne))
+            .max(zero_g - gv_field_at(key, path, ndim, &nw))
+            .max(zero_g - gv_field_at(key, path, ndim, &se))
+            .max(zero_g - gv_field_at(key, path, ndim, &sw))
+    };
+    let apx = zero_g.max(max4("e_wsr1", "wsr_p1"));
+    let amx = zero_g.max(neg_min4("e_wsl1", "wsl_p1"));
+    let apy = zero_g.max(max4("e_wsr2", "wsr_p2"));
+    let amy = zero_g.max(neg_min4("e_wsl2", "wsl_p2"));
+    // per-FACE HLLD coefficients -> (a^L, d^L, d^R). `bn_face` is the STAGGERED div-free normal B at
+    // this face (continuous across the fan); `vn`/`bnc` read the normal velocity / normal CELL-B.
+    let hlld_face = |l: &[i32], r: &[i32], vn: &dyn Fn(&[i32]) -> Gv, bnc: &dyn Fn(&[i32]) -> Gv,
+                     bn_face: Gv, wsr_k: &str, wsr_p: &str, wsl_k: &str, wsl_p: &str| -> (Gv, Gv, Gv) {
+        let (rl, rr) = (rho(l), rho(r));
+        let (vl, vr) = (vn(l), vn(r));
+        let (pl, pr) = (pre(l), pre(r));
+        let (bsl, bsr) = (bsq(l), bsq(r));
+        let (bncl, bncr) = (bnc(l), bnc(r));
+        let sr = zero_g.max(gv_field_at(wsr_k, wsr_p, ndim, l).max(gv_field_at(wsr_k, wsr_p, ndim, r)));
+        let sl = zero_g.min(gv_field_at(wsl_k, wsl_p, ndim, l).min(gv_field_at(wsl_k, wsl_p, ndim, r)));
+        let (mxl, mxr) = (rl * vl, rr * vr);
+        let fml = rl * vl * vl + pl + half * bsl - bncl * bncl;
+        let fmr = rr * vr * vr + pr + half * bsr - bncr * bncr;
+        let inv = one / (sr - sl + eps);
+        let rho_hll = (sr * rr - sl * rl + mxl - mxr) * inv;
+        let mx_hll = (sr * mxr - sl * mxl + fml - fmr) * inv;
+        let lstar = mx_hll / guard(rho_hll);
+        // star densities (Eq. 40).
+        let rho_sl = rl * (sl - vl) / guard(sl - lstar);
+        let rho_sr = rr * (sr - vr) / guard(sr - lstar);
+        // rotational/Alfvén speeds (Eq. 40) — STAGGERED face normal B.
+        let abx = bn_face.abs();
+        let lrl = lstar - abx / rho_sl.max(tiny).sqrt();
+        let lrr = lstar + abx / rho_sr.max(tiny).sqrt();
+        // chitilde^s (Eq. 42, singular factor cancelled).
+        let chitl = (vl - lstar) * (sl - lstar) / guard(lrl + sl - two * lstar);
+        let chitr = (vr - lstar) * (sr - lstar) / guard(lrr + sr - two * lstar);
+        // v^s per side (Eq. 45).
+        let vsl = (lrl + sl) / (lrl.abs() + sl.abs() + eps);
+        let vsr = (lrr + sr) / (lrr.abs() + sr.abs() + eps);
+        // v* with the B_x -> 0 degenerate guard (Eq. 46) as a smooth step.
+        let vstar_raw = (lrr + lrl) / (lrr.abs() + lrl.abs() + eps);
+        let g = (lrr - lrl).abs() - eps_deg * (sr - sl).abs();
+        let w = half * (one + sign_gv(g));
+        let vstar = w * vstar_raw;
+        // d^s (Eq. 44) and a^L.
+        let dl = half * (vsl - vstar) * chitl + half * (lrl.abs() - vstar * lrl);
+        let dr = half * (vsr - vstar) * chitr + half * (lrr.abs() - vstar * lrr);
+        (half * (one + vstar), dl, dr)
+    };
+    // staggered face B at the edge (also the master diffusion jumps): x-faces = bface_a, y = bface_b.
+    let bx_n = gv_field_at("e_bface_a", "bface_a", ndim, &zero);
+    let bx_s = gv_field_at("e_bface_a", "bface_a", ndim, &se);
+    let by_w = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
+    let by_e = gv_field_at("e_bface_b", "bface_b", ndim, &zero);
+    // x-faces (normal p1): North NW->NE, South SW->SE.
+    let (aln, dln, drn) = hlld_face(&nw, &ne, &vp1, &bp1, bx_n, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
+    let (als, dls, drs) = hlld_face(&sw, &se, &vp1, &bp1, bx_s, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
+    let alx = avg2(aln, als);
+    let cx = UctDir { al: alx, ar: one - alx, dl: dln.max(dls), dr: drn.max(drs) };
+    // y-faces (normal p2): West SW->NW, East SE->NE.
+    let (alw, dlw, drw) = hlld_face(&sw, &nw, &vp2, &bp2, by_w, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
+    let (ale, dle, dre) = hlld_face(&se, &ne, &vp2, &bp2, by_e, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
+    let aly = avg2(alw, ale);
+    let cy = UctDir { al: aly, ar: one - aly, dl: dlw.max(dle), dr: drw.max(dre) };
+    // PER-SIDE advective velocities (East/West x-vel, North/South y-vel) — the conservative form the
+    // asymmetric a^L = (1+v*)/2 requires (a single vbar would make the v* term anti-diffusive).
+    let vx_w = avg2(vp1(&nw), vp1(&sw));
+    let vx_e = avg2(vp1(&ne), vp1(&se));
+    let vy_s = avg2(vp2(&sw), vp2(&se));
+    let vy_n = avg2(vp2(&nw), vp2(&ne));
+    let emf = uct_master_emf_perside(&cx, &cy, vx_e, vx_w, vy_n, vy_s, by_e, by_w, bx_n, bx_s);
     (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
 }
 
@@ -3015,6 +3564,38 @@ mod tests {
         assert!(
             !k.field_inputs.iter().any(|(_, p)| p.name().starts_with("u_stage") || p.name().starts_with("cons")),
             "Coord/Assign reads no interior state, got inputs {:?}", k.field_inputs,
+        );
+    }
+
+    #[test]
+    fn boundary_fill_prescribes_cell_b_for_mhd() {
+        // the toroidal driven boundary: an MHD prescription (ncomp=3) with a `bcell` slot must
+        // emit prim.mag[k] writes alongside rho/vel/pre. a purely toroidal injection sets the
+        // in-plane B (mag[0],mag[1]) to 0 and the out-of-plane B_phi (mag[2]) to a value.
+        use symbi_ir::graph::ConstValue;
+        let mk = |vals: &[f64]| {
+            let mut g = Graph::new();
+            let outs = vals.iter().map(|&v| g.add_const(ConstValue::F64(v), None)).collect();
+            symbi_hydro::source_spec::BuiltSource { graph: g, params: vec![], outputs: outs }
+        };
+        let den = mk(&[1.0]);
+        let mom = mk(&[0.1, 0.0, 0.0]);
+        let nrg = mk(&[1.0]);
+        let bcell = mk(&[0.0, 0.0, 0.5]); // B_r=0, B_theta=0, B_phi=0.5 (purely toroidal)
+        let sources = [("den", &den), ("mom", &mom), ("nrg", &nrg), ("bcell", &bcell)];
+        let (k, writes) = boundary_fill_from_built_gv(
+            Coords::Spherical, &[Spacing::Log, Spacing::Uniform], &[0, 1], 2, 3, true, &sources,
+        );
+        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        let paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "prim.rho",
+                "prim.vel[0]", "prim.vel[1]", "prim.vel[2]",
+                "prim.pre",
+                "prim.mag[0]", "prim.mag[1]", "prim.mag[2]",
+            ],
         );
     }
 

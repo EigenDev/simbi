@@ -108,7 +108,17 @@ fn apply_boundary_dag_cpu<const D: usize, const DOF: usize, Mem, Sc>(
                 }
                 "nrg" => pre.expect("boundary 'nrg' on regime without prim.pre")
                     .view_mut().set(c, Sc::from_f64(s[0])),
-                other => panic!("boundary dag: unsupported slot '{other}' (den | mom | nrg)"),
+                // MHD cell-B prescription (prim.mag == mhd.bcell). a purely toroidal driven
+                // boundary sets the in-plane B to 0 and the out-of-plane B_phi to the injected
+                // value; the in-plane FACE B is left to the CT ghost-fill (div-free).
+                "bcell" => {
+                    let mhd = sim.fields.mhd.as_ref()
+                        .expect("boundary 'bcell' slot on a non-MHD regime");
+                    for k in 0..DOF {
+                        mhd.bcell[k].view_mut().set(c, Sc::from_f64(s[k]));
+                    }
+                }
+                other => panic!("boundary dag: unsupported slot '{other}' (den | mom | nrg | bcell)"),
             }
         }
     }

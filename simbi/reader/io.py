@@ -265,7 +265,11 @@ def read_primitives(
 
     prim_group = hydro_group["primitives"]
 
-    # C++ names → Python names
+    # C++ names → Python names. the cell-centered magnetic components (b1, b2, b3)
+    # are written into the primitives group by the rust backend; read them here so
+    # they are plottable. for 2.5D MHD the out-of-plane B_phi (b3) is ONLY cell-
+    # centered (no face counterpart in the staggered CT set), so without this it is
+    # unreachable -> `simbi plot --field b3` yields zero fields (dimensions=0).
     field_map = {
         "rho": "rho",
         "pre": "p",
@@ -273,6 +277,9 @@ def read_primitives(
         "v1": "v1",
         "v2": "v2",
         "v3": "v3",
+        "b1": "b1",
+        "b2": "b2",
+        "b3": "b3",
     }
 
     fields = {}

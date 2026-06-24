@@ -34,12 +34,78 @@ use crate::kernels::support::cfl_from_lambda;
 use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
-    dispatch_named, dispatch_runtime_source, geom_scalar, mhd_flux_suffix, mhd_geom_suffix,
-    motion_scalar, physical_geom, scalars_for, RegimeKind, RuntimeSource, ScalarBind, Solver,
+    dispatch_driven_boundaries, dispatch_named, dispatch_runtime_source, geom_scalar,
+    mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for, RegimeKind,
+    RuntimeSource, ScalarBind, Solver,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::state::FieldStore;
+use symbi_sim::state::CtMethod;
+
+/// the per-coordinate metric scale factor `h` (mirrors `gv::gv_scale_factor`, in f64): the
+/// physical width along an axis is `h * coordinate_width`. cartesian = 1; spherical theta = r,
+/// phi = r*sin(theta); cylindrical phi = r.
+#[inline]
+fn host_scale_factor(coords: symbi_geometry::Geometry, ci: usize, pos: &[f64; 3]) -> f64 {
+    use symbi_geometry::Geometry::*;
+    match (coords, ci) {
+        (Cartesian, _) => 1.0,
+        (Spherical, 1) => pos[0],
+        (Spherical, 2) => pos[0] * pos[1].sin(),
+        (Spherical, _) => 1.0,
+        (Cylindrical, 1) => pos[0],
+        (Cylindrical, _) => 1.0,
+    }
+}
+
+/// the relativistic driven-inflow CFL bound: `max` over the interior cells adjacent to every
+/// DRIVEN boundary face of `1 / (h_d * width_d)` (the inverse physical cell width, the steepest
+/// per-axis). a relativistic signal travels at most `c = 1`, so this is the `lambda` a wind
+/// injected at that face imposes — invisible to the interior-only wave-speed map. returns 0 when
+/// there are no driven faces (the `max` is then a no-op).
+fn driven_inflow_lambda<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) -> f64
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    let geom = &sim.geom;
+    let mut max_inv_w = 0.0f64;
+    for a in 0..D {
+        for side in 0..2 {
+            let bt = if side == 0 { sim.boundaries.lo(a) } else { sim.boundaries.hi(a) };
+            if !matches!(bt, symbi_sim::state::BoundaryType::Driven(_)) {
+                continue;
+            }
+            let s = if side == 0 { symbi_algebra::Side::Lo } else { symbi_algebra::Side::Hi };
+            for coord in geom.interior.boundary(a, s, 1).iter() {
+                // physical cell-center per COORDINATE axis (for the scale factors).
+                let mut pos = [0.0f64; 3];
+                for d in 0..D {
+                    let c = match &geom.maps {
+                        Some(m) => m[d].center(coord[d]),
+                        None => geom.x_lo[d] + (coord[d] as f64 + 0.5) * geom.dx[d],
+                    };
+                    pos[geom.axes[d]] = c;
+                }
+                let mut inv_w = 0.0f64;
+                for d in 0..D {
+                    let h = host_scale_factor(geom.coords, geom.axes[d], &pos);
+                    let iw = 1.0 / (h * geom.cell_width(coord, d));
+                    if iw > inv_w {
+                        inv_w = iw;
+                    }
+                }
+                if inv_w > max_inv_w {
+                    max_inv_w = inv_w;
+                }
+            }
+        }
+    }
+    max_inv_w
+}
 
 /// the unified D-dimensional ideal-MHD `KernelSet`, regime supplied as `R` (carries `SPEC`).
 pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
@@ -52,12 +118,20 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     pub cfl_scratch: Field<Sc, D, Mem>,
     /// Riemann solver — HLLE (default) / HLLC / HLLD; validated against the regime at attach.
     pub solver: Solver,
+    /// constrained-transport edge-EMF scheme: Contact (Gardiner-Stone, default) or Uct (Del Zanna
+    /// 2007 / Mignone-Del Zanna 2021 HLL-weighted, kills the odd-even checkerboard). Uct needs the
+    /// per-cell Riemann wave speeds materialized (RMHD only for now).
+    pub ct_method: CtMethod,
     /// a runtime user source (python -> json `SourceConfig` -> `build_user_source`),
     /// applied two-pass via the regime-agnostic `dispatch_runtime_source`. nmhd/imhd
     /// take the newtonian force/cooling/relax lifts; rmhd is relativistic so only
     /// `kind="raw"` reaches here. targets the hydro conserved slots (den/mom/nrg);
     /// B is evolved by CT, not a cell source. None for source-free runs.
     pub runtime_source: Option<Arc<RuntimeSource>>,
+    /// driven (DYNAMIC) boundary prescriptions, indexed by `BoundaryType::Driven(id)`. each is a
+    /// complete prim DAG `[rho, vel.., pre, B..]`; the standard ghost-fill skips the driven face,
+    /// then `dispatch_driven_boundaries` assigns its ghost state. empty => no driven faces.
+    pub boundary_dags: Vec<Arc<RuntimeSource>>,
     _r: PhantomData<R>,
 }
 
@@ -70,7 +144,18 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, runtime_source: None, _r: PhantomData }
+        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), _r: PhantomData }
+    }
+
+    /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
+    /// sim's `Boundaries` carries as `BoundaryType::Driven(id)` on the prescribed face. build
+    /// `built` from `expr_bridge::build_boundary_dag(&cfg, R::SPEC)` — a complete prim prescription
+    /// `[rho, vel.., pre, B..]`. for a purely toroidal injection the in-plane B is 0 and the
+    /// out-of-plane B_phi is the injected toroidal field (cell-centered, div-free by axisymmetry).
+    pub fn with_driven_boundary(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> (Self, u16) {
+        let id = self.boundary_dags.len() as u16;
+        self.boundary_dags.push(RuntimeSource::new(built, params, R::SPEC.has_energy));
+        (self, id)
     }
 
     /// attach a runtime user source from already-lowered `(target, BuiltSource)` pairs
@@ -95,6 +180,12 @@ where
     /// set the theta-MC limiter compression in [1,2] (1 = minmod, 2 = monotonized-central). fluent.
     pub fn theta(mut self, theta: f64) -> Self {
         self.theta = theta;
+        self
+    }
+
+    /// select the constrained-transport edge-EMF scheme (Contact / Uct). fluent.
+    pub fn ct_method(mut self, m: CtMethod) -> Self {
+        self.ct_method = m;
         self
     }
 
@@ -167,8 +258,11 @@ where
     }
 
     fn wave_speeds(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
-        // only materializing regimes (RMHD) run the quartic pass; others compute inline (no-op).
-        if !R::SPEC.materializes_wave_speeds {
+        // materializing regimes (RMHD always; NMHD under UCT, whose edge-EMF coefficients read
+        // wave_speed_l/r) run the per-cell pass; others compute speeds inline in the flux.
+        let materialize = R::SPEC.materializes_wave_speeds
+            || (self.ct_method == CtMethod::Uct && Self::kernel_prefix() == "nmhd");
+        if !materialize {
             return;
         }
         let wsname = format!("{}_wave_speeds_cell_{D}d", Self::kernel_prefix());
@@ -210,7 +304,17 @@ where
             &sim.fields.cons.den
         };
         dispatch_named(sim, pre_bind, Some(&self.cfl_scratch), 0, &wname, &geom.interior, &[], &scalars);
-        let lambda_max = crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
+        let mut lambda_max = crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
+        // DRIVEN-INFLOW CFL CAP: the per-cell wave-speed map only scans the INTERIOR, so a driven
+        // boundary's inflow state (which lives in the ghost band) is invisible to it — a relativistic
+        // wind from a cold-ambient inner boundary would size dt off the slow interior and then get
+        // pulled across the first inner face at a dt ~1e4x too large -> NaN. a relativistic signal
+        // can travel at most c = 1, so bound dt by the light-crossing of the interior cell adjacent
+        // to each driven face: lambda >= max_d (1 / (h_d * width_d)). only relativistic regimes get
+        // the c = 1 bound; non-relativistic driven inflow is a future refinement.
+        if R::SPEC.is_relativistic {
+            lambda_max = lambda_max.max(driven_inflow_lambda(sim));
+        }
         cfl_from_lambda(lambda_max, self.cfl_number)
     }
 
@@ -220,12 +324,26 @@ where
     }
     fn ghost_fill(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::ghost_fill(sim, R::SPEC.has_energy);
+        // docs/design/33: the standard fill skipped Driven faces (Driven -> Skip); prescribe
+        // their ghost prim state (incl. the cell B_phi) from the registered boundary DAGs.
+        if !self.boundary_dags.is_empty() {
+            dispatch_driven_boundaries(sim, &self.boundary_dags);
+        }
     }
     fn snapshot(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::snapshot(sim, R::SPEC.has_energy);
     }
     fn efield(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
-        crate::regimes::mhd_substrate::efield(sim);
+        // UCT needs the per-cell Riemann wave speeds; only regimes that materialize them (RMHD)
+        // can use it today, so fall back to Contact otherwise (nmhd/imhd).
+        let materialized = R::SPEC.materializes_wave_speeds
+            || (self.ct_method == CtMethod::Uct && Self::kernel_prefix() == "nmhd");
+        let method = if self.ct_method == CtMethod::Uct && !materialized {
+            CtMethod::Contact
+        } else {
+            self.ct_method
+        };
+        crate::regimes::mhd_substrate::efield(sim, method, self.solver, Self::kernel_prefix());
     }
     fn post_godunov(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, stage: u8) {
         crate::regimes::mhd_substrate::post_godunov(sim, R::SPEC.has_energy, dt, stage);

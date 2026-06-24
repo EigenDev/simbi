@@ -41,8 +41,8 @@ use symbi_discretize::{
     nmhd_wave_speed_map_gv,
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
     rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv,
-    rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv,
-    rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv,
+    rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv,
+    rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     snapshot_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing,
 };
 use symbi_discretize::GvKernel;
@@ -784,6 +784,27 @@ fn gen_rmhd_edge_emf(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) 
     emit_gv(out_dir, &format!("rmhd_edge_emf_{ndim}d_{name_k}"), ndim, &k, &writes);
 }
 
+// the UCT-HLL edge EMF twin (Del Zanna 2007 / Mignone & Del Zanna 2021). geometry-agnostic, like
+// the contact edge EMF — only the curl carries the metric, so one bake serves cartesian AND
+// spherical 2.5D (the spherical block reuses it, same as the contact kernel).
+fn gen_rmhd_edge_emf_uct(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
+    let (k, writes) = rmhd_edge_emf_uct_gv(ndim as usize, g1, g2);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_{ndim}d_{name_k}"), ndim, &k, &writes);
+}
+
+// the UCT-HLLC edge EMF (classical ideal-gas / NMHD): the contact-aware diffusion, lambda* computed
+// in-kernel from the HLL average. geometry-agnostic (one bake serves cartesian + spherical).
+fn gen_nmhd_edge_emf_uct_hllc(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
+    let (k, writes) = nmhd_edge_emf_uct_hllc_gv(ndim as usize, g1, g2);
+    emit_gv(out_dir, &format!("nmhd_edge_emf_uct_hllc_{ndim}d_{name_k}"), ndim, &k, &writes);
+}
+
+// the UCT-HLLD edge EMF (classical ideal-gas / NMHD): the five-wave fan, genuinely less diffusive.
+fn gen_nmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
+    let (k, writes) = nmhd_edge_emf_uct_hlld_gv(ndim as usize, g1, g2);
+    emit_gv(out_dir, &format!("nmhd_edge_emf_uct_hlld_{ndim}d_{name_k}"), ndim, &k, &writes);
+}
+
 // the RMHD CFL wave-speed map (3D): per-cell max over axes of the quartic
 // max(|lambda_-|,|lambda_+|). host folds max + cfl_from_smax.
 fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
@@ -798,6 +819,12 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 fn gen_rmhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
     let (k, writes) = rmhd_wave_speeds_cell_gv(ndim as usize);
     emit_gv(out_dir, &format!("rmhd_wave_speeds_cell_{ndim}d"), ndim, &k, &writes);
+}
+
+// classical (NMHD) per-cell wave speeds -> wave_speed_l/r, so UCT works for NMHD. geometry-free.
+fn gen_nmhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
+    let (k, writes) = nmhd_wave_speeds_cell_gv(ndim as usize);
+    emit_gv(out_dir, &format!("nmhd_wave_speeds_cell_{ndim}d"), ndim, &k, &writes);
 }
 
 // ---- newtonian MHD ---- the non-relativistic ideal-MHD regime. only THREE
@@ -954,6 +981,15 @@ fn gen_rmhd_ct_curl_3d_dir(out_dir: &str, dir: u8, geom: Geom) {
 fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_cyl_rz_gv(dir as usize, &geom.spacing);
     emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rz"), 2, &k, &writes);
+}
+
+// the 2.5D SPHERICAL (r-theta plane) CT curl B-update along in-plane face axis `dir` (0 -> B_r,
+// 1 -> B_theta), from the single out-of-plane corner EMF E_phi. dir=0 carries the spherical
+// (1/(r sin th)) d_th(sin th .) area metric; dir=1 the (1/r) d_r(r .) metric. name matches the
+// geom_suffix dispatch "_sph".
+fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
+    let (k, writes) = rmhd_ct_curl_2d_sph_gv(dir as usize, &geom.spacing);
+    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph"), 2, &k, &writes);
 }
 
 // the 2.5D cylindrical r-phi DISK CT curl B-update along in-plane face axis `dir` (0 -> B_r,
@@ -1409,6 +1445,12 @@ fn main() {
         // (euler/rk2, evolves all 3 components; Bz is final, Bx/By predictor), the
         // face->cell interpolation over the 2 in-plane components, and the ghosts.
         gen_rmhd_edge_emf(&out_dir, 2, 2, 0, 1);
+        // UCT-HLL twin (selectable via CtMethod::Uct); geometry-agnostic, also serves spherical 2.5D.
+        gen_rmhd_edge_emf_uct(&out_dir, 2, 2, 0, 1);
+        // UCT-HLLC (classical ideal-gas); geometry-agnostic, also serves spherical 2.5D.
+        gen_nmhd_edge_emf_uct_hllc(&out_dir, 2, 2, 0, 1);
+        // UCT-HLLD (classical ideal-gas, five-wave fan); geometry-agnostic.
+        gen_nmhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
         // device RK2 efield save/avg + the bcell^n snapshot copy on a 2D field need the 2d
         // index ABI (the 3d copy kernel OOBs on a 2d field — CUDA_ERROR_LAUNCH_FAILED).
         gen_rmhd_save_efield(&out_dir, 2);
@@ -1441,6 +1483,8 @@ fn main() {
         gen_snapshot(&out_dir, 2, "rmhd", true, g2.clone());
         // NMHD regime physics (algebraic c2p + closed-form magnetosonic HLLE/HLLC/HLLD).
         gen_nmhd_c2p(&out_dir, 2);
+        // classical per-cell wave speeds (geometry-free) so NMHD UCT can read wave_speed_l/r.
+        gen_nmhd_wave_speeds_cell(&out_dir, 2);
         for dir in 0..2 {
             let (k, w) = symbi_discretize::gv::nmhd_flux_gv(2, dir, dir as usize);
             emit_gv(&out_dir, &format!("nmhd_face_flux_2d_{dir}"), 2, &k, &w);
@@ -1522,6 +1566,36 @@ fn main() {
             let (k, w) = symbi_discretize::gv::imhd_hlld_flux_gv(2, dir, cn);
             emit_gv(&out_dir, &format!("imhd_face_flux_cyl_rz_hlld_2d_{dir}"), 2, &k, &w);
         }
+    }
+
+    // =========================================================================
+    // 2.5D SPHERICAL r-theta MHD (docs/design/30): a 2-axis (r,theta) grid carrying a
+    // 3-component B/velocity — the TOROIDAL B_phi/v_phi is the out-of-plane DOF on the folded
+    // phi symmetry. axes=[0,1] identity (grid axis 0=r coord 0, grid axis 1=theta coord 1); phi
+    // (coord 2) is out of plane. the SINGLE CT edge is the corner E_phi (name_k=2, REUSED from the
+    // cartesian block — coord_n==dir so the EMF + flux are bit-identical). only the SPHERICAL-metric
+    // in-plane curl, the area-weighted cell-B predictor, the wave-speed map, and the gas godunov
+    // (spherical geo source) are geometry-dependent. RMHD (the magnetar/PWN wind regime); the
+    // rotating-conductor inner boundary injects a purely toroidal B_phi (out-of-plane, div-free).
+    // =========================================================================
+    {
+        let sph = Geom::make(Coords::Spherical, 3, vec![0, 1]); // Spherical, ncomp=3, axes=[0,1] -> "_sph"
+        for dir in 0..2 {
+            gen_rmhd_ct_curl_2d_sph(&out_dir, dir, &sph);
+        }
+        gen_rmhd_bcell_godunov_euler(&out_dir, sph.clone(), 2);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, sph.clone(), 2);
+        gen_rmhd_wave_speed_map(&out_dir, 2, sph.clone());
+        gen_godunov_stage(&out_dir, 2, "rmhd", true, sph.clone(), None);
+        // NMHD + IMHD spherical 2.5D: the CT stack (ct_curl_2d_sph, bcell predictor, edge EMF) is
+        // regime-agnostic (shared with rmhd, baked above); only the wave-speed map + gas godunov
+        // (the regime geometric momentum source, GeoSource::{NewtonianMhd,IsothermalMhd}) differ.
+        // flux REUSED from cartesian (mhd_flux_suffix = "" for spherical identity axes); c2p /
+        // snapshot / ghost / wave_speeds_cell / save+avg-efield are geometry-free.
+        gen_nmhd_wave_speed_map(&out_dir, 2, sph.clone());
+        gen_godunov_stage(&out_dir, 2, "nmhd", true, sph.clone(), None);
+        gen_imhd_wave_speed_map(&out_dir, 2, sph.clone());
+        gen_godunov_stage(&out_dir, 2, "imhd", false, sph, None);
     }
 
     // =========================================================================

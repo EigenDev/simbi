@@ -30,6 +30,7 @@ use symbi::symbi_grid::Field;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
+use symbi_sim::state::CtMethod;
 use symbi_hydro::mhd_state::MhdPrimG;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::state::PrimG;
@@ -69,6 +70,7 @@ struct Config {
     scale_adot:          f64,
     solver:              Solver,
     solver_name:         String,
+    ct_method:           CtMethod,
     reconstruction_name: String,
     timestepping:        Timestepping,
     plm_theta:           f64,
@@ -91,6 +93,9 @@ struct Config {
     // a single user source expression in the rust `SourceConfig` wire format
     // (json string), or None. lowered + attached on the hydro path.
     source_json:         Option<String>,
+    // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
+    // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path for now.
+    driven_exprs:        Vec<String>,
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
@@ -261,6 +266,14 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
     }
 }
 
+fn ct_method_from_str(s: &str) -> PyResult<CtMethod> {
+    match s {
+        "contact" => Ok(CtMethod::Contact),
+        "uct" => Ok(CtMethod::Uct),
+        other => Err(PyValueError::new_err(format!("unknown ct_method '{other}' (contact | uct)"))),
+    }
+}
+
 fn timestepping_from_str(s: &str) -> PyResult<Timestepping> {
     match s {
         // rk1 is forward euler (first-order); the python `order=1` path emits it.
@@ -312,14 +325,38 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     let bc_objs = dict
         .get_item("boundary_conditions")?
         .ok_or_else(|| PyValueError::new_err("sim_info missing 'boundary_conditions'"))?;
+    // per-face boundary-expression field names, in face order (2*axis + side): a `dynamic`
+    // (DRIVEN) face reads its prescribed ghost state from the matching field.
+    const BX_FIELDS: [&str; 6] = [
+        "bx1_inner_expressions", "bx1_outer_expressions",
+        "bx2_inner_expressions", "bx2_outer_expressions",
+        "bx3_inner_expressions", "bx3_outer_expressions",
+    ];
     let mut boundaries = Vec::new();
-    for obj in bc_objs.try_iter()? {
+    // driven (DYNAMIC) boundary expressions in Driven-id order; id == registration order ==
+    // the order faces are visited here, so `Driven(id)` on a face matches `driven_exprs[id]`.
+    let mut driven_exprs: Vec<String> = Vec::new();
+    for (face, obj) in bc_objs.try_iter()?.enumerate() {
         let obj = obj?;
         let s: String = match obj.getattr("value") {
             Ok(v) => v.extract()?,
             Err(_) => obj.extract()?,
         };
-        boundaries.push(boundary_from_str(&s.to_lowercase())?);
+        match s.to_lowercase().as_str() {
+            "dynamic" => {
+                let field = BX_FIELDS.get(face).copied().unwrap_or("bx1_inner_expressions");
+                let json = get_source_json(dict, field)?.ok_or_else(|| {
+                    PyValueError::new_err(format!(
+                        "boundary face {face} is DYNAMIC but '{field}' is empty; \
+                         a driven boundary needs a prescribed ghost state"
+                    ))
+                })?;
+                let id = driven_exprs.len() as u16;
+                driven_exprs.push(json);
+                boundaries.push(BoundaryType::Driven(id));
+            }
+            other => boundaries.push(boundary_from_str(other)?),
+        }
     }
 
     let gamma = dict
@@ -328,6 +365,8 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         .unwrap_or(5.0 / 3.0);
 
     let solver_name = enum_str(dict, "solver")?;
+    // constrained-transport edge-EMF scheme; defaults to contact for back-compat.
+    let ct_method = ct_method_from_str(&enum_str_or(dict, "ct_method", "contact"))?;
 
     // canonicalize the coordinate system: the three cylindrical python variants
     // (cylindrical / axis_cylindrical / planar_cylindrical) all map to the one
@@ -403,6 +442,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         scale_adot: 0.0,
         solver: solver_from_str(&solver_name)?,
         solver_name,
+        ct_method,
         reconstruction_name: enum_str_or(dict, "reconstruction", "plm"),
         timestepping: timestepping_from_str(&enum_str(dict, "timestepping")?)?,
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
@@ -440,6 +480,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         // runtime source per run for now (the kernel set holds a single slot).
         source_json: get_source_json(dict, "gravity_source_expressions")?
             .or(get_source_json(dict, "hydro_source_expressions")?),
+        driven_exprs,
     })
 }
 
@@ -568,7 +609,26 @@ where
     } else {
         f64::INFINITY
     };
-    let mut next_cp = cp_interval;
+    // LOGARITHMIC checkpoint spacing: when dlogt > 0 (the python config enabled
+    // log_checkpoints over a positive start_time), the k-th checkpoint lands at
+    // start_time*10^(k*dlogt) in code units — dense early, sparse late, the right
+    // cadence for a run spanning many decades in time (a relativistic wind from a
+    // tiny inner radius out to a huge one). otherwise the cadence is LINEAR at
+    // cp_interval. `cp_at(fired)` returns the (fired+1)-th scheduled checkpoint time.
+    let cp_log = cfg.dlogt > 0.0 && cfg.start_time > 0.0;
+    let cp_tstart = cfg.start_time;
+    let cp_dlogt = cfg.dlogt;
+    let cp_at = move |fired: u64| -> f64 {
+        if cp_log {
+            cp_tstart * 10f64.powf((fired + 1) as f64 * cp_dlogt)
+        } else if cp_interval.is_finite() {
+            (fired + 1) as f64 * cp_interval
+        } else {
+            f64::INFINITY
+        }
+    };
+    let mut cp_fired: u64 = 0;
+    let mut next_cp = cp_at(0);
     let mut cp_index: u64 = cfg.checkpoint_index + 1;
 
     // the live monitor. dynamic mode self-detects a tty (clearing redraw on a
@@ -676,11 +736,15 @@ where
             return std::ops::ControlFlow::Break(());
         }
 
-        // MESSAGE BOARD cadence: checkpoints fire on the time schedule. each one
-        // posts to the board and marks the frame dirty so it shows promptly —
-        // independent of the row's iteration cadence below.
+        // MESSAGE BOARD cadence: checkpoints fire on the time schedule. a single
+        // large dt can cross MULTIPLE interval boundaries (e.g. a cold-medium CFL
+        // step, or a coarse cadence); write EXACTLY ONE checkpoint for the current
+        // state and advance next_cp past every boundary it crossed. the skipped
+        // intermediate states were never computed, and the file name is keyed by
+        // the current time — looping would just re-write the SAME file N times and
+        // spam the board with identical entries (the bug this replaces).
         let mut dirty = false;
-        while time + 1e-12 >= next_cp && next_cp.is_finite() {
+        if time + 1e-12 >= next_cp && next_cp.is_finite() {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let path = checkpoint_name(cfg, &format_sim_time(time / cfg.time_unit, cp_width));
             match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
@@ -688,7 +752,14 @@ where
                 Err(e) => table.post_error(&format!("checkpoint {cp_index:04} failed: {e:?}")),
             }
             cp_index += 1;
-            next_cp += cp_interval;
+            cp_fired += 1;
+            next_cp = cp_at(cp_fired);
+            // advance past every boundary this step crossed (log or linear) so a
+            // single large dt yields ONE write, not N identical-named dumps.
+            while time + 1e-12 >= next_cp && next_cp.is_finite() {
+                cp_fired += 1;
+                next_cp = cp_at(cp_fired);
+            }
             dirty = true;
         }
 
@@ -1229,7 +1300,8 @@ macro_rules! build_and_run_mhd {
         };
         let theta = build_theta(cfg);
         let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
-            .map_err(|e| format!("substrate/solver: {e:?}"))?;
+            .map_err(|e| format!("substrate/solver: {e:?}"))?
+            .ct_method(cfg.ct_method);
         // attach a user source expression to the MHD hydro slots (den/mom/nrg).
         // rmhd is relativistic -> only kind="raw"; nmhd takes force/cooling/relax.
         // B is CT-evolved, not a cell source. single-grid only.
@@ -1247,6 +1319,21 @@ macro_rules! build_and_run_mhd {
             }
             None => sub,
         };
+        // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
+        // matches `driven_exprs[id]`. a complete prim prescription incl. the cell B (purely
+        // toroidal: in-plane B = 0, out-of-plane B_phi injected). single-grid only.
+        let mut sub = sub;
+        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
+            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
+        }
+        for json in &cfg.driven_exprs {
+            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                .map_err(|e| format!("boundary expression parse: {e}"))?;
+            let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                &bcfg, <$regime_ty as Regime<f64, $d>>::SPEC,
+            ).map_err(|e| format!("boundary expression lower: {e}"))?;
+            sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+        }
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d,
             |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));

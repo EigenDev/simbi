@@ -32,6 +32,7 @@ from .input import (
     Metadata,
     ProcessedData,
     RawHDF5,
+    CtMethod,
     Reconstruction,
     Regime,
     Solver,
@@ -56,6 +57,7 @@ __all__ = [
     "Reconstruction",
     "Regime",
     "Solver",
+    "CtMethod",
     "SubCycleMode",
     "TimeStepping",
     # generator types

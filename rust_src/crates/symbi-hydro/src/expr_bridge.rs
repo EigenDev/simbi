@@ -365,38 +365,44 @@ fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Rang
 /// output subset, so the velocity vector lands as the `ncomp`-output `mom` slot.
 ///
 /// VALIDATION (regime-driven via `spec`, at attach — never mid-evolve):
-/// - **hydro only.** `is_mhd` is REJECTED: a prescribed `B` must be divergence-compatible (prescribe
-///   the tangential EMF the CT consumes, not cell `B`), a CT sub-problem (doc 33 §5). unlike sources,
-///   a driven boundary is REGIME-AGNOSTIC across hydro — a prim prescription is valid for SRHD too
-///   (it sets `prim`, no conservation law), so `is_relativistic` is ALLOWED.
+/// - **regime-agnostic across hydro AND mhd.** a prim prescription sets `prim` (no conservation
+///   law), valid for SRHD too (`is_relativistic` ALLOWED). MHD additionally prescribes the CELL-B
+///   vector (`bcell` slot -> `prim.mag`): the OUT-OF-PLANE component (B_phi in a 2.5D axisymmetric
+///   grid) is cell-centered + flux-evolved, so prescribing it is a plain Dirichlet, NOT the CT
+///   tangential-EMF sub-problem (doc 33 §5) that a prescribed POLOIDAL/in-plane FACE field needs.
+///   the in-plane cell-B components are the user's responsibility to keep div-compatible (=0 for a
+///   purely toroidal field) — `raw`-style: garbage in, garbage out.
 /// - **complete prim state.** the DAG must output exactly the regime's primitive components:
-///   `1 (rho) + D (vel) + has_energy (pre)`. a partial prescription is rejected.
+///   `1 (rho) + d (vel) + has_energy (pre) + is_mhd*d (cell B)` where `d = cfg.dim` is the vector
+///   component count (= DOF). a partial prescription is rejected.
 /// (the `dim == sim DOF` cross-check is the const-generic dispatch's, where DOF is known.)
 pub fn build_boundary_dag(
     cfg: &symbi_expr::SourceConfig,
     spec: &crate::regime_spec::RegimeSpec,
 ) -> Result<Vec<(String, BuiltSource)>, String> {
-    if spec.is_mhd {
-        return Err(format!(
-            "driven boundaries are hydro-only for now: regime '{}' is MHD, whose prescribed B must be \
-             divergence-compatible (tangential-EMF prescription, doc 33 section 5 — gated)",
-            spec.name,
-        ));
-    }
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
     let d = cfg.dim;
-    let n_prim = 1 + d + usize::from(spec.has_energy);
+    // MHD prescribes the cell-B vector too. the OUT-OF-PLANE component (B_phi in a 2.5D
+    // axisymmetric grid: cell-centered, flux-evolved) is the safe toroidal case — div-free
+    // by axisymmetry. the IN-PLANE components are the user's responsibility to keep
+    // div-compatible (=0 for a purely toroidal field); they are NOT a CT face prescription
+    // here, so no tangential-EMF sub-problem (doc 33 section 5) — that gate only applies to
+    // a prescribed POLOIDAL (in-plane face) field, which this does not provide.
+    let n_mag = if spec.is_mhd { d } else { 0 };
+    let n_prim = 1 + d + usize::from(spec.has_energy) + n_mag;
     if cfg.outputs.len() != n_prim {
         return Err(format!(
-            "driven boundary must prescribe the full prim state [rho, vel_0..vel_{}{}]: outputs.len() \
+            "driven boundary must prescribe the full prim state [rho, vel_0..vel_{}{}{}]: outputs.len() \
              = {}, expected {n_prim}",
             d.saturating_sub(1),
             if spec.has_energy { ", pre" } else { "" },
+            if spec.is_mhd { format!(", B_0..B_{}", d.saturating_sub(1)) } else { String::new() },
             cfg.outputs.len(),
         ));
     }
-    // split the user DAG into per-slot prescriptions: den <- rho, mom <- the D-vector vel, nrg <- pre.
-    // each is an independent lowering over its output subset (own graph) — no graph cloning.
+    // split the user DAG into per-slot prescriptions: den <- rho, mom <- the d-vector vel,
+    // nrg <- pre, bcell <- the d-vector cell B. each is an independent lowering over its
+    // output subset (own graph) — no graph cloning.
     let lower = |outs: &[usize]| {
         lower_dag_to_builtsource(&nodes, outs).map_err(|e| format!("bridge: {e:?}"))
     };
@@ -404,8 +410,13 @@ pub fn build_boundary_dag(
         ("den".to_string(), lower(&cfg.outputs[0..1])?),
         ("mom".to_string(), lower(&cfg.outputs[1..1 + d])?),
     ];
+    let mut next = 1 + d;
     if spec.has_energy {
-        out.push(("nrg".to_string(), lower(&cfg.outputs[1 + d..2 + d])?));
+        out.push(("nrg".to_string(), lower(&cfg.outputs[next..next + 1])?));
+        next += 1;
+    }
+    if spec.is_mhd {
+        out.push(("bcell".to_string(), lower(&cfg.outputs[next..next + d])?));
     }
     Ok(out)
 }
@@ -694,15 +705,36 @@ mod tests {
     }
 
     #[test]
-    fn boundary_on_mhd_is_rejected() {
-        // a prescribed B must be divergence-compatible (doc 33 section 5) -> hydro only for now.
+    fn boundary_on_mhd_prescribes_cell_b() {
+        // RMHD 2.5D (dim=3 vector components): a driven boundary prescribes the full prim
+        // [rho, v_0..v_2, pre, B_0..B_2] -> slots den(1), mom(3), nrg(1), bcell(3). a purely
+        // toroidal injection sets B_0=B_1=0 (in-plane), B_2=B_phi (out-of-plane, the safe case).
         let cfg = cfg_from(
-            r#"{ "kind":"dirichlet", "dim":1, "outputs":[0,1,2], "params":[],
+            r#"{ "kind":"dirichlet", "dim":3,
+                 "outputs":[0,1,2,3,4,5,6,7], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0},
+                           {"op":"CONSTANT","value":0.1}, {"op":"CONSTANT","value":0.0},
+                           {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":1.0},
+                           {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":0.0},
+                           {"op":"CONSTANT","value":0.5} ] }"#,
+        );
+        let built = build_boundary_dag(&cfg, &RMHD_SPEC).expect("toroidal driven boundary");
+        let slots: Vec<(&str, usize)> =
+            built.iter().map(|(s, b)| (s.as_str(), b.outputs.len())).collect();
+        assert_eq!(slots, vec![("den", 1), ("mom", 3), ("nrg", 1), ("bcell", 3)]);
+    }
+
+    #[test]
+    fn boundary_mhd_wrong_arity_is_rejected() {
+        // RMHD dim=3 needs 8 prim outputs (rho + 3 vel + pre + 3 B); give 5 (the hydro count).
+        let cfg = cfg_from(
+            r#"{ "kind":"dirichlet", "dim":3, "outputs":[0,1,2,3,4], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":0.1},
+                           {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":0.0},
                            {"op":"CONSTANT","value":1.0} ] }"#,
         );
         let err = expect_boundary_err(&cfg, &RMHD_SPEC);
-        assert!(err.contains("MHD") || err.contains("divergence"), "got: {err}");
+        assert!(err.contains("full prim state"), "got: {err}");
     }
 
     #[test]
