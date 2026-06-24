@@ -523,16 +523,18 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     solver: Solver,
     prefix: &str,
     gamma: f64,
+    theta: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    // the RMHD UCT-HLLD edge EMF calls the relativistic Riemann fan in-kernel, so it declares the
-    // EOS scalar (gamma); every other edge-EMF kernel has an empty scalar manifest. resolve BY
-    // MANIFEST so the same call serves both — `scalars_for` returns [] when no scalar is declared.
+    // the RMHD UCT-HLLD edge EMF declares the EOS scalar (gamma); the UCT edge EMFs declare the PLM
+    // slope limiter (theta, for the transverse R± reconstruction of the staggered fields); the rest
+    // have an empty scalar manifest. resolve BY MANIFEST so one call serves all.
     let scalar = |bind: &ScalarBind| -> Sc {
         match bind {
             ScalarBind::Ref(ScalarRef::Gamma | ScalarRef::Cs) => Sc::from_f64(gamma),
+            ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(theta),
             o => panic!("mhd efield: unexpected scalar {o:?}"),
         }
     };

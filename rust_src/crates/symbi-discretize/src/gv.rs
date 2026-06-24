@@ -3036,9 +3036,13 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec
 /// (signs verified against the compact Eq. 27 diffusion + the symmetric-speed reduction v_y B_x - v_x B_y.)
 fn uct_master_emf(cx: &UctDir, cy: &UctDir, vbar_x: Gv, vbar_y: Gv, by_e: Gv, by_w: Gv, bx_n: Gv, bx_s: Gv) -> Gv {
     let zero_g = Gv::ZERO;
-    let adv_x = zero_g - vbar_x * (cx.al * by_e + cx.ar * by_w);
+    // a^L (= alpha^+/sum) weights the UPWIND face: West for +x (a^L -> by_w), South for +y (a^L -> bx_s)
+    // — CONSISTENT with the diffusion's d^L->West/d^R->East pairing and with vbar (apx*vx_w). pairing
+    // a^L to the downwind face is anti-upwind: invisible for symmetric speeds (a^L==a^R, subsonic OT)
+    // but ADVECTS THE DOWNWIND state at supersonic Mach -> instability (the field-loop blow-up).
+    let adv_x = zero_g - vbar_x * (cx.al * by_w + cx.ar * by_e);
     let dif_x = cx.dr * by_e - cx.dl * by_w;
-    let adv_y = vbar_y * (cy.al * bx_n + cy.ar * bx_s);
+    let adv_y = vbar_y * (cy.al * bx_s + cy.ar * bx_n);
     let dif_y = zero_g - (cy.dr * bx_n - cy.dl * bx_s);
     adv_x + dif_x + adv_y + dif_y
 }
@@ -3046,14 +3050,15 @@ fn uct_master_emf(cx: &UctDir, cy: &UctDir, vbar_x: Gv, vbar_y: Gv, by_e: Gv, by
 /// the master EMF with PER-SIDE velocities (the conservative-flux advective form, Eq. 33 exactly).
 /// required when `a^L != a^R` (HLLD): factoring a single `vbar` out turns the asymmetry into a
 /// `v* (B^E - B^W)` term that is anti-diffusive and blows up. here each face flux carries its OWN
-/// upwind velocity: `adv_x = -[a^L_x v_x^E B_y^E + a^R_x v_x^W B_y^W]`, etc.
+/// upwind velocity. a^L (= the upwind weight) pairs with the UPWIND face: West for +x, South for +y
+/// — `adv_x = -[a^L v_x^W B_y^W + a^R v_x^E B_y^E]` (matching the d^L->West diffusion pairing).
 fn uct_master_emf_perside(
     cx: &UctDir, cy: &UctDir, vx_e: Gv, vx_w: Gv, vy_n: Gv, vy_s: Gv, by_e: Gv, by_w: Gv, bx_n: Gv, bx_s: Gv,
 ) -> Gv {
     let zero_g = Gv::ZERO;
-    let adv_x = zero_g - (cx.al * vx_e * by_e + cx.ar * vx_w * by_w);
+    let adv_x = zero_g - (cx.al * vx_w * by_w + cx.ar * vx_e * by_e);
     let dif_x = cx.dr * by_e - cx.dl * by_w;
-    let adv_y = cy.al * vy_n * bx_n + cy.ar * vy_s * bx_s;
+    let adv_y = cy.al * vy_s * bx_s + cy.ar * vy_n * bx_n;
     let dif_y = zero_g - (cy.dr * bx_n - cy.dl * bx_s);
     adv_x + dif_x + adv_y + dif_y
 }

@@ -259,6 +259,57 @@ DROP the entire `side_d`/`d^s`/B-ratio/d-clamp/straddle/FORCE_HLL scaffolding �
 wave-sum is bounded and correct by construction. gate `Phi` on `success` (HLL `Phi`
 where the secant fails).
 
+## 3.6 THE FULL RECIPE — EXACT, no corner cuts (M&DZ Eq. 16-35)
+
+the EMF FORMULA (Eq. 27/28) we implemented is CORRECT (verified algebraically for
+uniform v). the loop dies because we cut TWO corners on the INPUTS to that formula.
+follow this to the letter.
+
+**geometry (z-edge at corner `(i+1/2, j+1/2)`):**
+- `B_y` lives on Y-faces: `B_y^W` at `(i, j+1/2)`, `B_y^E` at `(i+1, j+1/2)` (flank edge in x).
+- `B_x` lives on X-faces: `B_x^S` at `(i+1/2, j)`, `B_x^N` at `(i+1/2, j+1)` (flank edge in y).
+- the X-faces carrying the `B_y`-flux are `x_f=(i+1/2,j)` and `x_f+e_y=(i+1/2,j+1)`
+  (S and N of the edge). the Y-faces carrying the `B_x`-flux are `y_f`/`y_f+e_x` (W,E).
+
+**CORNER 1 — per-face signal speeds (Eq. 27), NOT max-over-4-cells:**
+```
+alpha_x^+ = max(0, lambda^R_{x_f}, lambda^R_{x_f+e_y})   # max over the 2 ADJACENT X-FACES
+alpha_x^- = -min(0, lambda^L_{x_f}, lambda^L_{x_f+e_y})
+```
+the `lambda` are the per-FACE 1D-Riemann signal speeds (the same the gas flux used),
+NOT cell wave speeds maxed over 4 neighbours.
+
+**CORNER 2 — transverse R± reconstruction of EVERY input (Eq. 16-18):**
+the centered fluxes, the dissipations, AND the transverse velocities are each
+PLM-reconstructed FROM THE FACE TO THE EDGE in the transverse direction:
+```
+E_z^S = R_y^+( -F^[B_y]_{x_f} ),   E_z^N = R_y^-( -F^[B_y]_{x_f+e_y} )   # x-face flux, reconstruct in Y
+E_z^W = R_x^+(  F^[B_x]_{y_f} ),   E_z^E = R_x^-(  F^[B_x]_{y_f+e_x} )   # y-face flux, reconstruct in X
+phi_x^{S,N} = R_y^{+,-}( Phi^[B_y]_{x_f, x_f+e_y} ),  phi_y^{W,E} = R_x^{+,-}( Phi^[B_x]_{y_f,y_f+e_x} )
+Phi^[B_y]_{x_f} = F^[B_y]_{x_f}(centered, Eq.22) - Fhat^[B_y]_{x_f}(Riemann numerical flux = bflux)   # Eq.18
+```
+`R_y^+` reconstructs the S-face value UP to the edge (`+1/2 slope_y`), `R_y^-` the
+N-face DOWN; minmod/plm_theta slope. for UCT-HLL only the field+velocity need
+reconstruction (Eq. 28), reducing cost.
+
+**UCT-HLL EMF, to the letter (Eq. 28):**
+```
+Ez = -[ alpha_x^+ (vbar_x B_y)^W + alpha_x^- (vbar_x B_y)^E - alpha_x^+ alpha_x^- (B_y^E - B_y^W) ] / (alpha_x^+ + alpha_x^-)
+     +[ alpha_y^+ (vbar_y B_x)^S + alpha_y^- (vbar_y B_x)^N - alpha_y^+ alpha_y^- (B_x^N - B_x^S) ] / (alpha_y^+ + alpha_y^-)
+vbar_{t,x_f} = (alpha_x^+ v_t^L + alpha_x^- v_t^R)/(alpha_x^+ + alpha_x^-)   # Eq.29, then R-reconstructed transversely
+```
+`(vbar_x B_y)^W`, `B_y^W`, `B_y^E` are the staggered Y-faces + the Eq.29 velocity,
+ALL transversely reconstructed to the edge.
+
+**UCT-HLLD:** same composition, swap `alpha^±` advective weights for the HLLD
+`a^L,a^R,d^L,d^R` (Eq. 44-46 classical / the wave-sum Phi 3.5 for RMHD), coefficients
+AVERAGED from the 2 adjacent faces (Eq. 34-35: `d_x^W=(d^L_{x_f}+d^L_{x_f+e_y})/2`).
+the SAME transverse R± reconstruction applies.
+
+**what simbi has vs needs:** the `plm_theta` minmod machinery EXISTS (gas reconstruction)
+— it must be applied to the EMF inputs (the staggered fields, the per-face fluxes/Phi,
+the velocities) in the transverse direction. that is the whole fix.
+
 ## 4. REGIME NOTES (what works where)
 
 - **HLL is regime-generic** — only the two fast speeds; identical for NMHD / IMHD

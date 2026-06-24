@@ -343,7 +343,7 @@ where
         } else {
             self.ct_method
         };
-        crate::regimes::mhd_substrate::efield(sim, method, self.solver, Self::kernel_prefix(), self.eos_param);
+        crate::regimes::mhd_substrate::efield(sim, method, self.solver, Self::kernel_prefix(), self.eos_param, self.theta);
     }
     fn post_godunov(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, stage: u8) {
         crate::regimes::mhd_substrate::post_godunov(sim, R::SPEC.has_energy, dt, stage);

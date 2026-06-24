@@ -187,14 +187,23 @@ def metadata_to_config_dict(
         metadata: checkpoint metadata
         mesh_shape: mesh shape from data.mesh.shape (includes ghost zones)
     """
-    resolution = tuple(mesh_shape)
+    # mesh_shape is in STORAGE order (x_n, ..., x2, x1) — REVERSED, matching the bounds/spacing
+    # `[::-1]` the parser applies. un-reverse to the forward (x1, x2, x3) the config expects, and pad
+    # a lower-dimensional run (2D / 2.5D) up to the 3-tuple resolution field with trailing 1s.
+    resolution = tuple(int(n) for n in reversed(tuple(mesh_shape)))
+    resolution = resolution + (1,) * (3 - len(resolution))
+
+    # the rust backend tags relativistic MHD by its kernel prefix "rmhd"; the frontend Regime enum
+    # names it "srmhd". normalize so a checkpoint written by the backend restarts cleanly.
+    _regime_aliases = {"rmhd": "srmhd"}
+    regime_str = _regime_aliases.get(str(metadata.regime), str(metadata.regime))
 
     config = {
         "resolution": resolution,
         "start_time": float(metadata.time),
         "adiabatic_index": float(metadata.gamma),
         "coord_system": CoordSystem(metadata.coord_system),
-        "regime": Regime(metadata.regime),
+        "regime": Regime(regime_str),
         "solver": Solver(metadata.solver),
         "reconstruction": Reconstruction(metadata.reconstruction),
         "timestepping": TimeStepping(metadata.timestepping),
