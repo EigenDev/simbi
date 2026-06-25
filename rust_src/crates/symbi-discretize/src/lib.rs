@@ -59,3 +59,20 @@ pub use gv_refinement::{
     ProlongOrder,
 };
 pub use lattice::LatticeMap;
+
+/// whether a kernel's buffers all share one allocated layout, so the cell index
+/// can be computed once and shared across reads. true for the single-layout
+/// cell-centered kernels — c2p (cons<->prim), wave-speed maps (prim -> scalar
+/// scratch), and the pure-hydro adiabatic/srhd face flux (no staggered ct efield).
+/// false for mhd `*face_flux*` (writes a staggered edge efield) and amr
+/// prolong/restrict (read one grid, write another). classified by kernel name HERE
+/// in the hydro layer so the IR (`KernelEmitInputs::coalesce_layout`) stays
+/// domain-agnostic and merely carries the producer-set flag. the carrier oracle
+/// catches any misclassification (a wrong index diverges from the f64 oracle).
+/// PROTOTYPE: to be replaced by real per-field layout identity (the `view_t` migration).
+pub fn kernel_coalesces_layout(kernel_name: &str) -> bool {
+    kernel_name.contains("c2p")
+        || kernel_name.contains("wave_speed_map")
+        || kernel_name.contains("adiabatic_face_flux")
+        || kernel_name.contains("srhd_face_flux")
+}

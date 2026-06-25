@@ -30,7 +30,7 @@ fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: Writes) {
     let tile_spec = k.infer_tile_spec();
     let desc = emit_kernel_from_lowering(&k.graph, &KernelEmitInputs {
         kernel_name: name,
-        ndim,
+        coalesce_layout: symbi_discretize::kernel_coalesces_layout(name),        ndim,
         target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
         field_inputs: &k.field_inputs,
         scalar_params: &k.scalar_params,

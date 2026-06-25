@@ -117,6 +117,8 @@ fn write_both(out_dir: &str, graph: &Graph, inputs: &KernelEmitInputs) {
             kernel_name:      &serial_name,
             ndim:             inputs.ndim,
             target:           inputs.target.clone(),
+            // the serial twin is the SAME kernel, parallel-stripped — same buffer topology.
+            coalesce_layout:  inputs.coalesce_layout,
             field_inputs:     inputs.field_inputs,
             scalar_params:    inputs.scalar_params,
             field_writes:     inputs.field_writes,
@@ -433,6 +435,7 @@ fn emit_gv(out_dir: &str, kernel_name: &str, ndim: u8, k: &GvKernel, writes: &[(
         kernel_name,
         ndim,
         target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+        coalesce_layout:  symbi_discretize::kernel_coalesces_layout(kernel_name),
         field_inputs:     &k.field_inputs,
         scalar_params:    &k.scalar_params,
         field_writes:     writes,

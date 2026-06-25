@@ -1175,7 +1175,7 @@ mod tests {
 
         let spec = KernelEmitInputs {
             kernel_name: "stencil_test",
-            ndim: 1,
+            coalesce_layout: false,            ndim: 1,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
@@ -1235,7 +1235,7 @@ mod tests {
 
         let spec = KernelEmitInputs {
             kernel_name: "newton_sqrt",
-            ndim: 1,
+            coalesce_layout: false,            ndim: 1,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
@@ -1307,7 +1307,7 @@ mod tests {
 
         let spec = KernelEmitInputs {
             kernel_name: "par_stencil_test",
-            ndim: 2,
+            coalesce_layout: false,            ndim: 2,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
@@ -1404,7 +1404,7 @@ mod tests {
 
         let spec = KernelEmitInputs {
             kernel_name: "ghost_test",
-            ndim: 2,
+            coalesce_layout: false,            ndim: 2,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
@@ -1475,7 +1475,7 @@ mod tests {
         // interp: separate input (x0) and output buffers — the reference.
         let spec = KernelEmitInputs {
             kernel_name: "inplace_test",
-            ndim: 1,
+            coalesce_layout: false,            ndim: 1,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &[("x".into(), "x".into()), ("f".into(), "f".into())],
             scalar_params: &[],

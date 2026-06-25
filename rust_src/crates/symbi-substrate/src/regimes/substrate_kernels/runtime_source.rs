@@ -565,6 +565,7 @@ pub(crate) fn gv_kernel_to_ir(
             // the LIVE render target is `GpuBackend::TARGET` in `run_gpu`; this stays a fixed
             // value only so the content-hash below is stable.
             target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout:  symbi_discretize::kernel_coalesces_layout(nm),
             field_inputs:     &gvk.field_inputs,
             scalar_params:    &gvk.scalar_params,
             field_writes:     writes,

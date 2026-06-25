@@ -543,7 +543,7 @@ mod tests {
 
         let spec = KernelEmitInputs {
             kernel_name:      "diff_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs:     &[("in".into(), "in".into())],
             scalar_params:    &[],

@@ -68,7 +68,7 @@ where
     assert!(!kernel.graph.has_errors(), "graph errors: {:?}", kernel.graph.errors());
     let inputs = KernelEmitInputs {
         kernel_name: "dissipation_lower_probe",
-        ndim: 1,
+        coalesce_layout: false,        ndim: 1,
         target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
         field_inputs: &[],
         scalar_params: &param_names.iter().map(|n| n.to_string()).collect::<Vec<_>>(),

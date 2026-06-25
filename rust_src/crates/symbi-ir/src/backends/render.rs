@@ -287,26 +287,8 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         device_preamble:  inputs.device_preamble.to_vec(),
         param_elem,
         tile_spec:        inputs.tile_spec.cloned(),
-        coalesce_layout:  prototype_coalesce_layout(inputs.kernel_name),
+        coalesce_layout:  inputs.coalesce_layout,
     }
-}
-
-/// PROTOTYPE scaffolding (to be replaced by real per-field layout identity / the
-/// `view_t` migration): decide whether a kernel's buffers all share one allocated
-/// layout, so the cell index can be computed once and shared. allowlisted by name
-/// to the kernels VERIFIED single-layout cell-centered across every regime:
-///   * `*_c2p_*`           — cons <-> prim, all cell-centered (mhd reads bcell,
-///                           also cell-centered; bface never enters c2p)
-///   * `*wave_speed_map*`  — prim -> one scalar scratch, all cell-centered
-///   * `adiabatic_*flux*` / `srhd_*flux*` — pure-hydro prim -> flux, no CT efield
-/// EXCLUDED: mhd `*face_flux*` (writes a staggered edge `efield`), amr
-/// `*prolong*` / `*restrict*` (read one grid, write another). the carrier oracle
-/// catches any misclassification (a wrong index diverges from the f64 oracle).
-fn prototype_coalesce_layout(kernel_name: &str) -> bool {
-    kernel_name.contains("c2p")
-        || kernel_name.contains("wave_speed_map")
-        || kernel_name.contains("adiabatic_face_flux")
-        || kernel_name.contains("srhd_face_flux")
 }
 
 /// the runtime buffer manifest for a serialized kernel (docs/design/18 D3): each
@@ -678,7 +660,7 @@ mod tests {
         let coord_components = [0u8];
         let inputs = KernelEmitInputs {
             kernel_name:      "roundtrip_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs:     &field_inputs,
             scalar_params:    &scalar_params,

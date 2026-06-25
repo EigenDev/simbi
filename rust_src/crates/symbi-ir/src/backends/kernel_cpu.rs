@@ -679,7 +679,7 @@ mod tests {
         let cons_den = scalar_param(&mut g, "cons_den");
         let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
             kernel_name:      "pass_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           cfg(),
             field_inputs:     &[("cons_den".into(), "cons.den".into())],
             scalar_params:    &[],
@@ -725,7 +725,7 @@ mod tests {
         let summed = g.element_wise(ElementWiseOp::Add, vec![scaled, cons_nrg], None);
         let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
             kernel_name:      "compute_pre_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           cfg(),
             field_inputs:     &[
                 ("cons_den".into(), "cons.den".into()),
@@ -761,7 +761,7 @@ mod tests {
         let summed = g.element_wise(ElementWiseOp::Add, vec![scaled, cons_nrg], None);
         let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
             kernel_name:      "compute_pre_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           cfg(),
             field_inputs:     &[
                 ("cons_den".into(), "cons.den".into()),
@@ -794,7 +794,7 @@ mod tests {
         let rho = scalar_param(&mut g, "rho");
         let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
             kernel_name:      "inplace_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           cfg(),
             field_inputs:     &[("rho".into(), "cons.den".into())],
             scalar_params:    &[],
@@ -824,7 +824,7 @@ mod tests {
 
         let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
             kernel_name:      "diff_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           cfg(),
             field_inputs:     &[("flux".into(), "flux".into())],
             scalar_params:    &[],
@@ -855,7 +855,7 @@ mod tests {
         g.add_param(Symbol::intern("shift"), TensorTy::scalar(ElementTy::I32), None);
         let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
             kernel_name:      "shifted_1d",
-            ndim:             1,
+            coalesce_layout: false,            ndim:             1,
             target:           cfg(),
             field_inputs:     &[("rho".into(), "prim.rho".into())],
             scalar_params:    &["shift".into()],
@@ -901,7 +901,7 @@ mod tests {
         let cons_den = scalar_param(&mut g, "cons_den");
         let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
             kernel_name:      "pass_2d",
-            ndim:             2,
+            coalesce_layout: false,            ndim:             2,
             target:           cfg(),
             field_inputs:     &[("cons_den".into(), "cons.den".into())],
             scalar_params:    &[],

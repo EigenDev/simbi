@@ -45,6 +45,13 @@ pub struct KernelEmitInputs<'a> {
     pub kernel_name:   &'a str,
     pub ndim:          u8,
     pub target:        TargetConfig,
+    /// whether all of this kernel's buffers share ONE allocated layout, so the
+    /// cell index can be computed once and shared across reads. the PRODUCER sets
+    /// this (it knows the kernel's buffer topology); the IR stays domain-agnostic
+    /// and no longer infers it from the kernel name. true for single-layout
+    /// cell-centered kernels (c2p, wave-speed maps, pure-hydro face flux); false
+    /// for staggered mhd face-flux (edge efield) and amr prolong/restrict (two grids).
+    pub coalesce_layout: bool,
     /// (IR-side synthesized key, born-typed runtime binding). the IR key
     /// matches a Param node in the graph; the FieldBind is what ends up in
     /// `FieldBinding::field` for the dispatch side (no re-parse).
@@ -530,7 +537,7 @@ mod tests {
         let cons_den = scalar_param(&mut g, "cons_den");
         let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
             kernel_name:   "pass_1d",
-            ndim:          1,
+            coalesce_layout: false,            ndim:          1,
             target:        cuda_cfg(),
             field_inputs:  &[("cons_den".into(), "cons.den".into())],
             scalar_params: &[],
@@ -563,7 +570,7 @@ mod tests {
         let cons_den = scalar_param(&mut g, "cons_den");
         let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
             kernel_name:   "pass_2d",
-            ndim:          2,
+            coalesce_layout: false,            ndim:          2,
             target:        cuda_cfg(),
             field_inputs:  &[("cons_den".into(), "cons.den".into())],
             scalar_params: &[],
@@ -589,7 +596,7 @@ mod tests {
         let summed = g.element_wise(ElementWiseOp::Add, vec![scaled, cons_nrg], None);
         let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
             kernel_name:   "compute_pre_1d",
-            ndim:          1,
+            coalesce_layout: false,            ndim:          1,
             target:        cuda_cfg(),
             field_inputs:  &[
                 ("cons_den".into(), "cons.den".into()),
@@ -616,7 +623,7 @@ mod tests {
         let cons_mom_1 = scalar_param(&mut g, "cons_mom_1");
         let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
             kernel_name:   "split_1d",
-            ndim:          1,
+            coalesce_layout: false,            ndim:          1,
             target:        cuda_cfg(),
             field_inputs:  &[
                 ("cons_mom_0".into(), "cons.mom[0]".into()),
@@ -648,7 +655,7 @@ mod tests {
         let updated = g.element_wise(ElementWiseOp::Add, vec![cons_den, one], None);
         let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
             kernel_name:   "inplace_1d",
-            ndim:          1,
+            coalesce_layout: false,            ndim:          1,
             target:        cuda_cfg(),
             field_inputs:  &[("cons_den".into(), "cons.den".into())],
             scalar_params: &[],
@@ -673,7 +680,7 @@ mod tests {
         let prod = g.element_wise(ElementWiseOp::Mul, vec![a, dt], None);
         let desc = emit_kernel_from_lowering(&g, &KernelEmitInputs {
             kernel_name:   "scale_1d",
-            ndim:          1,
+            coalesce_layout: false,            ndim:          1,
             target:        cuda_cfg(),
             field_inputs:  &[("a".into(), "a".into())],
             scalar_params: &["dt".to_string()],

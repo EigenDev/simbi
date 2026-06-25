@@ -156,7 +156,7 @@ impl KernelRun {
 
         let spec = KernelEmitInputs {
             kernel_name: "harness_kernel",
-            ndim: ndim as u8,
+            coalesce_layout: false,            ndim: ndim as u8,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &self.kernel.field_inputs,
             scalar_params: &self.kernel.scalar_params,
@@ -186,7 +186,7 @@ impl KernelRun {
         assert!(ndim > 0, "KernelRun::emit_cpu: call .grid(...) to fix ndim");
         let desc = emit_kernel_cpu(&self.kernel.graph, &KernelEmitInputs {
             kernel_name: "harness_kernel",
-            ndim,
+            coalesce_layout: false,            ndim,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &self.kernel.field_inputs,
             scalar_params: &self.kernel.scalar_params,
@@ -219,7 +219,7 @@ impl KernelRun {
         // (emit_kernel_from_lowering) reads it — Cuda is the GPU lowerability path.
         let inputs = KernelEmitInputs {
             kernel_name: "lowering_probe",
-            ndim,
+            coalesce_layout: false,            ndim,
             target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
             field_inputs: &self.kernel.field_inputs,
             scalar_params: &self.kernel.scalar_params,

@@ -68,7 +68,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
     // ---- interp ----
     let spec = KernelEmitInputs {
         kernel_name: "godunov_oracle",
-        ndim: 2,
+        coalesce_layout: false,        ndim: 2,
         target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
         field_inputs: &gvk.field_inputs,
         scalar_params: &gvk.scalar_params,
