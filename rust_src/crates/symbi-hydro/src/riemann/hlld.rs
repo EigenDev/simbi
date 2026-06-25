@@ -644,6 +644,113 @@ pub fn hlld_newtonian<S: Scalar, const D: usize>(
     MhdCons::select(ok, pick, hlle_flux)
 }
 
+/// extract the classical Miyoshi-Kusano (2005) HLLD five-wave star states for the UCT-HLLD edge EMF
+/// WITHOUT building the flux — the closed-form analog of `hlld_rmhd_states`. returns the fan speeds
+/// (`lam` fast, `alf` Alfven, `lstar` contact), the per-side single-star lab-frame B (`bstar`), the
+/// contact double-star transverse field (`bc`) and velocity (`vc`), the single normal field (`bn`),
+/// and `success` (0 => any star density / star pressure non-positive => the EMF must use the HLL
+/// dissipation there). bit-consistent with `hlld_newtonian`: SAME speeds, single-/double-star
+/// formulas, and the RELATIVE-threshold Alfven-degeneracy switch (no masking floor on the star
+/// density; the EMF wave-sum form needs the star FIELDS, never the singular ratio). carrier-generic.
+pub fn hlld_newtonian_states<S: Scalar, const D: usize>(
+    eos: &impl Eos<S>,
+    prim_l: &MhdPrim<S, D>,
+    prim_r: &MhdPrim<S, D>,
+    nhat: &Tensor<S, D>,
+) -> HlldStates<S, D> {
+    let zero = S::ZERO;
+    let one = S::ONE;
+    let half = S::from_f64(0.5);
+    let neg = S::from_f64(-1.0);
+    let eps = S::from_f64(DIVZERO_GUARD);
+    let regime = NewtonianMhd;
+
+    // single continuous normal field (div B = 0, Miyoshi-Kusano constant-Bx) — as in `hlld_newtonian`.
+    let bn = (prim_l.mag.dot(nhat) + prim_r.mag.dot(nhat)) * half;
+    let bn_sq = bn * bn;
+    let with_bn = |p: &MhdPrim<S, D>| -> MhdPrim<S, D> {
+        MhdPrim { hydro: p.hydro, mag: p.mag + nhat.scale(bn - p.mag.dot(nhat)) }
+    };
+    let pl = with_bn(prim_l);
+    let pr = with_bn(prim_r);
+    let prim_l = &pl;
+    let prim_r = &pr;
+
+    let (sll, slr) = regime.wave_speeds(eos, prim_l, nhat);
+    let (srl, srr) = regime.wave_speeds(eos, prim_r, nhat);
+    let s_l = sll.min(srl);
+    let s_r = slr.max(srr);
+
+    let un_l = prim_l.vel.dot(nhat);
+    let un_r = prim_r.vel.dot(nhat);
+    let rho_l = prim_l.rho;
+    let rho_r = prim_r.rho;
+    let pt_l = prim_l.pre + half * prim_l.mag.dot(&prim_l.mag);
+    let pt_r = prim_r.pre + half * prim_r.mag.dot(&prim_r.mag);
+
+    // contact speed S_M + star total pressure (eqs 38, 41).
+    let cl = (s_l - un_l) * rho_l;
+    let cr = (s_r - un_r) * rho_r;
+    let dm = cr - cl;
+    let dm_s = S::select(dm.abs().cmp_lt(eps), eps, dm);
+    let s_m = (cr * un_r - cl * un_l - pt_r + pt_l) / dm_s;
+    let pt_star = (cr * pt_l - cl * pt_r + cl * cr * (un_r - un_l)) / dm_s;
+
+    let tang = |v: &Tensor<S, D>, vn: S| -> Tensor<S, D> { *v - nhat.scale(vn) };
+
+    // per-side single-star (*) transverse v/B + density (eqs 43-48); the Alfven-resonant denominator
+    // uses the SAME relative-threshold no-rotation switch as `hlld_newtonian` (NOT a 1e-30 floor).
+    let star = |prim_k: &MhdPrim<S, D>, s_k: S, un_k: S, rho_k: S| -> (Tensor<S, D>, Tensor<S, D>, S) {
+        let smk = s_k - s_m;
+        let smk_s = S::select(smk.abs().cmp_lt(eps), eps, smk);
+        let rho_star = rho_k * (s_k - un_k) / smk_s;
+        let term = rho_k * (s_k - un_k) * smk;
+        let den = term - bn_sq;
+        let small = den.abs().cmp_lt(S::from_f64(ALFVEN_DEGENERACY_TOL) * (term.abs() + bn_sq) + eps);
+        let den_s = S::select(small, one, den);
+        let v_tang = tang(&prim_k.vel, un_k);
+        let b_tang = tang(&prim_k.mag, bn);
+        let fac_v = S::select(small, zero, bn * (s_m - un_k) / den_s);
+        let fac_b = S::select(small, one, (rho_k * (s_k - un_k) * (s_k - un_k) - bn_sq) / den_s);
+        let v_star = nhat.scale(s_m) + (v_tang - b_tang.scale(fac_v));
+        let b_star = nhat.scale(bn) + b_tang.scale(fac_b);
+        (v_star, b_star, rho_star)
+    };
+    let (vs_l, bs_l, rs_l) = star(prim_l, s_l, un_l, rho_l);
+    let (vs_r, bs_r, rs_r) = star(prim_r, s_r, un_r, rho_r);
+
+    // Alfven speeds + double-star (**) contact v/B between them (eqs 51, 59-63).
+    let sqrt_rl = rs_l.safe_sqrt();
+    let sqrt_rr = rs_r.safe_sqrt();
+    let bn_abs = bn.abs();
+    let sa_l = s_m - bn_abs / S::select(sqrt_rl.cmp_lt(eps), eps, sqrt_rl);
+    let sa_r = s_m + bn_abs / S::select(sqrt_rr.cmp_lt(eps), eps, sqrt_rr);
+
+    let sgn = S::select(bn.cmp_ge(zero), one, neg);
+    let inv_sden = one / S::select((sqrt_rl + sqrt_rr).cmp_lt(eps), eps, sqrt_rl + sqrt_rr);
+    let vsl_t = tang(&vs_l, s_m);
+    let vsr_t = tang(&vs_r, s_m);
+    let bsl_t = tang(&bs_l, bn);
+    let bsr_t = tang(&bs_r, bn);
+    let vss_t = (vsl_t.scale(sqrt_rl) + vsr_t.scale(sqrt_rr) + (bsr_t - bsl_t).scale(sgn)).scale(inv_sden);
+    let bss_t = (bsr_t.scale(sqrt_rl) + bsl_t.scale(sqrt_rr) + (vsr_t - vsl_t).scale(sgn * sqrt_rl * sqrt_rr)).scale(inv_sden);
+    let v_ss = nhat.scale(s_m) + vss_t;
+    let b_ss = nhat.scale(bn) + bss_t;
+
+    // physicality: any non-positive star density / pressure => HLL dissipation in the EMF (success=0).
+    let ok = rs_l.cmp_gt(zero) & rs_r.cmp_gt(zero) & pt_star.cmp_gt(zero);
+    HlldStates {
+        lam: [s_l, s_r],
+        alf: [sa_l, sa_r],
+        lstar: s_m,
+        bstar: [bs_l, bs_r],
+        bc: b_ss,
+        vc: v_ss,
+        bn,
+        success: S::select(ok, one, zero),
+    }
+}
+
 // =============================================================================
 // isothermal MHD HLLD — Mignone (2007). the THREE-state / four-wave solver: the
 // isothermal closure (p = a^2 rho) removes the entropy/contact mode, so the fan
@@ -960,6 +1067,54 @@ mod tests {
         assert!(
             (f_hat - f_ref).abs() < 1e-8,
             "UCT master form does NOT telescope to the HLLD flux: {f_hat} vs {f_ref} (diff {})",
+            (f_hat - f_ref).abs()
+        );
+    }
+
+    #[test]
+    fn hlld_newtonian_uct_telescopes_to_flux() {
+        // the NMHD analog of hlld_rmhd_uct_telescopes_to_flux: the M&DZ WAVE-SUM form (Eq. 39) must
+        // reconstruct the hlld_newtonian B_y flux EXACTLY from the classical Miyoshi-Kusano star
+        // FIELDS — central minus the per-wave |lambda| dissipation. this is the regression gate for
+        // the OT timestep-collapse fix (2026-06-25): the EMF now uses the star fields (bounded), NOT
+        // the coefficient form's star-DENSITY ratio (which floored rho_s -> Alfven speed blew up).
+        //   F^[By] = 1/2[ F^L + F^R - |lam^L|(B_y^sL - B_y^L) - |alf^L|(B_c - B_y^sL)
+        //                            - |alf^R|(B_y^sR - B_c) - |lam^R|(B_y^R - B_y^sR) ]
+        // F^s = v_x^s B_y^s - v_y^s B^x. if this == hlld_newtonian.mag[1], the star states are PROVEN
+        // consistent with the flux (the EMF cannot drift from the solver).
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.1, 0.0]), pre: 1.0 },
+            mag: Tensor::new([0.5, 0.8, 0.4]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.2, 0.05]), pre: 0.4 },
+            mag: Tensor::new([0.5, -0.6, 0.3]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let s = hlld_newtonian_states(&eos, &prim_l, &prim_r, &nhat);
+        assert!(s.success > 0.5, "HLLD must converge (success=1) for this state");
+        assert!(s.alf[0] < 0.0 && s.alf[1] > 0.0, "need the double-star region to straddle: alf={:?}", s.alf);
+        let (lam, alf, bn) = (s.lam, s.alf, s.bn);
+        // per-side induction flux F^s = v_x^s B_y^s - v_y^s B^x (B^x = the single normal field).
+        let by = [prim_l.mag[1], prim_r.mag[1]];
+        let vx = [prim_l.vel[0], prim_r.vel[0]];
+        let vy = [prim_l.vel[1], prim_r.vel[1]];
+        let f = |i: usize| vx[i] * by[i] - vy[i] * bn;
+        let by_ss_l = s.bstar[0][1]; // B_y^{sL}
+        let by_ss_r = s.bstar[1][1]; // B_y^{sR}
+        let bc_y = s.bc[1]; // contact (double-star) B_y
+        let f_hat = 0.5
+            * (f(0) + f(1)
+                - lam[0].abs() * (by_ss_l - by[0])
+                - alf[0].abs() * (bc_y - by_ss_l)
+                - alf[1].abs() * (by_ss_r - bc_y)
+                - lam[1].abs() * (by[1] - by_ss_r));
+        let flux = hlld_newtonian(&eos, &prim_l, &prim_r, &nhat, 0.0);
+        let f_ref = flux.mag[1];
+        assert!(
+            (f_hat - f_ref).abs() < 1e-8,
+            "NMHD UCT wave-sum does NOT telescope to the HLLD flux: {f_hat} vs {f_ref} (diff {})",
             (f_hat - f_ref).abs()
         );
     }

@@ -133,7 +133,12 @@ impl Solver {
     pub fn valid_for(self, regime: RegimeKind) -> bool {
         match self {
             Solver::Hlle => true,
-            Solver::Hllc => !regime.is_mhd(),
+            // HLLC resolves the gas contact in the normal flux. valid for every regime with a
+            // contact-resolving HLLC flux kernel: all hydro/SRHD, plus the energy-carrying MHD
+            // regimes NMHD and RMHD (the UCT edge EMF reduces to the HLL EMF for B_x != 0 — the
+            // contact carries no transverse field, M&DZ p.11 — so HLLC-MHD = HLLC flux + HLL EMF).
+            // EXCLUDED: isothermal MHD (no thermal contact, no HLLC flux kernel built).
+            Solver::Hllc => !regime.is_mhd() || matches!(regime, RegimeKind::NewtonianMhd | RegimeKind::Rmhd),
             Solver::Hlld => regime.is_mhd(),
         }
     }
@@ -195,8 +200,12 @@ mod solver_matrix_tests {
         }
         for r in mhd {
             assert!(Solver::Hlle.valid_for(r), "hlle universal: {r:?}");
-            assert!(!Solver::Hllc.valid_for(r), "hllc is hydro-only: {r:?}");
             assert!(Solver::Hlld.valid_for(r), "hlld valid for MHD: {r:?}");
         }
+        // HLLC is valid for the energy-carrying MHD regimes (contact-resolving flux + HLL EMF)
+        // but NOT isothermal MHD (no thermal contact / no HLLC kernel).
+        assert!(Solver::Hllc.valid_for(RegimeKind::NewtonianMhd), "hllc valid for nmhd");
+        assert!(Solver::Hllc.valid_for(RegimeKind::Rmhd), "hllc valid for rmhd");
+        assert!(!Solver::Hllc.valid_for(RegimeKind::IsoMhd), "hllc invalid for iso-mhd (no contact)");
     }
 }

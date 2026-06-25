@@ -25,7 +25,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
 use symbi_hydro::isothermal_mhd::{imhd_recover, IsothermalMhd};
 use symbi_hydro::regime::Regime;
-use symbi_hydro::riemann::{hlle, hlle_with_speeds, hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_rmhd_states, HlldStates, hlld_newtonian, hlld_isothermal};
+use symbi_hydro::riemann::{hlle, hlle_with_speeds, hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_rmhd_states, hlld_newtonian_states, HlldStates, hlld_newtonian, hlld_isothermal};
 use symbi_hydro::ShockwaveLimiter;
 use symbi_hydro::rmhd::{rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities, Rmhd};
 use symbi_hydro::srhd::{srhd_recover, Srhd};

@@ -577,22 +577,6 @@ fn uct_master_emf(cx: &UctDir, cy: &UctDir, vbar_x: Gv, vbar_y: Gv, by_e: Gv, by
 }
 
 
-/// the master EMF with PER-SIDE velocities (the conservative-flux advective form, Eq. 33 exactly).
-/// required when `a^L != a^R` (HLLD): factoring a single `vbar` out turns the asymmetry into a
-/// `v* (B^E - B^W)` term that is anti-diffusive and blows up. here each face flux carries its OWN
-/// upwind velocity. a^L (= the upwind weight) pairs with the UPWIND face: West for +x, South for +y
-/// — `adv_x = -[a^L v_x^W B_y^W + a^R v_x^E B_y^E]` (matching the d^L->West diffusion pairing).
-fn uct_master_emf_perside(
-    cx: &UctDir, cy: &UctDir, vx_e: Gv, vx_w: Gv, vy_n: Gv, vy_s: Gv, by_e: Gv, by_w: Gv, bx_n: Gv, bx_s: Gv,
-) -> Gv {
-    let zero_g = Gv::ZERO;
-    let adv_x = zero_g - (cx.al * vx_w * by_w + cx.ar * vx_e * by_e);
-    let dif_x = cx.dr * by_e - cx.dl * by_w;
-    let adv_y = cy.al * vy_s * bx_s + cy.ar * vy_n * bx_n;
-    let dif_y = zero_g - (cy.dr * bx_n - cy.dl * bx_s);
-    adv_x + dif_x + adv_y + dif_y
-}
-
 
 /// the UCT-HLLC edge EMF (master Eq. 33 + HLLC coefficients Eq. 37-38). same master formula as the
 /// HLL kernel, but the diffusion uses the CONTACT speed `lstar` (the three-wave fan) -> less
@@ -714,36 +698,31 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 }
 
 
-/// the UCT-HLLD edge EMF (master Eq. 33 + the five-wave HLLD coefficients Eq. 40-46). the GENUINELY
-/// less-diffusive EMF: its rotational/Alfvén waves resolve the transverse field for B_x != 0, which
-/// HLL/HLLC cannot. per-face fan (classical ideal-gas NMHD):
-///   lambda* = m_n^hll/rho^hll                         (contact, Eq. 41)
-///   rho*^s  = rho^s (lambda^s - v_n^s)/(lambda^s - lambda*)
-///   lambda*^{L,R} = lambda* -/+ |B_n|/sqrt(rho*^{L,R}) (rotational, Eq. 40; B_n = STAGGERED face)
-///   chitilde^s = (v_n^s - lambda*)(lambda^s - lambda*)/(lambda*^s + lambda^s - 2 lambda*)  [Eq. 42,
-///                the singular (lambda*^s - lambda^s) factor cancelled; verified vs both stated limits]
-///   v^s = (lambda*^s + lambda^s)/(|lambda*^s| + |lambda^s|)              (per side, Eq. 45)
-///   v*  = (lambda*^R + lambda*^L)/(|lambda*^R| + |lambda*^L|)            (Eq. 45) -> 0 when the
-///         rotational waves collapse (Eq. 46 degenerate guard, B_x -> 0, recovers HLLC == HLL)
-///   d^s = (v^s - v*)/2 * chitilde^s + (|lambda*^s| - v* lambda*^s)/2     (Eq. 44)
-///   a^L = (1 + v*)/2 ,  a^R = (1 - v*)/2                                 (asymmetric advection)
-/// per-face d^{L,R} MAX-combined to the edge; a^L averaged. NO floor (the cancellation + guard keep
-/// d well-behaved). (IMHD: isothermal p; RMHD: relativistic fan.)
+/// the NMHD UCT-HLLD edge EMF. built from the WAVE-SUM dissipative flux (M&DZ Eq. 39 over the
+/// classical Miyoshi-Kusano five-wave star states), NOT the coefficient form (Eq. 44). the
+/// coefficient form needs the HLLD star DENSITIES `rho*^s` and floored them (`rho_s.max(1e-30)`),
+/// so the Alfven speed `|Bx|/sqrt(rho*^s)` blew up in the Orszag-Tang current sheet -> a cell
+/// evacuated to ~3e-5 -> the timestep collapsed (diagnosed 2026-06-25, isolation: same HLLD flux +
+/// contact EMF stays bounded). the wave-sum uses the star FIELDS directly — no ratio, no `rho_s`
+/// floor (the bounded form, mirroring `rmhd_edge_emf_uct_hlld_gv`). `hlld_newtonian_states` is
+/// bit-consistent with `hlld_newtonian`; reduces EXACTLY to `-F_hlld_newtonian[B_t]` in 1D.
+/// ```text
+///   E_z = -1/2 (v_x^E B_y^E + v_x^W B_y^W) + 1/2 (v_y^N B_x^N + v_y^S B_x^S) + Phi_x - Phi_y
+///   Phi = 1/2 [ |lambda^L|(B_t^{sL}-B_t^L) + |lambda^{sL}|(B_c-B_t^{sL})
+///             + |lambda^{sR}|(B_t^{sR}-B_c) + |lambda^R|(B_t^R-B_t^{sR}) ]
+/// ```
 pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     gv_register_field("e_rho", "rho");
     gv_register_field("e_vp1", "vel_p1");
     gv_register_field("e_vp2", "vel_p2");
+    gv_register_field("e_vout", "vel_out");
     gv_register_field("e_pre", "pre");
     gv_register_field("e_bp1", "bcell_p1");
     gv_register_field("e_bp2", "bcell_p2");
     gv_register_field("e_bout", "bcell_out");
     gv_register_field("e_bface_a", "bface_a");
     gv_register_field("e_bface_b", "bface_b");
-    gv_register_field("e_wsr1", "wsr_p1");
-    gv_register_field("e_wsl1", "wsl_p1");
-    gv_register_field("e_wsr2", "wsr_p2");
-    gv_register_field("e_wsl2", "wsl_p2");
     let cm = |axes: &[usize]| -> Vec<i32> {
         let mut o = vec![0i32; ndim];
         for &ax in axes {
@@ -753,96 +732,74 @@ pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     };
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
-    let one = Gv::ONE;
-    let two = Gv::from_f64(2.0);
     let eps = Gv::from_f64(1.0e-30);
-    let eps_deg = Gv::from_f64(1.0e-9);
-    let tiny = Gv::from_f64(1.0e-30);
     let zero_g = Gv::ZERO;
-    let rho = |o: &[i32]| gv_field_at("e_rho", "rho", ndim, o);
-    let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
-    let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
-    let pre = |o: &[i32]| gv_field_at("e_pre", "pre", ndim, o);
-    let bp1 = |o: &[i32]| gv_field_at("e_bp1", "bcell_p1", ndim, o);
-    let bp2 = |o: &[i32]| gv_field_at("e_bp2", "bcell_p2", ndim, o);
-    let bout = |o: &[i32]| gv_field_at("e_bout", "bcell_out", ndim, o);
-    let bsq = |o: &[i32]| {
-        let a = bp1(o);
-        let b = bp2(o);
-        let c = bout(o);
-        a * a + b * b + c * c
-    };
+    let gamma = Gv::scalar("gamma");
+    let eos = IdealGas { gamma };
     let avg2 = |a: Gv, b: Gv| (a + b) * half;
-    let guard = |x: Gv| x + eps * sign_gv(x);
     let ne = zero.clone();
     let nw = cm(&[g1]);
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
-    // per-FACE HLLD coefficients -> (a^L, d^L, d^R). `bn_face` is the STAGGERED div-free normal B at
-    // this face (continuous across the fan); `vn`/`bnc` read the normal velocity / normal CELL-B.
-    let hlld_face = |l: &[i32], r: &[i32], vn: &dyn Fn(&[i32]) -> Gv, bnc: &dyn Fn(&[i32]) -> Gv,
-                     bn_face: Gv, wsr_k: &str, wsr_p: &str, wsl_k: &str, wsl_p: &str| -> (Gv, Gv, Gv) {
-        let (rl, rr) = (rho(l), rho(r));
-        let (vl, vr) = (vn(l), vn(r));
-        let (pl, pr) = (pre(l), pre(r));
-        let (bsl, bsr) = (bsq(l), bsq(r));
-        let (bncl, bncr) = (bnc(l), bnc(r));
-        let sr = zero_g.max(gv_field_at(wsr_k, wsr_p, ndim, l).max(gv_field_at(wsr_k, wsr_p, ndim, r)));
-        let sl = zero_g.min(gv_field_at(wsl_k, wsl_p, ndim, l).min(gv_field_at(wsl_k, wsl_p, ndim, r)));
-        let (mxl, mxr) = (rl * vl, rr * vr);
-        let fml = rl * vl * vl + pl + half * bsl - bncl * bncl;
-        let fmr = rr * vr * vr + pr + half * bsr - bncr * bncr;
-        let inv = one / (sr - sl + eps);
-        let rho_hll = (sr * rr - sl * rl + mxl - mxr) * inv;
-        let mx_hll = (sr * mxr - sl * mxl + fml - fmr) * inv;
-        let lstar = mx_hll / guard(rho_hll);
-        // star densities (Eq. 40).
-        let rho_sl = rl * (sl - vl) / guard(sl - lstar);
-        let rho_sr = rr * (sr - vr) / guard(sr - lstar);
-        // rotational/Alfvén speeds (Eq. 40) — STAGGERED face normal B.
-        let abx = bn_face.abs();
-        let lrl = lstar - abx / rho_sl.max(tiny).sqrt();
-        let lrr = lstar + abx / rho_sr.max(tiny).sqrt();
-        // chitilde^s (Eq. 42, singular factor cancelled).
-        let chitl = (vl - lstar) * (sl - lstar) / guard(lrl + sl - two * lstar);
-        let chitr = (vr - lstar) * (sr - lstar) / guard(lrr + sr - two * lstar);
-        // v^s per side (Eq. 45).
-        let vsl = (lrl + sl) / (lrl.abs() + sl.abs() + eps);
-        let vsr = (lrr + sr) / (lrr.abs() + sr.abs() + eps);
-        // v* with the B_x -> 0 degenerate guard (Eq. 46) as a smooth step.
-        let vstar_raw = (lrr + lrl) / (lrr.abs() + lrl.abs() + eps);
-        let g = (lrr - lrl).abs() - eps_deg * (sr - sl).abs();
-        let w = half * (one + sign_gv(g));
-        let vstar = w * vstar_raw;
-        // d^s (Eq. 44) and a^L.
-        let dl = half * (vsl - vstar) * chitl + half * (lrl.abs() - vstar * lrl);
-        let dr = half * (vsr - vstar) * chitr + half * (lrr.abs() - vstar * lrr);
-        (half * (one + vstar), dl, dr)
+    // 2-cell-averaged NMHD prim straddling the edge, LOCAL (p1, p2, out) RH basis. the face-NORMAL
+    // and the dissipated TRANSVERSE B are both OVERRIDDEN with the staggered div-free face values
+    // (the Riemann assumes constant B_n; the transverse is the staggered face that gets dissipated).
+    let prim_avg = |o1: &[i32], o2: &[i32], n_idx: usize, bn: Gv, t_idx: usize, bt: Gv| -> MhdPrim<Gv, 3> {
+        let avg = |key: &str, path: &str| (gv_field_at(key, path, ndim, o1) + gv_field_at(key, path, ndim, o2)) * half;
+        let rho = avg("e_rho", "rho");
+        let pre = avg("e_pre", "pre");
+        let v = [avg("e_vp1", "vel_p1"), avg("e_vp2", "vel_p2"), avg("e_vout", "vel_out")];
+        let mut b = [avg("e_bp1", "bcell_p1"), avg("e_bp2", "bcell_p2"), avg("e_bout", "bcell_out")];
+        b[n_idx] = bn;
+        b[t_idx] = bt;
+        MhdPrim::<Gv, 3> { hydro: Prim { rho, vel: Tensor::new(v), pre }, mag: Tensor::new(b) }
     };
-    // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction);
-    // x-faces (bface_a, recon in y), y-faces (bface_b, recon in x). also the master diffusion jumps.
+    // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction).
     let theta = Gv::scalar("theta");
     let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
     let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
     let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
     let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
-    // x-faces (normal p1): North NW->NE, South SW->SE.
-    let (aln, dln, drn) = hlld_face(&nw, &ne, &vp1, &bp1, bx_n, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
-    let (als, dls, drs) = hlld_face(&sw, &se, &vp1, &bp1, bx_s, "e_wsr1", "wsr_p1", "e_wsl1", "wsl_p1");
-    let alx = avg2(aln, als);
-    let cx = UctDir { al: alx, ar: one - alx, dl: avg2(dln, dls), dr: avg2(drn, drs) };
-    // y-faces (normal p2): West SW->NW, East SE->NE.
-    let (alw, dlw, drw) = hlld_face(&sw, &nw, &vp2, &bp2, by_w, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
-    let (ale, dle, dre) = hlld_face(&se, &ne, &vp2, &bp2, by_e, "e_wsr2", "wsr_p2", "e_wsl2", "wsl_p2");
-    let aly = avg2(alw, ale);
-    let cy = UctDir { al: aly, ar: one - aly, dl: avg2(dlw, dle), dr: avg2(drw, dre) };
-    // PER-SIDE advective velocities (East/West x-vel, North/South y-vel) — the conservative form the
-    // asymmetric a^L = (1+v*)/2 requires (a single vbar would make the v* term anti-diffusive).
+    // edge normal fields (the single div-free B threading the edge in each direction).
+    let bx_edge = avg2(bx_n, bx_s);
+    let by_edge = avg2(by_w, by_e);
+    // the wave-sum dissipative flux Phi (M&DZ Eq. 39) over the ACTUAL star fields; gated on `success`
+    // -> the finite HLL dissipation (NaN-safe select; the HLL branch uses only the always-finite lam).
+    let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv| -> Gv {
+        let phi_hlld = half
+            * (st.lam[0].abs() * (st.bstar[0][t] - bt_l)
+                + st.alf[0].abs() * (st.bc[t] - st.bstar[0][t])
+                + st.alf[1].abs() * (st.bstar[1][t] - st.bc[t])
+                + st.lam[1].abs() * (bt_r - st.bstar[1][t]));
+        let ap = zero_g.max(st.lam[1]);
+        let am = zero_g.max(zero_g - st.lam[0]);
+        let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
+        Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
+    };
+    // x-Riemann (normal p1=0, dissipate B_y=component 1): West (NW,SW) vs East (NE,SE), staggered
+    // transverse B_y = by_w / by_e, normal B_x = bx_edge.
+    let x_l = prim_avg(&nw, &sw, 0, bx_edge, 1, by_w);
+    let x_r = prim_avg(&ne, &se, 0, bx_edge, 1, by_e);
+    let st_x = hlld_newtonian_states(&eos, &x_l, &x_r, &Tensor::<Gv, 3>::unit(0));
+    let phi_x = wave_sum(&st_x, 1, by_w, by_e);
+    // y-Riemann (normal p2=1, dissipate B_x=component 0): South (SE,SW) vs North (NE,NW), staggered
+    // transverse B_x = bx_s / bx_n, normal B_y = by_edge.
+    let y_l = prim_avg(&se, &sw, 1, by_edge, 0, bx_s);
+    let y_r = prim_avg(&ne, &nw, 1, by_edge, 0, bx_n);
+    let st_y = hlld_newtonian_states(&eos, &y_l, &y_r, &Tensor::<Gv, 3>::unit(1));
+    let phi_y = wave_sum(&st_y, 0, bx_s, bx_n);
+    // centered advective velocities (2-cell averages straddling the edge).
+    let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
     let vx_w = avg2(vp1(&nw), vp1(&sw));
     let vx_e = avg2(vp1(&ne), vp1(&se));
     let vy_s = avg2(vp2(&sw), vp2(&se));
     let vy_n = avg2(vp2(&nw), vp2(&ne));
-    let emf = uct_master_emf_perside(&cx, &cy, vx_e, vx_w, vy_n, vy_s, by_e, by_w, bx_n, bx_s);
+    // E_z = -1/2(v_x^E B_y^E + v_x^W B_y^W) + 1/2(v_y^N B_x^N + v_y^S B_x^S) + Phi_x - Phi_y.
+    let emf = zero_g - half * (vx_e * by_e + vx_w * by_w)
+        + half * (vy_n * bx_n + vy_s * bx_s)
+        + phi_x
+        - phi_y;
     (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
 }
 
