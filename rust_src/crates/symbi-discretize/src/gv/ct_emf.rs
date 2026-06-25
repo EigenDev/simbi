@@ -1035,28 +1035,49 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     let nw = cm(&[g1]);
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
-    // 2-cell-averaged RMHD prim straddling the edge, LOCAL (p1, p2, out) RH basis. the face-NORMAL
-    // and the dissipated TRANSVERSE B are both OVERRIDDEN with the staggered div-free face values
-    // (the Riemann assumes constant B_n; the transverse is the staggered face that gets dissipated).
-    let prim_avg = |o1: &[i32], o2: &[i32], n_idx: usize, bn: Gv, t_idx: usize, bt: Gv| -> MhdPrim<Gv, 3> {
-        let avg = |key: &str, path: &str| (gv_field_at(key, path, ndim, o1) + gv_field_at(key, path, ndim, o2)) * half;
-        let rho = avg("e_rho", "rho");
-        let pre = avg("e_pre", "pre");
-        let v = [avg("e_vp1", "vel_p1"), avg("e_vp2", "vel_p2"), avg("e_vout", "vel_out")];
-        let mut b = [avg("e_bp1", "bcell_p1"), avg("e_bp2", "bcell_p2"), avg("e_bout", "bcell_out")];
+    // PLM-reconstruct a CELL field to a face (same theta + limiter as the gas flux). THE FIX (M&DZ
+    // §3.6 EXACT recipe): the wave-sum's per-face Riemann must use the SAME reconstructed L/R states
+    // the gas flux solves, NOT a 2-cell-averaged single edge Riemann — cell states make the EMF fan
+    // inconsistent with the flux at sharp reconstruction (the plm=2 checkerboard, the relativistic D1).
+    let theta = Gv::scalar("theta");
+    let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| -> Gv {
+        let off = |d: i32| -> Vec<i32> {
+            let mut o = base.to_vec();
+            o[naxis] += d;
+            o
+        };
+        let q0 = gv_field_at(key, rt, ndim, base);
+        let qm = gv_field_at(key, rt, ndim, &off(-1));
+        let qp = gv_field_at(key, rt, ndim, &off(1));
+        let a = q0 - qm;
+        let b = qp - q0;
+        let mm = minmod3(a * theta, half * (a + b), b * theta);
+        let slope = Gv::select(theta.cmp_lt(Gv::ZERO), van_leer(a, b), mm);
+        q0 + Gv::from_f64(0.5 * sign) * slope
+    };
+    // RMHD prim reconstructed to ONE side of a face; the face-NORMAL and the dissipated TRANSVERSE B
+    // are both overridden with the staggered div-free values (constant-B_n Riemann; the transverse is
+    // the staggered face that gets dissipated). L uses sign +1 (toward +naxis face), R uses -1.
+    let prim_face = |base: &[i32], naxis: usize, sign: f64, n_idx: usize, bn: Gv, t_idx: usize, bt: Gv| -> MhdPrim<Gv, 3> {
+        let r = |key: &str, rt: &str| recon_cell(key, rt, base, naxis, sign);
+        let rho = r("e_rho", "rho");
+        let pre = r("e_pre", "pre");
+        let v = [r("e_vp1", "vel_p1"), r("e_vp2", "vel_p2"), r("e_vout", "vel_out")];
+        let mut b = [r("e_bp1", "bcell_p1"), r("e_bp2", "bcell_p2"), r("e_bout", "bcell_out")];
         b[n_idx] = bn;
         b[t_idx] = bt;
         MhdPrim::<Gv, 3> { hydro: Prim { rho, vel: Tensor::new(v), pre }, mag: Tensor::new(b) }
     };
-    // staggered face B PLM-reconstructed a half-cell to the edge (M&DZ transverse reconstruction).
-    let theta = Gv::scalar("theta");
+    // staggered face B reconstructed to the EDGE — the DISSIPATED transverse fields in the wave-sum.
     let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
     let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
     let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
     let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
-    // edge normal fields (the single div-free B threading the edge in each direction).
-    let bx_edge = avg2(bx_n, bx_s);
-    let by_edge = avg2(by_w, by_e);
+    // the single div-free NORMAL B at each face (the un-reconstructed staggered FACE value).
+    let bx_n_face = gv_field_at("e_bface_a", "bface_a", ndim, &ne);
+    let bx_s_face = gv_field_at("e_bface_a", "bface_a", ndim, &se);
+    let by_w_face = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
+    let by_e_face = gv_field_at("e_bface_b", "bface_b", ndim, &ne);
     // the wave-sum dissipative flux Phi (M&DZ Eq. 39) for a Riemann whose transverse component is `t`,
     // with staggered endpoints `bt_l`,`bt_r` and the single-/double-star fields from `st`. gated on
     // `success` -> HLL dissipation (NaN-safe true select; the HLL branch uses only the finite lam).
@@ -1071,18 +1092,25 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
-    // x-Riemann (normal p1=0, dissipate B_y=component 1): West (NW,SW) vs East (NE,SE), staggered
-    // transverse B_y = by_w / by_e, normal B_x = bx_edge.
-    let x_l = prim_avg(&nw, &sw, 0, bx_edge, 1, by_w);
-    let x_r = prim_avg(&ne, &se, 0, bx_edge, 1, by_e);
-    let st_x = hlld_rmhd_states(&Rmhd, &eos, &x_l, &x_r, &Tensor::<Gv, 3>::unit(0));
-    let phi_x = wave_sum(&st_x, 1, by_w, by_e);
-    // y-Riemann (normal p2=1, dissipate B_x=component 0): South (SE,SW) vs North (NE,NW), staggered
-    // transverse B_x = bx_s / bx_n, normal B_y = by_edge.
-    let y_l = prim_avg(&se, &sw, 1, by_edge, 0, bx_s);
-    let y_r = prim_avg(&ne, &nw, 1, by_edge, 0, bx_n);
-    let st_y = hlld_rmhd_states(&Rmhd, &eos, &y_l, &y_r, &Tensor::<Gv, 3>::unit(1));
-    let phi_y = wave_sum(&st_y, 0, bx_s, bx_n);
+    // x-Riemann dissipates B_y (component 1), normal B_x (0). PER-FACE: North (NW->NE) and South
+    // (SW->SE), each from reconstructed states (matching the gas flux); Phi_x = 1/2(Phi_N + Phi_S)
+    // (M&DZ Eq. 34 edge average). normal B_x = the staggered FACE B_x; transverse B_y = by_w / by_e.
+    let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
+    let xn_r = prim_face(&ne, g1, -1.0, 0, bx_n_face, 1, by_e);
+    let st_xn = hlld_rmhd_states(&Rmhd, &eos, &xn_l, &xn_r, &Tensor::<Gv, 3>::unit(0));
+    let xs_l = prim_face(&sw, g1, 1.0, 0, bx_s_face, 1, by_w);
+    let xs_r = prim_face(&se, g1, -1.0, 0, bx_s_face, 1, by_e);
+    let st_xs = hlld_rmhd_states(&Rmhd, &eos, &xs_l, &xs_r, &Tensor::<Gv, 3>::unit(0));
+    let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e), wave_sum(&st_xs, 1, by_w, by_e));
+    // y-Riemann dissipates B_x (component 0), normal B_y (1). PER-FACE: West (SW->NW) and East
+    // (SE->NE). normal B_y = the staggered FACE B_y; transverse B_x = bx_s / bx_n.
+    let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
+    let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
+    let st_yw = hlld_rmhd_states(&Rmhd, &eos, &yw_l, &yw_r, &Tensor::<Gv, 3>::unit(1));
+    let ye_l = prim_face(&se, g2, 1.0, 1, by_e_face, 0, bx_s);
+    let ye_r = prim_face(&ne, g2, -1.0, 1, by_e_face, 0, bx_n);
+    let st_ye = hlld_rmhd_states(&Rmhd, &eos, &ye_l, &ye_r, &Tensor::<Gv, 3>::unit(1));
+    let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n), wave_sum(&st_ye, 0, bx_s, bx_n));
     // centered advective velocities (2-cell averages straddling the edge).
     let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
     let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
