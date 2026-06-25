@@ -294,3 +294,31 @@ pub fn nmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
     }
     (end_trace(), writes)
 }
+
+
+/// isothermal-MHD per-cell wave speeds materialized for the UCT edge-EMF (`wave_speed_l/r[d]`).
+/// mirror of `nmhd_wave_speeds_cell_gv` with `IsothermalMhd::wave_speeds` (fast magnetosonic at
+/// a^2 = cs^2, NO pressure). lets isothermal MHD run UCT (the regime-generic HLL edge-EMF reads
+/// these speeds); without it `--ct-method uct` silently falls back to Contact.
+pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let vel: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let mag: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let cs = Gv::scalar("cs");
+    let eos = Isothermal { cs };
+    let prim = IsoMhdPrim::<Gv, 3> {
+        hydro: PrimG { rho, vel: Tensor::new(vel), pre: Zero::default() },
+        mag: Tensor::new(mag),
+    };
+    let mut writes = Vec::with_capacity(2 * ndim);
+    for d in 0..ndim {
+        let nhat = Tensor::<Gv, 3>::unit(d);
+        let (lmin, lmax) = IsothermalMhd.wave_speeds(&eos, &prim, &nhat);
+        writes.push((format!("ws_l_{d}"), format!("wave_speed_l[{d}]").into(), lmin.node()));
+        writes.push((format!("ws_r_{d}"), format!("wave_speed_r[{d}]").into(), lmax.node()));
+    }
+    (end_trace(), writes)
+}

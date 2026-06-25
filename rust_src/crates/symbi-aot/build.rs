@@ -41,8 +41,9 @@ use symbi_discretize::{
     nmhd_wave_speed_map_gv,
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
     rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv,
-    rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
+    rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
+    imhd_wave_speeds_cell_gv,
     snapshot_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing,
 };
 use symbi_discretize::GvKernel;
@@ -808,6 +809,12 @@ fn gen_nmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2
     emit_gv(out_dir, &format!("nmhd_edge_emf_uct_hlld_{ndim}d_{name_k}"), ndim, &k, &writes);
 }
 
+// the UCT-HLLD edge EMF (isothermal MHD): M&DZ Appendix A (no contact mode), genuinely less diffusive.
+fn gen_imhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
+    let (k, writes) = imhd_edge_emf_uct_hlld_gv(ndim as usize, g1, g2);
+    emit_gv(out_dir, &format!("imhd_edge_emf_uct_hlld_{ndim}d_{name_k}"), ndim, &k, &writes);
+}
+
 fn gen_rmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
     let (k, writes) = rmhd_edge_emf_uct_hlld_gv(ndim as usize, g1, g2);
     emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld_{ndim}d_{name_k}"), ndim, &k, &writes);
@@ -833,6 +840,12 @@ fn gen_rmhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
 fn gen_nmhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
     let (k, writes) = nmhd_wave_speeds_cell_gv(ndim as usize);
     emit_gv(out_dir, &format!("nmhd_wave_speeds_cell_{ndim}d"), ndim, &k, &writes);
+}
+
+// isothermal (IMHD) per-cell wave speeds -> wave_speed_l/r, so UCT works for IMHD. geometry-free.
+fn gen_imhd_wave_speeds_cell(out_dir: &str, ndim: u8) {
+    let (k, writes) = imhd_wave_speeds_cell_gv(ndim as usize);
+    emit_gv(out_dir, &format!("imhd_wave_speeds_cell_{ndim}d"), ndim, &k, &writes);
 }
 
 // ---- newtonian MHD ---- the non-relativistic ideal-MHD regime. only THREE
@@ -1459,6 +1472,8 @@ fn main() {
         gen_nmhd_edge_emf_uct_hllc(&out_dir, 2, 2, 0, 1);
         // UCT-HLLD (classical ideal-gas, five-wave fan); geometry-agnostic.
         gen_nmhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
+        // UCT-HLLD (isothermal MHD, M&DZ Appendix A); geometry-agnostic.
+        gen_imhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
         // UCT-HLLD (relativistic, MUB09 fan via hlld_rmhd_states); geometry-agnostic.
         gen_rmhd_edge_emf_uct_hlld(&out_dir, 2, 2, 0, 1);
         // device RK2 efield save/avg + the bcell^n snapshot copy on a 2D field need the 2d
@@ -1508,6 +1523,8 @@ fn main() {
         gen_snapshot(&out_dir, 2, "nmhd", true, g2.clone());
         // IMHD regime physics (no-energy c2p + HLLE/HLLD flux).
         gen_imhd_c2p(&out_dir, 2);
+        // isothermal per-cell wave speeds (geometry-free) so IMHD UCT can read wave_speed_l/r.
+        gen_imhd_wave_speeds_cell(&out_dir, 2);
         for dir in 0..2 {
             let (k, w) = symbi_discretize::gv::imhd_flux_gv(2, dir, dir as usize);
             emit_gv(&out_dir, &format!("imhd_face_flux_2d_{dir}"), 2, &k, &w);

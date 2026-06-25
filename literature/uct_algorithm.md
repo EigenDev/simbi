@@ -7,8 +7,21 @@
 # in this directory (mignone_delzanna.pdf). equation numbers below refer to it.
 #
 # this is the authoritative spec for the simbi UCT implementation. when in doubt
-# about an intricate coefficient (HLLC/HLLD intermediate states), OPEN THE PDF
-# and verify — the subscript-heavy equations are easy to mis-transcribe.
+# about an intricate coefficient (HLLC/HLLD intermediate states), OPEN THE TEX
+# SOURCE (mignone_delzanna/method1.tex, method2.tex, appendix.tex) — it is the
+# primary source, no OCR. equation LABELS below (eq:By_chi, eq:UCT_HLLD_ad, ...)
+# are the TeX \label{} keys.
+#
+# VERIFIED AGAINST THE TEX SOURCE 2026-06-25. corrections made this pass:
+#  - eq:By_chi (the "OCR-fragile" chi^s): numerator is (v_x^s - lambda*) NOT (v_x^s - lambda^s);
+#    denom last factor is (... - 2 lambda*) NOT 2 lambda^s. (§3.4)
+#  - eq:UCT_HLLD_nu: v^s is PER-SIDE (Alfven^s vs fast^s), NOT the two-Alfven v* formula. (§3.4)
+#  - §2b: MAX on the DIFFUSION d coefficients (paper-sanctioned), AVERAGE on the advective a.
+#  - NO FLOORS anywhere (the paper has none; rho^{*s} used directly, degenerate guard is the
+#    only safeguard). the simbi `rho_sl.max(1e-30)` and the wave-sum-at-edge were LIBERTIES — remove.
+#
+# MANDATE: reproduce the paper VERBATIM. zeroth order first (R± reconstruction = identity).
+# no liberties, no corner-cutting. the paper IS the algorithm.
 # =============================================================================
 
 ## 0. why UCT (the problem it solves)
@@ -81,18 +94,22 @@ vbar_{t,xf} = (alpha^+_x v^L_xf,t + alpha^-_x v^R_xf,t) / (alpha^+_x + alpha^-_x
 for t = y,z, with `alpha^+ = max(0, lambda^R)`, `alpha^- = -min(0, lambda^L)`.
 (the scaffolded `v_upwind[dir][t]` fields hold these.)
 
-### 2b. edge combination of the coefficients — USE MAX (not the paper default)
-the paper's default (Eq. 34-35) AVERAGES the two face coefficients to the edge:
+### 2b. edge combination of the coefficients — MAX on d, AVERAGE on a (paper-sanctioned)
+the paper's default (eq:dEW, eq:dSN — VERIFIED against `method2.tex`) AVERAGES the two face
+coefficients to the edge, "for both the a and d coefficients":
 ```
-d_x^W = (d^L_xf + d^L_{xf+ey})/2,   d_x^E = (d^R_xf + d^R_{xf+ey})/2   (Eq. 34)
-d_y^S = (d^L_yf + d^L_{yf+ex})/2,   d_y^N = (d^R_yf + d^R_{yf+ex})/2   (Eq. 35)
+d_x^W = (d^L_xf + d^L_{xf+ey})/2,   d_x^E = (d^R_xf + d^R_{xf+ey})/2   (eq:dEW)
+d_y^S = (d^L_yf + d^L_{yf+ex})/2,   d_y^N = (d^R_yf + d^R_{yf+ex})/2   (eq:dSN)
 ```
-**simbi uses MAX instead of the average** for the edge speed/diffusion
-reconstruction (a touch more diffusive, more robust). the paper EXPLICITLY
-sanctions this: "Other forms of averaging for these coefficients - based on the
-upwind direction or by maximizing the diffusion terms - are of course possible."
-keep MAX. apply it to the edge speeds `alpha^{+,-}` (max over the surrounding
-cells/faces) from which `d` is then formed, OR to `d` directly — both fine.
+**PROJECT DECISION (2026-06-25): MAX on the DIFFUSION `d` coefficients, AVERAGE on the
+ADVECTIVE `a` coefficients.** the paper EXPLICITLY sanctions max for diffusion (verbatim):
+"Other forms of averaging for these coefficients - based on the upwind direction or by
+**maximizing the diffusion terms** - are of course possible." so `d_x^W = max(d^L_xf, d^L_{xf+ey})`
+etc. is the paper's own permitted variant (a touch more diffusive, more robust). the `a`
+(advective) weights are NOT diffusion terms — maxing them is not meaningful — so `a` stays the
+simple average (eq:dEW), `a_x^W = (a^L_xf + a^L_{xf+ey})/2`. this is NOT a liberty: max-on-d is in
+the paper; average-on-a is the paper default. equivalently, max the per-face signal speeds
+`alpha^{+,-}` from which `d` is formed.
 
 ## 3. THE COEFFICIENT SETS (one per solver) — the only solver-specific part
 
@@ -144,33 +161,46 @@ HLLD's singular `B_x -> 0` limit (Eq. 46, recovered by `v* = 0`). do NOT apply t
 `B_x != 0` (there `d^s` can go negative -> anti-diffusion; that is the wrong regime).
 
 ### 3.4 HLLD (Eq. 39-46) — CLASSICAL (Miyoshi-Kusano five-wave)
-five-wave fan: `lambda^L, lambda^{sL}, lambda*, lambda^{sR}, lambda^R` (two fast,
-two Alfvén/rotational, one contact). the star-state densities and contact:
+*** VERIFIED VERBATIM against `mignone_delzanna/method2.tex` 2026-06-25. notation matches
+the paper: `lambda^s` = fast (s=L,R), `lambda*` = CONTACT (= m_x^hll/rho^hll), `lambda^{*s}`
+= the rotational/Alfven speed (s=L,R). the old notes used `lambda^{ss}`/`lambda^{sL}` for the
+Alfven speed — same object, paper writes `lambda^{*s}`. ***
+
+five-wave fan: `lambda^L, lambda^{*L}, lambda*, lambda^{*R}, lambda^R` (two fast,
+two Alfvén/rotational, one contact). the star-state densities and contact (eq:hlld_lambda*):
 ```
 rho^{*s} = rho^s (lambda^s - v_x^s)/(lambda^s - lambda*)        (s=L,R)
-lambda*  = m_x^hll / rho^hll
-lambda^{sL} = lambda* - |Bx|/sqrt(rho^{*L}),  lambda^{sR} = lambda* + |Bx|/sqrt(rho^{*R})   (Eq. 40)
+lambda*  = m_x^hll / rho^hll                                    (eq:Uhll for U^hll)
+lambda^{*L} = lambda* - |Bx|/sqrt(rho^{*L}),  lambda^{*R} = lambda* + |Bx|/sqrt(rho^{*R})
 ```
-HLL average state (Eq. 41): `U^hll = (lambda^R U^R - lambda^L U^L + F^L - F^R)/(lambda^R - lambda^L)`.
-transverse-field jumps across the fast waves (Eq. 42):
+HLL average state (eq:Uhll): `U^hll = (lambda^R U^R - lambda^L U^L + F^L - F^R)/(lambda^R - lambda^L)`.
+transverse-field jumps across the fast waves (eq:By_chi — the formerly "OCR-fragile" line,
+now CONFIRMED against the TeX; the old notes had TWO factors wrong, the CODE was right):
 ```
-B_t^{ss} - B_t^s = B_t^s chi^s,
-chi^s = (v_x^s - lambda^s)(lambda^s - lambda*) / [ (lambda^{ss} - lambda^s)(lambda^{*s} + lambda^s - 2 lambda^s) ]
+B_t^{*s} - B_t^s = B_t^s chi^s,
+chi^s = (v_x^s - lambda*)(lambda^s - lambda*) / [ (lambda^{*s} - lambda^s)(lambda^{*s} + lambda^s - 2 lambda*) ]
 ```
-  ^^^ VERIFY THIS DENOMINATOR AGAINST THE PDF before coding — OCR-fragile.
-coefficients (Eq. 44-45), with `chi~^s = (lambda^{ss} - lambda^s) chi^s`:
+  CORRECTIONS vs the old notes: numerator first factor is `(v_x^s - lambda*)` [CONTACT], NOT
+  `(v_x^s - lambda^s)`; denominator last factor is `(... - 2 lambda*)` [2x CONTACT], NOT `2 lambda^s`.
+
+coefficients (eq:UCT_HLLD_ad, eq:UCT_HLLD_nu), with `chi~^s = (lambda^{*s} - lambda^s) chi^s`
+(the singular `(lambda^{*s}-lambda^s)` factor cancels -> `chi~^s = (v_x^s-lambda*)(lambda^s-lambda*)/(lambda^{*s}+lambda^s-2 lambda*)`):
 ```
 a^L = (1 + v*)/2,   a^R = (1 - v*)/2
-d^s = (1/2)(v^s - v*) chi~^s + (1/2)(|lambda^{ss}| - v* lambda^{ss})
-v^s = (|lambda^{sR}| - |lambda^{sL}|)/(lambda^{sR} - lambda^{sL})
-v*  = (|lambda^{*R}| - |lambda^{*L}|)/(lambda^{*R} - lambda^{*L})
+d^s = (1/2)(v^s - v*) chi~^s + (1/2)(|lambda^{*s}| - v* lambda^{*s})
+v^s = (|lambda^{*s}| - |lambda^s|)/(lambda^{*s} - lambda^s) = (lambda^{*s} + lambda^s)/(|lambda^{*s}| + |lambda^s|)   [PER SIDE: Alfven^s vs FAST^s]
+v*  = (|lambda^{*R}| - |lambda^{*L}|)/(lambda^{*R} - lambda^{*L}) = (lambda^{*R} + lambda^{*L})/(|lambda^{*R}| + |lambda^{*L}|)   [the TWO Alfven waves]
 ```
-**degenerate guard (Eq. 46):** when `Bx -> 0` the two Alfvén waves collapse onto
-the contact (`lambda^{sL},lambda^{sR} -> lambda*`) and `v*` becomes ill-defined at
-stagnation points. switch to the three-wave (HLLC) limit by setting `v* = 0`
-whenever `|lambda^{sR} - lambda^{sL}| <= eps |lambda^R - lambda^L|`, eps = 1e-9.
-least diffusive: the Alfvén speeds bound the transverse-field diffusion, far
-below the fast speed.
+  CORRECTION vs the old notes: `v^s` is PER-SIDE — it pairs the rotational speed `lambda^{*s}` with
+  the FAST speed `lambda^s` of the SAME side `s`. it is NOT `(|lambda^{*R}|-|lambda^{*L}|)/(...)`,
+  which is `v*`. (the simbi CODE used the correct per-side `(lrl+sl)/(|lrl|+|sl|)`; only the notes were wrong.)
+
+**degenerate guard (eq, ε=1e-9):** when `Bx -> 0` the two Alfvén waves collapse onto
+the contact (`lambda^{*L},lambda^{*R} -> lambda*`) and `v*` becomes ill-defined at
+stagnation points (`v* ~ v_x/|v_x|`). switch to the three-wave (HLLC) limit (Eq. HLLCcoeffs)
+by setting `v* = 0` whenever `|lambda^{*R} - lambda^{*L}| <= eps |lambda^R - lambda^L|`, eps = 1e-9.
+NO FLOOR on rho^{*s}: for physical states rho^{*s} > 0 (the paper uses it directly); the degenerate
+guard is the ONLY safeguard. least diffusive: the Alfvén speeds bound the transverse-field diffusion.
 
 ### 3.5 RMHD HLLD — the BOUNDED DISSIPATIVE-FLUX form (derived 2026-06-24)
 

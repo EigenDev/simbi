@@ -24,7 +24,7 @@ mod hlld;
 
 pub use hlle::{hlle, hlle_with_speeds};
 pub use hllc::{hllc, hllc_rmhd, hllc_srhd, hllc_newtonian};
-pub use hlld::{hlld_rmhd, hlld_rmhd_states, hlld_newtonian, hlld_newtonian_states, hlld_isothermal, HlldStates};
+pub use hlld::{hlld_rmhd, hlld_rmhd_states, hlld_newtonian, hlld_newtonian_coeffs, hlld_isothermal, hlld_isothermal_coeffs, HlldStates};
 
 // shared solver tolerances (visible to the submodules via `super::`).
 /// guard against division by zero in intermediate expressions.

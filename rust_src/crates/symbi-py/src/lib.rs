@@ -881,6 +881,21 @@ fn humanize_rate(r: f64) -> String {
 /// the single source of truth for run identification — it absorbs the parts of
 /// the old python rich summary a user actually watches: regime + eos, geometry
 /// + zone count, the numerical scheme, boundaries, and the resource estimate.
+/// the slope-limiter name for the PLM reconstruction, keyed on `plm_theta` (mirrors `plm_theta_gv`):
+/// theta < 0 = van Leer; theta == 1 = minmod; theta == 2 = MC (monotonized central); otherwise the
+/// theta-MC family with the compression value shown.
+fn limiter_label(theta: f64) -> String {
+    if theta < 0.0 {
+        "van Leer".to_string()
+    } else if (theta - 1.0).abs() < 1e-9 {
+        "minmod".to_string()
+    } else if (theta - 2.0).abs() < 1e-9 {
+        "MC (monotonized central)".to_string()
+    } else {
+        format!("minmod-MC (theta = {theta:.2})")
+    }
+}
+
 fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     let n_zones: u64 = (0..cfg.dims).map(|ax| cfg.n_cells[ax] as u64).product();
     let res = (0..cfg.dims)
@@ -915,6 +930,13 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
         ["Run".into(), "est. memory".into(), format!("{:.3} GB", est_memory_gb(cfg))],
         ["Run".into(), "output".into(), cfg.data_dir.clone()],
     ];
+    // for PLM (2nd-order) runs, name the slope limiter (from plm_theta) under the reconstruction
+    // row. pcm (1st order) has no limiter, so the row is omitted there.
+    if cfg.reconstruction_name == "plm" {
+        if let Some(i) = rows.iter().position(|r| r[1] == "reconstruction") {
+            rows.insert(i + 1, ["Scheme".into(), "limiter".into(), limiter_label(cfg.plm_theta)]);
+        }
+    }
     // document the time unit only when it is not plain code units.
     if custom_unit {
         rows.push(["Run".into(), "time unit".into(),
@@ -1393,7 +1415,8 @@ macro_rules! build_and_run_imhd {
         };
         let theta = build_theta(cfg);
         let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
-            .map_err(|e| format!("substrate/solver: {e:?}"))?;
+            .map_err(|e| format!("substrate/solver: {e:?}"))?
+            .ct_method(cfg.ct_method);
         // attach a user source. iso MHD has no energy -> momentum-only force/relax,
         // raw den/mom (raw->nrg rejected); B is CT-evolved. single-grid only.
         let sub = match &cfg.source_json {

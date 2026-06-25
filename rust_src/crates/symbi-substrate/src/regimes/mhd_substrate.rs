@@ -558,6 +558,8 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             // EMF (which IS the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
             CtMethod::Uct => match (solver, prefix) {
                 (Solver::Hlld, "nmhd") => format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
+                // isothermal HLLD: M&DZ Appendix A (no contact mode; chi~ from the HLL central state).
+                (Solver::Hlld, "imhd") => format!("imhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
                 // relativistic HLLD: the MUB09 five-wave fan (the genuine less-diffusive RMHD EMF).
                 (Solver::Hlld, "rmhd") => format!("rmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),
                 _ => format!("rmhd_edge_emf_uct_{D}d_{}", edge.name_k),

@@ -261,19 +261,24 @@ where
         // materializing regimes (RMHD always; NMHD under UCT, whose edge-EMF coefficients read
         // wave_speed_l/r) run the per-cell pass; others compute speeds inline in the flux.
         let materialize = R::SPEC.materializes_wave_speeds
-            || (self.ct_method == CtMethod::Uct && Self::kernel_prefix() == "nmhd");
+            || (self.ct_method == CtMethod::Uct && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
         if !materialize {
             return;
         }
         let wsname = format!("{}_wave_speeds_cell_{D}d", Self::kernel_prefix());
         let scalars = scalars_for(&wsname, |bind| match bind {
-            ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.eos_param),
+            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),
             o => panic!("{} wave_speeds: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
-        // bind BY MANIFEST: prim + bcell reads -> the per-axis `wave_speed_{l,r}[k]` writes
-        // (typed `WaveSpeedL/R(k)`). materializing regimes carry energy, so prim.pre is real.
-        let pre = sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre");
-        dispatch_named(sim, pre, None, 0, &wsname, &sim.geom.allocated, &[], &scalars);
+        // bind BY MANIFEST: prim + bcell reads -> the per-axis `wave_speed_{l,r}[k]` writes (typed
+        // `WaveSpeedL/R(k)`). energy regimes have prim.pre; isothermal (no pressure) passes den as
+        // the leading window field (mirrors the cfl dispatch).
+        let pre_bind = if R::SPEC.has_energy {
+            sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
+        } else {
+            &sim.fields.cons.den
+        };
+        dispatch_named(sim, pre_bind, None, 0, &wsname, &sim.geom.allocated, &[], &scalars);
     }
 
     fn cfl(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> f64 {
@@ -337,7 +342,7 @@ where
         // UCT needs the per-cell Riemann wave speeds; only regimes that materialize them (RMHD)
         // can use it today, so fall back to Contact otherwise (nmhd/imhd).
         let materialized = R::SPEC.materializes_wave_speeds
-            || (self.ct_method == CtMethod::Uct && Self::kernel_prefix() == "nmhd");
+            || (self.ct_method == CtMethod::Uct && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
         let method = if self.ct_method == CtMethod::Uct && !materialized {
             CtMethod::Contact
         } else {

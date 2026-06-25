@@ -67,6 +67,14 @@ class Reconstruction(str, ExtendedEnum):
     PLM = "plm"
 
 
+class Limiter(str, ExtendedEnum):
+    # the slope limiter for PLM reconstruction (mirrors the C++ LIMITER enum). MINMOD is the
+    # theta-MC family parameterised by `plm_theta` (1 = pure minmod, 2 = MC); VAN_LEER is the smooth
+    # harmonic limiter (ignores plm_theta).
+    MINMOD = "minmod"
+    VAN_LEER = "vanleer"
+
+
 class Solver(str, ExtendedEnum):
     HLLE = "hlle"
     HLLC = "hllc"

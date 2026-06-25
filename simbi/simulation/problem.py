@@ -37,6 +37,7 @@ from simbi.types.input import (
     CellSpacing,
     CoordSystem,
     CtMethod,
+    Limiter,
     Reconstruction,
     RefinementMode,
     Regime,
@@ -321,6 +322,14 @@ class SimbiProblem(BaseModel):
             Reconstruction.PLM, cli=True, description="spatial reconstruction"
         ),
     ]
+    limiter: Annotated[
+        Limiter,
+        ProblemParam(
+            Limiter.MINMOD,
+            cli=True,
+            description="PLM slope limiter (minmod | vanleer); minmod uses plm_theta (1=minmod, 2=MC)",
+        ),
+    ]
     timestepping: Annotated[
         TimeStepping,
         ProblemParam(
@@ -336,7 +345,8 @@ class SimbiProblem(BaseModel):
     plm_theta: Annotated[
         float,
         ProblemParam(
-            1.5, gt=0.0, le=2.0, cli=True, description="plm theta parameter"
+            1.5, gt=0.0, le=2.0, cli=True,
+            description="minmod-MC compression in (0,2] (1=minmod, 2=MC); ignored for --limiter vanleer",
         ),
     ]
     boundary_conditions: Annotated[
@@ -765,10 +775,19 @@ class SimbiProblem(BaseModel):
     @model_validator(mode="after")
     def _validate_plm_theta(self) -> SimbiProblem:
         """validate plm theta parameter."""
-        if self.reconstruction == Reconstruction.PLM and not (
-            0.0 < self.plm_theta <= 2.0
+        if (
+            self.reconstruction == Reconstruction.PLM
+            and self.limiter == Limiter.MINMOD
+            and not (0.0 < self.plm_theta <= 2.0)
         ):
-            raise ValueError("plm_theta must be in (0, 2] when using PLM")
+            raise ValueError(
+                "plm_theta must be in (0, 2] when using PLM with the minmod limiter"
+            )
+        # resolve the limiter choice to the `theta` value the reconstruction kernel reads (theta < 0
+        # selects van Leer in plm_theta_gv); minmod keeps the user's plm_theta compression. runs after
+        # the validation above so the user's plm_theta is range-checked first.
+        if self.limiter == Limiter.VAN_LEER:
+            self.plm_theta = -1.0
         return self
 
     def validate_refinement_config(self) -> None:
@@ -970,8 +989,15 @@ class SimbiProblem(BaseModel):
         parser = argparse.ArgumentParser(add_help=False)
         cls.setup_cli(parser)
 
-        # parse into existing namespace (if provided)
-        parsed, _ = parser.parse_known_args(argv, namespace)
+        # parse into existing namespace (if provided). REJECT unrecognized flags instead of
+        # silently ignoring them (a typo'd or unsupported flag must fail loudly, not run with the
+        # default and mislead the user).
+        parsed, extras = parser.parse_known_args(argv, namespace)
+        if extras:
+            raise ConfigError(
+                f"unrecognized argument(s): {' '.join(extras)}\n"
+                f"run `simbi run <config> --help` to list the supported flags."
+            )
         if parsed is None:
             raise ValueError("failed to parse cli arguments for problem")
         return cls.from_namespace(parsed)

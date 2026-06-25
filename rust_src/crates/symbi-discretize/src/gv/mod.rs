@@ -25,7 +25,7 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
 use symbi_hydro::isothermal_mhd::{imhd_recover, IsothermalMhd};
 use symbi_hydro::regime::Regime;
-use symbi_hydro::riemann::{hlle, hlle_with_speeds, hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_rmhd_states, hlld_newtonian_states, HlldStates, hlld_newtonian, hlld_isothermal};
+use symbi_hydro::riemann::{hlle, hlle_with_speeds, hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_rmhd_states, HlldStates, hlld_newtonian, hlld_newtonian_coeffs, hlld_isothermal, hlld_isothermal_coeffs};
 use symbi_hydro::ShockwaveLimiter;
 use symbi_hydro::rmhd::{rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities, Rmhd};
 use symbi_hydro::srhd::{srhd_recover, Srhd};
@@ -77,9 +77,26 @@ fn minmod3<S: Scalar>(x: S, y: S, z: S) -> S {
 }
 
 
-/// PLM reconstruct with the free-`theta` theta-MC limiter (matches `plm_reconstruct_theta`,
-/// RMHD-only): `plm_slope(vl,vc,vr) = minmod3((vc-vl)*theta, (vr-vl)*0.5, (vr-vc)*theta)`,
-/// theta in [1,2] tuning compression (1 == plain minmod). Gv stencil via field_shifted.
+/// van Leer harmonic slope limiter: `2 dl dr/(dl+dr)` for same-sign slopes, `0` otherwise. SMOOTH
+/// (C^1, no kink at the origin — unlike minmod), so the reconstructed staggered field stays clean.
+/// the MHD-friendly limiter: keeps the L/R jumps small enough that the HLLD EMF's intermediate-field
+/// overshoot (-> anti-diffusive `d`, see the d-sign analysis) stays SUBCRITICAL without a clamp.
+/// selected in `plm_theta_gv` when `theta < 0`.
+fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
+    let prod = dl * dr;
+    let pos = prod.cmp_gt(S::ZERO);
+    let denom = S::select(pos, dl + dr, S::ONE);
+    let two = S::ONE + S::ONE;
+    S::select(pos, two * prod / denom, S::ZERO)
+}
+
+
+/// PLM reconstruct with a runtime-selectable limiter, keyed on the SIGN of the `theta` scalar param:
+///   theta >= 0 -> theta-MC minmod: `minmod3((vc-vl)*theta, (vr-vl)*0.5, (vr-vc)*theta)`, theta in
+///                 [1,2] tuning compression (1 == plain minmod, 0 == pcm/first-order).
+///   theta <  0 -> van Leer (the smooth, MHD-friendly limiter; the magnitude is unused).
+/// overloading theta's sign avoids a second ABI scalar — switch limiters at runtime via `--plm-theta`
+/// (>=0 minmod-MC, e.g. -1 for van Leer). both branches are traced; `select` keeps it NaN-safe.
 fn plm_theta_gv(key: &str, runtime: impl Into<FieldBind>, ndim: u8, dir: u8, theta: Gv) -> (Gv, Gv) {
     let runtime = runtime.into();
     let qm2 = Gv::field_shifted(key, runtime.clone(), ndim, dir, -2);
@@ -87,8 +104,13 @@ fn plm_theta_gv(key: &str, runtime: impl Into<FieldBind>, ndim: u8, dir: u8, the
     let q0 = Gv::field_shifted(key, runtime.clone(), ndim, dir, 0);
     let qp1 = Gv::field_shifted(key, runtime, ndim, dir, 1);
     let half = Gv::from_f64(0.5);
-    let slope =
-        |vl: Gv, vc: Gv, vr: Gv| minmod3((vc - vl) * theta, half * (vr - vl), (vr - vc) * theta);
+    let slope = |vl: Gv, vc: Gv, vr: Gv| {
+        let a = vc - vl;
+        let b = vr - vc;
+        let minmod = minmod3(a * theta, half * (a + b), b * theta); // theta-MC (theta >= 0)
+        let vleer = van_leer(a, b); // smooth harmonic limiter (theta < 0)
+        Gv::select(theta.cmp_lt(Gv::ZERO), vleer, minmod)
+    };
     let left = qm1 + half * slope(qm2, qm1, q0);
     let right = q0 - half * slope(qm1, q0, qp1);
     (left, right)
