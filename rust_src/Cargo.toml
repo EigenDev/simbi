@@ -6,6 +6,7 @@ members = [
     "crates/symbi-geometry",
     "crates/symbi-hydro",
     "crates/symbi-grid",
+    "crates/symbi-abi",
     "crates/symbi-ir",
     "crates/symbi-jit",
     "crates/symbi-discretize",

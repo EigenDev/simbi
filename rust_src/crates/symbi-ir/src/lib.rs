@@ -50,15 +50,10 @@ pub mod backends;
 pub mod class;
 pub mod emit;
 
-// typed kernel scalar-parameter names (the trace <-> dispatch ABI, minted once).
-pub mod scalar_param;
-
-// typed kernel field-buffer names (the trace <-> dispatch ABI, minted once).
-pub mod field_ref;
-
-// typed kernel scalar-parameter names (the closed half of the trace <-> dispatch
-// ABI, minted once — the scalar analog of field_ref).
-pub mod scalar_ref;
+// the typed trace <-> dispatch ABI vocabulary (field-buffer / scalar-param / mesh
+// names) lives in the leaf `symbi-abi` crate so this IR carries the generic
+// `FieldBind`/`ScalarBind` containers without spelling the closed domain vocabulary
+// itself. re-exported below at the historical paths (`symbi_ir::FieldRef`, ...).
 
 // typed kernel registry names for the amr-transfer / field-op family.
 pub mod kernel_id;
@@ -73,9 +68,11 @@ pub mod primitives;
 // submodule paths (`symbi_ir::graph::NodeId`) become `symbi_ir::graph::NodeId`.
 
 pub use class::ClassWitness;
-pub use scalar_param::MeshScalar;
-pub use field_ref::{FieldBind, FieldRef, StateComp, StateSlot};
-pub use scalar_ref::{BodyScalar, ScalarBind, ScalarRef};
+// the ABI vocabulary now lives in `symbi-abi`; re-exported here so downstream callers
+// keep using the historical `symbi_ir::FieldRef` / `symbi_ir::ScalarBind` paths.
+pub use symbi_abi::{
+    BodyScalar, FieldBind, FieldRef, MeshScalar, ScalarBind, ScalarRef, StateComp, StateSlot,
+};
 pub use kernel_id::{KernelId, ProlongTag};
 
 // carrier-side surface

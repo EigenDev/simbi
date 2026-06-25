@@ -1,0 +1,26 @@
+// =============================================================================
+// symbi-abi
+//
+// the typed trace <-> dispatch ABI vocabulary: the born-typed names for kernel
+// field buffers (`FieldRef`/`FieldBind`), scalar params (`ScalarRef`/`ScalarBind`/
+// `BodyScalar`), and mesh scalars (`MeshScalar`). each name is minted in exactly
+// one place (`name()`) and recovered by `parse()`, so a producer (the trace) and a
+// consumer (the dispatch) cannot drift on a spelling — the failure mode the typed
+// ABI was built to kill.
+//
+// this crate is a LEAF (serde only). it holds the closed DOMAIN vocabulary so the
+// graph-theoretic IR (symbi-ir) can carry the typed containers (`FieldBind` lives
+// in `Prepared`/`GvKernel`) without its own source spelling any hydro field name.
+//
+// usage:
+//  let den = symbi_abi::FieldRef::cons_den();
+//  let bind = symbi_abi::FieldBind::from_path("cons.mom_1");
+// =============================================================================
+
+pub mod scalar_param;
+pub mod field_ref;
+pub mod scalar_ref;
+
+pub use scalar_param::MeshScalar;
+pub use field_ref::{FieldBind, FieldRef, StateComp, StateSlot};
+pub use scalar_ref::{BodyScalar, ScalarBind, ScalarRef};

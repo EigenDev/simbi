@@ -58,7 +58,7 @@ pub struct FieldBinding {
     /// the typed field this buffer binds (`Ref` for closed cell-centered vocab,
     /// `Raw` for hand-built staggered/ct/geom/refinement paths). born typed in the
     /// serialized manifest — no bare string crosses the trace -> dispatch ABI.
-    pub field: crate::field_ref::FieldBind,
+    pub field: symbi_abi::FieldBind,
     pub buffer_index: u32,
     pub is_output: bool,
 }

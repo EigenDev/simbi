@@ -31,7 +31,7 @@
 
 use crate::emit::{self, KernelDescriptor, Precision, ReductionOp, Target, TargetConfig};
 use crate::{ElementTy, Graph, NodeId};
-use crate::field_ref::FieldBind;
+use symbi_abi::FieldBind;
 use crate::passes::scalarize::{ScalarExpr, ScalarStmt};
 use crate::backends::cuda::{emit_expr, emit_stmt};
 use crate::backends::render::{emit_kernel_render, render, KernelRenderer, Prepared, COORD_VARS};
@@ -507,7 +507,7 @@ pub fn render_field_reduction(
         field_bindings: vec![crate::emit::FieldBinding {
             // the reduction scratch buffer is hand-built, not closed cell-centered
             // vocab — held verbatim as Raw.
-            field: crate::field_ref::FieldBind::Raw("buf0".into()),
+            field: symbi_abi::FieldBind::Raw("buf0".into()),
             buffer_index: 0,
             is_output: false,
         }],

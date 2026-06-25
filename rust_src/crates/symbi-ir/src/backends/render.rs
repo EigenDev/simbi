@@ -23,8 +23,8 @@ use crate::backends::kernel::KernelEmitInputs;
 use crate::passes::scalarize::{scalarize_kernel, KernelScalarized, ScalarExpr, ScalarStmt};
 use crate::{ElementTy, Graph, NodeId};
 use crate::emit::{FieldBinding, KernelDescriptor};
-use crate::field_ref::FieldBind;
-use crate::scalar_ref::ScalarBind;
+use symbi_abi::FieldBind;
+use symbi_abi::ScalarBind;
 
 pub(crate) const COORD_VARS: [&str; 3] = ["ii", "jj", "kk"];
 

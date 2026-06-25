@@ -24,7 +24,7 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssi
 
 use symbi_algebra::{Domain, FieldElement, Space};
 use crate::{ElementTy, Symbol};
-use crate::field_ref::FieldBind;
+use symbi_abi::FieldBind;
 use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
 
 /// the finished trace: the stencil graph plus the kernel ABI manifest the emit
