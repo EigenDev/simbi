@@ -267,10 +267,8 @@ def run(parser: argparse.ArgumentParser, args: argparse.Namespace, *_):
         nbin_edges = nbins + 1
         if args.mode != "fnu":
             raise SystemExit(
-                "the 'events' mode used the legacy C++ photon logger, which the "
-                "rust afterglow replaces with skymap()/lightcurve(). use --mode fnu "
-                "for a light curve, or simbi.afterglow_skymap(checkpoint, ...) for "
-                "an image."
+                "the 'events' mode used the legacy C++ photon logger. use --mode fnu "
+                "for a light curve, or the `simbi afterglow skymap` cli for an image."
             )
 
         # observer-time bin edges (seconds), as before.

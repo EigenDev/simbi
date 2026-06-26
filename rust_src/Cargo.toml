@@ -23,7 +23,6 @@ members = [
     "crates/symbi-display",
     "crates/symbi-io",
     "crates/symbi-py",
-    "crates/symbi-rad-py",
 ]
 
 [workspace.package]

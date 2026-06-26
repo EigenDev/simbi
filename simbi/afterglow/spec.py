@@ -209,6 +209,10 @@ class ObserverParams:
         """a transverse proper length [cm] -> apparent angular size [mas]."""
         return length_cm / self.angular_diameter_distance_cm() * _RAD_TO_MAS
 
+    def mas_to_length(self, mas: float) -> float:
+        """apparent angular size [mas] -> transverse proper length [cm] (inverse of above)."""
+        return mas / _RAD_TO_MAS * self.angular_diameter_distance_cm()
+
     # -- construction ---------------------------------------------------------
 
     @classmethod

@@ -47,19 +47,22 @@ from .types.typing import (
     InitialStateType,
     MHDStateGenerators,
 )
-from .version import __version_tuple__
-
-# optional: radiation post-processing (rust symbi-afterglow via rad_hydro). the
-# rust module exposes the self-contained `lightcurve` / `skymap` pipeline (it
-# reads the checkpoint itself), replacing the legacy C++ py_calc_fnu/py_log_events.
+# the afterglow light curve, STREAMED over checkpoints via the single cpu_ext catalog path
+# (afterglow/lightcurve.py). this replaces the former symbi-rad-py `rad_hydro.lightcurve`
+# (a parallel self-contained binding) so there is ONE afterglow code path with all the fixes.
+# images use the `simbi afterglow skymap` cli (cpu_ext), not a top-level export.
 try:
-    from .libs.rad_hydro import lightcurve as afterglow_lightcurve
-    from .libs.rad_hydro import skymap as afterglow_skymap
+    from .afterglow.lightcurve import afterglow_lightcurve
 except ImportError:
     afterglow_lightcurve = None
-    afterglow_skymap = None
 
-__version__ = ".".join(map(str, __version_tuple__))
+# the installed package version (set by maturin from pyproject `[project] version`).
+try:
+    from importlib.metadata import PackageNotFoundError, version as _pkg_version
+
+    __version__ = _pkg_version("simbi")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
 
 __all__ = [
     # core api
@@ -92,7 +95,6 @@ __all__ = [
     "calc_dlogt",
     # optional
     "afterglow_lightcurve",
-    "afterglow_skymap",
     # version
     "__version__",
 ]

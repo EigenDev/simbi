@@ -183,6 +183,7 @@ pub fn compute_skymap(
     redshift: f64,
     doppler_power: f64,
     n_pix: usize,
+    fixed_half_width: f64,
 ) -> SkyImage {
     let n = normalize(observer_direction);
     // an orthonormal basis (e1, e2) spanning the sky plane perpendicular to n.
@@ -223,12 +224,18 @@ pub fn compute_skymap(
         pts.push(([proj1, proj2], weight));
     }
 
-    // image extent from the IN-WINDOW events (not all events), with a little padding.
-    let mut half_width = 0.0_f64;
-    for (q, _) in &pts {
-        half_width = half_width.max(q[0].abs()).max(q[1].abs());
-    }
-    half_width *= 1.1;
+    // image extent: a CALLER-FIXED half-width (a shared field of view, so per-checkpoint images
+    // accumulate onto one grid for streaming) when `fixed_half_width > 0`; else auto-size from the
+    // in-window events with a little padding.
+    let half_width = if fixed_half_width > 0.0 {
+        fixed_half_width
+    } else {
+        let mut hw = 0.0_f64;
+        for (q, _) in &pts {
+            hw = hw.max(q[0].abs()).max(q[1].abs());
+        }
+        hw * 1.1
+    };
 
     let mut intensity = vec![0.0; n_pix * n_pix];
     if half_width <= 0.0 || n_pix == 0 {
@@ -440,7 +447,7 @@ mod tests {
                 }
             }
         }
-        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], 0.0, 1.0e9, 0.0, 1.0e30, 0.0, 3.0, 16);
+        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], 0.0, 1.0e9, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0);
         let nonzero: Vec<f64> = img.intensity.iter().copied().filter(|&v| v > 0.0).collect();
         let mean = nonzero.iter().sum::<f64>() / nonzero.len() as f64;
         let maxv = img.intensity.iter().copied().fold(0.0, f64::max);
@@ -454,7 +461,7 @@ mod tests {
         // shell radius R, R/c ~ 38.6 day; select theta ~ 60 deg (z = 0.5 R -> arrival -19.3 day).
         let r = 1.0e17;
         let evts = shell_events(r, 10.0, 240, 240);
-        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], -19.3, 4.0, 0.0, 1.0e30, 0.0, 3.0, 64);
+        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], -19.3, 4.0, 0.0, 1.0e30, 0.0, 3.0, 64, 0.0);
         let prof = img.radial_profile(10);
         let peak = argmax(&prof);
         assert!(peak >= 5, "ring should peak off-center (got ring {peak}): {prof:?}");
@@ -483,7 +490,7 @@ mod tests {
             }]
         };
         let total = |g: f64| {
-            let img = compute_skymap(&one(g), [0.0, 0.0, 1.0], arrival_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16);
+            let img = compute_skymap(&one(g), [0.0, 0.0, 1.0], arrival_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0);
             img.intensity.iter().sum::<f64>()
         };
         assert!(total(10.0) > total(2.0), "delta^3 should favor the faster fluid");

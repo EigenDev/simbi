@@ -29,7 +29,9 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 use symbi_afterglow::event::PhotonEvent;
-use symbi_afterglow::observe::compute_skymap as observe_compute_skymap;
+use symbi_afterglow::observe::{
+    compute_lightcurve_from_events, compute_skymap as observe_compute_skymap,
+};
 use symbi_afterglow::transfer::{
     generate_photon_events, generate_photon_events_spherical, monte_carlo_radiative_transfer,
 };
@@ -279,7 +281,7 @@ fn monte_carlo_radiative_transfer_py(
 /// reshapes to [n_pix, n_pix]. doppler_power: 3 = specific intensity, 4 = bolometric.
 #[pyfunction]
 #[pyo3(name = "skymap_from_events")]
-#[pyo3(signature = (events, observer_direction, observer_time, time_window=0.1, energy_min=0.0, energy_max=1.0e30, redshift=0.0, doppler_power=3.0, n_pix=256))]
+#[pyo3(signature = (events, observer_direction, observer_time, time_window=0.1, energy_min=0.0, energy_max=1.0e30, redshift=0.0, doppler_power=3.0, n_pix=256, half_width=0.0))]
 #[allow(clippy::too_many_arguments)]
 fn skymap_from_events_py(
     events: &PhotonEvents,
@@ -291,6 +293,7 @@ fn skymap_from_events_py(
     redshift: f64,
     doppler_power: f64,
     n_pix: usize,
+    half_width: f64,
 ) -> PyResult<(Vec<f64>, usize, f64)> {
     if observer_direction.len() != 3 {
         return Err(PyValueError::new_err(
@@ -298,6 +301,7 @@ fn skymap_from_events_py(
         ));
     }
     let nhat = [observer_direction[0], observer_direction[1], observer_direction[2]];
+    // half_width > 0 fixes the field of view (a shared grid for streaming accumulation); 0 auto-sizes.
     let img = observe_compute_skymap(
         &events.events,
         nhat,
@@ -308,6 +312,7 @@ fn skymap_from_events_py(
         redshift,
         doppler_power,
         n_pix,
+        half_width,
     );
     Ok((img.intensity, img.n_pix, img.half_width))
 }
@@ -508,12 +513,46 @@ fn read_photon_events_py(path: &str) -> PyResult<PhotonEvents> {
     Ok(PhotonEvents { events })
 }
 
+/// reduce a catalog into an observer light curve F_nu(t): per-frequency flux density [mJy]
+/// over the observer-time bins, via the EATS. additive across catalogs, so a multi-checkpoint
+/// light curve STREAMS — reduce each checkpoint's events into the bins and discard them, never
+/// holding the full event set. returns (bin-center times [day], fluxes flat [n_time*n_freq],
+/// frequencies [Hz]).
+#[pyfunction]
+#[pyo3(name = "lightcurve_from_events")]
+#[pyo3(signature = (events, observer_direction, frequencies, redshift, luminosity_distance, time_bins))]
+fn lightcurve_from_events_py(
+    events: &PhotonEvents,
+    observer_direction: Vec<f64>,
+    frequencies: Vec<f64>,
+    redshift: f64,
+    luminosity_distance: f64,
+    time_bins: Vec<f64>,
+) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
+    if observer_direction.len() != 3 {
+        return Err(PyValueError::new_err(
+            "observer_direction must be a length-3 unit vector",
+        ));
+    }
+    let nhat = [observer_direction[0], observer_direction[1], observer_direction[2]];
+    let lc = compute_lightcurve_from_events(
+        &events.events,
+        nhat,
+        &frequencies,
+        redshift,
+        luminosity_distance,
+        &time_bins,
+    );
+    Ok((lc.times, lc.fluxes, lc.frequencies))
+}
+
 /// register the afterglow pyfunctions + the event-handle class on the parent module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PhotonEvents>()?;
     m.add_function(wrap_pyfunction!(generate_photon_events_py, m)?)?;
     m.add_function(wrap_pyfunction!(monte_carlo_radiative_transfer_py, m)?)?;
     m.add_function(wrap_pyfunction!(skymap_from_events_py, m)?)?;
+    m.add_function(wrap_pyfunction!(lightcurve_from_events_py, m)?)?;
     m.add_function(wrap_pyfunction!(write_photon_events_py, m)?)?;
     m.add_function(wrap_pyfunction!(read_photon_events_py, m)?)?;
     Ok(())

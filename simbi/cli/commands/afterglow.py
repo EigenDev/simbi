@@ -73,6 +73,43 @@ def _load_catalog(path, args, rad_hydro, observer, manifest):
     )
 
 
+def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, doppler_power):
+    """reduce each checkpoint into the image accumulator on a SHARED grid and DISCARD it, so
+    memory is O(n_pix^2) regardless of checkpoint count (fine time binning -> smooth images
+    without holding every photon). the shared field of view is --fov [mas] (one pass) or a
+    two-pass auto (pass 1 finds the max extent, pass 2 accumulates). returns (image_2d, half_cm)."""
+    n_pix = args.n_pix
+
+    def _reduce(path, half_width_cm):
+        cat = _load_catalog(path, args, rad_hydro, observer, manifest)
+        try:
+            intensity, _, hw = rad_hydro.skymap_from_events(
+                cat, nhat, obs_time, time_window=args.time_window, redshift=observer.redshift,
+                doppler_power=doppler_power, n_pix=n_pix, half_width=half_width_cm,
+            )
+            return np.asarray(intensity), hw
+        finally:
+            del cat  # release this checkpoint's events before the next
+
+    if args.fov is not None:
+        half_width_cm = observer.mas_to_length(args.fov)
+    else:
+        print("  pass 1/2: sizing the shared field of view...")
+        half_width_cm = 0.0
+        for path in paths:
+            _, hw = _reduce(path, 0.0)
+            half_width_cm = max(half_width_cm, hw)
+        if half_width_cm <= 0.0:
+            return np.zeros((n_pix, n_pix)), 0.0
+
+    print(f"  accumulating {len(paths)} checkpoints onto a fixed {n_pix}x{n_pix} grid...")
+    image = np.zeros(n_pix * n_pix)
+    for path in paths:
+        intensity, _ = _reduce(path, half_width_cm)
+        image += intensity
+    return image.reshape(n_pix, n_pix), half_width_cm
+
+
 def _combine_catalogs(paths, args, rad_hydro, observer, manifest):
     """load each input (checkpoint or catalog) and merge into ONE handle, so a movie can
     span the epochs the user provides. each checkpoint carries its own scale_factor_a, so
@@ -87,30 +124,109 @@ def _combine_catalogs(paths, args, rad_hydro, observer, manifest):
     return catalog
 
 
+def _flux_diagnostics(image, half_mas):
+    """intensity-weighted flux centroid (xc, yc) and marginal FWHM (fwhm_x, fwhm_y) in
+    mas, computed from the brightness distribution (paper-style image diagnostics)."""
+    n = image.shape[0]
+    coord = np.linspace(-half_mas, half_mas, n)  # pixel-center axis [mas]
+    prof_x = image.sum(axis=0)  # marginal over y -> longitudinal profile I(x)
+    prof_y = image.sum(axis=1)  # marginal over x -> transverse profile I(y)
+    if prof_x.sum() <= 0.0:
+        return None
+    xc = float((coord * prof_x).sum() / prof_x.sum())
+    yc = float((coord * prof_y).sum() / prof_y.sum())
+
+    def _fwhm(prof):
+        above = coord[prof >= 0.5 * prof.max()]
+        return float(above.max() - above.min()) if above.size else 0.0
+
+    return xc, yc, _fwhm(prof_x), _fwhm(prof_y)
+
+
+def _draw_skymap_on_ax(ax, image, half_mas, log_decades=None, contours=False, diagnostics=False, vmax=None):
+    """draw ONE skymap onto a given axes in the paper style: jet axis HORIZONTAL (x), thin
+    grey axis lines through the origin, and (optionally) the yellow flux-centroid marker +
+    FWHM error bars. returns the imshow handle. the image is transposed so the line-of-sight
+    sky-plane e2 (the projected symmetry axis) runs horizontally."""
+    img = np.asarray(image).T  # jet projection -> horizontal
+    extent = [-half_mas, half_mas, -half_mas, half_mas]
+
+    if log_decades is not None:
+        peak = img.max() if img.max() > 0 else 1.0
+        disp = np.log10(np.where(img > 0, img / peak, 10.0 ** (-2 * log_decades)))
+        disp = np.clip(disp, -log_decades, 0.0)
+        im = ax.imshow(disp, origin="lower", cmap="magma", extent=extent, vmin=-log_decades, vmax=0.0)
+        if contours:
+            levels = np.linspace(-log_decades, 0.0, int(2 * log_decades) + 1)[1:-1]
+            ax.contour(disp, levels=levels, colors="white", linewidths=0.4, extent=extent, origin="lower")
+    else:
+        im = ax.imshow(img, origin="lower", cmap="magma", extent=extent, vmax=vmax)
+        if contours and img.max() > 0:
+            levels = img.max() * np.array([0.1, 0.3, 0.5, 0.7, 0.9])
+            ax.contour(img, levels=levels, colors="white", linewidths=0.4, extent=extent, origin="lower")
+
+    # thin grey x/z axis lines through the origin.
+    ax.axhline(0.0, color="0.6", lw=0.5, ls=":", alpha=0.7)
+    ax.axvline(0.0, color="0.6", lw=0.5, ls=":", alpha=0.7)
+
+    if diagnostics:
+        diag = _flux_diagnostics(img, half_mas)
+        if diag is not None:
+            xc, yc, fwhm_x, fwhm_y = diag
+            ax.errorbar(
+                xc, yc, xerr=0.5 * fwhm_x, yerr=0.5 * fwhm_y, fmt="o", color="yellow",
+                ecolor="yellow", elinewidth=1.2, capsize=4, markersize=7, zorder=5,
+            )
+            print(
+                f"  centroid (x, z) = ({xc:.3f}, {yc:.3f}) mas; "
+                f"FWHM (x, z) = ({fwhm_x:.3f}, {fwhm_y:.3f}) mas"
+            )
+    return im
+
+
 def _plot_skymap(
-    image,
-    half_mas,
-    title,
-    save_fig=None,
-    show=False,
-    vmax=None,
+    image, half_mas, title, save_fig=None, show=False, vmax=None,
     cbar_label="surface brightness [mJy/mas$^2$]",
+    log_decades=None, contours=False, diagnostics=False, colorbar=True,
 ):
-    """render a skymap with milliarcsecond axes relative to the image center."""
+    """single skymap with mas axes (x = jet axis). morphology mode (log_decades) drops the
+    colorbar by default — for morphology the shape is what matters, not the scale."""
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots()
-    im = ax.imshow(
-        image,
-        origin="lower",
-        cmap="inferno",
-        extent=[-half_mas, half_mas, -half_mas, half_mas],
-        vmax=vmax,
-    )
-    ax.set_xlabel("relative R.A. [mas]")
-    ax.set_ylabel("relative Dec. [mas]")
+    im = _draw_skymap_on_ax(ax, image, half_mas, log_decades, contours, diagnostics, vmax)
+    ax.set_xlabel("x [mas]")
+    ax.set_ylabel("z [mas]")
     ax.set_title(title)
-    fig.colorbar(im, ax=ax, label=cbar_label)
+    if colorbar and log_decades is None:
+        fig.colorbar(im, ax=ax, label=cbar_label)
+    if save_fig:
+        fig.savefig(save_fig, dpi=150, bbox_inches="tight")
+        print(f"saved figure to {save_fig}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
+
+def _plot_skymap_panel(images, half_mas_list, titles, log_decades=None, contours=False, diagnostics=False, save_fig=None, show=False):
+    """a ROW of skymaps (one per observer angle) on a common mas field of view — the
+    multi-angle morphology comparison. no colorbar; shape is the point."""
+    import matplotlib.pyplot as plt
+
+    n = len(images)
+    fov = max([h for h in half_mas_list if h > 0], default=1.0)
+    fig, axes = plt.subplots(1, n, figsize=(3.4 * n, 3.6), sharey=True)
+    if n == 1:
+        axes = [axes]
+    for ax, img, hm, t in zip(axes, images, half_mas_list, titles):
+        _draw_skymap_on_ax(ax, img, hm, log_decades, contours, diagnostics)
+        ax.set_xlim(-fov, fov)
+        ax.set_ylim(-fov, fov)
+        ax.set_aspect("equal")
+        ax.set_xlabel("x [mas]")
+        ax.set_title(t)
+    axes[0].set_ylabel("z [mas]")
+    fig.tight_layout()
     if save_fig:
         fig.savefig(save_fig, dpi=150, bbox_inches="tight")
         print(f"saved figure to {save_fig}")
@@ -133,11 +249,14 @@ def _catalog_arrival_window(path, nhat, redshift, power=3.0, lo=0.02, hi=0.98):
     order = np.argsort(t_arr)
     cw = np.cumsum(weight[order])
     if cw[-1] <= 0.0:
-        return float(t_arr.min()), float(t_arr.max())
+        return float(t_arr.min()), float(np.median(t_arr)), float(t_arr.max())
     cw = cw / cw[-1]
-    t_lo = t_arr[order[min(np.searchsorted(cw, lo), len(order) - 1)]]
-    t_hi = t_arr[order[min(np.searchsorted(cw, hi), len(order) - 1)]]
-    return float(t_lo), float(t_hi)
+
+    def _at(q):
+        return float(t_arr[order[min(np.searchsorted(cw, q), len(order) - 1)]])
+
+    # (lo percentile, flux-weighted MEDIAN/peak, hi percentile)
+    return _at(lo), _at(0.5), _at(hi)
 
 
 def _handle_arrival_window(catalog, rad_hydro, manifest, observer, nhat, power):
@@ -363,6 +482,11 @@ def setup_lightcurve_parser(subparsers) -> None:
     )
 
     parser.add_argument(
+        "--max-events", type=int, default=2_000_000,
+        help="max photon packets generated PER checkpoint (streamed, then discarded)",
+    )
+
+    parser.add_argument(
         "--output",
         default=None,
         help="save lightcurve data to file",
@@ -392,9 +516,11 @@ def setup_skymap_parser(subparsers) -> None:
     )
 
     parser.add_argument(
-        "checkpoint",
-        help="hydro checkpoint HDF5 file (read -> in-process synchrotron catalog "
-        "-> sky-plane reduce at the line of sight)",
+        "inputs",
+        nargs="+",
+        help="one or more checkpoints OR catalogs; multiple are MERGED so the EATS at a "
+        "given observer time integrates all epochs (a single checkpoint covers only its "
+        "own narrow arrival window)",
     )
 
     parser.add_argument(
@@ -420,8 +546,9 @@ def setup_skymap_parser(subparsers) -> None:
     parser.add_argument(
         "--time",
         type=float,
-        required=True,
-        help="observer time [day]",
+        default=None,
+        help="observer time [day]; if omitted, defaults to the catalog's flux-peak "
+        "arrival time (the window is computed and printed either way)",
     )
 
     parser.add_argument(
@@ -442,6 +569,38 @@ def setup_skymap_parser(subparsers) -> None:
         "--bolometric",
         action="store_true",
         help="bolometric beaming (doppler^4) instead of in-band (doppler^3)",
+    )
+    parser.add_argument(
+        "--log-decades",
+        type=float,
+        default=None,
+        help="show the FREQUENCY-INDEPENDENT log morphology log10(I/I_max) over this many "
+        "decades (e.g. 2), instead of absolute mJy/mas^2",
+    )
+    parser.add_argument(
+        "--contours",
+        action="store_true",
+        help="overlay iso-intensity contour lines on the image",
+    )
+    parser.add_argument(
+        "--diagnostics",
+        action="store_true",
+        help="overlay the flux centroid (marker) + FWHM (error bars) and print them",
+    )
+    parser.add_argument(
+        "--observer-angles",
+        nargs="+",
+        type=float,
+        default=None,
+        help="multiple viewing angles [deg] -> a ROW of morphology panels (e.g. 15 45 75), "
+        "the catalog reduced once per angle",
+    )
+    parser.add_argument(
+        "--fov",
+        type=float,
+        default=None,
+        help="fixed image half-width [mas] for MULTI-checkpoint streaming (one pass); if "
+        "omitted, a two-pass auto sizes it. fixes the shared grid so frames accumulate.",
     )
 
     parser.add_argument(
@@ -632,20 +791,17 @@ def execute_generate(args: Namespace, remaining: Optional[list] = None) -> None:
 
 
 def execute_lightcurve(args: Namespace, remaining: Optional[list] = None) -> None:
-    """compute the observer light curve F_nu(t) directly from hydro checkpoints
-    via the rust afterglow (read_cells -> synchrotron catalog -> EATS reduce)."""
+    """observer light curve F_nu(t), STREAMED over checkpoints via the cpu_ext catalog path:
+    each checkpoint -> in-process synchrotron catalog -> EATS reduce into the time bins ->
+    accumulate -> DISCARD the events. memory is O(bins), not O(total events), so it scales to
+    many checkpoints. inherits the lab-radius / 2d-revolve / units fixes (one afterglow path)."""
     import h5py
 
-    from simbi import afterglow_lightcurve
-    from simbi.reader import read_simulation
+    from ...afterglow.lightcurve import stream_lightcurve
+    from ...afterglow.spec import SystemManifest
 
-    from ...afterglow.scales import get_scale_model
+    manifest = SystemManifest.resolve(args.files[0], scale_fallback=args.scale)
 
-    if afterglow_lightcurve is None:
-        raise SystemExit("rad_hydro (rust afterglow) not installed in simbi/libs")
-
-    scales = get_scale_model(args.scale)
-    meta0 = read_simulation(args.files[0]).metadata
     # luminosity distance: explicit, else from z (0 -> a 10 pc reference).
     if args.d_l is not None:
         d_l = args.d_l
@@ -655,34 +811,22 @@ def execute_lightcurve(args: Namespace, remaining: Optional[list] = None) -> Non
     else:
         d_l = 3.086e19  # 10 pc in cm
 
-    # observer-time bin edges [day].
+    freqs = [float(f) for f in args.frequencies]
     if args.time_range:
         time_edges = np.geomspace(args.time_range[0], args.time_range[1], args.n_bins + 1)
     else:
-        # default: a couple decades around the checkpoint light-crossing scale.
         time_edges = np.geomspace(1e-3, 1e3, args.n_bins + 1)
+    micro = {"p": args.p, "eps_e": args.eps_e, "eps_b": args.eps_b}
 
-    print(f"computing light curve from {len(args.files)} checkpoint(s)...")
-    times, fluxes_flat, freqs = afterglow_lightcurve(
-        list(args.files),
-        scales.length_scale.value,
-        scales.rho_scale.value,
-        scales.pre_scale.value,
-        scales.time_scale.value,
-        args.p,
-        args.eps_e,
-        args.eps_b,
-        meta0.gamma,
-        meta0.dt,
-        np.deg2rad(args.observer_angle),
-        [float(f) for f in args.frequencies],
-        args.redshift,
-        d_l,
-        [float(t) for t in time_edges],
+    print(f"computing light curve, streaming {len(args.files)} checkpoint(s)...")
+    times, total, freqs_arr = stream_lightcurve(
+        list(args.files), manifest.to_qscales(), micro, np.deg2rad(args.observer_angle),
+        freqs, args.redshift, d_l, [float(t) for t in time_edges], max_events=args.max_events,
     )
-    fluxes = np.array(fluxes_flat).reshape(len(times), len(freqs))[: args.n_bins]
-    times = np.asarray(times)[: args.n_bins]
-    print(f"computed {len(times)} time bins x {len(freqs)} frequencies")
+    freqs = list(freqs_arr)
+    fluxes = total.reshape(len(times), len(freqs))[: args.n_bins]
+    times = times[: args.n_bins]
+    print(f"computed {len(times)} time bins x {len(freqs)} frequencies (streamed)")
 
     if args.output:
         with h5py.File(args.output, "w") as f:
@@ -718,36 +862,84 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
 
     from ...afterglow.spec import ObserverParams, SystemManifest
 
-    _report_spec_sources(args.checkpoint, args.observer)
-    observer = ObserverParams.resolve(args.observer, near=args.checkpoint)
-    manifest = SystemManifest.resolve(args.checkpoint, scale_fallback=args.scale)
-    catalog = _load_catalog(args.checkpoint, args, rad_hydro, observer, manifest)
-
-    theta = np.deg2rad(args.observer_angle)
-    # line of sight in the (x, z) plane at polar angle theta from the symmetry axis.
-    nhat = [float(np.sin(theta)), 0.0, float(np.cos(theta))]
+    _report_spec_sources(args.inputs[0], args.observer)
+    observer = ObserverParams.resolve(args.observer, near=args.inputs[0])
+    manifest = SystemManifest.resolve(args.inputs[0], scale_fallback=args.scale)
     doppler_power = 4.0 if args.bolometric else 3.0
-    print(
-        f"reducing skymap at t={args.time} day, angle={args.observer_angle} deg "
-        f"({len(catalog)} packets)..."
-    )
-    intensity, n_pix, half_width = rad_hydro.skymap_from_events(
-        catalog,
-        nhat,
-        args.time,
-        time_window=args.time_window,
-        redshift=observer.redshift,
-        doppler_power=doppler_power,
-        n_pix=args.n_pix,
-    )
-    image = np.array(intensity).reshape(n_pix, n_pix)
+    multi = len(args.inputs) > 1
+
+    if multi:
+        # STREAM: never merge all checkpoints' events (the memory blowup). the EATS observer
+        # time can't be auto-found without a pass over the data, so it is required here.
+        if args.time is None:
+            raise SystemExit(
+                "multi-checkpoint skymap needs --time (the EATS observer time) — find it from a "
+                "single-checkpoint run's reported window, or the lightcurve peak."
+            )
+        obs_time = args.time
+        catalog = None
+        fov = f"--fov {args.fov:g} mas" if args.fov is not None else "two-pass auto fov"
+        print(f"streaming {len(args.inputs)} checkpoints at t={obs_time:.3g} day ({fov})...")
+    else:
+        catalog = _load_catalog(args.inputs[0], args, rad_hydro, observer, manifest)
+        primary = args.observer_angles[0] if args.observer_angles else args.observer_angle
+        th0 = np.deg2rad(primary)
+        nhat0 = [float(np.sin(th0)), 0.0, float(np.cos(th0))]
+        t_lo, t_peak, t_hi = _handle_arrival_window(
+            catalog, rad_hydro, manifest, observer, nhat0, doppler_power
+        )
+        obs_time = args.time if args.time is not None else t_peak
+        print(
+            f"EATS arrival window: [{t_lo:.3g}, {t_hi:.3g}] day, flux peak ~{t_peak:.3g} day "
+            f"-> imaging t={obs_time:.3g} day"
+        )
+        if not (t_lo <= obs_time <= t_hi):
+            print(
+                f"  note: t={obs_time:.3g} day is OUTSIDE the window; image will be faint/empty. "
+                "merge more checkpoints to reach it, or pick a t in range."
+            )
+
+    def _image_at_angle(angle):
+        """(image_2d, half_width_cm) at a viewing angle: stream over inputs (multi, O(n_pix^2)
+        memory) or reduce the single loaded catalog."""
+        th = np.deg2rad(angle)
+        nh = [float(np.sin(th)), 0.0, float(np.cos(th))]
+        if multi:
+            return _stream_skymap(
+                args.inputs, args, rad_hydro, observer, manifest, obs_time, nh, doppler_power
+            )
+        intensity, npx, hw = rad_hydro.skymap_from_events(
+            catalog, nh, obs_time, time_window=args.time_window, redshift=observer.redshift,
+            doppler_power=doppler_power, n_pix=args.n_pix, half_width=0.0,
+        )
+        return np.asarray(intensity).reshape(npx, npx), hw
+
+    # multi-angle morphology panel.
+    if args.observer_angles:
+        images, half_mas_list, titles = [], [], []
+        for angle in args.observer_angles:
+            img, hw = _image_at_angle(angle)
+            images.append(img)
+            half_mas_list.append(observer.length_to_mas(hw))
+            titles.append(rf"$\theta_{{\rm obs}}$ = {angle:g}$^\circ$")
+        print(f"panel: {len(args.observer_angles)} angles at t={obs_time:.3g} day")
+        _plot_skymap_panel(
+            images, half_mas_list, titles,
+            log_decades=args.log_decades if args.log_decades is not None else 2.0,
+            contours=args.contours, diagnostics=args.diagnostics,
+            save_fig=args.save_fig, show=args.plot,
+        )
+        return
+
+    image, half_width = _image_at_angle(args.observer_angle)
+    n_pix = image.shape[0]
     half_mas = observer.length_to_mas(half_width)
 
     if image.max() <= 0.0:
         print(
-            f"  empty image: no photons arrived within +/-{args.time_window / 2:g} day of "
-            f"t={args.time} day. pick a --time inside the catalog's arrival window "
-            "(or widen --time-window)."
+            f"  empty image at t={obs_time:.3g} day: no photons in +/-{args.time_window / 2:g} day. "
+            f"the flux-peak time is ~{t_peak:.3g} day (window [{t_lo:.3g}, {t_hi:.3g}]); "
+            "pick a --time in range, widen --time-window, or merge more checkpoints."
         )
         return
 
@@ -766,7 +958,7 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
         with h5py.File(args.output, "w") as f:
             f.create_dataset("surface_brightness", data=sb)  # mJy/mas^2
             f.create_dataset("intensity", data=image)  # raw beamed energy/cm^2
-            f.attrs["time"] = args.time
+            f.attrs["time"] = obs_time
             f.attrs["n_pix"] = n_pix
             f.attrs["half_width_cm"] = half_width
             f.attrs["half_width_mas"] = half_mas
@@ -775,13 +967,23 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
         print(f"saved skymap to {args.output}")
 
     if args.plot or args.save_fig:
+        # the log morphology is frequency-INDEPENDENT, so drop the nu/flux label there.
+        beaming = "bolometric" if args.bolometric else f"{nu:.1e} Hz"
+        title = (
+            f"t = {obs_time:.3g} day   ({beaming})"
+            if args.log_decades is not None
+            else f"t = {obs_time:.3g} day   ({nu:.1e} Hz, {flux_mjy:.3g} mJy)"
+        )
         _plot_skymap(
             sb,
             half_mas,
-            f"t = {args.time} day   ({nu:.1e} Hz, {flux_mjy:.3g} mJy)",
+            title,
             args.save_fig,
             args.plot,
             cbar_label="surface brightness [mJy/mas$^2$]",
+            log_decades=args.log_decades,
+            contours=args.contours,
+            diagnostics=args.diagnostics,
         )
 
 
@@ -862,7 +1064,7 @@ def execute_movie(args: Namespace, remaining: Optional[list] = None) -> None:
     # window is read from the MERGED handle via a throwaway catalog dump (so it spans all
     # provided epochs, not just one input).
     if args.t_start is None or args.t_stop is None:
-        t0, t1 = _handle_arrival_window(
+        t0, _, t1 = _handle_arrival_window(
             catalog, rad_hydro, manifest, observer, nhat, doppler_power
         )
     else:

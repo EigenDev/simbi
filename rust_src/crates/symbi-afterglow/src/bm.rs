@@ -238,7 +238,7 @@ mod tests {
         );
         assert!(!events.is_empty(), "synthesis produced no events");
         let img = crate::observe::compute_skymap(
-            &events, [0.0, 0.0, 1.0], t_obs_day, t_obs_day, 0.0, 1.0e30, 0.0, 3.0, 48,
+            &events, [0.0, 0.0, 1.0], t_obs_day, t_obs_day, 0.0, 1.0e30, 0.0, 3.0, 48, 0.0,
         );
         let prof = img.radial_profile(10);
         let peak = argmax(&prof);

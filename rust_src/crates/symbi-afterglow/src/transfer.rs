@@ -332,9 +332,17 @@ pub fn generate_photon_events(
     let t_prime_s = t_prime.value();
     let dt = cond.dt * scales.time;
 
-    let total_cells = (ni * nj * nk) as u64;
+    // a 2d (r, theta) sim is AXISYMMETRIC — the physical 3d blast is the slice swept around the
+    // jet axis. when phi is NOT a resolved data axis, REVOLVE each (r, theta) cell over this many
+    // azimuths to fill the ring (else everything collapses onto the phi=0 plane and the sky image
+    // is a flat cross-section, not the 3d blast).
+    const AXISYM_N_PHI: usize = 64;
+    let resolved_phi = x3.is_some() && mesh.data_dim > 2;
+    let n_azimuth = if resolved_phi { nk } else { AXISYM_N_PHI };
+
+    let total_cells = (ni * nj * n_azimuth) as u64;
     let photons_target =
-        if photons_per_cell > 0 { photons_per_cell } else { (max_events / total_cells).max(10) };
+        if photons_per_cell > 0 { photons_per_cell } else { (max_events / total_cells).max(4) };
 
     // <gamma^2> for a power law N(gamma)~gamma^-p above gamma_min: (p-1)/(p-3) gamma_min^2 for
     // p>3, else gamma_min^2 (the high-gamma integral does not converge, use the lower bound).
@@ -354,19 +362,21 @@ pub fn generate_photon_events(
             let dcos = if nj > 1 { (x2[jj].cos() - (x2[jj] + dx2).cos()).abs() } else { 2.0 };
             let jreal = if mesh.data_dim > 1 { jj } else { 0 };
 
-            for kk in 0..nk {
+            for kk in 0..n_azimuth {
                 if events.len() as u64 >= max_events {
                     break;
                 }
-                let dx3 = match x3 {
-                    Some(a) if a.len() > 1 => a[1] - a[0],
-                    _ => 2.0 * PI,
+                // resolved phi cells in 3d, else REVOLVE the axisymmetric data: phi at the
+                // azimuth-cell center, dphi = 2pi / n_azimuth (summing over kk recovers 2pi).
+                let (sin_phi, cos_phi, dx3) = if resolved_phi {
+                    let a = x3.unwrap();
+                    let d = if a.len() > 1 { a[1] - a[0] } else { 2.0 * PI };
+                    (a[kk].sin(), a[kk].cos(), d)
+                } else {
+                    let phi = (kk as f64 + 0.5) * 2.0 * PI / n_azimuth as f64;
+                    (phi.sin(), phi.cos(), 2.0 * PI / n_azimuth as f64)
                 };
-                let (sin_phi, cos_phi) = match x3 {
-                    Some(a) => (a[kk].sin(), a[kk].cos()),
-                    None => (0.0, 1.0),
-                };
-                let kreal = if mesh.data_dim > 2 { kk } else { 0 };
+                let kreal = if resolved_phi { kk } else { 0 };
                 let rhat = [x2[jj].sin() * cos_phi, x2[jj].sin() * sin_phi, x2[jj].cos()];
 
                 let idx = kreal * ni * nj + jreal * ni + ii;

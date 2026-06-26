@@ -216,7 +216,7 @@ mod tests {
                 rho: 1e-24, pre: 1e-3, volume: 1e45, t_emission: t_emit,
             };
             let ev = generate_events_from_cells(&[cell], &micro(), 2, 200, 1_000_000);
-            let img = compute_skymap(&ev, obs, t_arr_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16);
+            let img = compute_skymap(&ev, obs, t_arr_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0);
             img.intensity.iter().sum::<f64>()
         };
         // lateral velocity toward the observer (+x) beams more flux at it than away (-x) — a
