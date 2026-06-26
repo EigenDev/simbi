@@ -1807,9 +1807,28 @@ fn run_simulation(
         .map_err(PyRuntimeError::new_err)
 }
 
-#[pymodule]
-fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
+// shared module body. the pyo3 entry-point name below decides the `PyInit_*`
+// symbol and the imported module name: `cpu_ext` for the default build,
+// `gpu_ext` for the cuda build. both compile the SAME source — cuda only adds
+// the NVRTC device path — so the registration is identical and lives here.
+fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_simulation, m)?)?;
     afterglow::register(m)?;
     Ok(())
+}
+
+// cpu build -> `simbi.libs.cpu_ext`.
+#[cfg(not(feature = "cuda"))]
+#[pymodule]
+fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    register(m)
+}
+
+// cuda build -> `simbi.libs.gpu_ext`. dev.py overrides maturin's module-name to
+// match (`--config tool.maturin.module-name="simbi.libs.gpu_ext"`), so the two
+// backends coexist instead of overwriting the same `cpu_ext` dylib.
+#[cfg(feature = "cuda")]
+#[pymodule]
+fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    register(m)
 }

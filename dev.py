@@ -84,6 +84,11 @@ def _common(args) -> list:
     if feats:
         cmd += ["--features", feats]
         print(f"rust features: {feats}")
+    # the cuda build defines the `gpu_ext` pymodule (not `cpu_ext`); override
+    # maturin's pyproject module-name so the dylib installs as `simbi.libs.gpu_ext`
+    # and coexists with the cpu backend instead of overwriting it.
+    if "cuda" in feats.split(","):
+        cmd += ["--config", 'tool.maturin.module-name="simbi.libs.gpu_ext"']
     if args.verbose:
         cmd.append("-v")
     return cmd
