@@ -167,10 +167,17 @@ where
 
         // the scale factor advances for homologous expansion only; uniform
         // translation keeps a = 1 (the offset is a_dot * time, derivable).
-        if sim.motion.homologous {
+        if sim.motion_law.is_none() && sim.motion.homologous {
             sim.motion.a += sim.motion.a_dot * sim.dt;
         }
         sim.time += sim.dt;
+        // expression motion: refresh a / a_dot to the EXACT values at the new step time (for output
+        // and the next step's stage-0 entry); a constant a_dot never tracks a decelerating shock.
+        let tnew = sim.time;
+        if let Some((a, ad)) = sim.motion_law.as_ref().map(|ml| (ml.a_at(tnew), ml.adot_at(tnew))) {
+            sim.motion.a = a;
+            sim.motion.a_dot = ad;
+        }
         sim.iteration += 1;
 
         if let Some(c) = trace_coord {
@@ -347,9 +354,18 @@ where
     let a_n = sim.motion.a;
     let frac = stage_time_fractions(stages);
     for (ii, &(a0, ac)) in stages.iter().enumerate() {
-        if sim.motion.homologous {
+        {
             let entry = if ii == 0 { 0.0 } else { frac[ii - 1] };
-            sim.motion.a = a_n + sim.motion.a_dot * (entry * sim.dt);
+            let t_entry = sim.time + entry * sim.dt;
+            // expression motion: a / a_dot are EXACT functions of time -> evaluate at the stage entry
+            // time (no linearization). legacy linear motion: extrapolate from a_n at constant a_dot.
+            let mexpr = sim.motion_law.as_ref().map(|ml| (ml.a_at(t_entry), ml.adot_at(t_entry)));
+            if let Some((a, ad)) = mexpr {
+                sim.motion.a = a;
+                sim.motion.a_dot = ad;
+            } else if sim.motion.homologous {
+                sim.motion.a = a_n + sim.motion.a_dot * (entry * sim.dt);
+            }
         }
         let sim = &*sim;
         let bodies = sim.has_bodies();

@@ -508,10 +508,19 @@ where
         self.advance_level(0, dt, 0.0);
 
         let root = &mut self.levels[0];
-        if root.state.motion.homologous {
+        // legacy linear advance ONLY when there is no traced motion law.
+        if root.state.motion_law.is_none() && root.state.motion.homologous {
             root.state.motion.a += root.state.motion.a_dot * dt;
         }
         root.state.time += dt;
+        // expression motion: set a / a_dot EXACTLY at the new time (for output and the next root
+        // step's cfl + stages), instead of a constant-rate extrapolation that overshoots a
+        // decelerating mesh.
+        let tnew = root.state.time;
+        if let Some((a, ad)) = root.state.motion_law.as_ref().map(|ml| (ml.a_at(tnew), ml.adot_at(tnew))) {
+            root.state.motion.a = a;
+            root.state.motion.a_dot = ad;
+        }
         root.state.iteration += 1;
 
         // body feedback + motion: the FINEST level owns the sink and the

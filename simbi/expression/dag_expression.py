@@ -292,6 +292,96 @@ class Expr:
             result = f(result)
         return result
 
+    def diff(self, var: "Expr") -> "Expr":
+        """symbolic derivative d(self)/d(var), built into the same graph (forward chain rule with
+        memoization on shared subexpressions). `var` must be a variable() leaf (e.g. variable('t'));
+        matching is by NAME, so every leaf of that name differentiates to 1.
+
+        comparisons / mod raise (non-differentiable — they can only legitimately appear in a branch
+        CONDITION, never in a smooth a(t)). abs and select differentiate per-branch, which is correct
+        away from the kink / branch boundary; the backend's finite-difference cross-check is what
+        guards those cases, so a wrong derivative there fails loudly at setup rather than silently."""
+        g = self._graph
+        vdef = g.get_node(var._node_id)
+        if vdef is None or vdef[0] != "variable":
+            raise ValueError("diff: `var` must be a variable() leaf")
+        vname = vdef[2]["name"]
+        cache: dict[NodeId, NodeId] = {}
+
+        def kid(nid: NodeId) -> Expr:
+            return Expr(g, nid)
+
+        def d(nid: NodeId) -> Expr:
+            if nid in cache:
+                return Expr(g, cache[nid])
+            op, ins, attrs = g.get_node(nid)  # type: ignore[misc]
+            c = [kid(i) for i in ins]
+            dc = [d(i) for i in ins]
+            two = constant(2.0, g)
+            one = constant(1.0, g)
+            if op in ("constant", "parameter"):
+                res = constant(0.0, g)
+            elif op == "variable":
+                res = constant(1.0 if attrs["name"] == vname else 0.0, g)
+            elif op == "add":
+                res = dc[0] + dc[1]
+            elif op == "subtract":
+                res = dc[0] - dc[1]
+            elif op == "multiply":
+                res = dc[0] * c[1] + c[0] * dc[1]
+            elif op == "divide":
+                res = (dc[0] * c[1] - c[0] * dc[1]) / (c[1] * c[1])
+            elif op == "power":
+                edef = g.get_node(ins[1])
+                if edef is not None and edef[0] == "constant":  # constant exponent: n*a^(n-1)*da
+                    n = float(edef[2]["value"])
+                    res = constant(n, g) * (c[0] ** constant(n - 1.0, g)) * dc[0]
+                else:  # general: a^b * (db*ln(a) + b*da/a)
+                    res = (c[0] ** c[1]) * (dc[1] * log(c[0]) + c[1] * dc[0] / c[0])
+            elif op == "negate":
+                res = -dc[0]
+            elif op == "sqrt":
+                res = dc[0] / (two * sqrt(c[0]))
+            elif op == "abs":
+                res = (c[0] / kid(nid)) * dc[0]
+            elif op == "exp":
+                res = kid(nid) * dc[0]
+            elif op == "log":
+                res = dc[0] / c[0]
+            elif op == "log10":
+                res = dc[0] / (c[0] * constant(math.log(10.0), g))
+            elif op == "sin":
+                res = cos(c[0]) * dc[0]
+            elif op == "cos":
+                res = -sin(c[0]) * dc[0]
+            elif op == "tan":
+                res = dc[0] / (cos(c[0]) ** two)
+            elif op == "asin":
+                res = dc[0] / sqrt(one - c[0] ** two)
+            elif op == "acos":
+                res = -dc[0] / sqrt(one - c[0] ** two)
+            elif op == "atan":
+                res = dc[0] / (one + c[0] ** two)
+            elif op == "atan2":  # atan2(y, x): (x*dy - y*dx)/(x^2 + y^2)
+                res = (c[1] * dc[0] - c[0] * dc[1]) / (c[0] * c[0] + c[1] * c[1])
+            elif op == "sinh":
+                res = cosh(c[0]) * dc[0]
+            elif op == "cosh":
+                res = sinh(c[0]) * dc[0]
+            elif op == "tanh":
+                res = (one - kid(nid) ** two) * dc[0]
+            elif op in ("select", "where", "ternary"):  # per-branch (boundary delta is invisible)
+                res = Expr(g, g.add_node(op, ins[0], d(ins[1])._node_id, d(ins[2])._node_id))
+            else:
+                raise ValueError(
+                    f"diff: op '{op}' is not differentiable (comparisons/mod belong in a branch "
+                    f"condition, not in a smooth scale factor a(t))"
+                )
+            cache[nid] = res._node_id
+            return res
+
+        return d(self._node_id)
+
 
 # factory functions
 def constant(value: float, graph: Optional[ExprGraph] = None) -> Expr:
@@ -1205,6 +1295,24 @@ class CompiledExpr:
             "kind": "dirichlet",
             "dim": int(dim),
             "outputs": base["output_indices"],
+            "params": [],
+            "nodes": base["expressions"],
+        }
+
+    def serialize_motion(self) -> dict[str, object]:
+        """serialize a scale-factor MOTION law to the rust mesh-motion wire. the compiled outputs
+        MUST be exactly `[a(t), a_dot(t)]` in that order (a_dot is typically `a.diff(variable('t'))`).
+        NO conservation-law wrap (unlike `serialize_source`) — the two scalar-in-`t` expressions are
+        lowered to a `BuiltSource` and evaluated every step; the backend finite-difference-checks
+        `a_dot` against `a` at setup before running, so an inconsistent derivative fails loudly."""
+        base = self.serialize()
+        out = base["output_indices"]
+        if len(out) != 2:
+            raise ValueError(f"motion expects exactly 2 outputs [a, a_dot], got {len(out)}")
+        return {
+            "kind": "motion",
+            "dim": 1,  # unused by the motion path (a(t) is a scalar), required by the SourceConfig wire
+            "outputs": out,
             "params": [],
             "nodes": base["expressions"],
         }

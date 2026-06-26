@@ -350,6 +350,13 @@ def merge_with_checkpoint(
             # field not in checkpoint, use user value
             merged_data[field_name] = user_value
 
+    # RESUME at the checkpoint's physical time, not the config's start_time. start_time is the
+    # sim clock (sim.time): a restart must continue from where the checkpoint left off, regardless
+    # of what the config (or its validators) set start_time to. the LOG-checkpoint anchor is a
+    # SEPARATE field (checkpoint_log_anchor) so the cadence stays fixed across the restart.
+    if "start_time" in checkpoint_config:
+        merged_data["start_time"] = checkpoint_config["start_time"]
+
     # special handling for end_time: allow extending
     if "end_time" in safe_fields:
         user_end = getattr(problem, "end_time")

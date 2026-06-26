@@ -2,7 +2,12 @@
 # generate.py
 #
 # workflow for generating photon events from hydro snapshots.
-# calls C++ bindings, handles file I/O, orchestrates MCRT.
+# - loads each checkpoint via the simbi reader
+# - maps it to the rust event-generator contract (inputs.build_afterglow_inputs)
+# - calls the symbi-afterglow rust binding (cpu_ext) to generate + transfer photons
+# - writes the lab-frame catalog to HDF5 (postprocess.read_photon_events schema)
+# usage:
+#  generate_from_files(["chkpt.h5"], "events.h5", scale_model="blandford-mckee")
 # =============================================================================
 
 from typing import List
@@ -21,20 +26,21 @@ def generate_from_files(
     d_L: float = 1e28,
     apply_mcrt: bool = False,
     include_scattering: bool = True,
+    scale_model: str = "blandford-mckee",
 ) -> None:
     """
     generate photon events from hydro checkpoint files.
 
     workflow:
         1. load hydro data from checkpoint(s)
-        2. call C++ event generation
-        3. optionally apply MCRT
-        4. write events to HDF5
+        2. call the rust event generator
+        3. optionally apply monte carlo radiative transfer
+        4. write the catalog to HDF5
 
     args:
         files: list of checkpoint files
         output: output HDF5 filename
-        max_events: maximum number of events to generate
+        max_events: maximum number of events to generate (split across files)
         photons_per_cell: sampling density (0=auto)
         eps_e: electron energy fraction
         eps_b: magnetic field energy fraction
@@ -44,120 +50,78 @@ def generate_from_files(
         d_L: luminosity distance [cm]
         apply_mcrt: apply monte carlo radiative transfer
         include_scattering: include thomson scattering in MCRT
+        scale_model: named code->cgs scale model (matches the hydro run)
     """
-    # import here to avoid circular dependencies
-    from . import rad_hydro
-    from .scales import get_scale_model
+    # imported here to avoid a circular import (libs pulls the compiled extension).
+    from ..libs import cpu_ext as rad_hydro
+    from ..reader import read_simulation
+    from .inputs import build_fields, build_mesh, build_qscales
 
-    # get scale model (assume solar for now)
-    scales = get_scale_model("solar")
+    # code->cgs factors depend only on the scale model -> build once.
+    qscales = build_qscales(scale_model)
 
-    # prepare simulation conditions
+    # the microphysics + observer block is file-independent; dt / adiabatic_index /
+    # current_time are overwritten from each checkpoint's metadata.
     sim_cond = {
-        "dt": 0.0,  # will be filled from checkpoint
+        "dt": 0.0,
         "theta_obs": theta_obs,
-        "adiabatic_index": 4.0 / 3.0,  # will be filled from checkpoint
-        "current_time": 0.0,  # will be filled from checkpoint
+        "adiabatic_index": 4.0 / 3.0,
+        "current_time": 0.0,
         "p": p,
         "z": z,
         "eps_e": eps_e,
         "eps_b": eps_b,
         "d_L": d_L,
-        "nus": [1e9],  # placeholder
+        "nus": [1e9],
     }
 
-    qscales = {
-        "time_scale": scales.time_scale.value,
-        "length_scale": scales.length_scale.value,
-        "rho_scale": scales.rho_scale.value,
-        "pre_scale": scales.pre_scale.value,
-        "v_scale": 1.0,
-    }
-
-    all_events = []
+    # the rust binding returns an opaque PhotonEvents handle; catalogs from multiple
+    # files are merged into the first handle via its `extend` method (no python list).
+    catalog = None
 
     for idx, file in enumerate(files):
-        print(f"processing {file} ({idx+1}/{len(files)})...")
-
-        # read checkpoint using simbi's reader
-        from ..tools.reader import read_simulation
+        print(f"processing {file} ({idx + 1}/{len(files)})...")
 
         data = read_simulation(file)
+        fields = build_fields(data)
+        mesh = build_mesh(data)
 
-        # extract fields
-        fields = {
-            name: data.get_field(name)
-            for name in data.available_fields()
-        }
-
-        # build mesh
-        mesh = {
-            "x1": 0.5 * (data.mesh.x1v[:-1] + data.mesh.x1v[1:]),
-        }
-        if data.metadata.dimensions >= 2:
-            mesh["x2"] = 0.5 * (data.mesh.x2v[:-1] + data.mesh.x2v[1:])
-        if data.metadata.dimensions >= 3:
-            mesh["x3"] = 0.5 * (data.mesh.x3v[:-1] + data.mesh.x3v[1:])
-
-        # update sim conditions from checkpoint
         sim_cond["dt"] = data.metadata.dt
         sim_cond["adiabatic_index"] = data.metadata.gamma
         sim_cond["current_time"] = data.metadata.time
 
-        # determine dimensionality
-        data_dim = data.metadata.dimensions
+        events = rad_hydro.generate_photon_events(
+            sim_cond=sim_cond,
+            qscales=qscales,
+            fields=fields,
+            mesh=mesh,
+            max_events=max_events // len(files),
+            photons_per_cell=photons_per_cell,
+        )
+        print(f"  generated {len(events)} photons")
 
-        # call C++ event generation
-        # NOTE: This requires proper pybind11 bindings to be implemented
-        # For now, this is a stub showing the intended interface
-        try:
-            events = rad_hydro.generate_photon_events(
+        if apply_mcrt:
+            rad_hydro.monte_carlo_radiative_transfer(
+                events,
                 sim_cond=sim_cond,
                 qscales=qscales,
                 fields=fields,
                 mesh=mesh,
-                data_dim=data_dim,
-                max_events=max_events // len(files),  # distribute across files
-                photons_per_cell=photons_per_cell,
+                include_scattering=include_scattering,
+                include_pair_production=False,
             )
+            n_absorbed = events.n_absorbed
+            print(f"  MCRT: {n_absorbed} absorbed, {events.n_surviving} surviving")
 
-            print(f"  generated {len(events)} photons")
+        if catalog is None:
+            catalog = events
+        else:
+            catalog.extend(events)
 
-            # apply MCRT if requested
-            if apply_mcrt:
-                rad_hydro.monte_carlo_radiative_transfer(
-                    events=events,
-                    sim_cond=sim_cond,
-                    qscales=qscales,
-                    fields=fields,
-                    mesh=mesh,
-                    data_dim=data_dim,
-                    include_scattering=include_scattering,
-                    include_pair_production=False,
-                )
-                n_absorbed = sum(1 for e in events if e.absorbed)
-                print(f"  MCRT: {n_absorbed} absorbed, {len(events)-n_absorbed} surviving")
+    if catalog is None:
+        raise ValueError("no checkpoint files supplied")
 
-            all_events.extend(events)
-
-        except AttributeError:
-            print("  ERROR: C++ bindings not yet implemented")
-            print("  Need to add pybind11 wrappers for:")
-            print("    - generate_photon_events")
-            print("    - monte_carlo_radiative_transfer")
-            raise NotImplementedError("C++ bindings not yet implemented")
-
-    print(f"\ntotal events: {len(all_events)}")
-
-    # write to HDF5
+    print(f"\ntotal events: {len(catalog)}")
     print(f"writing events to {output}...")
-
-    # use C++ write function (already in photon_event_io.cpp)
-    try:
-        rad_hydro.write_photon_events(output, all_events, sim_cond, qscales)
-    except AttributeError:
-        print("  ERROR: C++ write_photon_events not bound to Python")
-        print("  Need to add pybind11 wrapper for write_photon_events")
-        raise NotImplementedError("write_photon_events binding not implemented")
-
+    rad_hydro.write_photon_events(output, catalog, sim_cond, qscales)
     print("done")

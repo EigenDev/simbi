@@ -21,6 +21,7 @@ pub mod regime_spec;
 pub mod source_spec;
 pub mod source_term;
 pub mod expr_bridge;
+pub mod motion_law;
 pub mod simulation_laws;
 pub mod source_evaluator;
 pub mod gpu_source_kernel;

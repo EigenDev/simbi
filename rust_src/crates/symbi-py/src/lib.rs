@@ -18,6 +18,8 @@
 //                         a=..., adot=...)
 // =============================================================================
 
+mod afterglow;
+
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -78,6 +80,10 @@ struct Config {
     viscosity:           f64,
     x1_spacing:          String,
     start_time:          f64,
+    // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
+    // start_time, which is the physical/resume clock (= checkpoint time on restart). 0 = unset ->
+    // fall back to start_time (the common case where they coincide).
+    checkpoint_log_anchor: f64,
     checkpoint_index:    u64,
     t_final:             f64,
     checkpoint_interval: f64,
@@ -93,6 +99,9 @@ struct Config {
     // a single user source expression in the rust `SourceConfig` wire format
     // (json string), or None. lowered + attached on the hydro path.
     source_json:         Option<String>,
+    // mesh-motion scale-factor law a(t)/a_dot(t) as the `serialize_motion` wire (json), or None.
+    // when present the time loop evaluates it exactly each (sub)stage (no linearization).
+    motion_json:         Option<String>,
     // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
     // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path for now.
     driven_exprs:        Vec<String>,
@@ -450,6 +459,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
         start_time: get_f64_or(dict, "start_time", 0.0),
+        checkpoint_log_anchor: get_f64_or(dict, "checkpoint_log_anchor", 0.0),
         checkpoint_index: dict
             .get_item("checkpoint_index")
             .ok()
@@ -480,6 +490,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         // runtime source per run for now (the kernel set holds a single slot).
         source_json: get_source_json(dict, "gravity_source_expressions")?
             .or(get_source_json(dict, "hydro_source_expressions")?),
+        motion_json: get_source_json(dict, "scale_factor_expressions")?,
         driven_exprs,
     })
 }
@@ -615,8 +626,12 @@ where
     // cadence for a run spanning many decades in time (a relativistic wind from a
     // tiny inner radius out to a huge one). otherwise the cadence is LINEAR at
     // cp_interval. `cp_at(fired)` returns the (fired+1)-th scheduled checkpoint time.
-    let cp_log = cfg.dlogt > 0.0 && cfg.start_time > 0.0;
-    let cp_tstart = cfg.start_time;
+    // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g. the inner
+    // light-crossing), NOT start_time — so the schedule is identical across a fresh run and a
+    // restart whose clock resumes at the checkpoint time. unset (0) -> start_time (they coincide).
+    let cp_anchor = if cfg.checkpoint_log_anchor > 0.0 { cfg.checkpoint_log_anchor } else { cfg.start_time };
+    let cp_log = cfg.dlogt > 0.0 && cp_anchor > 0.0;
+    let cp_tstart = cp_anchor;
     let cp_dlogt = cfg.dlogt;
     let cp_at = move |fired: u64| -> f64 {
         if cp_log {
@@ -1139,9 +1154,23 @@ fn motion_state(cfg: &Config) -> MotionState<f64> {
 macro_rules! into_hierarchy {
     ($sim:expr, $kernels:expr, $cfg:expr, $d:literal, $make:expr) => {{
         let mut sim = $sim;
+        // the physical clock starts at start_time (t0): the IC is the state AT t0, and a moving-mesh
+        // a(t) must be sampled at the physical time, not an elapsed-from-0 clock. (default 0 -> no
+        // change for the common case.)
+        sim.time = $cfg.start_time;
         // mesh motion lives on the (coarse) state — set before wrapping. static
         // for the common case; the gates above keep motion to single-grid hydro.
         sim.motion = motion_state($cfg);
+        // expression-driven mesh motion: build the traced a(t)/a_dot(t) law (autodiff'd a_dot, FD
+        // cross-checked) and seed the homologous motion from it at t0 = sim.time. the time loop then
+        // evaluates a(t) EXACTLY each (sub)stage instead of the linear scale_a0/scale_adot.
+        if let Some(ref mj) = $cfg.motion_json {
+            let t0 = sim.time;
+            let law = symbi_hydro::motion_law::MotionLaw::from_json(mj, t0, $cfg.t_final)
+                .map_err(|e| format!("mesh motion: {e}"))?;
+            sim.motion = symbi_geometry::MotionState::homologous(law.a_at(t0), law.adot_at(t0));
+            sim.motion_law = Some(law);
+        }
         if $cfg.refinement_enabled {
             let regions = refinement_regions_nd::<$d>(&$cfg.refinement_regions)?;
             let prolong = prolong_order_for(&$cfg.reconstruction_name);
@@ -1781,5 +1810,6 @@ fn run_simulation(
 #[pymodule]
 fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_simulation, m)?)?;
+    afterglow::register(m)?;
     Ok(())
 }

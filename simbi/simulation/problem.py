@@ -211,6 +211,16 @@ class SimbiProblem(BaseModel):
             description="simulation start time",
         ),
     ]
+    checkpoint_log_anchor: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            ge=0.0,
+            description="positive reference time for LOG-spaced checkpoints; distinct from "
+            "start_time (the physical/resume clock). 0 = use start_time. set this (not start_time) "
+            "when the log anchor differs from the run start, so restarts resume at the checkpoint time.",
+        ),
+    ]
 
     # =========================================================================
     # output settings - checkpoint_safe=True
@@ -483,7 +493,8 @@ class SimbiProblem(BaseModel):
         if log_enabled and num_outputs > 0:
             import math
 
-            return math.log10(self.end_time / self.start_time) / num_outputs
+            anchor = self.checkpoint_log_anchor if self.checkpoint_log_anchor > 0.0 else self.start_time
+            return math.log10(self.end_time / anchor) / num_outputs
         return 0.0
 
     # =========================================================================
@@ -576,6 +587,16 @@ class SimbiProblem(BaseModel):
     @computed_field
     @property
     def gravity_source_expressions(self) -> ExpressionDict:
+        return {}
+
+    @computed_field
+    @property
+    def scale_factor_expressions(self) -> ExpressionDict:
+        """mesh-motion scale factor a(t) + its derivative a_dot(t) as a TRACED expression pair,
+        evaluated exactly in the rust time loop (no linearization, no python in the loop). override
+        in a subclass returning `graph.compile([a, a_dot]).serialize_motion()`, with
+        `a_dot = a.diff(variable('t'))` (autodiff). default {} = no expression motion (static / the
+        legacy linear scale_factor callable)."""
         return {}
 
     # =========================================================================

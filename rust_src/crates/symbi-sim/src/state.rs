@@ -1311,6 +1311,9 @@ pub struct FieldStore<
 
     // ---- mesh motion (ALE) ----
     pub motion: MotionState<f64>,
+    // traced scale-factor law a(t)/a_dot(t); when present the time loop evaluates it EXACTLY each
+    // (sub)stage instead of linearly extrapolating `motion.a`. None = static / legacy linear.
+    pub motion_law: Option<symbi_hydro::motion_law::MotionLaw>,
 
     // ---- immersed bodies (optional side-car) ----
     pub immersed: Option<ImmersedBodies<NDIM>>,
@@ -1618,6 +1621,7 @@ where
                 fields, workspace, geom, boundaries,
                 time: 0.0, dt: 0.0, iteration: 0, cfl, timestepping,
                 motion: MotionState::static_mesh(),
+                motion_law: None,
                 immersed: None,
             },
             physics: Physics { regime, metric, eos },
