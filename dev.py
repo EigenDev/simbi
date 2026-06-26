@@ -3,7 +3,7 @@
 # dev.py
 #
 # simbi build/install wrapper around MATURIN (which drives cargo directly).
-# the rust backend (rust_src/crates/symbi-py) builds the pyo3 extension installed
+# the rust backend (src/crates/symbi-py) builds the pyo3 extension installed
 # as simbi/libs/cpu_ext; the unchanged `simbi.libs.cpu_ext` import loads it.
 # gpu is a cargo FEATURE: `--gpu` -> `--features cuda` (kernels JIT via NVRTC at
 # runtime; build.rs links libcuda/libnvrtc — no nvcc/meson needed).
@@ -22,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-RUST_SRC = Path("rust_src")
+SRC = Path("src")
 
 
 def maturin() -> list:
@@ -101,8 +101,14 @@ def build_command(args) -> None:
     _require_cargo()
     print("building wheel (maturin -> cargo)...")
     start = time.time()
-    run([*maturin(), "build", "--release", *_common(args)], env=venv_env(), verbose=args.verbose)
-    print(f"build completed in {time.time() - start:.1f}s (wheel in rust_src/target/wheels/)")
+    run(
+        [*maturin(), "build", "--release", *_common(args)],
+        env=venv_env(),
+        verbose=args.verbose,
+    )
+    print(
+        f"build completed in {time.time() - start:.1f}s (wheel in rust_src/target/wheels/)"
+    )
 
 
 def install_command(args) -> None:
@@ -122,10 +128,19 @@ def install_command(args) -> None:
     print(f"done in {time.time() - start:.1f}s")
     try:
         result = subprocess.run(
-            [sys.executable, "-c", "import simbi; print('verified', simbi.__version__)"],
-            capture_output=True, text=True, timeout=30,
+            [
+                sys.executable,
+                "-c",
+                "import simbi; print('verified', simbi.__version__)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
-        print("validation:", result.stdout.strip() if result.returncode == 0 else "FAILED")
+        print(
+            "validation:",
+            result.stdout.strip() if result.returncode == 0 else "FAILED",
+        )
         if result.returncode != 0:
             print(result.stderr, file=sys.stderr)
     except subprocess.TimeoutExpired:
@@ -136,7 +151,11 @@ def _remove_extensions() -> int:
     lib_dir = Path("simbi/libs")
     removed = 0
     if lib_dir.exists():
-        for ext in list(lib_dir.glob("*.so")) + list(lib_dir.glob("*.dylib")) + list(lib_dir.glob("*.pyd")):
+        for ext in (
+            list(lib_dir.glob("*.so"))
+            + list(lib_dir.glob("*.dylib"))
+            + list(lib_dir.glob("*.pyd"))
+        ):
             ext.unlink()
             print(f"removed {ext}")
             removed += 1
@@ -145,33 +164,62 @@ def _remove_extensions() -> int:
 
 def uninstall_command(args) -> None:
     if shutil.which("uv"):
-        run(["uv", "pip", "uninstall", "simbi"], env=venv_env(), verbose=args.verbose)
+        run(
+            ["uv", "pip", "uninstall", "simbi"],
+            env=venv_env(),
+            verbose=args.verbose,
+        )
     else:
-        run([sys.executable, "-m", "pip", "uninstall", "-y", "simbi"], verbose=args.verbose)
+        run(
+            [sys.executable, "-m", "pip", "uninstall", "-y", "simbi"],
+            verbose=args.verbose,
+        )
     _remove_extensions()
 
 
 def clean_command(args) -> None:
     removed = _remove_extensions()
     if args.all:
-        if (RUST_SRC / "Cargo.toml").exists() and shutil.which("cargo"):
-            run(["cargo", "clean", "--manifest-path", str(RUST_SRC / "Cargo.toml")], verbose=args.verbose)
+        if (SRC / "Cargo.toml").exists() and shutil.which("cargo"):
+            run(
+                [
+                    "cargo",
+                    "clean",
+                    "--manifest-path",
+                    str(SRC / "Cargo.toml"),
+                ],
+                verbose=args.verbose,
+            )
             print("ran cargo clean")
             removed += 1
         for cache in Path(".").rglob("__pycache__"):
             if cache.is_dir() and ".venv" not in cache.parts:
                 shutil.rmtree(cache)
                 removed += 1
-    print(f"cleanup complete: {removed} items removed" if removed else "nothing to clean")
+    print(
+        f"cleanup complete: {removed} items removed"
+        if removed
+        else "nothing to clean"
+    )
 
 
 def _add_build_args(p) -> None:
-    p.add_argument("--features", default="", help="comma-separated cargo features (e.g. cuda)")
-    p.add_argument("--gpu", action="store_true", help="gpu build -> cargo 'cuda' feature (NVRTC JIT)")
+    p.add_argument(
+        "--features",
+        default="",
+        help="comma-separated cargo features (e.g. cuda)",
+    )
+    p.add_argument(
+        "--gpu",
+        action="store_true",
+        help="gpu build -> cargo 'cuda' feature (NVRTC JIT)",
+    )
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="simbi build tool (dev -> maturin -> cargo)")
+    parser = argparse.ArgumentParser(
+        description="simbi build tool (dev -> maturin -> cargo)"
+    )
     parser.add_argument("--verbose", action="store_true", help="verbose output")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -179,18 +227,35 @@ def main() -> None:
     _add_build_args(bp)
     bp.set_defaults(func=build_command)
 
-    ip = sub.add_parser("install", help="build + editable install (maturin develop)")
+    ip = sub.add_parser(
+        "install", help="build + editable install (maturin develop)"
+    )
     _add_build_args(ip)
-    ip.add_argument("--editable", "-e", action="store_true", help="(default; maturin develop is editable)")
-    ip.add_argument("--cli-extras", action="store_true", help="install cli extras")
-    ip.add_argument("--visual-extras", action="store_true", help="install visual extras")
+    ip.add_argument(
+        "--editable",
+        "-e",
+        action="store_true",
+        help="(default; maturin develop is editable)",
+    )
+    ip.add_argument(
+        "--cli-extras", action="store_true", help="install cli extras"
+    )
+    ip.add_argument(
+        "--visual-extras", action="store_true", help="install visual extras"
+    )
     ip.set_defaults(func=install_command)
 
     up = sub.add_parser("uninstall", help="uninstall the project")
     up.set_defaults(func=uninstall_command)
 
-    cp = sub.add_parser("clean", help="remove compiled extensions; --all also cargo clean")
-    cp.add_argument("--all", action="store_true", help="also run cargo clean + drop python cache")
+    cp = sub.add_parser(
+        "clean", help="remove compiled extensions; --all also cargo clean"
+    )
+    cp.add_argument(
+        "--all",
+        action="store_true",
+        help="also run cargo clean + drop python cache",
+    )
     cp.set_defaults(func=clean_command)
 
     args = parser.parse_args()

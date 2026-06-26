@@ -55,7 +55,7 @@ documentation = "https://github.com/EigenDev/simbi"
 # extension lands at simbi/libs/cpu_ext via module-name.
 # =============================================================================
 [tool.maturin]
-manifest-path = "rust_src/crates/symbi-py/Cargo.toml"
+manifest-path = "src/crates/symbi-py/Cargo.toml"
 python-source = "."
 module-name = "simbi.libs.cpu_ext"
 
