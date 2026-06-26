@@ -2,13 +2,15 @@
 # =============================================================================
 # pre-push hook
 #
-# runs the rust test suite before allowing push to remote.
-# prevents broken code from reaching origin.
+# fast build check before allowing push to remote: does the whole workspace
+# (lib + bins + tests + examples) still COMPILE? this catches the common
+# breakage class -- a signature change that misses a call site, a stale example
+# -- in well under a minute, without codegen or running the test farm.
 #
-# the project migrated from meson/c++ to a cargo workspace (src/) built via
-# maturin; this gate runs the cpu test suite (no cuda feature) so it is portable
-# to machines without a gpu. gpu-gated tests are validated separately on a cuda
-# host via `cargo test --features cuda`.
+# it deliberately does NOT run the test suite. release builds + heavy
+# integration/convergence tests take many minutes and belong in CI, not in the
+# push path. run them yourself when relevant:
+#   cargo test --release --manifest-path src/Cargo.toml --workspace
 #
 # to bypass (emergencies only):
 #   git push --no-verify
@@ -18,34 +20,31 @@ set -u
 
 workspace="src"
 
-echo "running pre-push test suite..."
+echo "running pre-push build check..."
 echo "========================================"
 
-# cargo is the live build system; without it there is nothing to validate.
 if ! command -v cargo >/dev/null 2>&1; then
-    echo "warning: cargo not found — skipping test validation"
+    echo "warning: cargo not found -- skipping build check"
     exit 0
 fi
 
-# the rust workspace must be present (it moved from rust_src/ to src/).
 if [ ! -f "${workspace}/Cargo.toml" ]; then
-    echo "warning: no rust workspace at ${workspace}/ — skipping test validation"
+    echo "warning: no rust workspace at ${workspace}/ -- skipping build check"
     exit 0
 fi
 
-# run the cpu test suite. release mode matches how the numerics are exercised;
-# cargo caches builds, so only the first run pays full compile cost.
-echo "executing cargo test suite (${workspace}/, cpu)..."
-if cargo test --release --manifest-path "${workspace}/Cargo.toml" --workspace; then
+# `check --all-targets` type-checks lib, bins, tests, and examples without
+# codegen (no -C opt-level, no linking of test binaries) -- the fast path.
+echo "executing cargo check (${workspace}/, all targets)..."
+if cargo check --workspace --all-targets --manifest-path "${workspace}/Cargo.toml"; then
     echo "========================================"
-    echo "all tests passed"
-    echo "proceeding with push..."
+    echo "workspace compiles -- proceeding with push..."
     exit 0
 else
     echo "========================================"
-    echo "tests failed"
+    echo "build check failed"
     echo ""
-    echo "fix failing tests before pushing"
-    echo "or use 'git push --no-verify' to bypass (not recommended)"
+    echo "fix the compile errors before pushing"
+    echo "or use 'git push --no-verify' to bypass"
     exit 1
 fi
