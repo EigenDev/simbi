@@ -9,7 +9,8 @@
 # runtime; build.rs links libcuda/libnvrtc — no nvcc/meson needed).
 # usage:
 #  ./dev.py install            # maturin develop --release (editable build + install)
-#  ./dev.py build              # maturin build --release (wheel in rust_src/target/wheels)
+#  ./dev.py build              # maturin build --release (wheel in src/target/wheels)
+#  (no-uv path: `pip install -e .` builds editable via the maturin backend directly)
 #  ./dev.py build --gpu        # rust gpu build (cargo 'cuda' feature)
 #  ./dev.py clean [--all]      # remove extensions; --all also runs cargo clean
 # =============================================================================
@@ -62,8 +63,9 @@ def run(cmd, **kwargs) -> None:
         )
         if "cargo" in str(cmd) or "maturin" in str(cmd):
             print(
-                "hint: `./dev.py clean --all` then rebuild; ensure the rust toolchain "
-                "(https://rustup.rs) and maturin (`uv pip install maturin`) are installed.",
+                "hint: ensure the rust toolchain (https://rustup.rs) and maturin are installed "
+                "(`uv sync`, or `pip install maturin`); or skip dev.py entirely with "
+                "`pip install -e .` (builds via the maturin backend). then `./dev.py clean --all`.",
                 file=sys.stderr,
             )
         sys.exit(exc.returncode)
@@ -97,7 +99,7 @@ def _require_cargo() -> None:
 
 
 def build_command(args) -> None:
-    """maturin build --release -> a wheel under rust_src/target/wheels."""
+    """maturin build --release -> a wheel under src/target/wheels."""
     _require_cargo()
     print("building wheel (maturin -> cargo)...")
     start = time.time()
@@ -107,7 +109,7 @@ def build_command(args) -> None:
         verbose=args.verbose,
     )
     print(
-        f"build completed in {time.time() - start:.1f}s (wheel in rust_src/target/wheels/)"
+        f"build completed in {time.time() - start:.1f}s (wheel in src/target/wheels/)"
     )
 
 

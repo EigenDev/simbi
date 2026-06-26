@@ -38,6 +38,12 @@ dependencies = [
 visual = ["cmasher"]
 cli = ["rich-argparse"]
 
+# dev tooling installed by `uv sync` (PEP 735). maturin is the BUILD tool that `./dev.py
+# install` (maturin develop) needs in the venv; it is also in [build-system] requires for
+# `pip install .` / wheel builds. it is NOT a runtime dependency.
+[dependency-groups]
+dev = ["maturin>=1.7,<2"]
+
 [project.scripts]
 simbi = "simbi.cli.__main__:main"
 
