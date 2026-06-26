@@ -52,5 +52,10 @@ symbi-hydro      = { path = "../symbi-hydro" }
 # debug-emit-knobs: forwards to symbi-ir; also gates the SYMBI_GEN_SERIAL read in build.rs. off by default = canonical env-unset shape.
 debug-emit-knobs = ["symbi-ir/debug-emit-knobs"]
 
+# cpu kernel throughput bench. custom main(), so harness = false.
+[[bench]]
+name = "cpu_kernel_bench"
+harness = false
+
 [lints]
 workspace = true

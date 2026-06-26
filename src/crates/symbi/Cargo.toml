@@ -49,6 +49,15 @@ symbi-xpu = { path = "../symbi-xpu" }
 hdf5-metno = "0.12"
 symbi-display = { path = "../symbi-display" }
 
+# zone-cycle throughput benches (Mzcps). custom main(), so harness = false.
+# mhd_2p5d_bench runs on device under --features cuda, host cpu otherwise.
+[[bench]]
+name = "rmhd_zone_cycle_bench"
+harness = false
+
+[[bench]]
+name = "mhd_2p5d_bench"
+harness = false
 
 [lints]
 workspace = true
