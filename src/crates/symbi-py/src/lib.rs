@@ -645,6 +645,24 @@ where
     let mut cp_fired: u64 = 0;
     let mut next_cp = cp_at(0);
     let mut cp_index: u64 = cfg.checkpoint_index + 1;
+    // LOG-spaced runs are named by the monotonic INDEX, not the time: the fixed-3-decimal
+    // time name (`000_790`) collides at small times (0.0001 and 0.0002 both round to
+    // `000_000`, silently overwriting the dense early dumps a log run produces). the physical
+    // time lives in metadata/time, which every reader uses. size the zero-pad width to the
+    // projected checkpoint count (+ any restart offset) so names always sort lexicographically.
+    let cp_idx_width: usize = if cp_log {
+        // size the zero-pad TIGHTLY to the projected highest index (count + any restart offset).
+        // `ceil(log10(max_index + 1))` is the digit count and is robust at the power-of-10 boundary
+        // (a projection of 99.99 still yields 2, and exactly 1000 yields 4) so the seam never lands
+        // on the run's own last checkpoint. an overshoot extends the width gracefully (format! never
+        // truncates: width is a MINIMUM, so 99 -> 100); only a raw `ls` sees a cosmetic seam there,
+        // since every reader sorts numerically (metadata/time, viz extract_timestep).
+        let projected =
+            (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
+        ((projected.max(1.0) + 1.0).log10().ceil() as usize).max(1)
+    } else {
+        0
+    };
 
     // the live monitor. dynamic mode self-detects a tty (clearing redraw on a
     // terminal, plain appended frames when piped to a file). the row tracks the
@@ -710,7 +728,7 @@ where
         };
         if t0 == 0.0 || cfg.checkpoint_index == 0 {
             let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
-            let ic = checkpoint_name(cfg, &format_sim_time(t0 / cfg.time_unit, cp_width));
+            let ic = checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, t0, cfg.checkpoint_index));
             match write_hierarchy_checkpoint(&states, &ic, &checkpoint_metadata(cfg, cfg.checkpoint_index)) {
                 Ok(_) => table.post_success(&format!(
                     "checkpoint {ic}  ({}, initial condition)", fmt_time_msg(cfg, t0),
@@ -761,7 +779,7 @@ where
         let mut dirty = false;
         if time + 1e-12 >= next_cp && next_cp.is_finite() {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let path = checkpoint_name(cfg, &format_sim_time(time / cfg.time_unit, cp_width));
+            let path = checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index));
             match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
                 Ok(_) => table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time))),
                 Err(e) => table.post_error(&format!("checkpoint {cp_index:04} failed: {e:?}")),
@@ -1717,10 +1735,27 @@ fn checkpoint_time_width(cfg: &Config) -> usize {
     digits.max(3)
 }
 
-/// the time portion of a checkpoint name: the sim time in the natural unit,
-/// decimal point rendered as an underscore (a comma stand-in), fixed 3-digit
-/// fraction. e.g. t/unit = 1.0 -> "001_000", 0.5 -> "000_500". carries on the
-/// .9995+ rounding edge so the fraction never reads "1000".
+/// insert underscores every 3 digits from the RIGHT of a zero-padded integer string,
+/// as thousands separators: "001234" -> "001_234", "001234567" -> "001_234_567". `digits`
+/// must already be padded to a multiple of 3 so every file in a run shares the grouping.
+fn group_thousands(digits: &str) -> String {
+    let n = digits.len();
+    let mut out = String::with_capacity(n + n / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (n - i) % 3 == 0 {
+            out.push('_');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// the time portion of a checkpoint name: the sim time in the natural unit, decimal point
+/// rendered as an underscore, fixed 3-digit fraction, and the INTEGER part thousand-grouped
+/// so large times stay readable: t/unit = 1.0 -> "001_000", 0.5 -> "000_500", 1234.567 ->
+/// "001_234_567". the LAST underscore group is always the fraction; earlier groups are the
+/// integer. the integer is zero-padded to a multiple of 3 (sized from t_final) so a directory
+/// listing still sorts chronologically. carries on the .9995+ rounding edge (frac never "1000").
 fn format_sim_time(value: f64, int_width: usize) -> String {
     let v = value.max(0.0);
     let mut int_part = v.floor() as u64;
@@ -1729,7 +1764,24 @@ fn format_sim_time(value: f64, int_width: usize) -> String {
         int_part += 1;
         frac -= 1000;
     }
-    format!("{int_part:0int_width$}_{frac:03}")
+    // pad the integer to a multiple of 3 so the thousand-grouping is uniform across the run.
+    let grouped_width = (int_width + 2) / 3 * 3;
+    let padded = format!("{int_part:0grouped_width$}");
+    format!("{}_{frac:03}", group_thousands(&padded))
+}
+
+/// the `tnow` segment of a checkpoint name. LINEAR runs use the human-readable time
+/// (`000_790`); LOG-spaced runs (`idx_width > 0`) use the zero-padded monotonic INDEX
+/// (`00042`) instead, because the fixed-decimal time collides at small times. either way the
+/// exact physical time is preserved in metadata/time (the source of truth for all readers).
+fn checkpoint_tag(
+    cfg: &Config, idx_width: usize, time_width: usize, time: f64, index: u64,
+) -> String {
+    if idx_width > 0 {
+        format!("{index:0idx_width$}")
+    } else {
+        format_sim_time(time / cfg.time_unit, time_width)
+    }
 }
 
 /// the full checkpoint path: `<dir><zones>.chkpt.<tnow>[.<unit>].h5`. `tnow` is

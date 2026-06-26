@@ -56,11 +56,16 @@ def setup_parser(subparsers) -> None:
         help="run a simulation from a config file",
         formatter_class=HelpFormatter,
         usage="simbi run <config> [options]",
+        # we handle -h/--help ourselves (below) so that `simbi run <config> --help`
+        # can load the config and show ITS flags, not just the generic run options.
+        add_help=False,
     )
 
-    # main argument
+    # main argument: optional so `simbi run --help` / `--configs` work with no config.
     run_parser.add_argument(
         "config_script",
+        nargs="?",
+        default=None,
         help="config file or registered config name (e.g., 'sod' or 'sod.py')",
         type=_validate_config_script,
     )
@@ -100,9 +105,16 @@ def setup_parser(subparsers) -> None:
 
     # utilities
     util_group = run_parser.add_argument_group("utilities")
+    # -h/--help/--peek/--info all show the config's flags: with a <config> given they
+    # print THAT problem's parameters (--gamma-shock0, --has-mesh-motion, ...); with no
+    # config they print the generic run help. one flag, all the aliases a user reaches for.
     util_group.add_argument(
+        "-h",
+        "--help",
+        "--peek",
         "--info",
-        help="print config parameters without running",
+        dest="info",
+        help="show the problem's configurable flags (or the generic run help) without running",
         default=False,
         action="store_true",
     )

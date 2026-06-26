@@ -563,9 +563,15 @@ def setup_skymap_parser(subparsers) -> None:
     parser.add_argument(
         "--log-decades",
         type=float,
-        default=None,
+        default=3.0,
         help="show the FREQUENCY-INDEPENDENT log morphology log10(I/I_max) over this many "
-        "decades (e.g. 2), instead of absolute mJy/mas^2",
+        "decades (DEFAULT 3 -- log is the standard afterglow view). use --linear for "
+        "absolute mJy/mas^2 on a linear scale.",
+    )
+    parser.add_argument(
+        "--linear",
+        action="store_true",
+        help="plot absolute mJy/mas^2 on a LINEAR scale instead of the default log morphology",
     )
     parser.add_argument(
         "--contours",
@@ -860,6 +866,9 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
     manifest = SystemManifest.resolve(args.inputs[0], scale_fallback=args.scale)
     doppler_power = 4.0 if args.bolometric else 3.0
     multi = len(args.inputs) > 1
+    # log morphology is the DEFAULT afterglow view; --linear opts into absolute mJy/mas^2.
+    if getattr(args, "linear", False):
+        args.log_decades = None
 
     if multi:
         # STREAM: never merge all checkpoints' events (the memory blowup). the EATS observer

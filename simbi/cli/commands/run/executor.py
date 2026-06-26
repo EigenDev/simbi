@@ -79,6 +79,25 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
     3. runs the simulation
     """
     script = args.config_script
+    # the active subparser (run parser) is used to register the config's cli params and,
+    # when no config is given, to print the generic run help.
+    active_parser = getattr(args, "active_parser", None)
+
+    # no config supplied: `simbi run --help/--peek/--info` -> generic run help (exit 0);
+    # a bare `simbi run` -> a helpful error (the config is required).
+    if script is None:
+        if active_parser is not None:
+            active_parser.print_help()
+        if not getattr(args, "info", False):
+            print(
+                "\nerror: a config is required.  usage: simbi run <config> [options]\n"
+                "       list configs:        simbi run --configs\n"
+                "       peek a config's flags: simbi run <config> --help",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return
+
     problem_classes = _get_problem_classes(script)
 
     if not problem_classes:
@@ -86,9 +105,6 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
             f"no SimbiProblem subclasses found in {script}. "
             "ensure your config defines a class that inherits from SimbiProblem."
         )
-
-    # get the active subparser (run parser) for cli registration
-    active_parser = getattr(args, "active_parser", None)
 
     for class_name in problem_classes:
         # load the class
