@@ -84,14 +84,35 @@ def _common(args) -> list:
     if feats:
         cmd += ["--features", feats]
         print(f"rust features: {feats}")
-    # the cuda build defines the `gpu_ext` pymodule (not `cpu_ext`); override
-    # maturin's pyproject module-name so the dylib installs as `simbi.libs.gpu_ext`
-    # and coexists with the cpu backend instead of overwriting it.
-    if "cuda" in feats.split(","):
-        cmd += ["--config", 'tool.maturin.module-name="simbi.libs.gpu_ext"']
     if args.verbose:
         cmd.append("-v")
     return cmd
+
+
+def _is_gpu_build(args) -> bool:
+    return "cuda" in _features(args).split(",")
+
+
+def _finalize_gpu_ext() -> None:
+    """rename the cuda extension `cpu_ext` -> `gpu_ext` so the file name matches
+    its `PyInit_gpu_ext` symbol.
+
+    maturin derives BOTH the dylib name and the expected init symbol from the
+    crate's `[lib] name` (`cpu_ext`); it ignores `module-name` for the symbol. the
+    cuda build defines the pymodule as `gpu_ext` (see symbi-py/src/lib.rs), so the
+    installed `cpu_ext.<suffix>.so` actually exports `PyInit_gpu_ext`. renaming the
+    file to `gpu_ext.<suffix>.so` makes name and symbol agree, lets the cpu and gpu
+    backends coexist, and matches the `simbi.libs.gpu_ext` import in runner.py.
+    """
+    lib_dir = Path("simbi/libs")
+    renamed = 0
+    for src in lib_dir.glob("cpu_ext.*.so"):
+        dst = src.with_name(src.name.replace("cpu_ext", "gpu_ext", 1))
+        src.replace(dst)
+        print(f"gpu build: renamed {src.name} -> {dst.name}")
+        renamed += 1
+    if renamed == 0:
+        print("warning: no cpu_ext dylib found to rename to gpu_ext", file=sys.stderr)
 
 
 def _require_cargo() -> None:
@@ -132,6 +153,8 @@ def install_command(args) -> None:
     print("building + installing (maturin develop, editable)...")
     start = time.time()
     run(cmd, env=venv_env(), verbose=args.verbose)
+    if _is_gpu_build(args):
+        _finalize_gpu_ext()
     print(f"done in {time.time() - start:.1f}s")
     try:
         result = subprocess.run(

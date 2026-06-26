@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# =============================================================================
+# pre-push hook
+#
+# runs the rust test suite before allowing push to remote.
+# prevents broken code from reaching origin.
+#
+# the project migrated from meson/c++ to a cargo workspace (src/) built via
+# maturin; this gate runs the cpu test suite (no cuda feature) so it is portable
+# to machines without a gpu. gpu-gated tests are validated separately on a cuda
+# host via `cargo test --features cuda`.
+#
+# to bypass (emergencies only):
+#   git push --no-verify
+# =============================================================================
+
+set -u
+
+workspace="src"
+
+echo "running pre-push test suite..."
+echo "========================================"
+
+# cargo is the live build system; without it there is nothing to validate.
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "warning: cargo not found — skipping test validation"
+    exit 0
+fi
+
+# the rust workspace must be present (it moved from rust_src/ to src/).
+if [ ! -f "${workspace}/Cargo.toml" ]; then
+    echo "warning: no rust workspace at ${workspace}/ — skipping test validation"
+    exit 0
+fi
+
+# run the cpu test suite. release mode matches how the numerics are exercised;
+# cargo caches builds, so only the first run pays full compile cost.
+echo "executing cargo test suite (${workspace}/, cpu)..."
+if cargo test --release --manifest-path "${workspace}/Cargo.toml" --workspace; then
+    echo "========================================"
+    echo "all tests passed"
+    echo "proceeding with push..."
+    exit 0
+else
+    echo "========================================"
+    echo "tests failed"
+    echo ""
+    echo "fix failing tests before pushing"
+    echo "or use 'git push --no-verify' to bypass (not recommended)"
+    exit 1
+fi
