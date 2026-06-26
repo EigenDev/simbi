@@ -38,9 +38,12 @@ def stream_lightcurve(
     luminosity_distance: float,
     time_edges: Sequence[float],
     max_events: int = 2_000_000,
+    chunk_size: int = 4_000_000,
 ):
-    """accumulate the EATS light curve over `checkpoints`, one at a time. returns
-    (times [day], fluxes flat [n_time*n_freq] mJy, frequencies [Hz])."""
+    """accumulate the EATS light curve over `checkpoints`, one at a time. the EATS reduction
+    is ADDITIVE over event subsets, so a saved catalog is read in row-CHUNKS (O(chunk_size)
+    memory, not O(file)) — a huge generate-once events file reduces without being held whole.
+    returns (times [day], fluxes flat [n_time*n_freq] mJy, frequencies [Hz])."""
     from simbi.libs import cpu_ext
     from simbi.reader import read_simulation
 
@@ -52,11 +55,26 @@ def stream_lightcurve(
 
     times: Any = None
     total: Any = None
+
+    def _reduce(catalog):
+        nonlocal times, total
+        t, fl, _ = cpu_ext.lightcurve_from_events(
+            catalog, nhat, freqs, redshift, luminosity_distance, edges
+        )
+        times = np.asarray(t)
+        total = np.asarray(fl) if total is None else total + np.asarray(fl)
+
     for path in checkpoints:
         # accept EITHER an events catalog (read it back) or a hydro checkpoint (generate in
         # place) — the events file is the canonical product, but a checkpoint works directly too.
         if _is_event_catalog(path):
-            catalog = cpu_ext.read_photon_events(path)
+            n = cpu_ext.photon_event_count(path)
+            for start in range(0, max(n, 1), chunk_size):
+                catalog = cpu_ext.read_photon_events_chunk(path, start, chunk_size)
+                if len(catalog) == 0:
+                    break
+                _reduce(catalog)
+                del catalog  # release this chunk before the next
         else:
             data = read_simulation(path)
             sim_cond = {
@@ -79,12 +97,8 @@ def stream_lightcurve(
                 max_events=max_events,
                 photons_per_cell=0,
             )
-        t, fl, _ = cpu_ext.lightcurve_from_events(
-            catalog, nhat, freqs, redshift, luminosity_distance, edges
-        )
-        times = np.asarray(t)
-        total = np.asarray(fl) if total is None else total + np.asarray(fl)
-        del catalog  # release this checkpoint's events before the next one
+            _reduce(catalog)
+            del catalog  # release this checkpoint's events before the next one
 
     return times, total, np.asarray(freqs)
 

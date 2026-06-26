@@ -16,20 +16,11 @@ git push --no-verify
 
 ### how it works
 
-1. checks if build directory exists
-2. checks if tests are enabled in build
-3. runs `meson test -C build --print-errorlogs`
-4. allows push only if all tests pass
+1. runs the rust backend test suite
+2. allows push only if all tests pass
 
-### enabling tests in build
+### running the tests
 
 ```bash
-./dev.py build --build-tests
-```
-
-or with meson directly:
-
-```bash
-meson setup build -Dbuild_tests=true
-meson compile -C build
+cargo test --manifest-path src/Cargo.toml
 ```

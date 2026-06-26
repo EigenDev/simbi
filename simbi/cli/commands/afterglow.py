@@ -38,13 +38,8 @@ def _report_spec_sources(near, observer_arg):
     )
 
 
-def _load_catalog(path, args, rad_hydro, observer, manifest):
-    """load a photon catalog from one input: a saved catalog read back directly, or
-    generated in-process from a hydro checkpoint. returns the opaque PhotonEvents handle."""
-    if _is_event_catalog(path):
-        print(f"reading photon catalog {path}...")
-        return rad_hydro.read_photon_events(path)
-
+def _generate_catalog(path, args, rad_hydro, observer, manifest):
+    """generate a photon catalog in-process from a hydro checkpoint. returns the handle."""
     from simbi.reader import read_simulation
 
     from ...afterglow.inputs import build_fields, build_mesh
@@ -73,6 +68,37 @@ def _load_catalog(path, args, rad_hydro, observer, manifest):
     )
 
 
+def _load_catalog(path, args, rad_hydro, observer, manifest):
+    """load a photon catalog from one input: a saved catalog read back WHOLE, or generated
+    in-process from a hydro checkpoint. returns the opaque PhotonEvents handle. for
+    bounded-memory reduction of a large catalog, prefer `_iter_event_handles` (row-chunks)."""
+    if _is_event_catalog(path):
+        print(f"reading photon catalog {path}...")
+        return rad_hydro.read_photon_events(path)
+    return _generate_catalog(path, args, rad_hydro, observer, manifest)
+
+
+def _iter_event_handles(path, args, rad_hydro, observer, manifest, chunk_size=4_000_000):
+    """yield PhotonEvents handles for one input: a saved catalog is read in row-CHUNKS of
+    `chunk_size` (O(chunk) memory, not O(file)), each yielded then discarded; a hydro
+    checkpoint yields a single generated handle. additive reductions (skymap/lightcurve)
+    accumulate across the chunks, so a huge generate-once events file reduces without being
+    held whole."""
+    if _is_event_catalog(path):
+        n = rad_hydro.photon_event_count(path)
+        print(f"reading photon catalog {path} ({n} events, {chunk_size}/chunk)...")
+        for start in range(0, max(n, 1), chunk_size):
+            cat = rad_hydro.read_photon_events_chunk(path, start, chunk_size)
+            if len(cat) == 0:
+                break
+            try:
+                yield cat
+            finally:
+                del cat
+    else:
+        yield _generate_catalog(path, args, rad_hydro, observer, manifest)
+
+
 def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, doppler_power):
     """reduce each checkpoint into the image accumulator on a SHARED grid and DISCARD it, so
     memory is O(n_pix^2) regardless of checkpoint count (fine time binning -> smooth images
@@ -81,15 +107,23 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
     n_pix = args.n_pix
 
     def _reduce(path, half_width_cm):
-        cat = _load_catalog(path, args, rad_hydro, observer, manifest)
-        try:
+        # accumulate over the input's event handles: a saved catalog streams in row-chunks
+        # (bounded memory), a checkpoint is one handle. with a FIXED half_width the chunks
+        # share the grid so summing intensities is exact; in the sizing pass (half_width=0)
+        # the per-chunk grids differ but only the max extent `hw` is used, not the sum.
+        total = None
+        hw_max = 0.0
+        for cat in _iter_event_handles(path, args, rad_hydro, observer, manifest):
             intensity, _, hw = rad_hydro.skymap_from_events(
                 cat, nhat, obs_time, time_window=args.time_window, redshift=observer.redshift,
                 doppler_power=doppler_power, n_pix=n_pix, half_width=half_width_cm,
             )
-            return np.asarray(intensity), hw
-        finally:
-            del cat  # release this checkpoint's events before the next
+            arr = np.asarray(intensity)
+            total = arr if total is None else total + arr
+            hw_max = max(hw_max, hw)
+        if total is None:
+            total = np.zeros(n_pix * n_pix)
+        return total, hw_max
 
     if args.fov is not None:
         half_width_cm = observer.mas_to_length(args.fov)
@@ -146,9 +180,10 @@ def _flux_diagnostics(image, half_mas):
 def _draw_skymap_on_ax(ax, image, half_mas, log_decades=None, contours=False, diagnostics=False, vmax=None):
     """draw ONE skymap onto a given axes in the paper style: jet axis HORIZONTAL (x), thin
     grey axis lines through the origin, and (optionally) the yellow flux-centroid marker +
-    FWHM error bars. returns the imshow handle. the image is transposed so the line-of-sight
-    sky-plane e2 (the projected symmetry axis) runs horizontally."""
-    img = np.asarray(image).T  # jet projection -> horizontal
+    FWHM error bars. returns the imshow handle. the image is transposed so the projected
+    symmetry axis (sky-plane e2) runs horizontally, then flipped left<->right so the
+    APPROACHING (doppler-beamed, +z) hemisphere sits on the LEFT, matching nedora+2023."""
+    img = np.asarray(image).T[:, ::-1]  # jet -> horizontal, approaching side on the left
     extent = [-half_mas, half_mas, -half_mas, half_mas]
 
     if log_decades is not None:
@@ -426,24 +461,22 @@ def setup_lightcurve_parser(subparsers) -> None:
     parser.add_argument(
         "files",
         nargs="+",
-        help="hydro checkpoint HDF5 file(s) — the rust afterglow reads them "
-        "directly and integrates the EATS over all frames",
+        help="hydro checkpoint(s) OR a saved photon-event catalog; the EATS is integrated "
+        "over all inputs (each streamed then discarded — O(bins) memory)",
     )
 
+    parser.add_argument(
+        "--observer",
+        default=None,
+        help="observer yaml (redshift, luminosity_distance, microphysics, frequencies); "
+        "auto-discovered next to the data, else 10 pc / p=2.5 defaults",
+    )
     parser.add_argument(
         "--scale",
-        default="solar",
-        help="unit scale model (code -> cgs): length/density/pressure/time",
+        default="blandford-mckee",
+        help="fallback code->cgs scale model when no system.yaml sits next to the "
+        "input (the manifest is preferred)",
     )
-    parser.add_argument("--eps-e", type=float, default=0.1, help="electron energy fraction")
-    parser.add_argument("--eps-b", type=float, default=0.01, help="magnetic energy fraction")
-    parser.add_argument("--p", type=float, default=2.5, help="electron power-law index")
-    parser.add_argument("--redshift", type=float, default=0.0, help="source redshift z")
-    parser.add_argument(
-        "--d-l", type=float, default=None,
-        help="luminosity distance [cm] (auto from z if omitted)",
-    )
-
     parser.add_argument(
         "--observer-angle",
         type=float,
@@ -452,18 +485,10 @@ def setup_lightcurve_parser(subparsers) -> None:
     )
 
     parser.add_argument(
-        "--frequencies",
-        nargs="+",
-        type=float,
-        default=[1e9],
-        help="observed frequencies [Hz]",
-    )
-
-    parser.add_argument(
         "--n-bins",
         type=int,
         default=50,
-        help="number of time bins",
+        help="number of observer-time bins",
     )
 
     parser.add_argument(
@@ -471,14 +496,7 @@ def setup_lightcurve_parser(subparsers) -> None:
         nargs=2,
         type=float,
         default=None,
-        help="time range [day] (auto if omitted)",
-    )
-
-    parser.add_argument(
-        "--energy-cut",
-        type=float,
-        default=0.0,
-        help="minimum photon energy [erg]",
+        help="observer-time range [day] (auto 1e-3..1e3 if omitted)",
     )
 
     parser.add_argument(
@@ -798,30 +816,27 @@ def execute_lightcurve(args: Namespace, remaining: Optional[list] = None) -> Non
     import h5py
 
     from ...afterglow.lightcurve import stream_lightcurve
-    from ...afterglow.spec import SystemManifest
+    from ...afterglow.spec import ObserverParams, SystemManifest
 
+    # same yaml-driven spec as `skymap`: the observer yaml (redshift, luminosity_distance,
+    # microphysics, frequencies) is the single source of truth, with built-in defaults
+    # (10 pc, p=2.5, eps_e=0.1, eps_b=0.01, 1 GHz) when none is found.
+    _report_spec_sources(args.files[0], args.observer)
+    observer = ObserverParams.resolve(args.observer, near=args.files[0])
     manifest = SystemManifest.resolve(args.files[0], scale_fallback=args.scale)
 
-    # luminosity distance: explicit, else from z (0 -> a 10 pc reference).
-    if args.d_l is not None:
-        d_l = args.d_l
-    elif args.redshift > 0.0:
-        from ...afterglow.radiation import get_dL
-        d_l = float(get_dL(args.redshift).value)
-    else:
-        d_l = 3.086e19  # 10 pc in cm
-
-    freqs = [float(f) for f in args.frequencies]
+    freqs = [float(f) for f in observer.frequencies]
+    d_l = observer.luminosity_distance_cm()
+    micro = {"p": observer.p, "eps_e": observer.eps_e, "eps_b": observer.eps_b}
     if args.time_range:
         time_edges = np.geomspace(args.time_range[0], args.time_range[1], args.n_bins + 1)
     else:
         time_edges = np.geomspace(1e-3, 1e3, args.n_bins + 1)
-    micro = {"p": args.p, "eps_e": args.eps_e, "eps_b": args.eps_b}
 
-    print(f"computing light curve, streaming {len(args.files)} checkpoint(s)...")
+    print(f"computing light curve, streaming {len(args.files)} input(s)...")
     times, total, freqs_arr = stream_lightcurve(
         list(args.files), manifest.to_qscales(), micro, np.deg2rad(args.observer_angle),
-        freqs, args.redshift, d_l, [float(t) for t in time_edges], max_events=args.max_events,
+        freqs, observer.redshift, d_l, [float(t) for t in time_edges], max_events=args.max_events,
     )
     freqs = list(freqs_arr)
     fluxes = total.reshape(len(times), len(freqs))[: args.n_bins]
@@ -1111,10 +1126,15 @@ def execute_movie(args: Namespace, remaining: Optional[list] = None) -> None:
 
     # fixed mas field of view (half_max) so the ring expands within the frame; each image
     # is drawn at its true extent inside that fixed window.
+    # paper-style orientation (matches _draw_skymap_on_ax): jet axis horizontal, approaching
+    # (doppler-beamed, +z) hemisphere on the LEFT.
+    def _orient(sb):
+        return np.asarray(sb).T[:, ::-1]
+
     norm = LogNorm(vmax * 1e-3, vmax) if args.log_color else Normalize(0.0, vmax)
     fig, ax = plt.subplots()
     im = ax.imshow(
-        frames[0][0],
+        _orient(frames[0][0]),
         origin="lower",
         cmap="inferno",
         norm=norm,
@@ -1122,15 +1142,15 @@ def execute_movie(args: Namespace, remaining: Optional[list] = None) -> None:
     )
     ax.set_xlim(-half_max, half_max)
     ax.set_ylim(-half_max, half_max)
-    ax.set_xlabel("relative R.A. [mas]")
-    ax.set_ylabel("relative Dec. [mas]")
+    ax.set_xlabel("x [mas]")
+    ax.set_ylabel("z [mas]")
     fig.colorbar(im, ax=ax, label="surface brightness [mJy/mas$^2$]")
     title = ax.set_title("")
 
     def update(idx):
         sb, hmm, t, flux_mjy = frames[idx]
         extent = hmm if hmm > 0 else half_max
-        im.set_data(sb)
+        im.set_data(_orient(sb))
         im.set_extent([-extent, extent, -extent, extent])
         title.set_text(f"t = {t:.1f} day   F$_\\nu$ = {flux_mjy:.3g} mJy")
         return im, title

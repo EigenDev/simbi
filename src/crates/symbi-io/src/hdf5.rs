@@ -55,6 +55,35 @@ impl IoBackend for Hdf5Backend {
     }
 }
 
+impl Hdf5Backend {
+    /// length of the first axis of a root dataset, WITHOUT reading the data — the
+    /// row count that drives a chunked read loop.
+    pub fn dataset_len(&self, path: &Path, name: &str) -> Result<usize> {
+        let file = hdf5_metno::File::open(path)
+            .map_err(|e| IoError::Backend(format!("open file {path:?}: {e}")))?;
+        let ds = FileOrGroupRead::File(&file).dataset(name)?;
+        Ok(ds.shape().first().copied().unwrap_or(0))
+    }
+
+    /// read the rows `[start, start + count)` of EVERY root dataset (a flat-table / SoA
+    /// slice), plus all root attrs, into a TreeBuf — without ever materializing the full
+    /// columns. `start`/`count` are clamped to each dataset's length, so the last chunk is
+    /// naturally short and an out-of-range start yields empty columns. subgroups are NOT
+    /// walked (the photon catalog is a flat root table). this is the bounded-memory
+    /// counterpart to `read`: reduce a huge events file chunk-by-chunk, discarding each slice.
+    pub fn read_root_slice(&self, path: &Path, start: usize, count: usize) -> Result<TreeBuf> {
+        let file = hdf5_metno::File::open(path)
+            .map_err(|e| IoError::Backend(format!("open file {path:?}: {e}")))?;
+        let mut root = TreeBuf::new("");
+        read_group_attrs(&FileOrGroupRead::File(&file), &mut root.attrs)?;
+        for ds_name in list_datasets(&FileOrGroupRead::File(&file))? {
+            let ds = read_dataset_slice(&FileOrGroupRead::File(&file), &ds_name, start, count)?;
+            root.datasets.push(ds);
+        }
+        Ok(root)
+    }
+}
+
 // ----- adapter so we can write attrs/datasets to either a File or a Group --
 
 #[allow(dead_code)] // `create_group` reserved for future per-write group helper
@@ -323,6 +352,40 @@ fn read_dataset(src: &FileOrGroupRead<'_>, name: &str) -> Result<DatasetBuf> {
         other => return Err(IoError::Backend(format!("unsupported dataset type at '{name}': {other:?}"))),
     };
     Ok(DatasetBuf { name: name.into(), shape, data })
+}
+
+/// read only rows `[start, start + count)` of a 1D root dataset via an HDF5 hyperslab,
+/// clamped to the dataset length. mirrors `read_dataset`'s dtype dispatch but slices
+/// instead of `read_raw`, so memory is O(count) not O(dataset). 2D+ datasets are rejected
+/// (the catalog columns are all 1D).
+fn read_dataset_slice(
+    src: &FileOrGroupRead<'_>, name: &str, start: usize, count: usize,
+) -> Result<DatasetBuf> {
+    use hdf5_metno::types::{FloatSize, IntSize, TypeDescriptor};
+    let ds = src.dataset(name)?;
+    let full = ds.shape();
+    if full.len() != 1 {
+        return Err(IoError::Backend(format!(
+            "read_dataset_slice '{name}': expected 1D dataset, got shape {full:?}"
+        )));
+    }
+    let len = full[0];
+    let s = start.min(len);
+    let c = count.min(len - s);
+    let sel = s..s + c; // From<Range<usize>> for hdf5 Selection
+    let slice = |what: &str| format!("slice {what} ds '{name}' [{s}..{}]", s + c);
+    let dt = ds.dtype()
+        .and_then(|d| d.to_descriptor())
+        .map_err(|e| IoError::Backend(format!("dtype probe '{name}': {e}")))?;
+    let data = match dt {
+        TypeDescriptor::Float(FloatSize::U8)  => DataBuf::F64(ds.read_slice_1d::<f64, _>(sel).map_err(|e| IoError::Backend(format!("{}: {e}", slice("f64"))))?.to_vec()),
+        TypeDescriptor::Float(FloatSize::U4)  => DataBuf::F32(ds.read_slice_1d::<f32, _>(sel).map_err(|e| IoError::Backend(format!("{}: {e}", slice("f32"))))?.to_vec()),
+        TypeDescriptor::Integer(IntSize::U8)  => DataBuf::I64(ds.read_slice_1d::<i64, _>(sel).map_err(|e| IoError::Backend(format!("{}: {e}", slice("i64"))))?.to_vec()),
+        TypeDescriptor::Unsigned(IntSize::U8) => DataBuf::U64(ds.read_slice_1d::<u64, _>(sel).map_err(|e| IoError::Backend(format!("{}: {e}", slice("u64"))))?.to_vec()),
+        TypeDescriptor::Unsigned(IntSize::U1) => DataBuf::U8(ds.read_slice_1d::<u8, _>(sel).map_err(|e| IoError::Backend(format!("{}: {e}", slice("u8"))))?.to_vec()),
+        other => return Err(IoError::Backend(format!("unsupported dataset type at '{name}': {other:?}"))),
+    };
+    Ok(DatasetBuf { name: name.into(), shape: vec![c], data })
 }
 
 fn read_subtree(parent: &hdf5_metno::File, name: &str) -> Result<TreeBuf> {
