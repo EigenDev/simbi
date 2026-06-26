@@ -139,7 +139,13 @@ pub fn compute_lightcurve_from_events(
         if cos_angle < 0.5 {
             continue;
         }
-        let t_arrival = evt.t_emission + evt.radius() / C_LIGHT.value();
+        // equal-arrival-time surface, IDENTICAL to compute_skymap: the beamed front of an
+        // emitter at lab position r reaches the observer at t_obs = (1+z)(t_em - r.n/c). the
+        // old form (t_em + |r|/c — isotropic, no projection onto n, no redshift) put every
+        // emitter at ~back-of-source light-travel, landing OUTSIDE the real window and zeroing
+        // the curve while the skymap (correct EATS) showed flux from the same catalog.
+        let r_dot_n = evt.x * obs_hat[0] + evt.y * obs_hat[1] + evt.z * obs_hat[2];
+        let t_arrival = (1.0 + redshift) * (evt.t_emission - r_dot_n / C_LIGHT.value());
         let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else { continue };
 
         // observed frequency: comoving frequency boosted by the doppler factor, redshifted.
@@ -268,6 +274,7 @@ pub fn compute_polarization_from_events(
     time_bins: &[f64],
     energy_min: f64,
     energy_max: f64,
+    redshift: f64,
 ) -> PolarizationCurve {
     let n_times = time_bins.len();
     let mut stokes_q = vec![0.0; n_times];
@@ -288,7 +295,9 @@ pub fn compute_polarization_from_events(
         if cos_angle < 0.5 {
             continue;
         }
-        let t_arrival = evt.t_emission + evt.radius() / C_LIGHT.value();
+        // same equal-arrival-time surface as the light curve / skymap: t_obs = (1+z)(t_em - r.n/c).
+        let r_dot_n = evt.x * obs_hat[0] + evt.y * obs_hat[1] + evt.z * obs_hat[2];
+        let t_arrival = (1.0 + redshift) * (evt.t_emission - r_dot_n / C_LIGHT.value());
         let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else { continue };
 
         stokes_i_total[t_bin] += evt.energy_weight * evt.stokes_i;
@@ -346,8 +355,9 @@ mod tests {
         absorbed.absorbed = true;
 
         let nus = vec![1.0e14, 1.0e16];
-        // arrival time r/c ~ 3.3e5 s ~ 3.86 day -> inside [0, 10] day.
-        let tbins = vec![0.0, 10.0];
+        // EATS t_obs = (1+z)(t_em - r.n/c) = -(1e16/c) ~ -3.86 day: a near-side emitter (at +x,
+        // toward the +x observer) arrives EARLY relative to the origin -> inside [-10, 0] day.
+        let tbins = vec![-10.0, 0.0];
         let obs = [1.0, 0.0, 0.0];
 
         let lc = compute_lightcurve_from_events(&[visible], obs, &nus, 0.0, 1.0e26, &tbins);
@@ -372,7 +382,7 @@ mod tests {
     #[test]
     fn polarization_of_unpolarized_is_zero() {
         let evts: Vec<PhotonEvent> = (0..16).map(|_| packet_toward_x(1.0e15, 1.0, 1.0e16)).collect();
-        let pc = compute_polarization_from_events(&evts, [1.0, 0.0, 0.0], &[0.0, 10.0], 0.0, 1.0e30);
+        let pc = compute_polarization_from_events(&evts, [1.0, 0.0, 0.0], &[-10.0, 0.0], 0.0, 1.0e30, 0.0);
         assert!(pc.polarization_degree[0].abs() < 1e-12, "unpolarized -> zero degree");
     }
 
@@ -381,7 +391,7 @@ mod tests {
     fn polarization_recovers_q() {
         let mut e = packet_toward_x(1.0e15, 1.0, 1.0e16);
         e.stokes_q = 0.4; // 40% along Q
-        let pc = compute_polarization_from_events(&[e], [1.0, 0.0, 0.0], &[0.0, 10.0], 0.0, 1.0e30);
+        let pc = compute_polarization_from_events(&[e], [1.0, 0.0, 0.0], &[-10.0, 0.0], 0.0, 1.0e30, 0.0);
         assert!((pc.polarization_degree[0] - 0.4).abs() < 1e-9);
         assert!(pc.polarization_angle[0].abs() < 1e-9, "pure +Q -> angle 0");
     }

@@ -2,7 +2,7 @@
 # simbi/types/typing.py
 #
 # type aliases for generator-based initial conditions.
-# the c++ backend consumes python generators directly via pybind11,
+# the rust backend (cpu_ext, pyo3) consumes python generators directly,
 # so these types define the expected signatures:
 #   - GasStateGenerator: yields (rho, v1, v2, v3, p) tuples
 #   - BFieldGenerator: yields individual b-field component values

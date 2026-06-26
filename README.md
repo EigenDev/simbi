@@ -98,60 +98,36 @@ simbi run marti-muller --mode gpu --resolution 1024
 
 ### Dependencies
 
-- **Build**: Meson ≥ 1.4.0, Ninja
-- **Libraries**: pybind11, HDF5, OpenMP
-- **Python**: pydantic, rich, hdf5
+- **Build**: Rust toolchain (cargo, via [rustup](https://rustup.rs)) + [maturin](https://maturin.rs) (the PEP 517 backend). Linux also needs `patchelf`.
+- **Libraries**: HDF5 (linked into the extension); for GPU, the CUDA driver (`libcuda`/`libnvrtc`)
+- **Python**: numpy, h5py, matplotlib, astropy, scipy, pydantic, rich
 
 ### Installation Commands
 
+The Rust backend builds into `simbi/libs/cpu_ext` via maturin. `dev.py` is a thin wrapper.
+
 **Standard (editable install):**
 ```bash
-CC=gcc CXX=g++ python dev.py install -e
+./dev.py install            # maturin develop --release
+# or, without dev.py: pip install -e .   (uses the maturin backend directly)
 ```
 
-**With visualization tools:**
+**With visualization / CLI extras:**
 ```bash
-CC=gcc CXX=g++ python dev.py install --visual-extras
+./dev.py install --visual-extras --cli-extras
 ```
 
-**GPU compilation (NVIDIA, auto-detects architecture):**
+**GPU (NVIDIA):**
 ```bash
-CC=gcc CXX=g++ python dev.py install --gpu
+./dev.py install --gpu      # cargo 'cuda' feature
 ```
-
-**GPU compilation (explicit architecture):**
-```bash
-# V100 (compute capability 7.0)
-CC=gcc CXX=g++ python dev.py install --gpu --device-arch sm_70
-
-# A100 (compute capability 8.0)
-CC=gcc CXX=g++ python dev.py install --gpu --device-arch sm_80
-```
-
-**GPU compilation (AMD):**
-```bash
-# MI100 (gfx908)
-CC=gcc CXX=g++ python dev.py install --gpu --device-arch gfx908
-```
-
-### Advanced Build Options
-
-| Option | Description |
-|--------|-------------|
-| `--precision single\|double` | Floating point precision (default: double) |
-| `--column-major` | Use column-major data layout |
-| `--four-velocity` | Use four-velocity as primitive variable |
-| `--unified-memory` | CUDA unified memory (default: device memory) |
-| `--build-tests` | Build test suite |
-| `--linker mold\|lld\|gold\|bfd` | Select linker (auto-detects fastest) |
-| `--gpu-jobs N` | Parallel jobs for GPU compilation |
-| `--timeout N` | Build timeout in seconds |
-| `--reconfigure` | Force meson reconfiguration |
+Kernels are JIT-compiled via NVRTC at runtime, so no `nvcc` build step and no
+device-architecture flag is needed — the arch is detected on the running device.
 
 **Clean and rebuild:**
 ```bash
-python dev.py clean --all
-python dev.py install --gpu
+./dev.py clean --all        # drop extensions + cargo clean
+./dev.py install --gpu
 ```
 
 ---

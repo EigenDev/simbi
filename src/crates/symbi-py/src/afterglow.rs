@@ -423,7 +423,36 @@ fn read_photon_events_py(path: &str) -> PyResult<PhotonEvents> {
     let tree: TreeBuf = Hdf5Backend
         .read(std::path::Path::new(path))
         .map_err(|e| PyValueError::new_err(format!("read_photon_events: {e}")))?;
+    events_from_tree(&tree)
+}
 
+/// total packet count in a saved catalog, read from the `t_emission` column's length WITHOUT
+/// loading any column — the row count that bounds a `read_photon_events_chunk` loop.
+#[pyfunction]
+#[pyo3(name = "photon_event_count")]
+fn photon_event_count_py(path: &str) -> PyResult<usize> {
+    Hdf5Backend
+        .dataset_len(std::path::Path::new(path), "t_emission")
+        .map_err(|e| PyValueError::new_err(format!("photon_event_count: {e}")))
+}
+
+/// read only packets `[start, start + count)` of a saved catalog into a handle, so a huge
+/// events file is reduced (lightcurve/skymap) chunk-by-chunk at O(count) memory — the
+/// generate-once, chunk-read-many path. `start`/`count` are clamped to the file length, so the
+/// final chunk is short and an out-of-range start returns an empty handle (loop terminator).
+#[pyfunction]
+#[pyo3(name = "read_photon_events_chunk")]
+fn read_photon_events_chunk_py(path: &str, start: usize, count: usize) -> PyResult<PhotonEvents> {
+    let tree: TreeBuf = Hdf5Backend
+        .read_root_slice(std::path::Path::new(path), start, count)
+        .map_err(|e| PyValueError::new_err(format!("read_photon_events_chunk: {e}")))?;
+    events_from_tree(&tree)
+}
+
+/// build the packet vector from a catalog TreeBuf (whole-file `read` OR a hyperslab chunk —
+/// both produce the same SoA columns, just different lengths). shared by the full and chunked
+/// readers so the column->struct mapping (incl. the radial beta_vec fallback) lives in ONE place.
+fn events_from_tree(tree: &TreeBuf) -> PyResult<PhotonEvents> {
     let f64col = |name: &str| -> PyResult<Vec<f64>> {
         tree.find_dataset(name)
             .and_then(|d| d.data.as_f64())
@@ -555,5 +584,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(lightcurve_from_events_py, m)?)?;
     m.add_function(wrap_pyfunction!(write_photon_events_py, m)?)?;
     m.add_function(wrap_pyfunction!(read_photon_events_py, m)?)?;
+    m.add_function(wrap_pyfunction!(photon_event_count_py, m)?)?;
+    m.add_function(wrap_pyfunction!(read_photon_events_chunk_py, m)?)?;
     Ok(())
 }

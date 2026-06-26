@@ -40,7 +40,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     """
     import warnings
 
-    # silence pydantic serialization warnings for numpy types (needed for pybind11)
+    # silence pydantic serialization warnings for numpy types crossing into the rust backend
     warnings.filterwarnings(
         "ignore",
         message=".*Pydantic serializer warnings.*",
