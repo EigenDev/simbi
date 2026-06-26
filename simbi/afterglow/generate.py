@@ -6,11 +6,44 @@
 # - maps it to the rust event-generator contract (inputs.build_afterglow_inputs)
 # - calls the symbi-afterglow rust binding (cpu_ext) to generate + transfer photons
 # - writes the lab-frame catalog to HDF5 (postprocess.read_photon_events schema)
+#
+# a grb afterglow observation integrates emission over the EQUAL-ARRIVAL-TIME surface,
+# which draws from a RANGE of emission epochs -- so the catalog must span an ARRAY of
+# snapshots, NOT one. each snapshot emits over the lab-time interval it REPRESENTS (its
+# trapezoidal share of the snapshot-time axis), not the tiny CFL timestep; weighting by
+# the represented interval is what makes the stacked snapshots tile the blast's history.
+# a single snapshot has no interval to tile with -- it is one t_em slice, not an afterglow.
 # usage:
-#  generate_from_files(["chkpt.h5"], "events.h5", scale_model="blandford-mckee")
+#  generate_from_files(["s0.h5", "s1.h5", ...], "events.h5", scale_model="blandford-mckee")
 # =============================================================================
 
-from typing import List
+from typing import List, Optional
+
+
+def _snapshot_emission_durations(times: List[float]) -> List[float]:
+    """the lab-time interval each snapshot REPRESENTS, as composite-trapezoid quadrature
+    weights over the (sorted) snapshot times: w_0 = (t_1 - t_0)/2, w_{N-1} =
+    (t_{N-1} - t_{N-2})/2, interior w_i = (t_{i+1} - t_{i-1})/2. summing power * w_i over
+    snapshots approximates the integral of power over the covered epoch [t_0, t_{N-1}].
+    a single snapshot has no neighbor -> returns [0.0] (caller substitutes a fallback)."""
+    n = len(times)
+    if n == 1:
+        return [0.0]
+    w = [0.0] * n
+    w[0] = 0.5 * (times[1] - times[0])
+    w[-1] = 0.5 * (times[-1] - times[-2])
+    for ii in range(1, n - 1):
+        w[ii] = 0.5 * (times[ii + 1] - times[ii - 1])
+    return w
+
+
+def _read_snapshot_time(path: str) -> float:
+    """the lab-frame simulation time [code units] of a checkpoint, read WITHOUT loading
+    fields (just the `metadata/time` attribute)."""
+    import h5py
+
+    with h5py.File(path, "r") as f:
+        return float(f["metadata"].attrs["time"])
 
 
 def generate_from_files(
@@ -27,41 +60,63 @@ def generate_from_files(
     apply_mcrt: bool = False,
     include_scattering: bool = True,
     scale_model: str = "blandford-mckee",
+    qscales: Optional[dict] = None,
 ) -> None:
     """
-    generate photon events from hydro checkpoint files.
+    generate photon events from an ARRAY of hydro checkpoint files.
 
     workflow:
-        1. load hydro data from checkpoint(s)
-        2. call the rust event generator
-        3. optionally apply monte carlo radiative transfer
-        4. write the catalog to HDF5
+        1. read each snapshot's lab time -> the interval it represents (trapezoid weight)
+        2. load hydro data from each checkpoint
+        3. call the rust event generator (each snapshot emits over its represented interval)
+        4. optionally apply monte carlo radiative transfer
+        5. merge + write the catalog to HDF5
 
     args:
-        files: list of checkpoint files
+        files: checkpoint files spanning the blast evolution (one snapshot is NOT an afterglow)
         output: output HDF5 filename
         max_events: maximum number of events to generate (split across files)
         photons_per_cell: sampling density (0=auto)
         eps_e: electron energy fraction
         eps_b: magnetic field energy fraction
         p: electron distribution power-law index
-        theta_obs: observer angle [radians]
+        theta_obs: observer angle [radians] (vestigial: the catalog is angle-INDEPENDENT;
+            the line of sight is chosen at REDUCTION, in skymap/lightcurve)
         z: redshift
         d_L: luminosity distance [cm]
         apply_mcrt: apply monte carlo radiative transfer
         include_scattering: include thomson scattering in MCRT
-        scale_model: named code->cgs scale model (matches the hydro run)
+        scale_model: named code->cgs scale model (used only when `qscales` is not supplied)
+        qscales: explicit code->cgs factors (from a SystemManifest); overrides scale_model
     """
     # imported here to avoid a circular import (libs pulls the compiled extension).
     from ..libs import cpu_ext as rad_hydro
     from ..reader import read_simulation
     from .inputs import build_fields, build_mesh, build_qscales
 
-    # code->cgs factors depend only on the scale model -> build once.
-    qscales = build_qscales(scale_model)
+    if not files:
+        raise ValueError("no checkpoint files supplied")
+
+    # code->cgs factors: an explicit manifest wins, else build from the named model.
+    if qscales is None:
+        qscales = build_qscales(scale_model)
+
+    # SORT the snapshots by lab time and weight each by the interval it REPRESENTS, so the
+    # stacked emission tiles the blast history (a single emit-duration = the tiny CFL dt would
+    # under-count and mis-weight). a lone snapshot has no interval -> warn; the EATS integral
+    # over epochs is undefined from one t_em slice.
+    files = sorted(files, key=_read_snapshot_time)
+    times = [_read_snapshot_time(f) for f in files]
+    durations = _snapshot_emission_durations(times)
+    if len(files) == 1:
+        print(
+            "  WARNING: a single snapshot is not a grb afterglow -- the equal-arrival-time\n"
+            "  surface integrates emission over a RANGE of epochs. supply an array of\n"
+            "  snapshots spanning the blast evolution. falling back to the CFL dt for now."
+        )
 
     # the microphysics + observer block is file-independent; dt / adiabatic_index /
-    # current_time are overwritten from each checkpoint's metadata.
+    # current_time are overwritten per snapshot.
     sim_cond = {
         "dt": 0.0,
         "theta_obs": theta_obs,
@@ -86,7 +141,10 @@ def generate_from_files(
         fields = build_fields(data)
         mesh = build_mesh(data)
 
-        sim_cond["dt"] = data.metadata.dt
+        # emission duration = the lab-time interval this snapshot represents; a lone snapshot
+        # (duration 0) falls back to the CFL dt so it still produces SOMETHING (with the warning).
+        emit_dt = durations[idx] if durations[idx] > 0.0 else data.metadata.dt
+        sim_cond["dt"] = emit_dt
         sim_cond["adiabatic_index"] = data.metadata.gamma
         sim_cond["current_time"] = data.metadata.time
 

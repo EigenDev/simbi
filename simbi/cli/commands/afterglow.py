@@ -370,7 +370,21 @@ def setup_generate_parser(subparsers) -> None:
     parser.add_argument(
         "files",
         nargs="+",
-        help="hydro checkpoint file(s)",
+        help="hydro checkpoint files spanning the blast evolution -- the catalog is built "
+        "from the ARRAY (one snapshot is a single emission epoch, not an afterglow)",
+    )
+
+    parser.add_argument(
+        "--observer",
+        default=None,
+        help="observer yaml (redshift, luminosity_distance, microphysics); auto-discovered "
+        "next to the data, else 10 pc / p=2.5 defaults. NOTE: the catalog is angle-independent "
+        "-- the viewing angle is chosen later by skymap/lightcurve",
+    )
+    parser.add_argument(
+        "--scale",
+        default="blandford-mckee",
+        help="fallback code->cgs scale model when no system.yaml sits next to the input",
     )
 
     parser.add_argument(
@@ -383,7 +397,7 @@ def setup_generate_parser(subparsers) -> None:
         "--max-events",
         type=int,
         default=1000000,
-        help="maximum number of events to generate",
+        help="maximum number of events to generate (split across snapshots)",
     )
 
     parser.add_argument(
@@ -391,48 +405,6 @@ def setup_generate_parser(subparsers) -> None:
         type=int,
         default=0,
         help="photons per cell (0=auto)",
-    )
-
-    parser.add_argument(
-        "--eps-e",
-        type=float,
-        default=0.1,
-        help="electron energy fraction",
-    )
-
-    parser.add_argument(
-        "--eps-b",
-        type=float,
-        default=0.01,
-        help="magnetic field energy fraction",
-    )
-
-    parser.add_argument(
-        "--p",
-        type=float,
-        default=2.5,
-        help="electron distribution power-law index",
-    )
-
-    parser.add_argument(
-        "--theta-obs",
-        type=float,
-        default=0.0,
-        help="observer angle [degrees]",
-    )
-
-    parser.add_argument(
-        "--z",
-        type=float,
-        default=0.0,
-        help="redshift",
-    )
-
-    parser.add_argument(
-        "--d-L",
-        type=float,
-        default=1e28,
-        help="luminosity distance [cm]",
     )
 
     parser.add_argument(
@@ -785,26 +757,32 @@ def setup_spectrum_parser(subparsers) -> None:
 # =============================================================================
 
 def execute_generate(args: Namespace, remaining: Optional[list] = None) -> None:
-    """execute generate subcommand"""
+    """build the canonical photon-events catalog from an ARRAY of snapshots. the same
+    yaml spec as skymap/lightcurve drives units + microphysics; the catalog is angle-
+    INDEPENDENT (the line of sight is chosen later at reduction)."""
     from ...afterglow.generate import generate_from_files
+    from ...afterglow.spec import ObserverParams, SystemManifest
+
+    _report_spec_sources(args.files[0], args.observer)
+    observer = ObserverParams.resolve(args.observer, near=args.files[0])
+    manifest = SystemManifest.resolve(args.files[0], scale_fallback=args.scale)
 
     print(f"generating photon events from {len(args.files)} snapshot(s)...")
-
     generate_from_files(
         files=args.files,
         output=args.output,
         max_events=args.max_events,
         photons_per_cell=args.photons_per_cell,
-        eps_e=args.eps_e,
-        eps_b=args.eps_b,
-        p=args.p,
-        theta_obs=np.deg2rad(args.theta_obs),
-        z=args.z,
-        d_L=getattr(args, "d_l", None) or 1e28,
+        eps_e=observer.eps_e,
+        eps_b=observer.eps_b,
+        p=observer.p,
+        theta_obs=0.0,  # catalog is angle-independent; the angle is set at reduction
+        z=observer.redshift,
+        d_L=observer.luminosity_distance_cm(),
         apply_mcrt=args.mcrt,
         include_scattering=not args.no_scattering,
+        qscales=manifest.to_qscales(),
     )
-
     print(f"saved photon events to {args.output}")
 
 
