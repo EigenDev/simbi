@@ -203,8 +203,21 @@ where
     let alloc = sim.fields.cons.den.domain();
     let data_shape: Vec<u64> = (0..D).map(|ax| alloc.spaces[ax].size() as u64).collect();
     let mesh_cells: Vec<u64> = (0..D).rev().map(|ax| interior.spaces[ax].size() as u64).collect();
-    let dx_phys:   Vec<f64>  = sim.geom.dx[..D].iter().map(|&d| d * a).collect();
-    let x_lo_phys: Vec<f64>  = sim.geom.x_lo[..D].iter().map(|&x| x * a).collect();
+    // homologous expansion is RADIAL: a(t) scales the radial coordinate (and, in cartesian,
+    // every coordinate isotropically), but NEVER an angular one (theta/phi) — a moving spherical
+    // mesh must not report theta -> a*theta. mirror the per-geometry volume jacobian (block.rs:
+    // spherical ~a^3 = only r; cylindrical ~a^2 = r,z; cartesian ~a^D = all). axis 0 is x1 (r).
+    let metric_geom = sim.physics.metric.geometry();
+    let axis_scale = |ax: usize| -> f64 {
+        let is_length = match metric_geom {
+            symbi_geometry::Geometry::Cartesian => true,
+            symbi_geometry::Geometry::Spherical => ax == 0,
+            symbi_geometry::Geometry::Cylindrical => ax == 0 || ax == D - 1,
+        };
+        if is_length { a } else { 1.0 }
+    };
+    let dx_phys:   Vec<f64>  = sim.geom.dx[..D].iter().enumerate().map(|(ax, &d)| d * axis_scale(ax)).collect();
+    let x_lo_phys: Vec<f64>  = sim.geom.x_lo[..D].iter().enumerate().map(|(ax, &x)| x * axis_scale(ax)).collect();
     // ----- RegimeSpec-driven conserved iteration ------
     let conserved = collect_bucket(R::SPEC.fields, |fs, idx| {
         match fs.name {

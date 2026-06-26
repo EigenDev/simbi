@@ -58,8 +58,21 @@ class MeshAdapter:
             # default to linear
             coords_comoving = np.linspace(xmin, xmax, ncells + 1)
 
-        # apply scale factor for moving mesh: r_phys = a(t) * r_comoving
-        coords_physical = coords_comoving * self._mesh.scale_factor_a
+        # apply the moving-mesh scale factor. homologous expansion scales LENGTH axes only, never
+        # angles (theta/phi). this MUST match the writer (symbi-sim checkpoint.rs) and the volume
+        # jacobian (symbi-geometry block.rs). x1 (radial) is the last storage axis; in the reader's
+        # storage order z is axis 0 for cylindrical (r, phi, z).
+        metric = getattr(self._mesh, "metric", "cartesian").lower()
+        radial_axis = self._mesh.ndim - 1
+        if "cartesian" in metric:
+            scales_this_axis = True  # isotropic: every axis is a length
+        elif "cylindrical" in metric:
+            # (r, phi, z): r and z scale; phi (the middle axis) does not. 2D assumes (r, z).
+            scales_this_axis = axis == radial_axis or axis == 0
+        else:  # spherical / default curvilinear: only the radial axis scales
+            scales_this_axis = axis == radial_axis
+        scale = self._mesh.scale_factor_a if scales_this_axis else 1.0
+        coords_physical = coords_comoving * scale
 
         self._coords_cache[axis] = coords_physical
         return coords_physical
