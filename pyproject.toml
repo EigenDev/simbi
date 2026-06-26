@@ -40,9 +40,14 @@ cli = ["rich-argparse"]
 
 # dev tooling installed by `uv sync` (PEP 735). maturin is the BUILD tool that `./dev.py
 # install` (maturin develop) needs in the venv; it is also in [build-system] requires for
-# `pip install .` / wheel builds. it is NOT a runtime dependency.
+# `pip install .` / wheel builds. patchelf is needed ONLY on linux — maturin shells out to it
+# to set the extension's RPATH (the .so links external libs: hdf5, and libcuda/libnvrtc on gpu);
+# macos uses the built-in install_name_tool instead. neither is a runtime dependency.
 [dependency-groups]
-dev = ["maturin>=1.7,<2"]
+dev = [
+    "maturin>=1.7,<2",
+    "patchelf; sys_platform == 'linux'",
+]
 
 [project.scripts]
 simbi = "simbi.cli.__main__:main"
