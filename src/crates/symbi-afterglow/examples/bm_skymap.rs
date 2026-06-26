@@ -64,8 +64,9 @@ fn main() {
     println!("synthesized {} photon packets", events.len());
 
     // a wider arrival window blurs the discrete EATS slices into a continuous image.
+    // fixed_half_width = 0.0 -> auto-size the field of view from the in-window events.
     let img = compute_skymap(
-        &events, obs_dir, t_obs_day, 2.0 * t_obs_day, 0.0, 1.0e30, 0.0, doppler_power, n_pix,
+        &events, obs_dir, t_obs_day, 2.0 * t_obs_day, 0.0, 1.0e30, 0.0, doppler_power, n_pix, 0.0,
     );
 
     // radial surface-brightness profile (equal-area annuli) — the limb-brightening diagnostic.

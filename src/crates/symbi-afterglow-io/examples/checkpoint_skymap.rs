@@ -74,7 +74,9 @@ fn main() {
     println!("synthesized {} photon packets", events.len());
 
     let obs = [theta_obs.sin(), 0.0, theta_obs.cos()];
-    let img = compute_skymap(&events, obs, t_obs, window, 0.0, 1.0e30, 0.0, doppler_power, n_pix);
+    // fixed_half_width = 0.0 -> auto-size the field of view from the in-window events.
+    let img =
+        compute_skymap(&events, obs, t_obs, window, 0.0, 1.0e30, 0.0, doppler_power, n_pix, 0.0);
 
     // write the PGM (same header convention as the BM example -> plot_bm_skymap.py renders it).
     let maxv = img.intensity.iter().cloned().fold(0.0_f64, f64::max).max(1e-300);
