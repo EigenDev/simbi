@@ -549,7 +549,7 @@ fn events_from_tree(tree: &TreeBuf) -> PyResult<PhotonEvents> {
 /// frequencies [Hz]).
 #[pyfunction]
 #[pyo3(name = "lightcurve_from_events")]
-#[pyo3(signature = (events, observer_direction, frequencies, redshift, luminosity_distance, time_bins))]
+#[pyo3(signature = (events, observer_direction, frequencies, redshift, luminosity_distance, time_bins, doppler_power=3.0, frac_bandwidth=0.1))]
 fn lightcurve_from_events_py(
     events: &PhotonEvents,
     observer_direction: Vec<f64>,
@@ -557,6 +557,8 @@ fn lightcurve_from_events_py(
     redshift: f64,
     luminosity_distance: f64,
     time_bins: Vec<f64>,
+    doppler_power: f64,
+    frac_bandwidth: f64,
 ) -> PyResult<(Vec<f64>, Vec<f64>, Vec<f64>)> {
     if observer_direction.len() != 3 {
         return Err(PyValueError::new_err(
@@ -571,6 +573,8 @@ fn lightcurve_from_events_py(
         redshift,
         luminosity_distance,
         &time_bins,
+        doppler_power,
+        frac_bandwidth,
     );
     Ok((lc.times, lc.fluxes, lc.frequencies))
 }

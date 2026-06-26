@@ -10,11 +10,14 @@
 //
 // these operate purely on the raw-f64 events (the serialization boundary), so they
 // carry no `units` types — they are binning + normalization over a fixed catalog.
-// absorbed packets are skipped; arrival time is t_emission + r/c (light curve /
-// polarization) or the EATS form (1+z)(t_em - r.n/c) (sky map), matching the legacy.
+// absorbed packets are skipped; the arrival time is the SAME equal-arrival-time-surface
+// form (1+z)(t_em - r.n/c) everywhere (light curve, sky map, polarization). the light
+// curve is the sky map integrated over the sky: identical per-packet selection (EATS,
+// observer-direction doppler delta^power, observed-frequency band) binned in observer
+// TIME instead of sky position, so F_nu(t) and the image are the same physical quantity.
 //
 // usage:
-//  let lc = compute_lightcurve_from_events(&events, [s,0,c], &nus, z, d_l, &tbins);
+//  let lc = compute_lightcurve_from_events(&events, [s,0,c], &nus, z, d_l, &tbins, 3.0, 0.1);
 // =============================================================================
 
 use crate::constants::{C_LIGHT, H_PLANCK, PI, SECONDS_PER_DAY};
@@ -29,8 +32,12 @@ pub const DOPPLER_BAND: f64 = 3.0;
 /// doppler weighting exponent for a frequency-integrated (bolometric) image: delta^4.
 pub const DOPPLER_BOLOMETRIC: f64 = 4.0;
 
+/// convert a CGS spectral flux density [erg/(s cm^2 Hz)] to milli-janskys:
+/// 1 Jy = 1e-23 erg/(s cm^2 Hz), and 1 mJy = 1e-3 Jy, so [erg/(s cm^2 Hz)] * 1e26 = [mJy].
+pub const MJY_PER_CGS_FLUX: f64 = 1.0e26;
+
 /// flux density binned by observer time and frequency. `fluxes` is `n_times * n_freqs`,
-/// indexed `t_bin * n_freqs + f_bin` (CGS spectral flux density [erg/(s cm^2 Hz)]).
+/// indexed `t_bin * n_freqs + f_bin` in [mJy].
 #[derive(Clone, Debug)]
 pub struct ObserverLightcurve {
     pub times:       Vec<f64>,
@@ -114,9 +121,16 @@ fn bin_index(edges: &[f64], x: f64) -> Option<usize> {
     None
 }
 
-/// light curve for a chosen line of sight: bin each visible packet's flux contribution
-/// `E / (4 pi d_L^2 dnu dt)` into its (observer-time, observed-frequency) bin. `time_bins`
-/// are day edges, `frequencies` are Hz edges; `redshift` shifts the observed frequency.
+/// light curve for a chosen line of sight = the SKY MAP integrated over the sky. each
+/// non-absorbed packet is binned by its EATS arrival time and contributes the SAME beamed
+/// flux the sky map would place on the image: `F_nu = energy * delta^doppler_power /
+/// (4 pi d_L^2 dt dnu)` in [mJy]. `time_bins` are day edges; `frequencies` are the CENTER
+/// observed frequencies [Hz] (one light curve each), each with a monochromatic band of width
+/// `dnu = nu0 * frac_bandwidth`. because the catalog's `nu_emit` are importance-sampled from
+/// the SPN98 synchrotron spectrum, banding on the OBSERVED frequency recovers the true per-Hz
+/// flux density (not the crude all-energy/dnu approximation). `doppler_power` is 3 for the
+/// specific-intensity (per-Hz) flux — see `DOPPLER_BAND`. additive across catalogs (streams).
+#[allow(clippy::too_many_arguments)]
 pub fn compute_lightcurve_from_events(
     events: &[PhotonEvent],
     observer_direction: [f64; 3],
@@ -124,6 +138,8 @@ pub fn compute_lightcurve_from_events(
     redshift: f64,
     luminosity_distance: f64,
     time_bins: &[f64],
+    doppler_power: f64,
+    frac_bandwidth: f64,
 ) -> ObserverLightcurve {
     let n_times = time_bins.len();
     let n_freqs = frequencies.len();
@@ -131,31 +147,32 @@ pub fn compute_lightcurve_from_events(
 
     let obs_hat = normalize(observer_direction);
     let d_l_sq = luminosity_distance * luminosity_distance;
+    let one_plus_z = 1.0 + redshift;
     let time_bins_s: Vec<f64> = time_bins.iter().map(|t| t * SECONDS_PER_DAY.value()).collect();
 
     for evt in events.iter().filter(|e| !e.absorbed) {
-        // visibility: packet must propagate roughly toward the observer (< 60 deg).
-        let cos_angle = evt.px * obs_hat[0] + evt.py * obs_hat[1] + evt.pz * obs_hat[2];
-        if cos_angle < 0.5 {
-            continue;
-        }
-        // equal-arrival-time surface, IDENTICAL to compute_skymap: the beamed front of an
-        // emitter at lab position r reaches the observer at t_obs = (1+z)(t_em - r.n/c). the
-        // old form (t_em + |r|/c — isotropic, no projection onto n, no redshift) put every
-        // emitter at ~back-of-source light-travel, landing OUTSIDE the real window and zeroing
-        // the curve while the skymap (correct EATS) showed flux from the same catalog.
+        // equal-arrival-time surface, IDENTICAL to compute_skymap: t_obs = (1+z)(t_em - r.n/c).
         let r_dot_n = evt.x * obs_hat[0] + evt.y * obs_hat[1] + evt.z * obs_hat[2];
-        let t_arrival = (1.0 + redshift) * (evt.t_emission - r_dot_n / C_LIGHT.value());
+        let t_arrival = one_plus_z * (evt.t_emission - r_dot_n / C_LIGHT.value());
         let Some(t_bin) = bin_index(&time_bins_s, t_arrival) else { continue };
-
-        // observed frequency: comoving frequency boosted by the doppler factor, redshifted.
-        let nu_obs = evt.doppler_factor * evt.nu_emit / (1.0 + redshift);
-        let Some(f_bin) = bin_index(frequencies, nu_obs) else { continue };
-
-        let dnu = frequencies[f_bin + 1] - frequencies[f_bin];
         let dt = time_bins_s[t_bin + 1] - time_bins_s[t_bin];
-        let flux_contrib = evt.energy_weight / (4.0 * PI * d_l_sq * dnu * dt);
-        fluxes[t_bin * n_freqs + f_bin] += flux_contrib * evt.stokes_i;
+
+        // observer-direction doppler from the lab-frame fluid VELOCITY (not the random photon
+        // direction, which is a sampling artifact the sky map also ignores): delta = 1/(gamma(1-beta.n)).
+        let b = evt.beta_vec;
+        let beta_dot_n = b[0] * obs_hat[0] + b[1] * obs_hat[1] + b[2] * obs_hat[2];
+        let delta = 1.0 / (evt.lorentz_factor() * (1.0 - beta_dot_n));
+        let nu_obs = delta * evt.nu_emit / one_plus_z;
+        let beamed = evt.energy_weight * evt.stokes_i * delta.powf(doppler_power);
+
+        // accumulate into every requested frequency whose monochromatic band brackets nu_obs.
+        for (f_idx, &nu0) in frequencies.iter().enumerate() {
+            let dnu = nu0 * frac_bandwidth;
+            if (nu_obs - nu0).abs() <= 0.5 * dnu {
+                let f_nu = beamed / (4.0 * PI * d_l_sq * dt * dnu) * MJY_PER_CGS_FLUX;
+                fluxes[t_bin * n_freqs + f_idx] += f_nu;
+            }
+        }
     }
 
     ObserverLightcurve {
@@ -354,28 +371,31 @@ mod tests {
         let mut absorbed = visible;
         absorbed.absorbed = true;
 
-        let nus = vec![1.0e14, 1.0e16];
+        // a single CENTER frequency at the packet's observed nu (delta=1 here -> nu_obs=1e15).
+        let nus = vec![1.0e15];
         // EATS t_obs = (1+z)(t_em - r.n/c) = -(1e16/c) ~ -3.86 day: a near-side emitter (at +x,
         // toward the +x observer) arrives EARLY relative to the origin -> inside [-10, 0] day.
         let tbins = vec![-10.0, 0.0];
         let obs = [1.0, 0.0, 0.0];
 
-        let lc = compute_lightcurve_from_events(&[visible], obs, &nus, 0.0, 1.0e26, &tbins);
+        let lc = compute_lightcurve_from_events(&[visible], obs, &nus, 0.0, 1.0e26, &tbins, 3.0, 0.1);
         assert!(lc.fluxes.iter().any(|&f| f > 0.0), "visible packet should land flux");
 
-        let lc0 = compute_lightcurve_from_events(&[absorbed], obs, &nus, 0.0, 1.0e26, &tbins);
+        let lc0 = compute_lightcurve_from_events(&[absorbed], obs, &nus, 0.0, 1.0e26, &tbins, 3.0, 0.1);
         assert!(lc0.fluxes.iter().all(|&f| f == 0.0), "absorbed packet contributes nothing");
     }
 
-    // a packet pointing away from the observer is not visible.
+    // the monochromatic band selects only packets whose OBSERVED frequency brackets the target:
+    // a packet at nu_obs=1e15 lands in a band centered there but is absent from a far band.
     #[test]
-    fn lightcurve_skips_back_facing() {
-        let mut away = packet_toward_x(1.0e15, 1.0, 1.0e16);
-        away.px = -1.0; // pointing at -x, observer at +x
-        let lc = compute_lightcurve_from_events(
-            &[away], [1.0, 0.0, 0.0], &[1.0e14, 1.0e16], 0.0, 1.0e26, &[0.0, 10.0],
-        );
-        assert!(lc.fluxes.iter().all(|&f| f == 0.0));
+    fn lightcurve_bands_by_observed_frequency() {
+        let evt = packet_toward_x(1.0e15, 1.0, 1.0e16);
+        let obs = [1.0, 0.0, 0.0];
+        let tbins = vec![-10.0, 0.0];
+        let on = compute_lightcurve_from_events(&[evt], obs, &[1.0e15], 0.0, 1.0e26, &tbins, 3.0, 0.1);
+        let off = compute_lightcurve_from_events(&[evt], obs, &[1.0e12], 0.0, 1.0e26, &tbins, 3.0, 0.1);
+        assert!(on.fluxes[0] > 0.0, "packet lands in its own frequency band");
+        assert!(off.fluxes.iter().all(|&f| f == 0.0), "packet absent from a far band");
     }
 
     // unpolarized packets (Q=U=V=0) give zero polarization degree but finite intensity.
