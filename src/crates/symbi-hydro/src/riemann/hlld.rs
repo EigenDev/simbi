@@ -36,7 +36,7 @@ const SECANT_PERTURBATION: f64 = 1e-6;
 /// low-B regime threshold: below `bn^2/p < this`, use the low-B quadratic
 /// pressure estimate instead of the HLL recovered pressure.
 const LOW_B_PRESSURE_RATIO: f64 = 0.01;
-/// secant iteration count. matches the legacy `max_iter = 15`.
+/// secant iteration count (`max_iter = 15`).
 const SECANT_STEPS: usize = 15;
 /// RELATIVE degeneracy tolerance for the transverse-star denominator at the
 /// Alfven resonance, shared by the newtonian and isothermal HLLD solvers. the
@@ -74,7 +74,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     let eps = S::from_f64(DIVZERO_GUARD);
     let one = S::ONE;
     let zero = S::ZERO;
-    // sign of bn, branchless. eps offset matches the legacy host code.
+    // sign of bn, branchless. the eps offset keeps the sign well-defined at bn == 0.
     let sgn_bn = S::select(bn.cmp_ge(zero), one + eps, -one + eps);
 
     let big = S::from_f64(DIVERGENCE_GUARD * 10.0);
@@ -299,8 +299,8 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let lam = [a_l, a_r];
 
     // initial pressure guess: L+R average of TOTAL pressure (gas + magnetic).
-    // the legacy host code recovered the HLL state's primitive pressure via
-    // `regime.to_primitive`, but that requires `OrderedNumeric` and isn't
+    // recovering the HLL state's primitive pressure via `regime.to_primitive`
+    // would require `OrderedNumeric` and isn't
     // Gv-traceable (the c2p error code is host-only). the L+R average is
     // strictly positive, monotonic in inputs, and the secant converges fine
     // from it — the only cost is a few more iterations on extreme shocks.

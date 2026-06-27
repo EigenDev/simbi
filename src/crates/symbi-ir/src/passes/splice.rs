@@ -130,10 +130,9 @@ pub fn splice_graph(
                 target.add_lambda(fn_def, node.span)
             }
             _ => {
-                // SINGLE remap call (Phase 3): `try_map_inputs` knows which
+                // SINGLE remap call: `try_map_inputs` knows which
                 // fields are NodeIds for each variant. lookup forwards into
-                // `remap[..]`; missing entry is the same `OutputOutOfRange`
-                // error the legacy `remap_one` used to raise.
+                // `remap[..]`; a missing entry is an `OutputOutOfRange` error.
                 let mut op = node.op.clone();
                 op.try_map_inputs(|id| {
                     remap[id.0 as usize].ok_or(SpliceError::OutputOutOfRange)

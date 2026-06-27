@@ -17,8 +17,8 @@
 //
 // the wave-speed map is D-generic: it folds the per-axis relativistic Davis speed
 // (vn = vel[d], shared cs) over all D axes with a per-axis inv_dx, so the CFL is the
-// anisotropic-correct `cfl_from_lambda` — matching the iso/Newton convention and the
-// C++ per-axis `srhd::wave_speeds(prim, e_d)` projection.
+// anisotropic-correct `cfl_from_lambda` — matching the iso/Newton convention via a
+// per-axis wave-speed projection.
 //
 // the SRHD scheme is validated by the Marti & Mueller relativistic Sod through
 // the real evolve() loop in tests/substrate_srhd_sod.rs.

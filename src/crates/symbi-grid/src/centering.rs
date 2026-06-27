@@ -5,7 +5,7 @@
 // the `Centering` trait + `Cell` / `Face` / `Edge` zero-sized markers let
 // the type system distinguish cell-centered, face-centered, and edge-centered
 // fields — but NOT which axis they're staggered on. axis information lives
-// in array indices, matching C++ `vector_t<flux>[axis]`.
+// in array indices.
 //
 // usage:
 //   Field<f64, D, Mem>                    -> cell-centered (default)
@@ -21,8 +21,8 @@
 // rationale for axis-erased markers (rather than `Face<const AX: usize>`):
 // chalkboard kernels need `for cc in 0..D { bface[cc][coord] }` patterns.
 // arrays require uniform element types — `[Field<.., Face<0>>, Field<..,
-// Face<1>>, ...]` won't typecheck. C++ resolves this the same way: one
-// vector_t indexed by axis, with no per-axis type tag.
+// Face<1>>, ...]` won't typecheck. the resolution is one array indexed by
+// axis, with no per-axis type tag.
 // =============================================================================
 
 /// marker trait for field-centering tags. zero-sized, phantom only.

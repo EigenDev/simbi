@@ -8,8 +8,6 @@
 // guarantees the pointer is valid for the view's lifetime. a view IS a
 // function from coordinates to values: view.at(coord) -> &T.
 //
-// mirrors C++ xpu::mem::view_t<T, Rank>.
-//
 // usage:
 //   let view = field.view();
 //   let val = view.at([2, 3]);

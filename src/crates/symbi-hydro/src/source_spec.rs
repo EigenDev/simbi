@@ -1611,8 +1611,8 @@ mod tests {
     fn rigid_penalty_radius_boundary_is_strict() {
         // the mask uses strict `<` — a cell EXACTLY at the radius produces
         // zero (because d^2 == R^2 is not strictly less). this matches the
-        // C++ helpers.hpp pattern (`signed_distance < 0`) and is the
-        // documented convention. catches an inadvertent `<=` regression.
+        // `signed_distance < 0` convention and is the documented behavior.
+        // catches an inadvertent `<=` regression.
         let body_xm = [0.0_f64, 0.0, 0.0];
         let body_radius = 1.0;
         // d = exactly 1.0 = body_radius. d^2 = 1 = R^2, NOT strictly less.

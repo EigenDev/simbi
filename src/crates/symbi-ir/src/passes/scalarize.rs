@@ -118,7 +118,7 @@ pub enum ScalarExpr {
     /// F1.B.8: free-function call by name with scalar args. emit lowers
     /// as `name(arg0, arg1, ...)` on both CPU and CUDA targets. the
     /// function definition lives outside this elemental — either a
-    /// legacy scalar elemental's `_cuda` accessor (for kernels that
+    /// scalar elemental's `_cuda` accessor (for kernels that
     /// chain through F1.B.8's opaque-call substrate) or a host
     /// function on the CPU path.
     FreeCall {
@@ -293,8 +293,8 @@ pub enum ScalarStmt {
 // every transformation pass (cse, FieldLoadAt rewrite, uses-var detection, the
 // fresh-name index scan) walks scalar statements the same way: visit the
 // immediate scalar expression a stmt CARRIES, then recurse into any child
-// statement bodies. those two notions used to be respelled inline in every
-// backend match — touching one to add a variant meant touching all five.
+// statement bodies. those two notions are encoded ONCE here rather than
+// respelled inline in every backend match.
 //
 // the four helpers below + `with_child_expr` are the one place that encodes
 // "which exprs belong to me" and "which sub-bodies do I own". every walk-style
@@ -1986,7 +1986,7 @@ fn scalar_element_wise(op: ElementWiseOp, mut inputs: Vec<ScalarExpr>) -> Scalar
         ElementWiseOp::BitXor => binop_box(BinaryKind::BitXor, &mut inputs),
         ElementWiseOp::BitNot => ScalarExpr::UnaryOp(UnaryKind::Not, Box::new(inputs.remove(0))),
         // method-based binary. min/max stay as method calls — every backend
-        // renders them as the C++ `my_min`/`my_max` ternary (`a<b?a:b` / `a>b?a:b`):
+        // renders them as the `a<b?a:b` / `a>b?a:b` ternary:
         // the cuda special-case arm, the interp/jit ternary, and the f64/f32
         // `Numeric` carrier. so CPU and GPU agree at NaN/signed-zero (tier-1 #2b)
         // WITHOUT lowering to a scoped `if`-select — that inlines nested min/max

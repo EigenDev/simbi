@@ -160,7 +160,7 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
     /// for each ghost region contributing a non-skip fill, compute the
     /// per-axis map parameters and invoke `dispatch(region, params)`.
     ///
-    /// **legacy 26-box scheme**: classifies `allocated.difference(interior)`
+    /// 26-box scheme: classifies `allocated.difference(interior)`
     /// into up to `3^D - 1` axis-aligned regions (faces + edges + corners)
     /// and dispatches once per non-skip box. correct, but pays per-launch
     /// overhead × 26 per step AND launches with shapes the dispatcher's
@@ -298,9 +298,9 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
 /// cell width. kernels compute `s_max` themselves (map + reduction); this
 /// helper applies the scaling `cfl * dx_min / s_max`.
 ///
-/// note: this is the legacy isotropic form. anisotropic-correct form is
-/// `cfl_from_lambda` — call sites should migrate as their wave-speed maps
-/// are switched to per-axis form.
+/// note: this is the isotropic form. the anisotropic-correct form is
+/// `cfl_from_lambda`, which call sites use once their wave-speed maps are in
+/// per-axis form.
 #[inline]
 pub fn cfl_from_smax(s_max: f64, cfl_number: f64, dx_min: f64) -> f64 {
     cfl_number * dx_min / s_max

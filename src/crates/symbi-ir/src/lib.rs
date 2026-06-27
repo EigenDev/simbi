@@ -2,10 +2,7 @@
 // symbi-ir
 //
 // the substrate's target-independent computation-graph IR — graph, carrier, and
-// the codegen substrate's mathematical contract, all in one crate (consolidated
-// 2026-05-30: symbi-core was folded in here so the IR machine is one layer, not
-// two; the `tensor/` submodule was flattened the same day — its name had become
-// vestigial after the legacy scalar IR was deleted).
+// the codegen substrate's mathematical contract, all in one crate.
 //
 // symbi-discretize lowers carrier-generic physics into this IR by tracing it at
 // `S = Gv`; symbi-aot's build.rs emits kernels (CPU Rust + CUDA source + neutral
@@ -53,7 +50,7 @@ pub mod emit;
 // the typed trace <-> dispatch ABI vocabulary (field-buffer / scalar-param / mesh
 // names) lives in the leaf `symbi-abi` crate so this IR carries the generic
 // `FieldBind`/`ScalarBind` containers without spelling the closed domain vocabulary
-// itself. re-exported below at the historical paths (`symbi_ir::FieldRef`, ...).
+// itself. re-exported below (`symbi_ir::FieldRef`, ...).
 
 // typed kernel registry names for the amr-transfer / field-op family.
 pub mod kernel_id;
@@ -63,13 +60,11 @@ pub mod kernel_id;
 // (opt-in algebraic structure), Geometry (metric-bearing manifold).
 pub mod primitives;
 
-// ───── re-exports — the pre-flatten `tensor::*` surface, now at the crate root.
-// callers that did `symbi_ir::Symbol` now do `symbi_ir::Symbol`; explicit
-// submodule paths (`symbi_ir::graph::NodeId`) become `symbi_ir::graph::NodeId`.
+// ───── re-exports — the IR surface at the crate root.
 
 pub use class::ClassWitness;
-// the ABI vocabulary now lives in `symbi-abi`; re-exported here so downstream callers
-// keep using the historical `symbi_ir::FieldRef` / `symbi_ir::ScalarBind` paths.
+// the ABI vocabulary lives in `symbi-abi`; re-exported here so downstream callers
+// use the `symbi_ir::FieldRef` / `symbi_ir::ScalarBind` paths.
 pub use symbi_abi::{
     BodyScalar, FieldBind, FieldRef, MeshScalar, ScalarBind, ScalarRef, StateComp, StateSlot,
 };

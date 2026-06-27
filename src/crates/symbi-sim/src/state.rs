@@ -1,9 +1,8 @@
 // =============================================================================
 // state.rs
 //
-// simulation state built on the new foundation: symbi-grid Field, symbi-xpu
-// Executor. replaces the old data.rs + containers.rs with types that work
-// on both CPU and GPU via the xpu layer.
+// simulation state built on symbi-grid Field and the symbi-xpu
+// Executor, with types that work on both CPU and GPU via the xpu layer.
 //
 // SoA layout: conserved state is stored as separate fields per component
 // (den, mom[D], nrg) rather than one Field<Cons>. this is optimal for GPU
@@ -443,17 +442,17 @@ pub struct MhdStaggeredFields<const D: usize, const DOF: usize, M: MemorySpace =
     /// per DOF vector component. the D in-plane components [0..D) are interpolated
     /// from bface after CT; the (DOF-D) out-of-plane components [D..DOF) have no
     /// face to stagger on and are carried/evolved cell-centered directly (1.5D /
-    /// 2.5D MHD — docs/design/30). at D=DOF this is the legacy all-interpolated B.
+    /// 2.5D MHD — docs/design/30). at D=DOF this is the fully interpolated B.
     pub bcell: BcellFields<D, DOF, M, Sc>,
 
     /// RK2 snapshot of bcell at the start of a step (bcell^n). the godunov
-    /// flux-evolves bcell as a conserved component (matching C++ scale_gas/add_gas,
-    /// which include B); the RK2 combine needs bcell^n. the flux-predicted bcell is
+    /// flux-evolves bcell as a conserved component (the gas scale/add steps
+    /// include B); the RK2 combine needs bcell^n. the flux-predicted bcell is
     /// the b_old the magnetic-energy correction reads before CT overwrites bcell.
     pub bcell_n: BcellFields<D, DOF, M, Sc>,
 
     /// face-centered B: bface[d] on interior.extend(d, 0, 1) with ±1 transverse
-    /// halo on each axis tt != d (matches C++ MHD/RMHD face_domains).
+    /// halo on each axis tt != d (the MHD/RMHD face domains).
     /// this is the CT "truth" — evolved by discrete curl of E.
     /// only used in 2D/3D.
     pub bface: BfaceFields<D, M, Sc>,
@@ -864,7 +863,7 @@ where
 // typestate seeding phase: NeedsCells -> (NeedsCells) -> Ready.
 //
 // the builder owns the allocated sim from here. `set_initial` seeds the cell-centered state via
-// the SAME `seed_cells` / `seed_cell` internals the OLD path uses; for MHD it leaves the staggered
+// the `seed_cells` / `seed_cell` internals; for MHD it leaves the staggered
 // faces owed (still NeedsCells) until `seed_faces` sets them (and the bface_initialized flag).
 // `build()` is reachable ONLY at Ready, so an un-seeded sim (or un-seeded MHD faces) can't be built.
 // =============================================================================
@@ -935,8 +934,7 @@ where
 {
     /// seed EVERY interior cell from a primitive closure over the cell CENTER coordinate. routes to
     /// `Ready` (pure hydro — fully seeded) or `NeedsCells` (MHD — faces still owed) via the
-    /// `AfterSetInitial` associated state. routes through `SimStateGeneric::seed_cells` (identical
-    /// behavior to the OLD path).
+    /// `AfterSetInitial` associated state. routes through `SimStateGeneric::seed_cells`.
     pub fn set_initial(
         self,
         prim_at: impl Fn([f64; D]) -> <R as Regime<Sc, DOF>>::Prim,
@@ -1176,7 +1174,7 @@ impl<const D: usize> From<BoundaryType> for Boundaries<D> {
 }
 
 /// the configuration errors `SimBuilder::allocate` surfaces BEFORE allocating fields (and the
-/// solver/regime mismatch the phase-2 wiring will check). a typed result in place of the OLD
+/// solver/regime mismatch the phase-2 wiring will check). a typed result rather than an
 /// `expect`/`panic` config seam.
 #[derive(Debug)]
 pub enum ConfigError {
@@ -1312,7 +1310,7 @@ pub struct FieldStore<
     // ---- mesh motion (ALE) ----
     pub motion: MotionState<f64>,
     // traced scale-factor law a(t)/a_dot(t); when present the time loop evaluates it EXACTLY each
-    // (sub)stage instead of linearly extrapolating `motion.a`. None = static / legacy linear.
+    // (sub)stage instead of linearly extrapolating `motion.a`. None = static / linear.
     pub motion_law: Option<symbi_hydro::motion_law::MotionLaw>,
 
     // ---- immersed bodies (optional side-car) ----
@@ -1594,9 +1592,9 @@ where
         // prim.pre allocation is REGIME-uniform across CPU and GPU (docs/design/34): adiabatic
         // allocates it (the pressure primitive); isothermal does NOT — iso's pressure lives in the
         // kernel-set's substrate-owned `self.pre` (= cs^2*rho), bound by every iso kernel via the
-        // `pre` override on CPU AND GPU. the old `|| S::IS_DEVICE` allocated a DEAD placeholder on
-        // iso-GPU (the stale positional-ABI "derefs pre unconditionally" path is unused; nothing
-        // writes or reads `sim.fields.prim.pre` for iso) — a CPU/GPU storage divergence, now gone.
+        // `pre` override on CPU AND GPU. an `|| S::IS_DEVICE` term would allocate a DEAD placeholder on
+        // iso-GPU (a positional-ABI "derefs pre unconditionally" path that is unused; nothing
+        // writes or reads `sim.fields.prim.pre` for iso) — a CPU/GPU storage divergence avoided here.
         let alloc_pre = has_energy;
 
         let fields = PartitionFieldsGeneric {

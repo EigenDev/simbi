@@ -43,7 +43,7 @@ pub struct GvKernel {
     /// empty for pointwise kernels. feeds `KernelEmitInputs::coord_components`.
     pub coord_components: Vec<u8>,
     /// the launch grade this kernel is to be issued over. fusion (`try_fuse`)
-    /// requires both sides to share a grade; untagged legacy kernels never
+    /// requires both sides to share a grade; untagged kernels never
     /// fuse. see `LaunchGrade` and `try_fuse`.
     pub grade: LaunchGrade,
     /// optional shared-memory tile specification. when `Some`, the CUDA emit is
@@ -136,7 +136,7 @@ impl LaunchGrade {
         }
     }
 
-    /// the sentinel that opts out of fusion. used by the legacy `end_trace()`.
+    /// the sentinel that opts out of fusion. used by `end_trace()`.
     pub fn untagged() -> Self {
         Self::default()
     }
@@ -229,9 +229,8 @@ pub fn begin_trace() {
 /// take the finished trace (graph + manifest) out, closing it.
 ///
 /// the resulting kernel is **untagged** — it will not participate in
-/// `try_fuse`. legacy callers that don't care about fusion get exactly the
-/// previous behavior. new callers should prefer `end_trace_for_domain(d)` to
-/// opt into the fusion algebra.
+/// `try_fuse`. callers that don't care about fusion use this; callers that
+/// want the fusion algebra should prefer `end_trace_for_domain(d)`.
 pub fn end_trace() -> GvKernel {
     end_trace_with(LaunchGrade::untagged())
 }
@@ -770,8 +769,7 @@ impl symbi_algebra::algebra::Numeric for Gv {
 // Bool-typed." `BitAnd` / `BitOr` / `Not` emit the corresponding graph Bool
 // ops (`ElementWiseOp::BitAnd` / `BitOr` / `BitNot`).
 //
-// the legacy `impl Scalar for Gv` against `symbi_algebra::Scalar` was deleted
-// 2026-05-30 (Tier 1 chunk 5); this is the single carrier surface workspace-wide.
+// this is the single carrier surface workspace-wide.
 // =============================================================================
 
 /// type-safe Mask wrapper for Gv. wraps a Gv carrying a Bool-typed graph
@@ -894,7 +892,7 @@ impl crate::algebra::Scalar for Gv {
     // same convention as `scope`). emit an Op::IfElse carrying the cond, both
     // arm bodies, and each arm's result. scalarize lowers the arm bodies
     // INSIDE their respective `if`/`else` brace so only the taken arm executes
-    // — the carrier-portable form of the C++ early-conditional.
+    // — the carrier-portable form of an early-out conditional.
     //
     // shared upstream values (the cond, any pre-branch subexpression) are
     // created BEFORE the closures, so they fall OUTSIDE both ranges and stay in
@@ -1435,7 +1433,7 @@ mod fusion_laws {
     }
 
     /// existing fusion laws don't regress when both kernels declare `None`
-    /// for `tile_spec` (the legacy path). identity + grade-mismatch +
+    /// for `tile_spec` (the untiled path). identity + grade-mismatch +
     /// untagged still flow through `try_fuse` unchanged.
     #[test]
     fn untiled_kernels_still_fuse_as_before() {

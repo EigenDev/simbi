@@ -741,7 +741,7 @@ mod tests {
 
         // converges within the count: keep-OLD freezes at the last pre-threshold value
         // (4: at prev=4, cur=5 trips `cur >= 5`, so the OLD 4 is kept). the traced loop
-        // must freeze there, NOT run to count=20 (the pre-fix value).
+        // must freeze there, NOT run to count=20.
         let host = ramp::<f64>(0.0, 20, 5.0);
         let gv = run_gv(20, 5.0, 0.0);
         assert_eq!(host, 4.0, "host keep-OLD freeze returns the last pre-convergence value");
@@ -759,8 +759,8 @@ mod tests {
     fn cond_is_a_lazy_branch_carrier_equivalent_and_renders_if_else() {
         // the DUAL of iterate: `S::cond` is a real data-dependent branch. the
         // untaken arm computes acosh(x) (NaN for x < 1); with `cond` it traces
-        // INTO the `if` block and runs ONLY when x > 1 — the carrier-portable
-        // C++ early-`if`, not compute-all-paths.
+        // INTO the `if` block and runs ONLY when x > 1 — a carrier-portable
+        // early-`if`, not compute-all-paths.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
         use symbi_ir::{emit_kernel_from_lowering, Cpu, CpuField, CpuFieldMut, KernelEmitInputs};
 

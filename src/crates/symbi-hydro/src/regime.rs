@@ -42,7 +42,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// the declarative metadata bundle for this regime — name, field layout,
     /// flag consts, c2p flavor. B4-i (docs/design/09 §2.3): the physics
     /// regime as a FIRST-CLASS DATA VALUE. callers prefer
-    /// `<Self as Regime<S, D>>::SPEC.is_relativistic` over the legacy
+    /// `<Self as Regime<S, D>>::SPEC.is_relativistic` over the
     /// `self.is_relativistic()` accessor; the bool methods below default to
     /// reading from SPEC so per-regime impls don't repeat the flag.
     const SPEC: &'static RegimeSpec;
@@ -166,8 +166,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     // back silently to HLLE — a lie in code that masked "this regime does
     // not implement a three-wave star solver." HLLC is now an explicit free
     // function per regime: `crate::riemann::hllc` (newtonian),
-    // `crate::riemann::hllc_srhd`, `crate::riemann::hllc_rmhd` — each
-    // mirroring the C++ `cpp_src/physics/hydro/solvers/hllc.hpp` layout.
+    // `crate::riemann::hllc_srhd`, `crate::riemann::hllc_rmhd`.
     // callers that genuinely want HLLE invoke `crate::riemann::hlle`
     // directly (regime-generic; resolves shock + rarefaction, not contact).
 }

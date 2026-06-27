@@ -161,9 +161,9 @@ impl KernelRenderer for RustRenderer {
         "#[allow(unused_parens)]\n".to_string()
     }
     fn buffer_param(&self, idx: u32, is_output: bool) -> String {
-        // Phase 1B-4: per-buffer arg is ONE view-struct reference. all of `lo`,
-        // `extent`, and pre-multiplied `strides` ride along inside the struct.
-        // the OLD scattered `buf_lo_X_a` / `buf_extent_X_a` scalar args are gone
+        // per-buffer arg is ONE view-struct reference. all of `lo`,
+        // `extent`, and pre-multiplied `strides` ride along inside the struct;
+        // there are no scattered `buf_lo_X_a` / `buf_extent_X_a` scalar args
         // (see `skip_scattered_buffer_layout_args` below).
         if is_output {
             self.mut_buf_indices.borrow_mut().push(idx);
@@ -401,7 +401,7 @@ impl KernelRenderer for RustRenderer {
     }
     fn load_at_expr(&self, buf: u32, flat: &str) -> String {
         // every stencil load goes through the same view-struct: `field{N}.data`.
-        // mirrors the C++ `view_t::operator()` — one method, every emitter.
+        // one indexing method, every emitter.
         if unchecked_loads() {
             format!("(unsafe {{ *field{buf}.data.get_unchecked({flat}) }})")
         } else {

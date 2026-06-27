@@ -4,8 +4,7 @@
 // the CARTESIAN sharp relativistic Sod through the real evolve() loop — the
 // SRHD-robustness control that the smooth-pulse dgeneric smoke did not cover.
 // it proves the BASE SRHD scheme (full relativistic HLLE wave speeds + flux +
-// the iterative pressure-Newton c2p, all matching cpp_src/physics/hydro/
-// {wave_speeds,physics,conversion}.hpp) handles a strong discontinuity and keeps
+// the iterative pressure-Newton c2p) handles a strong discontinuity and keeps
 // the flow subluminal — i.e. the relativistic structure is correct.
 //
 // Marti & Mueller relativistic Sod (gamma=5/3): (rho,p)=(1,1)|(0.125,0.1), v=0.

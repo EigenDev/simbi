@@ -5,8 +5,8 @@
 // discrete physical object (black hole, planet, rigid sphere) embedded in
 // the fluid grid.
 //
-// uses a flat enum for capabilities instead of C++ variadic templates.
-// all state updates are immutable (copy-and-modify).
+// uses a flat enum for capabilities. all state updates are immutable
+// (copy-and-modify).
 //
 // usage:
 //   let bh = Body::black_hole(0, pos, vel, 1.0, 0.1, 0.04, 10.0, 0.0, 0.2);

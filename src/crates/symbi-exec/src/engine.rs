@@ -395,7 +395,7 @@ const TILED_SMEM_LIMIT: usize = 48 * 1024;
 /// grid, total <= 256 threads, and — critically — whose `(block + 2*halo)` slab
 /// times `cell_bytes` fits `TILED_SMEM_LIMIT`. tries decreasing cube edges and
 /// shrinks the largest dim to meet the thread cap. `SYMBI_TILE_BLOCK="8,8,4"`
-/// overrides for the tile-size sweep (docs/design/22 §G). this REPLACES the
+/// overrides for the tile-size sweep (docs/design/22 §G). this is used in place of the
 /// warp-first `block_for` for tiled kernels, whose [32,8,1] shape blows the slab
 /// when the halo sits on a thin (block=1) axis.
 #[cfg(feature = "cuda")]

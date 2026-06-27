@@ -4,8 +4,7 @@
 // compile-time dimensional analysis for the afterglow physics (CGS gaussian).
 // a `Quantity<M, L, T>` is an f64 tagged with type-level mass/length/time exponents:
 // multiplying or dividing quantities tracks the resulting dimensions, and adding
-// mismatched dimensions is a COMPILE error. this is the rust port of the legacy
-// `quantity_t<M,L,T,Q,K>` (units.hpp), which tracked the same with `std::ratio`.
+// mismatched dimensions is a COMPILE error.
 //
 // exponents are HALF-INTEGER-ENCODED: each type parameter is twice the physical
 // exponent (typenum `P2` => power 1), because gaussian electromagnetism is

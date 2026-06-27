@@ -205,15 +205,13 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     let eval = &rs.eval;
     let rs_params = &rs.params;
 
-    // the PURE-OP + SINGLE-WRITER model (the C++ op/executor separation). each cell's op READS the
+    // the PURE-OP + SINGLE-WRITER model (op/executor separation). each cell's op READS the
     // stage input and COMPUTES its source contribution `s`; the ONLY field mutation is
     // `Field::add_assign_checked` — the audited writer, whose bounds check is RELEASE-ACTIVE. the op
     // never writes a field directly, so there is exactly one place writes happen and they are
     // checked. parallelism is a flat `par_iter` over the interior coords: each coord is handled by
     // exactly ONE thread (disjoint cells), so the read-modify-write is race-free BY CONSTRUCTION,
-    // and a bad index PANICS loudly instead of corrupting the heap. this replaces both the serial
-    // loop and the earlier hand-parallel rewrite (over `DomainForEach::for_each` + unchecked
-    // `ViewMut::set`) that corrupted the heap.
+    // and a bad index PANICS loudly instead of corrupting the heap.
     let coords: Vec<[isize; D]> = sim.geom.interior.iter().collect();
     coords.par_iter().for_each(|&c| {
         let rho = (*u.den.at(c)).to_f64();

@@ -94,8 +94,8 @@ shim1!(sh_asinh, asinh); shim1!(sh_acosh, acosh); shim1!(sh_atanh, atanh);
 shim1!(sh_exp, exp); shim1!(sh_exp2, exp2);
 shim1!(sh_ln, ln); shim1!(sh_log2, log2); shim1!(sh_log10, log10);
 shim1!(sh_round, round);
-// no min/max/abs shims: they are emitted inline as fcmp + select (the C++ `my_*`
-// ternary) in translate_expr, matching cuda / interp / the Numeric carrier.
+// no min/max/abs shims: they are emitted inline as fcmp + select (a ternary)
+// in translate_expr, matching cuda / interp / the Numeric carrier.
 shim2!(sh_atan2, atan2);
 shim2!(sh_powf, powf); shim2!(sh_hypot, hypot);
 extern "C" fn sh_powi(a: f64, b: f64) -> f64 { a.powi(b as i32) }
@@ -429,7 +429,7 @@ fn translate_expr(
                 "floor" => return Ok(b.ins().floor(recv)),
                 "ceil" => return Ok(b.ins().ceil(recv)),
                 "trunc" => return Ok(b.ins().trunc(recv)),
-                // abs/min/max as the C++ `my_*` TERNARY (fcmp + select), NOT
+                // abs/min/max as a TERNARY (fcmp + select), NOT
                 // libdevice fabs/fmin/fmax — bit-matches the cuda emit, the interp,
                 // and the f64/f32 `Numeric` carrier at NaN / signed-zero (tier-1
                 // #2b). CLIF select is a value, not a lexical scope, so there is no
@@ -1032,7 +1032,7 @@ mod tests {
 
         // deterministic xorshift inputs (no rng dep). the domain is DELIBERATELY HARSH — negatives,
         // the zero-crossing, signed zeros, and magnitude extremes — to stress the native CLIF ops
-        // (fcmp/select/div/sqrt/neg) at the edges the old [0.1, 1.7] range never reached. interp ==
+        // (fcmp/select/div/sqrt/neg) at the edges a narrow positive range never reaches. interp ==
         // cranelift must hold on NaN/Inf too: every native op is IEEE-754 on both sides, every
         // MethodCall routes through the SAME std shim. (the carrier oracle's whole job is to catch a
         // codegen divergence; a narrow fuzz domain is exactly how a min/max-style NaN bug hides.)

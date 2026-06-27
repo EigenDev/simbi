@@ -376,9 +376,9 @@ pub fn godunov_stage_gv_with_fused_built(
 // =============================================================================
 // THE UNIFIED DAG-APPLICATION OPERATOR (docs/design/33 section 7).
 //
-// `apply_dag_core_gv` is the ONE kernel builder behind BOTH the interior source pass and (future,
-// docs/design/33) the driven-boundary pass. it factors out the four decisions the old
-// `source_apply_core_gv` baked: WHERE the DAG reads state (`StateEnv`), and HOW its result lands in
+// `apply_dag_core_gv` is the ONE kernel builder behind BOTH the interior source pass and
+// (docs/design/33) the driven-boundary pass. it factors out the decisions a source/boundary
+// makes: WHERE the DAG reads state (`StateEnv`), and HOW its result lands in
 // the target field (`WriteMode`). the iteration domain + target-field binding are the dispatch's job
 // (the same `dispatch_runtime_ir` + `resolve_path` serve cons.* and prim.*), so this builder is the
 // whole difference between a source and a boundary prescription. doc 32's user `combine` projects

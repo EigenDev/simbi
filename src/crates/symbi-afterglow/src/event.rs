@@ -1,9 +1,9 @@
 // =============================================================================
 // event.rs
 //
-// the lab-frame photon packet — the data product of the monte-carlo transfer path
-// (ported from the legacy `photon_event_t`). a packet carries TWO distinct physical
-// quantities that the legacy conflated into one `energy` field:
+// the lab-frame photon packet — the data product of the monte-carlo transfer path.
+// a packet carries TWO distinct physical
+// quantities that must not be conflated into a single `energy` field:
 //   - `nu_emit`       : the comoving (emitter-frame) photon frequency [Hz], sampled
 //                       from the cell's synchrotron spectrum — this is what sets the
 //                       observed frequency (nu_obs = delta * nu_emit / (1+z)) and the
@@ -11,7 +11,7 @@
 //   - `energy_weight` : the comoving energy [erg] the packet represents (equal per
 //                       cell) — this is what accumulates into flux / intensity.
 // keeping them separate is what lets the monte-carlo spectrum reproduce the analytic
-// broken power law; the old single `energy` field (used BOTH as a weight AND, via
+// broken power law; a single `energy` field (used BOTH as a weight AND, via
 // energy/h, as a frequency) could not.
 //
 // the fields are raw f64 (CGS): a `Vec<PhotonEvent>` IS the serialization boundary

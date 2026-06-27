@@ -297,7 +297,7 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             // declare the N result slots in the outer scope; each arm body ends
             // with `outs[j] = <arm result j>`. a real C `if (cond) { } else { }`
             // — ONE arm runs (a divergent warp runs both, never worse than a
-            // blend). the carrier-portable C++ early-`if`, DUAL of iterate's `for`.
+            // blend). the carrier-portable early-out `if`, DUAL of iterate's `for`.
             for (name, element) in outs {
                 out.push_str(cuda_type_name(*element));
                 out.push(' ');
@@ -371,15 +371,14 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
         ScalarExpr::MethodCall { receiver, method, args } => {
             // emit `min`/`max`/`abs` as INLINE TERNARIES, not fmin/fmax/fabs. the
             // libdevice functions follow IEEE 754-2008 NaN / signed-zero semantics
-            // that differ from the C++ reference `my_min`/`my_max`/`my_abs`
-            // (helpers.hpp:101-118, 171-180); at shock cells the divergent
-            // semantics produced different fluxes CPU vs GPU -> macroscopic Bx
-            // drift in MUB09 (tier-1 #2b). the f64/f32 `Numeric` carrier, the
+            // that differ from the plain `a<b?a:b` ternary; at shock cells the
+            // divergent semantics produced different fluxes CPU vs GPU -> macroscopic
+            // Bx drift in MUB09. the f64/f32 `Numeric` carrier, the
             // interpreter, and the cranelift jit all use this SAME ternary, so the
             // CPU<->GPU bit-oracle (cpu_gpu_minmax_oracle.rs) holds.
-            //   my_min(a, b) = a < b ? a : b
-            //   my_max(a, b) = a > b ? a : b
-            //   my_abs(x)    = x < 0 ? -x : x
+            //   min(a, b) = a < b ? a : b
+            //   max(a, b) = a > b ? a : b
+            //   abs(x)    = x < 0 ? -x : x
             // no headers needed; works in both CUDA C and CUDA C++.
             match method.as_str() {
                 "min" => {
@@ -493,7 +492,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
         }
         ScalarExpr::FreeCall { name, args } => {
             // F1.B.8: direct function call by name. the function
-            // definition is supplied externally (by the legacy scalar
+            // definition is supplied externally (by the scalar
             // elemental's _cuda accessor, embedded into the kernel
             // preamble by the kernel macro). emitter just produces the
             // call site.
@@ -623,7 +622,7 @@ fn cuda_method_to_fn(method: &str) -> &str {
         // NOTE: `abs`, `min`, `max` are handled inline (ternary form) in
         // emit_expr's MethodCall arm — they intentionally do NOT use the libdevice
         // `fabs`/`fmin`/`fmax`, whose IEEE NaN / signed-zero semantics diverge
-        // from the C++ reference (tier-1 #2b). these fallthrough entries are kept
+        // from the plain ternary. these fallthrough entries are kept
         // only for a hypothetical caller that bypasses the special-case path; they
         // are not reached during normal emission.
         "abs"    => "fabs",
@@ -716,8 +715,8 @@ mod tests {
 
     #[test]
     fn abs_emits_ternary_matching_my_abs() {
-        // tier-1 #2b: emit `(x < 0.0 ? -x : x)` not `fabs(x)` so semantics match
-        // the C++ reference `my_abs` (helpers.hpp:171-180) and the CPU carrier.
+        // emit `(x < 0.0 ? -x : x)` not `fabs(x)` so semantics match
+        // the CPU carrier's ternary abs.
         let mut g = Graph::new();
         let x = g.add_scalar_param("x", ElementTy::F64);
         let a = g.element_wise(ElementWiseOp::Abs, vec![x], None);

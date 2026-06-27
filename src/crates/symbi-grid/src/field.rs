@@ -3,11 +3,9 @@
 //
 // the field: owns memory, bound to a domain. the simulation's data container.
 //
-// clone = shallow (shared handle, same as C++ field_t).
+// clone = shallow (shared handle).
 // reads/writes go through views (view/view_mut) or coord-indexed at/set,
 // which the #[symbi::kernel(coord)] macro lowers to.
-//
-// mirrors C++ grid::field_t<T, Rank>.
 //
 // usage:
 //   let f = Field::<f64, 2>::zeros(&domain)?;
@@ -107,12 +105,11 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
 
     /// flat index from coordinate. delegates to `Domain::flat_index` so
     /// `Field` and `View` agree on the storage convention (axis 0 fastest).
-    /// **previously**, this method hand-rolled its own "last axis fastest"
-    /// formula independent of `Domain::strides()` — a fatal divergence: the
-    /// kernel dispatch wrote via `View` using `Domain`'s strides, while host
-    /// `Field::at`/`Field::set` read via this method using the opposite
-    /// formula. writes and reads landed at different addresses, and tests
-    /// that mixed kernel writes with `Field::at` reads silently got garbage.
+    /// this must not hand-roll an independent formula: the kernel dispatch
+    /// writes via `View` using `Domain`'s strides, while host
+    /// `Field::at`/`Field::set` read via this method. any divergence would
+    /// land writes and reads at different addresses and silently corrupt
+    /// code that mixes kernel writes with `Field::at` reads.
     #[inline]
     fn flat_index(&self, coord: [isize; D]) -> usize {
         self.domain.flat_index(coord)

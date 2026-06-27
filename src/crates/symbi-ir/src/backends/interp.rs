@@ -257,10 +257,10 @@ fn eval_binop(op: BinaryKind, a: Value, b: Value) -> Value {
 fn eval_method(recv: f64, method: &str, args: &[f64]) -> Value {
     match method {
         "sqrt" => Value::F(recv.sqrt()),
-        // abs/min/max use the C++ `my_abs`/`my_min`/`my_max` TERNARY, NOT the
+        // abs/min/max use the plain `a<b?a:b` TERNARY, NOT the
         // NaN-symmetric f64::abs/min/max — so the interpreter (the carrier oracle)
         // matches the cuda emit, the cranelift jit, and the f64/f32 `Numeric`
-        // carrier bit-for-bit at NaN / signed-zero (tier-1 #2b).
+        // carrier bit-for-bit at NaN / signed-zero.
         "abs" => Value::F(if recv < 0.0 { -recv } else { recv }),
         "min" => Value::F(if recv < args[0] { recv } else { args[0] }),
         "max" => Value::F(if recv > args[0] { recv } else { args[0] }),

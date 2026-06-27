@@ -8,16 +8,15 @@
 // scalars are rank-0 tensors (empty shape). this is what makes the
 // "scalars are rank-0 tensors anyway" framing real at the IR level.
 //
-// the Det/Tainted lattice from the existing symbi-ir scalar pipeline is
-// reused — every tensor carries a `DetClass` (re-exported alias of
-// `ClassWitness`). transcendentals taint; pure IEEE-mandated ops
-// preserve. propagation rules implemented in ops (R.2).
+// the Det/Tainted lattice carries through the type — every tensor carries a
+// `DetClass` (re-exported alias of `ClassWitness`). transcendentals taint; pure
+// IEEE-mandated ops preserve. propagation rules implemented in ops (R.2).
 // =============================================================================
 
 use crate::{ElementTy, DimExpr, VarianceTag};
 use crate::class::ClassWitness;
 
-/// alias for the existing scalar-IR class witness; tensors carry the
+/// alias for the class witness; tensors carry the
 /// same Det/Tainted lattice. one name in the spec; one type in the
 /// implementation.
 pub type DetClass = ClassWitness;
@@ -200,7 +199,7 @@ mod tests {
 
     #[test]
     fn det_class_re_exports_class_witness() {
-        // sanity that the alias is the same type as the existing scalar IR's
+        // sanity that the alias is the same type as `ClassWitness`
         let _: DetClass = ClassWitness::Det;
         let _: ClassWitness = DetClass::Tainted;
     }

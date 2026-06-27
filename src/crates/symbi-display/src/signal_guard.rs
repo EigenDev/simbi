@@ -1,8 +1,7 @@
 // =============================================================================
 // signal_guard.rs
 //
-// run-scoped graceful-interrupt + terminal recovery. mirrors the c++
-// `helpers::catch_signals()` / `InterruptException` flow: a caught signal does
+// run-scoped graceful-interrupt + terminal recovery. a caught signal does
 // NOT kill the process outright — it sets a stop flag the evolution loop polls,
 // so the driver can write a restart checkpoint and unwind cleanly before
 // exiting. a SECOND signal force-kills (the escape hatch when a checkpoint

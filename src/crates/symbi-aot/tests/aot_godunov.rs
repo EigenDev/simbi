@@ -20,8 +20,8 @@
 
 use symbi_aot::NamedKernel;
 
-// thin shim mapping the old "raw slices + scattered lo" call shape to the
-// Phase 1B-4 view-struct ABI. tests stay focused on the kernel's NUMERICS.
+// thin shim mapping a "raw slices + scattered lo" call shape to the
+// view-struct ABI. tests stay focused on the kernel's NUMERICS.
 fn godunov_mass_1d<S: symbi_aot::Scalar + symbi_aot::OrderedNumeric + Send + Sync>(
     rho: &[S], flux: &[S], rho_new: &mut [S],
     grid_size_0: i32, dom_lo_0: i32,

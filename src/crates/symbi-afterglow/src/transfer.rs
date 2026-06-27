@@ -1,13 +1,13 @@
 // =============================================================================
 // transfer.rs
 //
-// the monte-carlo photon-transfer path (ported from the legacy `rad.cpp`):
+// the monte-carlo photon-transfer path:
 //   - `generate_photon_events` samples relativistically-beamed synchrotron photon
 //     packets from a hydro snapshot. each packet's COMOVING FREQUENCY is drawn from
 //     the cell's broken-power-law synchrotron spectrum, and it carries an equal share
-//     of the cell's emitted energy. (this is the proper energy/frequency model: the
-//     legacy stored a single `energy` and misused energy/h as a frequency, so the
-//     monte-carlo spectrum could not reproduce the analytic one — now it does.)
+//     of the cell's emitted energy. (this is the proper energy/frequency model:
+//     storing a single `energy` and misusing energy/h as a frequency would prevent the
+//     monte-carlo spectrum from reproducing the analytic one; separate fields do.)
 //   - `monte_carlo_radiative_transfer` propagates packets through the medium with
 //     synchrotron self-absorption, thomson scattering, and optional pair production.
 //
@@ -16,9 +16,9 @@
 // the one exception is the empirical SSA coefficient, whose calibrated prefactor carries
 // implicit units and is therefore computed in raw f64 (documented at its site).
 //
-// deviations from the legacy (all deliberate; "C++ is reference, not gospel"):
+// design properties:
 //   - the proper energy/frequency model above (separate nu_emit and energy_weight),
-//   - seeded deterministic RNG (src/rng.rs) instead of std::random_device,
+//   - seeded deterministic RNG (src/rng.rs) for reproducibility,
 //   - correct relativistic-aberration beaming (a rotation, not a magnitude scale),
 //   - per-photon absorption path length (0.1 * emission radius), not 0.1 * x1[0],
 //   - SSA / pair-production keyed on the photon energy h*nu_emit, not the packet weight.
@@ -151,8 +151,8 @@ fn sample_emission_frequency(
 /// (unit vector, fluid frame) by a fluid element moving along `rhat` (unit vector) with
 /// speed `beta` (units of c). relativistic aberration changes the angle to `rhat` from
 /// acos(mu') to acos((mu'+beta)/(1+beta mu')); the result is that rotation applied in the
-/// (rhat, nprime) plane — a proper rotation yielding a UNIT vector. (the legacy scaled
-/// `nprime` by cos(rotation), which de-normalizes the direction; this is the fix.)
+/// (rhat, nprime) plane — a proper rotation yielding a UNIT vector. (scaling
+/// `nprime` by cos(rotation) would de-normalize the direction; the rotation does not.)
 fn beam_direction(rhat: [f64; 3], nprime: [f64; 3], beta: f64) -> [f64; 3] {
     let mu = dot(rhat, nprime);
     let mu_beam = (mu + beta) / (1.0 + beta * mu);
@@ -539,8 +539,8 @@ pub fn compute_skymap_deposit_spherical(
     if ni == 0 || n_pix == 0 || half_width <= 0.0 {
         return image;
     }
-    // n_mu / n_phi / theta_max are legacy tessellation knobs; the EATS-annulus parametrization
-    // below replaces the mu grid with the contributing cone shell, so only n_phi (the azimuth
+    // n_mu / n_phi / theta_max are tessellation knobs; the EATS-annulus parametrization
+    // below uses the contributing cone shell instead of the mu grid, so only n_phi (the azimuth
     // floor) is used. observer_direction is irrelevant for a SPHERE (same image from any angle).
     // all kept in the signature for binding compatibility.
     let _ = (theta_max, n_mu, observer_direction);
@@ -886,8 +886,8 @@ mod tests {
     }
 
     // the spherical generator synthesizes a full sphere from a 1d radial profile with
-    // equal-solid-angle sampling: <mu> ~ 0 and both hemispheres are populated (the legacy tied
-    // emission directions to the hydro mesh, so a 1d run had no sphere at all).
+    // equal-solid-angle sampling: <mu> ~ 0 and both hemispheres are populated (tying
+    // emission directions to the hydro mesh would leave a 1d run with no sphere at all).
     #[test]
     fn spherical_generation_fills_the_sphere_uniformly() {
         let cond = conditions();

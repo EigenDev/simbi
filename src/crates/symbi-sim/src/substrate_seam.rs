@@ -3,9 +3,8 @@
 //
 // the sim <-> substrate seam: the abstractions the sim core needs to TALK ABOUT
 // substrates without depending on any concrete regime KernelSet (docs/design/41).
-// previously these lived one layer too high — `KernelSet` inside the `evolve`
-// integrator, the `Solver`/`RegimeKind` enums inside `regimes/substrate_kernels`
-// — which forced `FieldStore`/`state.rs` to depend UP into `regimes` (the cycle).
+// homing `KernelSet` and the `Solver`/`RegimeKind` enums here keeps
+// `FieldStore`/`state.rs` from depending UP into `regimes` (which would be a cycle).
 //
 // homed here in `symbi-sim`, every reference from the sim core points DOWN; the
 // concrete kernelsets in the `symbi` crate's `regimes/` IMPLEMENT `KernelSet` and

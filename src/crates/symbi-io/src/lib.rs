@@ -11,8 +11,8 @@
 //
 // the writer and reader walk the SAME Tree — no parallel mirror code, no
 // hand-spelled field names in two places. typed `Attr` + `Metadata::with(..)`
-// fluent builder kills the `to_string()` boilerplate that used to litter
-// every example. `field_layout` exposes the canonical on-disk naming so it
+// fluent builder keeps examples free of `to_string()` boilerplate.
+// `field_layout` exposes the canonical on-disk naming so it
 // derives from `RegimeSpec.fields` instead of being duplicated in the writer.
 //
 // design references:

@@ -4,8 +4,8 @@
 // the curvilinear kernel-name suffix helpers (coord/geom/mhd suffixes), the
 // per-axis geometry-scalar push, and the `kernel_exists` coverage probe. pure
 // index/string arithmetic — no dispatch. the executor-facing layouts
-// (`alloc_layout`/`exec_layout`/`expect_kernel`) moved to the `symbi-exec` crate
-// (docs/design/40) and are re-exported below so existing paths resolve.
+// (`alloc_layout`/`exec_layout`/`expect_kernel`) live in the `symbi-exec` crate
+// (docs/design/40) and are re-exported below so the paths resolve.
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
@@ -14,9 +14,9 @@ use symbi_geometry::Geometry;
 
 use symbi_aot::kernel_by_name;
 
-// the allocation/execution layouts + the AOT-registry lookup wrapper moved to the
+// the allocation/execution layouts + the AOT-registry lookup wrapper live in the
 // `symbi-exec` crate (docs/design/40); re-exported here so the substrate's
-// `super::layout::{alloc_layout, exec_layout, expect_kernel}` paths resolve unchanged.
+// `super::layout::{alloc_layout, exec_layout, expect_kernel}` paths resolve.
 pub use symbi_exec::layout::{alloc_layout, exec_layout, expect_kernel};
 
 // the curvilinear kernel-name suffix for a coordinate system: Cartesian kernels are

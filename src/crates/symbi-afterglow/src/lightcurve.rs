@@ -2,7 +2,7 @@
 // lightcurve.rs
 //
 // the equal-arrival-time-surface (EATS) synchrotron light curve — the workhorse
-// afterglow observable, ported from the legacy `calc_fnu`. each cell of a spherical
+// afterglow observable. each cell of a spherical
 // hydro snapshot emits a doppler-boosted broken-power-law synchrotron spectrum; the
 // emission arrives at the observer at t_obs = t' - r (rhat . obs_hat) / c, so a single
 // snapshot smears across a range of observer times. the flux of every (frequency, cell)

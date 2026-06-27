@@ -215,7 +215,7 @@ fn cartesian_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> Cel
 
 
 // spherical (r, theta, phi): analytic exact-integral factors, volume-weighted centroids
-// (radial centroid past the C++ coordinate-center TODO).
+// (the radial centroid is volume-weighted, not the coordinate center).
 fn spherical_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> CellGeometryGv {
     let pi = std::f64::consts::PI;
     let (rl, rh) = (lo[0], hi[0]);

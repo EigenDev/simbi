@@ -12,7 +12,7 @@
 //
 // this is a SHORT SMOKE (a handful of steps): assert the evolution stays physical
 // (rho>0, p>0, |v|<1, finite) and that the shock actually develops. the
-// quantitative Brio-Wu profile vs the C++ reference is a longer run, left to the
+// quantitative Brio-Wu profile vs the reference is a longer run, left to the
 // user.
 // =============================================================================
 
@@ -77,7 +77,7 @@ fn rmhd_face_flux_1d(
 }
 
 const GAMMA: f64 = 2.0; // relativistic Brio-Wu (Balsara test 1)
-const THETA: f64 = 1.5; // theta-MC limiter compression (C++ default plm_theta)
+const THETA: f64 = 1.5; // theta-MC limiter compression (default plm_theta)
 const N: usize = 200; // interior cells
 const NG: usize = 2; // ghost cells each side (PLM reads coord-2)
 const TOT: usize = N + 2 * NG;

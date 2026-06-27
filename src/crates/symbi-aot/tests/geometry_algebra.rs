@@ -6,8 +6,8 @@
 // (inverse volume, dir-0 face areas, dir-0 volume-weighted centroid) FROM THE
 // CELL INDEX, and must match the ANALYTIC formulas — for Cartesian + Spherical,
 // uniform + LOG radial spacing. proves the in-kernel factor-from-index seam:
-// analytic exact-integral factors + volume-weighted centroids (past the C++'s
-// coordinate-center), with log zones via the axis map.
+// analytic exact-integral factors + volume-weighted centroids (not the
+// coordinate center), with log zones via the axis map.
 // =============================================================================
 
 use symbi_aot::NamedKernel;

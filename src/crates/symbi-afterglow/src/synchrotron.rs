@@ -2,7 +2,7 @@
 // synchrotron.rs
 //
 // per-cell synchrotron radiation primitives for relativistic-blast-wave afterglows
-// (Sari, Piran & Narayan 1998/1999), ported from the legacy `rad.cpp`. all CGS:
+// (Sari, Piran & Narayan 1998/1999). all CGS:
 // B in gauss, frequencies in Hz, energy density in erg/cm^3, number density in cm^-3.
 // every dimensionful argument and result is a typed `Quantity` (src/units.rs), so the
 // algebra here is checked at compile time — multiplying the wrong quantities together

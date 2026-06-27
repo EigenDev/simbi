@@ -25,7 +25,7 @@ use symbi_ir::algebra::Scalar;
 // geometry enum: coordinate system identifier
 // ============================================================
 
-/// coordinate system identifier, mirroring C++ geometry_t.
+/// coordinate system identifier.
 /// integer representation matches GPU kernel convention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(i32)]

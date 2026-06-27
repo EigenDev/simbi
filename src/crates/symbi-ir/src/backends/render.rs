@@ -10,11 +10,10 @@
 // Metal) is one `KernelRenderer` impl; a feature is one edit here, not N across
 // parallel emitters.
 //
-// `emit_kernel_cpu` and `emit_kernel_from_lowering` become thin wrappers over
-// `emit_kernel_render` with `RustRenderer` / `CRenderer`. the byte-for-byte
-// output is unchanged (the CPU emitter tests + the CUDA emitter tests + the PTX
-// gate are the regression anchors) — except the CUDA path now GAINS the base-read
-// gate (it used to emit dead `double key = buf[cell];` reads).
+// `emit_kernel_cpu` and `emit_kernel_from_lowering` are thin wrappers over
+// `emit_kernel_render` with `RustRenderer` / `CRenderer` (the CPU emitter tests +
+// the CUDA emitter tests + the PTX gate are the regression anchors). the base-read
+// gate elides dead `double key = buf[cell];` reads on the CUDA path.
 // =============================================================================
 
 use std::collections::{BTreeMap, HashMap};
@@ -74,8 +73,8 @@ pub trait KernelRenderer {
     /// when `true`, `render_source` skips emitting the per-buffer `buf_lo_<b>_<a>`
     /// and `buf_extent_<b>_<a>` scalar kernel args — the renderer bundles that
     /// layout into its `buffer_param` (e.g. a `View` struct that carries the
-    /// pointer + lo + pre-multiplied strides). default = `false` (Rust / legacy
-    /// scattered ABI). CUDA returns `true` once migrated to the View struct.
+    /// pointer + lo + pre-multiplied strides). default = `false` (the scattered
+    /// ABI). CUDA returns `true` (the View struct bundles the layout).
     fn skip_scattered_buffer_layout_args(&self) -> bool { false }
     /// the flat buffer index from rendered component strings. ALWAYS delegates
     /// to `emit::emit_flat_index` with `index_lang()` — implementations are
@@ -185,7 +184,7 @@ pub struct Prepared {
     /// the runtime render path (`render_from_ir`) sees the same intent.
     #[serde(default)]
     pub tile_spec:        Option<crate::gv::TileSpec>,
-    /// PROTOTYPE (view_t precursor): when true, every buffer is guaranteed to
+    /// when true, every buffer is guaranteed to
     /// share buffer 0's allocated layout (same `lo`/`strides`), so the per-cell
     /// flat index is computed ONCE from buffer 0 and aliased to every other
     /// buffer — the `View` collapse of N strided index computations into one.

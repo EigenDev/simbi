@@ -17,9 +17,8 @@
 // has no RUNTIME dependency on the substrate (only the build does).
 // =============================================================================
 
-// the CPU field descriptor the generated kernels take — the Rust mirror of C++
-// `view_t` (cpp_src/xpu/mem/view.hpp). carries the buffer pointer plus its
-// pre-multiplied row-major strides, so per-cell index arithmetic is ONE method
+// the CPU field descriptor the generated kernels take. carries the buffer
+// pointer plus its pre-multiplied row-major strides, so per-cell index arithmetic is ONE method
 // call (`at_Nd`) reading struct fields, not a dozen scattered scalar args. the
 // strides are computed ONCE at construction (host-side, per kernel launch).
 //
@@ -41,7 +40,7 @@
 pub mod named_call;
 pub use named_call::NamedKernel;
 
-// generic over scalar `T` (kernel precision); `T = f64` default for the legacy
+// generic over scalar `T` (kernel precision); `T = f64` default for the
 // f64 call sites + the f64-emitted kernels. `Copy` — a trivial read-only view
 // (a shared slice + two small index arrays), so the same field can fill several
 // slice slots (e.g. a zero-B buffer bound to all three magnetic components).
@@ -65,9 +64,7 @@ pub struct CpuFieldMut<'a, T = f64> {
 ///
 /// delegates to `symbi_algebra::strides_from_extent` — THE single definition of
 /// the stride formula, shared with `Domain`, `Layout`, and symbi-grid's `View`.
-/// (previously this was a third hand-synced copy guarded only by a "the three
-/// must agree" comment; the `Layout` primitive retired that hazard.) `pub` so the
-/// GPU view-construction path reuses the SAME helper.
+/// `pub` so the GPU view-construction path reuses the SAME helper.
 #[inline]
 pub fn compute_strides(extent: &[u32]) -> [i32; 4] {
     let n = extent.len().min(4);

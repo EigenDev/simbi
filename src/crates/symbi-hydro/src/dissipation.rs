@@ -14,20 +14,18 @@ use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 use crate::state::Prim;
 
-/// shockwave limiter selector for the HLLC riemann solver — mirrors the C++
-/// `shockwave_limiter_t` (`cpp_src/utility/enums.hpp`). picks the flavor of
+/// shockwave limiter selector for the HLLC riemann solver. picks the flavor of
 /// HLLC the regime emits at a face:
 ///
 ///   - `Standard`     — plain HLLC (toro / mignone-bodo star state).
 ///   - `Fleischmann`  — newtonian only: HLLC + fleischmann et al. (2020)
 ///                      adaptive-phi low-mach correction. relativistic
 ///                      regimes ignore (no relativistic LM correction).
-///   - `Quirk`        — RESERVED. C++ falls back to HLLE in 2D+ when the
-///                      `quirk_strong_shock` detector fires. the Rust
-///                      detector + threshold are not yet implemented; the
-///                      variant is enumerated for source-level parity with
-///                      `shockwave_limiter_t` and so a future patch lands
-///                      without API churn.
+///   - `Quirk`        — RESERVED. falls back to HLLE in 2D+ when the
+///                      `quirk_strong_shock` detector fires. the detector
+///                      and threshold are not yet implemented; the variant
+///                      is enumerated so a future patch lands without API
+///                      churn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ShockwaveLimiter {
     Standard,
@@ -40,12 +38,11 @@ impl Default for ShockwaveLimiter {
 }
 
 /// relative pressure-jump threshold for the Quirk strong-shock detector.
-/// matches `cpp_src/utility/helpers.hpp:26` `QUIRK_THRESHOLD = 1e-4`.
+/// `QUIRK_THRESHOLD = 1e-4`.
 pub const QUIRK_THRESHOLD: f64 = 1e-4;
 
 /// Quirk strong-shock detector — fires when the relative pressure jump
-/// across the face exceeds `QUIRK_THRESHOLD`. mirrors
-/// `cpp_src/utility/helpers.hpp:358-361`:
+/// across the face exceeds `QUIRK_THRESHOLD`:
 ///
 /// ```text
 ///   bool quirk_strong_shock(real pl, real pr) {
@@ -56,8 +53,7 @@ pub const QUIRK_THRESHOLD: f64 = 1e-4;
 /// returns `Self::Mask` (NOT bool / NOT Self) so the carrier-generic
 /// dispatch via `S::branch` works uniformly at S = f64 (host bool) and
 /// S = Gv (graph mask). callers gate the HLLC -> HLLE fallback on this
-/// mask; the gate is meaningful only in `D > 1` (1D doesn't carbuncle
-/// — the `rank > 1` guard in C++).
+/// mask; the gate is meaningful only in `D > 1` (1D doesn't carbuncle).
 #[inline]
 pub fn quirk_strong_shock<S: Scalar>(p_l: S, p_r: S) -> S::Mask {
     let jump = (p_r - p_l).abs();
@@ -97,8 +93,7 @@ pub fn detect_shock<S: Scalar, const D: usize>(
     let velocity_convergence = vn_l - vn_r;
 
     // AND = product of 0/1 masks. result is 1 if both conditions hold, else 0.
-    // (mask -> S via select(m, ONE, ZERO); migrated from the legacy mask-as-S
-    // idiom when chunk 5 made `cmp_*` return `S::Mask`.)
+    // (mask -> S via select(m, ONE, ZERO); `cmp_*` returns `S::Mask`.)
     let c1 = S::select(entropy_production.cmp_gt(S::from_f64(0.01)), S::ONE, S::ZERO);
     let c2 = S::select(velocity_convergence.cmp_gt(S::ZERO), S::ONE, S::ZERO);
     c1 * c2

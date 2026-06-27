@@ -718,9 +718,9 @@ where
     // with the prime the evolve driver runs at its own start.
     hier.prime();
 
-    // save the initial condition (t = 0) as the start-index checkpoint, matching
-    // the c++ driver: a fresh run (clock at zero, or index 0) writes its IC so the
-    // first output is the un-evolved state. then render the opening frame.
+    // save the initial condition (t = 0) as the start-index checkpoint: a fresh
+    // run (clock at zero, or index 0) writes its IC so the first output is the
+    // un-evolved state. then render the opening frame.
     {
         let (i0, t0, d0) = {
             let r = &hier.levels[0].state;
@@ -775,7 +775,7 @@ where
         // state and advance next_cp past every boundary it crossed. the skipped
         // intermediate states were never computed, and the file name is keyed by
         // the current time — looping would just re-write the SAME file N times and
-        // spam the board with identical entries (the bug this replaces).
+        // spam the board with identical entries.
         let mut dirty = false;
         if time + 1e-12 >= next_cp && next_cp.is_finite() {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
@@ -818,8 +818,8 @@ where
 
         // BENCHMARK ROW cadence: update the live row every 100 root iterations,
         // faithfully and INDEPENDENT of the checkpoint cadence — the table need
-        // not move in lockstep with the message board (this mirrors the c++
-        // driver). the rate is measured over the elapsed 100-iteration window.
+        // not move in lockstep with the message board. the rate is measured over
+        // the elapsed 100-iteration window.
         if iter % 100 == 0 {
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(last_inst).as_secs_f64();
@@ -911,9 +911,9 @@ fn humanize_rate(r: f64) -> String {
 }
 
 /// the live-monitor "PROBLEM SETUP" sub-table rows (category, property, value).
-/// the single source of truth for run identification — it absorbs the parts of
-/// the old python rich summary a user actually watches: regime + eos, geometry
-/// + zone count, the numerical scheme, boundaries, and the resource estimate.
+/// the single source of truth for run identification — the parts of the run
+/// summary a user actually watches: regime + eos, geometry + zone count, the
+/// numerical scheme, boundaries, and the resource estimate.
 /// the slope-limiter name for the PLM reconstruction, keyed on `plm_theta` (mirrors `plm_theta_gv`):
 /// theta < 0 = van Leer; theta == 1 = minmod; theta == 2 = MC (monotonized central); otherwise the
 /// theta-MC family with the compression value shown.
@@ -1728,7 +1728,7 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
 
 /// the integer-digit width for the time portion of a checkpoint name, sized
 /// from `t_final / time_unit` so every file in a run shares the same width and
-/// a directory listing sorts chronologically. minimum 3 (the c++ default).
+/// a directory listing sorts chronologically. minimum 3 (the default).
 fn checkpoint_time_width(cfg: &Config) -> usize {
     let t_units = (cfg.t_final / cfg.time_unit).max(1.0);
     let digits = t_units.log10().floor() as usize + 1;

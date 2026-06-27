@@ -17,13 +17,13 @@ use symbi_hydro::eos::Eos;
 use symbi_geometry::Metric;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 use crate::sim::state::*;
-// the KernelSet trait moved DOWN to the sim<->substrate seam (docs/design/41); the driver
-// is now a consumer of the contract, not its home. re-exported so the historical
-// `sim::evolve::KernelSet` path keeps resolving for downstream callers.
+// the KernelSet trait lives at the sim<->substrate seam (docs/design/41); the driver
+// is a consumer of the contract, not its home. re-exported so the
+// `sim::evolve::KernelSet` path resolves for downstream callers.
 pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
 // sim-state core (docs/design/41 step 4) so the AMR driver shares them DRY. the public profiler
-// API is re-exported at the historical `sim::evolve::` path for the bench examples.
+// API is re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{evolve_bodies, prof, stage_tag, stage_time_fractions};
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
@@ -44,6 +44,26 @@ where
     Mem: MemorySpace + Sync,
 {
     evolve_with_callback(sim, kernels, t_final, u64::MAX, |_| {})
+}
+
+// advance the sim by ONE step at a caller-supplied dt. `evolve` hides the per-step
+// sequence inside its run-to-completion loop; the decomposition / spmd drivers need
+// per-step control so a shared dt + inter-subdomain halo exchange can be interleaved
+// between steps (docs/design/36). prim + cons must be current at entry (prime with
+// c2p + ghost_fill once before the first call), same contract as the internal stage loop.
+pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    kernels: &impl KernelSet<D, DOF, Mem, f64>,
+    dt: f64,
+) where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    sim.dt = dt;
+    step(sim, kernels);
 }
 
 pub fn evolve_with_callback<R, const D: usize, const DOF: usize, M, E, S, Mem>(
@@ -103,9 +123,9 @@ where
     kernels.c2p(sim);
     kernels.ghost_fill(sim);
 
-    // mirrors cpp_src/grid/field.hpp::try_commit: every c2p step is a
+    // every c2p step is a
     // sum-reduction over per-cell error codes; nonzero means at least one
-    // cell failed inversion. C++ throws SimulationFailureException; we
+    // cell failed inversion. on failure we
     // panic with the decoded error code. without this check, NaN cons
     // silently propagates and the runner marches to t_final with garbage,
     // forcing checkpoints with invalid state.
@@ -358,7 +378,7 @@ where
             let entry = if ii == 0 { 0.0 } else { frac[ii - 1] };
             let t_entry = sim.time + entry * sim.dt;
             // expression motion: a / a_dot are EXACT functions of time -> evaluate at the stage entry
-            // time (no linearization). legacy linear motion: extrapolate from a_n at constant a_dot.
+            // time (no linearization). homologous linear motion: extrapolate from a_n at constant a_dot.
             let mexpr = sim.motion_law.as_ref().map(|ml| (ml.a_at(t_entry), ml.adot_at(t_entry)));
             if let Some((a, ad)) = mexpr {
                 sim.motion.a = a;

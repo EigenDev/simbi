@@ -1,11 +1,9 @@
 // =============================================================================
 // regime_spec.rs
 //
-// `RegimeSpec` — physics regime metadata as a first-class DATA VALUE. mirrors
-// docs/design/09 §2.3 "the regime-spec as a first-class value" (the
-// substantially-complete original lived in `symbi-math/regime.rs` and was
-// pruned with the dead-codegen pass; this is the re-implementation against
-// the current `symbi-hydro::Regime` spine).
+// `RegimeSpec` — physics regime metadata as a first-class DATA VALUE.
+// docs/design/09 §2.3 "the regime-spec as a first-class value", implemented
+// against the `symbi-hydro::Regime` spine.
 //
 // the design claim ratified by this module:
 //
@@ -176,10 +174,10 @@ pub enum LawKind {
 /// field name plus its law kind. the FLUX EQUATION is deliberately NOT
 /// carried here: the single source of truth for every regime's flux is the
 /// carrier-generic `Regime::to_flux` (run at `S = f64`, traced at `S = Gv`
-/// by the carrier gate). a second hand-transcribed flux-as-`Graph` layer
-/// used to live here and drifted from `to_flux` (iso-MHD lost its magnetic
-/// stress); deleting it makes drift structurally impossible. this struct is
-/// now pure metadata, consumed by `simulation_laws::validate` (clause 2 —
+/// by the carrier gate). carrying a second hand-transcribed flux-as-`Graph`
+/// layer here would let it drift from `to_flux` (e.g. iso-MHD losing its
+/// magnetic stress); omitting it makes drift structurally impossible. this
+/// struct is pure metadata, consumed by `simulation_laws::validate` (clause 2 —
 /// every overlay/law targets a field the regime declares).
 ///
 /// **identity by physics, not syntax** (docs/design/09 §2.3): `(field, kind)`

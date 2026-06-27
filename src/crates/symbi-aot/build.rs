@@ -413,8 +413,7 @@ impl Geom {
     }
 }
 
-// every gen_* emits a GV-traced kernel through `emit_gv` — Gv is the sole IR front end; the
-// legacy DiscretizeCtx / Expr DSL path is gone.
+// every gen_* emits a GV-traced kernel through `emit_gv` — Gv is the sole IR front end.
 
 // the emit chokepoint for a GV-TRACED kernel (symbi-hydro physics instantiated at S=Gv): the
 // `GvKernel` already carries the graph + the ABI manifest (field inputs, scalar params, coord
@@ -576,10 +575,9 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
 fn gen_iso_c2p(out_dir: &str, ndim: u8) {
     let name = format!("iso_c2p_{ndim}d");
     // built from symbi-hydro's `IsoNewtonian::to_primitive` + the `Isothermal::pressure`
-    // closure at S=Gv — the SINGLE-SOURCE physics — not a hand-written Expr builder (gv
-    // migration). iso c2p is geometry-independent and ncomp == ndim (the cyl r-z swirl
-    // has no iso c2p), so this is the ONLY iso c2p path: no geom branch, no retained
-    // builder. node structure is bit-identical to the old `iso_c2p` builder.
+    // closure at S=Gv — the SINGLE-SOURCE physics. iso c2p is geometry-independent and
+    // ncomp == ndim (the cyl r-z swirl has no iso c2p), so this is the ONLY iso c2p path:
+    // no geom branch, no retained builder.
     let (k, writes) = match ndim {
         1 => symbi_discretize::gv::iso_c2p_gv::<1>(),
         2 => symbi_discretize::gv::iso_c2p_gv::<2>(),
@@ -631,12 +629,12 @@ fn gen_curvilinear_hydro(out_dir: &str, ndim: u8, geom: Geom) {
 // flux/cfl as the isothermal one (#2 of the iso/adiabatic split).
 fn gen_adiabatic_c2p(out_dir: &str, ndim: u8, geom: Geom) {
     let name = format!("adiabatic_c2p{}_{ndim}d", geom.suffix());
-    // built from symbi-hydro's `Cons::to_primitive` at S=Gv — the SINGLE-SOURCE physics
-    // (gv migration). c2p is POINTWISE + geometry-independent: only the velocity-component
+    // built from symbi-hydro's `Cons::to_primitive` at S=Gv — the SINGLE-SOURCE physics.
+    // c2p is POINTWISE + geometry-independent: only the velocity-component
     // count `ncomp` varies (cartesian/spherical: ncomp == ndim; cyl r-z: ncomp = 3, the
     // v_phi swirl carried on a 2D grid — its KE folds all 3 components). so the const-
     // generic `<NCOMP>` instance drives EVERY geometry; `ndim` only selects the emit grid
-    // loop, exactly like rmhd_c2p_gv. numerically equivalent within ULP to the old builder.
+    // loop, exactly like rmhd_c2p_gv.
     // CPU+GPU validated (substrate_adiabatic_sod/hydro_gpu cartesian; cylindrical_* cyl r-z).
     let (k, writes) = match geom.ncomp {
         1 => symbi_discretize::gv::adiabatic_c2p_gv::<1>(),
@@ -658,8 +656,7 @@ fn gen_srhd_c2p(out_dir: &str, ndim: u8, max_iters: usize) {
     // built from symbi-hydro's branch-free `srhd_recover` at S=Gv — the SINGLE-SOURCE
     // physics (the iterative relativistic c2p; the Newton lowers to one IterateInline).
     // srhd c2p is cartesian-only + ncomp==ndim (no cyl r-z swirl srhd), so this is the
-    // ONLY srhd c2p path. numerically equivalent within ULP, NOT bit-identical to the old
-    // builder (which hand-cancels rho in c2/h). max_iters bakes the fixed Newton count.
+    // ONLY srhd c2p path. max_iters bakes the fixed Newton count.
     let (k, writes) = match ndim {
         1 => symbi_discretize::gv::srhd_c2p_gv::<1>(max_iters),
         2 => symbi_discretize::gv::srhd_c2p_gv::<2>(max_iters),
@@ -700,8 +697,8 @@ fn gen_rmhd_c2p(out_dir: &str, ndim: u8, max_iters: usize) {
     // built from symbi-hydro's branch-free `rmhd_recover` at S=Gv — the SINGLE-SOURCE
     // physics (the KKC false-position; the 6-state bracket lowers to one multi-accumulator
     // IterateInline). RMHD vectors are always 3-component, so the gv builder is grid-ndim
-    // -independent; `ndim` only selects the emit grid loop. numerically equivalent within
-    // ULP to the old builder. max_iters bakes the fixed false-position count.
+    // -independent; `ndim` only selects the emit grid loop. max_iters bakes the fixed
+    // false-position count.
     let (k, writes) = symbi_discretize::gv::rmhd_c2p_gv(max_iters);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -919,8 +916,8 @@ fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 
 // the RMHD cell-B flux predictor (Euler + RK2): flux-evolve the CELL B by the
 // induction-flux divergence, so the magnetic-energy correction in bcell_from_bface
-// reads the flux-implied B as b_old (matching the C++ godunov, whose scale_gas/
-// add_gas include the magnetic component). in-place on bcell (bc_{c} read+written).
+// reads the flux-implied B as b_old (scale_gas/add_gas include the magnetic
+// component). in-place on bcell (bc_{c} read+written).
 fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
     let name = format!("rmhd_bcell_godunov_euler{}_{ndim}d", geom.suffix());
     // ncomp = 3 (B is always a 3-vector); flux-divergence over ndim spatial directions.
@@ -947,10 +944,9 @@ fn interior_3d_grade() -> LaunchGrade {
     ]))
 }
 
-// the RMHD GAS-STAGE + CELL-B-PREDICTOR fused launch. the two used to dispatch
-// back-to-back inside `substrate_rmhd::god_stage`; they share grid + dt and
-// write to disjoint slots (cons.{den,mom,nrg} vs bc_{0,1,2}). `try_fuse` merges
-// the two GvKernels into one — the substrate then issues one launch per stage.
+// the RMHD GAS-STAGE + CELL-B-PREDICTOR fused launch. the two stages share grid
+// + dt and write to disjoint slots (cons.{den,mom,nrg} vs bc_{0,1,2}). `try_fuse`
+// merges the two GvKernels into one — the substrate then issues one launch per stage.
 //
 // emits `rmhd_godunov_and_bcell_{variant}{geom_suffix}_3d` for variant in
 // {euler, rk2}; the GAS-stage builder args mirror `gen_godunov_stage` for the

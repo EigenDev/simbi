@@ -196,8 +196,8 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
             // declare the N result slots in the OUTER scope; each arm body ends
             // with `outs[j] = <arm result j>`. Rust definite-assignment accepts
             // the deferred init since BOTH arms assign every slot before any
-            // use. only the taken arm runs — the carrier-portable C++ early-`if`
-            // (the compute-all-paths fix), the DUAL of the `For`/`Break` iterate.
+            // use. only the taken arm runs — the carrier-portable early-out `if`
+            // (avoids the compute-all-paths cost), the DUAL of the `For`/`Break` iterate.
             for (name, element) in outs {
                 out.push_str("let ");
                 out.push_str(name);
@@ -314,7 +314,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr, generic: bool) {
         ScalarExpr::FreeCall { name, args } => {
             // F1.B.8: direct function call by name. Rust emission —
             // the function is resolved by name at the surrounding
-            // module scope (the legacy scalar elemental's Rust impl).
+            // module scope (the scalar elemental's Rust impl).
             out.push_str(name);
             out.push('(');
             for (i, a) in args.iter().enumerate() {

@@ -508,7 +508,7 @@ where
         self.advance_level(0, dt, 0.0);
 
         let root = &mut self.levels[0];
-        // legacy linear advance ONLY when there is no traced motion law.
+        // homologous linear advance ONLY when there is no traced motion law.
         if root.state.motion_law.is_none() && root.state.motion.homologous {
             root.state.motion.a += root.state.motion.a_dot * dt;
         }

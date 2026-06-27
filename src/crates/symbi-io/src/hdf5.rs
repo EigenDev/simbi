@@ -2,9 +2,9 @@
 // hdf5.rs
 //
 // `Hdf5Backend` — production checkpoint backend. translates a borrowed Tree
-// into hdf5-metno API calls. matches the EXISTING on-disk layout the legacy
-// `sim::checkpoint` writer produced, so existing checkpoint files + every
-// plot script (`scripts/plot_*.py`) continue to read unchanged.
+// into hdf5-metno API calls. produces the canonical on-disk layout, so
+// existing checkpoint files + every plot script (`scripts/plot_*.py`) read
+// unchanged.
 //
 // the implementation is intentionally a SINGLE-PASS recursive walk: for each
 // group node, create the HDF5 group, drain its attrs + datasets + children.
@@ -142,7 +142,7 @@ impl<'a> FileOrGroup<'a> {
     fn new_attr_str(&self, name: &str) -> Result<hdf5_metno::Attribute> {
         // string metadata rides as a variable-length unicode HDF5 ATTRIBUTE,
         // matching the frozen v2.0 python reader contract (`meta_group.attrs[..]`
-        // decoded via `decode_str`) and the legacy c++ `write_attribute` path.
+        // decoded via `decode_str`).
         use hdf5_metno::types::VarLenUnicode;
         let r = match self {
             Self::File(f)  => f.new_attr::<VarLenUnicode>().create(name),
@@ -297,7 +297,7 @@ fn read_group_attrs(src: &FileOrGroupRead<'_>, out: &mut Vec<(String, Attr)>) ->
                 attr.read_scalar::<u64>().map(Attr::U64),
             TypeDescriptor::Unsigned(IntSize::U4) =>
                 attr.read_scalar::<u32>().map(|v| Attr::U64(v as u64)),
-            // legacy convention: bool attrs ride as u8.
+            // on-disk convention: bool attrs ride as u8.
             TypeDescriptor::Unsigned(IntSize::U1) =>
                 attr.read_scalar::<u8>().map(|v| Attr::Bool(v != 0)),
             TypeDescriptor::Boolean =>

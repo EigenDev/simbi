@@ -311,8 +311,8 @@ impl From<FieldRef> for FieldBind {
 }
 
 /// a raw runtime path classifies through `from_path` (closed vocab -> `Ref`, else `Raw`).
-/// the migration bridge: a producer still passing a `&str` path is classified here at
-/// construction, so the manifest is born-typed even before the call site is migrated to a
+/// a producer passing a `&str` path is classified here at
+/// construction, so the manifest is born-typed without requiring the call site to build a
 /// `FieldRef`. an unknown path lands in `Raw` (the open-vocabulary hand-built kernels).
 impl From<&str> for FieldBind {
     fn from(s: &str) -> Self {

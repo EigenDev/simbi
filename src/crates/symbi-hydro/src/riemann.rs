@@ -2,7 +2,7 @@
 // riemann.rs (module root)
 //
 // approximate riemann solvers for compressible hydrodynamics — ONE solver per
-// file (mirrors the C++ `solvers/` layout). all solvers use nhat (unit normal
+// file. all solvers use nhat (unit normal
 // vector) for direction, so ONE implementation handles every dimension and
 // direction, and all accept a `vface` ALE grid velocity (pass 0 for a static
 // mesh).

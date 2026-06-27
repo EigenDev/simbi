@@ -517,8 +517,8 @@ pub enum Op {
     /// when `cond` is true, `else_results` otherwise. each `*_body` lists the
     /// NodeIds CREATED inside that arm's `S::cond` closure (insertion order);
     /// they are lowered INSIDE the arm's brace so the codegen evaluates them
-    /// only on the taken path. this is what lets carrier-generic physics match
-    /// the C++ early-conditional cost (skip the whole quartic on a fast path)
+    /// only on the taken path. this is what lets carrier-generic physics get
+    /// the early-out cost (skip the whole quartic on a fast path)
     /// instead of paying compute-all-paths via `Op::Select`.
     ///
     /// `*_results` are vectors so the vector form (`cond_vec`, the dual of
@@ -668,9 +668,8 @@ impl Op {
     }
 
     /// re-insert this op (already remapped to live in `target`'s NodeId space)
-    /// by calling the matching public builder on `target`. ONE arm per variant
-    /// — the third (and last) Phase-3 site that used to dispatch per-variant
-    /// (alongside `try_map_inputs` and `inputs`) collapses to one call.
+    /// by calling the matching public builder on `target`. ONE arm per variant,
+    /// dispatched in a single call (alongside `try_map_inputs` and `inputs`).
     ///
     /// caller contract: every NodeId field of `self` MUST already be a valid
     /// id in `target` (i.e. `try_map_inputs` has been run against the splice
@@ -776,11 +775,9 @@ pub struct Graph {
     param_index: HashMap<Symbol, NodeId>,
     output: Option<NodeId>,
     errors: Vec<ShapeError>,
-    /// F5.4-retire: graph-level dim constraint. when set, restricts the
-    /// kernel to a specific ndim during macro emission. previously this
-    /// information was embedded in `MorphismKind::CtEdgeEmf` / `::Curl`
-    /// variants and recovered by `graph_dim_constraint`; with those
-    /// variants retired the constraint is now carried explicitly here.
+    /// graph-level dim constraint. when set, restricts the
+    /// kernel to a specific ndim during macro emission. the constraint is
+    /// carried explicitly here.
     /// `None` means "no graph-level constraint" (combine with per-Morphism
     /// constraints from Diff/FaceAvg, which are AnyD anyway).
     pinned_ndim: Option<u8>,

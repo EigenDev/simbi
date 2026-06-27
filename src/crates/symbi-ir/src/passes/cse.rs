@@ -1071,17 +1071,16 @@ mod tests {
     }
 
     /// the load-bearing test: a chain of duplicated subtrees that
-    /// would be quadratic-time in the old key_of implementation. this
-    /// builds a 16-deep binary tree where each subtree is shared with
-    /// its sibling — total node count is 2^17 - 1 = 131071, but the
-    /// number of DISTINCT subexpressions is only 17. the old CSE would
-    /// generate 17 keys totalling 131071 characters (cheap per key)
-    /// but call count_in_expr 131071 times — each call's key_of
-    /// walking the full subtree. that's ~10^10 character operations.
-    /// the new CSE walks each node exactly once: ~10^5 ops total.
+    /// would be quadratic-time under a key_of that re-serializes each
+    /// subtree. this builds a 16-deep binary tree where each subtree is
+    /// shared with its sibling — total node count is 2^17 - 1 = 131071, but
+    /// the number of DISTINCT subexpressions is only 17. a re-walking key_of
+    /// would call count_in_expr 131071 times, each walking the full subtree
+    /// — ~10^10 character operations. CSE walks each node exactly once:
+    /// ~10^5 ops total.
     ///
     /// the test budget here is conservative (no time assertion);
-    /// completion in test mode confirms the algorithmic fix.
+    /// completion in test mode confirms the linear walk.
     #[test]
     fn deeply_duplicated_tree_completes_quickly() {
         // step 4: switch the duplicated op from Mul (cheap, threshold 4) to
@@ -1285,8 +1284,8 @@ mod tests {
     }
 
     /// cheap-class at the threshold-1 boundary: a Mul shared 3 times must NOT
-    /// hoist (cheap threshold = 4). this is the load-bearing policy reversal —
-    /// the OLD pass would have hoisted any 2× share.
+    /// hoist (cheap threshold = 4). a share count below the cheap threshold is
+    /// left in place.
     #[test]
     fn cheap_below_threshold_stays_inline() {
         let mul = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("x")), Box::new(v("y")));

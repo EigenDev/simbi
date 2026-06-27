@@ -5,9 +5,8 @@
 // buffer's memory shape — its per-axis origin (`lo`), allocated `extent`, and
 // the `strides` that map a coordinate to a flat offset. one definition of the
 // physical-x-fastest stride formula, shared by every view (`Domain`, the runtime
-// `CpuField`/`DeviceView`, symbi-grid's `View`) instead of the three hand-synced
-// copies that previously had to "agree or kernel writes and host reads land at
-// different addresses" (the comment in symbi-aot that this primitive retires).
+// `CpuField`/`DeviceView`, symbi-grid's `View`). a single definition guarantees
+// kernel writes and host reads resolve to the same addresses.
 //
 // the law (proven in tests): `Layout::at(coord)` is the affine offset
 // `sum_a (coord[a] - lo[a]) * strides[a]`, byte-identical to `Domain::flat_index`

@@ -79,8 +79,8 @@ impl<const R: usize> Domain<R> {
 
     fn compute_strides(spaces: &[Space; R]) -> [usize; R] {
         // **physical-x-fastest convention**: axis 0 has stride 1, axis N has
-        // stride = product of all lower-axis extents. matches standard CFD /
-        // C++ layout (`field[k][j][i]` with `i` fastest) when the caller pins
+        // stride = product of all lower-axis extents. matches standard CFD
+        // row-major layout (`field[k][j][i]` with `i` fastest) when the caller pins
         // axis 0 to the physical fast axis (= simbi convention: x at axis 0).
         //
         // a kernel reading `field[coord[0]*stride[0] + ...]` with this layout

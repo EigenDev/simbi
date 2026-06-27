@@ -7,8 +7,8 @@
 // built-in `SourceSpec`'s output, so it rides the EXISTING splice/fuse path unchanged:
 // `splice_built_source_into` fuses it into a godunov / ghost-fill kernel, which then
 // codegens (CPU + CUDA) or interprets. this collapses the two parallel expression
-// engines (`symbi-expr`'s register-VM and `symbi-ir`'s codegen substrate) into one IR —
-// the elegance over the C++ `dag/`, which can only interpret a separate VM per cell.
+// engines (`symbi-expr`'s register-VM and `symbi-ir`'s codegen substrate) into one IR
+// that codegens instead of interpreting a separate VM per cell.
 //
 // the leaf convention matches the source vocabulary so a user expression fuses like any
 // other source: VariableX{1,2,3} -> `x_0/x_1/x_2` (the cell position, bound to the

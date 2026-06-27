@@ -176,7 +176,7 @@ pub trait Scalar:
     /// only value where `x == x` fails). use `is_nan(x)` instead.
     const NAN: Self;
 
-    // ── method-form alias of `Numeric::ZERO` / `Numeric::ONE` (legacy ergonomics) ─
+    // ── method-form alias of `Numeric::ZERO` / `Numeric::ONE` (ergonomics) ─
     #[inline] fn zero()         -> Self { <Self as symbi_algebra::algebra::Numeric>::ZERO }
     #[inline] fn one()          -> Self { <Self as symbi_algebra::algebra::Numeric>::ONE  }
 
@@ -295,7 +295,7 @@ pub trait Scalar:
     // ── HIGHER-ORDER: trace-safe LAZY branch — the DUAL of `iterate` ───────
     /// a data-dependent conditional that evaluates ONLY the taken arm at
     /// runtime — unlike `select` / `branch`, which evaluate BOTH. this is the
-    /// carrier-portable form of the C++ early-`if`: it lets carrier-generic
+    /// carrier-portable form of an early-out `if`: it lets carrier-generic
     /// physics skip a whole expensive arm (e.g. the RMHD quartic on a
     /// fast-path cell) instead of paying compute-all-paths.
     ///
@@ -423,7 +423,7 @@ pub trait Scalar:
 pub trait Selectable<S: Scalar>: Sized + Copy {
     fn select(m: S::Mask, t: Self, f: Self) -> Self;
 
-    /// LEGACY API alias. takes a Self-typed condition (encoded 0/1 in the
+    /// compatibility alias. takes a Self-typed condition (encoded 0/1 in the
     /// 0.0/1.0 convention) instead of an explicit Mask. defaults to
     /// `select(cond.cmp_gt(ZERO), ...)` — i.e. "non-zero is true". prefer
     /// `select` with an explicit Mask in new code.
@@ -453,10 +453,9 @@ where
     }
 }
 
-/// fixed-rank vector lift: select each component independently. mirrors the
-/// legacy `Selectable for Tensor` that lived in `symbi-algebra` before the
-/// 2026-05-30 cutover. lives HERE so it can refer to the production trait
-/// while keeping `Tensor` in `symbi-algebra`.
+/// fixed-rank vector lift: select each component independently. lives HERE so
+/// it can refer to the production trait while keeping `Tensor` in
+/// `symbi-algebra`.
 impl<S: Scalar, const N: usize> Selectable<S> for symbi_algebra::Tensor<S, N>
 where
     S::Mask: Copy,
@@ -577,7 +576,7 @@ impl Scalar for f64 {
     #[inline(always)] fn select(m: bool, t: f64, f: f64) -> f64 { if m { t } else { f } }
 
     // the lazy branch: a REAL `if` on the host — only the taken arm runs. this
-    // is what makes the f64 reference match the C++ early-`if` cost (and the
+    // is the f64 reference for the early-out branch cost (and the
     // oracle the traced `Op::IfElse` kernel is checked against).
     #[inline(always)]
     fn cond(m: bool, t: impl FnOnce() -> f64, f: impl FnOnce() -> f64) -> f64 {
@@ -655,10 +654,10 @@ impl Scalar for f64 {
     }
 }
 
-// f32 mirrors f64 with the same impl pattern. lands here in Tier 1 chunk 5
-// because the workspace's `ConsG<f32, ...>` / `PrimG<f32, ...>` types in
-// symbi-hydro state.rs require `f32: Scalar` to satisfy the struct's `S: Scalar`
-// bound. ZERO / ONE / from_f64 / sqrt / abs / min / max inherited from `Numeric for f32`.
+// f32 mirrors f64 with the same impl pattern. needed because the workspace's
+// `ConsG<f32, ...>` / `PrimG<f32, ...>` types in symbi-hydro state.rs require
+// `f32: Scalar` to satisfy the struct's `S: Scalar` bound. ZERO / ONE / from_f64
+// / sqrt / abs / min / max inherited from `Numeric for f32`.
 impl Scalar for f32 {
     type Mask = bool;
 

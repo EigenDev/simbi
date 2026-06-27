@@ -12,9 +12,6 @@
 // ghost coordinates to interior coordinates. the field's view handles
 // strided memory access. each concern is separate.
 //
-// mirrors C++ geometry/boundary/index_map.hpp + grid/ghost.hpp +
-// geometry/boundary/driver.hpp.
-//
 // usage:
 //   ghost_fill(&field, &allocated, &interior, &boundaries, &exec)?;
 // =============================================================================

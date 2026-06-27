@@ -4,10 +4,10 @@
 // a small, seeded, deterministic pseudo-random generator for the monte-carlo
 // photon transfer (xoshiro256** seeded via splitmix64). zero dependencies.
 //
-// the legacy C++ used std::random_device (non-reproducible): two runs of the same
-// snapshot gave different photon catalogs and the monte-carlo paths could not be
-// regression-tested. a seeded generator makes science runs reproducible and the
-// tests deterministic — the same (snapshot, seed) always yields the same events.
+// a non-reproducible entropy source would give two runs of the same snapshot
+// different photon catalogs, and the monte-carlo paths could not be regression-tested.
+// a seeded generator makes science runs reproducible and the tests deterministic —
+// the same (snapshot, seed) always yields the same events.
 //
 // usage:
 //  let mut rng = Rng::seed(0xC0FFEE);

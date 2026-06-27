@@ -16,7 +16,7 @@
 //   - same for `load_checkpoint` / `read_checkpoint_meta`, which now return
 //     `Result<_, symbi_io::IoError>`.
 //
-// the legacy `CheckpointSchedule` helper survives unchanged.
+// the `CheckpointSchedule` helper is independent of the I/O schema.
 // =============================================================================
 
 use std::path::Path;
@@ -477,8 +477,8 @@ where
 // public API: write_checkpoint / load_checkpoint / read_checkpoint_meta
 // =============================================================================
 
-/// **B8 — write a checkpoint.** typed `Metadata` replaces the legacy
-/// `&[(&str, &str)]` slice — no more `to_string()` boilerplate at call sites:
+/// **B8 — write a checkpoint.** typed `Metadata` carries naked typed values
+/// rather than a `&[(&str, &str)]` slice — no `to_string()` boilerplate at call sites:
 ///
 /// ```ignore
 /// let extras = Metadata::new()
@@ -507,8 +507,8 @@ where
 /// **AMR checkpoint** — write an entire refinement hierarchy into ONE file as
 /// `/level_0`, `/level_1`, … sibling groups (the frozen v2.0 reader walks
 /// `while level_i in f`). `levels[0]` is the coarse level and authors the global
-/// `/metadata`; every level carries its own mesh + fields. mirrors the legacy
-/// C++ "all levels, one file" layout.
+/// `/metadata`; every level carries its own mesh + fields. this is the
+/// "all levels, one file" layout.
 ///
 /// ```ignore
 /// let states: Vec<&SimState<..>> = hier.levels.iter().map(|l| &l.state).collect();
@@ -572,7 +572,7 @@ fn read_meta_from(tree: &TreeBuf) -> Result<CheckpointMeta> {
                        .as_f64("metadata/gamma")?,
         dimensions:   m.find_attr("dimensions").ok_or_else(|| IoError::MissingPath("metadata/dimensions".into()))?
                        .as_u64("metadata/dimensions")?,
-        // strings live as byte-array datasets, not as attrs (legacy convention)
+        // strings live as byte-array datasets, not as attrs (on-disk convention)
         regime:       read_str_dataset(m, "regime").unwrap_or_else(|_| "unknown".into()),
         coord_system: read_str_dataset(m, "coord_system").unwrap_or_else(|_| "unknown".into()),
     })
@@ -702,7 +702,7 @@ fn restore_field<const D: usize, Mem: MemorySpace>(
     }
     let view = field.view_mut();
     // SAME axis-0-fastest walk as `extract_field` — written-then-loaded is the identity by
-    // construction (previously this used `(0..D).rev()`, transposing every D>=2 restart).
+    // construction. a `(0..D).rev()` walk would transpose every D>=2 restart.
     let mut ii = 0usize;
     for_each_cell_axis0(domain, |coord| {
         view.set(coord, data[ii]);

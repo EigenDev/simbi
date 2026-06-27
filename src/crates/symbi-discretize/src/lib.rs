@@ -19,8 +19,7 @@
 //
 // every production kernel — c2p, flux, wave-speed, godunov, ghost-fill, CT curl,
 // immersed source — is built this way (`gv.rs` / `gv_immersed.rs`); the geometry
-// is traced in-kernel from the cell index (`gv::cell_geometry_gv`). the legacy
-// `Expr` DSL + `DiscretizeCtx` lowering is retired.
+// is traced in-kernel from the cell index (`gv::cell_geometry_gv`).
 // =============================================================================
 
 pub mod coords;
@@ -69,7 +68,7 @@ pub use lattice::LatticeMap;
 /// in the hydro layer so the IR (`KernelEmitInputs::coalesce_layout`) stays
 /// domain-agnostic and merely carries the producer-set flag. the carrier oracle
 /// catches any misclassification (a wrong index diverges from the f64 oracle).
-/// PROTOTYPE: to be replaced by real per-field layout identity (the `view_t` migration).
+/// PROTOTYPE: to be replaced by real per-field layout identity.
 pub fn kernel_coalesces_layout(kernel_name: &str) -> bool {
     kernel_name.contains("c2p")
         || kernel_name.contains("wave_speed_map")

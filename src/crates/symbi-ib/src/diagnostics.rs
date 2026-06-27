@@ -7,7 +7,7 @@
 //
 // cpu: per-tile local accumulation in DomainForEach, merged via mutex.
 //   each tile runs serially (cache-friendly), lock taken once per tile
-//   merge. matches the C++ thread_local + consolidate pattern.
+//   merge. thread-local accumulation followed by a consolidate step.
 //
 // gpu: per-cell delta field, reduced after the step.
 //   (future — for now, CPU-only accumulation via unified memory sync)

@@ -5,7 +5,7 @@
 // PHYSICAL (orthonormal-frame) three-velocity into the global Cartesian frame the
 // afterglow geometry (EATS arrival time, beaming toward an observer) works in.
 //
-// this MIRRORS the canonical transforms in `symbi_geometry::metric` — same coordinate
+// this matches the canonical transforms in `symbi_geometry::metric` — same coordinate
 // conventions, same orthonormal-frame velocity rotation — so the afterglow ingests
 // exactly what the hydro produces, for any geometry it runs (Cartesian / Spherical /
 // Cylindrical). conventions (must match the hydro):
@@ -20,7 +20,7 @@
 //  let beta = Coords::Spherical.velocity_to_cartesian([r, theta, phi], [vr, vt, vp]);
 // =============================================================================
 
-/// the coordinate system a hydro snapshot is stored in (mirrors `symbi_geometry::Geometry`).
+/// the coordinate system a hydro snapshot is stored in (matches `symbi_geometry::Geometry`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Coords {
     Cartesian,

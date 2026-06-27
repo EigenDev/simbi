@@ -45,8 +45,8 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
     // computed at render time. CRUCIALLY the full quartic (Eq. 56 — the
     // resolvent cubic + ~10 transcendentals via `solve_quartic_minmax`) lives
     // in the innermost else arm, so it is SKIPPED entirely when `vsq ~ 0`
-    // (Eq. 57) or `bn ~ 0` (Eq. 58) — matching the C++ `wave_speeds` early-
-    // `return` chain instead of paying compute-all-paths via `S::select`. the
+    // (Eq. 57) or `bn ~ 0` (Eq. 58) — the `wave_speeds` early-`return` chain
+    // instead of paying compute-all-paths via `S::select`. the
     // cheap shared prefix above (rho, hh, w2, cssq, bmu*) stays unconditional.
     let cond_vsq = vsq.cmp_lt(eps);
     let cond_bn = (bn * bn).cmp_lt(eps);
@@ -237,7 +237,7 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
 
     // OR of validity (d1_valid || d2_valid), expressed via select so it stays traceable:
     // `cmp_*` returns a Bool node under the tracing carrier (Gv), so arithmetic on it
-    // (the old `1-(1-a)(1-b)`) is a type error — select keeps it a clean 0/1 value.
+    // (`1-(1-a)(1-b)`) is a type error — select keeps it a clean 0/1 value.
     let any_valid = S::select(d1_valid, S::ONE, S::select(d2_valid, S::ONE, S::ZERO));
     let has_roots = any_valid.cmp_gt(S::from_f64(0.5));
     let smin_nz = S::select(has_roots, r0_lo.min(r1_lo).min(r2_lo).min(r3_lo), S::ZERO);
@@ -254,11 +254,11 @@ fn solve_quartic_minmax<S: Scalar>(b: S, c: S, d: S, e: S) -> (S, S) {
 
 /// solve resolvent cubic x^3 + bx^2 + cx + d = 0 for one real root.
 /// GPU-traceable via `S::cond` (the DUAL of iterate): ONLY the taken case's
-/// transcendental pair is evaluated — the carrier-portable form of the C++
-/// `solve_cubic`'s early-`return`, NOT compute-all-paths. cheap, symmetric
+/// transcendental pair is evaluated — the carrier-portable form of the
+/// `solve_cubic` early-`return`, NOT compute-all-paths. cheap, symmetric
 /// sub-choices (the cube-root sign) stay branch-free `S::select`. clamps are
 /// kept for bit-equivalence with the host f64 path (they are identity when the
-/// owning arm is taken). matches `helpers.hpp::solve_cubic` case-for-case.
+/// owning arm is taken).
 fn solve_cubic_resolvent<S: Scalar>(b: S, c: S, d: S) -> S {
     let p = c - b * b / S::from_f64(3.0);
     let q = S::from_f64(2.0) * b * b * b / S::from_f64(27.0) - b * c / S::from_f64(3.0) + d;
@@ -525,8 +525,8 @@ mod tests {
         }
     }
 
-    // straight-Rust transcription of wave_speeds.hpp::rmhd::wave_speeds (3-velocity / lab B),
-    // the C++ ground truth the substrate Expr port was validated against.
+    // direct analytic rmhd wave_speeds (3-velocity / lab B), the ground-truth
+    // reference the substrate Expr form is validated against.
     fn ref_wave_speeds(rho: f64, vel: [f64; 3], p: f64, mag: [f64; 3], gamma: f64, dir: usize) -> (f64, f64) {
         let dot = |a: &[f64; 3], b: &[f64; 3]| a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
         let eps = 1e-12;
@@ -622,7 +622,7 @@ mod tests {
 
     #[test]
     fn rmhd_wave_speeds_match_cpp_reference() {
-        // Rmhd::wave_speeds vs the C++ ground truth across all three dispersion regimes
+        // Rmhd::wave_speeds vs the analytic ground truth across all three dispersion regimes
         // (Eq.57 vsq~0, Eq.58 bn~0, Eq.56 full quartic). this is the function the flux HLLE
         // AND the spliced CFL map both call — one validated source.
         let eos = IdealGas { gamma: 5.0 / 3.0 };

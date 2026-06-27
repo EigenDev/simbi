@@ -4,8 +4,7 @@
 // compressible hydrodynamics for the symbi framework. provides equation of state,
 // conservative/primitive state types, the physics regimes, and the riemann solvers
 // — the carrier-generic (S: Scalar) single source the substrate traces at S=Gv. pure
-// math, no runtime dependency on symbi. (the legacy CPU godunov integrator —
-// godunov/reconstruct/ghost/ct — was retired; the substrate is the production path.)
+// math, no runtime dependency on symbi. the substrate is the production path.
 //
 // usage:
 //   use symbi_hydro::{IdealGas, Prim, Cons, Newtonian, hlle};
