@@ -177,6 +177,95 @@ def _flux_diagnostics(image, half_mas):
     return xc, yc, _fwhm(prof_x), _fwhm(prof_y)
 
 
+def _smooth_image(image, sigma_px):
+    """gaussian-smooth a surface-brightness image (zrake+2018 convolve each frame with a small
+    kernel) so monte-carlo photon SPECKLE becomes a continuous gradient. sigma in pixels; the
+    convolution conserves the total flux, so F_nu is unchanged. <=0 is a no-op."""
+    if sigma_px and sigma_px > 0.0:
+        from scipy.ndimage import gaussian_filter
+
+        return gaussian_filter(np.asarray(image, dtype=float), sigma_px)
+    return image
+
+
+_RAD_TO_MAS = 206_264_806.247_096_36
+_JY_CGS = 1.0e-23
+
+
+def _calibrate_deposit(image, half_width_cm, observer, time_window_day):
+    """calibrate the raw DETERMINISTIC-deposit image (sum of delta^p * j_nu * dV * dt_lab per pixel,
+    erg/Hz) to surface brightness [mJy/mas^2] + integrated F_nu [mJy]. the deposit is already a
+    MONOCHROMATIC (per-Hz) emissivity, so -- unlike the monte-carlo path -- there is NO 1/dnu:
+    F_nu = (beamed monochromatic energy) / (4 pi d_L^2 dt_obs)."""
+    n_pix = image.shape[0]
+    d_l = observer.luminosity_distance_cm()
+    d_a = observer.angular_diameter_distance_cm()
+    dt_s = time_window_day * 86400.0
+    px_cm = 2.0 * half_width_cm / n_pix if half_width_cm > 0.0 else 1.0
+    denom = 4.0 * np.pi * d_l * d_l * dt_s
+    flux_total_mjy = float(image.sum()) / denom / _JY_CGS * 1.0e3
+    px_mas = px_cm / d_a * _RAD_TO_MAS
+    surface_brightness = image / (px_mas * px_mas) / denom / _JY_CGS * 1.0e3
+    return surface_brightness, flux_total_mjy
+
+
+def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, frequency):
+    """DETERMINISTIC deposition over the snapshot ARRAY: each hydro checkpoint deposits its lab-frame
+    emissivity onto a SHARED sky grid via the EATS, accumulated. noise-free (no photon sampling) ->
+    a continuous gradient. requires hydro checkpoints (1d spherical). returns (image_2d, half_cm)."""
+    from simbi.reader import read_simulation
+
+    from ...afterglow.generate import _read_snapshot_time, _snapshot_emission_durations
+    from ...afterglow.inputs import build_fields, build_mesh
+
+    n_pix = args.n_pix
+    qscales = manifest.to_qscales()
+
+    # shared field of view [cm]: --fov, else auto-size with ONE cheap MC pass on the mid checkpoint.
+    if args.fov is not None:
+        half_width_cm = observer.mas_to_length(args.fov)
+    else:
+        mid = paths[len(paths) // 2]
+        cat = _load_catalog(mid, args, rad_hydro, observer, manifest)
+        try:
+            _, _, half_width_cm = rad_hydro.skymap_from_events(
+                cat, nhat, obs_time, time_window=args.time_window, redshift=observer.redshift,
+                doppler_power=3.0, n_pix=n_pix, half_width=0.0,
+            )
+        finally:
+            del cat
+        if not half_width_cm or half_width_cm <= 0.0:
+            raise SystemExit("could not auto-size the deposit grid; pass --fov MAS.")
+
+    # sort snapshots by lab time and weight each by the interval it represents (trapezoid, code units).
+    paths = sorted(paths, key=_read_snapshot_time)
+    durations = _snapshot_emission_durations([_read_snapshot_time(p) for p in paths])
+
+    print(f"depositing {len(paths)} snapshots onto a {n_pix}x{n_pix} grid (deterministic)...")
+    image = np.zeros(n_pix * n_pix)
+    for path, dt_code in zip(paths, durations):
+        data = read_simulation(path)
+        sim_cond = {
+            "dt": dt_code if dt_code > 0.0 else data.metadata.dt,
+            "theta_obs": 0.0,
+            "adiabatic_index": data.metadata.gamma,
+            "current_time": data.metadata.time,
+            "p": observer.p,
+            "z": observer.redshift,
+            "eps_e": observer.eps_e,
+            "eps_b": observer.eps_b,
+            "d_L": observer.luminosity_distance_cm(),
+            "nus": [float(frequency)],
+        }
+        img = rad_hydro.skymap_deposit_spherical(
+            sim_cond, qscales, build_fields(data), build_mesh(data), list(nhat),
+            float(obs_time), float(args.time_window), float(frequency), observer.redshift,
+            float(half_width_cm), n_pix, 2.0,
+        )
+        image += np.asarray(img)
+    return image.reshape(n_pix, n_pix), half_width_cm
+
+
 def _draw_skymap_on_ax(ax, image, half_mas, log_decades=None, contours=False, diagnostics=False, vmax=None):
     """draw ONE skymap onto a given axes in the paper style: jet axis HORIZONTAL (x), thin
     grey axis lines through the origin, and (optionally) the yellow flux-centroid marker +
@@ -606,6 +695,26 @@ def setup_skymap_parser(subparsers) -> None:
     )
 
     parser.add_argument(
+        "--method",
+        choices=["mc", "deposit"],
+        default="mc",
+        help="reduction method. 'mc' (default): monte-carlo photon catalog -- works on events "
+        "files OR checkpoints, and carries scattering/absorption/polarization, but needs many "
+        "photons + smoothing for clean images. 'deposit': DETERMINISTIC cell deposition "
+        "(zrake+2018) -- noise-free, publication-clean images from hydro CHECKPOINTS (1d "
+        "spherical), optically-thin synchrotron only.",
+    )
+
+    parser.add_argument(
+        "--smooth",
+        type=float,
+        default=2.1,
+        help="gaussian smoothing sigma in PIXELS. DEFAULT 2.1 = zrake+2018's 5-px (300 uas) kernel, "
+        "applied to EVERY image -- it absorbs the monte-carlo speckle AND the on-axis azimuthal "
+        "tessellation spokes (which zrake calls 'redundant for on-axis observers'). 0 disables.",
+    )
+
+    parser.add_argument(
         "--plot",
         action="store_true",
         help="show plot",
@@ -870,6 +979,57 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
     if getattr(args, "linear", False):
         args.log_decades = None
 
+    # DETERMINISTIC deposition path (zrake+2018): no photon catalog, no shot noise. operates on
+    # the hydro CHECKPOINT array directly, depositing each cell's emissivity onto a shared grid.
+    if getattr(args, "method", "mc") == "deposit":
+        if _is_event_catalog(args.inputs[0]):
+            raise SystemExit(
+                "--method deposit needs hydro CHECKPOINTS, not an events file (it deposits cell "
+                "emissivity directly). use --method mc for an events file."
+            )
+        if args.time is None:
+            raise SystemExit(
+                "--method deposit needs --time (the EATS observer time). run a quick "
+                "`--method mc` skymap first — it prints the arrival window + flux peak."
+            )
+        th = np.deg2rad(args.observer_angle)
+        nh = [float(np.sin(th)), 0.0, float(np.cos(th))]
+        nu = observer.frequencies[0]
+        image, half_width = _deposit_skymap(
+            args.inputs, args, rad_hydro, observer, manifest, args.time, nh, nu
+        )
+        sb, flux_mjy = _calibrate_deposit(image, half_width, observer, args.time_window)
+        sb = _smooth_image(sb, args.smooth)
+        half_mas = observer.length_to_mas(half_width)
+        print(
+            f"computed {args.n_pix}x{args.n_pix} DEPOSIT skymap: half_width={half_mas:.3f} mas, "
+            f"F_nu={flux_mjy:.4g} mJy at {nu:.2e} Hz (peak {sb.max():.3g} mJy/mas^2)"
+        )
+        if args.output:
+            import h5py
+
+            with h5py.File(args.output, "w") as f:
+                f.create_dataset("surface_brightness", data=sb)
+                f.attrs["time"] = args.time
+                f.attrs["half_width_mas"] = half_mas
+                f.attrs["frequency_hz"] = nu
+                f.attrs["flux_mjy"] = flux_mjy
+                f.attrs["method"] = "deposit"
+            print(f"saved skymap to {args.output}")
+        if args.plot or args.save_fig:
+            title = (
+                f"t = {args.time:.3g} day   ({nu:.1e} Hz)"
+                if args.log_decades is not None
+                else f"t = {args.time:.3g} day   ({nu:.1e} Hz, {flux_mjy:.3g} mJy)"
+            )
+            _plot_skymap(
+                sb, half_mas, title, args.save_fig, args.plot,
+                cbar_label="surface brightness [mJy/mas$^2$]",
+                log_decades=args.log_decades, contours=args.contours,
+                diagnostics=args.diagnostics,
+            )
+        return
+
     if multi:
         # STREAM: never merge all checkpoints' events (the memory blowup). the EATS observer
         # time can't be auto-found without a pass over the data, so it is required here.
@@ -921,7 +1081,7 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
         images, half_mas_list, titles = [], [], []
         for angle in args.observer_angles:
             img, hw = _image_at_angle(angle)
-            images.append(img)
+            images.append(_smooth_image(img, args.smooth))
             half_mas_list.append(observer.length_to_mas(hw))
             titles.append(rf"$\theta_{{\rm obs}}$ = {angle:g}$^\circ$")
         print(f"panel: {len(args.observer_angles)} angles at t={obs_time:.3g} day")
@@ -949,6 +1109,8 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
 
     nu = observer.frequencies[0]
     sb, flux_mjy = calibrate_skymap(image, half_width, observer, args.time_window, nu)
+    # zrake-style gaussian smoothing: turn monte-carlo photon speckle into a gradient.
+    sb = _smooth_image(sb, args.smooth)
     print(
         f"computed {n_pix}x{n_pix} skymap: half_width={half_mas:.3f} mas, "
         f"F_nu={flux_mjy:.4g} mJy at {nu:.2e} Hz (peak {sb.max():.3g} mJy/mas^2)"

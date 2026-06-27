@@ -33,7 +33,8 @@ use symbi_afterglow::observe::{
     compute_lightcurve_from_events, compute_skymap as observe_compute_skymap,
 };
 use symbi_afterglow::transfer::{
-    generate_photon_events, generate_photon_events_spherical, monte_carlo_radiative_transfer,
+    compute_skymap_deposit_spherical, generate_photon_events, generate_photon_events_spherical,
+    monte_carlo_radiative_transfer,
 };
 use symbi_afterglow::units::{Frequency, Length};
 use symbi_afterglow::{HydroFields, Mesh, QuantScales, SimConditions};
@@ -579,6 +580,61 @@ fn lightcurve_from_events_py(
     Ok((lc.times, lc.fluxes, lc.frequencies))
 }
 
+/// DETERMINISTIC (noise-free) sky-map deposition for a 1d spherical blast — Zrake+2018 eq. 1-2.
+/// deposits each cell's lab-frame monochromatic emissivity onto the sky plane (no photon sampling),
+/// gated by the EATS window. `sim_cond["dt"]` carries the snapshot's lab-time interval (the same
+/// trapezoidal weight the photon generator uses), `obs_time`/`time_window` are in DAYS, and
+/// `half_width` [cm] is the caller-fixed image extent (so frames over many snapshots share a grid).
+/// returns the raw deposit image (row-major `[iy*n_pix+ix]`); the caller calibrates to mJy/mas^2.
+#[pyfunction]
+#[pyo3(name = "skymap_deposit_spherical")]
+#[pyo3(signature = (sim_cond, qscales, fields, mesh, observer_direction, obs_time, time_window,
+                    frequency, redshift, half_width, n_pix=256, doppler_power=2.0))]
+#[allow(clippy::too_many_arguments)]
+fn skymap_deposit_spherical_py(
+    sim_cond: &Bound<'_, PyDict>,
+    qscales: &Bound<'_, PyDict>,
+    fields: &Bound<'_, PyDict>,
+    mesh: &Bound<'_, PyDict>,
+    observer_direction: Vec<f64>,
+    obs_time: f64,
+    time_window: f64,
+    frequency: f64,
+    redshift: f64,
+    half_width: f64,
+    n_pix: usize,
+    doppler_power: f64,
+) -> PyResult<Vec<f64>> {
+    if observer_direction.len() != 3 {
+        return Err(PyValueError::new_err(
+            "observer_direction must be a length-3 unit vector",
+        ));
+    }
+    let cond = sim_conditions(sim_cond)?;
+    let scales = quant_scales(qscales)?;
+    let rho = req_field(fields, "rho")?;
+    let gamma_beta = req_field(fields, "gamma_beta")?;
+    let pre = req_field(fields, "pre")?;
+    if rho.len() != gamma_beta.len() || rho.len() != pre.len() {
+        return Err(PyValueError::new_err(
+            "fields rho / gamma_beta / pre must have equal length",
+        ));
+    }
+    let hf = HydroFields { rho: &rho, gamma_beta: &gamma_beta, pre: &pre };
+    let md = mesh_data(mesh)?;
+
+    const SECONDS_PER_DAY: f64 = 86_400.0;
+    let nhat = [observer_direction[0], observer_direction[1], observer_direction[2]];
+    let emit_dt_s = (cond.dt * scales.time).value();
+    let obs_time_s = obs_time * SECONDS_PER_DAY;
+    let half_window_s = 0.5 * time_window * SECONDS_PER_DAY;
+
+    Ok(compute_skymap_deposit_spherical(
+        &cond, &scales, &hf, &md.x1, nhat, obs_time_s, half_window_s, frequency, redshift,
+        doppler_power, n_pix, half_width, emit_dt_s, std::f64::consts::PI, 256, 50,
+    ))
+}
+
 /// register the afterglow pyfunctions + the event-handle class on the parent module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PhotonEvents>()?;
@@ -590,5 +646,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_photon_events_py, m)?)?;
     m.add_function(wrap_pyfunction!(photon_event_count_py, m)?)?;
     m.add_function(wrap_pyfunction!(read_photon_events_chunk_py, m)?)?;
+    m.add_function(wrap_pyfunction!(skymap_deposit_spherical_py, m)?)?;
     Ok(())
 }

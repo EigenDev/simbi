@@ -32,10 +32,10 @@ use crate::constants::{C_LIGHT, H_PLANCK, M_P, PI, SIGMA_THOMSON};
 use crate::event::PhotonEvent;
 use crate::rng::Rng;
 use crate::synchrotron::{
-    beta, critical_lorentz, delta_doppler, gyration_frequency, lorentz_factor, minimum_lorentz, nu,
-    shock_bfield,
+    beta, critical_lorentz, delta_doppler, emissivity, gyration_frequency, lorentz_factor,
+    minimum_lorentz, nu, shock_bfield, spectral_shape,
 };
-use crate::units::{Energy, EnergyDensity, Length, MagneticField, NumberDensity};
+use crate::units::{Energy, EnergyDensity, Frequency, Length, MagneticField, NumberDensity};
 use crate::{HydroFields, Mesh, QuantScales, SimConditions};
 
 // the comoving emission spectrum is sampled over this many decades on each side of the
@@ -500,6 +500,125 @@ pub fn generate_photon_events_spherical(
     }
 
     events
+}
+
+/// DETERMINISTIC sky-map deposition for a spherically-symmetric (1d radial) blast — the noise-free
+/// alternative to the monte-carlo photon path (Zrake, Xie & MacFadyen 2018, eq. 1-2). instead of
+/// SAMPLING photon packets, each (radius, direction) patch deposits its lab-frame monochromatic
+/// synchrotron emissivity DIRECTLY onto the sky-plane pixel it projects to, gated by the
+/// equal-arrival-time surface. no shot noise -> a continuous gradient at any photon-free resolution.
+///
+/// the image accumulates, per pixel, `delta^doppler_power * j'_nu'(nu') * dV * dt_lab` summed over
+/// the patches whose EATS arrival lands in `[obs_time_s +/- half_window_s]`: `j'_nu'` is the COMOVING
+/// emissivity (`emissivity` x `spectral_shape`) at the comoving frequency `nu' = nu(1+z)/delta`, `dV`
+/// the patch lab volume, `dt_lab` the lab-time interval this snapshot represents. the caller divides
+/// by pixel area, the observer-time window, and 4 pi d_L^2 to reach a flux density (calibrated to
+/// agree with the monte-carlo path on F_nu). axisymmetric geometry: a 1d radial profile tessellated
+/// over `n_mu x n_phi` equal-solid-angle directions.
+#[allow(clippy::too_many_arguments)]
+pub fn compute_skymap_deposit_spherical(
+    cond: &SimConditions,
+    scales: &QuantScales,
+    fields: &HydroFields,
+    x1: &[f64],
+    observer_direction: [f64; 3],
+    obs_time_s: f64,
+    half_window_s: f64,
+    frequency_hz: f64,
+    redshift: f64,
+    doppler_power: f64,
+    n_pix: usize,
+    half_width: f64,
+    emit_dt_s: f64,
+    theta_max: f64,
+    n_mu: usize,
+    n_phi: usize,
+) -> Vec<f64> {
+    let mut image = vec![0.0; n_pix * n_pix];
+    let ni = x1.len();
+    if ni == 0 || n_pix == 0 || half_width <= 0.0 {
+        return image;
+    }
+    // n_mu / n_phi / theta_max are legacy tessellation knobs; the EATS-annulus parametrization
+    // below replaces the mu grid with the contributing cone shell, so only n_phi (the azimuth
+    // floor) is used. observer_direction is irrelevant for a SPHERE (same image from any angle).
+    // all kept in the signature for binding compatibility.
+    let _ = (theta_max, n_mu, observer_direction);
+    let p = cond.p;
+    let t_prime_s = (cond.current_time * scales.time).value();
+    let one_plus_z = 1.0 + redshift;
+    let c = C_LIGHT.value();
+
+    // a SPHERICALLY-SYMMETRIC blast looks the same from every direction, so the image depends only
+    // on the EATS, not the observer angle: at observer time t_obs the visible emitters are those
+    // whose direction makes angle alpha to the line of sight with r.n = r*cos(alpha) in the arrival
+    // window. that is a thin CONE SHELL (annulus) about the LOS. parametrize directly by
+    // (radius, cos alpha, azimuth psi) -- the doppler/emissivity depend only on cos alpha, and the
+    // ring projects to a centered circle of radius rho = r*sin(alpha). this is exact at ANY angle,
+    // visits ONLY the contributing directions (fast), and samples psi at pixel resolution (smooth).
+    let proj_lo = c * (t_prime_s - (obs_time_s + half_window_s) / one_plus_z);
+    let proj_hi = c * (t_prime_s - (obs_time_s - half_window_s) / one_plus_z);
+
+    for ii in 0..ni {
+        let r = (x1[ii] * scales.length).value();
+        if r <= 0.0 {
+            continue;
+        }
+        // cos(alpha) = r.n / r in the EATS window [proj_lo, proj_hi]/r, clamped to a real cone.
+        let cos_lo = (proj_lo / r).max(-1.0);
+        let cos_hi = (proj_hi / r).min(1.0);
+        if cos_lo >= cos_hi {
+            continue; // this shell never crosses the arrival window
+        }
+
+        let (x1l, x1r) = radial_shell_edges(x1, ii);
+        let cell = cell_state(cond, scales, fields, ii, p, t_prime_s);
+        // Zrake's j'_nu' is the ISOTROPIC (per-steradian) comoving emissivity; `emissivity` is the
+        // angle-integrated form, so divide by 4 pi. the lab transform is then j_nu = delta^2 j'_nu'
+        // (the j_nu/nu^2 invariant), applied below as delta^doppler_power.
+        let j_peak = emissivity(cell.bfield, cell.n_e, p).value() / (4.0 * PI); // [erg/(s Hz cm^3 sr)]
+        let nu_c = Frequency::new(cell.nu_c);
+        let nu_m = Frequency::new(cell.nu_m);
+        // the radial shell volume (no solid angle yet); dV of a (dcos, dpsi) cell = shell_vol*dcos*dpsi.
+        let shell_vol = (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * scales.length.cubed().value();
+
+        // sample the cos band across its projected RADIAL width at ~pixel resolution (floored so a
+        // razor-thin window still samples); the dense radial grid fills the rest of the gradient.
+        let width_px = ((cos_hi - cos_lo) * r) / (2.0 * half_width) * n_pix as f64;
+        let n_cos = (width_px.ceil() as usize).clamp(2, n_pix);
+        let dcos = (cos_hi - cos_lo) / n_cos as f64;
+
+        for kc in 0..n_cos {
+            let cos_a = cos_lo + (kc as f64 + 0.5) * dcos;
+            let sin_a = (1.0 - cos_a * cos_a).max(0.0).sqrt();
+            // doppler + emissivity depend ONLY on cos_a (angle to the LOS), hoisted out of psi.
+            let delta = 1.0 / (cell.w * (1.0 - cell.beta * cos_a));
+            let nu_prime = Frequency::new(frequency_hz * one_plus_z / delta);
+            let j_nu = j_peak * spectral_shape(p, nu_prime, nu_c, nu_m);
+
+            // this cone ring projects to a CENTERED circle of radius rho = r*sin_a; sample its
+            // azimuth at ~pixel resolution so it tiles (no spokes). dphi shrinks with n_psi -> flux
+            // conserved; total work scales with the image area.
+            let rho = r * sin_a;
+            let rho_px = rho / (2.0 * half_width) * n_pix as f64;
+            let n_psi = ((2.0 * PI * rho_px).ceil() as usize).clamp(n_phi.max(8), 8 * n_pix);
+            let dpsi = 2.0 * PI / n_psi as f64;
+            let dvolume = shell_vol * dcos * dpsi;
+            let contrib = delta.powf(doppler_power) * j_nu * dvolume * emit_dt_s;
+
+            for kp in 0..n_psi {
+                let psi = (kp as f64 + 0.5) * dpsi;
+                let q1 = rho * psi.cos();
+                let q2 = rho * psi.sin();
+                let ix = (((q1 + half_width) / (2.0 * half_width)) * n_pix as f64) as isize;
+                let iy = (((q2 + half_width) / (2.0 * half_width)) * n_pix as f64) as isize;
+                if ix >= 0 && iy >= 0 && (ix as usize) < n_pix && (iy as usize) < n_pix {
+                    image[iy as usize * n_pix + ix as usize] += contrib;
+                }
+            }
+        }
+    }
+    image
 }
 
 /// synchrotron self-absorption optical depth over `path_length` (dimensionless). the SSA

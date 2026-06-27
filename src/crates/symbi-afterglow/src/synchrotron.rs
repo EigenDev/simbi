@@ -108,6 +108,31 @@ pub fn delta_doppler(w: f64, beta_vec: [f64; 3], nhat: [f64; 3]) -> f64 {
     1.0 / (w * (1.0 - dot))
 }
 
+/// the DIMENSIONLESS broken-power-law synchrotron shape (Sari, Piran & Narayan 1998), normalized
+/// to 1 at the spectral peak, at emitter-frame frequency `nu_prime` with breaks `nu_c`, `nu_m`.
+/// this is `powerlaw_flux` factored out of its units carrier, so a per-frequency EMISSIVITY (not
+/// just a per-electron power) can be scaled by the same spectrum — the deterministic deposition
+/// reducer needs `emissivity * spectral_shape`. slow cooling is nu_c > nu_m.
+pub fn spectral_shape(p: f64, nu_prime: Frequency, nu_c: Frequency, nu_m: Frequency) -> f64 {
+    let slow_cool = nu_c > nu_m;
+    if slow_cool {
+        if nu_prime < nu_m {
+            (nu_prime / nu_m).value().powf(1.0 / 3.0)
+        } else if nu_prime < nu_c {
+            (nu_prime / nu_m).value().powf(-0.5 * (p - 1.0))
+        } else {
+            (nu_c / nu_m).value().powf(-0.5 * (p - 1.0))
+                * (nu_prime / nu_c).value().powf(-0.5 * p)
+        }
+    } else if nu_prime < nu_c {
+        (nu_prime / nu_c).value().powf(1.0 / 3.0)
+    } else if nu_prime < nu_m {
+        (nu_prime / nu_c).value().powf(-0.5)
+    } else {
+        (nu_m / nu_c).value().powf(-0.5) * (nu_prime / nu_m).value().powf(-0.5 * p)
+    }
+}
+
 /// the broken-power-law synchrotron spectrum (Sari, Piran & Narayan 1998): scale the peak power
 /// `power_max` by the spectral shape at the (emitter-frame) frequency `nu_prime`, given the
 /// cooling break `nu_c` and the injection break `nu_m`. slow cooling is nu_c > nu_m. the frequency
