@@ -115,17 +115,21 @@ pack/unpack a peer or mpi transport reuses -- only the move in the middle change
 (optimization left: `DeviceCopy` allocates the index buffers per call; pool/cache them,
 since the strip geometry is fixed.)
 
-remaining, in order:
+DONE: the grid orchestration is extracted. `decomp::exchange_grid(tiles: &[&FieldStore],
+counts, transport)` + `decomp::flatten`/`unflatten` now live in the module; the test is a
+thin oracle harness that builds sims, drives the SSP stages, and calls `exchange_grid`
+through a one-line `exchange_all` wrapper (which adds the `device_sync` drain). the module
+is now the complete reusable decomposition layer; a cluster driver reuses it directly.
 
-1. multi-device proper (NEEDS a cluster / 2+ gpus): a peer/mpi `HaloTransport` impl. peer
-   = the same gather into a contiguous buffer + `cuMemcpyPeerAsync` + scatter; mpi = gather
-   -> host/device buffer -> `MPI_Send/Recv` -> scatter. assign tiles to devices/ranks,
-   distributed cfl via a cross-rank reduce, distributed checkpoint i/o. under SPMD bind
-   each rank with `CUDA_VISIBLE_DEVICES` so the single-device code stays valid per rank.
-   the in-process + single-gpu tests stay the oracle; a new transport must keep them green.
-2. the two-pass grid orchestration (`exchange_grid`) + tile management (`grid_tiles`, the
-   stage `run`) are still in the test. extract into the module when the real driver needs
-   them (a tile-collection / neighbor-topology abstraction). not urgent.
+remaining (all NEEDS a cluster / 2+ gpus, none testable on the single 2070):
+
+1. a peer/mpi `HaloTransport` impl. peer = gather into a contiguous buffer +
+   `cuMemcpyPeerAsync` + scatter; mpi = gather -> buffer -> `MPI_Send/Recv` -> scatter
+   (the gather/scatter is exactly `DeviceCopy`'s kernel, just to a packed buffer). assign
+   tiles to devices/ranks, distributed cfl via a cross-rank reduce, distributed checkpoint
+   i/o. under SPMD bind each rank with `CUDA_VISIBLE_DEVICES` so the single-device code
+   stays valid per rank. the in-process + single-gpu tests stay the oracle; a new transport
+   must keep them green first.
 
 the iron rule: never advance a transport without its equivalence test green first. the
 test is the contract.
@@ -184,9 +188,10 @@ or thread `device_id` through the xpu layer. all premature. yagni.
 ## key file map (so you do not re-explore)
 
 - the adr (decided strategy): `docs/design/36_scalability_multi_gpu.md`
-- the transport seam + per-face exchange (reusable, D-generic, Domain-based):
-  `src/crates/symbi-sim/src/decomp.rs` (`HaloTransport` trait; `LocalCopy` host impl;
-  `DeviceCopy` cuda gather/scatter-kernel impl; `exchange_faces`), re-exported as
+- the complete reusable decomposition layer (D-generic, Domain-based at the cell level):
+  `src/crates/symbi-sim/src/decomp.rs` -- `HaloTransport` trait; `LocalCopy` host impl;
+  `DeviceCopy` pooled cuda gather/scatter-kernel impl; `exchange_faces` (per-face);
+  `exchange_grid` (two-pass over the tile grid); `flatten`/`unflatten`. re-exported as
   `symbi::sim::decomp`. gpu validation: `cargo test -p symbi --features cuda
   --test decomp_equivalence --release`
 - per-step primitive: `step_once` in `src/crates/symbi/src/sim/evolve.rs`

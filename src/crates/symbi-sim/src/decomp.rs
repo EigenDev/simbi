@@ -23,6 +23,12 @@ use crate::state::{FieldStore, PartitionGeometry};
 use symbi_algebra::{Domain, Side};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
+#[cfg(feature = "cuda")]
+use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
+#[cfg(feature = "cuda")]
+use symbi_xpu::runtime::{cuda_runtime::DISPATCHER, GpuRuntime};
+#[cfg(feature = "cuda")]
+use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
 /// move `src` over `src_region` into `dst` over `dst_region`, cell-for-cell. the two
 /// regions have identical shape (same per-axis extents); the transport pairs them by
@@ -77,9 +83,27 @@ extern "C" __global__ void halo_copy(
 }
 "#;
 
+// reusable unified index buffers for `DeviceCopy`, grown to the largest strip seen. the
+// strip geometry is fixed across steps, so this reuses the same device allocations instead
+// of a `cuMemAllocManaged` per `copy_region` (the dominant per-exchange cost). thread-local
+// so it needs no Send/Sync on the raw device pointers; the parallel test threads each pool
+// their own. the per-cell index WRITE still happens each call (cheap host memory writes).
+#[cfg(feature = "cuda")]
+struct HaloIdxBufs {
+    sidx: MemoryBlock<UnifiedMemory>,
+    didx: MemoryBlock<UnifiedMemory>,
+    cap: usize,
+}
+
+#[cfg(feature = "cuda")]
+thread_local! {
+    static HALO_IDX_BUFS: std::cell::RefCell<Option<HaloIdxBufs>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// device-side transport: the strip copy runs as a gpu kernel, with no host roundtrip of
-/// the field data. the per-cell flat-offset arrays are precomputed on the host and uploaded
-/// (small metadata); the data itself never leaves the device. on a host backend it falls
+/// the field data. the per-cell flat-offset arrays are precomputed on the host into pooled
+/// unified buffers; the data itself never leaves the device. on a host backend it falls
 /// back to the proven cell-for-cell copy.
 #[cfg(feature = "cuda")]
 pub struct DeviceCopy;
@@ -93,11 +117,6 @@ impl HaloTransport for DeviceCopy {
         dst: &Field<f64, D, M>,
         dst_region: &Domain<D>,
     ) {
-        use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
-        use symbi_xpu::runtime::cuda_runtime::DISPATCHER;
-        use symbi_xpu::runtime::GpuRuntime;
-        use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
-
         // the kernel dereferences device pointers; a host backend has none.
         if !M::IS_DEVICE_ACCESSIBLE {
             LocalCopy.copy_region(src, src_region, dst, dst_region);
@@ -110,45 +129,57 @@ impl HaloTransport for DeviceCopy {
             return;
         }
 
-        // precompute the flat offset of each strip cell into its field buffer. these match
-        // the View::at offsets because both index the field's allocated domain.
-        // NOTE: allocates the index buffers per call -- correct but not yet pooled.
-        let mut sidx = MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("sidx alloc");
-        let mut didx = MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("didx alloc");
-        let sp = sidx.as_mut_ptr::<u32>();
-        let dp = didx.as_mut_ptr::<u32>();
         let sdom = src.domain();
         let ddom = dst.domain();
-        for (i, (sc, dc)) in src_region.iter().zip(dst_region.iter()).enumerate() {
-            unsafe {
-                *sp.add(i) = sdom.flat_index(sc) as u32;
-                *dp.add(i) = ddom.flat_index(dc) as u32;
-            }
-        }
-
-        let kernel = DISPATCHER.jit_kernel_keyed(HALO_COPY_KERNEL, "decomp/halo_copy", "halo_copy");
         let src_ptr = src.as_ptr() as u64;
         let dst_ptr = dst.as_mut_ptr() as u64;
-        let sidx_ptr = sidx.as_ptr::<u32>() as u64;
-        let didx_ptr = didx.as_ptr::<u32>() as u64;
         let n_u32 = n as u32;
 
-        let mut args = KernelArgs::new();
-        args.push(&src_ptr);
-        args.push(&dst_ptr);
-        args.push(&sidx_ptr);
-        args.push(&didx_ptr);
-        args.push(&n_u32);
+        HALO_IDX_BUFS.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            // (re)allocate only when missing or too small; the strip geometry is fixed.
+            if slot.as_ref().map_or(true, |b| b.cap < n) {
+                *slot = Some(HaloIdxBufs {
+                    sidx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("sidx alloc"),
+                    didx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("didx alloc"),
+                    cap: n,
+                });
+            }
+            let bufs = slot.as_mut().unwrap();
 
-        let config = LaunchConfig::for_1d(n_u32, 64);
-        unsafe {
-            DISPATCHER
-                .runtime()
-                .launch(&kernel, config, args.as_mut_slice())
-                .expect("halo_copy launch failed");
-        }
-        // drain before the index buffers drop: the kernel reads them and launch is async.
-        ctx_sync();
+            // precompute the flat offset of each strip cell into its field buffer. these match
+            // the View::at offsets because both index the field's allocated domain.
+            let sp = bufs.sidx.as_mut_ptr::<u32>();
+            let dp = bufs.didx.as_mut_ptr::<u32>();
+            for (i, (sc, dc)) in src_region.iter().zip(dst_region.iter()).enumerate() {
+                unsafe {
+                    *sp.add(i) = sdom.flat_index(sc) as u32;
+                    *dp.add(i) = ddom.flat_index(dc) as u32;
+                }
+            }
+            let sidx_ptr = bufs.sidx.as_ptr::<u32>() as u64;
+            let didx_ptr = bufs.didx.as_ptr::<u32>() as u64;
+
+            let kernel =
+                DISPATCHER.jit_kernel_keyed(HALO_COPY_KERNEL, "decomp/halo_copy", "halo_copy");
+            let mut args = KernelArgs::new();
+            args.push(&src_ptr);
+            args.push(&dst_ptr);
+            args.push(&sidx_ptr);
+            args.push(&didx_ptr);
+            args.push(&n_u32);
+
+            let config = LaunchConfig::for_1d(n_u32, 64);
+            unsafe {
+                DISPATCHER
+                    .runtime()
+                    .launch(&kernel, config, args.as_mut_slice())
+                    .expect("halo_copy launch failed");
+            }
+            // drain before the pooled buffers are reused next call: the kernel reads them and
+            // the launch is async.
+            ctx_sync();
+        });
     }
 }
 
@@ -213,5 +244,57 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     for (fl, fr) in prim_fields(lo).into_iter().zip(prim_fields(hi)) {
         transport.copy_region(fr, &hi_src, fl, &lo_ghost); // hi interior -> lo ghost
         transport.copy_region(fl, &lo_src, fr, &hi_ghost); // lo interior -> hi ghost
+    }
+}
+
+// row-major (axis-0 slowest) flat index over a box of size `dims`, and its inverse. the
+// tile grid uses this ONE convention for both construction and neighbor lookup (a `Domain`
+// is avoided here on purpose: its iter order and flat_index order differ, which is a
+// footgun for tile bookkeeping; `Domain` does its job at the cell level in `exchange_faces`).
+pub fn flatten<const D: usize>(idx: [usize; D], dims: [usize; D]) -> usize {
+    let mut f = 0;
+    for a in 0..D {
+        f = f * dims[a] + idx[a];
+    }
+    f
+}
+
+pub fn unflatten<const D: usize>(mut flat: usize, dims: [usize; D]) -> [usize; D] {
+    let mut idx = [0usize; D];
+    for a in (0..D).rev() {
+        idx[a] = flat % dims[a];
+        flat /= dims[a];
+    }
+    idx
+}
+
+/// two-pass same-level halo exchange over a grid of `counts` tiles. `tiles` holds each
+/// subdomain's field store indexed by `flatten(tile_coord, counts)`. axes are processed in
+/// order so a later axis reads the ghosts an earlier axis filled, carrying corner values to
+/// the diagonal neighbor without explicit diagonal traffic. `transport` moves each strip
+/// (local host copy, gpu kernel, or a future peer/mpi impl). each adjacent pair is
+/// independent (reads interior, writes ghosts; an interior tile's lo/hi ghosts are distinct
+/// cells), so pair order within an axis is free.
+pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
+    tiles: &[&FieldStore<D, DOF, M>],
+    counts: [usize; D],
+    transport: &T,
+) {
+    let total: usize = counts.iter().product();
+    debug_assert_eq!(tiles.len(), total, "tiles slice length does not match counts");
+    let mut processed = [false; D];
+    for axis in 0..D {
+        for flat in 0..total {
+            let tc = unflatten(flat, counts);
+            if tc[axis] + 1 >= counts[axis] {
+                continue; // no neighbor on the hi side of this axis
+            }
+            let mut tc_hi = tc;
+            tc_hi[axis] += 1;
+            let lo = tiles[flatten(tc, counts)];
+            let hi = tiles[flatten(tc_hi, counts)];
+            exchange_faces(lo, hi, axis, &processed, &counts, transport);
+        }
+        processed[axis] = true;
     }
 }

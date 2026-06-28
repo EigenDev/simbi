@@ -33,7 +33,7 @@
 
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{exchange_faces, LocalCopy};
+use symbi::sim::decomp::{exchange_grid, flatten, unflatten, LocalCopy};
 #[cfg(feature = "cuda")]
 use symbi::sim::decomp::DeviceCopy;
 use symbi::sim::evolve::KernelSet;
@@ -67,23 +67,6 @@ macro_rules! decomp_harness {
 
             type Sim = SimState<Newtonian, $d, Cartesian, IdealGas<f64>, $space, $mem>;
             type Kern = AdiabaticSubstrateKernelSet<$mem, f64, $d>;
-
-            // row-major index <-> per-axis coordinate over a box of size `dims`.
-            fn unflatten(mut flat: usize, dims: [usize; $d]) -> [usize; $d] {
-                let mut idx = [0usize; $d];
-                for a in (0..$d).rev() {
-                    idx[a] = flat % dims[a];
-                    flat /= dims[a];
-                }
-                idx
-            }
-            fn flatten(idx: [usize; $d], dims: [usize; $d]) -> usize {
-                let mut f = 0;
-                for a in 0..$d {
-                    f = f * dims[a] + idx[a];
-                }
-                f
-            }
 
             // the integrator is set on the sim so the builder allocates the buffers it
             // needs (rk2's u_n snapshot); the harness drives the matching stage table.
@@ -141,39 +124,13 @@ macro_rules! decomp_harness {
                     .collect()
             }
 
-            // two-pass exchange over the whole grid, via the reusable decomposition module:
-            // process axes in order so a later axis reads the ghosts an earlier axis filled,
-            // carrying corner values to the diagonal neighbor without an explicit diagonal
-            // exchange. the bytes move through `LocalCopy` here; the same calls take a gpu peer
-            // or mpi transport later. takes a shared slice -- the transport writes ghosts via
-            // interior mutability, so no `split_at_mut` is needed.
-            fn exchange_grid(tiles: &[(Sim, Kern)], counts: [usize; $d]) {
-                // the prior gpu kernels (c2p/ghost_fill) wrote prim asynchronously; drain the
-                // device so the host LocalCopy reads coherent unified memory. no-op on cpu.
+            // drive the reusable module exchange over this harness's `(Sim, Kern)` tiles.
+            // the device drain (no-op on cpu) makes the prior async gpu writes visible to the
+            // transport; the sims deref to their `FieldStore` for the module's signature.
+            fn exchange_all(tiles: &[(Sim, Kern)], counts: [usize; $d]) {
                 device_sync::<$mem>();
-                let total: usize = counts.iter().product();
-                let mut processed = [false; $d];
-                for axis in 0..$d {
-                    for flat in 0..total {
-                        let tc = unflatten(flat, counts);
-                        if tc[axis] + 1 >= counts[axis] {
-                            continue;
-                        }
-                        let mut tc_hi = tc;
-                        tc_hi[axis] += 1;
-                        let lo_idx = flatten(tc, counts);
-                        let hi_idx = flatten(tc_hi, counts);
-                        exchange_faces(
-                            &*tiles[lo_idx].0,
-                            &*tiles[hi_idx].0,
-                            axis,
-                            &processed,
-                            &counts,
-                            &$transport,
-                        );
-                    }
-                    processed[axis] = true;
-                }
+                let tile_refs: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+                exchange_grid(&tile_refs, counts, &$transport);
             }
 
             // advance every tile one step at a shared dt, driving the SSP stage table
@@ -190,7 +147,7 @@ macro_rules! decomp_harness {
                     k.c2p(sim);
                     k.ghost_fill(sim);
                 }
-                exchange_grid(tiles, counts);
+                exchange_all(tiles, counts);
 
                 let mut t = 0.0;
                 while t < T_FINAL {
@@ -218,7 +175,7 @@ macro_rules! decomp_harness {
                         }
                         // refresh the cut halos from each neighbor's stage-updated interior,
                         // so the next stage (or step) reconstructs from current neighbor data.
-                        exchange_grid(tiles, counts);
+                        exchange_all(tiles, counts);
                     }
                     t += dt;
                 }
