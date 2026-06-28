@@ -507,6 +507,22 @@ where
         }
     }
 
+    /// the cfl-limited root dt this hierarchy would take (UNCLAMPED by t_final): the min over every
+    /// level of `cfl(level) * RATIO^level` (covered coarse cells are conservative averages, so a
+    /// fast fine-only feature is diluted out of the root cfl; level l subcycles RATIO^l times, so
+    /// its limit enters scaled by RATIO^l). exposed for the DECOMPOSED driver: it takes the global
+    /// min of this across tiles, then drives each tile with `evolve(t + global_dt)` -- since the
+    /// global dt is the min, each tile's internal `dt_cfl.min(global_dt)` collapses to global_dt,
+    /// giving a lockstep root step without a separate dt-injection path.
+    pub fn root_cfl_dt(&self) -> f64 {
+        let mut dt_cfl = f64::INFINITY;
+        for (ll, lvl) in self.levels.iter().enumerate() {
+            let scale = RATIO.pow(ll as u32) as f64;
+            dt_cfl = dt_cfl.min(lvl.kernels.cfl(&lvl.state) * scale);
+        }
+        dt_cfl
+    }
+
     /// one root step: cfl-limited dt (clamped to t_final), the recursive level
     /// advance, then the root clock + body state. EVERY level limits the root
     /// step — covered coarse cells are conservative averages of fine data, so
