@@ -287,6 +287,20 @@ class SimbiProblem(BaseModel):
             description="checkpoint index for resuming",
         ),
     ]
+    gpus: Annotated[
+        int,
+        ProblemParam(
+            1,
+            ge=1,
+            cli=True,
+            checkpoint_safe=True,
+            description="number of gpus to decompose the domain across, intra-node "
+            "(NVLink/peer). 1 = single device (default). >1 requires a gpu build "
+            "(./dev.py install --gpu or --hip) and at least that many visible devices. "
+            "the backend (cuda/hip) is a BUILD choice; this is purely how many devices "
+            "to use at runtime",
+        ),
+    ]
     checkpoint_file: Annotated[
         Optional[str | Path],
         ProblemParam(

@@ -108,6 +108,10 @@ struct Config {
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
+    // number of gpus to decompose the domain across, intra-node (docs/design/37, 38). 1 =
+    // single device (the only path wired today). >1 is validated here but the decomposed run
+    // loop (M4) is not yet wired, so it errors -- the runtime knob, not the build backend.
+    n_gpus: usize,
 }
 
 /// dimension-agnostic raw body parameters from the python `immersed_bodies`
@@ -501,6 +505,13 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_else(|| "t".to_string()),
         bodies: parse_bodies(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
+        n_gpus: dict
+            .get_item("gpus")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<usize>().ok())
+            .unwrap_or(1)
+            .max(1),
         // user source expressions (force/cooling/relax/raw) -> the rust source
         // front door. `gravity_source_expressions` is the conventional force slot;
         // `hydro_source_expressions` is the generic self-describing source. one
@@ -2132,6 +2143,37 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 // the pybind11-compatible entry point
 // =============================================================================
 
+// validate a multi-gpu request (`Config.n_gpus`) before any heavy work. phase A (docs/design/
+// 37, 38): gpus==1 is the only wired path; gpus>1 is validated and rejected with the PRECISE
+// reason -- a cpu build, too few visible devices, or the decomposed run loop (M4) not yet
+// wired -- so the user gets an actionable message instead of a silent single-device run.
+fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
+    if n_gpus <= 1 {
+        return Ok(());
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        Err(format!(
+            "gpus={n_gpus} requested, but this is a cpu build. multi-gpu needs a gpu build: \
+             `./dev.py install --gpu` (nvidia) or `--hip` (amd)."
+        ))
+    }
+    #[cfg(feature = "gpu")]
+    {
+        let avail = symbi::symbi_xpu::device_count().unwrap_or(0) as usize;
+        if n_gpus > avail {
+            return Err(format!(
+                "gpus={n_gpus} requested, but only {avail} gpu(s) are visible. select/limit with \
+                 CUDA_VISIBLE_DEVICES or ROCR_VISIBLE_DEVICES, or lower gpus."
+            ));
+        }
+        Err(format!(
+            "gpus={n_gpus} is valid ({avail} device(s) visible) but the multi-gpu run loop is not \
+             yet wired (docs/design/37 M4); set gpus=1 for now."
+        ))
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (prim_gen, staggered_bfields, sim_info, a, adot))]
 fn run_simulation(
@@ -2143,6 +2185,8 @@ fn run_simulation(
     adot: &Bound<'_, PyAny>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
+    // fail fast on an unsupported multi-gpu request, before draining generators or allocating.
+    validate_gpu_request(cfg.n_gpus).map_err(PyRuntimeError::new_err)?;
     // evaluate the scale-factor callables at the start time (GIL held). the rust
     // mesh-motion model integrates `a` from the constant rate `a_dot` (linear /
     // free homologous expansion, a_ddot = 0), so a single sample at t0 suffices.
