@@ -49,10 +49,13 @@ use super::transfer::{
 };
 use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage_time_fractions};
 use symbi_sim::hydro_ops::scan_c2p_errors;
+use symbi_sim::decomp::{drain_devices, exchange_grid, HaloTransport};
 use symbi_sim::state::{
-    Boundaries, BoundaryType, PrimFieldsGeneric, SimStateGeneric, array_field_zeros, axis_name,
+    Boundaries, BoundaryType, FieldStore, PrimFieldsGeneric, SimStateGeneric, Timestepping,
+    array_field_zeros, axis_name,
 };
 use symbi_sim::substrate_seam::KernelSet;
+use std::ops::ControlFlow;
 
 /// the refinement ratio. fixed at 2 (the transfer kernels are baked at 2 in
 /// the aot registry; the builders accept any ratio when that changes).
@@ -1078,4 +1081,130 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
             );
         }
     }
+}
+
+// =============================================================================
+// decomposed hierarchy driver (refinement x decomposition, phase 1-2)
+// =============================================================================
+
+/// the root-level halo exchange across tiles + a per-tile root `ghost_fill`. only the ROOT level
+/// is exchanged: the refined patches are tile-local (each lives inside one root tile's interior),
+/// so every fine level's coupling stays within its owning tile. drains the devices first (the
+/// cross-device read barrier), exchanges the prim reconstruction fields on the root `FieldStore`s
+/// (cut faces are `CoarseFine`, so `ghost_fill` leaves them for the exchange), then re-fills the
+/// physical boundary ghosts. used both to prime the tiles and BETWEEN root stages.
+fn exchange_root_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+{
+    drain_devices::<Mem>(devices);
+    {
+        let roots: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
+            tiles.iter().map(|h| &*h.levels[0].state).collect();
+        exchange_grid(&roots, counts, devices, transport);
+    }
+    for (i, h) in tiles.iter().enumerate() {
+        symbi_xpu::with_device(devices[i], || {
+            h.levels[0].kernels.ghost_fill(&h.levels[0].state)
+        });
+    }
+}
+
+/// the DECOMPOSED hierarchy driver (refinement x decomposition, phase 1-2: TILE-LOCAL static
+/// refinement, euler OR rk2 root). lockstep-advance N per-tile hierarchies whose refined patches
+/// each live inside a single root tile; the EXISTING recursive advance (`level_step_tail`'s fine
+/// subcycle) drives each tile's sub-hierarchy unchanged, and the only cross-tile coupling is the
+/// ROOT halo exchange -- done BETWEEN root stages (the rk2 corrector reads each neighbor's stage-1
+/// update; a between-step-only exchange is euler-correct only). the flux/emf reflux registers stay
+/// tile-local (a coarse cell and the fine cells at its face are co-located). global dt = min over
+/// tiles of `root_cfl_dt()` (clamped to t_final), so each tile's internal cfl clamp collapses to
+/// the same dt. proven `decomposed == monolithic` by `symbi/tests/decomp_refine_equivalence.rs`.
+///
+/// hydro only in the root post-step: mesh motion + immersed bodies combined with refinement-decomp
+/// are deferred (the root clock is advanced directly here, skipping step_root's motion/body tail).
+/// `on_checkpoint(iteration, time, &tiles)` fires every `interval` root steps and once at the end
+/// (the devices are drained first so the callback reads coherent tile state).
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, F>(
+    tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+    transport: &T,
+    ts: Timestepping,
+    start_time: f64,
+    t_final: f64,
+    interval: u64,
+    mut on_checkpoint: F,
+) where
+    R: Regime<f64, NDIM> + Copy,
+    M: Metric<f64, NDIM> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+    T: HaloTransport,
+    F: FnMut(u64, f64, &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>]) -> ControlFlow<()>,
+{
+    let n = tiles.len();
+    let nstages = ts.stages().len();
+    debug_assert_eq!(n, devices.len(), "tiles/devices length mismatch");
+
+    // cut halos current before the first flux.
+    exchange_root_halos(tiles, counts, devices, transport);
+
+    let mut t = start_time;
+    let mut iter: u64 = 0;
+    let mut last_cb: u64 = 0;
+    while t < t_final {
+        // global dt = min over tiles' root cfl, clamped to land exactly on t_final.
+        let mut gdt = t_final - t;
+        for i in 0..n {
+            gdt = gdt.min(symbi_xpu::with_device(devices[i], || tiles[i].root_cfl_dt()));
+        }
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
+        }
+        // the root SSP stages, with a root halo exchange between each (rk2 corrector reads the
+        // neighbor's stage-1 update -- the same contract as the single-level decomposition).
+        for ii in 0..nstages {
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || tiles[i].level_stage(0, ii, gdt, 0.0));
+            }
+            exchange_root_halos(tiles, counts, devices, transport);
+        }
+        // the tile-local fine subcycle + restrict + reflux (the existing recursive advance), then
+        // the root clock (hydro-only: motion / bodies in the root post-step are deferred).
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || {
+                tiles[i].level_step_tail(0, gdt, 0.0);
+                tiles[i].levels[0].state.time += gdt;
+                tiles[i].levels[0].state.iteration += 1;
+            });
+        }
+        // the tail's c2p recomputed prim over the allocated domain (incl. the cut halo from stale
+        // halo cons); refresh the cut halos for the next step's stage 0.
+        exchange_root_halos(tiles, counts, devices, transport);
+
+        t += gdt;
+        iter += 1;
+        if iter - last_cb >= interval {
+            last_cb = iter;
+            drain_devices::<Mem>(devices);
+            if on_checkpoint(iter, t, tiles).is_break() {
+                return;
+            }
+        }
+    }
+    drain_devices::<Mem>(devices);
+    let _ = on_checkpoint(iter, t, tiles);
 }

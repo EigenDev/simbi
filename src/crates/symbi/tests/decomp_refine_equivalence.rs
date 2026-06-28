@@ -14,10 +14,11 @@
 // collapses each tile's internal cfl clamp), then exchange root halos. cpu-only + 2d hydro.
 // =============================================================================
 
-use symbi::prelude::KernelSet;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{exchange_grid, unflatten, LocalCopy};
-use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
+use symbi::sim::decomp::{unflatten, LocalCopy};
+use symbi::sim::refinement::{
+    evolve_hierarchy_decomposed, Hierarchy, ProlongOrder, RefinementRegion,
+};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -121,52 +122,22 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     tiles
 }
 
-// exchange the ROOT-level halos across tiles (prim reconstruction fields), reusing the proven
-// single-level exchange on the root states. then re-fill physical boundary ghosts post-exchange.
-fn exchange_root(tiles: &mut [Hier], counts: [usize; 2]) {
-    let devices: Vec<i32> = vec![0; tiles.len()];
-    {
-        let roots: Vec<&FieldStore<2, 2, HostMemory, f64>> =
-            tiles.iter().map(|h| &*h.levels[0].state).collect();
-        exchange_grid(&roots, counts, &devices, &LocalCopy);
-    }
-    for h in tiles.iter() {
-        h.levels[0].kernels.ghost_fill(&h.levels[0].state);
-    }
-}
-
-// the decomposed AMR driver: lockstep root steps, the root halo exchanged BETWEEN root stages (the
-// rk2 corrector reads each neighbor's stage-1 update, exactly like the single-level decomposition).
-// each root step: global dt (min over tiles) -> begin -> { root stage; exchange }* -> tail (the
-// tile-local fine subcycle + reflux) -> root clock -> a final exchange for the next step's stage 0.
-// hydro only (no mesh motion / bodies in the root post-step -- those combinations are deferred).
+// drive the tiles through the PRODUCTION decomposed-hierarchy loop (symbi-amr): the oracle now
+// tests the same `evolve_hierarchy_decomposed` a multi-gpu refinement run would call, so a
+// divergence between the proof and production is impossible. host: all tiles on "device 0".
 fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping) {
-    exchange_root(tiles, counts); // cut halos current before the first flux
-    let nstages = ts.stages().len();
-    let mut t = 0.0;
-    while t < t_final {
-        let gdt = tiles
-            .iter()
-            .map(|h| h.root_cfl_dt())
-            .fold(f64::INFINITY, f64::min)
-            .min(t_final - t);
-        for h in tiles.iter_mut() {
-            h.level_step_begin(0, gdt);
-        }
-        for ii in 0..nstages {
-            for h in tiles.iter_mut() {
-                h.level_stage(0, ii, gdt, 0.0);
-            }
-            exchange_root(tiles, counts); // between-stage root halo exchange
-        }
-        for h in tiles.iter_mut() {
-            h.level_step_tail(0, gdt, 0.0); // tile-local fine subcycle + restrict + reflux
-            h.levels[0].state.time += gdt; // the root clock (step_root's tail, hydro-only here)
-            h.levels[0].state.iteration += 1;
-        }
-        exchange_root(tiles, counts); // tail's c2p touched the cut halo; refresh for the next step
-        t += gdt;
-    }
+    let devices: Vec<i32> = vec![0; tiles.len()];
+    evolve_hierarchy_decomposed(
+        tiles,
+        counts,
+        &devices,
+        &LocalCopy,
+        ts,
+        0.0,
+        t_final,
+        u64::MAX,
+        |_, _, _| std::ops::ControlFlow::Continue(()),
+    );
 }
 
 // scatter every level's density into one global composite grid at the FINEST resolution that

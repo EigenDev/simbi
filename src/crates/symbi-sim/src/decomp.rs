@@ -554,7 +554,7 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
 // in another context (the cross-device read barrier). no-op on a host backend. mirrors the
 // oracle's `sync_devices` (docs/design/37 M2).
 #[cfg(feature = "gpu")]
-fn drain_devices<M: MemorySpace>(devices: &[i32]) {
+pub fn drain_devices<M: MemorySpace>(devices: &[i32]) {
     if !M::IS_DEVICE_ACCESSIBLE {
         return;
     }
@@ -568,7 +568,7 @@ fn drain_devices<M: MemorySpace>(devices: &[i32]) {
 }
 
 #[cfg(not(feature = "gpu"))]
-fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
+pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 
 /// drive a decomposed simulation: `stores.len()` tiles evolved in LOCKSTEP at a shared dt,
 /// with a same-level halo exchange after each ssp stage. this IS the proven oracle loop
