@@ -57,6 +57,101 @@ impl HaloTransport for LocalCopy {
     }
 }
 
+// a D-independent gather/scatter copy kernel: thread i moves one strip cell, reading and
+// writing precomputed flat offsets into each field's own buffer. one kernel covers every
+// dimension and every stride because the geometry is baked into the index arrays. this is
+// the same pack/move/unpack primitive a peer-copy or mpi transport reuses -- only the move
+// (here a same-buffer-space device copy) changes.
+#[cfg(feature = "cuda")]
+const HALO_COPY_KERNEL: &str = r#"
+extern "C" __global__ void halo_copy(
+    const double* src,
+    double* dst,
+    const unsigned int* sidx,
+    const unsigned int* didx,
+    unsigned int n)
+{
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    dst[didx[i]] = src[sidx[i]];
+}
+"#;
+
+/// device-side transport: the strip copy runs as a gpu kernel, with no host roundtrip of
+/// the field data. the per-cell flat-offset arrays are precomputed on the host and uploaded
+/// (small metadata); the data itself never leaves the device. on a host backend it falls
+/// back to the proven cell-for-cell copy.
+#[cfg(feature = "cuda")]
+pub struct DeviceCopy;
+
+#[cfg(feature = "cuda")]
+impl HaloTransport for DeviceCopy {
+    fn copy_region<const D: usize, M: MemorySpace>(
+        &self,
+        src: &Field<f64, D, M>,
+        src_region: &Domain<D>,
+        dst: &Field<f64, D, M>,
+        dst_region: &Domain<D>,
+    ) {
+        use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
+        use symbi_xpu::runtime::cuda_runtime::DISPATCHER;
+        use symbi_xpu::runtime::GpuRuntime;
+        use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
+
+        // the kernel dereferences device pointers; a host backend has none.
+        if !M::IS_DEVICE_ACCESSIBLE {
+            LocalCopy.copy_region(src, src_region, dst, dst_region);
+            return;
+        }
+
+        let n = src_region.volume();
+        debug_assert_eq!(n, dst_region.volume(), "src/dst strip shapes differ");
+        if n == 0 {
+            return;
+        }
+
+        // precompute the flat offset of each strip cell into its field buffer. these match
+        // the View::at offsets because both index the field's allocated domain.
+        // NOTE: allocates the index buffers per call -- correct but not yet pooled.
+        let mut sidx = MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("sidx alloc");
+        let mut didx = MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("didx alloc");
+        let sp = sidx.as_mut_ptr::<u32>();
+        let dp = didx.as_mut_ptr::<u32>();
+        let sdom = src.domain();
+        let ddom = dst.domain();
+        for (i, (sc, dc)) in src_region.iter().zip(dst_region.iter()).enumerate() {
+            unsafe {
+                *sp.add(i) = sdom.flat_index(sc) as u32;
+                *dp.add(i) = ddom.flat_index(dc) as u32;
+            }
+        }
+
+        let kernel = DISPATCHER.jit_kernel_keyed(HALO_COPY_KERNEL, "decomp/halo_copy", "halo_copy");
+        let src_ptr = src.as_ptr() as u64;
+        let dst_ptr = dst.as_mut_ptr() as u64;
+        let sidx_ptr = sidx.as_ptr::<u32>() as u64;
+        let didx_ptr = didx.as_ptr::<u32>() as u64;
+        let n_u32 = n as u32;
+
+        let mut args = KernelArgs::new();
+        args.push(&src_ptr);
+        args.push(&dst_ptr);
+        args.push(&sidx_ptr);
+        args.push(&didx_ptr);
+        args.push(&n_u32);
+
+        let config = LaunchConfig::for_1d(n_u32, 64);
+        unsafe {
+            DISPATCHER
+                .runtime()
+                .launch(&kernel, config, args.as_mut_slice())
+                .expect("halo_copy launch failed");
+        }
+        // drain before the index buffers drop: the kernel reads them and launch is async.
+        ctx_sync();
+    }
+}
+
 /// the ng-deep ghost strip on `side` of `axis`, with the transverse extent clipped to
 /// the interior on any cut axis not yet exchanged (`!processed[b] && counts[b] > 1`) --
 /// the two-pass corner rule. on a physical axis, or a cut axis already exchanged, the

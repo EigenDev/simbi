@@ -34,6 +34,8 @@
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{exchange_faces, LocalCopy};
+#[cfg(feature = "cuda")]
+use symbi::sim::decomp::DeviceCopy;
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -59,7 +61,7 @@ fn bump(x: f64) -> f64 {
 }
 
 macro_rules! decomp_harness {
-    ($modname:ident, $d:literal, $space:ty, $mem:ty) => {
+    ($modname:ident, $d:literal, $space:ty, $mem:ty, $transport:expr) => {
         mod $modname {
             use super::*;
 
@@ -167,7 +169,7 @@ macro_rules! decomp_harness {
                             axis,
                             &processed,
                             &counts,
-                            &LocalCopy,
+                            &$transport,
                         );
                     }
                     processed[axis] = true;
@@ -271,9 +273,9 @@ macro_rules! decomp_harness {
     };
 }
 
-decomp_harness!(d1, 1, CpuSpace, HostMemory);
-decomp_harness!(d2, 2, CpuSpace, HostMemory);
-decomp_harness!(d3, 3, CpuSpace, HostMemory);
+decomp_harness!(d1, 1, CpuSpace, HostMemory, LocalCopy);
+decomp_harness!(d2, 2, CpuSpace, HostMemory, LocalCopy);
+decomp_harness!(d3, 3, CpuSpace, HostMemory, LocalCopy);
 
 // the same harness on the gpu memory space: every kernel routes through the production
 // run_gpu path (NVRTC -> launch), fields live in unified memory, and the exchange's host
@@ -281,9 +283,9 @@ decomp_harness!(d3, 3, CpuSpace, HostMemory);
 // speedup, but it proves the decomposition works against device fields before a second
 // gpu exists. needs `--features cuda` and a cuda device.
 #[cfg(feature = "cuda")]
-decomp_harness!(gpu_d1, 1, CudaSpace, UnifiedMemory);
+decomp_harness!(gpu_d1, 1, CudaSpace, UnifiedMemory, DeviceCopy);
 #[cfg(feature = "cuda")]
-decomp_harness!(gpu_d2, 2, CudaSpace, UnifiedMemory);
+decomp_harness!(gpu_d2, 2, CudaSpace, UnifiedMemory, DeviceCopy);
 
 #[test]
 fn euler_two_tile_1d() {
