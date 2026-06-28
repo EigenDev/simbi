@@ -298,3 +298,143 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
         processed[axis] = true;
     }
 }
+
+// the gather/scatter kernels for `StagedCopy`: pack a strided strip into a contiguous
+// buffer, and scatter a contiguous buffer back into a strided strip. the contiguous buffer
+// is the interchange a peer-copy (nvlink) or mpi transfer moves across the link.
+#[cfg(feature = "cuda")]
+const HALO_GATHER_KERNEL: &str = r#"
+extern "C" __global__ void halo_gather(
+    const double* src, double* buf, const unsigned int* idx, unsigned int n)
+{
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    buf[i] = src[idx[i]];
+}
+"#;
+
+#[cfg(feature = "cuda")]
+const HALO_SCATTER_KERNEL: &str = r#"
+extern "C" __global__ void halo_scatter(
+    double* dst, const double* buf, const unsigned int* idx, unsigned int n)
+{
+    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    dst[idx[i]] = buf[i];
+}
+"#;
+
+// pooled staging buffers: the gather/scatter index arrays plus the contiguous f64 strip.
+#[cfg(feature = "cuda")]
+struct HaloStageBufs {
+    sidx: MemoryBlock<UnifiedMemory>,
+    didx: MemoryBlock<UnifiedMemory>,
+    buf: MemoryBlock<UnifiedMemory>,
+    cap: usize,
+}
+
+#[cfg(feature = "cuda")]
+thread_local! {
+    static HALO_STAGE_BUFS: std::cell::RefCell<Option<HaloStageBufs>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// staged device transport: gather the strided strip into a CONTIGUOUS device buffer, then
+/// scatter it into the destination. on a single device the buffer is the staging area
+/// (gather then scatter, no move). ACROSS devices the contiguous buffer is exactly what a
+/// `cuMemcpyPeer` over nvlink (intra-node) or an mpi send/recv (multi-node) moves between
+/// the two ranks -- so this validates the pack/unpack halves of the multi-gpu transport on
+/// a single card; only the move in the middle is added on real hardware. host fallback for
+/// a cpu backend.
+#[cfg(feature = "cuda")]
+pub struct StagedCopy;
+
+#[cfg(feature = "cuda")]
+impl HaloTransport for StagedCopy {
+    fn copy_region<const D: usize, M: MemorySpace>(
+        &self,
+        src: &Field<f64, D, M>,
+        src_region: &Domain<D>,
+        dst: &Field<f64, D, M>,
+        dst_region: &Domain<D>,
+    ) {
+        if !M::IS_DEVICE_ACCESSIBLE {
+            LocalCopy.copy_region(src, src_region, dst, dst_region);
+            return;
+        }
+        let n = src_region.volume();
+        debug_assert_eq!(n, dst_region.volume(), "src/dst strip shapes differ");
+        if n == 0 {
+            return;
+        }
+        let sdom = src.domain();
+        let ddom = dst.domain();
+        let src_ptr = src.as_ptr() as u64;
+        let dst_ptr = dst.as_mut_ptr() as u64;
+        let n_u32 = n as u32;
+        let config = LaunchConfig::for_1d(n_u32, 64);
+
+        HALO_STAGE_BUFS.with(|cell| {
+            let mut slot = cell.borrow_mut();
+            if slot.as_ref().map_or(true, |b| b.cap < n) {
+                *slot = Some(HaloStageBufs {
+                    sidx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("sidx alloc"),
+                    didx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("didx alloc"),
+                    buf: MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n).expect("stage alloc"),
+                    cap: n,
+                });
+            }
+            let bufs = slot.as_mut().unwrap();
+            let sp = bufs.sidx.as_mut_ptr::<u32>();
+            let dp = bufs.didx.as_mut_ptr::<u32>();
+            for (i, (sc, dc)) in src_region.iter().zip(dst_region.iter()).enumerate() {
+                unsafe {
+                    *sp.add(i) = sdom.flat_index(sc) as u32;
+                    *dp.add(i) = ddom.flat_index(dc) as u32;
+                }
+            }
+            let sidx_ptr = bufs.sidx.as_ptr::<u32>() as u64;
+            let didx_ptr = bufs.didx.as_ptr::<u32>() as u64;
+            let buf_ptr = bufs.buf.as_mut_ptr::<f64>() as u64;
+
+            // gather: buf[i] = src[sidx[i]] -- pack the strided strip into the contiguous buffer.
+            let gather =
+                DISPATCHER.jit_kernel_keyed(HALO_GATHER_KERNEL, "decomp/halo_gather", "halo_gather");
+            let mut g = KernelArgs::new();
+            g.push(&src_ptr);
+            g.push(&buf_ptr);
+            g.push(&sidx_ptr);
+            g.push(&n_u32);
+            unsafe {
+                DISPATCHER
+                    .runtime()
+                    .launch(&gather, config, g.as_mut_slice())
+                    .expect("halo_gather launch failed");
+            }
+
+            // MOVE: single device -- the buffer IS the staging, nothing to move. across devices
+            // this is where cuMemcpyPeer (nvlink) or mpi send/recv copies `buf` to the neighbor's
+            // buffer before the scatter runs there.
+
+            // scatter: dst[didx[i]] = buf[i].
+            let scatter = DISPATCHER.jit_kernel_keyed(
+                HALO_SCATTER_KERNEL,
+                "decomp/halo_scatter",
+                "halo_scatter",
+            );
+            let mut s = KernelArgs::new();
+            s.push(&dst_ptr);
+            s.push(&buf_ptr);
+            s.push(&didx_ptr);
+            s.push(&n_u32);
+            unsafe {
+                DISPATCHER
+                    .runtime()
+                    .launch(&scatter, config, s.as_mut_slice())
+                    .expect("halo_scatter launch failed");
+            }
+            // drain before the pooled buffers are reused next call.
+            ctx_sync();
+        });
+    }
+}

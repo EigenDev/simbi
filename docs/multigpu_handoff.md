@@ -121,15 +121,27 @@ thin oracle harness that builds sims, drives the SSP stages, and calls `exchange
 through a one-line `exchange_all` wrapper (which adds the `device_sync` drain). the module
 is now the complete reusable decomposition layer; a cluster driver reuses it directly.
 
-remaining (all NEEDS a cluster / 2+ gpus, none testable on the single 2070):
+direction (chosen 2026-06-28): intra-node multi-gpu via nvlink peer-copy FIRST; mpi only
+when going multi-node. so no mpi dependency yet. the pack/unpack half (`StagedCopy`) is
+DONE and locally validated -- it gathers each strip into a contiguous buffer and scatters
+it back, exactly what a peer/mpi move transfers between ranks.
 
-1. a peer/mpi `HaloTransport` impl. peer = gather into a contiguous buffer +
-   `cuMemcpyPeerAsync` + scatter; mpi = gather -> buffer -> `MPI_Send/Recv` -> scatter
-   (the gather/scatter is exactly `DeviceCopy`'s kernel, just to a packed buffer). assign
-   tiles to devices/ranks, distributed cfl via a cross-rank reduce, distributed checkpoint
-   i/o. under SPMD bind each rank with `CUDA_VISIBLE_DEVICES` so the single-device code
-   stays valid per rank. the in-process + single-gpu tests stay the oracle; a new transport
-   must keep them green first.
+remaining (NEEDS 2+ gpus / a node; the structure is locally developable, the cross-gpu
+behavior is not):
+
+1. peer transport: a `HaloTransport` impl = `StagedCopy`'s gather, then `cuMemcpyPeer`
+   (nvlink) of the contiguous buffer to the neighbor device's buffer, then `StagedCopy`'s
+   scatter. only the middle move is new; the gather/scatter are proven. (later, multi-node:
+   swap the move for an mpi send/recv.)
+2. device binding: assign each tile to a gpu, launch its physics kernels ON that device,
+   enable peer access. this is the bigger half -- the xpu globals (`CUDA_CTX` once-lock,
+   `cuDeviceGet(0)`, the global `DISPATCHER`) must become per-device (the adr's "make
+   device identity explicit"). developable locally by mapping logical devices to the one
+   card; the real cross-gpu launch + peer access needs the node.
+3. distributed cfl via a cross-rank reduce; distributed checkpoint i/o. under SPMD bind each
+   rank with `CUDA_VISIBLE_DEVICES` so the single-device code stays valid per rank.
+
+the in-process + single-gpu tests stay the oracle; a new transport must keep them green.
 
 the iron rule: never advance a transport without its equivalence test green first. the
 test is the contract.
@@ -189,11 +201,13 @@ or thread `device_id` through the xpu layer. all premature. yagni.
 
 - the adr (decided strategy): `docs/design/36_scalability_multi_gpu.md`
 - the complete reusable decomposition layer (D-generic, Domain-based at the cell level):
-  `src/crates/symbi-sim/src/decomp.rs` -- `HaloTransport` trait; `LocalCopy` host impl;
-  `DeviceCopy` pooled cuda gather/scatter-kernel impl; `exchange_faces` (per-face);
-  `exchange_grid` (two-pass over the tile grid); `flatten`/`unflatten`. re-exported as
-  `symbi::sim::decomp`. gpu validation: `cargo test -p symbi --features cuda
-  --test decomp_equivalence --release`
+  `src/crates/symbi-sim/src/decomp.rs` -- `HaloTransport` trait; three impls: `LocalCopy`
+  (host), `DeviceCopy` (pooled direct strided device kernel), `StagedCopy` (pooled
+  gather -> contiguous buffer -> scatter, the pack/unpack a peer/mpi move reuses);
+  `exchange_faces` (per-face); `exchange_grid` (two-pass over the tile grid);
+  `flatten`/`unflatten`. re-exported as `symbi::sim::decomp`. gpu validation:
+  `cargo test -p symbi --features cuda --test decomp_equivalence --release` (gpu_d1 routes
+  through DeviceCopy, gpu_d2 through StagedCopy).
 - per-step primitive: `step_once` in `src/crates/symbi/src/sim/evolve.rs`
 - the equivalence test (5 passing oracle; grid orchestration + tile setup still here):
   `src/crates/symbi/tests/decomp_equivalence.rs`

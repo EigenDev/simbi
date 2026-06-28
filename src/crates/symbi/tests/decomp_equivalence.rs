@@ -35,7 +35,7 @@ use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{exchange_grid, flatten, unflatten, LocalCopy};
 #[cfg(feature = "cuda")]
-use symbi::sim::decomp::DeviceCopy;
+use symbi::sim::decomp::{DeviceCopy, StagedCopy};
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -241,8 +241,9 @@ decomp_harness!(d3, 3, CpuSpace, HostMemory, LocalCopy);
 // gpu exists. needs `--features cuda` and a cuda device.
 #[cfg(feature = "cuda")]
 decomp_harness!(gpu_d1, 1, CudaSpace, UnifiedMemory, DeviceCopy);
+// the 2x2 grid exercises StagedCopy: the gather/scatter pack/unpack that peer-copy reuses.
 #[cfg(feature = "cuda")]
-decomp_harness!(gpu_d2, 2, CudaSpace, UnifiedMemory, DeviceCopy);
+decomp_harness!(gpu_d2, 2, CudaSpace, UnifiedMemory, StagedCopy);
 
 #[test]
 fn euler_two_tile_1d() {
