@@ -18,7 +18,9 @@
 // =============================================================================
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, exchange_grid, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{
+    evolve_decomposed, exchange_grid, flatten, gather_faces, gather_interiors, unflatten, LocalCopy,
+};
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -95,11 +97,17 @@ fn grid_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<(Sim, Kern)> {
 }
 
 fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2], ts: Timestepping) {
-    let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-    let kernels: Vec<_> = tiles.iter().map(|(_, k)| k).collect();
     let devices: Vec<i32> = vec![0; tiles.len()]; // host: all "device 0" (no-op with_device)
+    // evolve_decomposed takes the tiles by &mut (per-step body bookkeeping); build the &mut store
+    // handles + & kernels from the same tiles.
+    let mut stores = Vec::new();
+    let mut kernels = Vec::new();
+    for (s, k) in tiles.iter_mut() {
+        stores.push(&mut **s);
+        kernels.push(&*k);
+    }
     evolve_decomposed(
-        &stores,
+        &mut stores,
         &kernels,
         counts,
         &devices,
@@ -108,7 +116,7 @@ fn run(tiles: &mut [(Sim, Kern)], counts: [usize; 2], ts: Timestepping) {
         T_FINAL,
         u64::MAX,
         &LocalCopy,
-        |_, _| std::ops::ControlFlow::Continue(()),
+        |_, _, _| std::ops::ControlFlow::Continue(()),
     );
 }
 
@@ -435,4 +443,57 @@ fn mhd_euler_quad_tile_2d_grid() {
 #[test]
 fn mhd_rk2_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Rk2);
+}
+
+// the OUTPUT path: `gather_interiors` (cells + cell B) + `gather_faces` (staggered B) must
+// reassemble the decomposed tiles into one global sim equal to the monolithic run -- this is what
+// the python checkpoint writer serializes. the per-tile `global_bcell`/`global_den` helpers above
+// prove the field VALUES match; this proves the GATHER functions the binding actually calls
+// reproduce them (cell den + all three bcell components + both staggered bface axes).
+#[test]
+fn mhd_gather_reassembles_global() {
+    let ts = Timestepping::Rk2;
+    let counts = [2, 2];
+
+    let mut mono = grid_tiles([1, 1], ts);
+    run(&mut mono, [1, 1], ts);
+    let mono_sim = &mono[0].0;
+
+    let mut dec = grid_tiles(counts, ts);
+    run(&mut dec, counts, ts);
+
+    // a fresh full-size sim (identical geometry to mono) as the gather target -- the binding's
+    // `global` output view. gather overwrites its interior from the tiles.
+    let global = grid_tiles([1, 1], ts).pop().unwrap().0;
+    {
+        let stores: Vec<_> = dec.iter().map(|(s, _)| &**s).collect();
+        gather_interiors(&global, &stores, counts);
+        gather_faces(&global, &stores, counts);
+    }
+
+    let g_mhd = global.fields.mhd.as_ref().unwrap();
+    let m_mhd = mono_sim.fields.mhd.as_ref().unwrap();
+
+    // cell fields: density + the three cell-centered B components over the interior.
+    let mut max_cell = 0.0_f64;
+    for c in global.geom.interior.iter() {
+        let dd = (global.fields.cons.den.view().at(c) - mono_sim.fields.cons.den.view().at(c)).abs();
+        max_cell = max_cell.max(dd);
+        for k in 0..3 {
+            let db = (g_mhd.bcell.b[k].view().at(c) - m_mhd.bcell.b[k].view().at(c)).abs();
+            max_cell = max_cell.max(db);
+        }
+    }
+
+    // staggered faces over each axis-d interior face domain (interior extended +1 on d).
+    let mut max_face = 0.0_f64;
+    for d in 0..2 {
+        for c in global.geom.interior.extend(d, 0, 1).iter() {
+            let df = (g_mhd.bface[d].view().at(c) - m_mhd.bface[d].view().at(c)).abs();
+            max_face = max_face.max(df);
+        }
+    }
+
+    assert!(max_cell < 1e-11, "gathered cell fields diverge: {max_cell:e}");
+    assert!(max_face < 1e-11, "gathered staggered faces diverge: {max_face:e}");
 }

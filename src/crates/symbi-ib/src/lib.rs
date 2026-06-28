@@ -24,5 +24,5 @@ pub use body_delta::BodyDelta;
 pub use collection::{BodyCollection, BinaryParams, ReferenceFrame, MAX_BODIES};
 pub use effects::{CellGeometry, grav_source, accretion_source, rigid_source};
 pub use sink::{accretion_coefficient, sink_weight, WeightedSums, SinkProperties, compute_sink_properties};
-pub use motion::{rotate_2d, rotate_3d, advance_binary, keplerian_binary};
+pub use motion::{rotate_2d, rotate_3d, advance_binary, apply_body_deltas, keplerian_binary};
 pub use diagnostics::DiagnosticAccumulator;

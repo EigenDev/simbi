@@ -12,7 +12,8 @@
 
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
-use crate::body::Body;
+use crate::body::{Body, BodyKind};
+use crate::body_delta::BodyDelta;
 use crate::collection::{BodyCollection, ReferenceFrame};
 
 /// rotate a 2D vector by angle theta (radians) in the xy-plane.
@@ -60,6 +61,38 @@ pub fn advance_binary<S: Scalar, const D: usize>(
         advanced.push(body.at_position(new_pos).with_velocity(new_vel));
     }
     Some(advanced)
+}
+
+/// apply per-body diagnostic deltas (force / torque / would-be accreted mass) to a body collection,
+/// then advance the prescribed binary orbit. shared by the single-grid `evolve_bodies` (which passes
+/// its own consolidated per-step deltas) and the DECOMPOSED body step (which passes the cross-tile
+/// SUM of every tile's partials). the gravitating mass is held FIXED (a fixed-potential sink):
+/// force/torque are recorded for output, total_accreted_mass accumulates the would-be accretion, and
+/// the binary motion is PRESCRIBED (Keplerian, independent of the feedback). applying the SAME deltas
+/// to two identical collections yields identical state -- the property the decomposed loop relies on
+/// to keep every tile's bodies in lockstep (same global delta + same prescribed advance on each tile).
+pub fn apply_body_deltas<const D: usize>(
+    bodies: &mut BodyCollection<f64, D>,
+    deltas: &[BodyDelta<f64, D>],
+    dt: f64,
+) {
+    for delta in deltas {
+        if delta.idx < bodies.len() {
+            let body = bodies.get_mut(delta.idx);
+            body.force = delta.force_delta;
+            body.torque = delta.torque_delta;
+            if let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = &mut body.kind {
+                *total_accreted_mass += delta.mass_delta;
+                *accretion_rate = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
+            }
+        }
+    }
+    if let Some(advanced) = advance_binary(bodies, dt) {
+        for ii in 0..advanced.len().min(bodies.len()) {
+            bodies.get_mut(ii).position = advanced[ii].position;
+            bodies.get_mut(ii).velocity = advanced[ii].velocity;
+        }
+    }
 }
 
 /// rotate an N-dimensional vector by theta in the xy-plane.

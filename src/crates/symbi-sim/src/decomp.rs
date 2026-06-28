@@ -216,22 +216,29 @@ fn ghost_strip<const D: usize>(
 }
 
 /// every per-cell DATA component a checkpoint needs: the conserved set (den, momentum, energy)
-/// plus the primitives (rho, velocity, pressure). used by `gather_interiors` to reassemble a
-/// decomposed run into one global store for output -- the gathered global then writes through
-/// the existing single-grid checkpoint path unchanged (docs/design/37 M4, v1 hydro). mhd
-/// staggered B is not gathered here (multi-gpu mhd is a later increment).
+/// plus the primitives (rho, velocity, pressure), and -- for MHD -- the cell-centered B `bcell`
+/// (the checkpoint writer reads it for both the `mag` conserved slot and the `bcell` primitive).
+/// used by `gather_interiors` to reassemble a decomposed run into one global store for output --
+/// the gathered global then writes through the existing single-grid checkpoint path unchanged
+/// (docs/design/37 M4). the STAGGERED `bface` lives on a face domain, so it is gathered separately
+/// by `gather_faces`. hydro/iso stores have no `mhd`, so the bcell tail is empty there; global and
+/// tiles share a regime, so both data_fields lists align component-for-component.
 fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
 ) -> Vec<&Field<f64, D, M>> {
     let c = &store.fields.cons;
     let p = &store.fields.prim;
-    std::iter::once(&c.den)
+    let mut fields: Vec<&Field<f64, D, M>> = std::iter::once(&c.den)
         .chain(c.mom.iter())
         .chain(c.nrg.as_ref())
         .chain(std::iter::once(&p.rho))
         .chain(p.vel.iter())
         .chain(p.pre.as_ref())
-        .collect()
+        .collect();
+    if let Some(mhd) = store.fields.mhd.as_ref() {
+        fields.extend(mhd.bcell.b.iter());
+    }
+    fields
 }
 
 /// reassemble a decomposed run into one full-size `global` store: copy each tile's INTERIOR
@@ -264,6 +271,46 @@ pub fn gather_interiors<const D: usize, const DOF: usize, M: MemorySpace>(
         }
         for (gf, tf) in data_fields(global).into_iter().zip(data_fields(tile)) {
             LocalCopy.copy_region(tf, &src_region, gf, &dst_region, 0, 0);
+        }
+    }
+}
+
+/// gather the STAGGERED face-normal B `bface[d]` from every tile into `global` (MHD only). the
+/// cell gather (`gather_interiors`) cannot carry `bface`: each axis-`d` face field lives on the
+/// interior face domain (cells extended +1 on `d`), not the cell domain. for each tile and axis,
+/// copy the tile's interior face box into the matching sub-box of the global face domain. the
+/// shared internal face (a tile's hi-`d` face == its neighbor's lo-`d` face) is written by both
+/// neighbors from CT-consistent (bit-identical) values, so the overwrite is harmless. no-op when
+/// the store carries no `mhd` fields (hydro/iso), so the shared run loop calls it unconditionally.
+pub fn gather_faces<const D: usize, const DOF: usize, M: MemorySpace>(
+    global: &FieldStore<D, DOF, M>,
+    tiles: &[&FieldStore<D, DOF, M>],
+    counts: [usize; D],
+) {
+    let Some(gmhd) = global.fields.mhd.as_ref() else {
+        return;
+    };
+    let gint = &global.geom.interior;
+    let m: [usize; D] = std::array::from_fn(|ax| gint.spaces[ax].size() / counts[ax]);
+    let glo: [isize; D] = std::array::from_fn(|ax| gint.spaces[ax].lo);
+
+    for (flat, tile) in tiles.iter().enumerate() {
+        let Some(tmhd) = tile.fields.mhd.as_ref() else {
+            continue;
+        };
+        let tc = unflatten(flat, counts);
+        let tint = &tile.geom.interior;
+        for d in 0..D {
+            // the tile's interior face domain on axis d (interior extended +1 on d) -> the
+            // matching sub-box of the global interior face domain (same extension).
+            let src = tint.extend(d, 0, 1);
+            let mut dst = gint.extend(d, 0, 1);
+            for ax in 0..D {
+                let lo = glo[ax] + (tc[ax] * m[ax]) as isize;
+                let hi = lo + m[ax] as isize + if ax == d { 1 } else { 0 };
+                dst = dst.slab(ax, (lo, hi));
+            }
+            LocalCopy.copy_region(&tmhd.bface[d], &src, &gmhd.bface[d], &dst, 0, 0);
         }
     }
 }
@@ -541,9 +588,43 @@ fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 /// the global dt is the min over all tiles' cfl -- identical to a monolithic run, since the
 /// union of the tile interiors is the monolithic interior. rk2 exchanges BETWEEN stages so the
 /// corrector reconstructs from each neighbor's stage-updated interior.
+/// the per-step immersed-body bookkeeping for a DECOMPOSED run. each tile's `body_feedback` has
+/// already reduced its LOCAL interior force/torque/accreted-mass into its own (interior-mutable)
+/// diagnostics; this SUMS those partials across tiles into a global per-body delta (the true
+/// disk-on-body reaction, == the monolithic single-grid reduction since the tile interiors
+/// partition the global interior), then applies the IDENTICAL global delta to EVERY tile's bodies +
+/// advances the prescribed binary orbit identically + resets each accumulator. identical input ->
+/// identical body state, so all tiles stay in lockstep and the next step's body_source reads the
+/// same body positions everywhere. no-op for tiles without bodies.
+fn step_bodies_decomposed<const D: usize, const DOF: usize, M: MemorySpace>(
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
+    dt: f64,
+) {
+    use symbi_ib::{apply_body_deltas, BodyDelta};
+    let mut global: Vec<BodyDelta<f64, D>> = Vec::new();
+    for s in stores.iter() {
+        let Some(im) = s.immersed.as_ref() else { continue };
+        for d in im.diagnostics.consolidate() {
+            match global.iter_mut().find(|g| g.idx == d.idx) {
+                Some(g) => {
+                    g.force_delta = g.force_delta + d.force_delta;
+                    g.torque_delta = g.torque_delta + d.torque_delta;
+                    g.mass_delta += d.mass_delta;
+                }
+                None => global.push(d),
+            }
+        }
+    }
+    for s in stores.iter_mut() {
+        let Some(im) = s.immersed.as_mut() else { continue };
+        apply_body_deltas(&mut im.bodies, &global, dt);
+        im.diagnostics.reset();
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
-    stores: &[&FieldStore<D, DOF, M, f64>],
+    stores: &mut [&mut FieldStore<D, DOF, M, f64>],
     kernels: &[&K],
     counts: [usize; D],
     devices: &[i32],
@@ -557,30 +638,47 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     M: MemorySpace,
     K: KernelSet<D, DOF, M, f64>,
     T: HaloTransport,
-    F: FnMut(u64, f64) -> ControlFlow<()>,
+    F: FnMut(u64, f64, &[&FieldStore<D, DOF, M, f64>]) -> ControlFlow<()>,
 {
     let stages = ts.stages();
     let multistage = stages.len() > 1;
     let n = stores.len();
     debug_assert_eq!(n, kernels.len(), "stores/kernels length mismatch");
     debug_assert_eq!(n, devices.len(), "stores/devices length mismatch");
+    // bodies are replicated identically on every tile; the per-step backward feedback + prescribed
+    // advance run once per step when any tile carries them.
+    let has_bodies = stores.iter().any(|s| s.immersed.is_some());
+
+    // a fresh SHARED reborrow of the tiles for the field phases (kernels / exchange / checkpoint).
+    // rebuilt per phase so the per-step body bookkeeping can take `&mut` between phases -- the
+    // bodies live on the same FieldStore the fields do, so the shared slice must be dropped before
+    // `step_bodies_decomposed` mutates them.
+    macro_rules! shared {
+        () => {{
+            let sh: Vec<&FieldStore<D, DOF, M, f64>> = stores.iter().map(|s| &**s).collect();
+            sh
+        }};
+    }
 
     // prime prim + ghosts (the stage entry contract), then seed the cut halos.
-    for i in 0..n {
-        symbi_xpu::with_device(devices[i], || {
-            kernels[i].c2p(stores[i]);
-            kernels[i].ghost_fill(stores[i]);
-        });
-    }
-    drain_devices::<M>(devices);
-    exchange_grid(stores, counts, devices, transport);
-    // re-fill PHYSICAL boundary ghosts AFTER the exchange. at a corner where a domain-boundary
-    // (outflow/reflect) meets a tile cut, the boundary ghost is derived from cells that include
-    // the cut halo -- only valid post-exchange. with ghost_fill BEFORE the exchange, that corner
-    // reads a stale (unexchanged) cut cell; for hydro it is harmless (uniform corners), but for
-    // mhd the edge-EMF there is spurious and poisons the RK2 corrector. no-op interior cost.
-    for i in 0..n {
-        symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(stores[i]));
+    {
+        let sh = shared!();
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || {
+                kernels[i].c2p(sh[i]);
+                kernels[i].ghost_fill(sh[i]);
+            });
+        }
+        drain_devices::<M>(devices);
+        exchange_grid(&sh, counts, devices, transport);
+        // re-fill PHYSICAL boundary ghosts AFTER the exchange. at a corner where a domain-boundary
+        // (outflow/reflect) meets a tile cut, the boundary ghost is derived from cells that include
+        // the cut halo -- only valid post-exchange. with ghost_fill BEFORE the exchange, that corner
+        // reads a stale (unexchanged) cut cell; for hydro it is harmless (uniform corners), but for
+        // mhd the edge-EMF there is spurious and poisons the RK2 corrector. no-op interior cost.
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
+        }
     }
 
     let mut t = start_time;
@@ -589,55 +687,94 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     while t < t_final {
         // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
         let mut dt = t_final - t;
-        for i in 0..n {
-            dt = dt.min(symbi_xpu::with_device(devices[i], || kernels[i].cfl(stores[i])));
-        }
-        // snapshot u_n once before the stages for multi-stage schemes (the corrector reads it).
-        if multistage {
+        {
+            let sh = shared!();
             for i in 0..n {
-                symbi_xpu::with_device(devices[i], || kernels[i].snapshot(stores[i]));
+                dt = dt.min(symbi_xpu::with_device(devices[i], || kernels[i].cfl(sh[i])));
+            }
+            // snapshot u_n once before the stages for multi-stage schemes (the corrector reads it).
+            if multistage {
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || kernels[i].snapshot(sh[i]));
+                }
+            }
+            for (sidx, &(a0, ac)) in stages.iter().enumerate() {
+                let stage = (sidx + 1) as u8; // 1-based: post_godunov saves the emf at stage 1, averages at 2.
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || {
+                        // the full per-stage pipeline (evolve.rs STAGE_PIPELINE). wave_speeds / efield
+                        // / post_godunov are the MHD constrained-transport hooks; they are no-op
+                        // defaults for hydro + iso, so this is byte-identical to the prior sequence
+                        // there, and drives the CT curl (edge emf -> bface -> bcell) for mhd.
+                        // snapshot_stage / source_apply are the ADDITIVE (non-fused) source pass: gated
+                        // on `has_additive_source`, so source-free runs of every regime skip them and
+                        // stay byte-identical. body_source is the forward immersed-body pass (gravity +
+                        // accretion sink), POINTWISE from the body's GLOBAL position so each tile
+                        // applies it to its own cells -- no cross-tile coupling. all of these are
+                        // pointwise/local; the only cross-tile work is the post-stage halo exchange.
+                        let additive = kernels[i].has_additive_source();
+                        if additive {
+                            // snapshot the stage-INPUT cons (the state the source evaluates S at), so
+                            // plain-godunov + additive == the single-grid fused stage bit-for-bit.
+                            kernels[i].snapshot_stage(sh[i]);
+                        }
+                        kernels[i].wave_speeds(sh[i]);
+                        for dd in 0..D {
+                            kernels[i].flux(sh[i], dd);
+                        }
+                        kernels[i].efield(sh[i]);
+                        kernels[i].godunov_stage(sh[i], dt, a0, ac);
+                        kernels[i].post_godunov(sh[i], dt, stage);
+                        if additive {
+                            // cons += (ac*dt) * S(u_stage), the SSP stage weight matching godunov.
+                            kernels[i].source_apply(sh[i], ac * dt);
+                        }
+                        if sh[i].immersed.is_some() {
+                            // gravity on mom/nrg + the accretion sink on den, cons += (ac*dt)*S_body.
+                            // for adiabatic/curvilinear this IS the body pass; for iso-cartesian it
+                            // no-ops (fused into godunov_stage). proven by `decomp_body_equivalence`.
+                            kernels[i].body_source(sh[i], ac * dt);
+                        }
+                        kernels[i].c2p(sh[i]);
+                        kernels[i].ghost_fill(sh[i]);
+                    });
+                }
+                // refresh the cut halos from each neighbor's stage-updated interior.
+                drain_devices::<M>(devices);
+                exchange_grid(&sh, counts, devices, transport);
+                // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
+                }
+            }
+            // backward immersed-body feedback (per STEP, after all stages): each tile reduces its
+            // LOCAL interior force/torque/accreted-mass into its own accumulator. the cross-tile sum
+            // + the prescribed-orbit advance happen in `step_bodies_decomposed` below, which needs
+            // `&mut` -- so `sh` (a shared reborrow of `stores`) MUST be dropped first.
+            if has_bodies {
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || kernels[i].body_feedback(sh[i], dt));
+                }
+                drain_devices::<M>(devices);
             }
         }
-        for (sidx, &(a0, ac)) in stages.iter().enumerate() {
-            let stage = (sidx + 1) as u8; // 1-based: post_godunov saves the emf at stage 1, averages at 2.
-            for i in 0..n {
-                symbi_xpu::with_device(devices[i], || {
-                    // the full per-stage pipeline (evolve.rs STAGE_PIPELINE). wave_speeds / efield
-                    // / post_godunov are the MHD constrained-transport hooks; they are no-op
-                    // defaults for hydro + iso, so this is byte-identical to the prior sequence
-                    // there, and drives the CT curl (edge emf -> bface -> bcell) for mhd. source /
-                    // body phases are gated off (multi-gpu v1 has neither).
-                    kernels[i].wave_speeds(stores[i]);
-                    for dd in 0..D {
-                        kernels[i].flux(stores[i], dd);
-                    }
-                    kernels[i].efield(stores[i]);
-                    kernels[i].godunov_stage(stores[i], dt, a0, ac);
-                    kernels[i].post_godunov(stores[i], dt, stage);
-                    kernels[i].c2p(stores[i]);
-                    kernels[i].ghost_fill(stores[i]);
-                });
-            }
-            // refresh the cut halos from each neighbor's stage-updated interior.
-            drain_devices::<M>(devices);
-            exchange_grid(stores, counts, devices, transport);
-            // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
-            for i in 0..n {
-                symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(stores[i]));
-            }
+        if has_bodies {
+            step_bodies_decomposed(stores, dt);
         }
         t += dt;
         iter += 1;
         if iter - last_cb >= interval {
             last_cb = iter;
             drain_devices::<M>(devices);
-            if on_checkpoint(iter, t).is_break() {
+            let sh = shared!();
+            if on_checkpoint(iter, t, &sh).is_break() {
                 return;
             }
         }
     }
     drain_devices::<M>(devices);
-    let _ = on_checkpoint(iter, t);
+    let sh = shared!();
+    let _ = on_checkpoint(iter, t, &sh);
 }
 
 // the gather/scatter kernels for `StagedCopy`: pack a strided strip into a contiguous

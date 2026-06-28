@@ -157,11 +157,17 @@ macro_rules! decomp_harness {
             // proof and production is impossible. interval = u64::MAX: no mid-run callback, the
             // equivalence check reads the final state via `global_den`.
             fn run(tiles: &mut [(Sim, Kern)], counts: [usize; $d], ts: Timestepping) {
-                let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-                let kernels: Vec<_> = tiles.iter().map(|(_, k)| k).collect();
                 let devices: Vec<i32> = (0..tiles.len()).map(tile_device).collect();
+                // evolve_decomposed takes the tiles by &mut (the per-step body bookkeeping mutates
+                // the bodies); build the &mut store handles + & kernels from the same tiles.
+                let mut stores = Vec::new();
+                let mut kernels = Vec::new();
+                for (s, k) in tiles.iter_mut() {
+                    stores.push(&mut **s);
+                    kernels.push(&*k);
+                }
                 evolve_decomposed(
-                    &stores,
+                    &mut stores,
                     &kernels,
                     counts,
                     &devices,
@@ -170,7 +176,7 @@ macro_rules! decomp_harness {
                     T_FINAL,
                     u64::MAX,
                     &$transport,
-                    |_, _| std::ops::ControlFlow::Continue(()),
+                    |_, _, _| std::ops::ControlFlow::Continue(()),
                 );
             }
 
