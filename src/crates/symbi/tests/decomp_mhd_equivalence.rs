@@ -18,7 +18,8 @@
 // =============================================================================
 
 use symbi::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
-use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{evolve_decomposed, exchange_grid, flatten, unflatten, LocalCopy};
+use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -150,6 +151,67 @@ fn tiles_div_b_max(tiles: &[(Sim, Kern)]) -> f64 {
     tiles.iter().map(|(s, _)| div_b_max(s)).fold(0.0_f64, f64::max)
 }
 
+// scatter cell-centered B component `comp` (0..3) into one global N^2 grid. the REAL MHD check:
+// the CT curl preserves div(B) for ANY emf, so div(B)==0 does not prove the field is right --
+// only `bcell` value equivalence vs the monolithic run does.
+fn global_bcell(tiles: &[(Sim, Kern)], counts: [usize; 2], comp: usize) -> Vec<f64> {
+    let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
+    let mut out = vec![f64::NAN; N * N];
+    for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
+        let tc = unflatten(flat_tile, counts);
+        let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+        let mhd = sim.fields.mhd.as_ref().unwrap();
+        for c in sim.geom.interior.iter() {
+            let g: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+            out[flatten(g, [N; 2])] = *mhd.bcell.b[comp].view().at(c);
+        }
+    }
+    out
+}
+
+// scatter the CURRENT edge EMF (efield.e[slot]) -- the freshly recomputed stage-2 emf, before
+// post_godunov averages it with efield_n and curls it into bface.
+fn global_ef(tiles: &[(Sim, Kern)], counts: [usize; 2], slot: usize) -> Vec<f64> {
+    let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
+    let mut out = vec![f64::NAN; N * N];
+    for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
+        let tc = unflatten(flat_tile, counts);
+        let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+        let mhd = sim.fields.mhd.as_ref().unwrap();
+        for c in sim.geom.interior.iter() {
+            let g: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+            out[flatten(g, [N; 2])] = *mhd.efield.e[slot].view().at(c);
+        }
+    }
+    out
+}
+
+// scatter the SAVED stage-1 edge EMF (efield_n.e[slot]) read at each interior cell's corner.
+// stage 2 averages this into the CT curl; if it diverges, the corrector's emf is inconsistent.
+fn global_efn(tiles: &[(Sim, Kern)], counts: [usize; 2], slot: usize) -> Vec<f64> {
+    let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
+    let mut out = vec![f64::NAN; N * N];
+    for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
+        let tc = unflatten(flat_tile, counts);
+        let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+        let mhd = sim.fields.mhd.as_ref().unwrap();
+        for c in sim.geom.interior.iter() {
+            let g: [usize; 2] = std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+            out[flatten(g, [N; 2])] = *mhd.efield_n.e[slot].view().at(c);
+        }
+    }
+    out
+}
+
+// argmax abs-difference between two global grids: (flat index, error).
+fn argmax_diff(a: &[f64], b: &[f64]) -> (usize, f64) {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (x - y).abs())
+        .enumerate()
+        .fold((0usize, 0.0_f64), |(bi, be), (i, e)| if e > be { (i, e) } else { (bi, be) })
+}
+
 fn assert_matches(counts: [usize; 2], ts: Timestepping) {
     let mut mono = grid_tiles([1; 2], ts);
     run(&mut mono, [1; 2], ts);
@@ -166,21 +228,174 @@ fn assert_matches(counts: [usize; 2], ts: Timestepping) {
         "some global cells were never written (gather bug)"
     );
     // 1. density equivalence: decomposed == monolithic to round-off.
-    let max_err = mono_vals
-        .iter()
-        .zip(&dec_vals)
-        .map(|(a, b)| (a - b).abs())
-        .fold(0.0_f64, f64::max);
-    assert!(
-        max_err < 1e-11,
-        "mhd decomposition {counts:?} ({ts:?}) vs monolithic density max err {max_err:e}"
+    // diagnostics FIRST (B-field, the source; then density, downstream), then assert. the curl
+    // preserves div(B) for any emf, so div(B)==0 is necessary but not sufficient -- the bcell
+    // VALUE equivalence is the real field check.
+    let (di, de) = argmax_diff(&mono_vals, &dec_vals);
+    for comp in 0..3 {
+        let mb = global_bcell(&mono, [1; 2], comp);
+        let db = global_bcell(&dec, counts, comp);
+        let (bi, be) = argmax_diff(&mb, &db);
+        if be >= 1e-11 {
+            eprintln!(
+                "[B{comp}] {counts:?} {ts:?}: max bcell[{comp}] err {be:e} at ({},{}) [center=({},{})] mono={} dec={}",
+                bi % N, bi / N, N / 2, N / 2, mb[bi], db[bi]
+            );
+        }
+    }
+    if de >= 1e-11 {
+        eprintln!(
+            "[rho] {counts:?} {ts:?}: max density err {de:e} at ({},{}); div(B) mono={mono_divb:e} dec={dec_divb:e}",
+            di % N, di / N
+        );
+    }
+    assert!(dec_divb < 1e-10, "div(B) {dec_divb:e} (mono {mono_divb:e})");
+    for comp in 0..3 {
+        let mb = global_bcell(&mono, [1; 2], comp);
+        let db = global_bcell(&dec, counts, comp);
+        let (_, be) = argmax_diff(&mb, &db);
+        assert!(be < 1e-11, "{counts:?} {ts:?} bcell[{comp}] err {be:e} (div-free but WRONG)");
+    }
+    assert!(de < 1e-11, "{counts:?} {ts:?} density err {de:e}");
+}
+
+// DEBUG: step mono and the 2x2 decomposition in lockstep through ONE RK2 step, comparing the
+// cell-centered B after prime, stage 1, and stage 2. RK2 stage 1 (a0=0,ac=1) is an Euler step and
+// corner-Euler passes, so the divergence must appear in stage 2 -- this pins which operation.
+#[test]
+#[ignore = "diagnostic, run with --ignored --nocapture"]
+fn mhd_debug_rk2_stages() {
+    let ts = Timestepping::Rk2;
+    let mono = grid_tiles([1, 1], ts);
+    let dec = grid_tiles([2, 2], ts);
+    let exch = |tiles: &[(Sim, Kern)], counts: [usize; 2]| {
+        let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+        let devs = vec![0i32; tiles.len()];
+        exchange_grid(&stores, counts, &devs, &LocalCopy);
+    };
+    // prime BEFORE cfl: cfl reads prim, which c2p populates (otherwise it returns inf).
+    let prime = |tiles: &[(Sim, Kern)], counts: [usize; 2]| {
+        for (s, k) in tiles {
+            k.c2p(&**s);
+            k.ghost_fill(&**s);
+        }
+        exch(tiles, counts);
+    };
+    let stage = |tiles: &[(Sim, Kern)], counts: [usize; 2], si: usize, a0: f64, ac: f64, dt: f64| {
+        for (s, k) in tiles {
+            k.wave_speeds(&**s);
+            for d in 0..2 {
+                k.flux(&**s, d);
+            }
+            k.efield(&**s);
+            k.godunov_stage(&**s, dt, a0, ac);
+            k.post_godunov(&**s, dt, (si + 1) as u8);
+            k.c2p(&**s);
+            k.ghost_fill(&**s);
+        }
+        exch(tiles, counts);
+    };
+    let cmp = |when: &str| {
+        for comp in 0..3 {
+            let mb = global_bcell(&mono, [1, 1], comp);
+            let db = global_bcell(&dec, [2, 2], comp);
+            let (bi, be) = argmax_diff(&mb, &db);
+            eprintln!("[{when}] bcell[{comp}] err {be:e} at ({},{})", bi % N, bi / N);
+        }
+    };
+
+    prime(&mono, [1, 1]);
+    prime(&dec, [2, 2]);
+    cmp("prime ");
+    // cfl AFTER prime (prim is now valid). per-run dt, exactly as evolve_decomposed does.
+    let dt_mono = mono.iter().map(|(s, k)| k.cfl(&**s)).fold(f64::INFINITY, f64::min);
+    let dt_dec = dec.iter().map(|(s, k)| k.cfl(&**s)).fold(f64::INFINITY, f64::min);
+    eprintln!(
+        "[cfl] dt_mono={dt_mono:.17e} dt_dec={dt_dec:.17e} diff={:.3e}",
+        (dt_mono - dt_dec).abs()
     );
-    // 2. div(B) stays at machine zero -- including the seam (the MHD-specific check). the mono
-    // value is the CT floor; the decomposed value must not exceed it meaningfully.
-    assert!(
-        dec_divb < 1e-10 && dec_divb <= mono_divb.max(1e-12) * 10.0,
-        "mhd decomposition {counts:?} ({ts:?}) div(B) seam violation: decomposed {dec_divb:e} vs mono floor {mono_divb:e}"
-    );
+    for (s, k) in &mono {
+        k.snapshot(&**s);
+    }
+    for (s, k) in &dec {
+        k.snapshot(&**s);
+    }
+    let stages = ts.stages();
+    stage(&mono, [1, 1], 0, stages[0].0, stages[0].1, dt_mono);
+    stage(&dec, [2, 2], 0, stages[0].0, stages[0].1, dt_dec);
+    cmp("stage1");
+    // efield_n was just saved during stage 1's post_godunov. is it consistent across the cut?
+    for slot in 0..2 {
+        let me = global_efn(&mono, [1, 1], slot);
+        let de = global_efn(&dec, [2, 2], slot);
+        let (bi, be) = argmax_diff(&me, &de);
+        // flatten = gx*N + gy, so gx = bi/N, gy = bi%N.
+        eprintln!("[efn{slot}] after stage1: err {be:e} at (gx={},gy={})", bi / N, bi % N);
+    }
+    // dump ACTUAL field values around the REAL corner (x-cut x=16, bottom outflow y=0). INDEX
+    // LOCALLY: global (gx, gy) -> owning tile (gx/16, gy/16) at interior-lo + the in-tile offset.
+    let dump = |label: &str, sim: &Sim, gx: usize, gy: usize, tx: usize, ty: usize| {
+        let i = &sim.geom.interior;
+        let c = [
+            i.spaces[0].lo + (gx - tx * 16) as isize,
+            i.spaces[1].lo + (gy - ty * 16) as isize,
+        ];
+        let mhd = sim.fields.mhd.as_ref().unwrap();
+        eprintln!(
+            "  {label} g({gx:>2},{gy:>2}): efn0={:+.4e} bc0={:+.4e} bc1={:+.4e} bf0={:+.4e} vx={:+.4e} vy={:+.4e} wsl0={:+.4e} wsr0={:+.4e}",
+            mhd.efield_n.e[0].view().at(c),
+            mhd.bcell.b[0].view().at(c),
+            mhd.bcell.b[1].view().at(c),
+            mhd.bface[0].view().at(c),
+            sim.fields.prim.vel[0].view().at(c),
+            sim.fields.prim.vel[1].view().at(c),
+            mhd.wave_speed_l[0].view().at(c),
+            mhd.wave_speed_r[0].view().at(c),
+        );
+    };
+    for gx in 14..18 {
+        let gy = 0;
+        let tx = gx / 16;
+        dump("mono", &mono[0].0, gx, gy, 0, 0);
+        dump("dec ", &dec[flatten([tx, 0], [2, 2])].0, gx, gy, tx, 0);
+    }
+    // stage 2 SPLIT: run wave_speeds+flux+efield (recompute the corrector emf), capture it, then
+    // finish (godunov, post_godunov averages+curls, c2p, ghost_fill). this isolates whether the
+    // recomputed stage-2 efield (vs efield_n) is the inconsistent input.
+    for (s, k) in &mono {
+        k.wave_speeds(&**s);
+        for d in 0..2 {
+            k.flux(&**s, d);
+        }
+        k.efield(&**s);
+    }
+    for (s, k) in &dec {
+        k.wave_speeds(&**s);
+        for d in 0..2 {
+            k.flux(&**s, d);
+        }
+        k.efield(&**s);
+    }
+    for slot in 0..2 {
+        let me = global_ef(&mono, [1, 1], slot);
+        let de = global_ef(&dec, [2, 2], slot);
+        let (bi, be) = argmax_diff(&me, &de);
+        eprintln!("[ef{slot}] stage2 recomputed (pre-curl): err {be:e} at ({},{})", bi % N, bi / N);
+    }
+    for (s, k) in &mono {
+        k.godunov_stage(&**s, dt_mono, stages[1].0, stages[1].1);
+        k.post_godunov(&**s, dt_mono, 2);
+        k.c2p(&**s);
+        k.ghost_fill(&**s);
+    }
+    for (s, k) in &dec {
+        k.godunov_stage(&**s, dt_dec, stages[1].0, stages[1].1);
+        k.post_godunov(&**s, dt_dec, 2);
+        k.c2p(&**s);
+        k.ghost_fill(&**s);
+    }
+    exch(&dec, [2, 2]);
+    cmp("stage2");
 }
 
 #[test]
@@ -200,21 +415,24 @@ fn mhd_rk2_two_tile_x_cut() {
     assert_matches([2, 1], Timestepping::Rk2);
 }
 
+// the y-cut counterpart of the x-cut RK2 test. if this passes but the 2x2 fails, the bug needs
+// BOTH cuts (the corner); if it fails, it's single-cut + RK2 + the outflow boundary.
+#[test]
+fn mhd_rk2_two_tile_y_cut() {
+    assert_matches([1, 2], Timestepping::Rk2);
+}
+
 #[test]
 fn mhd_euler_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Euler);
 }
 
-// KNOWN ISSUE (docs/design/37 MHD): the corner x RK2 case is off by ~8e-7 in density. every
-// other case is exact: single cuts (Euler AND RK2) and the 2x2 corner under Euler all pass, so
-// the staggered bface exchange is fundamentally correct. the failure needs the diagonal corner
-// AND RK2's second stage together -> the RK2 time-averaged EMF at the central edge (where 4
-// tiles meet) is slightly inconsistent across tiles. leading suspect: `efield_n` (the stage-1
-// edge EMF saved per tile, then averaged at stage 2) at the corner/ghost edges is not exchanged
-// /covered, so the stage-2 average reads stale data there. needs instrumented debugging of which
-// cells diverge; ignored until fixed so the 4 proven cases gate the suite.
+// the 2x2 corner under RK2 -- the hard case. FIXED: the bug was a ghost_fill/exchange ORDERING
+// defect in evolve_decomposed (ghost_fill ran before the cut exchange, so a domain-boundary ghost
+// at a boundary-meets-cut corner read a stale unexchanged cut cell -> spurious edge-EMF, only
+// exposed by the RK2 corrector averaging the saved stage-1 emf). moving ghost_fill AFTER the
+// exchange fixed it; div(B) exact and decomposed == monolithic to round-off here too.
 #[test]
-#[ignore = "corner x RK2 EMF-average seam inconsistency (~8e-7); single cuts + corner-Euler pass"]
 fn mhd_rk2_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Rk2);
 }

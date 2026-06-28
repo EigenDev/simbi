@@ -358,6 +358,10 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     // halos + prim + bcell -- so it stays bit-identical. the div-B oracle validates this.
     if let (Some(lo_mhd), Some(hi_mhd)) = (lo.fields.mhd.as_ref(), hi.fields.mhd.as_ref()) {
         for d in 0..D {
+            // the NORMAL face (d == axis) is the shared interface, owned by both tiles. it must
+            // NOT be copied: it is the result of each tile's CT curl, and the discrete div(B)=0
+            // depends on it being the curl output (overwriting it injects a monopole -- confirmed
+            // empirically). only the TRANSVERSE faces carry a halo across this cut.
             if d == axis {
                 continue;
             }
@@ -570,6 +574,14 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
     }
     drain_devices::<M>(devices);
     exchange_grid(stores, counts, devices, transport);
+    // re-fill PHYSICAL boundary ghosts AFTER the exchange. at a corner where a domain-boundary
+    // (outflow/reflect) meets a tile cut, the boundary ghost is derived from cells that include
+    // the cut halo -- only valid post-exchange. with ghost_fill BEFORE the exchange, that corner
+    // reads a stale (unexchanged) cut cell; for hydro it is harmless (uniform corners), but for
+    // mhd the edge-EMF there is spurious and poisons the RK2 corrector. no-op interior cost.
+    for i in 0..n {
+        symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(stores[i]));
+    }
 
     let mut t = start_time;
     let mut iter: u64 = 0;
@@ -609,6 +621,10 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             // refresh the cut halos from each neighbor's stage-updated interior.
             drain_devices::<M>(devices);
             exchange_grid(stores, counts, devices, transport);
+            // re-fill physical boundary ghosts post-exchange (cut-corner consistency, see prime).
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(stores[i]));
+            }
         }
         t += dt;
         iter += 1;
