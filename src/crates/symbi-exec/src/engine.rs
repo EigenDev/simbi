@@ -105,7 +105,7 @@ impl GpuBackend for CudaBackend {
 
     #[inline]
     fn dispatcher() -> &'static symbi_xpu::runtime::KernelDispatcher<Self::Runtime> {
-        &symbi_xpu::runtime::cuda_runtime::DISPATCHER
+        symbi_xpu::runtime::cuda_runtime::current_dispatcher()
     }
 
     #[inline]

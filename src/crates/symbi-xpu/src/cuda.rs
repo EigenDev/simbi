@@ -195,7 +195,7 @@ fn check(res: CUresult, op: &'static str) -> error::Result<()> {
 }
 
 // =============================================================================
-// CUDA initialization (singleton)
+// CUDA initialization: a per-device context registry (docs/design/37)
 // =============================================================================
 
 unsafe extern "C" {
@@ -207,21 +207,52 @@ struct SyncCtx(CUcontext);
 unsafe impl Send for SyncCtx {}
 unsafe impl Sync for SyncCtx {}
 
-static CUDA_CTX: OnceLock<SyncCtx> = OnceLock::new();
+/// max gpus per node we bind. gpu counts are tiny; a fixed array avoids locking on the
+/// hot path. raise if a node ever has more.
+pub const MAX_GPUS: usize = 16;
 
-/// ensure CUDA is initialized and the context is current on this thread.
-fn ensure_init() -> error::Result<()> {
-    let ctx = CUDA_CTX
+// one lazily-created context per device ordinal. cuda modules and allocations are bound to
+// the context they were made in, so each device gets its own (and its own dispatcher, see
+// runtime.rs).
+static CUDA_CTX: [OnceLock<SyncCtx>; MAX_GPUS] = [const { OnceLock::new() }; MAX_GPUS];
+
+thread_local! {
+    // the device whose context is current on THIS thread. cuda's current-context is
+    // per-thread, so the "current device" is too. defaults to 0 (the single-device path).
+    static CURRENT_DEVICE: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
+/// the device ordinal whose context is current on this thread.
+pub fn current_device() -> i32 {
+    CURRENT_DEVICE.with(|c| c.get())
+}
+
+/// number of cuda devices visible to the process.
+pub fn device_count() -> error::Result<i32> {
+    let mut count: c_int = 0;
+    unsafe {
+        check(cuInit(0), "cuInit")?;
+        check(cuDeviceGetCount(&mut count), "cuDeviceGetCount")?;
+    }
+    Ok(count)
+}
+
+/// ensure device `ord`'s context exists and is current on this thread; returns it.
+fn ensure_init_device(ord: i32) -> error::Result<CUcontext> {
+    assert!((ord as usize) < MAX_GPUS, "device ordinal {ord} exceeds MAX_GPUS");
+    let ctx = CUDA_CTX[ord as usize]
         .get_or_init(|| {
             unsafe {
-                // these panics are acceptable — init happens once at startup.
-                // if CUDA isn't available, there's nothing to recover from.
+                // these panics are acceptable — init happens once per device at startup.
                 check(cuInit(0), "cuInit").expect("cuInit failed");
                 let mut ctx: CUcontext = std::ptr::null_mut();
-                let _ = cuCtxGetCurrent(&mut ctx);
+                if ord == 0 {
+                    // preserve the embed-friendly reuse of an already-current context.
+                    let _ = cuCtxGetCurrent(&mut ctx);
+                }
                 if ctx.is_null() {
                     let mut dev: CUdevice = 0;
-                    check(cuDeviceGet(&mut dev, 0), "cuDeviceGet").expect("cuDeviceGet failed");
+                    check(cuDeviceGet(&mut dev, ord), "cuDeviceGet").expect("cuDeviceGet failed");
                     check(cuCtxCreate_v2(&mut ctx, 0, dev), "cuCtxCreate")
                         .expect("cuCtxCreate failed");
                 }
@@ -229,7 +260,28 @@ fn ensure_init() -> error::Result<()> {
             }
         })
         .0;
-    unsafe { check(cuCtxSetCurrent(ctx), "cuCtxSetCurrent") }
+    unsafe { check(cuCtxSetCurrent(ctx), "cuCtxSetCurrent")? };
+    Ok(ctx)
+}
+
+/// ensure CUDA is initialized and the CURRENT device's context is current on this thread.
+/// the single-device path (current device defaults to 0) is behaviorally unchanged.
+fn ensure_init() -> error::Result<()> {
+    ensure_init_device(current_device()).map(|_| ())
+}
+
+/// run `f` with device `ord`'s context current on this thread, restoring the previous
+/// device afterward. this binds a tile's kernels to its gpu (docs/design/37): the launch /
+/// alloc / sync code targets "the current context", so we make the right one current rather
+/// than threading a device id through every signature.
+pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
+    let prev = current_device();
+    ensure_init_device(ord).expect("with_device: ensure_init_device");
+    CURRENT_DEVICE.with(|c| c.set(ord));
+    let r = f();
+    ensure_init_device(prev).expect("with_device: restore device");
+    CURRENT_DEVICE.with(|c| c.set(prev));
+    r
 }
 
 // =============================================================================

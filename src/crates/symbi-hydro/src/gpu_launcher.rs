@@ -23,7 +23,7 @@
 // =============================================================================
 
 use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
-use symbi_xpu::runtime::cuda_runtime::DISPATCHER;
+use symbi_xpu::runtime::cuda_runtime::current_dispatcher;
 use symbi_xpu::runtime::GpuRuntime;
 use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
@@ -120,7 +120,7 @@ pub fn launch_source_kernel(
     // name here and let the dispatcher enforce content-addressed
     // correctness.
     let cache_key = format!("hydro/source/{entry_name}");
-    let jit_kernel = DISPATCHER.jit_kernel_keyed(source, &cache_key, entry_name);
+    let jit_kernel = current_dispatcher().jit_kernel_keyed(source, &cache_key, entry_name);
 
     // pack arguments in the order declared by the wrapped __global__:
     //   const double* param_0, ..., double* out_0, ..., unsigned int n_cells.
@@ -143,7 +143,7 @@ pub fn launch_source_kernel(
 
     let config = LaunchConfig::for_1d(n_cells_u32, BLOCK_SIZE);
     unsafe {
-        DISPATCHER
+        current_dispatcher()
             .runtime()
             .launch(&jit_kernel, config, args.as_mut_slice())
             .unwrap_or_else(|e| panic!(

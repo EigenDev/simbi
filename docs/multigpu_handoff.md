@@ -133,11 +133,16 @@ behavior is not):
    (nvlink) of the contiguous buffer to the neighbor device's buffer, then `StagedCopy`'s
    scatter. only the middle move is new; the gather/scatter are proven. (later, multi-node:
    swap the move for an mpi send/recv.)
-2. device binding: assign each tile to a gpu, launch its physics kernels ON that device,
-   enable peer access. this is the bigger half -- the xpu globals (`CUDA_CTX` once-lock,
-   `cuDeviceGet(0)`, the global `DISPATCHER`) must become per-device (the adr's "make
-   device identity explicit"). developable locally by mapping logical devices to the one
-   card; the real cross-gpu launch + peer access needs the node.
+2. device binding (scoped in docs/design/37; one process drives many gpus intra-node).
+   M1 DONE: the xpu globals are now per-device -- `symbi-xpu/src/cuda.rs` has a per-device
+   context registry (`CUDA_CTX: [OnceLock; MAX_GPUS]`), `current_device()`, `with_device(ord,
+   f)` (ambient current-device model, no device_id threaded through signatures), and
+   `runtime.rs` has a per-device dispatcher registry + `current_dispatcher()` (cuda modules
+   are context-bound, so this is mandatory). all defaults to device 0 -> behaviorally a
+   no-op, whole suite green. remaining: M2 `Field` gains `device_id` + tiles assigned to
+   devices + physics kernels wrapped in `with_device` (validate locally with N contexts on
+   the one card); M3 peer-access bindings + the peer `HaloTransport` (`StagedCopy` gather +
+   `cuMemcpyPeer` + scatter); M4 (needs the node) real multi-gpu + distributed cfl.
 3. distributed cfl via a cross-rank reduce; distributed checkpoint i/o. under SPMD bind each
    rank with `CUDA_VISIBLE_DEVICES` so the single-device code stays valid per rank.
 

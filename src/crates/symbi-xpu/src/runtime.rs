@@ -191,8 +191,23 @@ pub mod cuda_runtime {
         }
     }
 
-    /// the global CUDA dispatcher. initialized on first use.
-    pub static DISPATCHER: std::sync::LazyLock<KernelDispatcher<CudaRuntime>> =
-        std::sync::LazyLock::new(|| KernelDispatcher::new(CudaRuntime));
+    fn make_dispatcher() -> KernelDispatcher<CudaRuntime> {
+        KernelDispatcher::new(CudaRuntime)
+    }
+
+    // one dispatcher per device ordinal: cuda modules are bound to the context they were
+    // loaded into, so device N's kernels must live in device N's dispatcher (docs/design/37).
+    // each is initialized on first use, in whatever context is current at that point.
+    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<CudaRuntime>>; crate::cuda::MAX_GPUS] =
+        [const {
+            std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<CudaRuntime>)
+        }; crate::cuda::MAX_GPUS];
+
+    /// the dispatcher for the device whose context is current on this thread. callers JIT and
+    /// launch inside `cuda::with_device(ord, ...)`, so the modules land in the right context.
+    /// on the single-device path this is always device 0's dispatcher.
+    pub fn current_dispatcher() -> &'static KernelDispatcher<CudaRuntime> {
+        &DISPATCHERS[crate::cuda::current_device() as usize]
+    }
 }
 

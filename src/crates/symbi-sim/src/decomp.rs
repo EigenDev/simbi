@@ -26,7 +26,7 @@ use symbi_xpu::MemorySpace;
 #[cfg(feature = "cuda")]
 use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
 #[cfg(feature = "cuda")]
-use symbi_xpu::runtime::{cuda_runtime::DISPATCHER, GpuRuntime};
+use symbi_xpu::runtime::{cuda_runtime::current_dispatcher, GpuRuntime};
 #[cfg(feature = "cuda")]
 use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
@@ -161,7 +161,7 @@ impl HaloTransport for DeviceCopy {
             let didx_ptr = bufs.didx.as_ptr::<u32>() as u64;
 
             let kernel =
-                DISPATCHER.jit_kernel_keyed(HALO_COPY_KERNEL, "decomp/halo_copy", "halo_copy");
+                current_dispatcher().jit_kernel_keyed(HALO_COPY_KERNEL, "decomp/halo_copy", "halo_copy");
             let mut args = KernelArgs::new();
             args.push(&src_ptr);
             args.push(&dst_ptr);
@@ -171,7 +171,7 @@ impl HaloTransport for DeviceCopy {
 
             let config = LaunchConfig::for_1d(n_u32, 64);
             unsafe {
-                DISPATCHER
+                current_dispatcher()
                     .runtime()
                     .launch(&kernel, config, args.as_mut_slice())
                     .expect("halo_copy launch failed");
@@ -399,14 +399,14 @@ impl HaloTransport for StagedCopy {
 
             // gather: buf[i] = src[sidx[i]] -- pack the strided strip into the contiguous buffer.
             let gather =
-                DISPATCHER.jit_kernel_keyed(HALO_GATHER_KERNEL, "decomp/halo_gather", "halo_gather");
+                current_dispatcher().jit_kernel_keyed(HALO_GATHER_KERNEL, "decomp/halo_gather", "halo_gather");
             let mut g = KernelArgs::new();
             g.push(&src_ptr);
             g.push(&buf_ptr);
             g.push(&sidx_ptr);
             g.push(&n_u32);
             unsafe {
-                DISPATCHER
+                current_dispatcher()
                     .runtime()
                     .launch(&gather, config, g.as_mut_slice())
                     .expect("halo_gather launch failed");
@@ -417,7 +417,7 @@ impl HaloTransport for StagedCopy {
             // buffer before the scatter runs there.
 
             // scatter: dst[didx[i]] = buf[i].
-            let scatter = DISPATCHER.jit_kernel_keyed(
+            let scatter = current_dispatcher().jit_kernel_keyed(
                 HALO_SCATTER_KERNEL,
                 "decomp/halo_scatter",
                 "halo_scatter",
@@ -428,7 +428,7 @@ impl HaloTransport for StagedCopy {
             s.push(&didx_ptr);
             s.push(&n_u32);
             unsafe {
-                DISPATCHER
+                current_dispatcher()
                     .runtime()
                     .launch(&scatter, config, s.as_mut_slice())
                     .expect("halo_scatter launch failed");
