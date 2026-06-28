@@ -31,6 +31,7 @@
 // harness drowns in `Cartesian: Metric<f64,D>` / `Regime` / KernelSet bounds.
 // =============================================================================
 
+use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{exchange_faces, LocalCopy};
 use symbi::sim::evolve::KernelSet;
@@ -41,6 +42,8 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
+#[cfg(feature = "cuda")]
+use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -56,12 +59,12 @@ fn bump(x: f64) -> f64 {
 }
 
 macro_rules! decomp_harness {
-    ($modname:ident, $d:literal) => {
+    ($modname:ident, $d:literal, $space:ty, $mem:ty) => {
         mod $modname {
             use super::*;
 
-            type Sim = SimState<Newtonian, $d, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
-            type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, $d>;
+            type Sim = SimState<Newtonian, $d, Cartesian, IdealGas<f64>, $space, $mem>;
+            type Kern = AdiabaticSubstrateKernelSet<$mem, f64, $d>;
 
             // row-major index <-> per-axis coordinate over a box of size `dims`.
             fn unflatten(mut flat: usize, dims: [usize; $d]) -> [usize; $d] {
@@ -143,6 +146,9 @@ macro_rules! decomp_harness {
             // or mpi transport later. takes a shared slice -- the transport writes ghosts via
             // interior mutability, so no `split_at_mut` is needed.
             fn exchange_grid(tiles: &[(Sim, Kern)], counts: [usize; $d]) {
+                // the prior gpu kernels (c2p/ghost_fill) wrote prim asynchronously; drain the
+                // device so the host LocalCopy reads coherent unified memory. no-op on cpu.
+                device_sync::<$mem>();
                 let total: usize = counts.iter().product();
                 let mut processed = [false; $d];
                 for axis in 0..$d {
@@ -219,6 +225,8 @@ macro_rules! decomp_harness {
             // scatter every tile's interior density into one global N^D grid, indexed by
             // global cell coordinate. works for any tile topology (a 1d concat does not).
             fn global_den(tiles: &[(Sim, Kern)], counts: [usize; $d]) -> Vec<f64> {
+                // drain the device before reading cons back to host. no-op on cpu.
+                device_sync::<$mem>();
                 let m: [usize; $d] = std::array::from_fn(|a| N / counts[a]);
                 let mut out = vec![f64::NAN; N.pow($d as u32)];
                 for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
@@ -263,9 +271,19 @@ macro_rules! decomp_harness {
     };
 }
 
-decomp_harness!(d1, 1);
-decomp_harness!(d2, 2);
-decomp_harness!(d3, 3);
+decomp_harness!(d1, 1, CpuSpace, HostMemory);
+decomp_harness!(d2, 2, CpuSpace, HostMemory);
+decomp_harness!(d3, 3, CpuSpace, HostMemory);
+
+// the same harness on the gpu memory space: every kernel routes through the production
+// run_gpu path (NVRTC -> launch), fields live in unified memory, and the exchange's host
+// LocalCopy reads them after a device drain. one device with several subdomains -- no
+// speedup, but it proves the decomposition works against device fields before a second
+// gpu exists. needs `--features cuda` and a cuda device.
+#[cfg(feature = "cuda")]
+decomp_harness!(gpu_d1, 1, CudaSpace, UnifiedMemory);
+#[cfg(feature = "cuda")]
+decomp_harness!(gpu_d2, 2, CudaSpace, UnifiedMemory);
 
 #[test]
 fn euler_two_tile_1d() {
@@ -296,4 +314,20 @@ fn rk2_quad_tile_2d_grid() {
 #[test]
 fn euler_octo_tile_3d_grid() {
     d3::assert_matches([2, 2, 2], Timestepping::Euler);
+}
+
+// the gpu validation: the decomposition on device fields (unified memory), every kernel
+// through run_gpu. gpu-mono vs gpu-decomposed must still agree to round-off -- the only
+// difference is the exchange, run identically on both. proves the device-memory path
+// before any multi-device hardware.
+#[cfg(feature = "cuda")]
+#[test]
+fn gpu_rk2_four_tile_1d() {
+    gpu_d1::assert_matches([4], Timestepping::Rk2);
+}
+
+#[cfg(feature = "cuda")]
+#[test]
+fn gpu_rk2_quad_tile_2d_grid() {
+    gpu_d2::assert_matches([2, 2], Timestepping::Rk2);
 }

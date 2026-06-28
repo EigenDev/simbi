@@ -96,16 +96,29 @@ DONE: the transport seam is extracted -- `src/crates/symbi-sim/src/decomp.rs` ho
 through `decomp::exchange_faces` with `LocalCopy` and stays green -- it is now the
 permanent regression oracle for any future transport.
 
+DONE: single-gpu validation. the harness macro is parameterized over (exec space, memory
+space); `gpu_d1`/`gpu_d2` instances run on `CudaSpace`/`UnifiedMemory` through the
+production run_gpu path (NVRTC -> launch), behind `#[cfg(feature = "cuda")]`. tests
+`gpu_rk2_four_tile_1d` and `gpu_rk2_quad_tile_2d_grid` PASS on a single device
+(`cargo test -p symbi --features cuda --test decomp_equivalence --release`). a
+`device_sync::<Mem>()` (no-op on cpu) before every host read drains the async device
+queue so the host `LocalCopy` reads coherent unified memory. this proves the
+decomposition works against device fields; the host-roundtrip `LocalCopy` is correct but
+slow (page migration) and is NOT the multi-device path.
+
 remaining, in order:
 
-1. the two-pass grid orchestration (`exchange_grid`) and tile management (`grid_tiles`,
-   the stage `run`) are still in the test. extract them into the module too when the
-   real driver needs them -- they need a tile-collection / neighbor-topology abstraction
-   (a grid of `FieldStore`s with `counts`). not urgent; the reusable PRIMITIVE
-   (transport seam + per-face exchange) is already in `decomp`.
-2. real gpu: add a peer-copy `HaloTransport` impl (`cuMemcpyPeerAsync`), run 2 devices,
-   distributed cfl via a 2-rank reduce. adr milestone 1 proper. then an mpi impl for
-   multi-node. each new transport must keep the equivalence test green first.
+1. PREP MULTI-GPU: a device-side `HaloTransport` impl. a same-device device-to-device
+   copy (`cuMemcpyAsync` D2D, or a tiny copy kernel) is testable on the one 2070 and
+   removes the host roundtrip; the peer variant (`cuMemcpyPeerAsync`) is the same call
+   with a peer destination and needs 2 devices (cluster). the transport seam means this
+   is a new impl, not a rewrite; the in-process + single-gpu tests stay the oracle.
+2. multi-device proper (on a cluster): assign tiles to devices/ranks, peer/mpi transport,
+   distributed cfl via a cross-rank reduce, distributed checkpoint i/o. under SPMD bind
+   each rank with `CUDA_VISIBLE_DEVICES` so the single-device code stays valid per rank.
+3. the two-pass grid orchestration (`exchange_grid`) + tile management (`grid_tiles`, the
+   stage `run`) are still in the test. extract into the module when the real driver needs
+   them (a tile-collection / neighbor-topology abstraction). not urgent.
 
 the iron rule: never advance a transport without its equivalence test green first. the
 test is the contract.
