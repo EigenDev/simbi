@@ -251,8 +251,17 @@ fn ensure_init_device(ord: i32) -> error::Result<CUcontext> {
                     let _ = cuCtxGetCurrent(&mut ctx);
                 }
                 if ctx.is_null() {
+                    // logical ordinals round-robin onto the physical devices: identity when
+                    // there are at least as many gpus as logical ids (the production case),
+                    // and wrapping otherwise -- so N logical devices run as N distinct contexts
+                    // on a single card, which is how the multi-device path is validated without
+                    // a second gpu (docs/design/37).
+                    let mut count: c_int = 0;
+                    check(cuDeviceGetCount(&mut count), "cuDeviceGetCount")
+                        .expect("cuDeviceGetCount failed");
+                    let physical = if count > 0 { ord % count } else { 0 };
                     let mut dev: CUdevice = 0;
-                    check(cuDeviceGet(&mut dev, ord), "cuDeviceGet").expect("cuDeviceGet failed");
+                    check(cuDeviceGet(&mut dev, physical), "cuDeviceGet").expect("cuDeviceGet failed");
                     check(cuCtxCreate_v2(&mut ctx, 0, dev), "cuCtxCreate")
                         .expect("cuCtxCreate failed");
                 }

@@ -53,6 +53,19 @@ pub use error::{XpuError, Result};
 #[cfg(feature = "cuda")]
 pub use cuda::{CudaSpace, UnifiedMemory};
 
+/// run `f` with gpu device `ord` bound on this thread (its context current), restoring the
+/// previous device after. on a host (non-cuda) build this is just `f()` -- device binding is
+/// a no-op there, so callers can wrap a tile's work uniformly regardless of backend
+/// (docs/design/37).
+#[cfg(feature = "cuda")]
+pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
+    cuda::with_device(ord, f)
+}
+#[cfg(not(feature = "cuda"))]
+pub fn with_device<R>(_ord: i32, f: impl FnOnce() -> R) -> R {
+    f()
+}
+
 // default space selection
 #[cfg(feature = "cuda")]
 pub type DefaultSpace = CudaSpace;

@@ -139,9 +139,22 @@ behavior is not):
    f)` (ambient current-device model, no device_id threaded through signatures), and
    `runtime.rs` has a per-device dispatcher registry + `current_dispatcher()` (cuda modules
    are context-bound, so this is mandatory). all defaults to device 0 -> behaviorally a
-   no-op, whole suite green. remaining: M2 `Field` gains `device_id` + tiles assigned to
-   devices + physics kernels wrapped in `with_device` (validate locally with N contexts on
-   the one card); M3 peer-access bindings + the peer `HaloTransport` (`StagedCopy` gather +
+   no-op, whole suite green.
+   M2 DONE: tiles are bound to LOGICAL devices and validated on the single card. `cuda.rs
+   ensure_init_device` round-robins logical ordinals onto physical devices (`ord % count`),
+   so logical device 1+ become distinct contexts on the one gpu; `symbi-xpu/src/lib.rs`
+   exposes a uniform `with_device` (cuda -> `cuda::with_device`, host -> `f()`). there is NO
+   `Field.device_id` -- the ambient current-device model + managed-global memory make it
+   unnecessary (yagni). two validations PASS: `symbi-xpu/tests/multi_device.rs` runs a kernel
+   in two contexts on the one card through the per-device dispatcher (proves the context-bound
+   -module landmine is handled), and `decomp_equivalence.rs` now binds each tile's allocation
+   + every physics kernel to its logical device (round-robin over `NDEV=2`), drains every
+   context at the exchange/read seams (`sync_devices`), runs the host-orchestrated exchange on
+   device 0 over managed-global memory, and still reproduces the monolithic run (one tile,
+   device 0) to < 1e-12 on the gpu harnesses. run: `cargo test -p symbi-xpu --features cuda
+   --test multi_device --release` and `cargo test -p symbi --features cuda --test
+   decomp_equivalence --release`.
+   remaining: M3 peer-access bindings + the peer `HaloTransport` (`StagedCopy` gather +
    `cuMemcpyPeer` + scatter); M4 (needs the node) real multi-gpu + distributed cfl.
 3. distributed cfl via a cross-rank reduce; distributed checkpoint i/o. under SPMD bind each
    rank with `CUDA_VISIBLE_DEVICES` so the single-device code stays valid per rank.

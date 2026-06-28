@@ -29,6 +29,15 @@
 //
 // the `decomp_harness!` macro emits a concrete harness per dimension: a generic-over-D
 // harness drowns in `Cartesian: Metric<f64,D>` / `Regime` / KernelSet bounds.
+//
+// device binding (docs/design/37 M2): each tile is bound to a LOGICAL device, round-robin
+// over `NDEV`. on the one physical card those logical ordinals fold onto distinct cuda
+// contexts (the modulo map in cuda.rs), so a tile's allocation + every physics kernel run
+// in their own context while the host-orchestrated exchange runs on device 0 over the
+// managed-global field memory (visible to every context after a per-context drain). this
+// exercises the per-device dispatcher + context-bound modules on a single gpu; the
+// decomposed run still has to reproduce the monolithic run (one tile, device 0) to
+// round-off. on a host build `with_device` is a no-op, so the wrapping is uniform.
 // =============================================================================
 
 use symbi::regimes::substrate_gpu::device_sync;
@@ -43,7 +52,7 @@ use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
-use symbi_xpu::{CpuSpace, HostMemory};
+use symbi_xpu::{with_device, CpuSpace, HostMemory};
 #[cfg(feature = "cuda")]
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 
@@ -67,6 +76,23 @@ macro_rules! decomp_harness {
 
             type Sim = SimState<Newtonian, $d, Cartesian, IdealGas<f64>, $space, $mem>;
             type Kern = AdiabaticSubstrateKernelSet<$mem, f64, $d>;
+
+            // spread decomposed tiles across this many LOGICAL devices (round-robin by tile
+            // index). on the single physical card they fold onto NDEV distinct contexts, so
+            // the device-binding path is exercised without a second gpu. the monolithic run
+            // is one tile -> device 0, so it is unaffected.
+            const NDEV: i32 = 2;
+            fn tile_device(flat: usize) -> i32 {
+                (flat as i32) % NDEV
+            }
+
+            // drain every logical context so its async device writes are visible to a
+            // consumer running in another context (no-op on the host backend).
+            fn sync_devices() {
+                for dd in 0..NDEV {
+                    with_device(dd, || device_sync::<$mem>());
+                }
+            }
 
             // the integrator is set on the sim so the builder allocates the buffers it
             // needs (rk2's u_n snapshot); the harness drives the matching stage table.
@@ -119,7 +145,9 @@ macro_rules! decomp_harness {
                             };
                             [lo, hi]
                         }));
-                        make(m, origin, bnd, ts)
+                        // allocate this tile's fields in its bound device's context, so the
+                        // managed memory is hinted resident there (mirrors a real per-gpu tile).
+                        with_device(tile_device(flat), || make(m, origin, bnd, ts))
                     })
                     .collect()
             }
@@ -128,7 +156,10 @@ macro_rules! decomp_harness {
             // the device drain (no-op on cpu) makes the prior async gpu writes visible to the
             // transport; the sims deref to their `FieldStore` for the module's signature.
             fn exchange_all(tiles: &[(Sim, Kern)], counts: [usize; $d]) {
-                device_sync::<$mem>();
+                // every tile may have run its physics in a different context; drain them all
+                // so the transport (on device 0, over managed-global memory) sees current
+                // interiors. the transport drains its own launches before returning.
+                sync_devices();
                 let tile_refs: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
                 exchange_grid(&tile_refs, counts, &$transport);
             }
@@ -143,9 +174,11 @@ macro_rules! decomp_harness {
                 let multistage = stages.len() > 1;
 
                 // prime prim + ghosts (the stage's entry contract), then seed the cut halos.
-                for (sim, k) in tiles.iter_mut() {
-                    k.c2p(sim);
-                    k.ghost_fill(sim);
+                for (flat, (sim, k)) in tiles.iter_mut().enumerate() {
+                    with_device(tile_device(flat), || {
+                        k.c2p(sim);
+                        k.ghost_fill(sim);
+                    });
                 }
                 exchange_all(tiles, counts);
 
@@ -154,24 +187,26 @@ macro_rules! decomp_harness {
                     // the global dt is the min over all tiles -- identical to the monolithic
                     // cfl since the union of the tile interiors is the monolithic interior.
                     let mut dt = T_FINAL - t;
-                    for (sim, k) in tiles.iter() {
-                        dt = dt.min(k.cfl(sim));
+                    for (flat, (sim, k)) in tiles.iter().enumerate() {
+                        dt = dt.min(with_device(tile_device(flat), || k.cfl(sim)));
                     }
                     // snapshot u_n once before the stages for multi-stage schemes (the
                     // corrector reads it via a0 > 0).
                     if multistage {
-                        for (sim, k) in tiles.iter_mut() {
-                            k.snapshot(sim);
+                        for (flat, (sim, k)) in tiles.iter_mut().enumerate() {
+                            with_device(tile_device(flat), || k.snapshot(sim));
                         }
                     }
                     for &(a0, ac) in stages {
-                        for (sim, k) in tiles.iter_mut() {
-                            for dd in 0..$d {
-                                k.flux(sim, dd);
-                            }
-                            k.godunov_stage(sim, dt, a0, ac);
-                            k.c2p(sim);
-                            k.ghost_fill(sim);
+                        for (flat, (sim, k)) in tiles.iter_mut().enumerate() {
+                            with_device(tile_device(flat), || {
+                                for dd in 0..$d {
+                                    k.flux(sim, dd);
+                                }
+                                k.godunov_stage(sim, dt, a0, ac);
+                                k.c2p(sim);
+                                k.ghost_fill(sim);
+                            });
                         }
                         // refresh the cut halos from each neighbor's stage-updated interior,
                         // so the next stage (or step) reconstructs from current neighbor data.
@@ -184,8 +219,8 @@ macro_rules! decomp_harness {
             // scatter every tile's interior density into one global N^D grid, indexed by
             // global cell coordinate. works for any tile topology (a 1d concat does not).
             fn global_den(tiles: &[(Sim, Kern)], counts: [usize; $d]) -> Vec<f64> {
-                // drain the device before reading cons back to host. no-op on cpu.
-                device_sync::<$mem>();
+                // drain every tile's context before reading cons back to host. no-op on cpu.
+                sync_devices();
                 let m: [usize; $d] = std::array::from_fn(|a| N / counts[a]);
                 let mut out = vec![f64::NAN; N.pow($d as u32)];
                 for (flat_tile, (sim, _)) in tiles.iter().enumerate() {

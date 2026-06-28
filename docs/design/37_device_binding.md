@@ -76,16 +76,22 @@ the per-device-context registry.
 
 ## staged plan (each step validated as far as the one 2070 allows)
 
-M1 -- per-device context + dispatcher registries; `with_device`. behaviorally a no-op for a
-single device (the registry holds one entry; current = device 0). VALIDATE: the entire
-existing suite (cpu + single-gpu decomp tests) stays green. fully local.
+M1 (DONE) -- per-device context + dispatcher registries; `with_device`. behaviorally a no-op
+for a single device (the registry holds one entry; current = device 0). VALIDATED: the entire
+existing suite (cpu + single-gpu decomp tests) stayed green. fully local.
 
-M2 -- `Field` gains `device_id`; the harness/sim assigns each tile a device and wraps its
-physics kernels in `with_device`. VALIDATE LOCALLY by mapping logical devices onto the one
-physical card (N contexts on device 0): exercises the registry, the current-device switching,
-per-device dispatchers, and tile-to-device assignment. the decomp oracle runs with logical
-devices. NOT validated locally: real parallelism (all contexts share one gpu) and true
-cross-gpu access.
+M2 (DONE) -- tiles bound to LOGICAL devices, wrapped in `with_device`. NO `Field.device_id`:
+the ambient current-device model + managed-global memory make per-field ids unnecessary
+(yagni). `ensure_init_device` round-robins logical ordinals onto physical devices
+(`ord % count`), so logical device 1+ are distinct contexts on the one card; `lib.rs` exposes
+a uniform `with_device` (host build = `f()`). VALIDATED LOCALLY on two contexts on the one
+2070: `symbi-xpu/tests/multi_device.rs` launches a kernel in each context through its
+per-device dispatcher (proves the context-bound-module landmine is handled), and
+`decomp_equivalence.rs` binds each tile's allocation + every physics kernel to its logical
+device (round-robin over `NDEV=2`), drains all contexts at the exchange/read seams, runs the
+host-orchestrated exchange on device 0 over managed-global memory, and still matches the
+monolithic run to < 1e-12. NOT validated locally: real parallelism (the contexts share one
+gpu) and true cross-gpu access.
 
 M3 -- peer access bindings + the peer `HaloTransport`: `StagedCopy` gather on src device,
 `cuMemcpyPeer` of the contiguous buffer to the dst device's buffer, scatter on dst device.
@@ -119,5 +125,7 @@ applies, now across real devices.
   per-node-process + device-binding is simpler and is assumed here; revisit if IPC is needed.
 - where `with_device` lives: `symbi-xpu` (next to the context registry) and is re-exported.
 - does the substrate's per-stage dispatch need any change, or does wrapping the whole tile
-  step in `with_device` suffice? (expected: the wrap suffices, since all kernels read the
-  current context.)
+  step in `with_device` suffice? RESOLVED (M2): the wrap suffices. no substrate change -- the
+  decomp oracle wraps each tile's per-stage kernel group (flux/godunov/c2p/ghost_fill, plus
+  cfl + snapshot) in `with_device` and matches the monolithic run, because every kernel routes
+  through `current_dispatcher()`/`current_device()` and reads the current context.
