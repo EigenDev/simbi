@@ -225,9 +225,22 @@ proven-correct decomposition, not a rewrite.
 explicitly do NOT do now: build an mpi layer, a device scheduler, a load balancer,
 or thread `device_id` through the xpu layer. all premature. yagni.
 
+## backends (cuda + hip)
+
+the gpu path is backend-pluggable (docs/design/38). a `gpu` umbrella cargo feature gates all
+backend-agnostic device code; `cuda` (nvidia, nvrtc) and `hip` (amd, hiprtc) select the
+concrete backend and each imply `gpu`. downstream code names NEUTRAL types -- `symbi_xpu::
+DeviceSpace`/`DeviceMemory`, `symbi_xpu::runtime::{DeviceRuntime, current_dispatcher}`, and the
+neutral device api (`ctx_sync`, `with_device`, `memcpy_peer`, ...) -- never `CudaSpace`/`cuda::`
+directly. so the decomposition + transports (`decomp.rs`, `PeerCopy`) are backend-agnostic and
+the M3 peer path ports to amd for free (`hipMemcpyPeer`). build amd with `--features hip` (or
+`./dev.py install --hip`); it is cluster-validated only (no amd hardware locally). exactly one
+backend at a time (a `compile_error!` enforces it).
+
 ## key file map (so you do not re-explore)
 
 - the adr (decided strategy): `docs/design/36_scalability_multi_gpu.md`
+- the hip backend design: `docs/design/38_hip_backend.md` (cuda + hip behind one neutral surface)
 - the complete reusable decomposition layer (D-generic, Domain-based at the cell level):
   `src/crates/symbi-sim/src/decomp.rs` -- `HaloTransport` trait; three impls: `LocalCopy`
   (host), `DeviceCopy` (pooled direct strided device kernel), `StagedCopy` (pooled

@@ -5,13 +5,16 @@
 # simbi build/install wrapper around MATURIN (which drives cargo directly).
 # the rust backend (src/crates/symbi-py) builds the pyo3 extension installed
 # as simbi/libs/cpu_ext; the unchanged `simbi.libs.cpu_ext` import loads it.
-# gpu is a cargo FEATURE: `--gpu` -> `--features cuda` (kernels JIT via NVRTC at
-# runtime; build.rs links libcuda/libnvrtc — no nvcc/meson needed).
+# gpu is a cargo FEATURE: `--gpu`/`--cuda` -> nvidia (`--features cuda`, NVRTC JIT,
+# links libcuda/libnvrtc); `--hip` -> amd (`--features hip`, hipRTC JIT, links
+# libamdhip64/libhiprtc under ROCM_PATH). no nvcc/hipcc/meson needed. both produce
+# the gpu_ext extension, which coexists with cpu_ext.
 # usage:
 #  ./dev.py install            # maturin develop --release (editable build + install)
 #  ./dev.py build              # maturin build --release (wheel in src/target/wheels)
 #  (no-uv path: `pip install -e .` builds editable via the maturin backend directly)
-#  ./dev.py build --gpu        # rust gpu build (cargo 'cuda' feature)
+#  ./dev.py build --gpu        # nvidia gpu build (cargo 'cuda' feature)
+#  ./dev.py install --hip      # amd gpu build (cargo 'hip' feature, ROCm)
 #  ./dev.py clean [--all]      # remove extensions; --all also runs cargo clean
 # =============================================================================
 
@@ -73,8 +76,12 @@ def run(cmd, **kwargs) -> None:
 
 def _features(args) -> str:
     feats = [f.strip() for f in (args.features or "").split(",") if f.strip()]
+    # `--gpu`/`--cuda` -> the nvidia backend; `--hip` -> the amd backend (docs/design/38).
+    # mutually exclusive: the rust crate compile_error!s if both are set.
     if getattr(args, "gpu", False) and "cuda" not in feats:
         feats.append("cuda")
+    if getattr(args, "hip", False) and "hip" not in feats:
+        feats.append("hip")
     return ",".join(feats)
 
 
@@ -90,7 +97,9 @@ def _common(args) -> list:
 
 
 def _is_gpu_build(args) -> bool:
-    return "cuda" in _features(args).split(",")
+    # any gpu backend (cuda or hip) produces the gpu_ext extension.
+    feats = set(_features(args).split(","))
+    return bool(feats & {"cuda", "hip"})
 
 
 def _finalize_gpu_ext() -> None:
@@ -279,7 +288,13 @@ def _add_build_args(p) -> None:
     p.add_argument(
         "--gpu",
         action="store_true",
-        help="gpu build -> cargo 'cuda' feature (NVRTC JIT)",
+        help="nvidia gpu build -> cargo 'cuda' feature (NVRTC JIT)",
+    )
+    p.add_argument(
+        "--hip",
+        action="store_true",
+        help="amd gpu build -> cargo 'hip' feature (hipRTC JIT, ROCm). set ROCM_PATH / "
+        "SYMBI_HIP_ARCH if rocm is not at /opt/rocm or arch auto-detect is insufficient",
     )
 
 

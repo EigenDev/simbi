@@ -31,10 +31,15 @@ pub use symbi_geometry::{Cartesian, Cylindrical, Metric, Spherical};
 
 // --- execution + memory spaces (the `S` / `Mem` backend params) ---
 pub use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
+// the neutral device space/memory (docs/design/38): resolves to whichever gpu backend is
+// compiled in. the concrete `CudaSpace`/`UnifiedMemory` stay exported under `cuda` for any
+// code that names them directly.
+#[cfg(feature = "gpu")]
+pub use symbi_xpu::{DeviceMemory, DeviceSpace};
 #[cfg(feature = "cuda")]
-pub use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
-// the FEATURE-SELECTED backend: GPU (CudaSpace / UnifiedMemory) under `--features cuda`, else CPU
-// (CpuSpace / HostMemory) — re-exported so an example drops its per-file `#[cfg(feature="cuda")]`
+pub use symbi_xpu::{CudaSpace, UnifiedMemory};
+// the FEATURE-SELECTED backend: the device space/memory under any gpu feature, else CPU
+// (CpuSpace / HostMemory) — re-exported so an example drops its per-file `#[cfg(feature="gpu")]`
 // Space/Mem block in favor of `SimDefault*` (below).
 pub use symbi_xpu::{DefaultMemory, DefaultSpace};
 

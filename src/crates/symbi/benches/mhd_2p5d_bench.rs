@@ -25,11 +25,11 @@ use symbi_hydro::mhd_state::MhdPrim;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::state::Prim;
 
-// backend: device (UnifiedMemory + CudaSpace) under --features cuda, else host CPU.
+// backend: device (DeviceMemory + DeviceSpace) under --features cuda, else host CPU.
 // the same substrate code path; this bench measures whichever the build selects.
-#[cfg(feature = "cuda")]
-use symbi_xpu::cuda::{CudaSpace as Space, UnifiedMemory as Mem};
-#[cfg(not(feature = "cuda"))]
+#[cfg(feature = "gpu")]
+use symbi_xpu::{DeviceSpace as Space, DeviceMemory as Mem};
+#[cfg(not(feature = "gpu"))]
 use symbi_xpu::{CpuSpace as Space, HostMemory as Mem};
 
 const GAMMA: f64 = 5.0 / 3.0;
@@ -105,12 +105,12 @@ fn bench_3d_nz1(nx: usize, t_final: f64) -> (f64, u64) {
         .with_solver(Solver::Hlld)
         .expect("HLLD is valid for Newtonian MHD");
     let cells = sim.geom.interior.volume() as u64;
-    #[cfg(feature = "cuda")]
+    #[cfg(feature = "gpu")]
     let launches0 = symbi::regimes::substrate_gpu::gpu_launch_count();
     let t0 = Instant::now();
     evolve_with_callback(&mut sim, &sub, t_final, 1_000_000, |_| {}).expect("3d evolve");
     let secs = t0.elapsed().as_secs_f64();
-    #[cfg(feature = "cuda")]
+    #[cfg(feature = "gpu")]
     {
         let launches = symbi::regimes::substrate_gpu::gpu_launch_count() - launches0;
         eprintln!(

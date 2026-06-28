@@ -19,7 +19,7 @@
 // file compiles to nothing.
 // =============================================================================
 
-#![cfg(feature = "cuda")]
+#![cfg(feature = "gpu")]
 
 use symbi_hydro::regime_spec::{law_params, NEWTONIAN_SPEC};
 use symbi_hydro::source_spec::{gravity_params, point_mass_gravity_sources, source_params};

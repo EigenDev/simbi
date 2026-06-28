@@ -17,7 +17,7 @@
 // =============================================================================
 
 use symbi_aot::{CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar};
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 use symbi_aot::{compute_strides, copy_extent, copy_lo};
 use symbi_ir::emit::ReductionOp;
 use symbi_xpu::MemorySpace;
@@ -27,7 +27,7 @@ use symbi_xpu::MemorySpace;
 /// 16 bytes strides + 16 bytes extent = 56 bytes, naturally 8-byte aligned. one
 /// of these is passed by value per buffer to every GPU kernel (Phase 1B-3). cfg-gated to
 /// the `cuda` feature: cpu-only builds never construct one.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct DeviceView {
@@ -44,7 +44,7 @@ struct DeviceView {
 // alignment change from a new `#[derive]`) would silently mis-bind every kernel
 // arg. catch it at compile time rather than as garbled physics. `offset_of!` is
 // stable since 1.77.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 const _: () = {
     use std::mem::{offset_of, size_of};
     assert!(
@@ -80,7 +80,7 @@ const _: () = {
 // no `&dyn` — the backend is a zero-size type param, fully monomorphized;
 // `DefaultGpuBackend` binds the compiled-in choice at the dispatch boundary.
 // =============================================================================
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub trait GpuBackend: 'static {
     // the device runtime (alloc/launch/sync) this backend drives.
     type Runtime: symbi_xpu::runtime::GpuRuntime;
@@ -120,10 +120,39 @@ impl GpuBackend for CudaBackend {
     }
 }
 
-// the compiled-in default backend (the only one today). a second backend flips this
-// alias under its own feature; the dispatch boundary calls `run_gpu::<DefaultGpuBackend, _>`.
+// the hip backend (docs/design/38): same `Target::Hip` (renders the identical cuda-c++ source),
+// the hip per-device dispatcher, and the SAME `DeviceView` launch ABI as cuda.
+#[cfg(feature = "hip")]
+pub struct HipBackend;
+
+#[cfg(feature = "hip")]
+impl GpuBackend for HipBackend {
+    type Runtime = symbi_xpu::runtime::hip_runtime::HipRuntime;
+    const TARGET: symbi_ir::emit::Target = symbi_ir::emit::Target::Hip;
+
+    #[inline]
+    fn dispatcher() -> &'static symbi_xpu::runtime::KernelDispatcher<Self::Runtime> {
+        symbi_xpu::runtime::hip_runtime::current_dispatcher()
+    }
+
+    #[inline]
+    fn push_field(args: &mut symbi_xpu::KernelArgs, ptr: *const u8, lo: &[i32], extent: &[u32]) {
+        let view = DeviceView {
+            data: ptr as *const std::ffi::c_void,
+            lo: copy_lo(lo),
+            strides: compute_strides(extent),
+            extent: copy_extent(extent),
+        };
+        args.push(&view);
+    }
+}
+
+// the compiled-in default backend. each backend feature binds the alias to its own struct; the
+// dispatch boundary calls `run_gpu::<DefaultGpuBackend, _>`. cuda wins if both are set.
 #[cfg(feature = "cuda")]
 pub type DefaultGpuBackend = CudaBackend;
+#[cfg(all(feature = "hip", not(feature = "cuda")))]
+pub type DefaultGpuBackend = HipBackend;
 
 /// the regime-AGNOSTIC CFL reduction: max over `domain` of a per-cell wave-speed
 /// scratch field. thin wrapper over the general `field_reduce` — every regime
@@ -148,14 +177,14 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     op: ReductionOp,
 ) -> f64 {
     if Mem::IS_DEVICE_ACCESSIBLE {
-        #[cfg(feature = "cuda")]
+        #[cfg(feature = "gpu")]
         {
             return field_reduce_device::<DefaultGpuBackend, _, _, D>(field, domain, op);
         }
-        #[cfg(not(feature = "cuda"))]
+        #[cfg(not(feature = "gpu"))]
         {
             let _ = op;
-            unreachable!("device-accessible memory requires the cuda feature");
+            unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
         }
     }
     // host fold (the CPU algebra of the Reduce morphism, doc 15 §2). LARGE
@@ -223,19 +252,19 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
 /// host fold, so concurrent reductions from multiple threads serialize on
 /// the cache rather than racing on the buffer. uncontended in the single-
 /// simulation case (the common one); cheap when contested.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
     bytes_needed: usize,
     f: impl FnOnce(*mut Sc) -> R,
 ) -> R {
     use std::sync::{Mutex, OnceLock};
+    use symbi_xpu::DeviceMemory;
     use symbi_xpu::MemoryBlock;
-    use symbi_xpu::cuda::UnifiedMemory;
 
     // one slot per precision. `is_f64` discriminates at compile time via
     // size_of::<Sc>() so the lookup is monomorphized.
-    static F64_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<UnifiedMemory>>>> = OnceLock::new();
-    static F32_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<UnifiedMemory>>>> = OnceLock::new();
+    static F64_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
+    static F32_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
     let slot = if std::mem::size_of::<Sc>() == std::mem::size_of::<f64>() {
         F64_PARTIALS.get_or_init(|| Mutex::new(None))
     } else {
@@ -250,7 +279,7 @@ fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
         // round up to next power of 2 to amortize future growths.
         let alloc_bytes = bytes_needed.next_power_of_two().max(256);
         *guard = Some(
-            MemoryBlock::<UnifiedMemory>::new(alloc_bytes)
+            MemoryBlock::<DeviceMemory>::new(alloc_bytes)
                 .expect("unified alloc for reduction partials"),
         );
     }
@@ -265,7 +294,7 @@ fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
 /// the window, and fold the per-block partials on the host (only num_blocks scalars
 /// cross). the field's allocated domain gives the view_t buffer layout; the `domain`
 /// arg is the reduced window (interior).
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn field_reduce_device<
     B: GpuBackend,
     Sc: Scalar + OrderedNumeric,
@@ -278,9 +307,9 @@ fn field_reduce_device<
 ) -> f64 {
     use symbi_ir::emit::Precision;
     use symbi_ir::{REDUCTION_BLOCK_SIZE, render_field_reduction};
-    use symbi_xpu::LaunchConfig;
-    use symbi_xpu::cuda::ctx_sync;
+    use symbi_xpu::ctx_sync;
     use symbi_xpu::runtime::GpuRuntime;
+    use symbi_xpu::LaunchConfig;
 
     let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
     let precision = if is_f64 {
@@ -370,17 +399,17 @@ where
     F: FnOnce(&[CpuField<'_, Sc>], &mut [CpuFieldMut<'_, Sc>], &[u32], &[i32], &[i32], &[Sc]),
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
-        #[cfg(feature = "cuda")]
+        #[cfg(feature = "gpu")]
         {
             let _ = &cpu;
             run_gpu::<DefaultGpuBackend, _>(inv, ir, kernel_name);
         }
-        #[cfg(not(feature = "cuda"))]
+        #[cfg(not(feature = "gpu"))]
         {
-            // UnifiedMemory (the only device-accessible space) exists ONLY under the
-            // cuda feature, so this branch is unreachable in a non-cuda build.
+            // device-accessible memory (DeviceMemory) exists ONLY under a gpu feature, so
+            // this branch is unreachable in a host-only build.
             let _ = (ir, kernel_name, cpu);
-            unreachable!("device-accessible memory requires the cuda feature");
+            unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
         }
     } else {
         let _ = (ir, kernel_name);
@@ -402,13 +431,13 @@ where
 // the cache value bundles the descriptor with a precomputed `module_key` (the string
 // the dispatcher uses to look up the JITed CUDA module) — formatting it on every
 // launch was one String alloc per dispatch.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 struct CachedDesc {
     desc: symbi_ir::emit::KernelDescriptor,
     module_key: String,
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 static RENDER_CACHE: std::sync::LazyLock<
     std::sync::RwLock<std::collections::HashMap<(String, bool), std::sync::Arc<CachedDesc>>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
@@ -416,7 +445,7 @@ static RENDER_CACHE: std::sync::LazyLock<
 /// the per-block dynamic-smem budget we size tiled launches against. Turing (sm_75,
 /// the RTX 2070 dev part) allows 48 KB of dynamic `__shared__` without the
 /// `cudaFuncSetAttribute` opt-in; staying under it keeps the launch portable.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 const TILED_SMEM_LIMIT: usize = 48 * 1024;
 
 /// pick a BLOCK shape for a smem-tiled launch: balanced (cube-ish), clamped to the
@@ -426,7 +455,7 @@ const TILED_SMEM_LIMIT: usize = 48 * 1024;
 /// overrides for the tile-size sweep (docs/design/22 §G). this is used in place of the
 /// warp-first `block_for` for tiled kernels, whose [32,8,1] shape blows the slab
 /// when the halo sits on a thin (block=1) axis.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn tiled_block(ndim: usize, grid: &[u32], halo: &[u8], cell_bytes: usize) -> [u32; 3] {
     if let Some(b) = env_tile_block(ndim) {
         return b;
@@ -456,7 +485,7 @@ fn tiled_block(ndim: usize, grid: &[u32], halo: &[u8], cell_bytes: usize) -> [u3
 
 /// the explicit per-process tiled-block override `SYMBI_TILE_BLOCK="bx,by,bz"`
 /// (the leading `ndim` entries are used). `None` if unset/unparseable.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn env_tile_block(ndim: usize) -> Option<[u32; 3]> {
     let raw = std::env::var("SYMBI_TILE_BLOCK").ok()?;
     let mut b = [1u32; 3];
@@ -474,9 +503,9 @@ fn env_tile_block(ndim: usize) -> Option<[u32; 3]> {
 /// the amr hierarchy's api boundaries and host scans, and any test comparing
 /// device buffers right after a dispatch.
 pub fn device_sync<Mem: MemorySpace>() {
-    #[cfg(feature = "cuda")]
+    #[cfg(feature = "gpu")]
     if Mem::IS_DEVICE_ACCESSIBLE {
-        symbi_xpu::cuda::ctx_sync();
+        symbi_xpu::ctx_sync();
     }
 }
 
@@ -489,7 +518,7 @@ pub fn gpu_launch_count() -> u64 {
     GPU_LAUNCH_COUNT.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     inv: KernelInvocation<Sc>,
     ir: &str,

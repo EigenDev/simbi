@@ -211,3 +211,74 @@ pub mod cuda_runtime {
     }
 }
 
+// =============================================================================
+// HIP runtime (docs/design/38). the amd sibling of cuda_runtime: hiprtc -> code object ->
+// hipModuleLoadData. same per-device dispatcher registry (modules are per-device), keyed on
+// the hip current-device ordinal.
+// =============================================================================
+
+#[cfg(feature = "hip")]
+pub mod hip_runtime {
+    use super::*;
+    use crate::hip::{HipSpace, HipModule, HipKernel, HipStream};
+    use crate::ExecutionSpace;
+
+    pub struct HipRuntime;
+
+    impl GpuRuntime for HipRuntime {
+        type Module = HipModule;
+        type Kernel = HipKernel;
+
+        fn compile(&self, source: &str, name: &str) -> crate::Result<Vec<u8>> {
+            crate::hiprtc::compile_code(source, name)
+        }
+
+        fn load_binary(&self, binary: &[u8]) -> crate::Result<HipModule> {
+            HipSpace::load_module(binary)
+        }
+
+        fn get_kernel(&self, module: &HipModule, name: &str) -> crate::Result<HipKernel> {
+            HipSpace::get_function(module, name)
+        }
+
+        unsafe fn launch(
+            &self,
+            kernel: &HipKernel,
+            config: LaunchConfig,
+            args: &mut [*mut std::ffi::c_void],
+        ) -> crate::Result<()> {
+            let stream = HipStream::null();
+            unsafe { HipSpace::launch(&stream, kernel, config, args) }
+        }
+    }
+
+    fn make_dispatcher() -> KernelDispatcher<HipRuntime> {
+        KernelDispatcher::new(HipRuntime)
+    }
+
+    // one dispatcher per device ordinal: hip modules are bound to the device they were loaded
+    // for, so device N's kernels must live in device N's dispatcher (docs/design/37).
+    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<HipRuntime>>; crate::hip::MAX_GPUS] =
+        [const {
+            std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<HipRuntime>)
+        }; crate::hip::MAX_GPUS];
+
+    /// the dispatcher for the device bound on this thread. callers JIT and launch inside
+    /// `hip::with_device(ord, ...)`, so the modules land for the right device.
+    pub fn current_dispatcher() -> &'static KernelDispatcher<HipRuntime> {
+        &DISPATCHERS[crate::hip::current_device() as usize]
+    }
+}
+
+// =============================================================================
+// neutral backend selection (docs/design/38): downstream names `runtime::DeviceRuntime` and
+// `runtime::current_dispatcher()`; the active backend feature binds them. cuda wins if both
+// are somehow set (the hip arms are `not(cuda)`), so the tree never double-binds.
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+pub use cuda_runtime::{current_dispatcher, CudaRuntime as DeviceRuntime};
+
+#[cfg(all(feature = "hip", not(feature = "cuda")))]
+pub use hip_runtime::{current_dispatcher, HipRuntime as DeviceRuntime};
+

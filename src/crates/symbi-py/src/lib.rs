@@ -2171,16 +2171,16 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 // cpu build -> `simbi.libs.cpu_ext`.
-#[cfg(not(feature = "cuda"))]
+#[cfg(not(feature = "gpu"))]
 #[pymodule]
 fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)
 }
 
-// cuda build -> `simbi.libs.gpu_ext`. dev.py overrides maturin's module-name to
-// match (`--config tool.maturin.module-name="simbi.libs.gpu_ext"`), so the two
+// gpu build (cuda or hip) -> `simbi.libs.gpu_ext`. dev.py overrides maturin's module-name to
+// match (`--config tool.maturin.module-name="simbi.libs.gpu_ext"`), so the cpu and gpu
 // backends coexist instead of overwriting the same `cpu_ext` dylib.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[pymodule]
 fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)

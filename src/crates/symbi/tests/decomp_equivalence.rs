@@ -43,7 +43,7 @@
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{exchange_grid, flatten, unflatten, LocalCopy};
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 use symbi::sim::decomp::{DeviceCopy, PeerCopy, StagedCopy};
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
@@ -53,8 +53,8 @@ use symbi_hydro::eos::IdealGas;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{with_device, CpuSpace, HostMemory};
-#[cfg(feature = "cuda")]
-use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+#[cfg(feature = "gpu")]
+use symbi_xpu::{DeviceSpace, DeviceMemory};
 
 const GAMMA: f64 = 1.4;
 const CFL: f64 = 0.4;
@@ -277,16 +277,16 @@ decomp_harness!(d3, 3, CpuSpace, HostMemory, LocalCopy);
 // LocalCopy reads them after a device drain. one device with several subdomains -- no
 // speedup, but it proves the decomposition works against device fields before a second
 // gpu exists. needs `--features cuda` and a cuda device.
-#[cfg(feature = "cuda")]
-decomp_harness!(gpu_d1, 1, CudaSpace, UnifiedMemory, DeviceCopy);
+#[cfg(feature = "gpu")]
+decomp_harness!(gpu_d1, 1, DeviceSpace, DeviceMemory, DeviceCopy);
 // the 2x2 grid exercises StagedCopy: the gather/scatter pack/unpack that peer-copy reuses.
-#[cfg(feature = "cuda")]
-decomp_harness!(gpu_d2, 2, CudaSpace, UnifiedMemory, StagedCopy);
+#[cfg(feature = "gpu")]
+decomp_harness!(gpu_d2, 2, DeviceSpace, DeviceMemory, StagedCopy);
 // the peer-copy transport: tiles round-robin onto NDEV LOGICAL devices, so on a 2+ gpu node
 // the 2x2 grid drives real cross-device `cuMemcpyPeer` halos. self-skips on a single card (a
 // device cannot peer with itself); the math oracle still applies, now across real devices.
-#[cfg(feature = "cuda")]
-decomp_harness!(gpu_peer_d2, 2, CudaSpace, UnifiedMemory, PeerCopy);
+#[cfg(feature = "gpu")]
+decomp_harness!(gpu_peer_d2, 2, DeviceSpace, DeviceMemory, PeerCopy);
 
 #[test]
 fn euler_two_tile_1d() {
@@ -323,13 +323,13 @@ fn euler_octo_tile_3d_grid() {
 // through run_gpu. gpu-mono vs gpu-decomposed must still agree to round-off -- the only
 // difference is the exchange, run identically on both. proves the device-memory path
 // before any multi-device hardware.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[test]
 fn gpu_rk2_four_tile_1d() {
     gpu_d1::assert_matches([4], Timestepping::Rk2);
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[test]
 fn gpu_rk2_quad_tile_2d_grid() {
     gpu_d2::assert_matches([2, 2], Timestepping::Rk2);
@@ -341,16 +341,16 @@ fn gpu_rk2_quad_tile_2d_grid() {
 // (a context cannot peer with itself), so this is the one milestone validated on the cluster,
 // not locally. peer access is best-effort enabled (cuMemcpyPeer falls back through host if the
 // link is absent, so the correctness assertion holds either way).
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[test]
 fn gpu_peer_rk2_quad_tile_2d_grid() {
-    if symbi_xpu::cuda::device_count().unwrap_or(0) < 2 {
+    if symbi_xpu::device_count().unwrap_or(0) < 2 {
         eprintln!("skipping gpu_peer_rk2_quad_tile_2d_grid: needs >= 2 gpus");
         return;
     }
-    if symbi_xpu::cuda::can_access_peer(0, 1).unwrap_or(false) {
-        symbi_xpu::cuda::enable_peer_access(0, 1).ok();
-        symbi_xpu::cuda::enable_peer_access(1, 0).ok();
+    if symbi_xpu::can_access_peer(0, 1).unwrap_or(false) {
+        symbi_xpu::enable_peer_access(0, 1).ok();
+        symbi_xpu::enable_peer_access(1, 0).ok();
     }
     gpu_peer_d2::assert_matches([2, 2], Timestepping::Rk2);
 }

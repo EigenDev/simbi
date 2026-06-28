@@ -5,7 +5,9 @@ edition = "2024"
 
 [features]
 default = []
-cuda = ["symbi-xpu/cuda", "symbi-grid/cuda", "symbi-sim/cuda", "symbi-substrate/cuda"]
+gpu = ["symbi-xpu/gpu", "symbi-grid/gpu", "symbi-sim/gpu", "symbi-substrate/gpu"]
+cuda = ["gpu", "symbi-xpu/cuda", "symbi-grid/cuda", "symbi-sim/cuda", "symbi-substrate/cuda"]
+hip = ["gpu", "symbi-xpu/hip", "symbi-grid/hip", "symbi-sim/hip", "symbi-substrate/hip"]
 
 [dependencies]
 symbi-algebra = { path = "../symbi-algebra" }

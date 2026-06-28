@@ -24,7 +24,7 @@ pub mod motion_law;
 pub mod simulation_laws;
 pub mod source_evaluator;
 pub mod gpu_source_kernel;
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub mod gpu_launcher;
 pub mod newtonian;
 pub mod newtonian_mhd;
@@ -63,7 +63,7 @@ pub use source_evaluator::SourceEvaluator;
 // expr_bridge::build_user_source) is one import surface.
 pub use symbi_expr::SourceConfig;
 pub use gpu_source_kernel::GpuSourceKernel;
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub use gpu_launcher::launch_source_kernel;
 pub use newtonian::Newtonian;
 pub use newtonian_mhd::NewtonianMhd;

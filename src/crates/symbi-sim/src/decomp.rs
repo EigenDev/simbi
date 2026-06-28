@@ -23,11 +23,11 @@ use crate::state::{FieldStore, PartitionGeometry};
 use symbi_algebra::{Domain, Side};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
-#[cfg(feature = "cuda")]
-use symbi_xpu::cuda::{ctx_sync, memcpy_peer, UnifiedMemory, MAX_GPUS};
-#[cfg(feature = "cuda")]
-use symbi_xpu::runtime::{cuda_runtime::current_dispatcher, GpuRuntime};
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
+use symbi_xpu::{ctx_sync, memcpy_peer, DeviceMemory, MAX_GPUS};
+#[cfg(feature = "gpu")]
+use symbi_xpu::runtime::{current_dispatcher, GpuRuntime};
+#[cfg(feature = "gpu")]
 use symbi_xpu::{with_device, KernelArgs, LaunchConfig, MemoryBlock};
 
 /// move `src` over `src_region` into `dst` over `dst_region`, cell-for-cell. the two
@@ -75,7 +75,7 @@ impl HaloTransport for LocalCopy {
 // dimension and every stride because the geometry is baked into the index arrays. this is
 // the same pack/move/unpack primitive a peer-copy or mpi transport reuses -- only the move
 // (here a same-buffer-space device copy) changes.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 const HALO_COPY_KERNEL: &str = r#"
 extern "C" __global__ void halo_copy(
     const double* src,
@@ -95,14 +95,14 @@ extern "C" __global__ void halo_copy(
 // of a `cuMemAllocManaged` per `copy_region` (the dominant per-exchange cost). thread-local
 // so it needs no Send/Sync on the raw device pointers; the parallel test threads each pool
 // their own. the per-cell index WRITE still happens each call (cheap host memory writes).
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 struct HaloIdxBufs {
-    sidx: MemoryBlock<UnifiedMemory>,
-    didx: MemoryBlock<UnifiedMemory>,
+    sidx: MemoryBlock<DeviceMemory>,
+    didx: MemoryBlock<DeviceMemory>,
     cap: usize,
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 thread_local! {
     static HALO_IDX_BUFS: std::cell::RefCell<Option<HaloIdxBufs>> =
         const { std::cell::RefCell::new(None) };
@@ -112,10 +112,10 @@ thread_local! {
 /// the field data. the per-cell flat-offset arrays are precomputed on the host into pooled
 /// unified buffers; the data itself never leaves the device. on a host backend it falls
 /// back to the proven cell-for-cell copy.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub struct DeviceCopy;
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 impl HaloTransport for DeviceCopy {
     fn copy_region<const D: usize, M: MemorySpace>(
         &self,
@@ -149,8 +149,8 @@ impl HaloTransport for DeviceCopy {
             // (re)allocate only when missing or too small; the strip geometry is fixed.
             if slot.as_ref().map_or(true, |b| b.cap < n) {
                 *slot = Some(HaloIdxBufs {
-                    sidx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("sidx alloc"),
-                    didx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("didx alloc"),
+                    sidx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("sidx alloc"),
+                    didx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("didx alloc"),
                     cap: n,
                 });
             }
@@ -322,7 +322,7 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
 // the gather/scatter kernels for `StagedCopy`: pack a strided strip into a contiguous
 // buffer, and scatter a contiguous buffer back into a strided strip. the contiguous buffer
 // is the interchange a peer-copy (nvlink) or mpi transfer moves across the link.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 const HALO_GATHER_KERNEL: &str = r#"
 extern "C" __global__ void halo_gather(
     const double* src, double* buf, const unsigned int* idx, unsigned int n)
@@ -333,7 +333,7 @@ extern "C" __global__ void halo_gather(
 }
 "#;
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 const HALO_SCATTER_KERNEL: &str = r#"
 extern "C" __global__ void halo_scatter(
     double* dst, const double* buf, const unsigned int* idx, unsigned int n)
@@ -345,15 +345,15 @@ extern "C" __global__ void halo_scatter(
 "#;
 
 // pooled staging buffers: the gather/scatter index arrays plus the contiguous f64 strip.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 struct HaloStageBufs {
-    sidx: MemoryBlock<UnifiedMemory>,
-    didx: MemoryBlock<UnifiedMemory>,
-    buf: MemoryBlock<UnifiedMemory>,
+    sidx: MemoryBlock<DeviceMemory>,
+    didx: MemoryBlock<DeviceMemory>,
+    buf: MemoryBlock<DeviceMemory>,
     cap: usize,
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 thread_local! {
     static HALO_STAGE_BUFS: std::cell::RefCell<Option<HaloStageBufs>> =
         const { std::cell::RefCell::new(None) };
@@ -366,10 +366,10 @@ thread_local! {
 /// the two ranks -- so this validates the pack/unpack halves of the multi-gpu transport on
 /// a single card; only the move in the middle is added on real hardware. host fallback for
 /// a cpu backend.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub struct StagedCopy;
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 impl HaloTransport for StagedCopy {
     fn copy_region<const D: usize, M: MemorySpace>(
         &self,
@@ -400,9 +400,9 @@ impl HaloTransport for StagedCopy {
             let mut slot = cell.borrow_mut();
             if slot.as_ref().map_or(true, |b| b.cap < n) {
                 *slot = Some(HaloStageBufs {
-                    sidx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("sidx alloc"),
-                    didx: MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("didx alloc"),
-                    buf: MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n).expect("stage alloc"),
+                    sidx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("sidx alloc"),
+                    didx: MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("didx alloc"),
+                    buf: MemoryBlock::<DeviceMemory>::for_elements::<f64>(n).expect("stage alloc"),
                     cap: n,
                 });
             }
@@ -464,28 +464,28 @@ impl HaloTransport for StagedCopy {
 // pooled staging buffers for `PeerCopy`, one set PER logical device: the index array (a strip
 // is gathered/scattered on its own device) and the contiguous f64 buffer the peer move
 // transfers. allocated in the owning device's context so each buffer is resident on its gpu.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 struct PeerBufs {
-    idx: MemoryBlock<UnifiedMemory>,
-    buf: MemoryBlock<UnifiedMemory>,
+    idx: MemoryBlock<DeviceMemory>,
+    buf: MemoryBlock<DeviceMemory>,
     cap: usize,
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 thread_local! {
     static PEER_BUFS: std::cell::RefCell<[Option<PeerBufs>; MAX_GPUS]> =
         const { std::cell::RefCell::new([const { None }; MAX_GPUS]) };
 }
 
 // ensure device `dev` has staging buffers of at least `n` elements, allocated in its context.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn ensure_peer_bufs(pool: &mut [Option<PeerBufs>; MAX_GPUS], dev: i32, n: usize) {
     let slot = &mut pool[dev as usize];
     if slot.as_ref().map_or(true, |b| b.cap < n) {
         let (idx, buf) = with_device(dev, || {
             (
-                MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("peer idx alloc"),
-                MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n).expect("peer buf alloc"),
+                MemoryBlock::<DeviceMemory>::for_elements::<u32>(n).expect("peer idx alloc"),
+                MemoryBlock::<DeviceMemory>::for_elements::<f64>(n).expect("peer buf alloc"),
             )
         });
         *slot = Some(PeerBufs { idx, buf, cap: n });
@@ -499,10 +499,10 @@ fn ensure_peer_bufs(pool: &mut [Option<PeerBufs>; MAX_GPUS], dev: i32, n: usize)
 /// `src_dev == dst_dev` there is nothing to move across, so it defers to the proven
 /// single-device `StagedCopy`. host fallback for a cpu backend. NOT exercisable on one gpu (a
 /// device cannot peer with itself); the equivalence oracle runs it on a real multi-gpu node.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub struct PeerCopy;
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 impl HaloTransport for PeerCopy {
     fn copy_region<const D: usize, M: MemorySpace>(
         &self,

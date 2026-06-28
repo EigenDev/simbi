@@ -201,9 +201,9 @@ where
     // cuda feature: a HOST-memory sim in a cuda-feature build has no CUDA context, so
     // an unconditional `cuCtxSynchronize` panics (CUDA_ERROR_INVALID_CONTEXT). only
     // device-resident memory needs the sync; host memory is already coherent.
-    #[cfg(feature = "cuda")]
+    #[cfg(feature = "gpu")]
     if Mem::IS_DEVICE_ACCESSIBLE {
-        symbi_xpu::cuda::ctx_sync();
+        symbi_xpu::ctx_sync();
     }
     let interior = &sim.geom.interior;
     let a = sim.motion.a;

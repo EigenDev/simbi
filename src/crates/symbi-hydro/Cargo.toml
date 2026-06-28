@@ -13,10 +13,11 @@ symbi-xpu = { path = "../symbi-xpu", optional = true }
 
 [features]
 default = []
-# enable NVRTC-backed JIT launch for `GpuSourceKernel`. requires GPU hardware
-# at test/runtime; the `GpuSourceKernel` itself (source emission) compiles
-# without this feature.
-cuda = ["symbi-xpu/cuda", "dep:symbi-xpu"]
+# enable runtime-jit launch for `GpuSourceKernel` (nvrtc on cuda, hiprtc on hip). requires
+# gpu hardware at test/runtime; the `GpuSourceKernel` itself (source emission) compiles without.
+gpu = ["symbi-xpu/gpu", "dep:symbi-xpu"]
+cuda = ["gpu", "symbi-xpu/cuda", "dep:symbi-xpu"]
+hip = ["gpu", "symbi-xpu/hip", "dep:symbi-xpu"]
 
 [dev-dependencies]
 hdf5-metno = "0.12"
