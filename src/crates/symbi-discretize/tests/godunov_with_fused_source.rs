@@ -3,7 +3,7 @@
 //
 // **B6-ii / Phase 2 proof**: `godunov_euler_gv_with_fused_source` produces a
 // SINGLE kernel that combines the flux-divergence integrator + a spec-driven
-// user momentum source (e.g. `uniform_acceleration_sources`). validates:
+// user momentum source (e.g., `uniform_acceleration_sources`). validates:
 //
 //   1. **structural** — when `user_source = None`, the fused builder is a
 //      backwards-compat overlay of `godunov_euler_gv`; same Writes shape;
@@ -399,7 +399,7 @@ fn ssp_combine_applies_runtime_coefficients() {
 #[test]
 fn unsupported_target_field_panics_loudly() {
     // **discipline**: target_field that godunov doesn't know how to route
-    // (e.g. a typo, or a future field like "bcell" the substrate doesn't
+    // (e.g., a typo, or a future field like "bcell" the substrate doesn't
     // wire yet) is a programmer bug — surface a panic with the offending
     // value, not a silent drop.
     const D: usize = 1;

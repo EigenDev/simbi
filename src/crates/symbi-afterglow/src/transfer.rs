@@ -411,7 +411,7 @@ pub fn generate_photon_events(
 }
 
 /// generate photon packets from a 1D RADIAL profile over a SYNTHESIZED equal-solid-angle
-/// sphere — the right tool for imaging a spherically-symmetric (e.g. Blandford-McKee) blast,
+/// sphere — the right tool for imaging a spherically-symmetric (e.g., Blandford-McKee) blast,
 /// where the emission sphere must be tessellated independently of the (degenerate) hydro
 /// angular mesh. directions are sampled as `mu = cos(theta)` uniform on `[cos(theta_max), 1]`
 /// (so every direction cell has equal solid angle) crossed with uniform `phi`; the radial

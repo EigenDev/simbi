@@ -55,7 +55,7 @@ pub enum EinsumParseError {
     MultipleEllipses { side_index: SideIndex },
     /// invalid character (not alpha, not part of "...", not "," or "->").
     BadCharacter { ch: char, pos: usize },
-    /// dot-run that wasn't exactly 3 dots (e.g. "..", "....").
+    /// dot-run that wasn't exactly 3 dots (e.g., "..", "....").
     InvalidEllipsis { pos: usize, run_len: usize },
     /// spec uses more than MAX_LABELS_PER_SPEC distinct named labels.
     LabelLimitExceeded { count: usize, max: usize },
@@ -85,10 +85,18 @@ impl std::fmt::Display for EinsumParseError {
             EinsumParseError::MissingArrow => write!(f, "einsum spec missing '->'"),
             EinsumParseError::MultipleArrows => write!(f, "einsum spec has more than one '->'"),
             EinsumParseError::MultipleEllipses { side_index } => {
-                write!(f, "einsum spec {} has more than one '...'", side_index.label())
+                write!(
+                    f,
+                    "einsum spec {} has more than one '...'",
+                    side_index.label()
+                )
             }
             EinsumParseError::BadCharacter { ch, pos } => {
-                write!(f, "einsum spec: unexpected character '{}' at position {}", ch, pos)
+                write!(
+                    f,
+                    "einsum spec: unexpected character '{}' at position {}",
+                    ch, pos
+                )
             }
             EinsumParseError::InvalidEllipsis { pos, run_len } => write!(
                 f,
@@ -167,7 +175,10 @@ fn parse_atom_list(segment: &str, side: SideIndex) -> Result<AtomList, EinsumPar
                 i += 1;
             }
             if run != 3 {
-                return Err(EinsumParseError::InvalidEllipsis { pos: start, run_len: run });
+                return Err(EinsumParseError::InvalidEllipsis {
+                    pos: start,
+                    run_len: run,
+                });
             }
             ellipsis_count += 1;
             if ellipsis_count > 1 {
@@ -247,9 +258,18 @@ mod tests {
     #[test]
     fn batched_matmul_with_ellipsis() {
         let r = parse("...ij,...jk->...ik");
-        assert_eq!(r.inputs[0], vec![Atom::Ellipsis, Atom::Label('i'), Atom::Label('j')]);
-        assert_eq!(r.inputs[1], vec![Atom::Ellipsis, Atom::Label('j'), Atom::Label('k')]);
-        assert_eq!(r.output, vec![Atom::Ellipsis, Atom::Label('i'), Atom::Label('k')]);
+        assert_eq!(
+            r.inputs[0],
+            vec![Atom::Ellipsis, Atom::Label('i'), Atom::Label('j')]
+        );
+        assert_eq!(
+            r.inputs[1],
+            vec![Atom::Ellipsis, Atom::Label('j'), Atom::Label('k')]
+        );
+        assert_eq!(
+            r.output,
+            vec![Atom::Ellipsis, Atom::Label('i'), Atom::Label('k')]
+        );
     }
 
     #[test]
@@ -293,7 +313,10 @@ mod tests {
 
     #[test]
     fn multiple_arrows_errors() {
-        assert_eq!(parse_einsum_spec("ij->k->"), Err(EinsumParseError::MultipleArrows));
+        assert_eq!(
+            parse_einsum_spec("ij->k->"),
+            Err(EinsumParseError::MultipleArrows)
+        );
     }
 
     #[test]
@@ -370,7 +393,8 @@ mod tests {
     #[test]
     fn error_display_contains_useful_info() {
         let err = EinsumParseError::LabelLimitExceeded {
-            count: 10, max: MAX_LABELS_PER_SPEC,
+            count: 10,
+            max: MAX_LABELS_PER_SPEC,
         };
         let s = format!("{}", err);
         assert!(s.contains("10"), "{}", s);

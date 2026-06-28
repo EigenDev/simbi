@@ -14,7 +14,7 @@
 //   }
 //
 // return type:
-//   - rank-0: the scalar element type (e.g. `double`)
+//   - rank-0: the scalar element type (e.g., `double`)
 //   - rank-N: a struct with named fields _0, _1, ..., _{N-1}
 //
 // the macro layer (R.5) is the eventual consumer; CUDA syntax here is
@@ -414,7 +414,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
                 }
                 "powi" => {
                     // integer power. f64::powi raises a NEGATIVE base exactly
-                    // (e.g. (-2)^2 = 4) whereas libdevice pow(neg, 2.0) = NaN,
+                    // (e.g., (-2)^2 = 4) whereas libdevice pow(neg, 2.0) = NaN,
                     // and the fallthrough arm would emit a bare `powi(...)` that
                     // does not exist in NVRTC. emit the unrolled multiply chain
                     // (exponentiation by squaring) so the grouping is BIT-IDENTICAL

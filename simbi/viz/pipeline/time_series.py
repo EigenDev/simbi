@@ -63,7 +63,7 @@ def compute_orbital_averages(
     Args:
         time: array of time values
         mdot: array of mdot values
-        time_scale: orbital period (e.g. 2π)
+        time_scale: orbital period (e.g., 2π)
 
     Returns:
         t_bins: array of time bin centers

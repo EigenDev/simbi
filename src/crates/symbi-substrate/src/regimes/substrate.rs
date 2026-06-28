@@ -21,25 +21,25 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::ScalarRef;
 use symbi_grid::Field;
+use symbi_ir::ScalarRef;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
-use symbi_hydro::source_spec::BuiltSource;
 use std::sync::Arc;
+use symbi_hydro::source_spec::BuiltSource;
 
-use crate::kernels::support::{to_bc_array, GhostFillDriver};
+use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    cfl_wave_speed, dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_fields,
-    dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
-    dispatch_godunov_with_body_source, dispatch_runtime_source, dispatch_source_apply,
-    fused_runtime_cpu_kernel, resolve_params, FusedSourceBinding, RuntimeSource, ScalarBind, Solver,
+    FusedSourceBinding, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
+    dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_fields, dispatch_flux,
+    dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source,
+    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, resolve_params,
 };
-use symbi_geometry::Geometry;
 use symbi_discretize::gv::GeoSource;
-use symbi_sim::substrate_seam::KernelSet;
+use symbi_geometry::Geometry;
 use symbi_sim::state::FieldStore;
+use symbi_sim::substrate_seam::KernelSet;
 
 /// the adiabatic index of the isothermal limit: `cs^2 = gamma*p/rho` with the
 /// closure `p = cs^2*rho` recovers the isothermal sound speed when `gamma = 1`. the
@@ -55,7 +55,7 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// the PRESCRIBED per-cell sound-speed-squared `cs^2` (read-only; the local
     /// "temperature"). c2p reads it -> `prim.pre = cs2*rho`. `new` fills it uniformly with
     /// `cs^2` (globally isothermal); for a LOCALLY isothermal run, overwrite it at IC time
-    /// (e.g. `cs2(x) ~ 1/r` for a disk) before the first step.
+    /// (e.g., `cs2(x) ~ 1/r` for a disk) before the first step.
     pub cs2: Field<Sc, D, Mem>,
     /// the substrate-owned pressure primitive (off the global iso field ABI). c2p writes
     /// the interior (= cs2*rho), ghost_fill the ghosts; flux + cfl reconstruct/read it.
@@ -85,10 +85,12 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     pub fuse_runtime: bool,
 }
 
-impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> IsoSubstrateKernelSet<Mem, Sc, D> {
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    IsoSubstrateKernelSet<Mem, Sc, D>
+{
     pub fn new(cs: f64, cfl_number: f64, alloc_domain: &Domain<D>) -> Self {
-        let cs2 = Field::<Sc, D, Mem>::zeros(alloc_domain)
-            .expect("failed to allocate iso cs2 field");
+        let cs2 =
+            Field::<Sc, D, Mem>::zeros(alloc_domain).expect("failed to allocate iso cs2 field");
         // globally isothermal default: cs2(x) = cs^2 everywhere. a locally isothermal run
         // overwrites cs2 at IC time.
         let cs_sq = Sc::from_f64(cs * cs);
@@ -99,7 +101,18 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> IsoSubstrate
             .expect("failed to allocate substrate pressure field");
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate iso CFL scratch field");
-        Self { cs, cfl_number, theta: 1.0, cs2, pre, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false }
+        Self {
+            cs,
+            cfl_number,
+            theta: 1.0,
+            cs2,
+            pre,
+            cfl_scratch,
+            fused_source: None,
+            additive_source: None,
+            runtime_source: None,
+            fuse_runtime: false,
+        }
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source (the regime-agnostic mechanism). build it
@@ -107,7 +120,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> IsoSubstrate
     /// rejected up front:
     /// `let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC)?;`
     /// `let sub = sim.substrate().with_runtime_source(built, cfg.params.clone());`
-    pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+    pub fn with_runtime_source(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Self {
         // has_energy = false is the AUTHORITY here (iso's RegimeSpec): no `nrg` write is emitted.
         self.runtime_source = Some(RuntimeSource::new(built, params, false));
         self
@@ -117,7 +134,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> IsoSubstrate
     /// source rides inside the Cranelift-JIT'd godunov stage, one launch). same physics as
     /// `with_runtime_source`, bit-for-bit, proven by `jit_fused_equals_two_pass`; host + f64 only,
     /// else it falls back to the two-pass.
-    pub fn with_fused_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+    pub fn with_fused_runtime_source(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, false));
         self.fuse_runtime = true;
         self
@@ -175,7 +196,15 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // no flux.nrg (the energy U/F is dead-code-eliminated). + the theta-MC limiter.
         // iso is HLLE-only by physics (no contact wave); the substrate enforces it
         // here by hardcoding the solver rather than exposing a per-set knob.
-        dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, self.theta, Solver::Hlle);
+        dispatch_flux(
+            sim,
+            &self.pre,
+            "iso",
+            dir,
+            ISO_GAMMA,
+            self.theta,
+            Solver::Hlle,
+        );
     }
 
     fn c2p(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -194,7 +223,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         outputs.push(&self.pre);
         let name = format!("iso_c2p_{D}d");
         dispatch_fields::<Sc, Mem, D>(
-            &name, &sim.geom.allocated, &sim.geom.interior, &inputs, &outputs, &[], &[],
+            &name,
+            &sim.geom.allocated,
+            &sim.geom.interior,
+            &inputs,
+            &outputs,
+            &[],
+            &[],
         );
     }
 
@@ -217,19 +252,36 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // AOT `iso` godunov.
         if self.fuse_runtime {
             if let Some(rs) = &self.runtime_source {
-                if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }) {
+                if let Some(fk) =
+                    fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true })
+                {
                     dispatch_fused_runtime_cpu(sim, &self.pre, fk, rs, dt, a0, ac);
                     return;
                 }
             }
         }
-        dispatch_godunov_maybe_fused(sim, &self.pre, "iso", dt, a0, ac, self.fused_source.as_ref());
+        dispatch_godunov_maybe_fused(
+            sim,
+            &self.pre,
+            "iso",
+            dt,
+            a0,
+            ac,
+            self.fused_source.as_ref(),
+        );
     }
 
     fn cfl(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
         // iso wave-speed map (cs = sqrt(gamma*p/rho) from the substrate-owned self.pre);
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
-        cfl_wave_speed(sim, &self.pre, &self.cfl_scratch, "iso", ISO_GAMMA, self.cfl_number)
+        cfl_wave_speed(
+            sim,
+            &self.pre,
+            &self.cfl_scratch,
+            "iso",
+            ISO_GAMMA,
+            self.cfl_number,
+        )
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -237,31 +289,41 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // pressure is pulled back too (a grade-0 scalar, like density).
         let bc = to_bc_array::<D>(&sim.boundaries);
         let name = format!("iso_ghost_fill_{D}d");
-        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(|region, p| {
-            let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-            for k in 0..D {
-                outputs.push(&sim.fields.prim.vel[k]);
-            }
-            outputs.push(&self.pre);
-            // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
-            // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int ⊔ float
-            // coproduct).
-            let (ints, scalars) = resolve_params(
-                &name,
-                |bind| match bind {
-                    ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
-                    ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
-                    o => panic!("ghost_fill: unexpected int param {o:?}"),
-                },
-                |bind| match bind {
-                    ScalarBind::Ref(ScalarRef::VelSign(ax)) => Sc::from_f64(p.vel_sign[*ax as usize]),
-                    o => panic!("ghost_fill: unexpected scalar {o:?}"),
-                },
-            );
-            dispatch_fields::<Sc, Mem, D>(
-                &name, &sim.geom.allocated, &region.domain, &[], &outputs, &ints, &scalars,
-            );
-        });
+        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+            |region, p| {
+                let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
+                for k in 0..D {
+                    outputs.push(&sim.fields.prim.vel[k]);
+                }
+                outputs.push(&self.pre);
+                // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
+                // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int ⊔ float
+                // coproduct).
+                let (ints, scalars) = resolve_params(
+                    &name,
+                    |bind| match bind {
+                        ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
+                        ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        o => panic!("ghost_fill: unexpected int param {o:?}"),
+                    },
+                    |bind| match bind {
+                        ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
+                            Sc::from_f64(p.vel_sign[*ax as usize])
+                        }
+                        o => panic!("ghost_fill: unexpected scalar {o:?}"),
+                    },
+                );
+                dispatch_fields::<Sc, Mem, D>(
+                    &name,
+                    &sim.geom.allocated,
+                    &region.domain,
+                    &[],
+                    &outputs,
+                    &ints,
+                    &scalars,
+                );
+            },
+        );
     }
 
     fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -276,7 +338,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
         let name = format!("iso_snapshot_{D}d");
         dispatch_fields::<Sc, Mem, D>(
-            &name, &sim.geom.allocated, &sim.geom.allocated, &inputs, &outputs, &[], &[],
+            &name,
+            &sim.geom.allocated,
+            &sim.geom.allocated,
+            &inputs,
+            &outputs,
+            &[],
+            &[],
         );
     }
 
@@ -298,7 +366,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
         let name = format!("iso_snapshot_{D}d");
         dispatch_fields::<Sc, Mem, D>(
-            &name, &sim.geom.allocated, &sim.geom.interior, &inputs, &outputs, &[], &[],
+            &name,
+            &sim.geom.allocated,
+            &sim.geom.interior,
+            &inputs,
+            &outputs,
+            &[],
+            &[],
         );
     }
 

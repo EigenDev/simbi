@@ -13,7 +13,7 @@
 //   Spherical   : (r, theta, phi), v = (v_r, v_theta, v_phi)   [theta from +z, phi about +z]
 //   Cylindrical : (r, phi, z),     v = (v_r, v_phi, v_z)
 // the stored v1,v2,v3 are PHYSICAL components in units of c (the hydro's Lorentz factor
-// is W = 1/sqrt(1 - v.v) with a plain dot product, i.e. v is the orthonormal velocity).
+// is W = 1/sqrt(1 - v.v) with a plain dot product, i.e., v is the orthonormal velocity).
 //
 // usage:
 //  let pos  = Coords::Spherical.position_to_cartesian([r, theta, phi]);
@@ -85,7 +85,10 @@ mod tests {
     #[test]
     fn spherical_position_known_points() {
         // r=5, theta=0 (north pole) -> +z.
-        assert!(close(Coords::Spherical.position_to_cartesian([5.0, 0.0, 0.0]), [0.0, 0.0, 5.0]));
+        assert!(close(
+            Coords::Spherical.position_to_cartesian([5.0, 0.0, 0.0]),
+            [0.0, 0.0, 5.0]
+        ));
         // r=3, theta=pi/2, phi=0 -> +x.
         assert!(close(
             Coords::Spherical.position_to_cartesian([3.0, FRAC_PI_2, 0.0]),
@@ -120,9 +123,15 @@ mod tests {
         let pos = Coords::Spherical.position_to_cartesian(x);
         let vlat = Coords::Spherical.velocity_to_cartesian(x, [0.0, 0.5, 0.0]); // v_theta only
         let dot = pos[0] * vlat[0] + pos[1] * vlat[1] + pos[2] * vlat[2];
-        assert!(dot.abs() < 1e-12, "theta-hat must be perpendicular to r-hat, dot={dot}");
+        assert!(
+            dot.abs() < 1e-12,
+            "theta-hat must be perpendicular to r-hat, dot={dot}"
+        );
         let mag = (vlat[0] * vlat[0] + vlat[1] * vlat[1] + vlat[2] * vlat[2]).sqrt();
-        assert!((mag - 0.5).abs() < 1e-12, "orthonormal rotation preserves magnitude");
+        assert!(
+            (mag - 0.5).abs() < 1e-12,
+            "orthonormal rotation preserves magnitude"
+        );
     }
 
     // cylindrical azimuthal (phi-hat) velocity is transverse and norm-preserving.
@@ -133,7 +142,10 @@ mod tests {
         let vphi = Coords::Cylindrical.velocity_to_cartesian(x, [0.0, 0.6, 0.0]);
         // phi-hat is perpendicular to the cylindrical radial direction (x, y) but z stays 0.
         let dot_xy = pos[0] * vphi[0] + pos[1] * vphi[1];
-        assert!(dot_xy.abs() < 1e-12, "phi-hat perpendicular to cyl-radius, dot={dot_xy}");
+        assert!(
+            dot_xy.abs() < 1e-12,
+            "phi-hat perpendicular to cyl-radius, dot={dot_xy}"
+        );
         assert!(vphi[2].abs() < 1e-12);
     }
 

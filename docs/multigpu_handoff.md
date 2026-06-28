@@ -1,0 +1,194 @@
+# handoff: multi-gpu decomposition and scalability
+
+audience: a fresh claude (or human) picking up the scalability work with no prior
+context. read this top to bottom once, then start at "your first task".
+
+orientation note: line numbers in this doc drift as the code changes. always
+re-locate a symbol by grepping for its name, not by jumping to a line number.
+
+## tl;dr
+
+the codebase (a rust cargo workspace under `src/`, driven from python) is getting
+multi-gpu, and eventually multi-node, support. the strategy is already decided and
+written down in `docs/design/36_scalability_multi_gpu.md` (the adr). read that adr
+first, it is short and it is the source of truth for the WHY.
+
+the work is staged so the hardest question (is the decomposition math correct?) is
+answered before any hardware or transport complexity. THAT QUESTION IS NOW FULLY
+ANSWERED YES: an in-process, cpu-only equivalence test proves a domain split into a
+grid of tiles, with same-level halo exchange each step, reproduces the monolithic run
+to round-off across dimension x integrator x topology -- 1d/2d/3d, forward-euler AND
+rk2 (with a halo exchange between stages), chains and grids including the 2x2 corner
+case. the decomposition + halo math is DONE. what remains is purely transport: lift
+the proven in-process exchange behind a seam whose impls are local copy (today) ->
+gpu peer copy (2 devices) -> mpi (multi-node).
+
+## strategic context (the decided direction)
+
+from the adr, do not relitigate these:
+
+- model: SPMD, one rank (process) per gpu. each rank owns one device, reuses the
+  existing single-device code unchanged, holds one subdomain, and exchanges halos
+  with neighbor ranks over a transport (local copy now, peer copy for 2 gpus, mpi
+  for multi-node). this one model spans 1 gpu -> N gpus -> N nodes.
+- we did NOT choose the "single process drives many devices with an explicit
+  device_id threaded everywhere" model. it is invasive and does not reach
+  multi-node. do not start threading device_id through the xpu layer.
+- the asset: the AMR system is structurally a domain-decomposition engine already.
+  each `LevelData` owns a self-contained `SimStateGeneric` (fields + geometry +
+  boundaries + ghosts); coarse-fine halos are explicitly typed and exchanged with
+  time interpolation (`prolong_cf`); conservation is handled by flux registers.
+  multi-gpu reuses this machinery, it does not reinvent it.
+- the one genuinely-missing primitive: SAME-LEVEL neighbor halo exchange. AMR only
+  does coarse<->fine. splitting a uniform grid across ranks creates same-resolution
+  neighbor boundaries. building that exchange is the first real piece of work, and
+  it doubles as multi-patch-amr infrastructure.
+
+## what exists right now (the starting state)
+
+all on the `experimental` branch (the user treats it as a sandbox, so no feature
+branch is needed).
+
+1. `pub fn step_once` in `src/crates/symbi/src/sim/evolve.rs`.
+   advances a sim by ONE step at a caller-supplied dt. `evolve` hides the per-step
+   loop; the decomposition driver needs per-step control so a shared dt and a halo
+   exchange can be interleaved between steps. it wraps the private `step`. prim +
+   cons must be current at entry (prime with `c2p` + `ghost_fill` once before the
+   first call).
+
+2. `src/crates/symbi/tests/decomp_equivalence.rs`. the proven correctness contract,
+   validated IN PROCESS on the cpu (no second gpu, no peer copy, no mpi). the
+   `decomp_harness!` macro emits a concrete harness per dimension (a generic-over-D
+   harness drowns in `Cartesian: Metric<f64,D>` / `Regime` / KernelSet bounds). FIVE
+   tests PASS: 1d euler 2-tile, 1d rk2 4-tile, 2d euler single-axis, 2d rk2 2x2 grid,
+   3d euler 2x2x2. each runs a monolithic sim and a decomposed sim and asserts the
+   global density grids agree to < 1e-12.
+
+key design choices in the test (understand them before extending):
+
+- a decomposition is a per-axis tile count `counts: [usize; D]`. the monolithic run
+  is `counts = [1; D]` (one tile, no cuts), so the same code path validates both.
+- cut faces between tiles are `BoundaryType::CoarseFine`; `ghost_fill` treats that as
+  `BcType::Skip` (see `src/crates/symbi-substrate/src/kernels/support.rs`, grep
+  `CoarseFine`), so it leaves those ghosts untouched and the exchange owns them. a
+  dedicated `BoundaryType::Neighbor` variant is a later cleanup (the ~49 match sites),
+  not a prerequisite.
+- the exchange is a TWO-PASS scheme (`exchange_grid`): process axes in order; a cut
+  face's transverse extent is INTERIOR for cut axes not yet exchanged, FULL otherwise.
+  this carries corner ghosts to the diagonal neighbor without explicit diagonal
+  communication (the reason the 2x2 case passes). it copies only the PRIM components
+  (rho, vel[..], pre) the flux stage reconstructs from; cons exchange is not needed
+  for forward euler.
+- the harness drives the SSP stage table itself (not `step_once`), so it serves both
+  euler (one stage) and rk2 (two stages). for rk2 the cut halos are exchanged BETWEEN
+  stages, not just per step (the corrector must reconstruct from each neighbor's
+  stage-1-updated interior). the integrator is set on the sim in `make` so the builder
+  allocates rk2's u_n snapshot buffer; the loop drives the matching `ts.stages()`.
+- all runs share one `run` loop with a global dt = min over tiles' cfl, so the halo
+  exchange is the only variable between mono and decomposed.
+
+## where to go next (pick up here)
+
+DONE: rk2 (per-stage exchange) and 3d are proven. the decomposition math is complete.
+DONE: the transport seam is extracted -- `src/crates/symbi-sim/src/decomp.rs` holds the
+`HaloTransport` trait, the `LocalCopy` impl, and the D-generic `exchange_faces` (built on
+`Domain::boundary`/`slab`/`iter`). the equivalence test routes its per-face exchange
+through `decomp::exchange_faces` with `LocalCopy` and stays green -- it is now the
+permanent regression oracle for any future transport.
+
+remaining, in order:
+
+1. the two-pass grid orchestration (`exchange_grid`) and tile management (`grid_tiles`,
+   the stage `run`) are still in the test. extract them into the module too when the
+   real driver needs them -- they need a tile-collection / neighbor-topology abstraction
+   (a grid of `FieldStore`s with `counts`). not urgent; the reusable PRIMITIVE
+   (transport seam + per-face exchange) is already in `decomp`.
+2. real gpu: add a peer-copy `HaloTransport` impl (`cuMemcpyPeerAsync`), run 2 devices,
+   distributed cfl via a 2-rank reduce. adr milestone 1 proper. then an mpi impl for
+   multi-node. each new transport must keep the equivalence test green first.
+
+the iron rule: never advance a transport without its equivalence test green first. the
+test is the contract.
+
+verify the current suite with (from `src/`):
+
+```
+cargo test -p symbi --test decomp_equivalence --release
+```
+
+## hard-won gotchas (these will waste your time if you do not know them)
+
+- TESTS MUST RUN IN RELEASE. `cargo test` in debug SIGSEGVs rustc itself (an llvm
+  dwarf stack overflow on the heavily-generic `symbi-substrate` crate). always pass
+  `--release`. `cargo check` (metadata only, no codegen) is fine in debug and is
+  fast.
+- the pre-push hook is now a fast build check (`cargo check --workspace
+  --all-targets`), not a test run. it lives in `.git/hooks/pre-push` and
+  `.githooks/pre-push`. it catches "does it compile", not "do tests pass". run the
+  release test suite yourself.
+- run long builds in the BACKGROUND. a foreground shell call has a ~2 minute
+  timeout and will kill a multi-minute build (you will see exit 143), then a retry
+  looks like a hang. a cold release build of the affected crates is several minutes.
+- the user runs gpu builds and prefers to drive builds; default to editing + handing
+  off the build, or run builds in the background and report results. do not invoke
+  the old c++ build (meson/ninja); the project is maturin/cargo now.
+- gpu/cuda specifics for later: the gpu path is NVRTC runtime jit (no nvcc, no arch
+  flag). a cuda build of the python extension exports `PyInit_gpu_ext` and
+  `dev.py install --gpu` renames the dylib to `gpu_ext` so cpu and gpu coexist.
+
+## the roadmap after the test passes (from the adr)
+
+do these in order. each is a transport or scope substitution under the
+proven-correct decomposition, not a rewrite.
+
+1. generalize the in-process exchange behind a small transport seam (a trait or
+   enum: local-copy / peer-copy / mpi). milestone-1 target: 2 gpus, uniform grid,
+   no amr, no mpi, halos via `cuMemcpyPeerAsync`, distributed cfl via a 2-rank
+   reduce. prove strong/weak scaling.
+2. extend the equivalence test to 2d, then to rk2 (which needs a per-stage
+   exchange). these expand the contract; keep them green.
+3. promote the CoarseFine-skip trick to a dedicated `BoundaryType::Neighbor`
+   variant once the concept is proven. this is the ~49-site enum change; do it only
+   after the math is trusted, as a clarity cleanup.
+4. multi-node: swap the transport for mpi. one rank per device, across nodes. under
+   SPMD, bind each rank with `CUDA_VISIBLE_DEVICES` so the existing single-device
+   code (the global cuda context, `cuDeviceGet(0)`, the global dispatcher) stays
+   valid verbatim, per rank. add a distributed cfl allreduce and distributed
+   checkpoint i/o.
+5. compose decomposition WITH amr (load-balance refined patches across ranks). this
+   is the genuinely hard part; defer until 1-4 are solid.
+
+explicitly do NOT do now: build an mpi layer, a device scheduler, a load balancer,
+or thread `device_id` through the xpu layer. all premature. yagni.
+
+## key file map (so you do not re-explore)
+
+- the adr (decided strategy): `docs/design/36_scalability_multi_gpu.md`
+- the transport seam + per-face exchange (reusable, D-generic, Domain-based):
+  `src/crates/symbi-sim/src/decomp.rs` (`HaloTransport`, `LocalCopy`, `exchange_faces`),
+  re-exported as `symbi::sim::decomp`
+- per-step primitive: `step_once` in `src/crates/symbi/src/sim/evolve.rs`
+- the equivalence test (5 passing oracle; grid orchestration + tile setup still here):
+  `src/crates/symbi/tests/decomp_equivalence.rs`
+- slab + copy primitives: `src/crates/symbi-amr/src/refinement/transfer.rs`
+  (`cf_ghost_slabs`, `copy_field`, plus `prolong_*`/`restrict_*` for reference)
+- the decomposition substrate (study how amr does halos): `src/crates/symbi-amr/
+  src/refinement/hierarchy.rs` (`LevelData`, `prolong_cf`, `advance_level`,
+  `step_root`, flux registers)
+- boundary types: enum + `Boundaries` in `src/crates/symbi-sim/src/state.rs` (grep
+  `BoundaryType`, `Boundaries`, `fn axis`); the Skip mapping in
+  `src/crates/symbi-substrate/src/kernels/support.rs` (grep `CoarseFine`)
+- single-device globals to make per-rank-aware much later (NOT now):
+  `src/crates/symbi-xpu/src/cuda.rs` (the `CUDA_CTX` once-lock, `cuDeviceGet(.., 0)`,
+  `ctx_sync`, `create_stream` ignoring its device id, `UnifiedMemory::allocate`);
+  `src/crates/symbi-xpu/src/runtime.rs` (the global `DISPATCHER`);
+  `src/crates/symbi-exec/src/engine.rs` (`run_gpu`, `field_reduce_device`);
+  `src/crates/symbi-grid/src/field.rs` (`Field` carries `Locality`, no device id)
+
+## how to know you are done with each step
+
+- done so far: `decomp_equivalence` passes in release (4 tests: 1d 2/4-tile, 2d
+  single-axis, 2d 2x2), all < 1e-12.
+- each next step adds a test (rk2 equivalence, 3d equivalence, 2-gpu scaling numbers)
+  and keeps all prior tests green. never advance a transport or integrator without its
+  equivalence test green first. the test is the contract.

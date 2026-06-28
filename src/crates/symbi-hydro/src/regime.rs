@@ -22,13 +22,13 @@
 //   let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
-use symbi_ir::algebra::{Scalar, Selectable};
-use crate::eos::Eos;
 use crate::c2p_result::C2pResult;
 use crate::energy::EnergyModel;
+use crate::eos::Eos;
 use crate::regime_spec::RegimeSpec;
-use std::ops::{Add, Sub, Neg, Mul};
+use std::ops::{Add, Mul, Neg, Sub};
+use symbi_algebra::{OrderedNumeric, Tensor};
+use symbi_ir::algebra::{Scalar, Selectable};
 
 /// physics regime. bundles state types with the conversions, flux, and
 /// wave speed estimates needed by riemann solvers.
@@ -47,7 +47,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// reading from SPEC so per-regime impls don't repeat the flag.
     const SPEC: &'static RegimeSpec;
 
-    /// primitive state type (e.g. rho, vel, pre for newtonian).
+    /// primitive state type (e.g., rho, vel, pre for newtonian).
     type Prim: Copy;
 
     /// the energy model (docs/design/34): `Adiabatic` (energy equation evolved) or `IsoModel`
@@ -78,7 +78,8 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// carrier-generic `srhd_recover` / `rmhd_recover` directly, never this
     /// method. callers requesting `regime.to_primitive::<Gv>` fail to compile.
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
-    where S: OrderedNumeric;
+    where
+        S: OrderedNumeric;
 
     /// physical flux along direction nhat.
     /// nhat is a unit vector — dot(vel, nhat) gives the normal velocity.
@@ -150,17 +151,23 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
 
     /// whether this regime is relativistic (needs rho*h*W^2 for source terms).
     /// derives from `SPEC` — no override needed per impl.
-    fn is_relativistic(&self) -> bool { Self::SPEC.is_relativistic }
+    fn is_relativistic(&self) -> bool {
+        Self::SPEC.is_relativistic
+    }
 
     /// whether this regime includes magnetic fields (MHD).
     /// controls allocation of staggered CT fields.
     /// derives from `SPEC` — no override needed per impl.
-    fn is_mhd(&self) -> bool { Self::SPEC.is_mhd }
+    fn is_mhd(&self) -> bool {
+        Self::SPEC.is_mhd
+    }
 
     /// whether this regime has an energy equation.
     /// false for isothermal — no nrg/pre fields are allocated or evolved.
     /// derives from `SPEC` — no override needed per impl.
-    fn has_energy(&self) -> bool { Self::SPEC.has_energy }
+    fn has_energy(&self) -> bool {
+        Self::SPEC.has_energy
+    }
 
     // NOTE (B3, 2026-05-30): `Regime::hllc` was dropped. the default fell
     // back silently to HLLE — a lie in code that masked "this regime does

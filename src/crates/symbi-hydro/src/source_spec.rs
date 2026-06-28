@@ -49,7 +49,7 @@ pub enum SourceKind {
     Gravity,
     /// immersed-body forcing (penalty, sink, rigid). B5-iv.
     ImmersedBody,
-    /// user-formulated source term (e.g. heating, radiation cooling). B5-v.
+    /// user-formulated source term (e.g., heating, radiation cooling). B5-v.
     UserDefined,
 }
 
@@ -104,7 +104,7 @@ impl std::hash::Hash for SourceSpec {
 /// canonical parameter naming for position components — extends
 /// `law_params` with the spatial coords the source builders need.
 pub mod source_params {
-    /// per-axis coordinate value `x_<k>` (e.g. `x_0 = r` in spherical).
+    /// per-axis coordinate value `x_<k>` (e.g., `x_0 = r` in spherical).
     pub fn x(k: usize) -> String { format!("x_{k}") }
 }
 
@@ -807,7 +807,7 @@ pub fn lift_to_built(build: impl FnOnce() -> Vec<Gv>) -> BuiltSource {
 /// splice a user FIELD (its own lowered graph) into the active trace, binding each of its
 /// params to a same-named [`Gv::scalar`] leaf, and return its outputs as `Gv`s the lift can
 /// consume. MUST be called inside an open trace ([`lift_to_built`]). a param shared with the
-/// lift (e.g. the field also reads `rho`) dedups onto the lift's leaf — same runtime scalar.
+/// lift (e.g., the field also reads `rho`) dedups onto the lift's leaf — same runtime scalar.
 fn splice_field_into_trace(field: &BuiltSource) -> Vec<Gv> {
     let name_to_node: std::collections::HashMap<String, NodeId> = field
         .params
@@ -1549,7 +1549,7 @@ mod tests {
     fn rigid_penalty_zero_outside_body() {
         // **the clause-3 canary**: a field point OUTSIDE the body must
         // produce exactly 0.0 for every momentum component. if the mask
-        // discipline regresses (e.g. a future bug uses native `<` and
+        // discipline regresses (e.g., a future bug uses native `<` and
         // silently returns the full source everywhere), this fails.
         let body_xm = [0.0_f64, 0.0, 0.0];
         let body_radius = 1.0;

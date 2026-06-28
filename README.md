@@ -11,15 +11,14 @@
 
 <div align="center">
 
-**High-performance 3D relativistic magneto-gas dynamic code for astrophysical fluid simulations**
+**A high-performance 3D relativistic magneto-gas dynamics code for astrophysical fluid simulations**
 
 [![MIT License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-orange.svg?style=for-the-badge&logo=c%2B%2B)](https://en.cppreference.com/w/cpp/20)
+[![Rust](https://img.shields.io/badge/Rust-backend-orange.svg?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/downloads/)
-[![CUDA Support](https://img.shields.io/badge/CUDA-Supported-76B900.svg?style=for-the-badge&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
-[![AMD Support](https://img.shields.io/badge/AMD-Supported-ED1C24.svg?style=for-the-badge&logo=amd)](https://rocm.docs.amd.com/)
+[![CUDA](https://img.shields.io/badge/CUDA-supported-76B900.svg?style=for-the-badge&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
 
-**[Quick Start](#quick-start) • [Installation](#installation) • [Usage](#usage) • [Publications](#publications)**
+**[Quick Start](#quick-start) · [Installation](#installation) · [Usage](#usage) · [Publications](#publications)**
 
 </div>
 
@@ -27,17 +26,20 @@
 
 ## Overview
 
-SIMBI is a finite volume code for astrophysical fluid simulations. Results from SIMBI simulations have been published in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, studying relativistic jets, shock morphology, and stellar explosions.
+SIMBI is a finite volume code for astrophysical fluid simulations. If you want to throw relativistic jets, shock tubes, stellar explosions, or magnetized turbulence at a grid and see what happens, this is the tool. Results from SIMBI have shown up in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, covering relativistic jets, shock morphology, and stellar explosions.
 
-**Features:**
-- Special Relativistic Magnetohydrodynamics (SRMHD), Special Relativistic Hydrodynamics (SRHD), and Newtonian Hydrodynamics
-- GPU acceleration via CUDA (NVIDIA) and HIP (AMD)
+A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. The physics is the same, the speed got better, and the codebase is a lot easier to live in. You drive the whole thing from Python, so you never have to touch the Rust unless you want to.
+
+**What you get:**
+- Special relativistic magnetohydrodynamics (SRMHD), special relativistic hydrodynamics (SRHD), and Newtonian hydrodynamics, all in one code
+- GPU acceleration on NVIDIA cards, with kernels compiled on the fly so there is no separate build step and no architecture flag to remember
 - High-resolution shock capturing with HLLE, HLLC, and HLLD Riemann solvers
-- Immersed boundary method (Peskin 2002) for solid objects in the computational domain
+- An immersed boundary method (Peskin 2002) for putting solid objects in the flow
 - Adaptive mesh refinement with Berger-Colella subcycling
-- Entity-component-system architecture for partition-aware multi-device execution
-- Type-safe Python configuration with automatic CLI generation
-- Afterglow radiation transport and observables
+- Afterglow radiation transport, so you can turn a simulation into synthetic observables
+- A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
+
+On the roadmap: an AMD/HIP backend and multi-GPU (then multi-node) domain decomposition. The architecture is already pointed that way, but those are not shipped yet, so this README only promises what actually runs today.
 
 ---
 
@@ -59,84 +61,119 @@ SIMBI is a finite volume code for astrophysical fluid simulations. Results from 
 
 ## Quick Start
 
-Run the Marti & Müller relativistic shock tube test:
+If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too. It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary, and it makes the whole setup a two-line affair.
 
-**CPU:**
+Do not have uv yet? Grab it:
+
 ```bash
-# install
-CC=gcc CXX=g++ python dev.py install
-
-# run test problem
-simbi run marti-muller --mode cpu --resolution 400
-
-# visualize
-simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-**GPU (auto-detects architecture):**
+Now run the Marti and Muller relativistic shock tube test on CPU:
+
 ```bash
-CC=gcc CXX=g++ python dev.py install --gpu
-simbi run marti-muller --mode gpu --resolution 1024
+# create the environment and build the rust backend, all in one shot
+uv venv
+uv pip install .
+
+# run the test problem
+uv run simbi run marti-muller --mode cpu --resolution 400
+
+# look at the result
+uv run simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
 ```
+You can also save a bunch of time by doing `source .venv/bin/activate` and you''ll remain in the 
+simbi environment you created when you ran `uv venv`. 
+
+Got an NVIDIA card? The GPU build adds the CUDA feature, so it goes through the project helper:
+
+```bash
+./dev.py install --gpu
+uv run simbi run marti-muller --mode gpu --resolution 1024
+```
+
+That is the whole thing. No CMake, no Ninja, no compiler environment variables to babysit.
+(Though, I am a big fan of those tools! I learned so much about programming and developing
+a major project like this from utilizing those tools. It just becomes a bit much for me to
+deal with as I explore more architectures and directions. Cargo is standard enough for my 
+purposes these days. :D)
 
 ---
 
 ## Installation
 
-### Requirements
+### What you need
 
-**Minimum:**
-- gcc ≥ 8 or clang ≥ 10
-- Python 3.10+
-- 8 GB RAM
-- Linux/macOS
+- A Rust toolchain (cargo), the easy way is [rustup](https://rustup.rs)
+- Python 3.10 or newer
+- HDF5 (it gets linked into the extension)
+- For GPU, the NVIDIA driver, which gives you `libcuda` and `libnvrtc`
+- On Linux, `patchelf` (uv and maturin will tell you if it is missing)
 
-**Recommended:**
-- Latest stable compiler
-- Python 3.11+
-- 32+ GB RAM for large 3D simulations
+That is it. You do not need `nvcc`. Kernels are compiled at runtime with NVRTC, so the GPU build figures out your card's architecture on its own.
 
-### Dependencies
+### The uv way (recommended)
 
-- **Build**: Rust toolchain (cargo, via [rustup](https://rustup.rs)) + [maturin](https://maturin.rs) (the PEP 517 backend). Linux also needs `patchelf`.
-- **Libraries**: HDF5 (linked into the extension); for GPU, the CUDA driver (`libcuda`/`libnvrtc`)
-- **Python**: numpy, h5py, matplotlib, astropy, scipy, pydantic, rich
+Seriously, just use uv. It builds the Rust extension through maturin behind the scenes and you never think about it again.
 
-### Installation Commands
-
-The Rust backend builds into `simbi/libs/cpu_ext` via maturin. `dev.py` is a thin wrapper.
-
-**Standard (editable install):**
 ```bash
-./dev.py install            # maturin develop --release
-# or, without dev.py: pip install -e .   (uses the maturin backend directly)
+# spin up an isolated environment
+uv venv
+
+# build and install the package
+uv pip install .
+
+# want the plotting and CLI niceties too?
+uv pip install ".[visual,cli]"
 ```
 
-**With visualization / CLI extras:**
+From here on, prefix commands with `uv run` and you are always using the right environment:
+
 ```bash
-./dev.py install --visual-extras --cli-extras
+uv run simbi run sedov --mode cpu --resolution 256
 ```
 
-**GPU (NVIDIA):**
-```bash
-./dev.py install --gpu      # cargo 'cuda' feature
-```
-Kernels are JIT-compiled via NVRTC at runtime, so no `nvcc` build step and no
-device-architecture flag is needed — the arch is detected on the running device.
+Just want the `simbi` command on your PATH without thinking about environments? Since it is a CLI tool, this is the slick option:
 
-**Clean and rebuild:**
 ```bash
-./dev.py clean --all        # drop extensions + cargo clean
+uv tool install .
+```
+
+Now `simbi` works from anywhere, no `uv run` prefix needed.
+
+### Working on SIMBI itself?
+
+If you are hacking on the code rather than just running it, that is when you want an editable install. Use the project helper, which runs `maturin develop` so the Rust extension gets rebuilt in place:
+
+```bash
+./dev.py install            # editable, rebuilds the rust backend
+./dev.py install --gpu      # same, with the cuda feature
+```
+
+Plain `uv pip install -e .` works too for the Python side, but it will not recompile the Rust on its own, so `./dev.py install` is the better contributor loop.
+
+### GPU builds
+
+The GPU path needs the cargo `cuda` feature turned on, so it goes through `dev.py`, which is a thin wrapper around maturin:
+
+```bash
 ./dev.py install --gpu
+```
+
+The CPU and GPU extensions live side by side (`cpu_ext` and `gpu_ext`), so installing one does not clobber the other. Pick the backend at run time with `--mode cpu` or `--mode gpu`.
+
+### Cleaning up
+
+```bash
+./dev.py clean --all     # drop the built extensions and run cargo clean
+./dev.py install --gpu   # rebuild from scratch
 ```
 
 ---
 
 ## Usage
 
-### CLI Commands
-
-SIMBI provides three main commands:
+### The three commands
 
 ```bash
 simbi run        # run simulations
@@ -144,66 +181,68 @@ simbi plot       # visualize checkpoint data
 simbi afterglow  # radiation transport and observables
 ```
 
-### Running Simulations
+(Remember, with uv you write `uv run simbi ...`.)
+
+### Running simulations
 
 ```bash
-# basic usage
+# the basic shape of it
 simbi run marti-muller --mode gpu --resolution 400
 
-# list available parameters for a problem
+# what knobs does this problem expose?
 simbi run <problem> --info
 
-# list all available problem configs
+# what problems ship with simbi?
 simbi run --configs
 
-# custom config path
+# point it at your own config file
 simbi run simbi_configs/examples/kh.py --mode cpu --resolution 512
 
-# resume from checkpoint
+# pick up where a previous run left off
 simbi run <problem> --checkpoint data/checkpoint.h5
 ```
 
-**Common options:**
-- `--mode cpu|gpu` - execution mode
-- `--resolution N` or `--resolution N M` or `--resolution N M K` - grid resolution
-- `--adiabatic-index` - ratio of specific heats
-- `--end-time` - simulation end time
-- `--data-directory` - output directory
+**Options you will reach for:**
+- `--mode cpu|gpu` sets the execution backend
+- `--resolution N`, `--resolution N M`, or `--resolution N M K` sets the grid
+- `--adiabatic-index` is the ratio of specific heats
+- `--end-time` is when to stop
+- `--data-directory` is where the output goes
 
 ### Visualization
 
 ```bash
-# plot checkpoint fields
+# plot a few fields from a checkpoint
 simbi plot data/checkpoint.h5 --setup "Problem Name" --field rho v p
 
-# plot with body diagnostics
+# include immersed body diagnostics
 simbi plot data/checkpoint.h5 --bodies
 
-# create animation
+# stitch a stack of checkpoints into an animation
 simbi plot data/*.h5 --animate --field rho
 
-# generate example config
+# get a starter config to customize
 simbi plot --generate-config
 ```
 
-### Afterglow Analysis
+### Afterglow analysis
 
-Generate synthetic observables from simulation data:
+Turn hydro snapshots into synthetic observables:
 
 ```bash
-# generate photon events from hydro snapshots
+# build a photon event catalog from the snapshots
 simbi afterglow generate data/*.h5 --output events.h5 --max-events 1000000
 
-# compute observer lightcurve
+# observer lightcurve
 simbi afterglow lightcurve events.h5 --observer-angle 0.1 --frequencies 1e9 1e14 1e18
 
-# generate sky intensity map
+# sky intensity map
 simbi afterglow skymap events.h5 --observer-time 1e5
 
-# compute polarization evolution
+# polarization evolution
 simbi afterglow polarization events.h5 --observer-angle 0.1
 
-# generate spectrum
+# spectrum
 simbi afterglow spectrum events.h5 --observer-time 1e5
 ```
 
@@ -211,9 +250,9 @@ simbi afterglow spectrum events.h5 --observer-time 1e5
 
 ## Configuration System
 
-SIMBI uses type-safe configuration with automatic CLI generation. Problems inherit from `SimbiProblem` and use `ProblemParam` for field metadata.
+Problems are plain Python classes. You inherit from `SimbiProblem`, declare your parameters with `ProblemParam`, and SIMBI builds the CLI for you from the type annotations. No argparse boilerplate, and the types are checked.
 
-### Basic Structure
+### Basic structure
 
 ```python
 from pathlib import Path
@@ -228,7 +267,7 @@ from simbi.types import (
 )
 
 class KelvinHelmholtz(SimbiProblem):
-    """kelvin-helmholtz instability in newtonian fluid."""
+    """kelvin-helmholtz instability in a newtonian fluid."""
 
     # physics parameters
     adiabatic_index: Annotated[
@@ -272,7 +311,7 @@ class KelvinHelmholtz(SimbiProblem):
             nx, ny = self.resolution
             for jj in range(ny):
                 for ii in range(nx):
-                    # compute y coordinate
+                    # the y coordinate of this cell
                     y = self.bounds[1][0] + jj * (self.bounds[1][1] - self.bounds[1][0]) / ny
                     if abs(y) < 0.25:
                         yield (self.rhoL, 0.5, 0.0, 2.5)  # rho, vx, vy, p
@@ -281,18 +320,18 @@ class KelvinHelmholtz(SimbiProblem):
         return gas_state
 ```
 
-### ProblemParam Options
+### ProblemParam options
 
-| Option | Description |
-|--------|-------------|
-| `cli=True` | Expose as CLI argument |
-| `checkpoint_safe=True` | Can override when resuming from checkpoint |
-| `description="..."` | Help text for CLI |
-| `ge=`, `le=`, `gt=`, `lt=` | Validation constraints |
+| Option | What it does |
+|--------|--------------|
+| `cli=True` | Expose the field as a CLI argument |
+| `checkpoint_safe=True` | Allow overriding it when resuming from a checkpoint |
+| `description="..."` | Help text for the CLI |
+| `ge=`, `le=`, `gt=`, `lt=` | Validation bounds |
 
-### Source Terms
+### Source terms
 
-Add gravity or custom hydro sources via expression graphs:
+Add gravity or custom hydro sources as expression graphs:
 
 ```python
 import simbi
@@ -307,9 +346,9 @@ def gravity_source_expressions(self):
     return terms.serialize()
 ```
 
-### Immersed Bodies
+### Immersed bodies
 
-Define objects in the computational domain:
+Drop solid objects into the domain:
 
 ```python
 from simbi.types import ImmersedBodyConfig, BodyCapability, GravitationalProperties
@@ -331,9 +370,9 @@ def immersed_bodies(self) -> list[ImmersedBodyConfig]:
     ]
 ```
 
-### Dynamic Mesh Motion
+### Dynamic mesh motion
 
-For expanding or contracting domains:
+For domains that expand or contract:
 
 ```python
 @computed_field
@@ -353,50 +392,50 @@ def scale_factor_derivative(self):
 
 ### Regimes
 
-| Regime | Description | Use Cases |
+| Regime | Description | Use cases |
 |--------|-------------|-----------|
-| `SRMHD` | Special Relativistic Magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
-| `SRHD` | Special Relativistic Hydrodynamics | Gamma-ray bursts, relativistic shocks, stellar explosions |
-| `NEWTONIAN` | Classical Hydrodynamics | Stellar winds, ISM dynamics, classical turbulence |
+| `SRMHD` | Special relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
+| `SRHD` | Special relativistic hydrodynamics | Gamma-ray bursts, relativistic shocks, stellar explosions |
+| `NEWTONIAN` | Classical hydrodynamics | Stellar winds, ISM dynamics, classical turbulence |
 
-### Coordinate Systems
+### Coordinate systems
 
-- `CARTESIAN` - x, y, z
-- `SPHERICAL` - r, θ, φ
-- `CYLINDRICAL` - r, φ, z
-- `AXIS_CYLINDRICAL` - cylindrical with axis symmetry
-- `PLANAR_CYLINDRICAL` - 2D cylindrical in r-z plane
+- `CARTESIAN`, the usual x, y, z
+- `SPHERICAL`, r, theta, phi
+- `CYLINDRICAL`, r, phi, z
+- `AXIS_CYLINDRICAL`, cylindrical with axis symmetry
+- `PLANAR_CYLINDRICAL`, 2D cylindrical in the r-phi plane
 
-### Numerical Methods
+### Numerical methods
 
-**Riemann Solvers:**
-- `HLLE` - HLL solver with entropy fix
-- `HLLC` - HLL Contact solver (hydrodynamics)
-- `HLLD` - HLL Discontinuities solver (magnetohydrodynamics)
+**Riemann solvers:**
+- `HLLE`, HLL with an entropy fix
+- `HLLC`, HLL with a contact wave (hydrodynamics)
+- `HLLD`, HLL with discontinuities (magnetohydrodynamics)
 
-**Grid Spacing:**
-- `LINEAR` - uniform spacing
-- `LOGARITHMIC` - log spacing (useful for spherical)
+**Grid spacing:**
+- `LINEAR`, uniform spacing
+- `LOGARITHMIC`, log spacing, handy for spherical setups
 
-**Boundary Conditions:**
-- `PERIODIC` - wrap around
-- `REFLECTING` - mirror symmetry
-- `OUTFLOW` - zero gradient
-- `DYNAMIC` - user-defined expressions
+**Boundary conditions:**
+- `PERIODIC`, wrap around
+- `REFLECTING`, mirror symmetry
+- `OUTFLOW`, zero gradient
+- `DYNAMIC`, user-defined expressions
 
-**Time Integration:**
-- `EULER` - Forward Euler
-- `RK2` - Second-order Runge-Kutta (Berger-Colella for AMR)
+**Time integration:**
+- `EULER`, forward Euler
+- `RK2`, second-order Runge-Kutta (Berger-Colella for AMR)
 
-**Additional Options:**
-- `plm_theta` - PLM reconstruction parameter (0-2, default 1.5)
-- `use_quirk_smoothing` - Quirk's carbuncle fix
-- `use_fleischmann_limiter` - Low-Mach fix for HLLC
+**A few extras:**
+- `plm_theta`, the PLM reconstruction parameter (0 to 2, default 1.5)
+- `use_quirk_smoothing`, Quirk's carbuncle fix
+- `use_fleischmann_limiter`, a low-Mach fix for HLLC
 
-### Static Mesh Refinement
+### Static mesh refinement
 
 ```python
-# enable refinement
+# turn refinement on
 refinement_enabled: Annotated[bool, ProblemParam(True)]
 refinement_max_levels: Annotated[int, ProblemParam(3)]
 refinement_regions: Annotated[
@@ -409,79 +448,73 @@ refinement_subcycling_mode: Annotated[
 ]
 ```
 
-**Subcycling Modes:**
-- `NONE` - all levels advance with same timestep
-- `STANDARD` - subcycle by refinement ratio
-- `MANUAL` - user-specified substeps per level
-- `ADAPTIVE` - (not yet implemented)
+**Subcycling modes:**
+- `NONE`, every level advances on the same timestep
+- `STANDARD`, subcycle by the refinement ratio
+- `MANUAL`, you specify substeps per level
+- `ADAPTIVE`, not yet implemented
 
 ---
 
 ## Architecture
 
-### Entity-Component-System Design
+Here is the quick tour of how the Rust side fits together, in case you want to hack on it.
 
-SIMBI uses an ECS architecture for partition-aware multi-device execution:
+The compute backend is a Cargo workspace of small, focused crates rather than one giant blob. The interesting idea at the center of it: the physics is written down once as an intermediate representation, and that IR gets lowered to either native CPU code or CUDA source. The GPU source is compiled at run time with NVRTC. The upshot is that the CPU and GPU run the exact same math, because there is no second hand-written copy of every kernel to keep in sync.
 
-**Components:**
-- `simulation_t<Rank, Regime, CoordSystem>` - top-level simulation state
-- `partition_t<Rank>` - device assignment + execution stream for one domain partition
-- `level_decomposition_t<Rank>` - all partitions + halo graph for one AMR level
-- `partition_fields_t` - hydro fields (cons, prim, flux, bfield, efield) for one partition
-- `flux_register_component_t` - AMR flux correction registers
+A few load-bearing pieces:
 
-**Systems:**
-- `timestep_system_t` - compute CFL-limited timesteps with subcycling
-- `ghost_fill_system_t` - fill ghost cells via physical BCs or coarse grid prolongation
-- `c2p_system_t` - conservative to primitive variable conversion
-- `flux_system_t` - compute numerical fluxes via Riemann solver
-- `euler_system_t` / `rk2_stage1_system_t` / `rk2_stage2_system_t` - time integration
-- `restriction_system_t` - inject fine grid interior to coarse grid
-- `prolongation_system_t` - interpolate coarse grid to fine grid boundaries
-- `reflux_system_t` - apply flux correction at AMR boundaries
-- `body_effects_system_t` - immersed boundary forces and diagnostics
+- **`symbi-ir`** holds the kernel IR and the code generators (CPU and CUDA share one renderer)
+- **`symbi-hydro`** is the physics: regimes, equations of state, and the Riemann solvers
+- **`symbi-sim`** owns the simulation state and the kernel-native evolution driver
+- **`symbi-substrate`** assembles the per-regime kernel sets (flux, c2p, godunov, cfl, ghost fill)
+- **`symbi-amr`** is the refinement hierarchy: prolongation, restriction, flux registers, and subcycling
+- **`symbi-xpu`** is the device layer: memory, streams, and kernel launches
+- **`symbi-afterglow`** does the radiation transport and observables
+- **`symbi-py`** is the thin pyo3 bridge that becomes the `cpu_ext` and `gpu_ext` Python modules
 
-Each system operates on partitions using per-partition executors for async kernel dispatch.
+Two design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. And the time step is sequenced entirely through a `KernelSet` trait, so the driver never reaches into the fields directly. That second part is what keeps multi-GPU on the table: a subdomain is just a self-contained simulation state, and the refinement machinery already knows how to exchange halos between neighboring regions.
 
 ---
 
 ## Example Configurations
 
-SIMBI includes ~24 example configurations in `simbi_configs/examples/`:
+There are around two dozen ready-to-run configs in `simbi_configs/examples/`. A sampler:
 
-| Example | Description |
-|---------|-------------|
+| Example | What it is |
+|---------|------------|
 | `sod.py` | Newtonian shock tube |
-| `marti_muller.py` | SRHD shock tube (1D, 3D variants) |
+| `marti_muller.py` | SRHD shock tube (1D and 3D variants) |
 | `kh.py` | Kelvin-Helmholtz instability |
 | `rt.py` | Rayleigh-Taylor instability (with gravity) |
 | `sedov.py` | Sedov-Taylor explosion (spherical) |
-| `thermal_bomb.py` | Thermal bomb (2D, 3D variants) |
+| `thermal_bomb.py` | Thermal bomb (2D and 3D variants) |
 | `magnetic_blast.py` | MHD blast wave |
 | `magnetic_shock_tube.py` | 1D MHD shock |
 | `orszag_tang.py` | SRMHD Orszag-Tang vortex |
-| `kepler.py` | Keplerian disk with central mass |
+| `kepler.py` | Keplerian disk with a central mass |
 | `uniform_sphere.py` | Uniform sphere with homologous mesh expansion |
 | `quad_shocktube.py` | 2D multi-region shock |
 
-Run any example:
+Run any of them:
+
 ```bash
-simbi run sedov --mode gpu --resolution 256
-simbi run kepler --mode cpu --resolution 128 128
+uv run simbi run sedov --mode gpu --resolution 256
+uv run simbi run kepler --mode cpu --resolution 128 128
 ```
 
 ---
 
 ## Publications
 
-SIMBI has been used in the following publications:
+SIMBI has been used in the following papers:
 
 | Year | Publication |
 |------|-------------|
-| **2024** | [DuPont, M. et al. - "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"](https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc) |
-| **2023** | [DuPont, M. et al. - "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"](https://iopscience.iop.org/article/10.3847/1538-4357/ad284e) |
-| **2023** | [DuPont, M. & MacFadyen A. - "Stars Bisected By Relativistic Blades"](https://iopscience.iop.org/article/10.3847/2041-8213/ad132c) |
-| **2022** | [DuPont, M. et al. - "Ellipsars: Ring-like Explosions from Flattened Stars"](https://iopscience.iop.org/article/10.3847/2041-8213/ac6ded) |
+| **2024** | [DuPont, M. et al., "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"](https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc) |
+| **2023** | [DuPont, M. et al., "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"](https://iopscience.iop.org/article/10.3847/1538-4357/ad284e) |
+| **2023** | [DuPont, M. & MacFadyen A., "Stars Bisected By Relativistic Blades"](https://iopscience.iop.org/article/10.3847/2041-8213/ad132c) |
+| **2022** | [DuPont, M. et al., "Ellipsars: Ring-like Explosions from Flattened Stars"](https://iopscience.iop.org/article/10.3847/2041-8213/ac6ded) |
 
 ---
 
@@ -491,7 +524,7 @@ SIMBI has been used in the following publications:
 @article{simbi2023,
   title={SIMBI: A high-performance 3D relativistic magneto-gas dynamic
          code for astrophysical fluid simulations},
-  author={Eigen, J. and others},
+  author={DuPont, M. and others},
   journal={Journal of Computational Physics},
   volume={456},
   pages={111-123},
@@ -506,12 +539,12 @@ SIMBI has been used in the following publications:
 
 | Version | Changes |
 |---------|---------|
-| **v0.8.0** | Minimized compiler warnings |
-| **v0.7.0** | Added mypy type checking, immersed boundary method |
-| **v0.6.0** | Fixed git tag ordering, code refactoring |
+| **v0.8.0** | Full rewrite of the compute backend from C++ to Rust, built with maturin |
+| **v0.7.0** | Added mypy type checking and the immersed boundary method |
+| **v0.6.0** | Fixed git tag ordering, general refactoring |
 | **v0.5.0** | Performance optimizations |
 | **v0.4.0** | Code restructuring |
-| **v0.3.0** | Improved C++ organization |
+| **v0.3.0** | Improved code organization |
 | **v0.2.0** | Memory contiguity optimizations |
 | **v0.1.0** | Initial release |
 
@@ -519,22 +552,21 @@ SIMBI has been used in the following publications:
 
 ## Support
 
-Report bugs and request features at [GitHub Issues](https://github.com/EigenDev/simbi/issues).
+Found a bug or want a feature? Open an issue at [GitHub Issues](https://github.com/EigenDev/simbi/issues).
 
-**Common issues:**
+When something will not install, check the basics first:
 
-Installation problems:
 ```bash
-gcc --version   # check ≥ 8
-python --version  # check ≥ 3.10
-nvidia-smi      # verify GPU (NVIDIA)
-rocm-smi        # verify GPU (AMD)
+python --version   # want 3.10 or newer
+cargo --version    # the rust toolchain is present
+nvidia-smi         # the GPU and driver are visible (NVIDIA)
 ```
 
-Runtime issues:
+When a run misbehaves:
+
 ```bash
-simbi run <problem> --info  # check available options
-simbi run --configs         # list available problems
+simbi run <problem> --info  # see the options this problem takes
+simbi run --configs         # list the problems you can run
 ```
 
 ---
@@ -547,6 +579,10 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 <div align="center">
 
-**[Report Bug](https://github.com/EigenDev/simbi/issues) • [Request Feature](https://github.com/EigenDev/simbi/issues)**
+**[Report a Bug](https://github.com/EigenDev/simbi/issues) · [Request a Feature](https://github.com/EigenDev/simbi/issues)**
 
 </div>
+
+---
+
+> Porting this to rust benefitted greatly from the use of the Claude Code tool

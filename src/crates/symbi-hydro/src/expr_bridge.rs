@@ -121,7 +121,7 @@ fn variable_name(op: Op) -> Option<&'static str> {
 }
 
 /// get-or-declare a named scalar param leaf, recording first-seen order in `params` so
-/// repeated uses (e.g. `x_0` twice) share ONE leaf — the runtime fills one scalar.
+/// repeated uses (e.g., `x_0` twice) share ONE leaf — the runtime fills one scalar.
 fn declare_param(
     g: &mut Graph,
     name: &str,
@@ -347,7 +347,7 @@ pub fn build_user_source(
 
 /// multiply the named `field` outputs by the region mask `chi` (in the field's own graph), if a
 /// region is present. the lifts are linear in these outputs, so this masks the final conserved
-/// contribution. `idxs` selects WHICH outputs carry the maskable quantity (e.g. relax masks only
+/// contribution. `idxs` selects WHICH outputs carry the maskable quantity (e.g., relax masks only
 /// the rate `kappa`, not the reference velocity).
 fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Range<usize>) {
     let Some(chi) = chi else { return };

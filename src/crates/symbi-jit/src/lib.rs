@@ -22,18 +22,16 @@
 use std::collections::HashMap;
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
-use cranelift_codegen::ir::{types, AbiParam, Block, InstBuilder, MemFlags, Signature, Value};
+use cranelift_codegen::ir::{AbiParam, Block, InstBuilder, MemFlags, Signature, Value, types};
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 
-use symbi_ir::dim::DimExpr;
-use symbi_ir::passes::scalarize::{
-    BinaryKind, LoweredFn, ScalarExpr, ScalarStmt, UnaryKind,
-};
-use symbi_ir::graph::ConstValue;
 use symbi_ir::ElementTy;
+use symbi_ir::dim::DimExpr;
+use symbi_ir::graph::ConstValue;
+use symbi_ir::passes::scalarize::{BinaryKind, LoweredFn, ScalarExpr, ScalarStmt, UnaryKind};
 
 /// a named local: an immutable SSA `Value` (a `Let` binding) or a Cranelift `Variable` (a
 /// mutable accumulator — `LetMut` — that crosses loop iterations / blocks; Cranelift inserts
@@ -79,43 +77,74 @@ impl std::error::Error for JitError {}
 
 macro_rules! shim1 {
     ($name:ident, $m:ident) => {
-        extern "C" fn $name(x: f64) -> f64 { x.$m() }
+        extern "C" fn $name(x: f64) -> f64 {
+            x.$m()
+        }
     };
 }
 macro_rules! shim2 {
     ($name:ident, $m:ident) => {
-        extern "C" fn $name(a: f64, b: f64) -> f64 { a.$m(b) }
+        extern "C" fn $name(a: f64, b: f64) -> f64 {
+            a.$m(b)
+        }
     };
 }
-shim1!(sh_sin, sin);   shim1!(sh_cos, cos);   shim1!(sh_tan, tan);
-shim1!(sh_asin, asin); shim1!(sh_acos, acos); shim1!(sh_atan, atan);
-shim1!(sh_sinh, sinh); shim1!(sh_cosh, cosh); shim1!(sh_tanh, tanh);
-shim1!(sh_asinh, asinh); shim1!(sh_acosh, acosh); shim1!(sh_atanh, atanh);
-shim1!(sh_exp, exp); shim1!(sh_exp2, exp2);
-shim1!(sh_ln, ln); shim1!(sh_log2, log2); shim1!(sh_log10, log10);
+shim1!(sh_sin, sin);
+shim1!(sh_cos, cos);
+shim1!(sh_tan, tan);
+shim1!(sh_asin, asin);
+shim1!(sh_acos, acos);
+shim1!(sh_atan, atan);
+shim1!(sh_sinh, sinh);
+shim1!(sh_cosh, cosh);
+shim1!(sh_tanh, tanh);
+shim1!(sh_asinh, asinh);
+shim1!(sh_acosh, acosh);
+shim1!(sh_atanh, atanh);
+shim1!(sh_exp, exp);
+shim1!(sh_exp2, exp2);
+shim1!(sh_ln, ln);
+shim1!(sh_log2, log2);
+shim1!(sh_log10, log10);
 shim1!(sh_round, round);
 // no min/max/abs shims: they are emitted inline as fcmp + select (a ternary)
 // in translate_expr, matching cuda / interp / the Numeric carrier.
 shim2!(sh_atan2, atan2);
-shim2!(sh_powf, powf); shim2!(sh_hypot, hypot);
-extern "C" fn sh_powi(a: f64, b: f64) -> f64 { a.powi(b as i32) }
-extern "C" fn sh_div_euclid(a: f64, b: f64) -> f64 { (a / b).floor() }
+shim2!(sh_powf, powf);
+shim2!(sh_hypot, hypot);
+extern "C" fn sh_powi(a: f64, b: f64) -> f64 {
+    a.powi(b as i32)
+}
+extern "C" fn sh_div_euclid(a: f64, b: f64) -> f64 {
+    (a / b).floor()
+}
 
 /// `(symbol, arity-incl-receiver, fn-ptr)` for every shimmed method. `arity` is the total
 /// f64 args the CLIF call passes (receiver + method args).
 fn shim_table() -> &'static [(&'static str, usize, *const u8)] {
     &[
-        ("sin", 1, sh_sin as *const u8),   ("cos", 1, sh_cos as *const u8),
-        ("tan", 1, sh_tan as *const u8),   ("asin", 1, sh_asin as *const u8),
-        ("acos", 1, sh_acos as *const u8), ("atan", 1, sh_atan as *const u8),
-        ("sinh", 1, sh_sinh as *const u8), ("cosh", 1, sh_cosh as *const u8),
-        ("tanh", 1, sh_tanh as *const u8), ("asinh", 1, sh_asinh as *const u8),
-        ("acosh", 1, sh_acosh as *const u8), ("atanh", 1, sh_atanh as *const u8),
-        ("exp", 1, sh_exp as *const u8),   ("exp2", 1, sh_exp2 as *const u8),
-        ("ln", 1, sh_ln as *const u8),     ("log2", 1, sh_log2 as *const u8),
-        ("log10", 1, sh_log10 as *const u8), ("round", 1, sh_round as *const u8),
-        ("atan2", 2, sh_atan2 as *const u8), ("powf", 2, sh_powf as *const u8),
-        ("hypot", 2, sh_hypot as *const u8), ("powi", 2, sh_powi as *const u8),
+        ("sin", 1, sh_sin as *const u8),
+        ("cos", 1, sh_cos as *const u8),
+        ("tan", 1, sh_tan as *const u8),
+        ("asin", 1, sh_asin as *const u8),
+        ("acos", 1, sh_acos as *const u8),
+        ("atan", 1, sh_atan as *const u8),
+        ("sinh", 1, sh_sinh as *const u8),
+        ("cosh", 1, sh_cosh as *const u8),
+        ("tanh", 1, sh_tanh as *const u8),
+        ("asinh", 1, sh_asinh as *const u8),
+        ("acosh", 1, sh_acosh as *const u8),
+        ("atanh", 1, sh_atanh as *const u8),
+        ("exp", 1, sh_exp as *const u8),
+        ("exp2", 1, sh_exp2 as *const u8),
+        ("ln", 1, sh_ln as *const u8),
+        ("log2", 1, sh_log2 as *const u8),
+        ("log10", 1, sh_log10 as *const u8),
+        ("round", 1, sh_round as *const u8),
+        ("atan2", 2, sh_atan2 as *const u8),
+        ("powf", 2, sh_powf as *const u8),
+        ("hypot", 2, sh_hypot as *const u8),
+        ("powi", 2, sh_powi as *const u8),
         ("div_euclid", 2, sh_div_euclid as *const u8),
     ]
 }
@@ -138,15 +167,27 @@ unsafe impl Sync for CompiledFn {}
 
 impl CompiledFn {
     /// number of inputs (params) the function expects, in `LoweredFn::params` order.
-    pub fn n_inputs(&self) -> usize { self.n_in }
+    pub fn n_inputs(&self) -> usize {
+        self.n_in
+    }
     /// number of outputs (result components).
-    pub fn n_outputs(&self) -> usize { self.n_out }
+    pub fn n_outputs(&self) -> usize {
+        self.n_out
+    }
 
     /// evaluate: `inputs` in param order, results written into `out`.
     #[inline]
     pub fn call(&self, inputs: &[f64], out: &mut [f64]) {
-        assert_eq!(inputs.len(), self.n_in, "CompiledFn::call: input arity mismatch");
-        assert_eq!(out.len(), self.n_out, "CompiledFn::call: output arity mismatch");
+        assert_eq!(
+            inputs.len(),
+            self.n_in,
+            "CompiledFn::call: input arity mismatch"
+        );
+        assert_eq!(
+            out.len(),
+            self.n_out,
+            "CompiledFn::call: output arity mismatch"
+        );
         // SAFETY: the function reads exactly `n_in` f64s from `inputs` and writes exactly
         // `n_out` f64s to `out`; the asserts above guarantee both slices are large enough.
         unsafe { (self.func)(inputs.as_ptr(), out.as_mut_ptr()) }
@@ -226,7 +267,9 @@ pub fn compile(lowered: &LoweredFn) -> Result<CompiledFn, JitError> {
     let mut vars: HashMap<String, LocalSlot> = HashMap::new();
     for (i, p) in lowered.params.iter().enumerate() {
         let off = (i * 8) as i32;
-        let v = b.ins().load(types::F64, MemFlags::trusted(), inputs_ptr, off);
+        let v = b
+            .ins()
+            .load(types::F64, MemFlags::trusted(), inputs_ptr, off);
         vars.insert(p.name.clone(), LocalSlot::Val(v));
     }
 
@@ -268,7 +311,12 @@ pub fn compile(lowered: &LoweredFn) -> Result<CompiledFn, JitError> {
     // SAFETY: `code` is the finalized entry whose signature is `(*const f64, *mut f64) -> ()`.
     let func: unsafe extern "C" fn(*const f64, *mut f64) = unsafe { std::mem::transmute(code) };
 
-    Ok(CompiledFn { _module: module, func, n_in, n_out })
+    Ok(CompiledFn {
+        _module: module,
+        func,
+        n_in,
+        n_out,
+    })
 }
 
 /// the kernel-stencil context for `FieldLoadAt`: the input buffer base array + per-buffer
@@ -285,7 +333,7 @@ struct StencilCtx<'a> {
     /// integer `_coord_N` registers, by name (for the coord arithmetic in load components).
     coord_vars: &'a HashMap<String, Value>,
     /// body `Let`/`LetMut` definitions by name — so a load index that references a CSE'd integer
-    /// offset var (e.g. `__cse_1`, which CSE hoists to function scope) resolves by recursing into
+    /// offset var (e.g., `__cse_1`, which CSE hoists to function scope) resolves by recursing into
     /// its defining expression. index exprs are pure coord/const integer arithmetic.
     let_defs: &'a HashMap<String, &'a ScalarExpr>,
     ndim: usize,
@@ -298,8 +346,12 @@ struct StencilCtx<'a> {
 fn collect_let_defs<'a>(stmts: &'a [ScalarStmt], out: &mut HashMap<String, &'a ScalarExpr>) {
     for s in stmts {
         match s {
-            ScalarStmt::Let { name, value, .. } => { out.insert(name.clone(), value); }
-            ScalarStmt::LetMut { name, init, .. } => { out.insert(name.clone(), init); }
+            ScalarStmt::Let { name, value, .. } => {
+                out.insert(name.clone(), value);
+            }
+            ScalarStmt::LetMut { name, init, .. } => {
+                out.insert(name.clone(), init);
+            }
             ScalarStmt::For { body, .. } => collect_let_defs(body, out),
             ScalarStmt::If { then_body, .. } => collect_let_defs(then_body, out),
             ScalarStmt::Scope { body, .. } => collect_let_defs(body, out),
@@ -340,10 +392,12 @@ fn translate_index_expr(
             if let Some(v) = ctx.coord_vars.get(name) {
                 *v
             } else if let Some(def) = ctx.let_defs.get(name) {
-                // a CSE'd integer offset (e.g. `__cse_1`): resolve by translating its definition.
+                // a CSE'd integer offset (e.g., `__cse_1`): resolve by translating its definition.
                 translate_index_expr(b, def, ctx)?
             } else {
-                return Err(JitError::Unsupported(format!("non-coord var '{name}' in load index")));
+                return Err(JitError::Unsupported(format!(
+                    "non-coord var '{name}' in load index"
+                )));
             }
         }
         ScalarExpr::BinOp(op, l, r) => {
@@ -356,7 +410,11 @@ fn translate_index_expr(
                 _ => return Err(JitError::Unsupported(format!("op {op:?} in load index"))),
             }
         }
-        other => return Err(JitError::Unsupported(format!("expr {other:?} in load index"))),
+        other => {
+            return Err(JitError::Unsupported(format!(
+                "expr {other:?} in load index"
+            )));
+        }
     })
 }
 
@@ -421,7 +479,11 @@ fn translate_expr(
             let e = translate_expr(b, else_, vars, shims, stencil)?;
             b.ins().select(c, t, e)
         }
-        ScalarExpr::MethodCall { receiver, method, args } => {
+        ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
             let recv = translate_expr(b, receiver, vars, shims, stencil)?;
             // native, IEEE-exact, bit-identical to std: sqrt/floor/ceil/trunc.
             match method.as_str() {
@@ -489,7 +551,10 @@ fn translate_expr(
         ScalarExpr::IndexInto { container, .. } => {
             return Err(JitError::Unsupported(format!("index into '{container}'")));
         }
-        ScalarExpr::FieldLoadAt { field_key, components } => {
+        ScalarExpr::FieldLoadAt {
+            field_key,
+            components,
+        } => {
             let ctx = stencil
                 .ok_or_else(|| JitError::Unsupported("FieldLoadAt outside a kernel".into()))?;
             // integer stencil coord -> matching flat index -> load from the field's buffer.
@@ -500,16 +565,21 @@ fn translate_expr(
             if coords.len() != ctx.ndim {
                 return Err(JitError::Unsupported(format!(
                     "FieldLoadAt '{field_key}': {} components != ndim {}",
-                    coords.len(), ctx.ndim,
+                    coords.len(),
+                    ctx.ndim,
                 )));
             }
             let idx = emit_flat_index(b, &coords, ctx);
-            let fi = *ctx
-                .field_idx
-                .get(field_key)
-                .ok_or_else(|| JitError::Unsupported(format!("FieldLoadAt unknown field '{field_key}'")))?;
+            let fi = *ctx.field_idx.get(field_key).ok_or_else(|| {
+                JitError::Unsupported(format!("FieldLoadAt unknown field '{field_key}'"))
+            })?;
             let psz = ctx.ptr_ty.bytes() as i32;
-            let base = b.ins().load(ctx.ptr_ty, MemFlags::trusted(), ctx.in_bufs, fi as i32 * psz);
+            let base = b.ins().load(
+                ctx.ptr_ty,
+                MemFlags::trusted(),
+                ctx.in_bufs,
+                fi as i32 * psz,
+            );
             let byte_off = b.ins().imul_imm(idx, 8);
             let addr = b.ins().iadd(base, byte_off);
             b.ins().load(types::F64, MemFlags::trusted(), addr, 0)
@@ -533,7 +603,9 @@ fn clif_ty(e: ElementTy) -> cranelift_codegen::ir::Type {
 fn expect_var(vars: &HashMap<String, LocalSlot>, name: &str) -> Result<Variable, JitError> {
     match vars.get(name) {
         Some(LocalSlot::Var(v)) => Ok(*v),
-        Some(LocalSlot::Val(_)) => Err(JitError::Unsupported(format!("assign to immutable '{name}'"))),
+        Some(LocalSlot::Val(_)) => Err(JitError::Unsupported(format!(
+            "assign to immutable '{name}'"
+        ))),
         None => Err(JitError::UnboundVar(name.to_string())),
     }
 }
@@ -554,8 +626,12 @@ fn translate_stmts(
 ) -> Result<Flow, JitError> {
     for stmt in stmts {
         match stmt {
-            ScalarStmt::Let { name, element, value } => {
-                // integer-typed lets are CSE'd stencil INDEX offsets (e.g. `__cse_1 = _coord_0 + 1`),
+            ScalarStmt::Let {
+                name,
+                element,
+                value,
+            } => {
+                // integer-typed lets are CSE'd stencil INDEX offsets (e.g., `__cse_1 = _coord_0 + 1`),
                 // used ONLY inside `FieldLoadAt` components — which the index translator resolves
                 // separately via `let_defs` in the integer domain. translating them here as f64 body
                 // statements would emit `fadd(f64_coord, i32_const)` (a verifier type error). skip
@@ -567,7 +643,11 @@ fn translate_stmts(
                 let v = translate_expr(b, value, vars, shims, Some(stencil))?;
                 vars.insert(name.clone(), LocalSlot::Val(v));
             }
-            ScalarStmt::LetMut { name, element, init } => {
+            ScalarStmt::LetMut {
+                name,
+                element,
+                init,
+            } => {
                 let var = Variable::from_u32(*next_var);
                 *next_var += 1;
                 b.declare_var(var, clif_ty(*element));
@@ -590,7 +670,11 @@ fn translate_stmts(
                     BinaryKind::BitOr => b.ins().bor(cur, rhs),
                     BinaryKind::BitAnd => b.ins().band(cur, rhs),
                     BinaryKind::BitXor => b.ins().bxor(cur, rhs),
-                    other => return Err(JitError::Unsupported(format!("compound-assign op {other:?}"))),
+                    other => {
+                        return Err(JitError::Unsupported(format!(
+                            "compound-assign op {other:?}"
+                        )));
+                    }
                 };
                 b.def_var(var, v);
             }
@@ -598,7 +682,9 @@ fn translate_stmts(
                 let n = match bound {
                     DimExpr::Literal(n) => *n as i64,
                     other => {
-                        return Err(JitError::Unsupported(format!("generic For bound {other:?}")));
+                        return Err(JitError::Unsupported(format!(
+                            "generic For bound {other:?}"
+                        )));
                     }
                 };
                 let iter_var = Variable::from_u32(*next_var);
@@ -631,8 +717,12 @@ fn translate_stmts(
                     b.ins().jump(header, &[]);
                 }
                 match shadowed {
-                    Some(s) => { vars.insert(iter.clone(), s); }
-                    None => { vars.remove(iter); }
+                    Some(s) => {
+                        vars.insert(iter.clone(), s);
+                    }
+                    None => {
+                        vars.remove(iter);
+                    }
                 }
                 b.seal_block(header);
                 b.seal_block(exit);
@@ -645,7 +735,8 @@ fn translate_stmts(
                 b.ins().brif(c, then_blk, &[], merge, &[]);
                 b.seal_block(then_blk);
                 b.switch_to_block(then_blk);
-                let flow = translate_stmts(b, then_body, vars, shims, stencil, next_var, loop_exit)?;
+                let flow =
+                    translate_stmts(b, then_body, vars, shims, stencil, next_var, loop_exit)?;
                 if flow == Flow::Fallthrough {
                     b.ins().jump(merge, &[]);
                 }
@@ -658,7 +749,9 @@ fn translate_stmts(
                 b.ins().jump(exit, &[]);
                 return Ok(Flow::Terminated);
             }
-            ScalarStmt::Scope { name, body, result, .. } => {
+            ScalarStmt::Scope {
+                name, body, result, ..
+            } => {
                 // a bounded-pressure scope is a renderer register-pressure HINT; the JIT does its
                 // own regalloc, so flatten it: run the body inline (its lets are SSA + dominate),
                 // then bind `name = result`.
@@ -672,7 +765,9 @@ fn translate_stmts(
             ScalarStmt::IfElse { .. } => {
                 // a data-dependent branch (only the taken arm runs) with phi outputs — needs CLIF
                 // block params. not yet JIT'd; reject so the caller falls back to the interpreter.
-                return Err(JitError::Unsupported("IfElse (data-dependent branch)".into()));
+                return Err(JitError::Unsupported(
+                    "IfElse (data-dependent branch)".into(),
+                ));
             }
         }
     }
@@ -754,8 +849,12 @@ impl CompiledKernel {
             // flat index of `coord` within the shared (lo, extent) layout; the asserts size them.
             unsafe {
                 (self.cell)(
-                    coord.as_ptr(), lo_i.as_ptr(), ext_i.as_ptr(),
-                    in_ptrs.as_ptr(), scalars.as_ptr(), out_ptrs.as_mut_ptr(),
+                    coord.as_ptr(),
+                    lo_i.as_ptr(),
+                    ext_i.as_ptr(),
+                    in_ptrs.as_ptr(),
+                    scalars.as_ptr(),
+                    out_ptrs.as_mut_ptr(),
                 );
             }
         }
@@ -786,12 +885,14 @@ impl CompiledKernel {
         // borrow checker, so the raw bases below alias nothing. (the in-place dispatch path uses
         // `run_parallel_raw` directly, where aliasing a read+write buffer is intentional + sound.)
         unsafe {
-            self.run_parallel_raw(grid_sizes, dom_los, lo, extent, &in_bases, scalars, &out_bases);
+            self.run_parallel_raw(
+                grid_sizes, dom_los, lo, extent, &in_bases, scalars, &out_bases,
+            );
         }
     }
 
     /// the raw-base parallel driver — the dispatch primitive. takes input/output buffer BASES as
-    /// pointers so an IN-PLACE field (one the kernel both reads and writes, e.g. `cons.den` in the
+    /// pointers so an IN-PLACE field (one the kernel both reads and writes, e.g., `cons.den` in the
     /// fused godunov) can be bound as the SAME pointer in both `in_bases` and `out_bases`. that
     /// aliasing is SOUND: `compile_kernel` loads every input at the cell's flat index at function
     /// ENTRY, then stores every output at the same index at EXIT (read-before-write per cell), and
@@ -820,11 +921,18 @@ impl CompiledKernel {
         assert_eq!(scalars.len(), self.n_scalar);
         let lo_i: Vec<i64> = lo.iter().map(|&x| x as i64).collect();
         let ext_i: Vec<i64> = extent.iter().map(|&x| x as i64).collect();
-        let shared = SharedBufs { in_ptrs: in_bases.to_vec(), out_ptrs: out_bases.to_vec() };
+        let shared = SharedBufs {
+            in_ptrs: in_bases.to_vec(),
+            out_ptrs: out_bases.to_vec(),
+        };
         // small stack coord (ndim <= 3 in practice; 8 is ample) — no per-cell heap alloc on the
         // hot path, unlike the serial `run`'s `vec![]`.
         const MAX_NDIM: usize = 8;
-        assert!(self.ndim <= MAX_NDIM, "run_parallel: ndim {} exceeds {MAX_NDIM}", self.ndim);
+        assert!(
+            self.ndim <= MAX_NDIM,
+            "run_parallel: ndim {} exceeds {MAX_NDIM}",
+            self.ndim
+        );
         let ndim = self.ndim;
         let total: usize = grid_sizes.iter().map(|&g| g as usize).product();
         (0..total).into_par_iter().for_each(|flat| {
@@ -841,8 +949,11 @@ impl CompiledKernel {
             // the shared bases sound to share across threads (in-place aliasing read-before-write).
             unsafe {
                 (self.cell)(
-                    coord.as_ptr(), lo_i.as_ptr(), ext_i.as_ptr(),
-                    shared.in_ptrs.as_ptr(), scalars.as_ptr(),
+                    coord.as_ptr(),
+                    lo_i.as_ptr(),
+                    ext_i.as_ptr(),
+                    shared.in_ptrs.as_ptr(),
+                    scalars.as_ptr(),
                     shared.out_ptrs.as_ptr() as *mut *mut f64,
                 );
             }
@@ -852,7 +963,7 @@ impl CompiledKernel {
 
 /// compile a scalarized stencil kernel. `field_inputs` = the cell-load / stencil-read field keys
 /// (input buffer order); `scalar_params` = kernel scalars; `field_writes` = `(key, RHS node)`.
-/// the body may carry control flow (`For`/`If`/`Break`, e.g. an `IterateInline` root-find);
+/// the body may carry control flow (`For`/`If`/`Break`, e.g., an `IterateInline` root-find);
 /// only generic-dim `For` bounds reject -> caller falls back to the interpreter.
 pub fn compile_kernel(
     graph: &symbi_ir::graph::Graph,
@@ -864,8 +975,11 @@ pub fn compile_kernel(
     let write_nodes: Vec<symbi_ir::graph::NodeId> = field_writes.iter().map(|(_, n)| *n).collect();
     let sc = symbi_ir::passes::scalarize::scalarize_kernel(graph, &write_nodes);
     let (n_in, n_out, n_scalar) = (field_inputs.len(), field_writes.len(), scalar_params.len());
-    let field_idx: HashMap<String, usize> =
-        field_inputs.iter().enumerate().map(|(i, k)| (k.clone(), i)).collect();
+    let field_idx: HashMap<String, usize> = field_inputs
+        .iter()
+        .enumerate()
+        .map(|(i, k)| (k.clone(), i))
+        .collect();
 
     // ---- module + shims (same setup as `compile`) ----
     let mut flags = settings::builder();
@@ -892,9 +1006,12 @@ pub fn compile_kernel(
     let mut shim_ids: HashMap<&'static str, (FuncId, usize)> = HashMap::new();
     for (name, arity, _) in shim_table() {
         let mut sig = module.make_signature();
-        for _ in 0..*arity { sig.params.push(AbiParam::new(types::F64)); }
+        for _ in 0..*arity {
+            sig.params.push(AbiParam::new(types::F64));
+        }
         sig.returns.push(AbiParam::new(types::F64));
-        let id = module.declare_function(name, Linkage::Import, &sig)
+        let id = module
+            .declare_function(name, Linkage::Import, &sig)
             .map_err(|e| JitError::Codegen(format!("declare shim '{name}': {e}")))?;
         shim_ids.insert(name, (id, *arity));
     }
@@ -902,7 +1019,9 @@ pub fn compile_kernel(
     // ---- entry: fn(coord, lo, extent, in_bufs, scalars, out_bufs) — 6 pointers ----
     let mut ctx = module.make_context();
     ctx.func.signature = Signature::new(module.target_config().default_call_conv);
-    for _ in 0..6 { ctx.func.signature.params.push(AbiParam::new(ptr_ty)); }
+    for _ in 0..6 {
+        ctx.func.signature.params.push(AbiParam::new(ptr_ty));
+    }
 
     let mut fctx = FunctionBuilderContext::new();
     let mut b = FunctionBuilder::new(&mut ctx.func, &mut fctx);
@@ -914,7 +1033,8 @@ pub fn compile_kernel(
     let (coord_ptr, lo_ptr, ext_ptr, in_bufs, scalars_ptr, out_bufs) =
         (pr[0], pr[1], pr[2], pr[3], pr[4], pr[5]);
 
-    let mut shim_refs: HashMap<&'static str, (cranelift_codegen::ir::FuncRef, usize)> = HashMap::new();
+    let mut shim_refs: HashMap<&'static str, (cranelift_codegen::ir::FuncRef, usize)> =
+        HashMap::new();
     for (name, (id, arity)) in &shim_ids {
         let fref = module.declare_func_in_func(*id, b.func);
         shim_refs.insert(name, (fref, *arity));
@@ -938,8 +1058,14 @@ pub fn compile_kernel(
     let mut let_defs: HashMap<String, &ScalarExpr> = HashMap::new();
     collect_let_defs(&sc.body, &mut let_defs);
     let sctx = StencilCtx {
-        in_bufs, field_idx: &field_idx, lo: &lo_v, extent: &ext_v,
-        coord_vars: &coord_vars, let_defs: &let_defs, ndim, ptr_ty,
+        in_bufs,
+        field_idx: &field_idx,
+        lo: &lo_v,
+        extent: &ext_v,
+        coord_vars: &coord_vars,
+        let_defs: &let_defs,
+        ndim,
+        ptr_ty,
     };
 
     // current-cell flat index, reused for cell loads + output stores.
@@ -950,13 +1076,17 @@ pub fn compile_kernel(
     // dominate everything (defined in the entry block) so they stay immutable `Val` slots.
     let mut vars: HashMap<String, LocalSlot> = HashMap::new();
     for (i, key) in field_inputs.iter().enumerate() {
-        let base = b.ins().load(ptr_ty, MemFlags::trusted(), in_bufs, i as i32 * psz);
+        let base = b
+            .ins()
+            .load(ptr_ty, MemFlags::trusted(), in_bufs, i as i32 * psz);
         let addr = b.ins().iadd(base, idx0_off);
         let v = b.ins().load(types::F64, MemFlags::trusted(), addr, 0);
         vars.insert(key.clone(), LocalSlot::Val(v));
     }
     for (i, name) in scalar_params.iter().enumerate() {
-        let v = b.ins().load(types::F64, MemFlags::trusted(), scalars_ptr, (i * 8) as i32);
+        let v = b
+            .ins()
+            .load(types::F64, MemFlags::trusted(), scalars_ptr, (i * 8) as i32);
         vars.insert(name.clone(), LocalSlot::Val(v));
     }
     for ax in 0..ndim {
@@ -966,10 +1096,20 @@ pub fn compile_kernel(
 
     // body (Let/LetMut/Assign/For/If/Break) + outputs.
     let mut next_var: u32 = 0;
-    translate_stmts(&mut b, &sc.body, &mut vars, &shim_refs, &sctx, &mut next_var, None)?;
+    translate_stmts(
+        &mut b,
+        &sc.body,
+        &mut vars,
+        &shim_refs,
+        &sctx,
+        &mut next_var,
+        None,
+    )?;
     for (k, expr) in sc.outputs.iter().enumerate() {
         let v = translate_expr(&mut b, expr, &vars, &shim_refs, Some(&sctx))?;
-        let base = b.ins().load(ptr_ty, MemFlags::trusted(), out_bufs, k as i32 * psz);
+        let base = b
+            .ins()
+            .load(ptr_ty, MemFlags::trusted(), out_bufs, k as i32 * psz);
         let addr = b.ins().iadd(base, idx0_off);
         b.ins().store(MemFlags::trusted(), v, addr, 0);
     }
@@ -977,25 +1117,43 @@ pub fn compile_kernel(
     b.ins().return_(&[]);
     b.finalize();
 
-    let func_id = module.declare_function("symbi_kernel", Linkage::Export, &ctx.func.signature)
+    let func_id = module
+        .declare_function("symbi_kernel", Linkage::Export, &ctx.func.signature)
         .map_err(|e| JitError::Codegen(format!("declare entry: {e}")))?;
-    module.define_function(func_id, &mut ctx)
+    module
+        .define_function(func_id, &mut ctx)
         .map_err(|e| JitError::Codegen(format!("define entry: {e:?}")))?;
     module.clear_context(&mut ctx);
-    module.finalize_definitions().map_err(|e| JitError::Codegen(format!("finalize: {e}")))?;
+    module
+        .finalize_definitions()
+        .map_err(|e| JitError::Codegen(format!("finalize: {e}")))?;
     let code = module.get_finalized_function(func_id);
     // SAFETY: the finalized entry has the 6-pointer signature declared above.
     let cell = unsafe {
         std::mem::transmute::<
             *const u8,
-            unsafe extern "C" fn(*const i64, *const i64, *const i64, *const *const f64, *const f64, *mut *mut f64),
+            unsafe extern "C" fn(
+                *const i64,
+                *const i64,
+                *const i64,
+                *const *const f64,
+                *const f64,
+                *mut *mut f64,
+            ),
         >(code)
     };
 
-    Ok(CompiledKernel { _module: module, cell, ndim, n_in, n_out, n_scalar })
+    Ok(CompiledKernel {
+        _module: module,
+        cell,
+        ndim,
+        n_in,
+        n_out,
+        n_scalar,
+    })
 }
 
-/// JIT a traced `GvKernel` (e.g. the combined godunov+source stage) via `compile_kernel`, mapping
+/// JIT a traced `GvKernel` (e.g., the combined godunov+source stage) via `compile_kernel`, mapping
 /// the kernel's ABI manifest. `writes` are the trace's `(key, runtime, node)` outputs. THE BRIDGE
 /// for v2 fusion: build the godunov+source `GvKernel` (`splice_fused_sources_to_contribs` /
 /// `godunov_stage_gv_with_fused_sources`), JIT it here, dispatch it instead of the two-pass.
@@ -1007,7 +1165,13 @@ pub fn compile_gv_kernel(
     let field_inputs: Vec<String> = kernel.field_inputs.iter().map(|(k, _)| k.clone()).collect();
     let field_writes: Vec<(String, symbi_ir::graph::NodeId)> =
         writes.iter().map(|(k, _, n)| (k.clone(), *n)).collect();
-    compile_kernel(&kernel.graph, &field_inputs, &kernel.scalar_params, &field_writes, ndim)
+    compile_kernel(
+        &kernel.graph,
+        &field_inputs,
+        &kernel.scalar_params,
+        &field_writes,
+        ndim,
+    )
 }
 
 #[cfg(test)]
@@ -1015,7 +1179,7 @@ mod tests {
     use super::*;
     use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::graph::{ElementWiseOp, Graph, NodeId, TranscendentalOp};
-    use symbi_ir::passes::scalarize::{scalarize, LoweredParam};
+    use symbi_ir::passes::scalarize::{LoweredParam, scalarize};
 
     /// build a graph (the closure adds its own params + returns the output node), scalarize,
     /// and assert the Cranelift-compiled fn is BIT-IDENTICAL to the interpreter over many
@@ -1059,8 +1223,12 @@ mod tests {
             // bit-equal, OR both NaN (a NaN output is correct on either side; the payload may differ).
             let ok = want.to_bits() == got[0].to_bits() || (want.is_nan() && got[0].is_nan());
             assert!(
-                ok, "JIT != interp: inputs={inputs:?} interp={} ({:#018x}) jit={} ({:#018x})",
-                want, want.to_bits(), got[0], got[0].to_bits(),
+                ok,
+                "JIT != interp: inputs={inputs:?} interp={} ({:#018x}) jit={} ({:#018x})",
+                want,
+                want.to_bits(),
+                got[0],
+                got[0].to_bits(),
             );
         }
     }
@@ -1153,10 +1321,10 @@ mod tests {
 
     #[test]
     fn kernel_stencil_matches_interp() {
+        use symbi_ir::Symbol;
         use symbi_ir::backends::interp::{CpuField, CpuFieldMut};
         use symbi_ir::backends::kernel::KernelEmitInputs;
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::Symbol;
 
         // a 1D stencil kernel: out[c] = in[c] + 2 * in[c+1] - sqrt(in[c]).
         // exercises the cell load (`Var("in")`), the stencil read (`FieldLoadAt` at `_coord_0 + 1`),
@@ -1175,8 +1343,12 @@ mod tests {
 
         let spec = KernelEmitInputs {
             kernel_name: "stencil_test",
-            coalesce_layout: false,            ndim: 1,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: false,
+            ndim: 1,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
             field_writes: &[("out".into(), "out".into(), out)],
@@ -1188,28 +1360,49 @@ mod tests {
         // domain [0, N); buffer [0, N+1) so the c+1 read at c=N-1 stays in bounds.
         let n = 64usize;
         let ext = (n + 1) as u32;
-        let in_data: Vec<f64> = (0..ext).map(|i| 0.3 + 1.7 * (i as f64 * 0.123).fract()).collect();
+        let in_data: Vec<f64> = (0..ext)
+            .map(|i| 0.3 + 1.7 * (i as f64 * 0.123).fract())
+            .collect();
 
         let mut out_interp = vec![0.0f64; ext as usize];
         Cpu.run_kernel(
-            &g, &spec,
-            &[CpuField { data: &in_data, lo: &[0], extent: &[ext] }],
-            &mut [CpuFieldMut { data: &mut out_interp, lo: &[0], extent: &[ext] }],
-            &[], &[n as u32], &[0],
+            &g,
+            &spec,
+            &[CpuField {
+                data: &in_data,
+                lo: &[0],
+                extent: &[ext],
+            }],
+            &mut [CpuFieldMut {
+                data: &mut out_interp,
+                lo: &[0],
+                extent: &[ext],
+            }],
+            &[],
+            &[n as u32],
+            &[0],
         );
 
         let kernel = compile_kernel(&g, &["in".into()], &[], &[("out".into(), out)], 1)
             .expect("jit compile_kernel");
         let mut out_jit = vec![0.0f64; ext as usize];
         kernel.run(
-            &[n as u32], &[0], &[0], &[ext],
-            &[&in_data], &[], &mut [&mut out_jit],
+            &[n as u32],
+            &[0],
+            &[0],
+            &[ext],
+            &[&in_data],
+            &[],
+            &mut [&mut out_jit],
         );
 
         for c in 0..n {
             assert_eq!(
-                out_interp[c].to_bits(), out_jit[c].to_bits(),
-                "stencil JIT != interp at cell {c}: interp={} jit={}", out_interp[c], out_jit[c],
+                out_interp[c].to_bits(),
+                out_jit[c].to_bits(),
+                "stencil JIT != interp at cell {c}: interp={} jit={}",
+                out_interp[c],
+                out_jit[c],
             );
         }
     }
@@ -1235,8 +1428,12 @@ mod tests {
 
         let spec = KernelEmitInputs {
             kernel_name: "newton_sqrt",
-            coalesce_layout: false,            ndim: 1,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: false,
+            ndim: 1,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
             field_writes: &[("out".into(), "out".into(), it)],
@@ -1246,25 +1443,49 @@ mod tests {
         };
 
         let n = 64usize;
-        let in_data: Vec<f64> = (0..n).map(|i| 0.5 + 4.0 * (i as f64 * 0.137).fract() + i as f64).collect();
+        let in_data: Vec<f64> = (0..n)
+            .map(|i| 0.5 + 4.0 * (i as f64 * 0.137).fract() + i as f64)
+            .collect();
         let mut out_interp = vec![0.0f64; n];
         Cpu.run_kernel(
-            &g, &spec,
-            &[CpuField { data: &in_data, lo: &[0], extent: &[n as u32] }],
-            &mut [CpuFieldMut { data: &mut out_interp, lo: &[0], extent: &[n as u32] }],
-            &[], &[n as u32], &[0],
+            &g,
+            &spec,
+            &[CpuField {
+                data: &in_data,
+                lo: &[0],
+                extent: &[n as u32],
+            }],
+            &mut [CpuFieldMut {
+                data: &mut out_interp,
+                lo: &[0],
+                extent: &[n as u32],
+            }],
+            &[],
+            &[n as u32],
+            &[0],
         );
 
         let kernel = compile_kernel(&g, &["in".into()], &[], &[("out".into(), it)], 1)
             .expect("jit compile_kernel (iterate)");
         let mut out_jit = vec![0.0f64; n];
-        kernel.run(&[n as u32], &[0], &[0], &[n as u32], &[&in_data], &[], &mut [&mut out_jit]);
+        kernel.run(
+            &[n as u32],
+            &[0],
+            &[0],
+            &[n as u32],
+            &[&in_data],
+            &[],
+            &mut [&mut out_jit],
+        );
 
         for c in 0..n {
             assert_eq!(
-                out_interp[c].to_bits(), out_jit[c].to_bits(),
+                out_interp[c].to_bits(),
+                out_jit[c].to_bits(),
                 "iterate JIT != interp at cell {c}: interp={} jit={} (target sqrt {})",
-                out_interp[c], out_jit[c], in_data[c].sqrt(),
+                out_interp[c],
+                out_jit[c],
+                in_data[c].sqrt(),
             );
         }
     }
@@ -1273,10 +1494,10 @@ mod tests {
 
     #[test]
     fn kernel_run_parallel_matches_serial_and_interp() {
+        use symbi_ir::Symbol;
         use symbi_ir::backends::interp::{CpuField, CpuFieldMut};
         use symbi_ir::backends::kernel::KernelEmitInputs;
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::Symbol;
 
         // 2D multi-output stencil to exercise the bijective coord->index mapping across threads:
         //   out0[c] = in[c] + 2 * in[c + e_x] - sqrt(in[c]),  out1[c] = in[c] * in[c + e_y].
@@ -1302,16 +1523,24 @@ mod tests {
         let (nx, ny) = (24usize, 17usize);
         let (ex, ey) = ((nx + 1) as u32, (ny + 1) as u32);
         let buf_len = (ex * ey) as usize;
-        let in_data: Vec<f64> =
-            (0..buf_len).map(|i| 0.3 + 1.7 * (i as f64 * 0.0916).fract()).collect();
+        let in_data: Vec<f64> = (0..buf_len)
+            .map(|i| 0.3 + 1.7 * (i as f64 * 0.0916).fract())
+            .collect();
 
         let spec = KernelEmitInputs {
             kernel_name: "par_stencil_test",
-            coalesce_layout: false,            ndim: 2,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: false,
+            ndim: 2,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
-            field_writes: &[("out0".into(), "out0".into(), out0), ("out1".into(), "out1".into(), out1)],
+            field_writes: &[
+                ("out0".into(), "out0".into(), out0),
+                ("out1".into(), "out1".into(), out1),
+            ],
             coord_components: &[0, 1],
             device_preamble: &[],
             tile_spec: None,
@@ -1320,32 +1549,61 @@ mod tests {
         let mut out0_interp = vec![0.0f64; buf_len];
         let mut out1_interp = vec![0.0f64; buf_len];
         Cpu.run_kernel(
-            &g, &spec,
-            &[CpuField { data: &in_data, lo: &[0, 0], extent: &[ex, ey] }],
+            &g,
+            &spec,
+            &[CpuField {
+                data: &in_data,
+                lo: &[0, 0],
+                extent: &[ex, ey],
+            }],
             &mut [
-                CpuFieldMut { data: &mut out0_interp, lo: &[0, 0], extent: &[ex, ey] },
-                CpuFieldMut { data: &mut out1_interp, lo: &[0, 0], extent: &[ex, ey] },
+                CpuFieldMut {
+                    data: &mut out0_interp,
+                    lo: &[0, 0],
+                    extent: &[ex, ey],
+                },
+                CpuFieldMut {
+                    data: &mut out1_interp,
+                    lo: &[0, 0],
+                    extent: &[ex, ey],
+                },
             ],
-            &[], &[nx as u32, ny as u32], &[0, 0],
+            &[],
+            &[nx as u32, ny as u32],
+            &[0, 0],
         );
 
         let kernel = compile_kernel(
-            &g, &["in".into()], &[],
-            &[("out0".into(), out0), ("out1".into(), out1)], 2,
-        ).expect("jit compile_kernel (2d)");
+            &g,
+            &["in".into()],
+            &[],
+            &[("out0".into(), out0), ("out1".into(), out1)],
+            2,
+        )
+        .expect("jit compile_kernel (2d)");
 
         let mut out0_serial = vec![0.0f64; buf_len];
         let mut out1_serial = vec![0.0f64; buf_len];
         kernel.run(
-            &[nx as u32, ny as u32], &[0, 0], &[0, 0], &[ex, ey],
-            &[&in_data], &[], &mut [&mut out0_serial, &mut out1_serial],
+            &[nx as u32, ny as u32],
+            &[0, 0],
+            &[0, 0],
+            &[ex, ey],
+            &[&in_data],
+            &[],
+            &mut [&mut out0_serial, &mut out1_serial],
         );
 
         let mut out0_par = vec![0.0f64; buf_len];
         let mut out1_par = vec![0.0f64; buf_len];
         kernel.run_parallel(
-            &[nx as u32, ny as u32], &[0, 0], &[0, 0], &[ex, ey],
-            &[&in_data], &[], &mut [&mut out0_par, &mut out1_par],
+            &[nx as u32, ny as u32],
+            &[0, 0],
+            &[0, 0],
+            &[ex, ey],
+            &[&in_data],
+            &[],
+            &mut [&mut out0_par, &mut out1_par],
         );
 
         for jj in 0..ny {
@@ -1356,11 +1614,13 @@ mod tests {
                     ("out1", &out1_interp, &out1_serial, &out1_par),
                 ] {
                     assert_eq!(
-                        serial[c].to_bits(), par[c].to_bits(),
+                        serial[c].to_bits(),
+                        par[c].to_bits(),
                         "{lbl} run_parallel != run at ({ii},{jj})",
                     );
                     assert_eq!(
-                        interp[c].to_bits(), par[c].to_bits(),
+                        interp[c].to_bits(),
+                        par[c].to_bits(),
                         "{lbl} run_parallel != interp at ({ii},{jj})",
                     );
                 }
@@ -1371,13 +1631,13 @@ mod tests {
     #[test]
     fn kernel_run_parallel_ghost_offset_matches_interp() {
         // the production layout: the iteration window (interior) starts at allocated index `g`, and
-        // the buffer's `lo` is NEGATIVE (ghost cells), e.g. alo=[-2,-2], dom_lo=[0,0]. the godunov
+        // the buffer's `lo` is NEGATIVE (ghost cells), e.g., alo=[-2,-2], dom_lo=[0,0]. the godunov
         // dispatch runs exactly this (alo=[-2,-2], dlo=[0,0]). a stencil read `f[c+e]` + flat_index
         // must subtract the (negative) `lo` correctly. gated run_parallel == interp, bit-for-bit.
+        use symbi_ir::Symbol;
         use symbi_ir::backends::interp::{CpuField, CpuFieldMut};
         use symbi_ir::backends::kernel::KernelEmitInputs;
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::Symbol;
 
         // out[c] = in[c] + 2*in[c + e_x] - in[c + e_y].
         let mut g = Graph::new();
@@ -1400,12 +1660,18 @@ mod tests {
         let ext = (n as i32 + 2 * gh) as u32;
         let alo = [-gh, -gh];
         let buf_len = (ext * ext) as usize;
-        let in_data: Vec<f64> = (0..buf_len).map(|i| 0.3 + 1.7 * (i as f64 * 0.0731).fract()).collect();
+        let in_data: Vec<f64> = (0..buf_len)
+            .map(|i| 0.3 + 1.7 * (i as f64 * 0.0731).fract())
+            .collect();
 
         let spec = KernelEmitInputs {
             kernel_name: "ghost_test",
-            coalesce_layout: false,            ndim: 2,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: false,
+            ndim: 2,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &[("in".into(), "in".into())],
             scalar_params: &[],
             field_writes: &[("out".into(), "out".into(), out)],
@@ -1415,25 +1681,43 @@ mod tests {
         };
         let mut out_interp = vec![0.0f64; buf_len];
         Cpu.run_kernel(
-            &g, &spec,
-            &[CpuField { data: &in_data, lo: &alo, extent: &[ext, ext] }],
-            &mut [CpuFieldMut { data: &mut out_interp, lo: &alo, extent: &[ext, ext] }],
-            &[], &[n as u32, n as u32], &[0, 0],
+            &g,
+            &spec,
+            &[CpuField {
+                data: &in_data,
+                lo: &alo,
+                extent: &[ext, ext],
+            }],
+            &mut [CpuFieldMut {
+                data: &mut out_interp,
+                lo: &alo,
+                extent: &[ext, ext],
+            }],
+            &[],
+            &[n as u32, n as u32],
+            &[0, 0],
         );
 
         let kernel = compile_kernel(&g, &["in".into()], &[], &[("out".into(), out)], 2)
             .expect("jit compile_kernel (ghost)");
         let mut out_par = vec![0.0f64; buf_len];
         kernel.run_parallel(
-            &[n as u32, n as u32], &[0, 0], &alo, &[ext, ext],
-            &[&in_data], &[], &mut [&mut out_par],
+            &[n as u32, n as u32],
+            &[0, 0],
+            &alo,
+            &[ext, ext],
+            &[&in_data],
+            &[],
+            &mut [&mut out_par],
         );
 
         for c in 0..buf_len {
             assert_eq!(
-                out_interp[c].to_bits(), out_par[c].to_bits(),
+                out_interp[c].to_bits(),
+                out_par[c].to_bits(),
                 "ghost-offset run_parallel != interp at flat {c}: interp={} jit={}",
-                out_interp[c], out_par[c],
+                out_interp[c],
+                out_par[c],
             );
         }
     }
@@ -1449,14 +1733,14 @@ mod tests {
         // read-after-write race). dispatched via `run_parallel_raw` with `x`'s buffer aliased as
         // both an input base and the output base; `f` distinct + read-only. must equal the interp
         // run (separate buffers), bit-for-bit.
+        use symbi_ir::Symbol;
         use symbi_ir::backends::interp::{CpuField, CpuFieldMut};
         use symbi_ir::backends::kernel::KernelEmitInputs;
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::Symbol;
 
         let mut g = Graph::new();
         let x_cell = g.add_scalar_param("x", ElementTy::F64); // in-place field, own-cell read
-        let f_cell = g.add_scalar_param("f", ElementTy::F64);  // read-only field, own-cell read
+        let f_cell = g.add_scalar_param("f", ElementTy::F64); // read-only field, own-cell read
         let c0 = g.add_scalar_param("_coord_0", ElementTy::I32);
         let one = g.add_const(ConstValue::I32(1), None);
         let c0p = g.element_wise(ElementWiseOp::Add, vec![c0, one], None);
@@ -1469,14 +1753,22 @@ mod tests {
 
         let n = 48usize;
         let ext = (n + 1) as u32; // +1 so the f[c+1] neighbour read stays in bounds
-        let x0: Vec<f64> = (0..ext).map(|i| 0.5 + 1.3 * (i as f64 * 0.071).fract()).collect();
-        let f0: Vec<f64> = (0..ext).map(|i| 0.2 + 0.9 * (i as f64 * 0.053).fract()).collect();
+        let x0: Vec<f64> = (0..ext)
+            .map(|i| 0.5 + 1.3 * (i as f64 * 0.071).fract())
+            .collect();
+        let f0: Vec<f64> = (0..ext)
+            .map(|i| 0.2 + 0.9 * (i as f64 * 0.053).fract())
+            .collect();
 
         // interp: separate input (x0) and output buffers — the reference.
         let spec = KernelEmitInputs {
             kernel_name: "inplace_test",
-            coalesce_layout: false,            ndim: 1,
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            coalesce_layout: false,
+            ndim: 1,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
             field_inputs: &[("x".into(), "x".into()), ("f".into(), "f".into())],
             scalar_params: &[],
             field_writes: &[("x".into(), "x".into(), out)],
@@ -1486,13 +1778,28 @@ mod tests {
         };
         let mut out_interp = x0.clone();
         Cpu.run_kernel(
-            &g, &spec,
+            &g,
+            &spec,
             &[
-                CpuField { data: &x0, lo: &[0], extent: &[ext] },
-                CpuField { data: &f0, lo: &[0], extent: &[ext] },
+                CpuField {
+                    data: &x0,
+                    lo: &[0],
+                    extent: &[ext],
+                },
+                CpuField {
+                    data: &f0,
+                    lo: &[0],
+                    extent: &[ext],
+                },
             ],
-            &mut [CpuFieldMut { data: &mut out_interp, lo: &[0], extent: &[ext] }],
-            &[], &[n as u32], &[0],
+            &mut [CpuFieldMut {
+                data: &mut out_interp,
+                lo: &[0],
+                extent: &[ext],
+            }],
+            &[],
+            &[n as u32],
+            &[0],
         );
 
         // jit: `x`'s ONE buffer aliased as both an input base and the output base; `f` read-only.
@@ -1505,16 +1812,23 @@ mod tests {
         // `f0` is a distinct read-only buffer.
         unsafe {
             kernel.run_parallel_raw(
-                &[n as u32], &[0], &[0], &[ext],
-                &[base as *const f64, f0.as_ptr()], &[], &[base],
+                &[n as u32],
+                &[0],
+                &[0],
+                &[ext],
+                &[base as *const f64, f0.as_ptr()],
+                &[],
+                &[base],
             );
         }
 
         for c in 0..n {
             assert_eq!(
-                out_interp[c].to_bits(), buf[c].to_bits(),
+                out_interp[c].to_bits(),
+                buf[c].to_bits(),
                 "in-place run_parallel_raw != interp at cell {c}: interp={} jit={}",
-                out_interp[c], buf[c],
+                out_interp[c],
+                buf[c],
             );
         }
     }

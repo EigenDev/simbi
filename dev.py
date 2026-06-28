@@ -115,6 +115,34 @@ def _finalize_gpu_ext() -> None:
         print("warning: no cpu_ext dylib found to rename to gpu_ext", file=sys.stderr)
 
 
+def _stash_cpu_ext() -> list:
+    """move any existing cpu_ext dylib aside before a cuda build. the cuda build
+    writes to the cpu_ext filename (the crate `[lib] name`) before `_finalize_gpu_ext`
+    renames it to gpu_ext, so without this it would clobber an existing cpu backend.
+    returns a list of (stashed_path, original_path) to restore afterwards."""
+    lib_dir = Path("simbi/libs")
+    stashed = []
+    for src in lib_dir.glob("cpu_ext.*.so"):
+        bak = src.with_name(src.name + ".cpubak")
+        src.replace(bak)
+        stashed.append((bak, src))
+    return stashed
+
+
+def _restore_cpu_ext(stashed: list) -> None:
+    """put the stashed cpu_ext dylib back beside the freshly-built gpu_ext so the two
+    backends coexist. the cuda build's cpu_ext was renamed to gpu_ext, so the cpu_ext
+    filename is free again."""
+    for bak, dst in stashed:
+        if dst.exists():
+            # a cpu_ext already exists (the rename did not run, e.g., build failed before
+            # finalize); keep what is there and drop the stash.
+            bak.unlink()
+        else:
+            bak.replace(dst)
+            print(f"gpu build: preserved existing {dst.name} beside gpu_ext")
+
+
 def _require_cargo() -> None:
     if not shutil.which("cargo"):
         print(
@@ -152,9 +180,18 @@ def install_command(args) -> None:
         cmd += ["--extras", ",".join(extras)]
     print("building + installing (maturin develop, editable)...")
     start = time.time()
-    run(cmd, env=venv_env(), verbose=args.verbose)
-    if _is_gpu_build(args):
-        _finalize_gpu_ext()
+    # the cuda build writes to the cpu_ext filename before it is renamed to gpu_ext,
+    # so stash an existing cpu_ext first and restore it after. this lets the cpu and
+    # gpu extensions live side by side instead of the gpu build clobbering the cpu one.
+    gpu = _is_gpu_build(args)
+    stashed = _stash_cpu_ext() if gpu else []
+    try:
+        run(cmd, env=venv_env(), verbose=args.verbose)
+        if gpu:
+            _finalize_gpu_ext()
+    finally:
+        if gpu:
+            _restore_cpu_ext(stashed)
     print(f"done in {time.time() - start:.1f}s")
     try:
         result = subprocess.run(
@@ -237,7 +274,7 @@ def _add_build_args(p) -> None:
     p.add_argument(
         "--features",
         default="",
-        help="comma-separated cargo features (e.g. cuda)",
+        help="comma-separated cargo features (e.g., cuda)",
     )
     p.add_argument(
         "--gpu",

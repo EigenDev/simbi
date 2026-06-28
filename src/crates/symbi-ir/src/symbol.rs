@@ -2,7 +2,7 @@
 // symbol.rs
 //
 // interned identifier used for const-generic dimension names in DimExpr
-// (e.g. "D" in `Tensor<f64, D>`). interning is per the spec's §12.2
+// (e.g., "D" in `Tensor<f64, D>`). interning is per the spec's §12.2
 // decision: cheap equality, no accidental mismatch from whitespace.
 //
 // implementation: thread-local HashMap<String, Arc<str>>. each unique

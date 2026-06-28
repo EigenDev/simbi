@@ -26,7 +26,7 @@ use symbi_xpu::runtime::compute_internal_cache_key;
 #[test]
 fn same_name_distinct_content_produces_distinct_keys() {
     // **the load-bearing canary**: two different kernel sources sharing
-    // the same `name` (e.g. both call themselves "mom_source") must NOT
+    // the same `name` (e.g., both call themselves "mom_source") must NOT
     // share a cache slot.
     let name = "mom_source";
     let source_a = "extern \"C\" __global__ void mom_source(const double* p0, double* o0, unsigned n) { /* 1 input */ }";
@@ -53,7 +53,10 @@ fn identical_content_produces_identical_keys() {
     let k1 = compute_internal_cache_key(name, source.as_bytes());
     let k2 = compute_internal_cache_key(name, source.as_bytes());
 
-    assert_eq!(k1, k2, "identical content MUST produce identical cache keys");
+    assert_eq!(
+        k1, k2,
+        "identical content MUST produce identical cache keys"
+    );
 }
 
 #[test]
@@ -71,7 +74,7 @@ fn name_is_prefixed_for_diagnostics() {
 #[test]
 fn distinct_names_for_same_content_produce_distinct_keys() {
     // the user might want to RECOMPILE the same kernel under different
-    // names (e.g. for separate metric tracking). respect that — distinct
+    // names (e.g., for separate metric tracking). respect that — distinct
     // names with the same content must still produce distinct cache slots.
     // (the user can opt-in to dedup by sharing the name; the framework
     // doesn't force collapse.)
@@ -84,14 +87,17 @@ fn distinct_names_for_same_content_produce_distinct_keys() {
 #[test]
 fn very_small_content_changes_produce_different_keys() {
     // single-byte differences in source must produce different cache
-    // entries. catches near-misses (e.g. a debug `printf` vs no printf,
+    // entries. catches near-misses (e.g., a debug `printf` vs no printf,
     // or one numeric literal differing by an ULP — the latter is a real
     // physics-altering change).
     let s1 = "auto _v_0 = 1.0;";
     let s2 = "auto _v_0 = 1.1;";
     let k1 = compute_internal_cache_key("kernel", s1.as_bytes());
     let k2 = compute_internal_cache_key("kernel", s2.as_bytes());
-    assert_ne!(k1, k2, "ULP-level numeric differences must produce distinct keys");
+    assert_ne!(
+        k1, k2,
+        "ULP-level numeric differences must produce distinct keys"
+    );
 }
 
 #[test]
@@ -99,9 +105,12 @@ fn binary_content_is_hashed_same_as_source() {
     // the dispatcher uses the same content-hash helper for pre-compiled PTX
     // as for NVRTC source (`jit_kernel_keyed`). asserting the helper works on
     // arbitrary byte slices, not just text.
-    let bin_a: &[u8] = &[0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01];  // ELF magic-ish
-    let bin_b: &[u8] = &[0x7f, 0x45, 0x4c, 0x46, 0x02, 0x02];  // one byte different
+    let bin_a: &[u8] = &[0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01]; // ELF magic-ish
+    let bin_b: &[u8] = &[0x7f, 0x45, 0x4c, 0x46, 0x02, 0x02]; // one byte different
     let k_a = compute_internal_cache_key("ptx_blob", bin_a);
     let k_b = compute_internal_cache_key("ptx_blob", bin_b);
-    assert_ne!(k_a, k_b, "byte-level differences in binary must produce distinct keys");
+    assert_ne!(
+        k_a, k_b,
+        "byte-level differences in binary must produce distinct keys"
+    );
 }

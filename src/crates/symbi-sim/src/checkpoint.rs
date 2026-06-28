@@ -27,11 +27,9 @@ use symbi_hydro::eos::Eos;
 use symbi_hydro::regime::Regime;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 
-pub use symbi_io::{Attr, IoError, Metadata, Result};
 use symbi_hydro::FieldSpec;
-use symbi_io::{
-    DataRef, Dataset, Hdf5Backend, IoBackend, Tree, TreeBuf,
-};
+pub use symbi_io::{Attr, IoError, Metadata, Result};
+use symbi_io::{DataRef, Dataset, Hdf5Backend, IoBackend, Tree, TreeBuf};
 
 // =============================================================================
 // CheckpointSchedule — unchanged, owned here for historical compatibility.
@@ -40,25 +38,34 @@ use symbi_io::{
 #[derive(Clone, Debug)]
 pub struct CheckpointSchedule {
     pub next_time: f64,
-    pub interval:  f64,
-    pub dlogt:     f64,
-    pub tstart:    f64,
-    pub index:     usize,
+    pub interval: f64,
+    pub dlogt: f64,
+    pub tstart: f64,
+    pub index: usize,
 }
 
 impl CheckpointSchedule {
     pub fn linear(interval: f64) -> Self {
         CheckpointSchedule {
-            next_time: interval, interval, dlogt: 0.0, tstart: 0.0, index: 0,
+            next_time: interval,
+            interval,
+            dlogt: 0.0,
+            tstart: 0.0,
+            index: 0,
         }
     }
     pub fn logarithmic(dlogt: f64, tstart: f64) -> Self {
         CheckpointSchedule {
             next_time: tstart * 10.0_f64.powf(dlogt),
-            interval: 0.0, dlogt, tstart, index: 0,
+            interval: 0.0,
+            dlogt,
+            tstart,
+            index: 0,
         }
     }
-    pub fn should_checkpoint(&self, time: f64) -> bool { time >= self.next_time - 1e-14 }
+    pub fn should_checkpoint(&self, time: f64) -> bool {
+        time >= self.next_time - 1e-14
+    }
     pub fn advance(&mut self) {
         self.index += 1;
         if self.dlogt != 0.0 {
@@ -67,7 +74,9 @@ impl CheckpointSchedule {
             self.next_time = (self.index + 1) as f64 * self.interval;
         }
     }
-    pub fn next(&self) -> f64 { self.next_time }
+    pub fn next(&self) -> f64 {
+        self.next_time
+    }
     pub fn with_index(mut self, idx: usize) -> Self {
         self.index = idx;
         if self.dlogt != 0.0 {
@@ -105,17 +114,17 @@ struct Snapshot<const D: usize> {
     // `mesh/global_cells` ([nx3,nx2,nx1]); matches the reversed field `shape` so the
     // plot axes are not transposed (a non-square grid otherwise crashes pcolormesh).
     mesh_cells: Vec<u64>,
-    dx_phys:    Vec<f64>,
-    x_lo_phys:  Vec<f64>,
-    conserved:  Vec<(String, Vec<f64>)>,
-    primitive:  Vec<(String, Vec<f64>)>,
-    bface:      Vec<(String, Vec<f64>)>, // canonical "B1".."BD" face-centered B, MHD only
+    dx_phys: Vec<f64>,
+    x_lo_phys: Vec<f64>,
+    conserved: Vec<(String, Vec<f64>)>,
+    primitive: Vec<(String, Vec<f64>)>,
+    bface: Vec<(String, Vec<f64>)>, // canonical "B1".."BD" face-centered B, MHD only
     // per-face (start, fin) index bounds for the reader's `magnetic/Bn/domain` group.
-    bface_dom:  Vec<(Vec<i64>, Vec<i64>)>,
+    bface_dom: Vec<(Vec<i64>, Vec<i64>)>,
     // single-partition owned cell range for the `partition_0` group the frozen
     // v2.0 reader expects: start = [0; D], fin = interior cell counts.
     owned_start: Vec<i64>,
-    owned_fin:   Vec<i64>,
+    owned_fin: Vec<i64>,
 }
 
 /// visit every cell of `domain` in AXIS-0-FASTEST order (x varies fastest) — the on-disk
@@ -132,7 +141,9 @@ fn for_each_cell_axis0<const D: usize>(
         visit(coord);
         for ax in 0..D {
             coord[ax] += 1;
-            if coord[ax] < domain.spaces[ax].hi { break; }
+            if coord[ax] < domain.spaces[ax].hi {
+                break;
+            }
             coord[ax] = domain.spaces[ax].lo;
         }
     }
@@ -150,13 +161,13 @@ fn extract_field<const D: usize, Mem: MemorySpace>(
 /// drive the canonical iteration of one bucket's `FieldSpec` list. for each
 /// (FieldSpec × component-idx), the closure dispatches to the right struct
 /// member or returns `None` when the field isn't allocated for this regime
-/// (e.g. iso has no cons.nrg, non-MHD has no mhd.bcell). returns the
+/// (e.g., iso has no cons.nrg, non-MHD has no mhd.bcell). returns the
 /// `(name, data)` vec the snapshot uses. each cell-centered field is gathered
 /// over its OWN allocated domain (`field.domain()` — interior + ghosts), so the
 /// written buffer carries the halo and a restart is not truncated.
 fn collect_bucket<'a, F, const D: usize, Mem: MemorySpace>(
-    fields:    &[FieldSpec],
-    mut pick:  F,
+    fields: &[FieldSpec],
+    mut pick: F,
 ) -> Vec<(String, Vec<f64>)>
 where
     F: FnMut(&FieldSpec, usize) -> Option<&'a symbi_grid::Field<f64, D, Mem>>,
@@ -202,7 +213,10 @@ where
     // cell-centered datasets are written at this extent; the reader trims ng back.
     let alloc = sim.fields.cons.den.domain();
     let data_shape: Vec<u64> = (0..D).map(|ax| alloc.spaces[ax].size() as u64).collect();
-    let mesh_cells: Vec<u64> = (0..D).rev().map(|ax| interior.spaces[ax].size() as u64).collect();
+    let mesh_cells: Vec<u64> = (0..D)
+        .rev()
+        .map(|ax| interior.spaces[ax].size() as u64)
+        .collect();
     // homologous expansion is RADIAL: a(t) scales the radial coordinate (and, in cartesian,
     // every coordinate isotropically), but NEVER an angular one (theta/phi) — a moving spherical
     // mesh must not report theta -> a*theta. mirror the per-geometry volume jacobian (block.rs:
@@ -216,48 +230,78 @@ where
         };
         if is_length { a } else { 1.0 }
     };
-    let dx_phys:   Vec<f64>  = sim.geom.dx[..D].iter().enumerate().map(|(ax, &d)| d * axis_scale(ax)).collect();
-    let x_lo_phys: Vec<f64>  = sim.geom.x_lo[..D].iter().enumerate().map(|(ax, &x)| x * axis_scale(ax)).collect();
+    let dx_phys: Vec<f64> = sim.geom.dx[..D]
+        .iter()
+        .enumerate()
+        .map(|(ax, &d)| d * axis_scale(ax))
+        .collect();
+    let x_lo_phys: Vec<f64> = sim.geom.x_lo[..D]
+        .iter()
+        .enumerate()
+        .map(|(ax, &x)| x * axis_scale(ax))
+        .collect();
     // ----- RegimeSpec-driven conserved iteration ------
-    let conserved = collect_bucket(R::SPEC.fields, |fs, idx| {
-        match fs.name {
-            "den" => Some(&sim.fields.cons.den),
-            "mom" => Some(&sim.fields.cons.mom[idx]),
-            "nrg" => sim.fields.cons.nrg_field(),
-            "mag" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
-            other => panic!("checkpoint write: unknown conserved field '{other}'"),
-        }
+    let conserved = collect_bucket(R::SPEC.fields, |fs, idx| match fs.name {
+        "den" => Some(&sim.fields.cons.den),
+        "mom" => Some(&sim.fields.cons.mom[idx]),
+        "nrg" => sim.fields.cons.nrg_field(),
+        "mag" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
+        other => panic!("checkpoint write: unknown conserved field '{other}'"),
     });
 
     // ----- RegimeSpec-driven primitive iteration ------
-    let primitive = collect_bucket(R::SPEC.primitive_fields, |fs, idx| {
-        match fs.name {
-            "rho"   => Some(&sim.fields.prim.rho),
-            "vel"   => Some(&sim.fields.prim.vel[idx]),
-            "pre"   => sim.fields.prim.pre_field(),
-            "bcell" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
-            other => panic!("checkpoint write: unknown primitive field '{other}'"),
-        }
+    let primitive = collect_bucket(R::SPEC.primitive_fields, |fs, idx| match fs.name {
+        "rho" => Some(&sim.fields.prim.rho),
+        "vel" => Some(&sim.fields.prim.vel[idx]),
+        "pre" => sim.fields.prim.pre_field(),
+        "bcell" => sim.fields.mhd.as_ref().map(|m| &m.bcell[idx]),
+        other => panic!("checkpoint write: unknown primitive field '{other}'"),
     });
 
     // ----- face-centered B (CT ground truth) — separate group ----
     let (bface, bface_dom): (Vec<(String, Vec<f64>)>, Vec<(Vec<i64>, Vec<i64>)>) =
         if let Some(ref mhd) = sim.fields.mhd {
-            if mhd.bface_initialized.load(std::sync::atomic::Ordering::Relaxed) {
-                (0..D).map(|d| {
-                    let face_dom = interior.extend(d, 0, 1);
-                    let name = format!("B{}", d + 1);
-                    let start: Vec<i64> = (0..D).map(|ax| face_dom.spaces[ax].lo as i64).collect();
-                    let fin:   Vec<i64> = (0..D).map(|ax| face_dom.spaces[ax].hi as i64).collect();
-                    ((name, extract_field(&mhd.bface[d], &face_dom)), (start, fin))
-                }).unzip()
-            } else { (Vec::new(), Vec::new()) }
-        } else { (Vec::new(), Vec::new()) };
+            if mhd
+                .bface_initialized
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                (0..D)
+                    .map(|d| {
+                        let face_dom = interior.extend(d, 0, 1);
+                        let name = format!("B{}", d + 1);
+                        let start: Vec<i64> =
+                            (0..D).map(|ax| face_dom.spaces[ax].lo as i64).collect();
+                        let fin: Vec<i64> =
+                            (0..D).map(|ax| face_dom.spaces[ax].hi as i64).collect();
+                        (
+                            (name, extract_field(&mhd.bface[d], &face_dom)),
+                            (start, fin),
+                        )
+                    })
+                    .unzip()
+            } else {
+                (Vec::new(), Vec::new())
+            }
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
     let owned_start: Vec<i64> = vec![0; D];
-    let owned_fin:   Vec<i64> = resolution.iter().map(|&n| n as i64).collect();
+    let owned_fin: Vec<i64> = resolution.iter().map(|&n| n as i64).collect();
 
-    Snapshot { resolution, data_shape, mesh_cells, dx_phys, x_lo_phys, conserved, primitive, bface, bface_dom, owned_start, owned_fin }
+    Snapshot {
+        resolution,
+        data_shape,
+        mesh_cells,
+        dx_phys,
+        x_lo_phys,
+        conserved,
+        primitive,
+        bface,
+        bface_dom,
+        owned_start,
+        owned_fin,
+    }
 }
 
 // =============================================================================
@@ -269,7 +313,13 @@ fn regime_name<R: Regime<f64, D>, const D: usize>(r: &R) -> &'static str {
     // `has_energy() == false` marks the isothermal (IsoModel) regimes, which carry
     // no energy equation — distinguish them so the checkpoint regime is faithful.
     if r.is_mhd() {
-        if r.is_relativistic() { "rmhd" } else if r.has_energy() { "mhd" } else { "imhd" }
+        if r.is_relativistic() {
+            "rmhd"
+        } else if r.has_energy() {
+            "mhd"
+        } else {
+            "imhd"
+        }
     } else if r.is_relativistic() {
         "srhd"
     } else if r.has_energy() {
@@ -281,8 +331,8 @@ fn regime_name<R: Regime<f64, D>, const D: usize>(r: &R) -> &'static str {
 
 fn coord_name(g: symbi_geometry::Geometry) -> &'static str {
     match g {
-        symbi_geometry::Geometry::Cartesian   => "cartesian",
-        symbi_geometry::Geometry::Spherical   => "spherical",
+        symbi_geometry::Geometry::Cartesian => "cartesian",
+        symbi_geometry::Geometry::Spherical => "spherical",
         symbi_geometry::Geometry::Cylindrical => "cylindrical",
     }
 }
@@ -290,8 +340,8 @@ fn coord_name(g: symbi_geometry::Geometry) -> &'static str {
 fn timestepping_name(t: Timestepping) -> &'static str {
     match t {
         Timestepping::Euler => "euler",
-        Timestepping::Rk2   => "rk2",
-        Timestepping::Rk3   => "rk3",
+        Timestepping::Rk2 => "rk2",
+        Timestepping::Rk3 => "rk3",
     }
 }
 
@@ -299,8 +349,8 @@ fn timestepping_name(t: Timestepping) -> &'static str {
 /// hierarchy, so authored from the coarse level) + the coarse mesh datasets for
 /// single-level readers.
 fn build_metadata_group<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim:    &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    snap:   &'a Snapshot<D>,
+    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    snap: &'a Snapshot<D>,
     extras: &'a Metadata,
 ) -> Tree<'a>
 where
@@ -312,21 +362,30 @@ where
 {
     // builtins. user extras can override any name here — explicit win.
     let builtins: Vec<(&str, Attr)> = vec![
-        ("gamma",            Attr::F64(sim.physics.eos.gamma())),
-        ("cfl",              Attr::F64(sim.cfl)),
-        ("time",             Attr::F64(sim.time)),
-        ("dt",               Attr::F64(sim.dt)),
-        ("iteration",        Attr::U64(sim.iteration as u64)),
-        ("dimensions",       Attr::U64(D as u64)),
-        ("halo_radius",      Attr::U64(sim.geom.ng as u64)),
-        ("scale_factor",     Attr::F64(sim.motion.a)),
+        ("gamma", Attr::F64(sim.physics.eos.gamma())),
+        ("cfl", Attr::F64(sim.cfl)),
+        ("time", Attr::F64(sim.time)),
+        ("dt", Attr::F64(sim.dt)),
+        ("iteration", Attr::U64(sim.iteration as u64)),
+        ("dimensions", Attr::U64(D as u64)),
+        ("halo_radius", Attr::U64(sim.geom.ng as u64)),
+        ("scale_factor", Attr::F64(sim.motion.a)),
         ("scale_factor_dot", Attr::F64(sim.motion.a_dot)),
-        ("homologous",       Attr::Bool(sim.motion.homologous)),
-        ("regime",           Attr::Str(regime_name(&sim.physics.regime).into())),
-        ("is_mhd",           Attr::Bool(sim.physics.regime.is_mhd())),
-        ("is_relativistic",  Attr::Bool(sim.physics.regime.is_relativistic())),
-        ("timestepping",     Attr::Str(timestepping_name(sim.timestepping).into())),
-        ("coord_system",     Attr::Str(coord_name(sim.physics.metric.geometry()).into())),
+        ("homologous", Attr::Bool(sim.motion.homologous)),
+        ("regime", Attr::Str(regime_name(&sim.physics.regime).into())),
+        ("is_mhd", Attr::Bool(sim.physics.regime.is_mhd())),
+        (
+            "is_relativistic",
+            Attr::Bool(sim.physics.regime.is_relativistic()),
+        ),
+        (
+            "timestepping",
+            Attr::Str(timestepping_name(sim.timestepping).into()),
+        ),
+        (
+            "coord_system",
+            Attr::Str(coord_name(sim.physics.metric.geometry()).into()),
+        ),
     ];
     let mut meta = Tree::new("metadata");
     // explicit user extras WIN. start with them, then fill in any built-in
@@ -335,13 +394,19 @@ where
         meta.push_attr(k.to_string(), v.clone());
     }
     for (k, v) in builtins {
-        if extras.get(k).is_some() { continue; }
+        if extras.get(k).is_some() {
+            continue;
+        }
         meta.push_attr(k.to_string(), v);
     }
     // coarsest-level mesh info (backward compat with single-level readers).
-    meta.push_dataset(Dataset::new("resolution", vec![D], DataRef::U64(&snap.resolution)));
-    meta.push_dataset(Dataset::new("dx",         vec![D], DataRef::F64(&snap.dx_phys)));
-    meta.push_dataset(Dataset::new("x_lo",       vec![D], DataRef::F64(&snap.x_lo_phys)));
+    meta.push_dataset(Dataset::new(
+        "resolution",
+        vec![D],
+        DataRef::U64(&snap.resolution),
+    ));
+    meta.push_dataset(Dataset::new("dx", vec![D], DataRef::F64(&snap.dx_phys)));
+    meta.push_dataset(Dataset::new("x_lo", vec![D], DataRef::F64(&snap.x_lo_phys)));
     meta
 }
 
@@ -349,9 +414,9 @@ where
 /// conserved. each AMR level carries its own resolution / origin / dx, so this is
 /// authored per (sim, snap). `idx` is the refinement level (0 = coarse).
 fn build_level_group<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim:  &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     snap: &'a Snapshot<D>,
-    idx:  usize,
+    idx: usize,
 ) -> Tree<'a>
 where
     R: Regime<f64, D>,
@@ -365,8 +430,8 @@ where
     // so the mesh carries the geometry description, not the precomputed coordinate
     // arrays. symbi's own `load_checkpoint` reconstructs geometry from config, not
     // from this group, so this layout serves the reader without breaking restart.
-    let mut geometry = Tree::new("geometry")
-        .with_attr("metric", coord_name(sim.physics.metric.geometry()));
+    let mut geometry =
+        Tree::new("geometry").with_attr("metric", coord_name(sim.physics.metric.geometry()));
     // mesh metadata (global_cells + per-dim geometry) is written in STORAGE
     // (reversed) axis order so it matches the reversed field `shape` below and the
     // reader's [nx3,nx2,nx1] expectation: dim_0 is the SLOWEST-varying screen axis,
@@ -377,9 +442,8 @@ where
         // the interior lower edge — honors an AMR fine level whose interior
         // starts at a non-zero global index (start = global origin offset by
         // the interior origin), so the reader rebuilds cell centers correctly.
-        let start = snap.x_lo_phys[ax]
-            + sim.geom.interior.spaces[ax].lo as f64 * snap.dx_phys[ax];
-        let end   = start + snap.dx_phys[ax] * snap.resolution[ax] as f64;
+        let start = snap.x_lo_phys[ax] + sim.geom.interior.spaces[ax].lo as f64 * snap.dx_phys[ax];
+        let end = start + snap.dx_phys[ax] * snap.resolution[ax] as f64;
         geometry.push_group(
             Tree::new(format!("dim_{slot}"))
                 .with_attr("start", start)
@@ -391,7 +455,11 @@ where
     }
     let mesh = Tree::new("mesh")
         .with_attr("halo_width", sim.geom.ng as u64)
-        .with_dataset(Dataset::new("global_cells", vec![D], DataRef::U64(&snap.mesh_cells)))
+        .with_dataset(Dataset::new(
+            "global_cells",
+            vec![D],
+            DataRef::U64(&snap.mesh_cells),
+        ))
         .with_group(geometry);
 
     // declare shape in REVERSED axis order so it matches the on-disk layout
@@ -400,14 +468,19 @@ where
     // horizontal screen axis. for 2D OT: shape = [Ny, Nx]; for 3D: [Nz, Ny, Nx].
     // cell datasets carry the PADDED extent (interior + 2*ng); the reader trims
     // `halo_width` per side back to the interior `global_cells` for plotting.
-    let shape: Vec<usize> = (0..D).rev()
+    let shape: Vec<usize> = (0..D)
+        .rev()
         .map(|ax| snap.data_shape[ax] as usize)
         .collect();
 
     // ---- partition_0/hydro/primitives (RegimeSpec-driven) ----
     let mut prim = Tree::new("primitives");
     for (name, data) in &snap.primitive {
-        prim.push_dataset(Dataset::new(name.clone(), shape.clone(), DataRef::F64(data)));
+        prim.push_dataset(Dataset::new(
+            name.clone(),
+            shape.clone(),
+            DataRef::F64(data),
+        ));
     }
     let mut hydro = Tree::new("hydro").with_group(prim);
 
@@ -418,13 +491,14 @@ where
         let mut magnetic = Tree::new("magnetic");
         for (face_ax, (name, data)) in snap.bface.iter().enumerate() {
             let face_dom = interior.extend(face_ax, 0, 1);
-            let face_shape: Vec<usize> = (0..D).rev()
+            let face_shape: Vec<usize> = (0..D)
+                .rev()
                 .map(|ax| face_dom.spaces[ax].size() as usize)
                 .collect();
             let (start, fin) = &snap.bface_dom[face_ax];
             let domain = Tree::new("domain")
                 .with_dataset(Dataset::new("start", vec![D], DataRef::I64(start)))
-                .with_dataset(Dataset::new("fin",   vec![D], DataRef::I64(fin)));
+                .with_dataset(Dataset::new("fin", vec![D], DataRef::I64(fin)));
             magnetic.push_group(
                 Tree::new(name.clone())
                     .with_group(domain)
@@ -435,14 +509,26 @@ where
     }
 
     let partition_0 = Tree::new("partition_0")
-        .with_dataset(Dataset::new("owned_start", vec![D], DataRef::I64(&snap.owned_start)))
-        .with_dataset(Dataset::new("owned_fin",   vec![D], DataRef::I64(&snap.owned_fin)))
+        .with_dataset(Dataset::new(
+            "owned_start",
+            vec![D],
+            DataRef::I64(&snap.owned_start),
+        ))
+        .with_dataset(Dataset::new(
+            "owned_fin",
+            vec![D],
+            DataRef::I64(&snap.owned_fin),
+        ))
         .with_group(hydro);
 
     // ---- conserved — kept as the primary for symbi's own restart ----
     let mut cons = Tree::new("conserved");
     for (name, data) in &snap.conserved {
-        cons.push_dataset(Dataset::new(name.clone(), shape.clone(), DataRef::F64(data)));
+        cons.push_dataset(Dataset::new(
+            name.clone(),
+            shape.clone(),
+            DataRef::F64(data),
+        ));
     }
 
     Tree::new(format!("level_{idx}"))
@@ -454,8 +540,8 @@ where
 }
 
 fn build_tree<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim:   &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    snap:  &'a Snapshot<D>,
+    sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    snap: &'a Snapshot<D>,
     extras: &'a Metadata,
 ) -> Tree<'a>
 where
@@ -488,8 +574,8 @@ where
 /// write_checkpoint(&sim, "kepler_0001.h5", &extras)?;
 /// ```
 pub fn write_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim:    &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
-    path:   &str,
+    sim: &SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    path: &str,
     extras: &Metadata,
 ) -> Result<()>
 where
@@ -516,7 +602,7 @@ where
 /// ```
 pub fn write_hierarchy_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     levels: &[&SimStateGeneric<R, D, DOF, M, E, S, Mem>],
-    path:   &str,
+    path: &str,
     extras: &Metadata,
 ) -> Result<()>
 where
@@ -549,42 +635,59 @@ where
 
 #[derive(Clone, Debug)]
 pub struct CheckpointMeta {
-    pub time:        f64,
-    pub dt:          f64,
-    pub iteration:   u64,
-    pub gamma:       f64,
-    pub dimensions:  u64,
-    pub regime:      String,
+    pub time: f64,
+    pub dt: f64,
+    pub iteration: u64,
+    pub gamma: f64,
+    pub dimensions: u64,
+    pub regime: String,
     pub coord_system: String,
 }
 
 fn read_meta_from(tree: &TreeBuf) -> Result<CheckpointMeta> {
-    let m = tree.find_group("metadata")
+    let m = tree
+        .find_group("metadata")
         .ok_or_else(|| IoError::MissingPath("metadata".into()))?;
     Ok(CheckpointMeta {
-        time:         m.find_attr("time").ok_or_else(|| IoError::MissingPath("metadata/time".into()))?
-                       .as_f64("metadata/time")?,
-        dt:           m.find_attr("dt").ok_or_else(|| IoError::MissingPath("metadata/dt".into()))?
-                       .as_f64("metadata/dt")?,
-        iteration:    m.find_attr("iteration").ok_or_else(|| IoError::MissingPath("metadata/iteration".into()))?
-                       .as_u64("metadata/iteration")?,
-        gamma:        m.find_attr("gamma").ok_or_else(|| IoError::MissingPath("metadata/gamma".into()))?
-                       .as_f64("metadata/gamma")?,
-        dimensions:   m.find_attr("dimensions").ok_or_else(|| IoError::MissingPath("metadata/dimensions".into()))?
-                       .as_u64("metadata/dimensions")?,
+        time: m
+            .find_attr("time")
+            .ok_or_else(|| IoError::MissingPath("metadata/time".into()))?
+            .as_f64("metadata/time")?,
+        dt: m
+            .find_attr("dt")
+            .ok_or_else(|| IoError::MissingPath("metadata/dt".into()))?
+            .as_f64("metadata/dt")?,
+        iteration: m
+            .find_attr("iteration")
+            .ok_or_else(|| IoError::MissingPath("metadata/iteration".into()))?
+            .as_u64("metadata/iteration")?,
+        gamma: m
+            .find_attr("gamma")
+            .ok_or_else(|| IoError::MissingPath("metadata/gamma".into()))?
+            .as_f64("metadata/gamma")?,
+        dimensions: m
+            .find_attr("dimensions")
+            .ok_or_else(|| IoError::MissingPath("metadata/dimensions".into()))?
+            .as_u64("metadata/dimensions")?,
         // strings live as byte-array datasets, not as attrs (on-disk convention)
-        regime:       read_str_dataset(m, "regime").unwrap_or_else(|_| "unknown".into()),
+        regime: read_str_dataset(m, "regime").unwrap_or_else(|_| "unknown".into()),
         coord_system: read_str_dataset(m, "coord_system").unwrap_or_else(|_| "unknown".into()),
     })
 }
 
 fn read_str_dataset(tree: &TreeBuf, name: &str) -> Result<String> {
-    let ds = tree.find_dataset(name).ok_or_else(|| IoError::MissingPath(name.into()))?;
+    let ds = tree
+        .find_dataset(name)
+        .ok_or_else(|| IoError::MissingPath(name.into()))?;
     match &ds.data {
         symbi_io::DataBuf::U8(b) => Ok(String::from_utf8_lossy(b).into_owned()),
         other => Err(IoError::TypeMismatch {
-            path: name.into(), expected: "u8 (string)",
-            actual: match other { symbi_io::DataBuf::F64(_) => "f64", _ => "?" },
+            path: name.into(),
+            expected: "u8 (string)",
+            actual: match other {
+                symbi_io::DataBuf::F64(_) => "f64",
+                _ => "?",
+            },
         }),
     }
 }
@@ -598,7 +701,7 @@ pub fn read_checkpoint_meta(path: &str) -> Result<CheckpointMeta> {
 /// prim if present, and bface if present) from disk; returns the typed
 /// `CheckpointMeta` for the caller to consume time/iteration/etc.
 pub fn load_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(
-    sim:  &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     path: &str,
 ) -> Result<CheckpointMeta>
 where
@@ -610,30 +713,46 @@ where
 {
     let tree = Hdf5Backend.read(Path::new(path))?;
     let meta = read_meta_from(&tree)?;
-    sim.time      = meta.time;
-    sim.dt        = meta.dt;
+    sim.time = meta.time;
+    sim.dt = meta.dt;
     sim.iteration = meta.iteration;
 
-    let level_0 = tree.find_group("level_0")
+    let level_0 = tree
+        .find_group("level_0")
         .ok_or_else(|| IoError::MissingPath("level_0".into()))?;
     let interior = sim.geom.interior.clone();
 
     // conserved (primary — c2p will derive prims on restart). RegimeSpec-driven.
-    let cons = level_0.find_group("conserved")
+    let cons = level_0
+        .find_group("conserved")
         .ok_or_else(|| IoError::MissingPath("level_0/conserved".into()))?;
     for fs in R::SPEC.fields {
         let n = symbi_io::component_count(fs, D);
         for idx in 0..n {
             let name = symbi_io::dataset_name(fs, idx);
             match fs.name {
-                "den" => restore_field(cons, &name, &sim.fields.cons.den, sim.fields.cons.den.domain())?,
-                "mom" => restore_field(cons, &name, &sim.fields.cons.mom[idx], sim.fields.cons.mom[idx].domain())?,
-                "nrg" => if let Some(nrg) = sim.fields.cons.nrg_field() {
-                    restore_field(cons, &name, nrg, nrg.domain())?;
-                },
-                "mag" => if let Some(ref mhd) = sim.fields.mhd {
-                    restore_field(cons, &name, &mhd.bcell[idx], mhd.bcell[idx].domain())?;
-                },
+                "den" => restore_field(
+                    cons,
+                    &name,
+                    &sim.fields.cons.den,
+                    sim.fields.cons.den.domain(),
+                )?,
+                "mom" => restore_field(
+                    cons,
+                    &name,
+                    &sim.fields.cons.mom[idx],
+                    sim.fields.cons.mom[idx].domain(),
+                )?,
+                "nrg" => {
+                    if let Some(nrg) = sim.fields.cons.nrg_field() {
+                        restore_field(cons, &name, nrg, nrg.domain())?;
+                    }
+                }
+                "mag" => {
+                    if let Some(ref mhd) = sim.fields.mhd {
+                        restore_field(cons, &name, &mhd.bcell[idx], mhd.bcell[idx].domain())?;
+                    }
+                }
                 other => panic!("checkpoint read: unknown conserved field '{other}'"),
             }
         }
@@ -646,16 +765,35 @@ where
             for idx in 0..n {
                 let name = symbi_io::dataset_name(fs, idx);
                 match fs.name {
-                    "rho" => restore_field(prim, &name, &sim.fields.prim.rho, sim.fields.prim.rho.domain())?,
-                    "vel" => restore_field(prim, &name, &sim.fields.prim.vel[idx], sim.fields.prim.vel[idx].domain())?,
-                    "pre" => if let Some(pre) = sim.fields.prim.pre_field() {
-                        restore_field(prim, &name, pre, pre.domain())?;
-                    },
-                    "bcell" => if let Some(ref mhd) = sim.fields.mhd {
-                        if prim.find_dataset(&name).is_some() {
-                            restore_field(prim, &name, &mhd.bcell[idx], mhd.bcell[idx].domain())?;
+                    "rho" => restore_field(
+                        prim,
+                        &name,
+                        &sim.fields.prim.rho,
+                        sim.fields.prim.rho.domain(),
+                    )?,
+                    "vel" => restore_field(
+                        prim,
+                        &name,
+                        &sim.fields.prim.vel[idx],
+                        sim.fields.prim.vel[idx].domain(),
+                    )?,
+                    "pre" => {
+                        if let Some(pre) = sim.fields.prim.pre_field() {
+                            restore_field(prim, &name, pre, pre.domain())?;
                         }
-                    },
+                    }
+                    "bcell" => {
+                        if let Some(ref mhd) = sim.fields.mhd {
+                            if prim.find_dataset(&name).is_some() {
+                                restore_field(
+                                    prim,
+                                    &name,
+                                    &mhd.bcell[idx],
+                                    mhd.bcell[idx].domain(),
+                                )?;
+                            }
+                        }
+                    }
                     other => panic!("checkpoint read: unknown primitive field '{other}'"),
                 }
             }
@@ -674,7 +812,8 @@ where
                 }
             }
             if all_ok {
-                mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
+                mhd.bface_initialized
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }
@@ -683,21 +822,25 @@ where
 }
 
 fn restore_field<const D: usize, Mem: MemorySpace>(
-    tree:     &TreeBuf,
-    name:     &str,
-    field:    &symbi_grid::Field<f64, D, Mem>,
-    domain:   &symbi_algebra::Domain<D>,
+    tree: &TreeBuf,
+    name: &str,
+    field: &symbi_grid::Field<f64, D, Mem>,
+    domain: &symbi_algebra::Domain<D>,
 ) -> Result<()> {
-    let ds = tree.find_dataset(name)
+    let ds = tree
+        .find_dataset(name)
         .ok_or_else(|| IoError::MissingPath(name.into()))?;
-    let data = ds.data.as_f64()
-        .ok_or_else(|| IoError::TypeMismatch {
-            path: name.into(), expected: "f64", actual: "non-f64",
-        })?;
+    let data = ds.data.as_f64().ok_or_else(|| IoError::TypeMismatch {
+        path: name.into(),
+        expected: "f64",
+        actual: "non-f64",
+    })?;
     let vol = domain.volume();
     if data.len() != vol {
         return Err(IoError::ShapeMismatch {
-            path: name.into(), expected: vec![vol], actual: vec![data.len()],
+            path: name.into(),
+            expected: vec![vol],
+            actual: vec![data.len()],
         });
     }
     let view = field.view_mut();
@@ -771,7 +914,7 @@ mod tests {
         for ax in 0..3 {
             let dim = geometry.find_group(&format!("dim_{ax}")).unwrap();
             let start = dim.find_attr("start").unwrap().as_f64("start").unwrap();
-            let end   = dim.find_attr("end").unwrap().as_f64("end").unwrap();
+            let end = dim.find_attr("end").unwrap().as_f64("end").unwrap();
             let n = 4usize;
             let dx = (end - start) / n as f64;
             for ii in 0..n {
@@ -795,19 +938,40 @@ mod tests {
         // (`extract_field`) and scatter (`restore_field`) a loud failure — the bug that shipped
         // when the two walks used opposite axis orders (`0..D` vs `(0..D).rev()`).
         type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
-        let build = || Sim2::new_at(
-            Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian,
-            [0isize, 0], [5usize, 3], [0.0, 0.0], [0.2, 1.0 / 3.0], 2,
-            Boundaries::uniform(BoundaryType::Outflow), 0.4, Timestepping::Rk2, 0,
-        ).unwrap();
+        let build = || {
+            Sim2::new_at(
+                Newtonian,
+                IdealGas { gamma: 5.0 / 3.0 },
+                Cartesian,
+                [0isize, 0],
+                [5usize, 3],
+                [0.0, 0.0],
+                [0.2, 1.0 / 3.0],
+                2,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Rk2,
+                0,
+            )
+            .unwrap()
+        };
 
         let sim = build();
-        let nrg = sim.fields.cons.nrg_field().expect("Newtonian cons.nrg").clone();
+        let nrg = sim
+            .fields
+            .cons
+            .nrg_field()
+            .expect("Newtonian cons.nrg")
+            .clone();
         for c in sim.geom.interior.iter() {
             let (i, j) = (c[0] as f64, c[1] as f64);
             sim.fields.cons.den.view_mut().set(c, 1.0 + i + 100.0 * j);
-            sim.fields.cons.mom[0].view_mut().set(c, 10.0 + i + 100.0 * j);
-            sim.fields.cons.mom[1].view_mut().set(c, 20.0 + i + 100.0 * j);
+            sim.fields.cons.mom[0]
+                .view_mut()
+                .set(c, 10.0 + i + 100.0 * j);
+            sim.fields.cons.mom[1]
+                .view_mut()
+                .set(c, 20.0 + i + 100.0 * j);
             nrg.view_mut().set(c, 30.0 + i + 100.0 * j);
         }
 
@@ -822,13 +986,23 @@ mod tests {
 
         let lnrg = loaded.fields.cons.nrg_field().unwrap();
         for c in sim.geom.interior.iter() {
-            assert_eq!(*loaded.fields.cons.den.view().at(c), *sim.fields.cons.den.view().at(c),
-                "cons.den transposed/garbled at {c:?}");
+            assert_eq!(
+                *loaded.fields.cons.den.view().at(c),
+                *sim.fields.cons.den.view().at(c),
+                "cons.den transposed/garbled at {c:?}"
+            );
             for k in 0..2 {
-                assert_eq!(*loaded.fields.cons.mom[k].view().at(c), *sim.fields.cons.mom[k].view().at(c),
-                    "cons.mom_{k} transposed/garbled at {c:?}");
+                assert_eq!(
+                    *loaded.fields.cons.mom[k].view().at(c),
+                    *sim.fields.cons.mom[k].view().at(c),
+                    "cons.mom_{k} transposed/garbled at {c:?}"
+                );
             }
-            assert_eq!(*lnrg.view().at(c), *nrg.view().at(c), "cons.nrg transposed/garbled at {c:?}");
+            assert_eq!(
+                *lnrg.view().at(c),
+                *nrg.view().at(c),
+                "cons.nrg transposed/garbled at {c:?}"
+            );
         }
     }
 
@@ -842,11 +1016,23 @@ mod tests {
         // (b) every ghost cell survives the write -> load round-trip byte-for-byte.
         type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
         let ng = 2usize;
-        let build = || Sim2::new_at(
-            Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian,
-            [0isize, 0], [5usize, 3], [0.0, 0.0], [0.2, 1.0 / 3.0], ng,
-            Boundaries::uniform(BoundaryType::Outflow), 0.4, Timestepping::Rk2, 0,
-        ).unwrap();
+        let build = || {
+            Sim2::new_at(
+                Newtonian,
+                IdealGas { gamma: 5.0 / 3.0 },
+                Cartesian,
+                [0isize, 0],
+                [5usize, 3],
+                [0.0, 0.0],
+                [0.2, 1.0 / 3.0],
+                ng,
+                Boundaries::uniform(BoundaryType::Outflow),
+                0.4,
+                Timestepping::Rk2,
+                0,
+            )
+            .unwrap()
+        };
 
         let sim = build();
         // a value unique per (coord) so a misplaced or dropped ghost is a loud failure.
@@ -864,13 +1050,20 @@ mod tests {
 
         // (a) the den dataset must hold the PADDED volume (5+2*ng)x(3+2*ng), not 5x3.
         let tree = Hdf5Backend.read(std::path::Path::new(path)).unwrap();
-        let den_ds = tree.find_group("level_0").unwrap()
-            .find_group("conserved").unwrap()
-            .find_dataset("den").unwrap();
+        let den_ds = tree
+            .find_group("level_0")
+            .unwrap()
+            .find_group("conserved")
+            .unwrap()
+            .find_dataset("den")
+            .unwrap();
         let on_disk = den_ds.data.as_f64().unwrap().len();
-        assert_eq!(on_disk, alloc.volume(),
+        assert_eq!(
+            on_disk,
+            alloc.volume(),
             "den dataset holds {on_disk} cells but the allocated field has {} (interior would be 15)",
-            alloc.volume());
+            alloc.volume()
+        );
 
         // (b) every allocated cell — ESPECIALLY the ghosts outside the interior — round-trips.
         let mut loaded = build();
@@ -878,10 +1071,19 @@ mod tests {
         let interior = sim.geom.interior.clone();
         let mut ghost_checked = 0usize;
         for c in alloc.iter() {
-            assert_eq!(*loaded.fields.cons.den.view().at(c), seed(c),
-                "cons.den lost/garbled at {c:?} (ghost={})", !interior.contains(c));
-            if !interior.contains(c) { ghost_checked += 1; }
+            assert_eq!(
+                *loaded.fields.cons.den.view().at(c),
+                seed(c),
+                "cons.den lost/garbled at {c:?} (ghost={})",
+                !interior.contains(c)
+            );
+            if !interior.contains(c) {
+                ghost_checked += 1;
+            }
         }
-        assert!(ghost_checked > 0, "test seeded no ghosts — allocation has no halo");
+        assert!(
+            ghost_checked > 0,
+            "test seeded no ghosts — allocation has no halo"
+        );
     }
 }

@@ -753,7 +753,7 @@ where
         self
     }
     /// the per-axis boundary conditions. accepts `Boundaries<D>` or a bare `BoundaryType` (uniform)
-    /// via `Into`. `Boundaries::per_axis([..]).axis(..)` for non-uniform (e.g. periodic-z, outflow-r).
+    /// via `Into`. `Boundaries::per_axis([..]).axis(..)` for non-uniform (e.g., periodic-z, outflow-r).
     pub fn boundaries(mut self, bc: impl Into<Boundaries<D>>) -> Self {
         self.boundaries = bc.into();
         self
@@ -945,7 +945,7 @@ where
     }
 
     /// seed every interior cell from a closure over its (index, center-coordinate) — for index-based
-    /// ICs (e.g. kh-noise). same state routing as `set_initial`.
+    /// ICs (e.g., kh-noise). same state routing as `set_initial`.
     pub fn set_initial_indexed(
         self,
         prim_at: impl Fn([isize; D], [f64; D]) -> <R as Regime<Sc, DOF>>::Prim,
@@ -1661,7 +1661,7 @@ where
         mhd.bface_initialized.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// seed a staggered face-normal B component to a UNIFORM value (the common case — e.g. a
+    /// seed a staggered face-normal B component to a UNIFORM value (the common case — e.g., a
     /// uniform Bx / vertical B_z / toroidal B_phi threading the domain).
     pub fn seed_face(&self, d: usize, value: Sc) {
         self.seed_face_with(d, |_| value);

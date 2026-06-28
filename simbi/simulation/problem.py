@@ -81,7 +81,7 @@ def _error_hint(field: str, err: dict) -> Optional[str]:
     flag = "--" + field.replace("_", "-")
     if field == "resolution":
         return (
-            f"pass comma-separated axis sizes, e.g. `{flag} 256,256`; trailing "
+            f"pass comma-separated axis sizes, e.g., `{flag} 256,256`; trailing "
             "axes default to 1, so a 2d run needs only nx,ny"
         )
     if field == "bounds":
@@ -252,7 +252,7 @@ class SimbiProblem(BaseModel):
             cli=True,
             checkpoint_safe=True,
             description="natural time unit (code units per unit); checkpoint "
-            "names + the live display report time / time_unit. e.g. set to the "
+            "names + the live display report time / time_unit. e.g., set to the "
             "orbital period for a binary so output reads in orbits",
         ),
     ]
@@ -262,7 +262,7 @@ class SimbiProblem(BaseModel):
             "t",
             cli=True,
             checkpoint_safe=True,
-            description="label for the natural time unit (e.g. 'orbit'); 't' "
+            description="label for the natural time unit (e.g., 'orbit'); 't' "
             "means code units and is omitted from checkpoint names",
         ),
     ]
@@ -648,7 +648,7 @@ class SimbiProblem(BaseModel):
             except ValueError:
                 raise ValueError(
                     f"resolution: expected comma-separated integers "
-                    f"(e.g. 256,256), got {raw!r}"
+                    f"(e.g., 256,256), got {raw!r}"
                 ) from None
 
         # pad a SHORT resolution to the field's declared tuple arity with singleton
@@ -941,7 +941,7 @@ class SimbiProblem(BaseModel):
     def _field_is_cli(cls, field_name: str) -> bool:
         """whether a field is cli-exposed, inheriting the flag across the mro.
 
-        a core knob declared `cli=True` in a base class (e.g. `solver`,
+        a core knob declared `cli=True` in a base class (e.g., `solver`,
         `reconstruction`, `cfl_number`) stays exposed even when a subclass
         overrides the field ONLY to change its default — the common config
         pattern `solver: Annotated[Solver, ProblemParam(Solver.HLLC)]` would

@@ -83,7 +83,7 @@ X2_ALIASES = ["y", "theta", "x2", "phi"]
 X3_ALIASES = ["z", "phi", "x3"]
 
 # per-cell FLUID-STATE leaves — let a source read the local state, so the physics
-# (not just the position/time) is in the user's hands: e.g. cooling ~ rho^2,
+# (not just the position/time) is in the user's hands: e.g., cooling ~ rho^2,
 # velocity drag ~ -k*vel. these map to the rust `VARIABLE_RHO/VEL{1,2,3}/PRESSURE`
 # ops (symbi-hydro::expr_bridge lowers them to the per-cell rho / vel_k / pre reads).
 # NOTE regime validity is the user's responsibility: `pressure` on an isothermal
@@ -294,7 +294,7 @@ class Expr:
 
     def diff(self, var: "Expr") -> "Expr":
         """symbolic derivative d(self)/d(var), built into the same graph (forward chain rule with
-        memoization on shared subexpressions). `var` must be a variable() leaf (e.g. variable('t'));
+        memoization on shared subexpressions). `var` must be a variable() leaf (e.g., variable('t'));
         matching is by NAME, so every leaf of that name differentiates to 1.
 
         comparisons / mod raise (non-differentiable — they can only legitimately appear in a branch

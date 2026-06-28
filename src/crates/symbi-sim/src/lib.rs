@@ -26,3 +26,4 @@ pub mod config;
 pub mod hydro_ops;
 pub mod run_args;
 pub mod checkpoint;
+pub mod decomp;

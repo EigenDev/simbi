@@ -114,7 +114,7 @@ impl<const R: usize> Domain<R> {
     }
 
     /// return a new domain contracted by `width` on each side of every axis.
-    /// e.g. [0, 100).contract(2) -> [2, 98)
+    /// e.g., [0, 100).contract(2) -> [2, 98)
     pub fn contract(&self, width: isize) -> Domain<R> {
         Domain::new(std::array::from_fn(|a| Space {
             name: self.spaces[a].name,

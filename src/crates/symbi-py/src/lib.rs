@@ -27,20 +27,20 @@ use pyo3::types::PyDict;
 use symbi::prelude::*;
 use symbi::sim::refinement::transfer::prolong_field;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
-use symbi_algebra::Tensor;
 use symbi::symbi_grid::Field;
+use symbi_algebra::Tensor;
+use symbi_display::{ScreenGuard, SignalGuard, Table};
+use symbi_geometry::MotionState;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
-use symbi_sim::state::CtMethod;
 use symbi_hydro::mhd_state::MhdPrimG;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::state::PrimG;
-use symbi_geometry::MotionState;
+use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
 use symbi_sim::checkpoint::write_hierarchy_checkpoint;
-use symbi_display::{ScreenGuard, SignalGuard, Table};
-use symbi_ib::{Body, BodyCollection, BodyKind};
+use symbi_sim::state::CtMethod;
 
 // =============================================================================
 // parsed configuration — a plain-rust mirror of the python exec_dict. the
@@ -48,63 +48,63 @@ use symbi_ib::{Body, BodyCollection, BodyKind};
 // =============================================================================
 
 struct Config {
-    name:                String,
-    regime:              String,
-    coord_system:        String,
-    cyl_plane:           CylPlane,
-    dims:                usize,
-    n_cells:             [usize; 3],
-    x_lo:                [f64; 3],
-    dx:                  [f64; 3],
-    boundaries:          Vec<BoundaryType>,
-    cfl:                 f64,
-    gamma:               f64,
-    cs:                  f64,
-    locally_isothermal:  bool,
-    refinement_enabled:  bool,
+    name: String,
+    regime: String,
+    coord_system: String,
+    cyl_plane: CylPlane,
+    dims: usize,
+    n_cells: [usize; 3],
+    x_lo: [f64; 3],
+    dx: [f64; 3],
+    boundaries: Vec<BoundaryType>,
+    cfl: f64,
+    gamma: f64,
+    cs: f64,
+    locally_isothermal: bool,
+    refinement_enabled: bool,
     // each region is a flat [lo_0, hi_0, lo_1, hi_1, ..] bound list (2 per axis).
-    refinement_regions:  Vec<Vec<f64>>,
+    refinement_regions: Vec<Vec<f64>>,
     // homologous / translating mesh motion (linear: a_ddot = 0). a0/adot are the
     // scale-factor callables evaluated at start_time (set in run_simulation).
-    mesh_motion:         bool,
-    is_homologous:       bool,
-    scale_a0:            f64,
-    scale_adot:          f64,
-    solver:              Solver,
-    solver_name:         String,
-    ct_method:           CtMethod,
+    mesh_motion: bool,
+    is_homologous: bool,
+    scale_a0: f64,
+    scale_adot: f64,
+    solver: Solver,
+    solver_name: String,
+    ct_method: CtMethod,
     reconstruction_name: String,
-    timestepping:        Timestepping,
-    plm_theta:           f64,
-    dlogt:               f64,
-    viscosity:           f64,
-    x1_spacing:          String,
-    start_time:          f64,
+    timestepping: Timestepping,
+    plm_theta: f64,
+    dlogt: f64,
+    viscosity: f64,
+    x1_spacing: String,
+    start_time: f64,
     // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
     // start_time, which is the physical/resume clock (= checkpoint time on restart). 0 = unset ->
     // fall back to start_time (the common case where they coincide).
     checkpoint_log_anchor: f64,
-    checkpoint_index:    u64,
-    t_final:             f64,
+    checkpoint_index: u64,
+    t_final: f64,
     checkpoint_interval: f64,
-    data_dir:            String,
+    data_dir: String,
     // natural time unit for checkpoint names + display: reported time is
     // `time / time_unit`, labeled `time_unit_label` ("t" = code units).
-    time_unit:           f64,
-    time_unit_label:     String,
+    time_unit: f64,
+    time_unit_label: String,
     // immersed bodies (gravity / accretion sinks) parsed from the config's
     // `immersed_bodies` list; empty for body-free runs. dimension-agnostic raw
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
-    bodies:              Vec<BodyParams>,
+    bodies: Vec<BodyParams>,
     // a single user source expression in the rust `SourceConfig` wire format
     // (json string), or None. lowered + attached on the hydro path.
-    source_json:         Option<String>,
+    source_json: Option<String>,
     // mesh-motion scale-factor law a(t)/a_dot(t) as the `serialize_motion` wire (json), or None.
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
-    motion_json:         Option<String>,
+    motion_json: Option<String>,
     // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
     // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path for now.
-    driven_exprs:        Vec<String>,
+    driven_exprs: Vec<String>,
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
@@ -115,14 +115,14 @@ struct Config {
 /// ACCRETION=2). accretion fields are only meaningful when the ACCRETION bit
 /// is set (a black-hole sink); otherwise the body is a fixed-potential mass.
 struct BodyParams {
-    capability:       u64,
-    mass:             f64,
-    radius:           f64,
-    position:         Vec<f64>,
-    velocity:         Vec<f64>,
-    softening:        f64,
+    capability: u64,
+    mass: f64,
+    radius: f64,
+    position: Vec<f64>,
+    velocity: Vec<f64>,
+    softening: f64,
     accretion_radius: f64,
-    sink_rate:        f64,
+    sink_rate: f64,
 }
 
 // =============================================================================
@@ -130,7 +130,7 @@ struct BodyParams {
 // =============================================================================
 
 /// read a python enum field as its lowercase `.value` string; falls back to the
-/// raw value when the object is already a plain string (e.g. `regime`).
+/// raw value when the object is already a plain string (e.g., `regime`).
 fn enum_str(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<String> {
     let obj = dict
         .get_item(key)?
@@ -173,7 +173,8 @@ fn enum_str_or(dict: &Bound<'_, PyDict>, key: &str, default: &str) -> String {
         Ok(v) => v.extract().ok(),
         Err(_) => obj.extract().ok(),
     };
-    s.map(|s| s.to_lowercase()).unwrap_or_else(|| default.to_string())
+    s.map(|s| s.to_lowercase())
+        .unwrap_or_else(|| default.to_string())
 }
 
 /// read a user source-expression field (already in the rust `SourceConfig` wire
@@ -279,7 +280,9 @@ fn ct_method_from_str(s: &str) -> PyResult<CtMethod> {
     match s {
         "contact" => Ok(CtMethod::Contact),
         "uct" => Ok(CtMethod::Uct),
-        other => Err(PyValueError::new_err(format!("unknown ct_method '{other}' (contact | uct)"))),
+        other => Err(PyValueError::new_err(format!(
+            "unknown ct_method '{other}' (contact | uct)"
+        ))),
     }
 }
 
@@ -289,7 +292,9 @@ fn timestepping_from_str(s: &str) -> PyResult<Timestepping> {
         "euler" | "rk1" => Ok(Timestepping::Euler),
         "rk2" => Ok(Timestepping::Rk2),
         "rk3" => Ok(Timestepping::Rk3),
-        other => Err(PyValueError::new_err(format!("unknown timestepping '{other}'"))),
+        other => Err(PyValueError::new_err(format!(
+            "unknown timestepping '{other}'"
+        ))),
     }
 }
 
@@ -298,7 +303,9 @@ fn boundary_from_str(s: &str) -> PyResult<BoundaryType> {
         "periodic" => Ok(BoundaryType::Periodic),
         "outflow" => Ok(BoundaryType::Outflow),
         "reflecting" | "reflect" => Ok(BoundaryType::Reflect),
-        other => Err(PyValueError::new_err(format!("unsupported boundary '{other}'"))),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported boundary '{other}'"
+        ))),
     }
 }
 
@@ -326,7 +333,11 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         if let Some(b) = dict.get_item(&key)? {
             let (lo, hi): (f64, f64) = b.extract()?;
             x_lo[ii] = lo;
-            dx[ii] = if n_cells[ii] > 0 { (hi - lo) / n_cells[ii] as f64 } else { 1.0 };
+            dx[ii] = if n_cells[ii] > 0 {
+                (hi - lo) / n_cells[ii] as f64
+            } else {
+                1.0
+            };
         }
     }
 
@@ -337,9 +348,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     // per-face boundary-expression field names, in face order (2*axis + side): a `dynamic`
     // (DRIVEN) face reads its prescribed ghost state from the matching field.
     const BX_FIELDS: [&str; 6] = [
-        "bx1_inner_expressions", "bx1_outer_expressions",
-        "bx2_inner_expressions", "bx2_outer_expressions",
-        "bx3_inner_expressions", "bx3_outer_expressions",
+        "bx1_inner_expressions",
+        "bx1_outer_expressions",
+        "bx2_inner_expressions",
+        "bx2_outer_expressions",
+        "bx3_inner_expressions",
+        "bx3_outer_expressions",
     ];
     let mut boundaries = Vec::new();
     // driven (DYNAMIC) boundary expressions in Driven-id order; id == registration order ==
@@ -353,7 +367,10 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         };
         match s.to_lowercase().as_str() {
             "dynamic" => {
-                let field = BX_FIELDS.get(face).copied().unwrap_or("bx1_inner_expressions");
+                let field = BX_FIELDS
+                    .get(face)
+                    .copied()
+                    .unwrap_or("bx1_inner_expressions");
                 let json = get_source_json(dict, field)?.ok_or_else(|| {
                     PyValueError::new_err(format!(
                         "boundary face {face} is DYNAMIC but '{field}' is empty; \
@@ -507,12 +524,22 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
     };
     let mut out = Vec::with_capacity(list.len());
     for item in &list {
-        let Ok(b) = item.downcast::<PyDict>() else { continue };
+        let Ok(b) = item.downcast::<PyDict>() else {
+            continue;
+        };
         let f = |k: &str| -> f64 {
-            b.get_item(k).ok().flatten().and_then(|v| v.extract().ok()).unwrap_or(0.0)
+            b.get_item(k)
+                .ok()
+                .flatten()
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0)
         };
         let v = |k: &str| -> Vec<f64> {
-            b.get_item(k).ok().flatten().and_then(|x| x.extract().ok()).unwrap_or_default()
+            b.get_item(k)
+                .ok()
+                .flatten()
+                .and_then(|x| x.extract().ok())
+                .unwrap_or_default()
         };
         let capability: u64 = b
             .get_item("capability")
@@ -600,15 +627,15 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
 /// AMR startup. generic over the concrete monomorphized hierarchy the macro builds.
 fn run_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     hier: &mut Hierarchy<R, D, DOF, M, E, S, Mem, K>,
-    cfg:  &Config,
+    cfg: &Config,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    R:   Regime<f64, D>,
-    M:   Metric<f64, D> + Copy + Send + Sync,
-    E:   Eos<f64> + Send + Sync,
-    S:   ExecutionSpace,
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Send + Sync,
+    S: ExecutionSpace,
     Mem: MemorySpace + Sync,
-    K:   KernelSet<D, DOF, Mem, f64>,
+    K: KernelSet<D, DOF, Mem, f64>,
 {
     let data_dir = &cfg.data_dir;
     // the checkpoint cadence is in NATURAL units: `checkpoint_interval * time_unit`
@@ -626,10 +653,14 @@ where
     // cadence for a run spanning many decades in time (a relativistic wind from a
     // tiny inner radius out to a huge one). otherwise the cadence is LINEAR at
     // cp_interval. `cp_at(fired)` returns the (fired+1)-th scheduled checkpoint time.
-    // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g. the inner
+    // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g., the inner
     // light-crossing), NOT start_time — so the schedule is identical across a fresh run and a
     // restart whose clock resumes at the checkpoint time. unset (0) -> start_time (they coincide).
-    let cp_anchor = if cfg.checkpoint_log_anchor > 0.0 { cfg.checkpoint_log_anchor } else { cfg.start_time };
+    let cp_anchor = if cfg.checkpoint_log_anchor > 0.0 {
+        cfg.checkpoint_log_anchor
+    } else {
+        cfg.start_time
+    };
     let cp_log = cfg.dlogt > 0.0 && cp_anchor > 0.0;
     let cp_tstart = cp_anchor;
     let cp_dlogt = cfg.dlogt;
@@ -657,8 +688,7 @@ where
         // on the run's own last checkpoint. an overshoot extends the width gracefully (format! never
         // truncates: width is a MINIMUM, so 99 -> 100); only a raw `ls` sees a cosmetic seam there,
         // since every reader sorts numerically (metadata/time, viz extract_timestep).
-        let projected =
-            (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
+        let projected = (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
         ((projected.max(1.0) + 1.0).log10().ceil() as usize).max(1)
     } else {
         0
@@ -669,8 +699,10 @@ where
     // root level's clock; checkpoint writes post to the message board.
     let t_final = cfg.t_final;
     let setup = problem_setup_rows(cfg);
-    let setup_ref: Vec<[&str; 3]> =
-        setup.iter().map(|r| [r[0].as_str(), r[1].as_str(), r[2].as_str()]).collect();
+    let setup_ref: Vec<[&str; 3]> = setup
+        .iter()
+        .map(|r| [r[0].as_str(), r[1].as_str(), r[2].as_str()])
+        .collect();
     let title = if cfg.name.is_empty() {
         "SIMBI".to_string()
     } else {
@@ -728,10 +760,18 @@ where
         };
         if t0 == 0.0 || cfg.checkpoint_index == 0 {
             let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
-            let ic = checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, t0, cfg.checkpoint_index));
-            match write_hierarchy_checkpoint(&states, &ic, &checkpoint_metadata(cfg, cfg.checkpoint_index)) {
+            let ic = checkpoint_name(
+                cfg,
+                &checkpoint_tag(cfg, cp_idx_width, cp_width, t0, cfg.checkpoint_index),
+            );
+            match write_hierarchy_checkpoint(
+                &states,
+                &ic,
+                &checkpoint_metadata(cfg, cfg.checkpoint_index),
+            ) {
                 Ok(_) => table.post_success(&format!(
-                    "checkpoint {ic}  ({}, initial condition)", fmt_time_msg(cfg, t0),
+                    "checkpoint {ic}  ({}, initial condition)",
+                    fmt_time_msg(cfg, t0),
                 )),
                 Err(e) => table.post_error(&format!("initial checkpoint failed: {e:?}")),
             }
@@ -739,7 +779,10 @@ where
         if let Some(dp) = &diag_path {
             if let Some(im) = hier.levels.last().and_then(|l| l.state.immersed.as_ref()) {
                 let _ = append_diagnostics(dp, t0, &im.bodies);
-                table.post_diagnostic(&format!("diagnostics {dp}  ({}, initial)", fmt_time_msg(cfg, t0)));
+                table.post_diagnostic(&format!(
+                    "diagnostics {dp}  ({}, initial)",
+                    fmt_time_msg(cfg, t0)
+                ));
             }
         }
         set_row(&mut table, i0, t0, d0, t_final, 0.0);
@@ -758,19 +801,23 @@ where
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let restart = checkpoint_name(cfg, "interrupted");
-            let _ = write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
+            let _ =
+                write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
             let _ = write_hierarchy_checkpoint(
-                &states, &format!("{data_dir}final.h5"), &checkpoint_metadata(cfg, cp_index),
+                &states,
+                &format!("{data_dir}final.h5"),
+                &checkpoint_metadata(cfg, cp_index),
             );
             table.post_warning(&format!(
                 "interrupted ({}) at {}, step {iter} — restart checkpoint {restart}",
-                guard.signal_name(), fmt_time_msg(cfg, time),
+                guard.signal_name(),
+                fmt_time_msg(cfg, time),
             ));
             return std::ops::ControlFlow::Break(());
         }
 
         // MESSAGE BOARD cadence: checkpoints fire on the time schedule. a single
-        // large dt can cross MULTIPLE interval boundaries (e.g. a cold-medium CFL
+        // large dt can cross MULTIPLE interval boundaries (e.g., a cold-medium CFL
         // step, or a coarse cadence); write EXACTLY ONE checkpoint for the current
         // state and advance next_cp past every boundary it crossed. the skipped
         // intermediate states were never computed, and the file name is keyed by
@@ -779,9 +826,14 @@ where
         let mut dirty = false;
         if time + 1e-12 >= next_cp && next_cp.is_finite() {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let path = checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index));
+            let path = checkpoint_name(
+                cfg,
+                &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index),
+            );
             match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
-                Ok(_) => table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time))),
+                Ok(_) => {
+                    table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time)))
+                }
                 Err(e) => table.post_error(&format!("checkpoint {cp_index:04} failed: {e:?}")),
             }
             cp_index += 1;
@@ -849,7 +901,8 @@ where
         table.set_dynamic(false);
         let root = &hier.levels[0].state;
         table.post_warning(&format!(
-            "run halted at t = {:.4} after {} steps", root.time, root.iteration,
+            "run halted at t = {:.4} after {} steps",
+            root.time, root.iteration,
         ));
         table.refresh();
         return Ok(());
@@ -860,7 +913,11 @@ where
     write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))?;
     let root = &hier.levels[0].state;
     let wall = start.elapsed().as_secs_f64();
-    let avg = if wall > 1e-9 { n_zones as f64 * root.iteration as f64 / wall } else { 0.0 };
+    let avg = if wall > 1e-9 {
+        n_zones as f64 * root.iteration as f64 / wall
+    } else {
+        0.0
+    };
     // leave the alternate screen, then render ONE static final frame so the
     // completed dashboard persists on the primary buffer. post the summary
     // first so `draw_row`'s single refresh carries it.
@@ -868,7 +925,10 @@ where
     table.set_dynamic(false);
     table.post_success(&format!(
         "done — {} steps to t = {:.4} in {:.2}s (avg {} zone-cyc/s); final checkpoint {final_path}",
-        root.iteration, root.time, wall, humanize_rate(avg),
+        root.iteration,
+        root.time,
+        wall,
+        humanize_rate(avg),
     ));
     draw_row(&mut table, root.iteration, root.time, root.dt, t_final, avg);
     Ok(())
@@ -940,7 +1000,11 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     // cadence is stored in natural units; t_final in code units -> /time_unit).
     let unit = &cfg.time_unit_label;
     let custom_unit = unit != "t" && cfg.time_unit != 1.0;
-    let suffix = if custom_unit { format!(" {unit}") } else { String::new() };
+    let suffix = if custom_unit {
+        format!(" {unit}")
+    } else {
+        String::new()
+    };
     let cp = if cfg.checkpoint_interval > 0.0 {
         format!("{:.4}{suffix}", cfg.checkpoint_interval)
     } else {
@@ -951,29 +1015,59 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
         ["Regime".into(), "type".into(), cfg.regime.clone()],
         ["Regime".into(), "eos".into(), eos_label(cfg)],
         ["Geometry".into(), "coords".into(), cfg.coord_system.clone()],
-        ["Geometry".into(), "dimensions".into(), format!("{}D", cfg.dims)],
-        ["Geometry".into(), "resolution".into(), format!("{res}  ({n_zones} zones)")],
+        [
+            "Geometry".into(),
+            "dimensions".into(),
+            format!("{}D", cfg.dims),
+        ],
+        [
+            "Geometry".into(),
+            "resolution".into(),
+            format!("{res}  ({n_zones} zones)"),
+        ],
         ["Geometry".into(), "boundaries".into(), boundary_label(cfg)],
         ["Scheme".into(), "solver".into(), cfg.solver_name.clone()],
-        ["Scheme".into(), "reconstruction".into(), cfg.reconstruction_name.clone()],
-        ["Scheme".into(), "timestepping".into(), timestepping_label(cfg.timestepping)],
+        [
+            "Scheme".into(),
+            "reconstruction".into(),
+            cfg.reconstruction_name.clone(),
+        ],
+        [
+            "Scheme".into(),
+            "timestepping".into(),
+            timestepping_label(cfg.timestepping),
+        ],
         ["Scheme".into(), "cfl".into(), format!("{:.3}", cfg.cfl)],
         ["Run".into(), "t_final".into(), t_final_disp],
         ["Run".into(), "checkpoint dt".into(), cp],
-        ["Run".into(), "est. memory".into(), format!("{:.3} GB", est_memory_gb(cfg))],
+        [
+            "Run".into(),
+            "est. memory".into(),
+            format!("{:.3} GB", est_memory_gb(cfg)),
+        ],
         ["Run".into(), "output".into(), cfg.data_dir.clone()],
     ];
     // for PLM (2nd-order) runs, name the slope limiter (from plm_theta) under the reconstruction
     // row. pcm (1st order) has no limiter, so the row is omitted there.
     if cfg.reconstruction_name == "plm" {
         if let Some(i) = rows.iter().position(|r| r[1] == "reconstruction") {
-            rows.insert(i + 1, ["Scheme".into(), "limiter".into(), limiter_label(cfg.plm_theta)]);
+            rows.insert(
+                i + 1,
+                [
+                    "Scheme".into(),
+                    "limiter".into(),
+                    limiter_label(cfg.plm_theta),
+                ],
+            );
         }
     }
     // document the time unit only when it is not plain code units.
     if custom_unit {
-        rows.push(["Run".into(), "time unit".into(),
-            format!("1 {unit} = {:.4} code", cfg.time_unit)]);
+        rows.push([
+            "Run".into(),
+            "time unit".into(),
+            format!("1 {unit} = {:.4} code", cfg.time_unit),
+        ]);
     }
     rows
 }
@@ -991,7 +1085,7 @@ fn eos_label(cfg: &Config) -> String {
     }
 }
 
-/// per-axis boundary tags joined for display (e.g. "reflecting | outflow").
+/// per-axis boundary tags joined for display (e.g., "reflecting | outflow").
 fn boundary_label(cfg: &Config) -> String {
     if cfg.boundaries.is_empty() {
         "—".to_string()
@@ -1064,7 +1158,7 @@ fn refinement_regions_nd<const D: usize>(
 }
 
 /// the effective slope-limiter theta passed to the substrate. PLM uses the
-/// config `plm_theta` (default 1.5, theta-MC limiter); PCM — i.e. first-order /
+/// config `plm_theta` (default 1.5, theta-MC limiter); PCM — i.e., first-order /
 /// `order=1` — maps to theta = 0, which collapses minmod3 to a zero slope, so
 /// the reconstruction degenerates to piecewise-constant. the substrate has no
 /// separate PCM kernel; this IS how first-order space is selected.
@@ -1084,11 +1178,23 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
     const ACCRETION: u64 = 2;
     let mut coll = BodyCollection::new();
     for (idx, b) in params.iter().enumerate() {
-        let pos = Tensor::new(std::array::from_fn(|ax| b.position.get(ax).copied().unwrap_or(0.0)));
-        let vel = Tensor::new(std::array::from_fn(|ax| b.velocity.get(ax).copied().unwrap_or(0.0)));
+        let pos = Tensor::new(std::array::from_fn(|ax| {
+            b.position.get(ax).copied().unwrap_or(0.0)
+        }));
+        let vel = Tensor::new(std::array::from_fn(|ax| {
+            b.velocity.get(ax).copied().unwrap_or(0.0)
+        }));
         let body = if b.capability & ACCRETION != 0 {
             Body::black_hole(
-                idx, pos, vel, b.mass, b.radius, b.softening, b.sink_rate, 1.0, b.accretion_radius,
+                idx,
+                pos,
+                vel,
+                b.mass,
+                b.radius,
+                b.softening,
+                b.sink_rate,
+                1.0,
+                b.accretion_radius,
             )
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
@@ -1112,7 +1218,10 @@ fn append_diagnostics<const D: usize>(
 ) -> std::io::Result<()> {
     use std::io::Write;
     let fresh = !std::path::Path::new(path).exists();
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
     if fresh {
         writeln!(
             f,
@@ -1123,18 +1232,24 @@ fn append_diagnostics<const D: usize>(
     for bb in 0..bodies.len() {
         let b = bodies.get(bb);
         let (accreted, rate) = match b.kind {
-            BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
-                (total_accreted_mass, accretion_rate)
-            }
+            BodyKind::BlackHole {
+                total_accreted_mass,
+                accretion_rate,
+                ..
+            } => (total_accreted_mass, accretion_rate),
             _ => (0.0, 0.0),
         };
         writeln!(
             f,
             "{time:.8e} {bb} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {accreted:.8e} {rate:.8e}",
-            comp(&b.position, 0), comp(&b.position, 1),
-            comp(&b.velocity, 0), comp(&b.velocity, 1),
-            comp(&b.force, 0), comp(&b.force, 1),
-            b.torque[2], b.mass,
+            comp(&b.position, 0),
+            comp(&b.position, 1),
+            comp(&b.velocity, 0),
+            comp(&b.velocity, 1),
+            comp(&b.force, 0),
+            comp(&b.force, 1),
+            b.torque[2],
+            b.mass,
         )?;
     }
     Ok(())
@@ -1215,7 +1330,10 @@ macro_rules! build_and_run_hydro {
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -1255,7 +1373,10 @@ macro_rules! build_and_run_hydro {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
         };
         let theta = build_theta(cfg);
-        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
         // attach a user source expression (force/cooling/relax/raw) when present.
         // lowered against THIS regime's spec via the source front door — the bridge
@@ -1264,20 +1385,28 @@ macro_rules! build_and_run_hydro {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <$regime_ty as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
         };
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
+            .substrate()
+            .theta(theta)
+            .with_solver(solver)
+            .expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -1287,15 +1416,51 @@ macro_rules! build_and_run_hydro {
 macro_rules! hydro_dispatch {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Spherical, Spherical),
-            (1, "cylindrical") => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Cylindrical, Cylindrical),
-            (2, "cylindrical") => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Cylindrical, Cylindrical),
-            (3, "cylindrical") => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cylindrical, Cylindrical),
+            (1, "cartesian") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Cartesian, Cartesian)
+            }
+            (2, "cartesian") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Cartesian, Cartesian)
+            }
+            (3, "cartesian") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cartesian, Cartesian)
+            }
+            (1, "spherical") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Spherical, Spherical)
+            }
+            (2, "spherical") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Spherical, Spherical)
+            }
+            (3, "spherical") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Spherical, Spherical)
+            }
+            (1, "cylindrical") => build_and_run_hydro!(
+                $cfg,
+                $prims,
+                $regime,
+                $regime_ty,
+                1,
+                Cylindrical,
+                Cylindrical
+            ),
+            (2, "cylindrical") => build_and_run_hydro!(
+                $cfg,
+                $prims,
+                $regime,
+                $regime_ty,
+                2,
+                Cylindrical,
+                Cylindrical
+            ),
+            (3, "cylindrical") => build_and_run_hydro!(
+                $cfg,
+                $prims,
+                $regime,
+                $regime_ty,
+                3,
+                Cylindrical,
+                Cylindrical
+            ),
             (d, g) => Err(format!("no dispatch arm for (dims={d}, coord={g}) yet")),
         }
     };
@@ -1330,10 +1495,16 @@ macro_rules! build_and_run_mhd {
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         if bufs.len() < 3 {
-            return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            return Err(format!(
+                "mhd needs 3 staggered b-field generators, got {}",
+                bufs.len()
+            ));
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -1351,9 +1522,14 @@ macro_rules! build_and_run_mhd {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] = std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                let mag_arr: [f64; 3] =
+                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
                 MhdPrim {
-                    hydro: Prim { rho: row[0], vel: Tensor::new([row[1], row[2], row[3]]), pre: row[4] },
+                    hydro: Prim {
+                        rho: row[0],
+                        vel: Tensor::new([row[1], row[2], row[3]]),
+                        pre: row[4],
+                    },
                     mag: Tensor::new(mag_arr),
                 }
             })
@@ -1368,7 +1544,10 @@ macro_rules! build_and_run_mhd {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
         };
         let theta = build_theta(cfg);
-        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .ct_method(cfg.ct_method);
         // attach a user source expression to the MHD hydro slots (den/mom/nrg).
@@ -1377,13 +1556,18 @@ macro_rules! build_and_run_mhd {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <$regime_ty as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
@@ -1399,13 +1583,18 @@ macro_rules! build_and_run_mhd {
             let bcfg = symbi_hydro::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
             let built = symbi_hydro::expr_bridge::build_boundary_dag(
-                &bcfg, <$regime_ty as Regime<f64, $d>>::SPEC,
-            ).map_err(|e| format!("boundary expression lower: {e}"))?;
+                &bcfg,
+                <$regime_ty as Regime<f64, $d>>::SPEC,
+            )
+            .map_err(|e| format!("boundary expression lower: {e}"))?;
             sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
         }
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
+            .substrate()
+            .theta(theta)
+            .with_solver(solver)
+            .expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -1423,10 +1612,16 @@ macro_rules! build_and_run_imhd {
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         if bufs.len() < 3 {
-            return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            return Err(format!(
+                "imhd needs 3 staggered b-field generators, got {}",
+                bufs.len()
+            ));
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -1444,9 +1639,14 @@ macro_rules! build_and_run_imhd {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] = std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                let mag_arr: [f64; 3] =
+                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
                 MhdPrimG::<f64, 3, IsoModel> {
-                    hydro: PrimG { rho: row[0], vel: Tensor::new([row[1], row[2], row[3]]), pre: Default::default() },
+                    hydro: PrimG {
+                        rho: row[0],
+                        vel: Tensor::new([row[1], row[2], row[3]]),
+                        pre: Default::default(),
+                    },
                     mag: Tensor::new(mag_arr),
                 }
             })
@@ -1461,7 +1661,10 @@ macro_rules! build_and_run_imhd {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
         };
         let theta = build_theta(cfg);
-        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .ct_method(cfg.ct_method);
         // attach a user source. iso MHD has no energy -> momentum-only force/relax,
@@ -1469,20 +1672,28 @@ macro_rules! build_and_run_imhd {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <IsothermalMhd as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
         };
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
+            .substrate()
+            .theta(theta)
+            .with_solver(solver)
+            .expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -1493,15 +1704,54 @@ macro_rules! build_and_run_imhd {
 macro_rules! mhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 3, Spherical, Spherical),
-            (1, "cylindrical") => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 1, Cylindrical, Cylindrical),
-            (2, "cylindrical") => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 2, Cylindrical, Cylindrical),
-            (3, "cylindrical") => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 3, Cylindrical, Cylindrical),
+            (1, "cartesian") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian
+            ),
+            (2, "cartesian") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2, Cartesian, Cartesian
+            ),
+            (3, "cartesian") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 3, Cartesian, Cartesian
+            ),
+            (1, "spherical") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 1, Spherical, Spherical
+            ),
+            (2, "spherical") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2, Spherical, Spherical
+            ),
+            (3, "spherical") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 3, Spherical, Spherical
+            ),
+            (1, "cylindrical") => build_and_run_mhd!(
+                $cfg,
+                $prims,
+                $bufs,
+                $regime,
+                $regime_ty,
+                1,
+                Cylindrical,
+                Cylindrical
+            ),
+            (2, "cylindrical") => build_and_run_mhd!(
+                $cfg,
+                $prims,
+                $bufs,
+                $regime,
+                $regime_ty,
+                2,
+                Cylindrical,
+                Cylindrical
+            ),
+            (3, "cylindrical") => build_and_run_mhd!(
+                $cfg,
+                $prims,
+                $bufs,
+                $regime,
+                $regime_ty,
+                3,
+                Cylindrical,
+                Cylindrical
+            ),
             (d, g) => Err(format!("no mhd dispatch arm for (dims={d}, coord={g}) yet")),
         }
     };
@@ -1512,16 +1762,24 @@ macro_rules! mhd_dispatch {
 macro_rules! imhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_imhd!($cfg, $prims, $bufs, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_imhd!($cfg, $prims, $bufs, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_imhd!($cfg, $prims, $bufs, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_imhd!($cfg, $prims, $bufs, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_imhd!($cfg, $prims, $bufs, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_imhd!($cfg, $prims, $bufs, 3, Spherical, Spherical),
-            (1, "cylindrical") => build_and_run_imhd!($cfg, $prims, $bufs, 1, Cylindrical, Cylindrical),
-            (2, "cylindrical") => build_and_run_imhd!($cfg, $prims, $bufs, 2, Cylindrical, Cylindrical),
-            (3, "cylindrical") => build_and_run_imhd!($cfg, $prims, $bufs, 3, Cylindrical, Cylindrical),
-            (d, g) => Err(format!("no imhd dispatch arm for (dims={d}, coord={g}) yet")),
+            (1, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 1, Cartesian, Cartesian),
+            (2, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 2, Cartesian, Cartesian),
+            (3, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 3, Cartesian, Cartesian),
+            (1, "spherical") => build_and_run_imhd!($cfg, $prims, $bufs, 1, Spherical, Spherical),
+            (2, "spherical") => build_and_run_imhd!($cfg, $prims, $bufs, 2, Spherical, Spherical),
+            (3, "spherical") => build_and_run_imhd!($cfg, $prims, $bufs, 3, Spherical, Spherical),
+            (1, "cylindrical") => {
+                build_and_run_imhd!($cfg, $prims, $bufs, 1, Cylindrical, Cylindrical)
+            }
+            (2, "cylindrical") => {
+                build_and_run_imhd!($cfg, $prims, $bufs, 2, Cylindrical, Cylindrical)
+            }
+            (3, "cylindrical") => {
+                build_and_run_imhd!($cfg, $prims, $bufs, 3, Cylindrical, Cylindrical)
+            }
+            (d, g) => Err(format!(
+                "no imhd dispatch arm for (dims={d}, coord={g}) yet"
+            )),
         }
     };
 }
@@ -1545,15 +1803,28 @@ macro_rules! build_and_run_iso {
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         // locally isothermal carries an extra per-cell pressure component.
-        let want = if cfg.locally_isothermal { $d + 2 } else { $d + 1 };
+        let want = if cfg.locally_isothermal {
+            $d + 2
+        } else {
+            $d + 1
+        };
         if let Some(row) = prims.first() {
             if row.len() < want {
                 return Err(format!(
                     "isothermal prim row has {} components, expected {want} (rho, v1..v{}{})",
-                    row.len(), $d, if cfg.locally_isothermal { ", p_local" } else { "" },
+                    row.len(),
+                    $d,
+                    if cfg.locally_isothermal {
+                        ", p_local"
+                    } else {
+                        ""
+                    },
                 ));
             }
         }
@@ -1596,13 +1867,18 @@ macro_rules! build_and_run_iso {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
@@ -1618,7 +1894,9 @@ macro_rules! build_and_run_iso {
                 pre_ic.view_mut().set(coord, prims[lin][1 + $d]);
                 for ax in 0..$d {
                     coord[ax] += 1;
-                    if coord[ax] < interior.spaces[ax].hi { break; }
+                    if coord[ax] < interior.spaces[ax].hi {
+                        break;
+                    }
                     coord[ax] = interior.spaces[ax].lo;
                 }
             }
@@ -1638,8 +1916,14 @@ macro_rules! build_and_run_iso {
                 let region = hi[0].state.geom.interior.clone();
                 let zero = Field::zeros(&lo[ll - 1].state.geom.allocated)
                     .map_err(|e| format!("cs2 prolong alloc: {e:?}"))?;
-                prolong_field(&lo[ll - 1].kernels.cs2, &zero, &hi[0].kernels.cs2,
-                              &region, order, 0.0);
+                prolong_field(
+                    &lo[ll - 1].kernels.cs2,
+                    &zero,
+                    &hi[0].kernels.cs2,
+                    &region,
+                    order,
+                    0.0,
+                );
             }
         }
 
@@ -1652,16 +1936,18 @@ macro_rules! build_and_run_iso {
 macro_rules! iso_dispatch {
     ($cfg:expr, $prims:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_iso!($cfg, $prims, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_iso!($cfg, $prims, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_iso!($cfg, $prims, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_iso!($cfg, $prims, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_iso!($cfg, $prims, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_iso!($cfg, $prims, 3, Spherical, Spherical),
+            (1, "cartesian") => build_and_run_iso!($cfg, $prims, 1, Cartesian, Cartesian),
+            (2, "cartesian") => build_and_run_iso!($cfg, $prims, 2, Cartesian, Cartesian),
+            (3, "cartesian") => build_and_run_iso!($cfg, $prims, 3, Cartesian, Cartesian),
+            (1, "spherical") => build_and_run_iso!($cfg, $prims, 1, Spherical, Spherical),
+            (2, "spherical") => build_and_run_iso!($cfg, $prims, 2, Spherical, Spherical),
+            (3, "spherical") => build_and_run_iso!($cfg, $prims, 3, Spherical, Spherical),
             (1, "cylindrical") => build_and_run_iso!($cfg, $prims, 1, Cylindrical, Cylindrical),
             (2, "cylindrical") => build_and_run_iso!($cfg, $prims, 2, Cylindrical, Cylindrical),
             (3, "cylindrical") => build_and_run_iso!($cfg, $prims, 3, Cylindrical, Cylindrical),
-            (d, g) => Err(format!("no isothermal dispatch arm for (dims={d}, coord={g}) yet")),
+            (d, g) => Err(format!(
+                "no isothermal dispatch arm for (dims={d}, coord={g}) yet"
+            )),
         }
     };
 }
@@ -1677,7 +1963,8 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         && !(cfg.dims == 3 && cfg.coord_system == "cartesian")
     {
         return Err("mhd refinement requires a 3d cartesian grid (the CT \
-                    reflux assumes 1/dx curl coefficients)".to_string());
+                    reflux assumes 1/dx curl coefficients)"
+            .to_string());
     }
     // mesh motion is single-grid uniform-spacing hydro only in this pass.
     if cfg.mesh_motion {
@@ -1685,23 +1972,26 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             return Err("mesh motion is single-grid only (not wired with refinement)".to_string());
         }
         if cfg.regime.contains("mhd") {
-            return Err("mesh motion is not wired for MHD (comoving-field convention pending)".to_string());
+            return Err(
+                "mesh motion is not wired for MHD (comoving-field convention pending)".to_string(),
+            );
         }
     }
     // immersed bodies attach to level 0; the AMR body sync (finest-owns-bodies)
     // is not wired through the binding yet, so refined body runs are rejected.
     if !cfg.bodies.is_empty() && cfg.refinement_enabled {
         return Err("immersed bodies are single-grid only in the binding \
-                    (AMR body sync not wired yet)".to_string());
+                    (AMR body sync not wired yet)"
+            .to_string());
     }
     match cfg.regime.as_str() {
-        "newtonian"  => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
-        "srhd"       => hydro_dispatch!(cfg, prims, Srhd, Srhd),
+        "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
+        "srhd" => hydro_dispatch!(cfg, prims, Srhd, Srhd),
         "isothermal" => iso_dispatch!(cfg, prims),
-        "srmhd"      => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
-        "nmhd"       => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),
-        "imhd"       => imhd_dispatch!(cfg, prims, bfields),
-        other        => Err(format!("regime '{other}' not wired yet")),
+        "srmhd" => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
+        "nmhd" => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),
+        "imhd" => imhd_dispatch!(cfg, prims, bfields),
+        other => Err(format!("regime '{other}' not wired yet")),
     }
 }
 
@@ -1775,7 +2065,11 @@ fn format_sim_time(value: f64, int_width: usize) -> String {
 /// (`00042`) instead, because the fixed-decimal time collides at small times. either way the
 /// exact physical time is preserved in metadata/time (the source of truth for all readers).
 fn checkpoint_tag(
-    cfg: &Config, idx_width: usize, time_width: usize, time: f64, index: u64,
+    cfg: &Config,
+    idx_width: usize,
+    time_width: usize,
+    time: f64,
+    index: u64,
 ) -> String {
     if idx_width > 0 {
         format!("{index:0idx_width$}")
@@ -1787,7 +2081,7 @@ fn checkpoint_tag(
 /// the full checkpoint path: `<dir><zones>.chkpt.<tnow>[.<unit>].h5`. `tnow` is
 /// either a formatted time or a status word (interrupted / crashed). the unit
 /// segment is appended only for a non-default time unit, so ordinary runs keep
-/// the terse `<zones>.chkpt.<time>.h5` form (e.g. `262144.chkpt.000_500.h5`).
+/// the terse `<zones>.chkpt.<time>.h5` form (e.g., `262144.chkpt.000_500.h5`).
 fn checkpoint_name(cfg: &Config, tnow: &str) -> String {
     let label = sanitize_unit_label(&cfg.time_unit_label);
     let unit = if label.is_empty() || label == "t" {
@@ -1795,12 +2089,16 @@ fn checkpoint_name(cfg: &Config, tnow: &str) -> String {
     } else {
         format!(".{label}")
     };
-    format!("{}{}.chkpt.{tnow}{unit}.h5", cfg.data_dir, resolution_tag(cfg))
+    format!(
+        "{}{}.chkpt.{tnow}{unit}.h5",
+        cfg.data_dir,
+        resolution_tag(cfg)
+    )
 }
 
 /// the per-axis resolution tag for a checkpoint name: the interior cell counts
 /// joined by `x` (the standard resolution notation, distinct from the `_`
-/// decimal in the time). e.g. 1d 100 -> "100", 2d 256x256 -> "256x256",
+/// decimal in the time). e.g., 1d 100 -> "100", 2d 256x256 -> "256x256",
 /// 3d 64x64x64 -> "64x64x64".
 fn resolution_tag(cfg: &Config) -> String {
     (0..cfg.dims)
@@ -1814,7 +2112,10 @@ fn resolution_tag(cfg: &Config) -> String {
 /// all become valid path components). the RAW label is still used verbatim in
 /// the live display, messages, and checkpoint metadata.
 fn sanitize_unit_label(label: &str) -> String {
-    label.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect()
+    label
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
 }
 
 /// the natural-unit time string for a checkpoint message: "t = 1.0000" in code

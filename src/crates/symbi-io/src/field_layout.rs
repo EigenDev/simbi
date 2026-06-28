@@ -18,7 +18,7 @@ use symbi_hydro::{FieldKind, FieldSpec};
 /// the canonical on-disk dataset name for one COMPONENT of one FieldSpec.
 /// - `Scalar`           → `fs.name` ("den", "nrg", "rho", ...)
 /// - `DimVector`        → `m1..mD` for momentum, `v1..vD` for velocity, ...
-/// - `FixedVector { n }`→ `b1..bn`  (e.g. magnetic, always 3-component)
+/// - `FixedVector { n }`→ `b1..bn`  (e.g., magnetic, always 3-component)
 ///
 /// the (NAME → SUFFIX) mapping is the canonical on-disk convention — existing
 /// checkpoint files + every `scripts/plot_*.py` read identical paths.
@@ -39,8 +39,8 @@ fn short_prefix(field_name: &str) -> &'static str {
         "mom" => "m",
         "vel" => "v",
         "mag" => "b",
-        "bcell" => "b",      // primitive cell-centered B
-        "bface" => "B",      // face-centered B (CT ground truth)
+        "bcell" => "b", // primitive cell-centered B
+        "bface" => "B", // face-centered B (CT ground truth)
         // unknown — fall back to the field name itself (least surprising for
         // a future regime).
         other => Box::leak(other.to_string().into_boxed_str()),
@@ -58,8 +58,9 @@ pub fn component_count(fs: &FieldSpec, ndim: usize) -> usize {
 
 /// produce every (component-index, dataset-name) pair for one FieldSpec at
 /// dimension `D`. for `mom @ D=3` returns `[(0, "m1"), (1, "m2"), (2, "m3")]`.
-pub fn iter_components<'a>(fs: &'a FieldSpec, ndim: usize)
-    -> impl Iterator<Item = (usize, String)> + 'a
-{
+pub fn iter_components<'a>(
+    fs: &'a FieldSpec,
+    ndim: usize,
+) -> impl Iterator<Item = (usize, String)> + 'a {
     (0..component_count(fs, ndim)).map(move |k| (k, dataset_name(fs, k)))
 }

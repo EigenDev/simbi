@@ -33,28 +33,26 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, Space};
-use symbi_hydro::regime::Regime;
-use symbi_hydro::eos::Eos;
 use symbi_geometry::Metric;
+use symbi_hydro::eos::Eos;
+use symbi_hydro::regime::Regime;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 
 use symbi_grid::Field;
 
-use symbi_sim::state::{
-    array_field_zeros, axis_name, Boundaries, BoundaryType, PrimFieldsGeneric, SimStateGeneric,
-};
-use symbi_sim::driver::{
-    check_dt_or_panic, evolve_bodies, prof, stage_tag, stage_time_fractions,
-};
-use symbi_sim::substrate_seam::KernelSet;
-use symbi_sim::hydro_ops::scan_c2p_errors;
 use super::emf_register::EmfRegister;
 use super::flux_register::FluxRegister;
 use super::transfer::{
-    bcell_from_bface_region, bface_cf_halo_slabs, cf_ghost_slabs, copy_field,
+    ProlongOrder, bcell_from_bface_region, bface_cf_halo_slabs, cf_ghost_slabs, copy_field,
     prolong_face_field, prolong_field, prolong_prims, restrict_bface, restrict_cell_field,
-    restrict_cons, ProlongOrder,
+    restrict_cons,
 };
+use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage_time_fractions};
+use symbi_sim::hydro_ops::scan_c2p_errors;
+use symbi_sim::state::{
+    Boundaries, BoundaryType, PrimFieldsGeneric, SimStateGeneric, array_field_zeros, axis_name,
+};
+use symbi_sim::substrate_seam::KernelSet;
 
 /// the refinement ratio. fixed at 2 (the transfer kernels are baked at 2 in
 /// the aot registry; the builders accept any ratio when that changes).
@@ -143,7 +141,7 @@ where
     /// prolongation at the hierarchy's `prolong_order` (= interior reconstruction
     /// order + 1, the same order the coarse-fine ghost prolongation uses). the IC
     /// fill for a hierarchy whose coarse level was seeded but whose fine levels are
-    /// still empty — a coarse-only IC, e.g. a python-driven `prim_gen`. each
+    /// still empty — a coarse-only IC, e.g., a python-driven `prim_gen`. each
     /// conserved component is prolonged coarse -> fine interior; the fine levels
     /// then refine the solution as they evolve.
     ///
@@ -181,7 +179,14 @@ where
                 for dd in 0..NDIM {
                     let face_region = fine.geom.interior.extend(dd, 0, 1);
                     let zero_face = Field::<f64, NDIM, Mem>::zeros(cm.bface[dd].domain())?;
-                    prolong_face_field(dd, &cm.bface[dd], &zero_face, &fm.bface[dd], &face_region, 0.0);
+                    prolong_face_field(
+                        dd,
+                        &cm.bface[dd],
+                        &zero_face,
+                        &fm.bface[dd],
+                        &face_region,
+                        0.0,
+                    );
                 }
                 fm.bface_initialized
                     .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -192,10 +197,7 @@ where
 
     /// a 1-level hierarchy: the degenerate case that must reproduce evolve()
     /// bit-for-bit.
-    pub fn single(
-        state: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>,
-        kernels: K,
-    ) -> Self {
+    pub fn single(state: SimStateGeneric<R, NDIM, DOF, M, E, S, Mem>, kernels: K) -> Self {
         Hierarchy {
             levels: vec![LevelData {
                 state,
@@ -237,7 +239,10 @@ where
         for region in regions {
             let parent = &levels.last().unwrap().state;
             if parent.fields.mhd.is_some() {
-                assert!(NDIM == 3, "mhd refinement: the staggered CT substrate is 3d-only");
+                assert!(
+                    NDIM == 3,
+                    "mhd refinement: the staggered CT substrate is 3d-only"
+                );
                 assert!(
                     parent.geom.coords == symbi_geometry::Geometry::Cartesian,
                     "mhd refinement: cartesian only (the emf-reflux curl coefficients are 1/dx)"
@@ -328,7 +333,12 @@ where
             });
         }
 
-        Ok(Hierarchy { levels, prolong_order, flux_registers, emf_registers })
+        Ok(Hierarchy {
+            levels,
+            prolong_order,
+            flux_registers,
+            emf_registers,
+        })
     }
 
     /// attach an immersed body collection to every level: the FINEST level
@@ -342,7 +352,11 @@ where
     pub fn with_bodies(mut self, bodies: symbi_ib::BodyCollection<f64, NDIM>) -> Self {
         let n = self.levels.len();
         for ll in 0..n {
-            let coll = if ll + 1 == n { bodies.clone() } else { gravity_only(&bodies) };
+            let coll = if ll + 1 == n {
+                bodies.clone()
+            } else {
+                gravity_only(&bodies)
+            };
             self.levels[ll].state.attach_bodies(coll);
         }
         self.assert_sinks_inside_finest();
@@ -354,7 +368,9 @@ where
     /// accounting the refluxing protects.
     fn assert_sinks_inside_finest(&self) {
         let finest = &self.levels[self.levels.len() - 1].state;
-        let Some(im) = finest.immersed.as_ref() else { return };
+        let Some(im) = finest.immersed.as_ref() else {
+            return;
+        };
         let geom = &finest.geom;
         im.bodies.visit_accretion(|body| {
             let racc: f64 = body.accretion_radius().unwrap_or(0.0);
@@ -366,7 +382,9 @@ where
                     p - racc >= lo && p + racc <= hi,
                     "refinement: body {} sink sphere [{:.4}, {:.4}] leaves the finest level \
                      [{lo:.4}, {hi:.4}] on axis {ax}",
-                    body.idx, p - racc, p + racc
+                    body.idx,
+                    p - racc,
+                    p + racc
                 );
             }
         });
@@ -395,9 +413,10 @@ where
         // (it reproduces the single-grid evolve); only REFINED runs are forbidden.
         assert!(
             self.levels.len() == 1
-                || self.levels.iter().all(|l| {
-                    l.state.motion.a_dot == 0.0 && l.state.motion.a == 1.0
-                }),
+                || self
+                    .levels
+                    .iter()
+                    .all(|l| { l.state.motion.a_dot == 0.0 && l.state.motion.a == 1.0 }),
             "refinement: mesh motion is uni-grid only (the registers carry no scale factor)"
         );
         self.init_levels();
@@ -407,7 +426,7 @@ where
             if self.levels[0].state.iteration.saturating_sub(last_cb) >= interval {
                 last_cb = self.levels[0].state.iteration;
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
-                // a `Break` from the observer (e.g. a caught signal) stops the
+                // a `Break` from the observer (e.g., a caught signal) stops the
                 // march early; the observer has already snapshotted state for
                 // restart. drain the queue so the host read in the caller is
                 // coherent, then return.
@@ -517,7 +536,12 @@ where
         // step's cfl + stages), instead of a constant-rate extrapolation that overshoots a
         // decelerating mesh.
         let tnew = root.state.time;
-        if let Some((a, ad)) = root.state.motion_law.as_ref().map(|ml| (ml.a_at(tnew), ml.adot_at(tnew))) {
+        if let Some((a, ad)) = root
+            .state
+            .motion_law
+            .as_ref()
+            .map(|ml| (ml.a_at(tnew), ml.adot_at(tnew)))
+        {
             root.state.motion.a = a;
             root.state.motion.a_dot = ad;
         }
@@ -617,7 +641,10 @@ where
                         }
                         for dd in 0..NDIM {
                             reg.accumulate_coarse_uniform(
-                                &l.state.fields.flux, &l.state.geom.dx, dd, weights[ii] * dt,
+                                &l.state.fields.flux,
+                                &l.state.geom.dx,
+                                dd,
+                                weights[ii] * dt,
                             );
                         }
                     } else {
@@ -636,14 +663,21 @@ where
                     if uniform_cartesian(&l.state) {
                         for dd in 0..NDIM {
                             reg.accumulate_fine_uniform(
-                                &l.state.fields.flux, &l.state.geom.dx, dd, weights[ii] * dt,
+                                &l.state.fields.flux,
+                                &l.state.geom.dx,
+                                dd,
+                                weights[ii] * dt,
                             );
                         }
                     } else {
                         let geo = l.state.geom.block_geometry(l.state.physics.metric);
                         for dd in 0..NDIM {
                             reg.accumulate_fine(
-                                &l.state.fields.flux, &geo, dd, weights[ii] * dt, RATIO,
+                                &l.state.fields.flux,
+                                &geo,
+                                dd,
+                                weights[ii] * dt,
+                                RATIO,
                             );
                         }
                     }
@@ -651,8 +685,12 @@ where
             });
             let l = &self.levels[level];
             prof("efield", || l.kernels.efield(&l.state));
-            prof("godunov_stage", || l.kernels.godunov_stage(&l.state, dt, a0, ac));
-            prof("post_godunov", || l.kernels.post_godunov(&l.state, dt, stage_tag(ii, n)));
+            prof("godunov_stage", || {
+                l.kernels.godunov_stage(&l.state, dt, a0, ac)
+            });
+            prof("post_godunov", || {
+                l.kernels.post_godunov(&l.state, dt, stage_tag(ii, n))
+            });
             if additive_source {
                 prof("source_apply", || l.kernels.source_apply(&l.state, ac * dt));
             }
@@ -681,7 +719,9 @@ where
         let is_mhd = self.levels[level].state.fields.mhd.is_some();
         if has_finer && is_mhd {
             prof("refine_emf", || {
-                let reg = self.emf_registers[level].as_ref().expect("mhd pair carries an emf register");
+                let reg = self.emf_registers[level]
+                    .as_ref()
+                    .expect("mhd pair carries an emf register");
                 reg.zero();
                 let l = &self.levels[level];
                 reg.accumulate_coarse(&l.state.fields.mhd.as_ref().unwrap().efield, dt);
@@ -689,7 +729,9 @@ where
         }
         if has_coarser && is_mhd {
             prof("refine_emf", || {
-                let reg = self.emf_registers[level - 1].as_ref().expect("mhd pair carries an emf register");
+                let reg = self.emf_registers[level - 1]
+                    .as_ref()
+                    .expect("mhd pair carries an emf register");
                 let l = &self.levels[level];
                 reg.accumulate_fine(&l.state.fields.mhd.as_ref().unwrap().efield, dt);
             });
@@ -725,7 +767,10 @@ where
                     restrict_bface(&fmhd.bface, &cmhd.bface, cov);
                     let inv_dx: [f64; NDIM] =
                         std::array::from_fn(|ax| 1.0 / coarse.state.geom.dx[ax]);
-                    self.emf_registers[level].as_ref().unwrap().apply(&cmhd.bface, &inv_dx);
+                    self.emf_registers[level]
+                        .as_ref()
+                        .unwrap()
+                        .apply(&cmhd.bface, &inv_dx);
                     let shell = shell_around(cov, &coarse.state.geom.interior);
                     bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
                 }
@@ -733,7 +778,8 @@ where
             prof("refine_reflux_apply", || {
                 let l = &self.levels[level];
                 if uniform_cartesian(&l.state) {
-                    self.flux_registers[level].apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
+                    self.flux_registers[level]
+                        .apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
                 } else {
                     let geo = l.state.geom.block_geometry(l.state.physics.metric);
                     self.flux_registers[level].apply(&l.state.fields.cons, &geo);
@@ -742,7 +788,9 @@ where
             let l = &self.levels[level];
             prof("c2p", || l.kernels.c2p(&l.state));
             if has_coarser {
-                prof("refine_prolong", || self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64));
+                prof("refine_prolong", || {
+                    self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64)
+                });
             }
             let l = &self.levels[level];
             prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
@@ -808,11 +856,9 @@ where
         {
             let pmhd = parent.state.fields.mhd.as_ref().unwrap();
             for dd in 0..NDIM {
-                for slab in bface_cf_halo_slabs(
-                    &fine.state.geom.interior,
-                    &fine.state.boundaries,
-                    dd,
-                ) {
+                for slab in
+                    bface_cf_halo_slabs(&fine.state.geom.interior, &fine.state.boundaries, dd)
+                {
                     prolong_face_field(
                         dd,
                         &bface_old[dd],
@@ -849,7 +895,6 @@ fn flux_weights(stages: &[(f64, f64)]) -> Vec<f64> {
         .collect()
 }
 
-
 /// is this level on a uniform cartesian grid — the flux register's KERNEL
 /// path (cpu + gpu, constant area/volume scales)? curvilinear levels keep
 /// the per-coordinate host loops.
@@ -882,7 +927,10 @@ fn save_prim_old<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     Mem: MemorySpace,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
-    let po = lvl.prim_old.as_ref().expect("save_prim_old: prim_old allocated");
+    let po = lvl
+        .prim_old
+        .as_ref()
+        .expect("save_prim_old: prim_old allocated");
     let prim = &lvl.state.fields.prim;
 
     copy_field(&prim.rho, &po.rho);
@@ -968,7 +1016,8 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
         assert!(
             clo >= int.lo && chi <= int.hi && clo < chi,
             "refinement: coverage [{clo}, {chi}) outside parent interior [{}, {}) on axis {ax}",
-            int.lo, int.hi
+            int.lo,
+            int.hi
         );
         if clo != int.lo {
             assert!(

@@ -11,9 +11,9 @@
 //   }
 //
 // return_type:
-//   - rank-0:  the scalar element type (e.g. `f64`)
+//   - rank-0:  the scalar element type (e.g., `f64`)
 //   - rank-N:  a tuple of length = product of literal dims
-//              (e.g. `(f64, f64, f64)` for shape [3])
+//              (e.g., `(f64, f64, f64)` for shape [3])
 //
 // the R.5 kernel macro will eventually use a different emission shape
 // (writing per-component to Field<T> via SoA indices); this V1 shape
@@ -64,7 +64,9 @@ fn emit_signature(out: &mut String, f: &LoweredFn) {
     if !generics.is_empty() {
         out.push('<');
         for (i, g) in generics.iter().enumerate() {
-            if i > 0 { out.push_str(", "); }
+            if i > 0 {
+                out.push_str(", ");
+            }
             out.push_str("const ");
             out.push_str(g);
             out.push_str(": usize");
@@ -73,7 +75,9 @@ fn emit_signature(out: &mut String, f: &LoweredFn) {
     }
     out.push('(');
     for (i, p) in f.params.iter().enumerate() {
-        if i > 0 { out.push_str(", "); }
+        if i > 0 {
+            out.push_str(", ");
+        }
         out.push_str(&p.name);
         out.push_str(": ");
         emit_param_type(out, p);
@@ -107,7 +111,9 @@ fn emit_return_type(out: &mut String, f: &LoweredFn) {
     // rank > 0: a tuple of the element type repeated for each scalar.
     out.push('(');
     for i in 0..f.results.len() {
-        if i > 0 { out.push_str(", "); }
+        if i > 0 {
+            out.push_str(", ");
+        }
         out.push_str(rust_type_name(f.result_element, false));
     }
     out.push(')');
@@ -115,7 +121,11 @@ fn emit_return_type(out: &mut String, f: &LoweredFn) {
 
 pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
     match stmt {
-        ScalarStmt::Let { name, element, value } => {
+        ScalarStmt::Let {
+            name,
+            element,
+            value,
+        } => {
             out.push_str("let ");
             out.push_str(name);
             out.push_str(": ");
@@ -124,7 +134,11 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
             emit_expr(out, value, generic);
             out.push(';');
         }
-        ScalarStmt::LetMut { name, element, init } => {
+        ScalarStmt::LetMut {
+            name,
+            element,
+            init,
+        } => {
             out.push_str("let mut ");
             out.push_str(name);
             out.push_str(": ");
@@ -176,7 +190,12 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
         ScalarStmt::Break => {
             out.push_str("break;");
         }
-        ScalarStmt::Scope { name, element, body, result } => {
+        ScalarStmt::Scope {
+            name,
+            element,
+            body,
+            result,
+        } => {
             // Rust has first-class block expressions: `let name: ty = { body; result };`
             // — the inner lets die at the closing brace, only `result` survives.
             // see docs/design/23_bounded_pressure_ir.md.
@@ -192,7 +211,12 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
             emit_expr(out, result, generic);
             out.push_str(" };");
         }
-        ScalarStmt::IfElse { outs, cond, then_body, else_body } => {
+        ScalarStmt::IfElse {
+            outs,
+            cond,
+            then_body,
+            else_body,
+        } => {
             // declare the N result slots in the OUTER scope; each arm body ends
             // with `outs[j] = <arm result j>`. Rust definite-assignment accepts
             // the deferred init since BOTH arms assign every slot before any
@@ -229,7 +253,9 @@ fn emit_return(out: &mut String, f: &LoweredFn, generic: bool) {
     }
     out.push('(');
     for (i, e) in f.results.iter().enumerate() {
-        if i > 0 { out.push_str(", "); }
+        if i > 0 {
+            out.push_str(", ");
+        }
         emit_expr(out, e, generic);
     }
     out.push(')');
@@ -272,14 +298,20 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr, generic: bool) {
                 out.push_str(") as f64)");
             }
         }
-        ScalarExpr::MethodCall { receiver, method, args } => {
+        ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
             out.push('(');
             emit_expr(out, receiver, generic);
             out.push_str(").");
             out.push_str(method);
             out.push('(');
             for (i, a) in args.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
+                if i > 0 {
+                    out.push_str(", ");
+                }
                 emit_expr(out, a, generic);
             }
             out.push(')');
@@ -318,7 +350,9 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr, generic: bool) {
             out.push_str(name);
             out.push('(');
             for (i, a) in args.iter().enumerate() {
-                if i > 0 { out.push_str(", "); }
+                if i > 0 {
+                    out.push_str(", ");
+                }
                 emit_expr(out, a, generic);
             }
             out.push(')');
@@ -364,7 +398,13 @@ fn emit_float_const(out: &mut String, x: f64, generic: bool) {
 // integer/bool types are scalar-independent.
 pub(crate) fn rust_type_name(e: ElementTy, generic: bool) -> &'static str {
     match e {
-        ElementTy::F64 | ElementTy::F32 => if generic { "S" } else { "f64" },
+        ElementTy::F64 | ElementTy::F32 => {
+            if generic {
+                "S"
+            } else {
+                "f64"
+            }
+        }
         ElementTy::I32 => "i32",
         ElementTy::U32 => "u32",
         ElementTy::Bool => "bool",
@@ -377,16 +417,23 @@ pub(crate) fn rust_type_name(e: ElementTy, generic: bool) -> &'static str {
 mod tests {
     use super::*;
     use crate::{
-        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy,
-        TranscendentalOp, scalarize,
+        ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, Symbol, TensorTy, TranscendentalOp,
+        scalarize,
     };
 
-    fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
+    fn lit(n: usize) -> DimExpr {
+        DimExpr::Literal(n)
+    }
 
     /// helper: emit_cpu output must parse as syn::ItemFn.
     fn assert_parses(src: &str) {
         let parsed: Result<syn::ItemFn, _> = syn::parse_str(src);
-        assert!(parsed.is_ok(), "emit_cpu output failed to parse:\n{}\nerror: {}", src, parsed.err().unwrap());
+        assert!(
+            parsed.is_ok(),
+            "emit_cpu output failed to parse:\n{}\nerror: {}",
+            src,
+            parsed.err().unwrap()
+        );
     }
 
     #[test]
@@ -442,7 +489,9 @@ mod tests {
         let f = scalarize(&g, r, "dot3");
         let src = emit_cpu(&f);
         assert_parses(&src);
-        assert!(src.contains("pub fn dot3(a_0: f64, a_1: f64, a_2: f64, b_0: f64, b_1: f64, b_2: f64) -> f64"));
+        assert!(src.contains(
+            "pub fn dot3(a_0: f64, a_1: f64, a_2: f64, b_0: f64, b_1: f64, b_2: f64) -> f64"
+        ));
         // body contains the unrolled sum of products.
         assert!(src.contains("(a_0 * b_0)"));
         assert!(src.contains("(a_2 * b_2)"));
@@ -462,8 +511,16 @@ mod tests {
         let f = scalarize(&g, r, "scale2");
         let src = emit_cpu(&f);
         assert_parses(&src);
-        assert!(src.contains("-> (f64, f64)"), "tuple return missing: {}", src);
-        assert!(src.contains("((s * v_0), (s * v_1))"), "tuple body wrong: {}", src);
+        assert!(
+            src.contains("-> (f64, f64)"),
+            "tuple return missing: {}",
+            src
+        );
+        assert!(
+            src.contains("((s * v_0), (s * v_1))"),
+            "tuple body wrong: {}",
+            src
+        );
     }
 
     #[test]
@@ -569,16 +626,28 @@ mod tests {
         // accept the source; it should be valid Rust.
         assert_parses(&src);
         // signature: pub fn dot_d<const D: usize>(a: [f64; D], b: [f64; D]) -> f64
-        assert!(src.contains("pub fn dot_d<const D: usize>"), "signature missing: {}", src);
+        assert!(
+            src.contains("pub fn dot_d<const D: usize>"),
+            "signature missing: {}",
+            src
+        );
         assert!(src.contains("a: [f64; D]"), "{}", src);
         assert!(src.contains("b: [f64; D]"), "{}", src);
         assert!(src.contains("-> f64"));
         // body: let mut __acc_N: f64 = 0.0; for __ii_N in 0..D { __acc_N += a[ii] * b[ii]; }
-        assert!(src.contains("let mut __acc_"), "missing accumulator: {}", src);
+        assert!(
+            src.contains("let mut __acc_"),
+            "missing accumulator: {}",
+            src
+        );
         assert!(src.contains("for __ii_"), "missing for loop: {}", src);
         assert!(src.contains("a[__ii_"), "missing a[ii] indexing: {}", src);
         assert!(src.contains("b[__ii_"), "missing b[ii] indexing: {}", src);
-        assert!(src.contains("+= ("), "missing compound-assign with product: {}", src);
+        assert!(
+            src.contains("+= ("),
+            "missing compound-assign with product: {}",
+            src
+        );
     }
 
     #[test]
@@ -612,7 +681,9 @@ mod tests {
     /// form: `let <name>: <ty> = { <inner lets>; <result> };`.
     #[test]
     fn scope_emits_rust_block_expression() {
-        use crate::passes::scalarize::{LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, BinaryKind};
+        use crate::passes::scalarize::{
+            BinaryKind, LoweredFn, LoweredParam, ScalarExpr, ScalarStmt,
+        };
         let a_var = || ScalarExpr::Var("a".to_string());
         let b_var = || ScalarExpr::Var("b".to_string());
         let t1_var = || ScalarExpr::Var("__t1".to_string());
@@ -624,31 +695,19 @@ mod tests {
                 LoweredParam::scalar("a".to_string(), ElementTy::F64),
                 LoweredParam::scalar("b".to_string(), ElementTy::F64),
             ],
-            body: vec![
-                ScalarStmt::Scope {
-                    name:    "out".to_string(),
+            body: vec![ScalarStmt::Scope {
+                name: "out".to_string(),
+                element: ElementTy::F64,
+                body: vec![ScalarStmt::Let {
+                    name: "__t1".to_string(),
                     element: ElementTy::F64,
-                    body:    vec![
-                        ScalarStmt::Let {
-                            name:    "__t1".to_string(),
-                            element: ElementTy::F64,
-                            value:   ScalarExpr::BinOp(
-                                BinaryKind::Add,
-                                Box::new(a_var()),
-                                Box::new(b_var()),
-                            ),
-                        },
-                    ],
-                    result: ScalarExpr::BinOp(
-                        BinaryKind::Mul,
-                        Box::new(t1_var()),
-                        Box::new(a_var()),
-                    ),
-                },
-            ],
+                    value: ScalarExpr::BinOp(BinaryKind::Add, Box::new(a_var()), Box::new(b_var())),
+                }],
+                result: ScalarExpr::BinOp(BinaryKind::Mul, Box::new(t1_var()), Box::new(a_var())),
+            }],
             results: vec![ScalarExpr::Var("out".to_string())],
             result_element: ElementTy::F64,
-            result_shape:   vec![],
+            result_shape: vec![],
         };
 
         let src = emit_cpu(&fun);
@@ -667,7 +726,9 @@ mod tests {
     /// that the renderer is recursive and doesn't accidentally hoist.
     #[test]
     fn scope_nests_correctly() {
-        use crate::passes::scalarize::{LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, BinaryKind};
+        use crate::passes::scalarize::{
+            BinaryKind, LoweredFn, LoweredParam, ScalarExpr, ScalarStmt,
+        };
         let inner_var = || ScalarExpr::Var("inner".to_string());
         let outer_var = || ScalarExpr::Var("outer".to_string());
         let x = || ScalarExpr::Var("x".to_string());
@@ -679,49 +740,43 @@ mod tests {
         let fun = LoweredFn {
             name: "nested".to_string(),
             params: vec![LoweredParam::scalar("x".to_string(), ElementTy::F64)],
-            body: vec![
-                ScalarStmt::Scope {
-                    name:    "outer".to_string(),
+            body: vec![ScalarStmt::Scope {
+                name: "outer".to_string(),
+                element: ElementTy::F64,
+                body: vec![ScalarStmt::Scope {
+                    name: "inner".to_string(),
                     element: ElementTy::F64,
-                    body: vec![
-                        ScalarStmt::Scope {
-                            name: "inner".to_string(),
-                            element: ElementTy::F64,
-                            body: vec![
-                                ScalarStmt::Let {
-                                    name: "q".to_string(),
-                                    element: ElementTy::F64,
-                                    value: ScalarExpr::BinOp(
-                                        BinaryKind::Mul,
-                                        Box::new(x()),
-                                        Box::new(x()),
-                                    ),
-                                },
-                            ],
-                            result: ScalarExpr::BinOp(
-                                BinaryKind::Add,
-                                Box::new(ScalarExpr::Var("q".to_string())),
-                                Box::new(x()),
-                            ),
-                        },
-                    ],
+                    body: vec![ScalarStmt::Let {
+                        name: "q".to_string(),
+                        element: ElementTy::F64,
+                        value: ScalarExpr::BinOp(BinaryKind::Mul, Box::new(x()), Box::new(x())),
+                    }],
                     result: ScalarExpr::BinOp(
-                        BinaryKind::Mul,
-                        Box::new(inner_var()),
-                        Box::new(ScalarExpr::Const(ConstValue::F64(2.0))),
+                        BinaryKind::Add,
+                        Box::new(ScalarExpr::Var("q".to_string())),
+                        Box::new(x()),
                     ),
-                },
-            ],
+                }],
+                result: ScalarExpr::BinOp(
+                    BinaryKind::Mul,
+                    Box::new(inner_var()),
+                    Box::new(ScalarExpr::Const(ConstValue::F64(2.0))),
+                ),
+            }],
             results: vec![outer_var()],
             result_element: ElementTy::F64,
-            result_shape:   vec![],
+            result_shape: vec![],
         };
 
         let src = emit_cpu(&fun);
-        assert!(src.contains("let inner: f64 = {"),
-            "inner scope must render as a block expression:\n{src}");
-        assert!(src.contains("let outer: f64 = {"),
-            "outer scope must render as a block expression:\n{src}");
+        assert!(
+            src.contains("let inner: f64 = {"),
+            "inner scope must render as a block expression:\n{src}"
+        );
+        assert!(
+            src.contains("let outer: f64 = {"),
+            "outer scope must render as a block expression:\n{src}"
+        );
         // brace balance: any nested-scope kernel must still parse.
         assert_parses(&src);
     }

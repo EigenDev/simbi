@@ -164,7 +164,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
         "--norm",
         default=None,
         metavar="VALUE|max|min",
-        help="normalize each field by: a number (e.g. 5e-7), or 'max'/'min' (the field's own "
+        help="normalize each field by: a number (e.g., 5e-7), or 'max'/'min' (the field's own "
         "extremum). for M&DZ-style 'relative to max initial value', pass that number.",
     )
 

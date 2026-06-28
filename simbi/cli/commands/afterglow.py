@@ -677,7 +677,7 @@ def setup_skymap_parser(subparsers) -> None:
         nargs="+",
         type=float,
         default=None,
-        help="multiple viewing angles [deg] -> a ROW of morphology panels (e.g. 15 45 75), "
+        help="multiple viewing angles [deg] -> a ROW of morphology panels (e.g., 15 45 75), "
         "the catalog reduced once per angle",
     )
     parser.add_argument(

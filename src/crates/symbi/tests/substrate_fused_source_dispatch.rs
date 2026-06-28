@@ -51,11 +51,16 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
     // trivial seed to reach a Ready sim; the EXACT conserved literals this test asserts are
     // written raw below (the source step is applied to these gauge values, not a physical prim).
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([n]).spacing([dx])
+        .cells([n])
+        .spacing([dx])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
         .build();
 
     // uniform interior state — gauge readings the source is supposed to update.
@@ -64,7 +69,12 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
     let nrg_v = 5.0_f64;
     let g_ext_0 = -9.81_f64;
     let dt = 0.01_f64;
-    let cnrg = sim.fields.cons.nrg_field().expect("Newtonian cons.nrg").clone();
+    let cnrg = sim
+        .fields
+        .cons
+        .nrg_field()
+        .expect("Newtonian cons.nrg")
+        .clone();
     for c in sim.geom.interior.iter() {
         sim.fields.cons.den.view_mut().set(c, rho_v);
         sim.fields.cons.mom[0].view_mut().set(c, mom_v);
@@ -98,10 +108,12 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
     let mut source_scalars: HashMap<String, f64> = HashMap::new();
     source_scalars.insert("g_ext_0".to_string(), g_ext_0);
     dispatch_godunov_with_sources::<1, 1, _, _>(
-        &sim, &pre,
+        &sim,
+        &pre,
         "adiabatic",
         dt,
-        /* a0, ac = forward-Euler */ 0.0, 1.0,
+        /* a0, ac = forward-Euler */ 0.0,
+        1.0,
         "uniform_accel",
         &source_scalars,
     );
@@ -140,10 +152,10 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
     // proves the per-regime name routing — `iso_godunov_euler_with_uniform_accel_1d`
     // resolves correctly with the same fused-source plumbing.
     use symbi_algebra::Tensor;
-    use symbi_hydro::eos::Isothermal;
-    use symbi_hydro::energy::IsoModel;
-    use symbi_hydro::state::PrimG;
     use symbi_hydro::IsoNewtonian;
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::eos::Isothermal;
+    use symbi_hydro::state::PrimG;
     type IsoSim = SimState<IsoNewtonian, 1, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
 
     let n = 8usize;
@@ -151,7 +163,8 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
     let cs = 1.0_f64;
     // trivial seed to reach a Ready iso sim; the EXACT conserved literals are written raw below.
     let sim = IsoSim::build(IsoNewtonian, Isothermal { cs }, Cartesian)
-        .cells([n]).spacing([dx])
+        .cells([n])
+        .spacing([dx])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("iso sim construction failed")
@@ -184,10 +197,12 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
     let mut source_scalars: HashMap<String, f64> = HashMap::new();
     source_scalars.insert("g_ext_0".to_string(), g_ext_0);
     dispatch_godunov_with_sources::<1, 1, _, _>(
-        &sim, &pre,
+        &sim,
+        &pre,
         "iso",
         dt,
-        /* a0, ac = forward-Euler */ 0.0, 1.0,
+        /* a0, ac = forward-Euler */ 0.0,
+        1.0,
         "uniform_accel",
         &source_scalars,
     );
@@ -213,26 +228,33 @@ fn substrate_routes_to_iso_fused_uniform_accel() {
 #[should_panic(expected = "unexpected spec scalar")]
 fn missing_source_scalar_panics_loudly() {
     // **discipline**: a `source_scalars` map missing a param the AOT kernel
-    // declares (e.g. forgetting `g_ext_0` for uniform_accel) must panic at the
+    // declares (e.g., forgetting `g_ext_0` for uniform_accel) must panic at the
     // dispatch's resolver — not silently fill with 0.0 or whatever. surface
     // vocabulary mismatches up at the call site.
     let n = 8usize;
     let dx = 1.0 / n as f64;
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
-        .cells([n]).spacing([dx])
+        .cells([n])
+        .spacing([dx])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("sim construction failed")
-        .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
+        .set_initial(|_x| Prim {
+            rho: 1.0,
+            vel: Tensor::zeros(),
+            pre: 1.0,
+        })
         .build();
     let pre = sim.fields.prim.pre_field().expect("prim.pre").clone();
     // intentionally empty — missing g_ext_0 should surface as a panic.
     let source_scalars: HashMap<String, f64> = HashMap::new();
     dispatch_godunov_with_sources::<1, 1, _, _>(
-        &sim, &pre,
+        &sim,
+        &pre,
         "adiabatic",
         0.01,
-        /* a0, ac = forward-Euler */ 0.0, 1.0,
+        /* a0, ac = forward-Euler */ 0.0,
+        1.0,
         "uniform_accel",
         &source_scalars,
     );

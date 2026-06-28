@@ -9,29 +9,29 @@
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::ScalarRef;
 use symbi_grid::Field;
+use symbi_ir::ScalarRef;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::collections::HashMap;
 
-use crate::kernels::support::{cfl_from_lambda, FaceDomain};
+use crate::kernels::support::{FaceDomain, cfl_from_lambda};
 use crate::regimes::substrate_gpu::{field_max_reduce, field_reduce};
-use symbi_sim::state::FieldStore;
 use symbi_ir::emit::ReductionOp;
+use symbi_sim::state::FieldStore;
 
 use super::binding::{bind_manifest, kernel_bindings, resolve_path};
 use super::exec::dispatch_fields;
 use super::layout::geom_suffix;
 use super::params::{
-    body_scalar, geom_scalar, motion_scalar, physical_geom, resolve_body_scalars, scalars_for,
-    ScalarBind,
+    ScalarBind, body_scalar, geom_scalar, motion_scalar, physical_geom, resolve_body_scalars,
+    scalars_for,
 };
 use super::types::Solver;
 
 /// the ONE CFL dispatch every hydro regime shares: run `{prefix}_wave_speed_map{sfx}` over
-/// the per-cell wave speeds (the regime's only contribution is which map — i.e. its wave
+/// the per-cell wave speeds (the regime's only contribution is which map — i.e., its wave
 /// speed), reduce by max, form `dt = cfl / lambda_max`. the scalar tail is the SHARED
 /// `[gamma, <widths>]` (Cartesian inv_dx, else interleaved x_lo,dx — matching the kernel's
 /// cfl_inv_widths dispatch). the field buffers (rho, the per-axis velocities — for the
@@ -58,8 +58,7 @@ where
     // mesh motion: PHYSICAL geometry scalars (widths AND centroids — exact
     // identities at a = 1; expanding axes only) pair with the per-axis
     // hubble/translation rates for the in-kernel relative speed `|s - v_g|`.
-    let (x_lo_phys, dx_phys) =
-        physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
     let scalars = scalars_for(&name, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("cfl_wave_speed: unexpected spec scalar {bind:?}");
@@ -73,7 +72,16 @@ where
             ),
         }
     });
-    dispatch_named(sim, pre, Some(scratch), 0, &name, &geom.interior, &[], &scalars);
+    dispatch_named(
+        sim,
+        pre,
+        Some(scratch),
+        0,
+        &name,
+        &geom.interior,
+        &[],
+        &scalars,
+    );
     let lambda_max = field_max_reduce(scratch, &geom.interior);
     cfl_from_lambda(lambda_max, cfl_number)
 }
@@ -97,8 +105,9 @@ pub fn dispatch_named<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
 {
     let bindings = kernel_bindings(name);
-    let (inputs, outputs) =
-        bind_manifest(&bindings, |fref| resolve_path(sim, Some(pre), scratch, dir, fref));
+    let (inputs, outputs) = bind_manifest(&bindings, |fref| {
+        resolve_path(sim, Some(pre), scratch, dir, fref)
+    });
     // PER-BUFFER LAYOUT: every buffer's (lo, extent, vol) comes from its OWN `Field::domain()`
     // inside `dispatch_fields_each` — bit-identical to a shared layout for cell-centered fields
     // (where `f.domain() == sim.geom.allocated`), and the ONLY thing that lets a STAGGERED field
@@ -122,7 +131,16 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     let name = format!("body_source{sfx}_{D}d");
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
     // the kernel reads no prim.pre; pass cons.den as the (unused) pre override.
-    dispatch_named(sim, &sim.fields.cons.den, None, 0, &name, &sim.geom.interior, &[], &scalars);
+    dispatch_named(
+        sim,
+        &sim.fields.cons.den,
+        None,
+        0,
+        &name,
+        &sim.geom.interior,
+        &[],
+        &scalars,
+    );
 }
 
 /// dispatch the backward body FEEDBACK (`body_feedback_2d`): run the per-cell per-body
@@ -149,7 +167,11 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     let n_out = symbi_ib::MAX_BODIES * per_body;
 
     // inputs in the manifest field_inputs order: cons.den, mom_0.., nrg (pure reads).
-    let nrg = sim.fields.cons.nrg_field().expect("body_feedback needs cons.nrg");
+    let nrg = sim
+        .fields
+        .cons
+        .nrg_field()
+        .expect("body_feedback needs cons.nrg");
     let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
     for comp in 0..DOF {
         inputs.push(&sim.fields.cons.mom[comp]);
@@ -160,10 +182,21 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
         .map(|_| Field::<Sc, D, Mem>::zeros(&geom.allocated).expect("feedback scratch alloc"))
         .collect();
     let outputs: Vec<&Field<Sc, D, Mem>> = scratch.iter().collect();
-    dispatch_fields::<Sc, Mem, D>(&name, &geom.allocated, &geom.interior, &inputs, &outputs, &[], &scalars);
+    dispatch_fields::<Sc, Mem, D>(
+        &name,
+        &geom.allocated,
+        &geom.interior,
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
 
     // sum each scratch field over the interior -> the per-body force[ndim] / torque[3] / mass.
-    let sums: Vec<f64> = scratch.iter().map(|s| field_reduce(s, &geom.interior, ReductionOp::Add)).collect();
+    let sums: Vec<f64> = scratch
+        .iter()
+        .map(|s| field_reduce(s, &geom.interior, ReductionOp::Add))
+        .collect();
     if let Some(ref im) = sim.immersed {
         for b in 0..symbi_ib::MAX_BODIES {
             let base = b * per_body;
@@ -236,9 +269,20 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
         .map(|_| Field::<Sc, D, Mem>::zeros(&geom.allocated).expect("feedback scratch alloc"))
         .collect();
     let outputs: Vec<&Field<Sc, D, Mem>> = scratch.iter().collect();
-    dispatch_fields::<Sc, Mem, D>(&name, &geom.allocated, &geom.interior, &inputs, &outputs, &[], &scalars);
+    dispatch_fields::<Sc, Mem, D>(
+        &name,
+        &geom.allocated,
+        &geom.interior,
+        &inputs,
+        &outputs,
+        &[],
+        &scalars,
+    );
 
-    let sums: Vec<f64> = scratch.iter().map(|s| field_reduce(s, &geom.interior, ReductionOp::Add)).collect();
+    let sums: Vec<f64> = scratch
+        .iter()
+        .map(|s| field_reduce(s, &geom.interior, ReductionOp::Add))
+        .collect();
     if let Some(ref im) = sim.immersed {
         for b in 0..symbi_ib::MAX_BODIES {
             let base = b * per_body;
@@ -295,10 +339,14 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
             ScalarBind::Ref(sref) => motion_scalar(&sim.motion, geom.coords, D, *sref)
                 .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, *sref))
                 .unwrap_or_else(|| {
-                    panic!("dispatch_godunov_with_body_source: unexpected scalar {sref:?} for '{name}'")
+                    panic!(
+                        "dispatch_godunov_with_body_source: unexpected scalar {sref:?} for '{name}'"
+                    )
                 }),
             ScalarBind::Spec(s) => {
-                panic!("dispatch_godunov_with_body_source: unexpected spec scalar '{s}' for '{name}'")
+                panic!(
+                    "dispatch_godunov_with_body_source: unexpected spec scalar '{s}' for '{name}'"
+                )
             }
         };
         Sc::from_f64(v)
@@ -327,7 +375,11 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // the flux is geometry-independent EXCEPT for the axis-role velocity layout (DOF>NDIM):
     // cartesian + spherical share the unsuffixed flux; the cyl-axisymmetric flux is its own
     // (ncomp=3, normal vel = vel[axes[dir]]), so it carries the coord suffix iff DOF != NDIM.
-    let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+    let geom_sfx = if DOF != D {
+        geom_suffix(sim.geom.coords, DOF, D)
+    } else {
+        ""
+    };
     let solver_sfx = solver.kernel_suffix();
     let name = format!("{prefix}_face_flux{solver_sfx}{geom_sfx}_{D}d_{dir}");
     // scalars BY NAME: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
@@ -401,8 +453,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // mesh motion: the divergence + the curvilinear geometric source run over
     // PHYSICAL geometry (expanding axes scaled by a), and mesh_hdil carries
     // the physical volume-growth rate; all exact identities on a static mesh.
-    let (x_lo_phys, dx_phys) =
-        physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
     let scalars = scalars_for(&name, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("dispatch_godunov: unexpected spec scalar {bind:?}");
@@ -454,16 +505,33 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
             // lazily-declared centroid params (x_lo_k, dx_k).
             ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, *sref)
                 .map(Sc::from_f64)
-                .unwrap_or_else(|| panic!("dispatch_source_apply: unexpected scalar {sref:?} for kernel '{name}'")),
+                .unwrap_or_else(|| {
+                    panic!("dispatch_source_apply: unexpected scalar {sref:?} for kernel '{name}'")
+                }),
             // open spec scalars (gm, xm_k, g_ext_k, ...) — the spec's string-keyed map.
-            ScalarBind::Spec(s) => binding.scalars.get(&**s)
+            ScalarBind::Spec(s) => binding
+                .scalars
+                .get(&**s)
                 .map(|v| Sc::from_f64(*v))
-                .unwrap_or_else(|| panic!("dispatch_source_apply: unexpected spec scalar '{s}' for kernel '{name}'")),
+                .unwrap_or_else(|| {
+                    panic!(
+                        "dispatch_source_apply: unexpected spec scalar '{s}' for kernel '{name}'"
+                    )
+                }),
         }
     });
     // the source manifest reads u_stage.* + cons.* and writes cons.* in place; the
     // `pre` arg is unused by this kernel (no prim.pre binding) — pass cons.den.
-    dispatch_named(sim, &sim.fields.cons.den, None, 0, &name, &geom.interior, &[], &scalars);
+    dispatch_named(
+        sim,
+        &sim.fields.cons.den,
+        None,
+        0,
+        &name,
+        &geom.interior,
+        &[],
+        &scalars,
+    );
 }
 
 /// **B6-iv (Phase 4b) — declarative fused-source binding** for a substrate kernel-set.
@@ -472,14 +540,14 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
 /// kernel); when `None`, the unfused `dispatch_godunov` (backwards-compat default).
 ///
 /// the `source_id` slug MUST match an AOT-emitted variant from `symbi-aot/build.rs::
-/// gen_godunov_euler_fused` for this regime/ndim (e.g. `"uniform_accel"`). `scalars`
+/// gen_godunov_euler_fused` for this regime/ndim (e.g., `"uniform_accel"`). `scalars`
 /// covers every spec-declared scalar param the spec's `BuiltSource` declares
 /// (`g_ext_k`, `gm`, `xm_k`, `body_radius`, ...) — anything missing surfaces as a
 /// panic at `dispatch_godunov_with_sources`'s resolver, not silent zero-fill.
 #[derive(Clone, Debug)]
 pub struct FusedSourceBinding {
     pub source_id: String,
-    pub scalars:   HashMap<String, f64>,
+    pub scalars: HashMap<String, f64>,
 }
 
 impl FusedSourceBinding {
@@ -498,7 +566,7 @@ impl FusedSourceBinding {
     pub fn from_pair((source_id, pairs): (&'static str, Vec<(String, f64)>)) -> Self {
         Self {
             source_id: source_id.to_string(),
-            scalars:   pairs.into_iter().collect(),
+            scalars: pairs.into_iter().collect(),
         }
     }
 }
@@ -510,33 +578,33 @@ impl FusedSourceBinding {
 /// repeat per regime.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
-    sim:           &FieldStore<D, DOF, Mem, Sc>,
-    pre:           &Field<Sc, D, Mem>,
-    prefix:        &str,
-    dt:            f64,
-    a0:            f64,
-    ac:            f64,
-    fused_source:  Option<&FusedSourceBinding>,
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    prefix: &str,
+    dt: f64,
+    a0: f64,
+    ac: f64,
+    fused_source: Option<&FusedSourceBinding>,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
     match fused_source {
         None => dispatch_godunov(sim, pre, prefix, dt, a0, ac),
-        Some(b) => dispatch_godunov_with_sources(
-            sim, pre, prefix, dt, a0, ac, &b.source_id, &b.scalars,
-        ),
+        Some(b) => {
+            dispatch_godunov_with_sources(sim, pre, prefix, dt, a0, ac, &b.source_id, &b.scalars)
+        }
     }
 }
 
 /// **B6-iv (Phase 4) — fused-source godunov dispatch.** the same metadata-driven path as
 /// `dispatch_godunov`, but selects the AOT-baked FUSED kernel
 /// `{prefix}_godunov_{kind}_with_{source_id}{sfx}_{D}d` and feeds it the spec source's
-/// scalar parameters (e.g. `g_ext_0 = -9.81` for `uniform_acceleration_sources`)
+/// scalar parameters (e.g., `g_ext_0 = -9.81` for `uniform_acceleration_sources`)
 /// alongside the standard `dt` + geometry scalars.
 ///
 /// `source_id` MUST match the AOT-emitted name suffix from
-/// `symbi_aot::build.rs::gen_godunov_euler_fused` — e.g. `"uniform_accel"` for the
+/// `symbi_aot::build.rs::gen_godunov_euler_fused` — e.g., `"uniform_accel"` for the
 /// uniform_acceleration overlay family. `source_scalars` maps the spec's declared
 /// scalar params (whatever names `build_source` declared — `g_ext_k`, `gm`, `xm_k`,
 /// `body_radius`, etc.) to their per-step values. unknown / missing names panic via
@@ -552,13 +620,13 @@ pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
 /// replaces two (godunov + body_source) on the AOT-baked fused configs (B6-iii).
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
-    sim:            &FieldStore<D, DOF, Mem, Sc>,
-    pre:            &Field<Sc, D, Mem>,
-    prefix:         &str,
-    dt:             f64,
-    a0:             f64,
-    ac:             f64,
-    source_id:      &str,
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    prefix: &str,
+    dt: f64,
+    a0: f64,
+    ac: f64,
+    source_id: &str,
     source_scalars: &HashMap<String, f64>,
 ) where
     Mem: MemorySpace + Sync,
@@ -567,8 +635,7 @@ pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
     let name = format!("{prefix}_godunov_stage_with_{source_id}{sfx}_{D}d");
-    let (x_lo_phys, dx_phys) =
-        physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
     let scalars = scalars_for(&name, |bind| {
         match bind {
             ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),

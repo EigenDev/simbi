@@ -19,7 +19,7 @@
 //  let outs = splice_graph(&mut target, &source, &[rho_out, vel_out], &subst)?;
 //
 // splice walks source once per call, so multiple outputs sharing common
-// subexpressions (e.g. struct-return elementals where rho, vel, pre all
+// subexpressions (e.g., struct-return elementals where rho, vel, pre all
 // depend on inv_rho) preserve common-subexpression sharing rather than
 // duplicating intermediate ops.
 // =============================================================================

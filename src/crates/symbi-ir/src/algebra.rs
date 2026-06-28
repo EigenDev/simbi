@@ -34,7 +34,9 @@
 
 #![deny(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
 
-use std::ops::{Add, Sub, Mul, Div, Neg, AddAssign, SubAssign, MulAssign, DivAssign, BitAnd, BitOr, Not};
+use std::ops::{
+    Add, AddAssign, BitAnd, BitOr, Div, DivAssign, Mul, MulAssign, Neg, Not, Sub, SubAssign,
+};
 
 use symbi_algebra::FieldElement;
 
@@ -123,10 +125,7 @@ pub mod laws {
 // =============================================================================
 
 pub trait Mask:
-    Copy + Send + Sync + 'static
-    + BitAnd<Output = Self>
-    + BitOr <Output = Self>
-    + Not   <Output = Self>
+    Copy + Send + Sync + 'static + BitAnd<Output = Self> + BitOr<Output = Self> + Not<Output = Self>
 {
 }
 
@@ -145,16 +144,25 @@ impl Mask for bool {}
 // =============================================================================
 
 pub trait Scalar:
-    Copy + Send + Sync + 'static
+    Copy
+    + Send
+    + Sync
+    + 'static
     + Default
     + FieldElement<Scalar = Self>
     + symbi_algebra::algebra::Numeric
-    + Add<Output = Self> + Sub<Output = Self>
-    + Mul<Output = Self> + Div<Output = Self>
+    + Add<Output = Self>
+    + Sub<Output = Self>
+    + Mul<Output = Self>
+    + Div<Output = Self>
     + Neg<Output = Self>
-    + AddAssign + SubAssign + MulAssign + DivAssign
+    + AddAssign
+    + SubAssign
+    + MulAssign
+    + DivAssign
     + std::iter::Sum
-    + std::fmt::Debug + std::fmt::Display
+    + std::fmt::Debug
+    + std::fmt::Display
 {
     /// the carrier-polymorphic boolean. `bool` for `f64`; a node handle for `Gv`.
     type Mask: Mask;
@@ -177,8 +185,14 @@ pub trait Scalar:
     const NAN: Self;
 
     // ── method-form alias of `Numeric::ZERO` / `Numeric::ONE` (ergonomics) ─
-    #[inline] fn zero()         -> Self { <Self as symbi_algebra::algebra::Numeric>::ZERO }
-    #[inline] fn one()          -> Self { <Self as symbi_algebra::algebra::Numeric>::ONE  }
+    #[inline]
+    fn zero() -> Self {
+        <Self as symbi_algebra::algebra::Numeric>::ZERO
+    }
+    #[inline]
+    fn one() -> Self {
+        <Self as symbi_algebra::algebra::Numeric>::ONE
+    }
 
     /// HOST-BOUNDARY ESCAPE — NOT for carrier-generic physics.
     ///
@@ -227,7 +241,7 @@ pub trait Scalar:
     }
 
     /// clamp into `[lo, hi]` = `max(lo).min(hi)`. keeps a transcendental argument in-domain
-    /// on BOTH carrier arms before a `select` (e.g. `acos` to `[-1, 1]`, `acosh` to
+    /// on BOTH carrier arms before a `select` (e.g., `acos` to `[-1, 1]`, `acosh` to
     /// `[1, +inf)`). callers pass `lo <= hi`.
     #[inline]
     fn clamp(self, lo: Self, hi: Self) -> Self {
@@ -235,30 +249,30 @@ pub trait Scalar:
     }
 
     // ── transcendentals (total on stated domain) ──────────────────────────
-    fn sin (self) -> Self;
-    fn cos (self) -> Self;
-    fn tan (self) -> Self;
+    fn sin(self) -> Self;
+    fn cos(self) -> Self;
+    fn tan(self) -> Self;
     fn asin(self) -> Self;
     fn acos(self) -> Self;
     fn atan2(self, other: Self) -> Self;
 
-    fn exp  (self) -> Self;
-    fn ln   (self) -> Self;
+    fn exp(self) -> Self;
+    fn ln(self) -> Self;
     fn log10(self) -> Self;
 
-    fn powi(self, n: i32)  -> Self;
+    fn powi(self, n: i32) -> Self;
     fn powf(self, e: Self) -> Self;
 
     fn floor(self) -> Self;
-    fn ceil (self) -> Self;
+    fn ceil(self) -> Self;
 
     // ── hyperbolics (RMHD quartic, Cardano-Vieta hyperbolic branch) ───────
     /// total on R.
-    fn sinh (self) -> Self;
+    fn sinh(self) -> Self;
     /// total on R; grows ~e^|x|/2 (overflow above |x| ~= 710).
-    fn cosh (self) -> Self;
+    fn cosh(self) -> Self;
     /// total on R; bounded in `(-1, 1)`.
-    fn tanh (self) -> Self;
+    fn tanh(self) -> Self;
     /// total on R.
     fn asinh(self) -> Self;
     /// total on `[1, +inf)`; NaN for `x < 1`.
@@ -267,12 +281,24 @@ pub trait Scalar:
     fn atanh(self) -> Self;
 
     // ── IEEE sentinel methods (defaulted via consts) ──────────────────────
-    #[inline] fn infinity()     -> Self { Self::INFINITY }
-    #[inline] fn neg_infinity() -> Self { Self::NEG_INFINITY }
-    #[inline] fn nan()          -> Self { Self::NAN }
+    #[inline]
+    fn infinity() -> Self {
+        Self::INFINITY
+    }
+    #[inline]
+    fn neg_infinity() -> Self {
+        Self::NEG_INFINITY
+    }
+    #[inline]
+    fn nan() -> Self {
+        Self::NAN
+    }
     /// IEEE-correct NaN test: true for any NaN bit pattern, false for any
     /// finite value or +/-inf. defaulted via the `x == x` identity.
-    #[inline] fn is_nan(self) -> Self::Mask { !self.cmp_eq(self) }
+    #[inline]
+    fn is_nan(self) -> Self::Mask {
+        !self.cmp_eq(self)
+    }
 
     // ── HIGHER-ORDER: trace-safe conditional for state-typed results ──────
     /// **NEVER use native `if cond { ... } else { ... }`** on a value
@@ -296,7 +322,7 @@ pub trait Scalar:
     /// a data-dependent conditional that evaluates ONLY the taken arm at
     /// runtime — unlike `select` / `branch`, which evaluate BOTH. this is the
     /// carrier-portable form of an early-out `if`: it lets carrier-generic
-    /// physics skip a whole expensive arm (e.g. the RMHD quartic on a
+    /// physics skip a whole expensive arm (e.g., the RMHD quartic on a
     /// fast-path cell) instead of paying compute-all-paths.
     ///
     /// use `cond` where the arms have a LARGE cost asymmetry. for cheap,
@@ -425,7 +451,7 @@ pub trait Selectable<S: Scalar>: Sized + Copy {
 
     /// compatibility alias. takes a Self-typed condition (encoded 0/1 in the
     /// 0.0/1.0 convention) instead of an explicit Mask. defaults to
-    /// `select(cond.cmp_gt(ZERO), ...)` — i.e. "non-zero is true". prefer
+    /// `select(cond.cmp_gt(ZERO), ...)` — i.e., "non-zero is true". prefer
     /// `select` with an explicit Mask in new code.
     #[inline]
     fn sel(cond: S, t: Self, f: Self) -> Self {
@@ -478,20 +504,20 @@ where
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceLoc {
-    pub file:    &'static str,
-    pub line:    u32,
-    pub column:  u32,
+    pub file: &'static str,
+    pub line: u32,
+    pub column: u32,
     pub fn_name: &'static str,
-    /// the let-binding name when known (e.g. `"cons_l"`); None for anonymous.
+    /// the let-binding name when known (e.g., `"cons_l"`); None for anonymous.
     /// supplied by callers via `source_loc!(binding = "cons_l")`.
     pub binding: Option<&'static str>,
 }
 
 impl SourceLoc {
     pub const UNKNOWN: Self = Self {
-        file:    "<unknown>",
-        line:    0,
-        column:  0,
+        file: "<unknown>",
+        line: 0,
+        column: 0,
         fn_name: "<unknown>",
         binding: None,
     };
@@ -505,14 +531,20 @@ impl SourceLoc {
 macro_rules! source_loc {
     () => {
         $crate::algebra::SourceLoc {
-            file: file!(), line: line!(), column: column!(),
-            fn_name: "<unknown>", binding: None,
+            file: file!(),
+            line: line!(),
+            column: column!(),
+            fn_name: "<unknown>",
+            binding: None,
         }
     };
     (binding = $name:literal) => {
         $crate::algebra::SourceLoc {
-            file: file!(), line: line!(), column: column!(),
-            fn_name: "<unknown>", binding: Some($name),
+            file: file!(),
+            line: line!(),
+            column: column!(),
+            fn_name: "<unknown>",
+            binding: Some($name),
         }
     };
 }
@@ -547,7 +579,9 @@ pub struct RenderPolicyNotImplemented {
 }
 
 impl Default for RenderPolicy {
-    fn default() -> Self { RenderPolicy::Minified }
+    fn default() -> Self {
+        RenderPolicy::Minified
+    }
 }
 
 // =============================================================================
@@ -561,19 +595,40 @@ impl Scalar for f64 {
     type Mask = bool;
 
     // ZERO / ONE inherited from `Numeric for f64`.
-    const INFINITY:     f64 = f64::INFINITY;
+    const INFINITY: f64 = f64::INFINITY;
     const NEG_INFINITY: f64 = f64::NEG_INFINITY;
-    const NAN:          f64 = f64::NAN;
+    const NAN: f64 = f64::NAN;
 
-    #[inline(always)] fn to_f64(self) -> f64 { self }
+    #[inline(always)]
+    fn to_f64(self) -> f64 {
+        self
+    }
 
-    #[inline(always)] fn cmp_lt(self, b: f64) -> bool { self <  b }
-    #[inline(always)] fn cmp_le(self, b: f64) -> bool { self <= b }
-    #[inline(always)] fn cmp_gt(self, b: f64) -> bool { self >  b }
-    #[inline(always)] fn cmp_ge(self, b: f64) -> bool { self >= b }
-    #[inline(always)] fn cmp_eq(self, b: f64) -> bool { self == b }
+    #[inline(always)]
+    fn cmp_lt(self, b: f64) -> bool {
+        self < b
+    }
+    #[inline(always)]
+    fn cmp_le(self, b: f64) -> bool {
+        self <= b
+    }
+    #[inline(always)]
+    fn cmp_gt(self, b: f64) -> bool {
+        self > b
+    }
+    #[inline(always)]
+    fn cmp_ge(self, b: f64) -> bool {
+        self >= b
+    }
+    #[inline(always)]
+    fn cmp_eq(self, b: f64) -> bool {
+        self == b
+    }
 
-    #[inline(always)] fn select(m: bool, t: f64, f: f64) -> f64 { if m { t } else { f } }
+    #[inline(always)]
+    fn select(m: bool, t: f64, f: f64) -> f64 {
+        if m { t } else { f }
+    }
 
     // the lazy branch: a REAL `if` on the host — only the taken arm runs. this
     // is the f64 reference for the early-out branch cost (and the
@@ -584,36 +639,100 @@ impl Scalar for f64 {
     }
 
     #[inline(always)]
-    fn cond_vec<const N: usize>(m: bool, t: impl FnOnce() -> [f64; N], f: impl FnOnce() -> [f64; N]) -> [f64; N] {
+    fn cond_vec<const N: usize>(
+        m: bool,
+        t: impl FnOnce() -> [f64; N],
+        f: impl FnOnce() -> [f64; N],
+    ) -> [f64; N] {
         if m { t() } else { f() }
     }
 
     // sqrt / abs / min / max inherited from `Numeric for f64`.
-    #[inline(always)] fn recip(self)         -> f64 { 1.0 / self }
+    #[inline(always)]
+    fn recip(self) -> f64 {
+        1.0 / self
+    }
 
-    #[inline(always)] fn sin  (self)         -> f64 { f64::sin(self) }
-    #[inline(always)] fn cos  (self)         -> f64 { f64::cos(self) }
-    #[inline(always)] fn tan  (self)         -> f64 { f64::tan(self) }
-    #[inline(always)] fn asin (self)         -> f64 { f64::asin(self) }
-    #[inline(always)] fn acos (self)         -> f64 { f64::acos(self) }
-    #[inline(always)] fn atan2(self, b: f64) -> f64 { f64::atan2(self, b) }
+    #[inline(always)]
+    fn sin(self) -> f64 {
+        f64::sin(self)
+    }
+    #[inline(always)]
+    fn cos(self) -> f64 {
+        f64::cos(self)
+    }
+    #[inline(always)]
+    fn tan(self) -> f64 {
+        f64::tan(self)
+    }
+    #[inline(always)]
+    fn asin(self) -> f64 {
+        f64::asin(self)
+    }
+    #[inline(always)]
+    fn acos(self) -> f64 {
+        f64::acos(self)
+    }
+    #[inline(always)]
+    fn atan2(self, b: f64) -> f64 {
+        f64::atan2(self, b)
+    }
 
-    #[inline(always)] fn exp  (self) -> f64 { f64::exp(self) }
-    #[inline(always)] fn ln   (self) -> f64 { f64::ln(self) }
-    #[inline(always)] fn log10(self) -> f64 { f64::log10(self) }
+    #[inline(always)]
+    fn exp(self) -> f64 {
+        f64::exp(self)
+    }
+    #[inline(always)]
+    fn ln(self) -> f64 {
+        f64::ln(self)
+    }
+    #[inline(always)]
+    fn log10(self) -> f64 {
+        f64::log10(self)
+    }
 
-    #[inline(always)] fn powi(self, n: i32) -> f64 { f64::powi(self, n) }
-    #[inline(always)] fn powf(self, e: f64) -> f64 { f64::powf(self, e) }
+    #[inline(always)]
+    fn powi(self, n: i32) -> f64 {
+        f64::powi(self, n)
+    }
+    #[inline(always)]
+    fn powf(self, e: f64) -> f64 {
+        f64::powf(self, e)
+    }
 
-    #[inline(always)] fn floor(self) -> f64 { f64::floor(self) }
-    #[inline(always)] fn ceil (self) -> f64 { f64::ceil(self) }
+    #[inline(always)]
+    fn floor(self) -> f64 {
+        f64::floor(self)
+    }
+    #[inline(always)]
+    fn ceil(self) -> f64 {
+        f64::ceil(self)
+    }
 
-    #[inline(always)] fn sinh (self) -> f64 { f64::sinh(self) }
-    #[inline(always)] fn cosh (self) -> f64 { f64::cosh(self) }
-    #[inline(always)] fn tanh (self) -> f64 { f64::tanh(self) }
-    #[inline(always)] fn asinh(self) -> f64 { f64::asinh(self) }
-    #[inline(always)] fn acosh(self) -> f64 { f64::acosh(self) }
-    #[inline(always)] fn atanh(self) -> f64 { f64::atanh(self) }
+    #[inline(always)]
+    fn sinh(self) -> f64 {
+        f64::sinh(self)
+    }
+    #[inline(always)]
+    fn cosh(self) -> f64 {
+        f64::cosh(self)
+    }
+    #[inline(always)]
+    fn tanh(self) -> f64 {
+        f64::tanh(self)
+    }
+    #[inline(always)]
+    fn asinh(self) -> f64 {
+        f64::asinh(self)
+    }
+    #[inline(always)]
+    fn acosh(self) -> f64 {
+        f64::acosh(self)
+    }
+    #[inline(always)]
+    fn atanh(self) -> f64 {
+        f64::atanh(self)
+    }
 
     // iterate: early-return on convergence. preserves the FREEZE LAW — the
     // returned `acc` is the value BEFORE the converging step, matching how
@@ -628,14 +747,16 @@ impl Scalar for f64 {
         let mut acc = self;
         for _ in 0..max_steps {
             let next = body(acc);
-            if converged(acc, next) { return acc; }
+            if converged(acc, next) {
+                return acc;
+            }
             acc = next;
         }
         acc
     }
 
     // iterate_vec: same FREEZE LAW, N-accumulator. `result` selects the
-    // returned component (often the c2p root, e.g. recovered pressure).
+    // returned component (often the c2p root, e.g., recovered pressure).
     #[inline]
     fn iterate_vec<const N: usize>(
         init: [f64; N],
@@ -647,7 +768,9 @@ impl Scalar for f64 {
         let mut acc = init;
         for _ in 0..max_steps {
             let next = body(acc);
-            if converged(acc, next) { return acc[result]; }
+            if converged(acc, next) {
+                return acc[result];
+            }
             acc = next;
         }
         acc[result]
@@ -661,19 +784,40 @@ impl Scalar for f64 {
 impl Scalar for f32 {
     type Mask = bool;
 
-    const INFINITY:     f32 = f32::INFINITY;
+    const INFINITY: f32 = f32::INFINITY;
     const NEG_INFINITY: f32 = f32::NEG_INFINITY;
-    const NAN:          f32 = f32::NAN;
+    const NAN: f32 = f32::NAN;
 
-    #[inline(always)] fn to_f64(self) -> f64 { self as f64 }
+    #[inline(always)]
+    fn to_f64(self) -> f64 {
+        self as f64
+    }
 
-    #[inline(always)] fn cmp_lt(self, b: f32) -> bool { self <  b }
-    #[inline(always)] fn cmp_le(self, b: f32) -> bool { self <= b }
-    #[inline(always)] fn cmp_gt(self, b: f32) -> bool { self >  b }
-    #[inline(always)] fn cmp_ge(self, b: f32) -> bool { self >= b }
-    #[inline(always)] fn cmp_eq(self, b: f32) -> bool { self == b }
+    #[inline(always)]
+    fn cmp_lt(self, b: f32) -> bool {
+        self < b
+    }
+    #[inline(always)]
+    fn cmp_le(self, b: f32) -> bool {
+        self <= b
+    }
+    #[inline(always)]
+    fn cmp_gt(self, b: f32) -> bool {
+        self > b
+    }
+    #[inline(always)]
+    fn cmp_ge(self, b: f32) -> bool {
+        self >= b
+    }
+    #[inline(always)]
+    fn cmp_eq(self, b: f32) -> bool {
+        self == b
+    }
 
-    #[inline(always)] fn select(m: bool, t: f32, f: f32) -> f32 { if m { t } else { f } }
+    #[inline(always)]
+    fn select(m: bool, t: f32, f: f32) -> f32 {
+        if m { t } else { f }
+    }
 
     #[inline(always)]
     fn cond(m: bool, t: impl FnOnce() -> f32, f: impl FnOnce() -> f32) -> f32 {
@@ -681,35 +825,99 @@ impl Scalar for f32 {
     }
 
     #[inline(always)]
-    fn cond_vec<const N: usize>(m: bool, t: impl FnOnce() -> [f32; N], f: impl FnOnce() -> [f32; N]) -> [f32; N] {
+    fn cond_vec<const N: usize>(
+        m: bool,
+        t: impl FnOnce() -> [f32; N],
+        f: impl FnOnce() -> [f32; N],
+    ) -> [f32; N] {
         if m { t() } else { f() }
     }
 
-    #[inline(always)] fn recip(self) -> f32 { 1.0 / self }
+    #[inline(always)]
+    fn recip(self) -> f32 {
+        1.0 / self
+    }
 
-    #[inline(always)] fn sin  (self)         -> f32 { f32::sin(self) }
-    #[inline(always)] fn cos  (self)         -> f32 { f32::cos(self) }
-    #[inline(always)] fn tan  (self)         -> f32 { f32::tan(self) }
-    #[inline(always)] fn asin (self)         -> f32 { f32::asin(self) }
-    #[inline(always)] fn acos (self)         -> f32 { f32::acos(self) }
-    #[inline(always)] fn atan2(self, b: f32) -> f32 { f32::atan2(self, b) }
+    #[inline(always)]
+    fn sin(self) -> f32 {
+        f32::sin(self)
+    }
+    #[inline(always)]
+    fn cos(self) -> f32 {
+        f32::cos(self)
+    }
+    #[inline(always)]
+    fn tan(self) -> f32 {
+        f32::tan(self)
+    }
+    #[inline(always)]
+    fn asin(self) -> f32 {
+        f32::asin(self)
+    }
+    #[inline(always)]
+    fn acos(self) -> f32 {
+        f32::acos(self)
+    }
+    #[inline(always)]
+    fn atan2(self, b: f32) -> f32 {
+        f32::atan2(self, b)
+    }
 
-    #[inline(always)] fn exp  (self) -> f32 { f32::exp(self) }
-    #[inline(always)] fn ln   (self) -> f32 { f32::ln(self) }
-    #[inline(always)] fn log10(self) -> f32 { f32::log10(self) }
+    #[inline(always)]
+    fn exp(self) -> f32 {
+        f32::exp(self)
+    }
+    #[inline(always)]
+    fn ln(self) -> f32 {
+        f32::ln(self)
+    }
+    #[inline(always)]
+    fn log10(self) -> f32 {
+        f32::log10(self)
+    }
 
-    #[inline(always)] fn powi(self, n: i32) -> f32 { f32::powi(self, n) }
-    #[inline(always)] fn powf(self, e: f32) -> f32 { f32::powf(self, e) }
+    #[inline(always)]
+    fn powi(self, n: i32) -> f32 {
+        f32::powi(self, n)
+    }
+    #[inline(always)]
+    fn powf(self, e: f32) -> f32 {
+        f32::powf(self, e)
+    }
 
-    #[inline(always)] fn floor(self) -> f32 { f32::floor(self) }
-    #[inline(always)] fn ceil (self) -> f32 { f32::ceil(self) }
+    #[inline(always)]
+    fn floor(self) -> f32 {
+        f32::floor(self)
+    }
+    #[inline(always)]
+    fn ceil(self) -> f32 {
+        f32::ceil(self)
+    }
 
-    #[inline(always)] fn sinh (self) -> f32 { f32::sinh(self) }
-    #[inline(always)] fn cosh (self) -> f32 { f32::cosh(self) }
-    #[inline(always)] fn tanh (self) -> f32 { f32::tanh(self) }
-    #[inline(always)] fn asinh(self) -> f32 { f32::asinh(self) }
-    #[inline(always)] fn acosh(self) -> f32 { f32::acosh(self) }
-    #[inline(always)] fn atanh(self) -> f32 { f32::atanh(self) }
+    #[inline(always)]
+    fn sinh(self) -> f32 {
+        f32::sinh(self)
+    }
+    #[inline(always)]
+    fn cosh(self) -> f32 {
+        f32::cosh(self)
+    }
+    #[inline(always)]
+    fn tanh(self) -> f32 {
+        f32::tanh(self)
+    }
+    #[inline(always)]
+    fn asinh(self) -> f32 {
+        f32::asinh(self)
+    }
+    #[inline(always)]
+    fn acosh(self) -> f32 {
+        f32::acosh(self)
+    }
+    #[inline(always)]
+    fn atanh(self) -> f32 {
+        f32::atanh(self)
+    }
 
     #[inline]
     fn iterate(
@@ -721,7 +929,9 @@ impl Scalar for f32 {
         let mut acc = self;
         for _ in 0..max_steps {
             let next = body(acc);
-            if converged(acc, next) { return acc; }
+            if converged(acc, next) {
+                return acc;
+            }
             acc = next;
         }
         acc
@@ -738,7 +948,9 @@ impl Scalar for f32 {
         let mut acc = init;
         for _ in 0..max_steps {
             let next = body(acc);
-            if converged(acc, next) { return acc[result]; }
+            if converged(acc, next) {
+                return acc[result];
+            }
             acc = next;
         }
         acc[result]
@@ -767,22 +979,58 @@ impl Scalar for f32 {
 mod tests {
     use super::*;
 
-    #[test] fn f64_add_identity()    { assert_eq!(3.0 + f64::zero(), 3.0); }
-    #[test] fn f64_mul_identity()    { assert_eq!(3.0 * f64::one(),  3.0); }
-    #[test] fn f64_neg_involution()  { assert_eq!(-(-3.0_f64),       3.0); }
-    #[test] fn f64_sub_via_neg()     { assert_eq!(3.0 - 1.0, 3.0 + (-1.0_f64)); }
-    #[test] fn f64_div_via_recip()   { assert_eq!(6.0 / 2.0, 6.0 * Scalar::recip(2.0_f64)); }
+    #[test]
+    fn f64_add_identity() {
+        assert_eq!(3.0 + f64::zero(), 3.0);
+    }
+    #[test]
+    fn f64_mul_identity() {
+        assert_eq!(3.0 * f64::one(), 3.0);
+    }
+    #[test]
+    fn f64_neg_involution() {
+        assert_eq!(-(-3.0_f64), 3.0);
+    }
+    #[test]
+    fn f64_sub_via_neg() {
+        assert_eq!(3.0 - 1.0, 3.0 + (-1.0_f64));
+    }
+    #[test]
+    fn f64_div_via_recip() {
+        assert_eq!(6.0 / 2.0, 6.0 * Scalar::recip(2.0_f64));
+    }
 
-    #[test] fn f64_cmp_lt_irreflexive() { assert!(!(3.0_f64).cmp_lt(3.0)); }
-    #[test] fn f64_cmp_eq_reflexive()   { assert!( (3.0_f64).cmp_eq(3.0)); }
+    #[test]
+    fn f64_cmp_lt_irreflexive() {
+        assert!(!(3.0_f64).cmp_lt(3.0));
+    }
+    #[test]
+    fn f64_cmp_eq_reflexive() {
+        assert!((3.0_f64).cmp_eq(3.0));
+    }
 
-    #[test] fn f64_select_true_picks_t()  { assert_eq!(<f64 as Scalar>::select(true,  1.0, 2.0), 1.0); }
-    #[test] fn f64_select_false_picks_f() { assert_eq!(<f64 as Scalar>::select(false, 1.0, 2.0), 2.0); }
+    #[test]
+    fn f64_select_true_picks_t() {
+        assert_eq!(<f64 as Scalar>::select(true, 1.0, 2.0), 1.0);
+    }
+    #[test]
+    fn f64_select_false_picks_f() {
+        assert_eq!(<f64 as Scalar>::select(false, 1.0, 2.0), 2.0);
+    }
 
-    #[test] fn f64_sqrt_sq_is_abs()        { let x = -2.5_f64; assert_eq!((x * x).sqrt(), x.abs()); }
-    #[test] fn f64_exp_ln_roundtrip()      { let x =  2.5_f64; assert!((x.ln().exp() - x).abs() < 1e-12); }
+    #[test]
+    fn f64_sqrt_sq_is_abs() {
+        let x = -2.5_f64;
+        assert_eq!((x * x).sqrt(), x.abs());
+    }
+    #[test]
+    fn f64_exp_ln_roundtrip() {
+        let x = 2.5_f64;
+        assert!((x.ln().exp() - x).abs() < 1e-12);
+    }
 
-    #[test] fn bool_mask_demorgan() {
+    #[test]
+    fn bool_mask_demorgan() {
         // !(a & b) == !a | !b for every (a, b).
         for &a in &[true, false] {
             for &b in &[true, false] {
@@ -791,51 +1039,68 @@ mod tests {
         }
     }
 
-    #[test] fn source_loc_macro_compiles() {
+    #[test]
+    fn source_loc_macro_compiles() {
         let loc = source_loc!(binding = "cons_l");
         assert_eq!(loc.binding, Some("cons_l"));
         assert!(loc.line > 0);
     }
 
     // ── hyperbolic identities (the laws drive the carrier oracle) ─────────
-    #[test] fn f64_cosh_sq_minus_sinh_sq_is_one() {
+    #[test]
+    fn f64_cosh_sq_minus_sinh_sq_is_one() {
         for &x in &[-1.5_f64, 0.0, 0.7, 2.5] {
             let id = x.cosh() * x.cosh() - x.sinh() * x.sinh();
-            assert!((id - 1.0).abs() < 1e-12, "cosh^2-sinh^2 != 1 at x={x}: {id}");
+            assert!(
+                (id - 1.0).abs() < 1e-12,
+                "cosh^2-sinh^2 != 1 at x={x}: {id}"
+            );
         }
     }
-    #[test] fn f64_asinh_sinh_roundtrip() {
+    #[test]
+    fn f64_asinh_sinh_roundtrip() {
         for &x in &[-2.0_f64, -0.3, 0.0, 1.2] {
             assert!((x.sinh().asinh() - x).abs() < 1e-12);
         }
     }
-    #[test] fn f64_acosh_cosh_is_abs() {
+    #[test]
+    fn f64_acosh_cosh_is_abs() {
         // acosh(cosh(x)) == |x| — asymmetric, like sqrt(x*x).
         for &x in &[-1.7_f64, -0.4, 0.0, 0.9, 2.3] {
             assert!((x.cosh().acosh() - x.abs()).abs() < 1e-12);
         }
     }
-    #[test] fn f64_acosh_partial_domain() {
+    #[test]
+    fn f64_acosh_partial_domain() {
         // acosh on x < 1 is NaN — documented in the trait + laws.
         assert!(<f64 as Scalar>::acosh(0.5).is_nan());
     }
 
     // ── IEEE sentinels ────────────────────────────────────────────────────
-    #[test] fn f64_infinity_is_positive() { assert!(<f64 as Scalar>::infinity() > 0.0); }
-    #[test] fn f64_neg_infinity_is_negative() { assert!(<f64 as Scalar>::neg_infinity() < 0.0); }
-    #[test] fn f64_nan_is_not_self_equal() {
+    #[test]
+    fn f64_infinity_is_positive() {
+        assert!(<f64 as Scalar>::infinity() > 0.0);
+    }
+    #[test]
+    fn f64_neg_infinity_is_negative() {
+        assert!(<f64 as Scalar>::neg_infinity() < 0.0);
+    }
+    #[test]
+    fn f64_nan_is_not_self_equal() {
         // the LAW that defines is_nan: NaN is the only value with x != x.
         let n = <f64 as Scalar>::nan();
         assert!(!n.cmp_eq(n));
     }
-    #[test] fn f64_is_nan_detects_nan() {
+    #[test]
+    fn f64_is_nan_detects_nan() {
         // is_nan is true for any NaN, false for finite / +/-inf.
         assert!((<f64 as Scalar>::nan()).is_nan());
         assert!(!(0.0_f64).is_nan());
         assert!(!(<f64 as Scalar>::infinity()).is_nan());
         assert!(!(<f64 as Scalar>::neg_infinity()).is_nan());
     }
-    #[test] fn f64_cmp_eq_with_nan_is_always_false() {
+    #[test]
+    fn f64_cmp_eq_with_nan_is_always_false() {
         // documents the trap: x.cmp_eq(S::nan()) is ALWAYS false.
         let n = <f64 as Scalar>::nan();
         assert!(!(1.0_f64).cmp_eq(n));
@@ -843,26 +1108,40 @@ mod tests {
     }
 
     // ── branch: default routes through Selectable::select ─────────────────
-    #[test] fn f64_branch_picks_true_arm() {
-        let r = <f64 as Scalar>::branch(true,  || 1.0_f64, || 2.0);
+    #[test]
+    fn f64_branch_picks_true_arm() {
+        let r = <f64 as Scalar>::branch(true, || 1.0_f64, || 2.0);
         assert_eq!(r, 1.0);
     }
-    #[test] fn f64_branch_picks_false_arm() {
+    #[test]
+    fn f64_branch_picks_false_arm() {
         let r = <f64 as Scalar>::branch(false, || 1.0_f64, || 2.0);
         assert_eq!(r, 2.0);
     }
-    #[test] fn f64_branch_evaluates_both_closures() {
+    #[test]
+    fn f64_branch_evaluates_both_closures() {
         // documents the A1 trap: native `if cond { yes() } else { no() }`
         // would only evaluate the chosen arm. `branch` evaluates BOTH (for
         // the f64 carrier this is wasted work; for Gv it is the trace).
         let counter = std::cell::Cell::new(0);
         let bump = |_| counter.set(counter.get() + 1);
-        let _ = <f64 as Scalar>::branch(true, || { bump(0); 1.0_f64 }, || { bump(0); 2.0 });
+        let _ = <f64 as Scalar>::branch(
+            true,
+            || {
+                bump(0);
+                1.0_f64
+            },
+            || {
+                bump(0);
+                2.0
+            },
+        );
         assert_eq!(counter.get(), 2);
     }
 
     // ── iterate: the FREEZE LAW on f64 ────────────────────────────────────
-    #[test] fn f64_iterate_returns_pre_convergence_acc() {
+    #[test]
+    fn f64_iterate_returns_pre_convergence_acc() {
         // body: acc -> 2*acc. converged: |next - acc| < 0.5.
         // start at 0.0: 0 -> 0 (converged immediately since |0-0|<0.5 -> returns 0).
         let r0 = (0.0_f64).iterate(10, |a| 2.0 * a, |a, n| ((n - a) as f64).abs() < 0.5);
@@ -873,7 +1152,8 @@ mod tests {
         let r1 = (1.0_f64).iterate(10, |a| 2.0 * a, |a, n| ((n - a) as f64).abs() < 0.5);
         assert_eq!(r1, 1024.0);
     }
-    #[test] fn f64_iterate_freeze_holds_pre_convergence_value() {
+    #[test]
+    fn f64_iterate_freeze_holds_pre_convergence_value() {
         // a fixed-point body (acc -> sqrt(acc)) converges towards 1.0 from 4.0.
         // returns acc BEFORE the converging step — that's the freeze: the
         // returned value is from BEFORE the convergence criterion fired.
@@ -884,22 +1164,26 @@ mod tests {
     }
 
     // ── iterate_vec: fibonacci as the multi-state canary ──────────────────
-    #[test] fn f64_iterate_vec_fibonacci() {
+    #[test]
+    fn f64_iterate_vec_fibonacci() {
         // (a, b) -> (b, a + b). 5 steps from (1, 1) -> (1, 1) (1,2) (2,3) (3,5) (5,8) (8,13).
         // never-converged predicate; result index = 1 (the "b" component).
         let r = <f64 as Scalar>::iterate_vec::<2>(
-            [1.0, 1.0], 5,
+            [1.0, 1.0],
+            5,
             |acc| [acc[1], acc[0] + acc[1]],
             |_, _| false,
             1,
         );
         assert_eq!(r, 13.0);
     }
-    #[test] fn f64_iterate_vec_freeze() {
+    #[test]
+    fn f64_iterate_vec_freeze() {
         // same fibonacci body, but converge-immediately predicate; returns acc[1]
         // BEFORE the first body step — the seed value.
         let r = <f64 as Scalar>::iterate_vec::<2>(
-            [3.0, 7.0], 5,
+            [3.0, 7.0],
+            5,
             |acc| [acc[1], acc[0] + acc[1]],
             |_, _| true,
             1,

@@ -4,12 +4,12 @@
 // every CLI-reachable (MHD regime x dimension x geometry x --solver) must have its face-flux
 // kernel emitted. the dispatch builds the name `{prefix}_face_flux{geom}{solver}_{D}d_{dir}`
 // (substrate_{rmhd,newtonian_mhd,isothermal_mhd}.rs flux()); this asserts each such name resolves
-// in the AOT registry, catching the "valid flag, missing kernel" class (e.g. the 2D RMHD HLLD gap)
+// in the AOT registry, catching the "valid flag, missing kernel" class (e.g., the 2D RMHD HLLD gap)
 // at test time instead of mid-run. solver applicability mirrors the physics: iso MHD has no contact
 // wave -> no HLLC.
 // =============================================================================
 
-use symbi::regimes::substrate_kernels::{kernel_exists, Solver};
+use symbi::regimes::substrate_kernels::{Solver, kernel_exists};
 
 // the MHD regimes and the solvers each one's KernelSet is meant to serve.
 const MHD_REGIMES: &[(&str, &[Solver])] = &[
@@ -30,7 +30,10 @@ const HYDRO_REGIMES: &[(&str, &[Solver])] = &[
 
 // the exact name the regime dispatch builds (geom suffix BEFORE the solver suffix).
 fn flux_name(prefix: &str, geom: &str, solver: Solver, d: usize, dir: usize) -> String {
-    format!("{prefix}_face_flux{geom}{}_{d}d_{dir}", solver.kernel_suffix())
+    format!(
+        "{prefix}_face_flux{geom}{}_{d}d_{dir}",
+        solver.kernel_suffix()
+    )
 }
 
 #[test]

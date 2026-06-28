@@ -43,17 +43,17 @@ pub use named_call::NamedKernel;
 // generic over scalar `T` (kernel precision); `T = f64` default for the
 // f64 call sites + the f64-emitted kernels. `Copy` — a trivial read-only view
 // (a shared slice + two small index arrays), so the same field can fill several
-// slice slots (e.g. a zero-B buffer bound to all three magnetic components).
+// slice slots (e.g., a zero-B buffer bound to all three magnetic components).
 #[derive(Clone, Copy)]
 pub struct CpuField<'a, T = f64> {
-    pub data:    &'a [T],
-    pub lo:      [i32; 4],
+    pub data: &'a [T],
+    pub lo: [i32; 4],
     pub strides: [i32; 4],
 }
 
 pub struct CpuFieldMut<'a, T = f64> {
-    pub data:    &'a mut [T],
-    pub lo:      [i32; 4],
+    pub data: &'a mut [T],
+    pub lo: [i32; 4],
     pub strides: [i32; 4],
 }
 
@@ -103,7 +103,11 @@ impl<'a, T> CpuField<'a, T> {
     /// strides ONCE; subsequent accesses use the cached values.
     #[inline]
     pub fn from_layout(data: &'a [T], lo: &[i32], extent: &[u32]) -> Self {
-        Self { data, lo: copy_lo(lo), strides: compute_strides(extent) }
+        Self {
+            data,
+            lo: copy_lo(lo),
+            strides: compute_strides(extent),
+        }
     }
 
     /// flat offset of `(i)` in a 1D buffer. inlined; no slice access in the body.
@@ -115,8 +119,7 @@ impl<'a, T> CpuField<'a, T> {
     /// flat offset of `(i, j)` in a 2D buffer.
     #[inline(always)]
     pub fn flat_2d(&self, i: i32, j: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0]
-            + (j - self.lo[1]) * self.strides[1]) as usize
+        ((i - self.lo[0]) * self.strides[0] + (j - self.lo[1]) * self.strides[1]) as usize
     }
 
     /// flat offset of `(i, j, k)` in a 3D buffer. THE hot-path index — every
@@ -131,17 +134,27 @@ impl<'a, T> CpuField<'a, T> {
     /// rank-1 dereference. cheaper than going through `flat_1d` only because
     /// the index arithmetic inlines either way.
     #[inline(always)]
-    pub fn at_1d(&self, i: i32) -> &T { &self.data[self.flat_1d(i)] }
+    pub fn at_1d(&self, i: i32) -> &T {
+        &self.data[self.flat_1d(i)]
+    }
     #[inline(always)]
-    pub fn at_2d(&self, i: i32, j: i32) -> &T { &self.data[self.flat_2d(i, j)] }
+    pub fn at_2d(&self, i: i32, j: i32) -> &T {
+        &self.data[self.flat_2d(i, j)]
+    }
     #[inline(always)]
-    pub fn at_3d(&self, i: i32, j: i32, k: i32) -> &T { &self.data[self.flat_3d(i, j, k)] }
+    pub fn at_3d(&self, i: i32, j: i32, k: i32) -> &T {
+        &self.data[self.flat_3d(i, j, k)]
+    }
 }
 
 impl<'a, T> CpuFieldMut<'a, T> {
     #[inline]
     pub fn from_layout(data: &'a mut [T], lo: &[i32], extent: &[u32]) -> Self {
-        Self { data, lo: copy_lo(lo), strides: compute_strides(extent) }
+        Self {
+            data,
+            lo: copy_lo(lo),
+            strides: compute_strides(extent),
+        }
     }
 
     #[inline(always)]
@@ -150,8 +163,7 @@ impl<'a, T> CpuFieldMut<'a, T> {
     }
     #[inline(always)]
     pub fn flat_2d(&self, i: i32, j: i32) -> usize {
-        ((i - self.lo[0]) * self.strides[0]
-            + (j - self.lo[1]) * self.strides[1]) as usize
+        ((i - self.lo[0]) * self.strides[0] + (j - self.lo[1]) * self.strides[1]) as usize
     }
     #[inline(always)]
     pub fn flat_3d(&self, i: i32, j: i32, k: i32) -> usize {
@@ -161,11 +173,17 @@ impl<'a, T> CpuFieldMut<'a, T> {
     }
 
     #[inline(always)]
-    pub fn at_1d(&self, i: i32) -> &T { &self.data[self.flat_1d(i)] }
+    pub fn at_1d(&self, i: i32) -> &T {
+        &self.data[self.flat_1d(i)]
+    }
     #[inline(always)]
-    pub fn at_2d(&self, i: i32, j: i32) -> &T { &self.data[self.flat_2d(i, j)] }
+    pub fn at_2d(&self, i: i32, j: i32) -> &T {
+        &self.data[self.flat_2d(i, j)]
+    }
     #[inline(always)]
-    pub fn at_3d(&self, i: i32, j: i32, k: i32) -> &T { &self.data[self.flat_3d(i, j, k)] }
+    pub fn at_3d(&self, i: i32, j: i32, k: i32) -> &T {
+        &self.data[self.flat_3d(i, j, k)]
+    }
 
     #[inline(always)]
     pub fn at_1d_mut(&mut self, i: i32) -> &mut T {
@@ -238,11 +256,18 @@ impl<'a, T> KernelInvocation<'a, T> {
         let mut outputs: SmallVec<[CpuFieldMut<'a, T>; 16]> = SmallVec::new();
         for b in self.buffers {
             match b.handle {
-                BufHandle::Host(d)    => inputs.push(CpuField::from_layout(d, b.lo, b.extent)),
+                BufHandle::Host(d) => inputs.push(CpuField::from_layout(d, b.lo, b.extent)),
                 BufHandle::HostMut(d) => outputs.push(CpuFieldMut::from_layout(d, b.lo, b.extent)),
             }
         }
-        kernel(&inputs, &mut outputs, self.grid, self.dom_lo, self.ints, self.scalars);
+        kernel(
+            &inputs,
+            &mut outputs,
+            self.grid,
+            self.dom_lo,
+            self.ints,
+            self.scalars,
+        );
     }
 }
 
@@ -253,8 +278,8 @@ impl<'a, T> KernelInvocation<'a, T> {
 // `if cond { x } else { y }` for graph Branch nodes, so the body needs host
 // ordering. f64/f32 both impl OrderedNumeric; the carrier-generic Gv path uses
 // the GpuRenderer (CUDA C codegen), not this CPU rendering.
-pub use symbi_ir::algebra::Scalar;
 pub use symbi_algebra::OrderedNumeric;
+pub use symbi_ir::algebra::Scalar;
 
 /// the structured CPU-kernel ABI as a fn pointer: `(inputs, outputs, grid, dom_lo,
 /// ints, scalars)`. every generated `pub fn k<S: Scalar + OrderedNumeric>(..)` has
@@ -269,7 +294,7 @@ pub type KernelFn<S> =
 // the build-time-generated kernel registry: one `include!` per CPU kernel (each a
 // `pub fn k<S: Scalar>(..)`) + one `pub const <KERNEL>_IR: &str` per kernel (the
 // serialized backend-neutral lowered IR / Prepared; render it to a backend at
-// runtime via `symbi_ir::render_from_ir`, e.g. for the GPU<->CPU validation
+// runtime via `symbi_ir::render_from_ir`, e.g., for the GPU<->CPU validation
 // gate). generated by build.rs from the set of kernels emitted this run — see
 // write_registry. CpuField / CpuFieldMut / Scalar must be in scope above this point
 // (the CPU kernels use them).

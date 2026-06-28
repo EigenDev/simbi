@@ -14,10 +14,10 @@
 //   f.set([i, j], x);        // write (interior mutability)
 // =============================================================================
 
-use symbi_algebra::Domain;
-use symbi_xpu::{MemorySpace, MemoryBlock, SharedHandle, DefaultMemory};
-use crate::centering::{Centering, Cell};
+use crate::centering::{Cell, Centering};
 use crate::view::{View, ViewMut};
+use symbi_algebra::Domain;
+use symbi_xpu::{DefaultMemory, MemoryBlock, MemorySpace, SharedHandle};
 
 // =============================================================================
 // field
@@ -31,8 +31,12 @@ pub enum Locality {
 }
 
 impl Locality {
-    pub fn is_gpu(self) -> bool { self == Locality::Gpu }
-    pub fn is_cpu(self) -> bool { self == Locality::Cpu }
+    pub fn is_gpu(self) -> bool {
+        self == Locality::Gpu
+    }
+    pub fn is_cpu(self) -> bool {
+        self == Locality::Cpu
+    }
 }
 
 /// memory-backed field over a domain. clone = shallow.
@@ -67,7 +71,11 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     /// allocate a field over the given domain, zero-initialized.
     pub fn zeros(domain: &Domain<D>) -> symbi_xpu::Result<Self> {
         let block = MemoryBlock::<M>::for_elements::<T>(domain.volume())?;
-        let locality = if M::IS_DEVICE_ACCESSIBLE { Locality::Gpu } else { Locality::Cpu };
+        let locality = if M::IS_DEVICE_ACCESSIBLE {
+            Locality::Gpu
+        } else {
+            Locality::Cpu
+        };
         Ok(Field {
             storage: SharedHandle::new(block),
             domain: domain.clone(),
@@ -126,7 +134,9 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     #[inline]
     pub fn set(&self, coord: [isize; D], val: T) {
         let idx = self.flat_index(coord);
-        unsafe { *(self.storage.get().as_ptr::<T>() as *mut T).add(idx) = val; }
+        unsafe {
+            *(self.storage.get().as_ptr::<T>() as *mut T).add(idx) = val;
+        }
     }
 
     /// accumulate `delta` into the value at `coord`, with a RELEASE-ACTIVE bounds check.
@@ -156,7 +166,7 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     // ---- direct access for initialization ----
 
     /// raw mutable pointer to the underlying storage.
-    /// use only for initialization (e.g. filling initial data).
+    /// use only for initialization (e.g., filling initial data).
     pub fn as_mut_ptr(&self) -> *mut T {
         self.storage.get().as_ptr::<T>() as *mut T
     }
@@ -174,11 +184,15 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{Space, Domain};
+    use symbi_algebra::{Domain, Space};
     use symbi_xpu::HostMemory;
 
     fn dom_1d(n: isize) -> Domain<1> {
-        Domain::new([Space { name: "x", lo: 0, hi: n }])
+        Domain::new([Space {
+            name: "x",
+            lo: 0,
+            hi: n,
+        }])
     }
 
     #[test]

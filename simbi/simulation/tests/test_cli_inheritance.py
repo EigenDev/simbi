@@ -1,7 +1,7 @@
 # =============================================================================
 # test_cli_inheritance.py
 #
-# regression: a subclass that overrides a core knob (e.g. `solver`) ONLY to
+# regression: a subclass that overrides a core knob (e.g., `solver`) ONLY to
 # change its default must keep the base class's `cli=True`. otherwise the
 # Annotated override replaces the base metadata wholesale, dropping the cli
 # flag, so `--solver` is an unknown arg that `parse_known_args` silently

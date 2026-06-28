@@ -60,6 +60,7 @@ class CellSpacing(str, ExtendedEnum):
 class TimeStepping(str, ExtendedEnum):
     RK1 = "rk1"
     RK2 = "rk2"
+    RK3 = "rk3"
 
 
 class Reconstruction(str, ExtendedEnum):

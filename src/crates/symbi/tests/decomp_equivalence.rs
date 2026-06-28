@@ -1,0 +1,299 @@
+// =============================================================================
+// decomp_equivalence.rs
+//
+// the correctness contract for multi-gpu domain decomposition (docs/design/36),
+// validated IN-PROCESS on the cpu -- no second device, no peer copy, no mpi.
+//
+// the one thing that must be right before any transport work: a domain split into a
+// grid of tiles, with same-level halo exchange each step, must reproduce the
+// monolithic run to round-off. this isolates the decomposition + halo math from all
+// hardware and transport concerns. once green, peer-copy (2 gpus) and mpi (multi-node)
+// are transport substitutions under a proven-correct decomposition.
+//
+// a decomposition is a per-axis tile count `counts: [usize; D]`. the monolithic run is
+// just `counts = [1; D]` (one tile, no cuts), so the same code path validates both.
+// the harness drives the stage loop itself (not `step_once`), so it works for both
+// forward euler (one stage) and rk2 (two stages, with a halo exchange BETWEEN stages).
+//
+// coverage (dimension x integrator x topology):
+//   - 1d euler 2-tile, 1d rk2 4-tile (interior tile fed from both neighbors)
+//   - 2d euler single-axis, 2d rk2 2x2 grid (the corner case under rk2)
+//   - 3d euler 2x2x2 grid (edges + corners in 3d)
+//
+// cut faces are `BoundaryType::CoarseFine` (ghost_fill skips them, so the exchange owns
+// them). the exchange is a TWO-PASS scheme (`exchange_grid`): process axes in order; a
+// cut face's transverse extent is INTERIOR for cut axes not yet exchanged, FULL
+// otherwise. that carries corner ghosts to the diagonal neighbor without explicit
+// diagonal communication. only the PRIM components the flux reconstructs from are
+// copied; cons ghosts are never read.
+//
+// the `decomp_harness!` macro emits a concrete harness per dimension: a generic-over-D
+// harness drowns in `Cartesian: Metric<f64,D>` / `Regime` / KernelSet bounds.
+// =============================================================================
+
+use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
+use symbi::sim::decomp::{exchange_faces, LocalCopy};
+use symbi::sim::evolve::KernelSet;
+use symbi::sim::state::*;
+use symbi_algebra::Tensor;
+use symbi_geometry::Cartesian;
+use symbi_hydro::eos::IdealGas;
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::state::Prim;
+use symbi_xpu::{CpuSpace, HostMemory};
+
+const GAMMA: f64 = 1.4;
+const CFL: f64 = 0.4;
+const N: usize = 64; // cells per axis (kept modest so the 3d run is quick)
+const DX: f64 = 1.0 / N as f64;
+const T_FINAL: f64 = 0.05; // waves from the central bump stay well inside the domain.
+
+// a smooth, centered pressure+density bump along axis 0 -> sound waves that cross the
+// cut, so the halo is genuinely exercised; away from the physical ends so the outflow
+// boundaries never activate and mono == decomposed is exact.
+fn bump(x: f64) -> f64 {
+    0.2 * (-((x - 0.5) / 0.1).powi(2)).exp()
+}
+
+macro_rules! decomp_harness {
+    ($modname:ident, $d:literal) => {
+        mod $modname {
+            use super::*;
+
+            type Sim = SimState<Newtonian, $d, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+            type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, $d>;
+
+            // row-major index <-> per-axis coordinate over a box of size `dims`.
+            fn unflatten(mut flat: usize, dims: [usize; $d]) -> [usize; $d] {
+                let mut idx = [0usize; $d];
+                for a in (0..$d).rev() {
+                    idx[a] = flat % dims[a];
+                    flat /= dims[a];
+                }
+                idx
+            }
+            fn flatten(idx: [usize; $d], dims: [usize; $d]) -> usize {
+                let mut f = 0;
+                for a in 0..$d {
+                    f = f * dims[a] + idx[a];
+                }
+                f
+            }
+
+            // the integrator is set on the sim so the builder allocates the buffers it
+            // needs (rk2's u_n snapshot); the harness drives the matching stage table.
+            fn make(
+                cells: [usize; $d],
+                origin: [f64; $d],
+                bnd: Boundaries<$d>,
+                ts: Timestepping,
+            ) -> (Sim, Kern) {
+                let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+                    .cells(cells)
+                    .spacing([DX; $d])
+                    .origin(origin)
+                    .boundaries(bnd)
+                    .timestepping(ts)
+                    .allocate()
+                    .expect("sim construction failed")
+                    .set_initial(|x| {
+                        let b = bump(x[0]);
+                        Prim { rho: 1.0 + b, vel: Tensor::new([0.0; $d]), pre: 1.0 + b }
+                    })
+                    .build();
+                let k = Kern::new(GAMMA, CFL, &sim.geom.allocated);
+                (sim, k)
+            }
+
+            // build the tile grid for `counts` tiles-per-axis. each tile is an equal slice
+            // of the domain; it gets a CoarseFine face wherever it borders a neighbor and
+            // physical outflow on the outer domain boundary. tiles are stored row-major.
+            fn grid_tiles(counts: [usize; $d], ts: Timestepping) -> Vec<(Sim, Kern)> {
+                let m: [usize; $d] = std::array::from_fn(|a| {
+                    assert!(N % counts[a] == 0, "N must split evenly into counts[{a}]");
+                    N / counts[a]
+                });
+                let total: usize = counts.iter().product();
+                (0..total)
+                    .map(|flat| {
+                        let tc = unflatten(flat, counts);
+                        let origin = std::array::from_fn(|a| tc[a] as f64 * m[a] as f64 * DX);
+                        let bnd = Boundaries(std::array::from_fn(|a| {
+                            let lo = if tc[a] == 0 {
+                                BoundaryType::Outflow
+                            } else {
+                                BoundaryType::CoarseFine
+                            };
+                            let hi = if tc[a] == counts[a] - 1 {
+                                BoundaryType::Outflow
+                            } else {
+                                BoundaryType::CoarseFine
+                            };
+                            [lo, hi]
+                        }));
+                        make(m, origin, bnd, ts)
+                    })
+                    .collect()
+            }
+
+            // two-pass exchange over the whole grid, via the reusable decomposition module:
+            // process axes in order so a later axis reads the ghosts an earlier axis filled,
+            // carrying corner values to the diagonal neighbor without an explicit diagonal
+            // exchange. the bytes move through `LocalCopy` here; the same calls take a gpu peer
+            // or mpi transport later. takes a shared slice -- the transport writes ghosts via
+            // interior mutability, so no `split_at_mut` is needed.
+            fn exchange_grid(tiles: &[(Sim, Kern)], counts: [usize; $d]) {
+                let total: usize = counts.iter().product();
+                let mut processed = [false; $d];
+                for axis in 0..$d {
+                    for flat in 0..total {
+                        let tc = unflatten(flat, counts);
+                        if tc[axis] + 1 >= counts[axis] {
+                            continue;
+                        }
+                        let mut tc_hi = tc;
+                        tc_hi[axis] += 1;
+                        let lo_idx = flatten(tc, counts);
+                        let hi_idx = flatten(tc_hi, counts);
+                        exchange_faces(
+                            &*tiles[lo_idx].0,
+                            &*tiles[hi_idx].0,
+                            axis,
+                            &processed,
+                            &counts,
+                            &LocalCopy,
+                        );
+                    }
+                    processed[axis] = true;
+                }
+            }
+
+            // advance every tile one step at a shared dt, driving the SSP stage table
+            // ourselves so the halo exchange can be interleaved BETWEEN stages (rk2 needs
+            // the cut ghosts refreshed from each neighbor's stage-updated interior, not just
+            // once per step). for adiabatic hydro the per-stage sequence is flux(all dirs)
+            // -> godunov_stage -> c2p -> ghost_fill; the mhd / source / body hooks are no-ops.
+            fn run(tiles: &mut [(Sim, Kern)], counts: [usize; $d], ts: Timestepping) {
+                let stages = ts.stages();
+                let multistage = stages.len() > 1;
+
+                // prime prim + ghosts (the stage's entry contract), then seed the cut halos.
+                for (sim, k) in tiles.iter_mut() {
+                    k.c2p(sim);
+                    k.ghost_fill(sim);
+                }
+                exchange_grid(tiles, counts);
+
+                let mut t = 0.0;
+                while t < T_FINAL {
+                    // the global dt is the min over all tiles -- identical to the monolithic
+                    // cfl since the union of the tile interiors is the monolithic interior.
+                    let mut dt = T_FINAL - t;
+                    for (sim, k) in tiles.iter() {
+                        dt = dt.min(k.cfl(sim));
+                    }
+                    // snapshot u_n once before the stages for multi-stage schemes (the
+                    // corrector reads it via a0 > 0).
+                    if multistage {
+                        for (sim, k) in tiles.iter_mut() {
+                            k.snapshot(sim);
+                        }
+                    }
+                    for &(a0, ac) in stages {
+                        for (sim, k) in tiles.iter_mut() {
+                            for dd in 0..$d {
+                                k.flux(sim, dd);
+                            }
+                            k.godunov_stage(sim, dt, a0, ac);
+                            k.c2p(sim);
+                            k.ghost_fill(sim);
+                        }
+                        // refresh the cut halos from each neighbor's stage-updated interior,
+                        // so the next stage (or step) reconstructs from current neighbor data.
+                        exchange_grid(tiles, counts);
+                    }
+                    t += dt;
+                }
+            }
+
+            // scatter every tile's interior density into one global N^D grid, indexed by
+            // global cell coordinate. works for any tile topology (a 1d concat does not).
+            fn global_den(tiles: &[(Sim, Kern)], counts: [usize; $d]) -> Vec<f64> {
+                let m: [usize; $d] = std::array::from_fn(|a| N / counts[a]);
+                let mut out = vec![f64::NAN; N.pow($d as u32)];
+                for (flat_tile, (sim, _)) in tiles.iter().enumerate() {
+                    let tc = unflatten(flat_tile, counts);
+                    let ilo: [isize; $d] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+                    for c in sim.geom.interior.iter() {
+                        let g: [usize; $d] =
+                            std::array::from_fn(|a| tc[a] * m[a] + (c[a] - ilo[a]) as usize);
+                        out[flatten(g, [N; $d])] = *sim.fields.cons.den.view().at(c);
+                    }
+                }
+                out
+            }
+
+            // run mono (counts = [1; D]) and the requested decomposition with integrator
+            // `ts`, then assert the global density grids agree to round-off.
+            pub fn assert_matches(counts: [usize; $d], ts: Timestepping) {
+                let mut mono = grid_tiles([1; $d], ts);
+                run(&mut mono, [1; $d], ts);
+                let mono_vals = global_den(&mono, [1; $d]);
+
+                let mut dec = grid_tiles(counts, ts);
+                run(&mut dec, counts, ts);
+                let dec_vals = global_den(&dec, counts);
+
+                assert!(
+                    mono_vals.iter().all(|v| v.is_finite()) && dec_vals.iter().all(|v| v.is_finite()),
+                    "some global cells were never written (gather bug)"
+                );
+                let max_err = mono_vals
+                    .iter()
+                    .zip(&dec_vals)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                assert!(
+                    max_err < 1e-12,
+                    "decomposition {counts:?} (D={}, {ts:?}) vs monolithic density max err {max_err:e}",
+                    $d
+                );
+            }
+        }
+    };
+}
+
+decomp_harness!(d1, 1);
+decomp_harness!(d2, 2);
+decomp_harness!(d3, 3);
+
+#[test]
+fn euler_two_tile_1d() {
+    d1::assert_matches([2], Timestepping::Euler);
+}
+
+// rk2 + an interior tile fed from both neighbors. rk2 exercises the BETWEEN-stage halo
+// exchange (the cut ghosts must be refreshed from each neighbor's stage-1 interior).
+#[test]
+fn rk2_four_tile_1d() {
+    d1::assert_matches([4], Timestepping::Rk2);
+}
+
+#[test]
+fn euler_two_tile_2d_single_axis() {
+    d2::assert_matches([2, 1], Timestepping::Euler);
+}
+
+// the hard combined case: a 2x2 grid (diagonal-neighbor corners) under rk2 (per-stage
+// exchange). this is the topology and integrator a real 2d multi-gpu run uses.
+#[test]
+fn rk2_quad_tile_2d_grid() {
+    d2::assert_matches([2, 2], Timestepping::Rk2);
+}
+
+// a 3d 2x2x2 grid: faces, edges, and corners. the two-pass exchange is already
+// D-generic, so this confirms it carries over to 3d.
+#[test]
+fn euler_octo_tile_3d_grid() {
+    d3::assert_matches([2, 2, 2], Timestepping::Euler);
+}

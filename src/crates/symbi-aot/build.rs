@@ -390,7 +390,7 @@ impl Geom {
     fn cyl_3d() -> Self {
         Self::make(Coords::Cylindrical, 3, vec![0, 1, 2])
     }
-    // override the default all-uniform spacing (e.g. a log-radial spherical grid).
+    // override the default all-uniform spacing (e.g., a log-radial spherical grid).
     fn with_spacing(mut self, spacing: Vec<Spacing>) -> Self {
         self.spacing = spacing;
         self
@@ -1494,7 +1494,7 @@ fn main() {
         for dir in 0..2 {
             emit_rmhd_flux_gv(&out_dir, &format!("rmhd_face_flux_2d_{dir}"), 2, dir);
             // HLLC / HLLD 2.5D RMHD fluxes (cartesian, coord_n == dir) — parity with the 1D + 3D
-            // emission so `--solver hllc|hlld` works on a 2D RMHD sim (e.g. rmhd_orszag_tang).
+            // emission so `--solver hllc|hlld` works on a 2D RMHD sim (e.g., rmhd_orszag_tang).
             gen_rmhd_hllc_face_flux(&out_dir, 2, dir);
             gen_rmhd_hlld_face_flux(&out_dir, 2, dir);
         }

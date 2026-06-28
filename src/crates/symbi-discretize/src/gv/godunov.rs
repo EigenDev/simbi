@@ -139,7 +139,7 @@ fn splice_fused_sources_to_contribs(
             let v_k = mom[k] / rho;
             shared_params.insert(format!("vel_{k}"), v_k.node());
         }
-        // pressure-reading sources (e.g. radiative cooling Lambda(rho, T), T = pre/rho): bind `pre`
+        // pressure-reading sources (e.g., radiative cooling Lambda(rho, T), T = pre/rho): bind `pre`
         // to the c2p-computed `prim.pre` field. at source-apply / fused-godunov time prim is the SSP
         // stage input (not yet recomputed), so this is consistent with rho/vel above. energy-bearing
         // regimes only — iso has no pressure field. bound ONLY when a source actually references
@@ -170,7 +170,7 @@ fn splice_fused_sources_to_contribs(
     }
 
     // scalar-leaf cache so the SAME spec param across multiple overlays
-    // (e.g. `g_ext_0` in the mom + nrg specs of uniform_acceleration)
+    // (e.g., `g_ext_0` in the mom + nrg specs of uniform_acceleration)
     // resolves to ONE Gv leaf — runtime fills one scalar, CSE collapses.
     let mut scalar_leaves: HashMap<String, NodeId> = HashMap::new();
     let mut out = FusedContribs {
@@ -537,7 +537,7 @@ pub fn source_apply_gv(
 
 
 /// RUNTIME entry (Path B): the SAME in-place source-apply kernel, but from already-lowered
-/// `(target_field, BuiltSource)` values — e.g. `expr_bridge::build_user_source`'s output from a
+/// `(target_field, BuiltSource)` values — e.g., `expr_bridge::build_user_source`'s output from a
 /// SourceConfig loaded at sim startup. the `(Stage, Accumulate)` instance of [`apply_dag_core_gv`].
 pub fn source_apply_from_built_gv(
     coords: Coords,

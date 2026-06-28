@@ -259,7 +259,7 @@ pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
 
 /// run `f` in a FRESH, isolated trace and return the finished (untagged) kernel + `f`'s result.
 /// any trace already active on this thread is SAVED before and RESTORED after — so this is safe
-/// to call WHILE another trace is open (e.g. building a sub-source `BuiltSource` partway through
+/// to call WHILE another trace is open (e.g., building a sub-source `BuiltSource` partway through
 /// a godunov trace). without this, the inner `begin_trace`/`end_trace` would clobber the outer
 /// trace and the next outer `Gv` op would panic "outside an active trace".
 pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
@@ -612,7 +612,7 @@ impl Gv {
     }
 
     /// a per-cell field read: `key` is the IR-side buffer-load name, `runtime` the
-    /// dotted path the dispatch binds the buffer to (e.g. `"cons.den"`). recorded
+    /// dotted path the dispatch binds the buffer to (e.g., `"cons.den"`). recorded
     /// (deduped) in the kernel ABI manifest — this is the input binding for a
     /// carrier-generic physics fn instantiated at Gv.
     pub fn field(key: &str, runtime: impl Into<FieldBind>) -> Gv {
@@ -652,7 +652,7 @@ impl Gv {
         })))
     }
 
-    /// a scalar kernel param (e.g. `gamma`), recorded (deduped) in the manifest signature.
+    /// a scalar kernel param (e.g., `gamma`), recorded (deduped) in the manifest signature.
     pub fn scalar(name: &str) -> Gv {
         Gv(GvVal::Node(with_trace(|t| {
             let id = t.graph.add_scalar_param(name, ElementTy::F64);
@@ -920,7 +920,7 @@ impl crate::algebra::Scalar for Gv {
     // the N-output lazy branch: one Op::IfElse, N results, N Op::Proj outputs.
     // the SHARED arm computation is traced once (each closure runs once); each
     // returned Gv is a projection of the same branch. this is what lets a
-    // multi-output fast-path (e.g. the (sl, sr) wave-speed Eq.57/58/quartic
+    // multi-output fast-path (e.g., the (sl, sr) wave-speed Eq.57/58/quartic
     // selection) skip the whole quartic on the fast path. mirrors `cond` per
     // arm; the only addition is the N-element result vectors + the projections.
     fn cond_vec<const N: usize>(
@@ -972,7 +972,7 @@ impl crate::algebra::Scalar for Gv {
 
     fn powi(self, n: i32) -> Gv {
         // lower to repeated multiplication (exponentiation by squaring), NOT Pow/powf:
-        // `f64::powi` raises a NEGATIVE base exactly (e.g. (-2)^2 = 4), but CUDA
+        // `f64::powi` raises a NEGATIVE base exactly (e.g., (-2)^2 = 4), but CUDA
         // `powf(neg, 2.0)` = NaN — a carrier-equivalence break (f64 host != Gv kernel).
         // n is a small integer constant at trace time, so the multiply chain unrolls into
         // the DAG; it also avoids the transcendental `powf` call entirely.
@@ -1593,7 +1593,7 @@ mod powi_carrier_equiv {
     use crate::passes::scalarize::scalarize;
 
     // `Gv::powi` must NOT lower to Pow/powf: `f64::powi` raises a NEGATIVE base exactly
-    // (e.g. (-2)^2 = 4), but `powf(neg, 2.0)` = NaN on CUDA — a carrier-equivalence break
+    // (e.g., (-2)^2 = 4), but `powf(neg, 2.0)` = NaN on CUDA — a carrier-equivalence break
     // (the f64 host path != the traced kernel). this pins the structural fix (multiply
     // chain, no Pow node) AND the numeric agreement with `f64::powi` on negative bases.
     #[test]

@@ -26,93 +26,87 @@ pub enum ShapeError {
     /// occurrences so the diagnostic can point at each.
     DimMismatch {
         expected: DimExpr,
-        found:    DimExpr,
+        found: DimExpr,
         /// span of the node that introduced `expected`.
-        span_a:   Option<Span>,
+        span_a: Option<Span>,
         /// span of the node that introduced `found`.
-        span_b:   Option<Span>,
-        /// short tag identifying the operation context (e.g. "einsum 'i'", ".dot").
-        context:  String,
+        span_b: Option<Span>,
+        /// short tag identifying the operation context (e.g., "einsum 'i'", ".dot").
+        context: String,
     },
 
     /// a tensor had the wrong rank for an op.
     RankMismatch {
         expected: u32,
-        found:    u32,
-        span:     Option<Span>,
-        context:  String,
+        found: u32,
+        span: Option<Span>,
+        context: String,
     },
 
     /// `.contract()` (or einsum contraction) saw operands whose variance
-    /// doesn't pair (e.g. Upper paired with Upper, or anything paired
+    /// doesn't pair (e.g., Upper paired with Upper, or anything paired
     /// with Untagged).
     VarianceMismatch {
-        left:    VarianceTag,
-        right:   VarianceTag,
-        span_a:  Option<Span>,
-        span_b:  Option<Span>,
+        left: VarianceTag,
+        right: VarianceTag,
+        span_a: Option<Span>,
+        span_b: Option<Span>,
         context: String,
     },
 
     /// element types disagree where the op requires equality.
     ElementMismatch {
-        left:    ElementTy,
-        right:   ElementTy,
-        span_a:  Option<Span>,
-        span_b:  Option<Span>,
+        left: ElementTy,
+        right: ElementTy,
+        span_a: Option<Span>,
+        span_b: Option<Span>,
         context: String,
     },
 
     /// shapes weren't broadcast-compatible (per § 1.5 broadcast rule).
     BroadcastIncompatible {
-        left:    Vec<DimExpr>,
-        right:   Vec<DimExpr>,
-        span:    Option<Span>,
+        left: Vec<DimExpr>,
+        right: Vec<DimExpr>,
+        span: Option<Span>,
         context: String,
     },
 
     /// einsum spec exceeded the V1 max of 8 named labels.
     EinsumLabelOverLimit {
         count: usize,
-        max:   usize,
-        span:  Option<Span>,
+        max: usize,
+        span: Option<Span>,
     },
 
     /// einsum output references a label that doesn't appear in any input.
-    EinsumOutputLabelNotInInputs {
-        label: char,
-        span:  Option<Span>,
-    },
+    EinsumOutputLabelNotInInputs { label: char, span: Option<Span> },
 
     /// einsum spec had more than one ellipsis on one side of the spec.
     EinsumMultipleEllipses {
-        side: &'static str,        // "input" or "output"
+        side: &'static str, // "input" or "output"
         span: Option<Span>,
     },
 
     /// einsum input count didn't match the spec's input-spec count.
     EinsumInputArityMismatch {
-        spec_inputs:    usize,
-        actual_inputs:  usize,
-        span:           Option<Span>,
+        spec_inputs: usize,
+        actual_inputs: usize,
+        span: Option<Span>,
     },
 
     /// einsum input rank doesn't match the input's labelled axes
     /// (after accounting for ellipsis).
     EinsumRankMismatch {
         input_index: usize,
-        expected:    u32,
-        found:       u32,
-        span:        Option<Span>,
+        expected: u32,
+        found: u32,
+        span: Option<Span>,
     },
 
     /// generic catch-all for builder preconditions (out-of-bounds index,
     /// empty Construct, etc.). use sparingly — prefer typed variants
     /// when the failure mode is fundamental.
-    Other {
-        message: String,
-        span:    Option<Span>,
-    },
+    Other { message: String, span: Option<Span> },
 }
 
 impl ShapeError {
@@ -139,26 +133,54 @@ impl ShapeError {
     /// from the variant fields.
     pub fn summary(&self) -> String {
         match self {
-            ShapeError::DimMismatch { expected, found, context, .. } => format!(
+            ShapeError::DimMismatch {
+                expected,
+                found,
+                context,
+                ..
+            } => format!(
                 "dim mismatch in {}: expected {}, found {}",
                 context, expected, found,
             ),
-            ShapeError::RankMismatch { expected, found, context, .. } => format!(
+            ShapeError::RankMismatch {
+                expected,
+                found,
+                context,
+                ..
+            } => format!(
                 "rank mismatch in {}: expected rank {}, found rank {}",
                 context, expected, found,
             ),
-            ShapeError::VarianceMismatch { left, right, context, .. } => format!(
+            ShapeError::VarianceMismatch {
+                left,
+                right,
+                context,
+                ..
+            } => format!(
                 "variance mismatch in {}: {} paired with {}",
-                context, left.label(), right.label(),
+                context,
+                left.label(),
+                right.label(),
             ),
-            ShapeError::ElementMismatch { left, right, context, .. } => format!(
+            ShapeError::ElementMismatch {
+                left,
+                right,
+                context,
+                ..
+            } => format!(
                 "element type mismatch in {}: {} vs {}",
                 context, left, right,
             ),
-            ShapeError::BroadcastIncompatible { left, right, context, .. } => format!(
+            ShapeError::BroadcastIncompatible {
+                left,
+                right,
+                context,
+                ..
+            } => format!(
                 "incompatible broadcast in {}: [{}] vs [{}]",
                 context,
-                fmt_shape(left), fmt_shape(right),
+                fmt_shape(left),
+                fmt_shape(right),
             ),
             ShapeError::EinsumLabelOverLimit { count, max, .. } => format!(
                 "einsum spec uses {} named labels, V1 limit is {}",
@@ -172,11 +194,20 @@ impl ShapeError {
                 "einsum spec has more than one ellipsis on the {} side",
                 side,
             ),
-            ShapeError::EinsumInputArityMismatch { spec_inputs, actual_inputs, .. } => format!(
+            ShapeError::EinsumInputArityMismatch {
+                spec_inputs,
+                actual_inputs,
+                ..
+            } => format!(
                 "einsum spec expects {} inputs, got {}",
                 spec_inputs, actual_inputs,
             ),
-            ShapeError::EinsumRankMismatch { input_index, expected, found, .. } => format!(
+            ShapeError::EinsumRankMismatch {
+                input_index,
+                expected,
+                found,
+                ..
+            } => format!(
                 "einsum input {}: expected rank {} per spec, got rank {}",
                 input_index, expected, found,
             ),
@@ -188,7 +219,9 @@ impl ShapeError {
 fn fmt_shape(s: &[DimExpr]) -> String {
     let mut out = String::new();
     for (i, d) in s.iter().enumerate() {
-        if i > 0 { out.push_str(", "); }
+        if i > 0 {
+            out.push_str(", ");
+        }
         out.push_str(&format!("{}", d));
     }
     out
@@ -205,17 +238,21 @@ mod tests {
     use super::*;
     use crate::DimExpr;
 
-    fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
-    fn g(s: &str) -> DimExpr { DimExpr::generic(s) }
+    fn lit(n: usize) -> DimExpr {
+        DimExpr::Literal(n)
+    }
+    fn g(s: &str) -> DimExpr {
+        DimExpr::generic(s)
+    }
 
     #[test]
     fn dim_mismatch_summary_contains_both_dims() {
         let err = ShapeError::DimMismatch {
             expected: lit(3),
-            found:    lit(4),
-            span_a:   None,
-            span_b:   None,
-            context:  "einsum 'i'".to_string(),
+            found: lit(4),
+            span_a: None,
+            span_b: None,
+            context: "einsum 'i'".to_string(),
         };
         let s = err.summary();
         assert!(s.contains("einsum"), "{}", s);
@@ -227,10 +264,10 @@ mod tests {
     fn dim_mismatch_handles_generic() {
         let err = ShapeError::DimMismatch {
             expected: g("D"),
-            found:    lit(3),
-            span_a:   None,
-            span_b:   None,
-            context:  ".dot".to_string(),
+            found: lit(3),
+            span_a: None,
+            span_b: None,
+            context: ".dot".to_string(),
         };
         let s = err.summary();
         assert!(s.contains("D"), "{}", s);
@@ -254,10 +291,10 @@ mod tests {
     #[test]
     fn element_mismatch_summary() {
         let err = ShapeError::ElementMismatch {
-            left:    ElementTy::F64,
-            right:   ElementTy::F32,
-            span_a:  None,
-            span_b:  None,
+            left: ElementTy::F64,
+            right: ElementTy::F32,
+            span_a: None,
+            span_b: None,
             context: "ElementWise(Add)".to_string(),
         };
         let s = err.summary();
@@ -268,9 +305,9 @@ mod tests {
     #[test]
     fn broadcast_incompatible_summary() {
         let err = ShapeError::BroadcastIncompatible {
-            left:    vec![lit(3), lit(4)],
-            right:   vec![lit(5)],
-            span:    None,
+            left: vec![lit(3), lit(4)],
+            right: vec![lit(5)],
+            span: None,
             context: "ElementWise(Mul)".to_string(),
         };
         let s = err.summary();
@@ -283,9 +320,9 @@ mod tests {
     fn rank_mismatch_summary() {
         let err = ShapeError::RankMismatch {
             expected: 2,
-            found:    1,
-            span:     None,
-            context:  "matmul".to_string(),
+            found: 1,
+            span: None,
+            context: "matmul".to_string(),
         };
         assert!(err.summary().contains("rank"));
         assert!(err.summary().contains("2"));
@@ -294,7 +331,11 @@ mod tests {
 
     #[test]
     fn einsum_overlimit_summary() {
-        let err = ShapeError::EinsumLabelOverLimit { count: 9, max: 8, span: None };
+        let err = ShapeError::EinsumLabelOverLimit {
+            count: 9,
+            max: 8,
+            span: None,
+        };
         let s = err.summary();
         assert!(s.contains("9"), "{}", s);
         assert!(s.contains("8"), "{}", s);
@@ -302,13 +343,19 @@ mod tests {
 
     #[test]
     fn einsum_output_label_missing_summary() {
-        let err = ShapeError::EinsumOutputLabelNotInInputs { label: 'k', span: None };
+        let err = ShapeError::EinsumOutputLabelNotInInputs {
+            label: 'k',
+            span: None,
+        };
         assert!(err.summary().contains("'k'"));
     }
 
     #[test]
     fn einsum_multiple_ellipses_summary() {
-        let err = ShapeError::EinsumMultipleEllipses { side: "output", span: None };
+        let err = ShapeError::EinsumMultipleEllipses {
+            side: "output",
+            span: None,
+        };
         assert!(err.summary().contains("output"));
         assert!(err.summary().contains("ellipsis"));
     }
@@ -343,7 +390,7 @@ mod tests {
     fn other_summary_round_trips_message() {
         let err = ShapeError::Other {
             message: "construct with zero elements".to_string(),
-            span:    None,
+            span: None,
         };
         assert_eq!(err.summary(), "construct with zero elements");
     }
@@ -353,10 +400,10 @@ mod tests {
         // none of the errors above have spans; primary_span returns None.
         let err = ShapeError::DimMismatch {
             expected: lit(1),
-            found:    lit(2),
-            span_a:   None,
-            span_b:   None,
-            context:  "x".to_string(),
+            found: lit(2),
+            span_a: None,
+            span_b: None,
+            context: "x".to_string(),
         };
         assert!(err.primary_span().is_none());
     }
@@ -365,9 +412,9 @@ mod tests {
     fn display_matches_summary() {
         let err = ShapeError::RankMismatch {
             expected: 0,
-            found:    1,
-            span:     None,
-            context:  "Index".to_string(),
+            found: 1,
+            span: None,
+            context: "Index".to_string(),
         };
         assert_eq!(format!("{}", err), err.summary());
     }

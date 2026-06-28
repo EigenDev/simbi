@@ -38,7 +38,11 @@ pub struct KernelArgs {
 
 impl KernelArgs {
     pub fn new() -> Self {
-        KernelArgs { storage: Vec::new(), offsets: Vec::new(), ptrs: Vec::new() }
+        KernelArgs {
+            storage: Vec::new(),
+            offsets: Vec::new(),
+            ptrs: Vec::new(),
+        }
     }
 
     /// reserve byte capacity for the arena AND slot capacity for the offset /
@@ -48,7 +52,7 @@ impl KernelArgs {
         KernelArgs {
             storage: Vec::with_capacity(bytes),
             offsets: Vec::with_capacity(n_args),
-            ptrs:    Vec::with_capacity(n_args),
+            ptrs: Vec::with_capacity(n_args),
         }
     }
 
@@ -75,15 +79,13 @@ impl KernelArgs {
         let offset = self.storage.len();
         // SAFETY: `T: Copy` so it has no destructor; the byte view is sound
         // for any `Copy` plain-data type. `size_of::<T>` bytes are valid.
-        let bytes = unsafe {
-            std::slice::from_raw_parts(val as *const T as *const u8, size)
-        };
+        let bytes = unsafe { std::slice::from_raw_parts(val as *const T as *const u8, size) };
         self.storage.extend_from_slice(bytes);
         self.offsets.push(offset as u32);
     }
 
     /// build the void** array for cuLaunchKernel. valid until the next `push`
-    /// or `clear` — i.e. valid through the launch call. callers MUST NOT push
+    /// or `clear` — i.e., valid through the launch call. callers MUST NOT push
     /// after this without re-calling `as_mut_slice`: a subsequent push could
     /// realloc the arena and invalidate the pointers we just handed out.
     pub fn as_mut_slice(&mut self) -> &mut [*mut std::ffi::c_void] {
@@ -108,7 +110,9 @@ impl KernelArgs {
 }
 
 impl Default for KernelArgs {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ---- thread-local pool ------------------------------------------------------
@@ -116,7 +120,7 @@ impl Default for KernelArgs {
 // every kernel launch on the same thread reuses the SAME KernelArgs instance —
 // the arena retains its grown capacity across launches, so after warmup pushes
 // hit existing arena bytes and allocate nothing. CPU sims are usually
-// single-threaded; multi-threaded callers (e.g. rayon-parallel CPU kernels)
+// single-threaded; multi-threaded callers (e.g., rayon-parallel CPU kernels)
 // pool one arena per worker, no shared state, no lock.
 //
 // initial sizing covers the widest substrate kernel comfortably: rmhd face_flux
@@ -178,13 +182,17 @@ mod tests {
     #[test]
     fn clear_retains_capacity() {
         let mut a = KernelArgs::with_capacity_bytes(256, 32);
-        for _ in 0..16 { a.push(&0u64); }
+        for _ in 0..16 {
+            a.push(&0u64);
+        }
         let cap_before = a.storage.capacity();
         a.clear();
         assert_eq!(a.len(), 0);
         assert_eq!(a.storage.capacity(), cap_before);
         // a second cycle should not regrow
-        for _ in 0..16 { a.push(&0u64); }
+        for _ in 0..16 {
+            a.push(&0u64);
+        }
         assert_eq!(a.storage.capacity(), cap_before);
     }
 }

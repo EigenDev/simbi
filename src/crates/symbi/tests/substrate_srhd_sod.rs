@@ -5,7 +5,7 @@
 // SRHD-robustness control that the smooth-pulse dgeneric smoke did not cover.
 // it proves the BASE SRHD scheme (full relativistic HLLE wave speeds + flux +
 // the iterative pressure-Newton c2p) handles a strong discontinuity and keeps
-// the flow subluminal — i.e. the relativistic structure is correct.
+// the flow subluminal — i.e., the relativistic structure is correct.
 //
 // Marti & Mueller relativistic Sod (gamma=5/3): (rho,p)=(1,1)|(0.125,0.1), v=0.
 // for v=0: D = rho*W = rho, S = 0, tau = rho*h*W^2 - p - D = p/(gamma-1) (W=1).
@@ -36,7 +36,11 @@ fn srhd_cartesian_sharp_sod_stays_subluminal() {
         .expect("srhd sim construction failed")
         .set_initial(|x| {
             let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
-            Prim { rho, vel: Tensor::new([0.0]), pre }
+            Prim {
+                rho,
+                vel: Tensor::new([0.0]),
+                pre,
+            }
         })
         .build();
 
@@ -56,6 +60,12 @@ fn srhd_cartesian_sharp_sod_stays_subluminal() {
     }
     // the shock accelerates the gas mildly-relativistically, and the relativistic
     // HLLE keeps it strictly subluminal — no NaN, no floor needed.
-    assert!(max_vel > 0.1, "gas did not accelerate (max |v| = {max_vel})");
-    println!("SRHD CARTESIAN SHARP SOD: {} steps to t={:.3}, max |v| {:.3}", sim.iteration, sim.time, max_vel);
+    assert!(
+        max_vel > 0.1,
+        "gas did not accelerate (max |v| = {max_vel})"
+    );
+    println!(
+        "SRHD CARTESIAN SHARP SOD: {} steps to t={:.3}, max |v| {:.3}",
+        sim.iteration, sim.time, max_vel
+    );
 }

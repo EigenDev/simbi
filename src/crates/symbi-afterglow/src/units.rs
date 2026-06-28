@@ -182,7 +182,7 @@ where
 
 impl<M, L, T> Quantity<M, L, T> {
     /// dimensional square root: HALVES every exponent. a compile error unless each
-    /// exponent is even in half-integer encoding (i.e. the dimension is a perfect
+    /// exponent is even in half-integer encoding (i.e., the dimension is a perfect
     /// square) — `PartialDiv` has no impl otherwise. this is what makes
     /// `sqrt(energy density) -> magnetic field` legal and `sqrt(length)` illegal.
     #[inline]

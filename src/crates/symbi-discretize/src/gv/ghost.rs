@@ -55,7 +55,7 @@ pub fn scalar_ghost_fill_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, N
 
 // the per-vector-component wall-map sign: the in-plane components (k < ndim) pick up the
 // boundary axis's reflect sign (B/vel are grade-1 vectors under the wall map); the out-of-
-// plane components (k >= ndim, e.g. Bz/vz in 1.5D/2.5D) are tangential to every grid-axis
+// plane components (k >= ndim, e.g., Bz/vz in 1.5D/2.5D) are tangential to every grid-axis
 // wall, so they copy unchanged (sign = +1). this is why ghost fill loops 0..ncomp (DOF),
 // NOT 0..ndim — else the out-of-plane ghosts stay zero and drain the boundary.
 fn gv_ghost_sign(k: usize, ndim: usize, vel_sign: &[Gv]) -> Gv {

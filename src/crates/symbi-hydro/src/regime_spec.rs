@@ -32,13 +32,13 @@
 /// are supplied at the `Regime<S, D>` trait level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FieldKind {
-    /// a rank-0 scalar (e.g. density, energy).
+    /// a rank-0 scalar (e.g., density, energy).
     Scalar,
     /// a rank-1 vector whose component count is the kernel's `D`
-    /// (e.g. momentum: D components in the active spatial dimensionality).
+    /// (e.g., momentum: D components in the active spatial dimensionality).
     DimVector,
     /// a rank-1 vector with a fixed component count independent of `D`
-    /// (e.g. the magnetic field is always 3-component, even in 2D RMHD).
+    /// (e.g., the magnetic field is always 3-component, even in 2D RMHD).
     FixedVector { components: u8 },
 }
 
@@ -51,7 +51,7 @@ pub enum FieldKind {
 pub struct FieldSpec {
     /// canonical field name; used for kernel-binding manifests and
     /// diagnostic display. matches the existing buffer-name convention in
-    /// `symbi-discretize` / `symbi-aot` (e.g. "den", "mom_0", "nrg", "mag").
+    /// `symbi-discretize` / `symbi-aot` (e.g., "den", "mom_0", "nrg", "mag").
     pub name: &'static str,
     /// the field's structural kind (scalar vs vector, dim-sized vs fixed).
     pub kind: FieldKind,
@@ -175,7 +175,7 @@ pub enum LawKind {
 /// carried here: the single source of truth for every regime's flux is the
 /// carrier-generic `Regime::to_flux` (run at `S = f64`, traced at `S = Gv`
 /// by the carrier gate). carrying a second hand-transcribed flux-as-`Graph`
-/// layer here would let it drift from `to_flux` (e.g. iso-MHD losing its
+/// layer here would let it drift from `to_flux` (e.g., iso-MHD losing its
 /// magnetic stress); omitting it makes drift structurally impossible. this
 /// struct is pure metadata, consumed by `simulation_laws::validate` (clause 2 —
 /// every overlay/law targets a field the regime declares).
@@ -465,7 +465,7 @@ pub const ISO_MHD_SPEC: RegimeSpec = RegimeSpec {
 // =============================================================================
 // section 3 — collapse proof tests. these are the load-bearing assertions
 // against the design claim that `RegimeSpec` is consts + c2p hook. when
-// future regimes land (e.g. iso-srhd, dust, two-fluid), they need to extend
+// future regimes land (e.g., iso-srhd, dust, two-fluid), they need to extend
 // these tests with their own delta against the prototype.
 // =============================================================================
 

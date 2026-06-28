@@ -44,7 +44,7 @@ pub enum LatticeMap {
     /// the amr PROLONGATION pullback — a fine cell (ghost indices included, hence
     /// floor division for negatives) reads its coarse parent in absolute indices.
     Coarsen { axis: u8, ratio: i64 },
-    /// apply both maps (e.g. a 2D corner ghost: periodic in x and reflect in y).
+    /// apply both maps (e.g., a 2D corner ghost: periodic in x and reflect in y).
     /// the maps act on different axes, so order is immaterial.
     Compose(Box<LatticeMap>, Box<LatticeMap>),
 }
@@ -57,9 +57,11 @@ impl LatticeMap {
             LatticeMap::Periodic { axis, shift } => with(dest, *axis, |c| c + *shift),
             LatticeMap::Reflect { axis, pivot2 } => with(dest, *axis, |c| *pivot2 - c),
             LatticeMap::Outflow { axis, edge } => with(dest, *axis, |_| *edge),
-            LatticeMap::Refine { axis, ratio, offset } => {
-                with(dest, *axis, |c| c * *ratio + *offset)
-            }
+            LatticeMap::Refine {
+                axis,
+                ratio,
+                offset,
+            } => with(dest, *axis, |c| c * *ratio + *offset),
             LatticeMap::Coarsen { axis, ratio } => with(dest, *axis, |c| c.div_euclid(*ratio)),
             LatticeMap::Compose(a, b) => a.source(&b.source(dest)),
         }
@@ -94,7 +96,10 @@ mod tests {
         assert_eq!(lo.source(&[-1]), vec![63]);
         assert_eq!(lo.source(&[-2]), vec![62]);
         // high-side ghost at 64 reads the low interior cell.
-        let hi = LatticeMap::Periodic { axis: 0, shift: -64 };
+        let hi = LatticeMap::Periodic {
+            axis: 0,
+            shift: -64,
+        };
         assert_eq!(hi.source(&[64]), vec![0]);
         // periodic carries no sign flip.
         assert_eq!(lo.jacobian_sign(0), 1);
@@ -103,7 +108,10 @@ mod tests {
     #[test]
     fn reflect_mirrors_and_flips_normal() {
         // wall on the half-index -0.5 (between cell -1 and cell 0): pivot2 = -1.
-        let m = LatticeMap::Reflect { axis: 0, pivot2: -1 };
+        let m = LatticeMap::Reflect {
+            axis: 0,
+            pivot2: -1,
+        };
         assert_eq!(m.source(&[-1]), vec![0]); // ghost -1 mirrors to interior 0
         assert_eq!(m.source(&[-2]), vec![1]); // ghost -2 mirrors to interior 1
         // the wall-normal component flips; tangential does not.
@@ -124,7 +132,10 @@ mod tests {
         // 2D corner ghost: periodic in x, reflecting in y.
         let m = LatticeMap::Compose(
             Box::new(LatticeMap::Periodic { axis: 0, shift: 64 }),
-            Box::new(LatticeMap::Reflect { axis: 1, pivot2: -1 }),
+            Box::new(LatticeMap::Reflect {
+                axis: 1,
+                pivot2: -1,
+            }),
         );
         assert_eq!(m.source(&[-1, -1]), vec![63, 0]); // x wraps, y mirrors
         assert_eq!(m.jacobian_sign(0), 1); // x: periodic, no flip
@@ -140,8 +151,16 @@ mod tests {
     #[test]
     fn refine_reads_the_fine_children() {
         // coarse cell 3 reads fine children 6 and 7 at ratio 2 (absolute indices).
-        let lo = LatticeMap::Refine { axis: 0, ratio: 2, offset: 0 };
-        let hi = LatticeMap::Refine { axis: 0, ratio: 2, offset: 1 };
+        let lo = LatticeMap::Refine {
+            axis: 0,
+            ratio: 2,
+            offset: 0,
+        };
+        let hi = LatticeMap::Refine {
+            axis: 0,
+            ratio: 2,
+            offset: 1,
+        };
         assert_eq!(lo.source(&[3]), vec![6]);
         assert_eq!(hi.source(&[3]), vec![7]);
         // negative coarse indices (ghosts) scale the same way.
@@ -170,7 +189,11 @@ mod tests {
         let r = 2i64;
         for cc in -5..5i64 {
             for oo in 0..r {
-                let refine = LatticeMap::Refine { axis: 0, ratio: r, offset: oo };
+                let refine = LatticeMap::Refine {
+                    axis: 0,
+                    ratio: r,
+                    offset: oo,
+                };
                 let coarsen = LatticeMap::Coarsen { axis: 0, ratio: r };
                 assert_eq!(coarsen.source(&refine.source(&[cc])), vec![cc]);
             }

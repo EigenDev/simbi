@@ -12,7 +12,9 @@
 
 // the sim-state core lives in `symbi-sim`; re-exported at the `crate::sim::*`
 // paths so every downstream caller (regimes, dispatch, prelude, tests) is untouched.
-pub use symbi_sim::{checkpoint, config, driver, hydro_ops, run_args, state, substrate_seam};
+pub use symbi_sim::{
+    checkpoint, config, decomp, driver, hydro_ops, run_args, state, substrate_seam,
+};
 
 // SMR lives in the `symbi-amr` crate (docs/design/41 step 4); re-exported at the
 // `crate::sim::refinement` path so downstream callers (tests, examples) are untouched.

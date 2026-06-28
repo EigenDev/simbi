@@ -678,7 +678,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 
     // the curl bface update: per IN-PLANE face axis dir (0..D), dB_dir/dt = -(curl E)_dir
     // from its incident edges. cartesian binds the transverse inverse-widths; curvilinear
-    // the per-cell geom weights (3D for now). a face with no incident edges (e.g. Bx in
+    // the per-cell geom weights (3D for now). a face with no incident edges (e.g., Bx in
     // 1.5D) is simply not updated — it stays at its constant IC.
     let curvilinear = sim.geom.coords != symbi_geometry::Geometry::Cartesian;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);

@@ -77,14 +77,14 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
 
     /// get the kernel handle for `source`, compiling via the runtime's OWN JIT
     /// (NVRTC) and caching the module per kernel_name — for callers that build a
-    /// non-standard arg array (e.g. interleaved int/float scalar params) and launch
+    /// non-standard arg array (e.g., interleaved int/float scalar params) and launch
     /// via `runtime()` themselves. no caller-supplied compile closure.
     pub fn jit_kernel(&self, source: &str, kernel_name: &str) -> R::Kernel {
         self.jit_kernel_keyed(source, kernel_name, kernel_name)
     }
 
     /// like `jit_kernel`, but the module cache is keyed by `cache_key` (which may
-    /// encode e.g. the precision) while the entry point is resolved by `entry_name`
+    /// encode e.g., the precision) while the entry point is resolved by `entry_name`
     /// (the real symbol in the PTX). lets the SAME kernel name compile at two
     /// precisions in one process without the f32 module shadowing the f64 one.
     ///

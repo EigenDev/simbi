@@ -29,7 +29,7 @@ use super::layout::{alloc_layout, exec_layout};
 use super::params::{geom_scalar, motion_scalar, physical_geom, ScalarBind};
 
 /// dispatch a RUNTIME-BUILT IR kernel — one whose neutral IR blob was produced at sim
-/// startup (not AOT-baked into the registry), e.g. a python-authored user source lowered
+/// startup (not AOT-baked into the registry), e.g., a python-authored user source lowered
 /// via `source_apply_from_built_gv` -> `prepared_to_ir`. binds the kernel's buffers by its
 /// own manifest (`kernel_bindings_from_ir`) through `resolve_path`, and its scalar params
 /// by name through `resolve_scalar`, then launches on-device (render + NVRTC-JIT, cached by
@@ -124,7 +124,7 @@ pub struct RuntimeSource {
 /// field runtime-paths (`resolve_path` keys, in buffer order) and the scalar-param names.
 pub(crate) struct FusedCpuKernel {
     kernel: symbi_jit::CompiledKernel,
-    /// `field_inputs` as typed refs in in-buffer order (parsed once at build; e.g. `cons.den`,
+    /// `field_inputs` as typed refs in in-buffer order (parsed once at build; e.g., `cons.den`,
     /// `u_n.mom_0`, `mass_flux[0]`) — the host bind path is string-free.
     in_refs: Vec<FieldRef>,
     /// write targets as typed refs in out-buffer order (the in-place `cons.*` targets).
@@ -136,7 +136,7 @@ pub(crate) struct FusedCpuKernel {
 
 impl RuntimeSource {
     /// build from spec-validated `(target, BuiltSource)` pairs. `has_energy` comes from the
-    /// attaching kernel-set's `RegimeSpec` (e.g. `NEWTONIAN_SPEC.has_energy` /
+    /// attaching kernel-set's `RegimeSpec` (e.g., `NEWTONIAN_SPEC.has_energy` /
     /// `ISO_NEWTONIAN_SPEC.has_energy`), NOT the caller — the set IS the regime.
     pub fn new(built: Vec<(String, BuiltSource)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
         let eval = SourceEvaluator::from_built(&built);

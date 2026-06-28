@@ -2,7 +2,7 @@
 // dim.rs
 //
 // dimension expressions for tensor shapes. each axis is either a
-// compile-time literal (e.g. 3, 4) or a const-generic identifier (e.g.
+// compile-time literal (e.g., 3, 4) or a const-generic identifier (e.g.
 // "D", "N") that the backend resolves at monomorphization time.
 //
 // shape equality (§ 1.5): two `DimExpr` values are equal iff:
@@ -23,7 +23,7 @@ use crate::symbol::Symbol;
 pub enum DimExpr {
     /// known at macro expansion time. fully unrollable.
     Literal(usize),
-    /// const-generic identifier from the surrounding context (e.g. "D").
+    /// const-generic identifier from the surrounding context (e.g., "D").
     /// resolved at monomorphization; the backend either emits a fixed-
     /// bound loop or unrolls per monomorph value.
     Generic(Symbol),
