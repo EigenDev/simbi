@@ -19,7 +19,9 @@
 // lives in one tested place.
 // =============================================================================
 
-use crate::state::{FieldStore, PartitionGeometry};
+use crate::state::{FieldStore, PartitionGeometry, Timestepping};
+use crate::substrate_seam::KernelSet;
+use std::ops::ControlFlow;
 use symbi_algebra::{Domain, Side};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
@@ -213,6 +215,59 @@ fn ghost_strip<const D: usize>(
     strip
 }
 
+/// every per-cell DATA component a checkpoint needs: the conserved set (den, momentum, energy)
+/// plus the primitives (rho, velocity, pressure). used by `gather_interiors` to reassemble a
+/// decomposed run into one global store for output -- the gathered global then writes through
+/// the existing single-grid checkpoint path unchanged (docs/design/37 M4, v1 hydro). mhd
+/// staggered B is not gathered here (multi-gpu mhd is a later increment).
+fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
+    store: &FieldStore<D, DOF, M>,
+) -> Vec<&Field<f64, D, M>> {
+    let c = &store.fields.cons;
+    let p = &store.fields.prim;
+    std::iter::once(&c.den)
+        .chain(c.mom.iter())
+        .chain(c.nrg.as_ref())
+        .chain(std::iter::once(&p.rho))
+        .chain(p.vel.iter())
+        .chain(p.pre.as_ref())
+        .collect()
+}
+
+/// reassemble a decomposed run into one full-size `global` store: copy each tile's INTERIOR
+/// (cons + prim) into the matching sub-box of `global` (docs/design/37 M4). the inverse of the
+/// tile build's IC scatter; the gathered `global` is then written by the existing single-grid
+/// checkpoint writer, so decomposed output is byte-identical in format to a single-device run.
+///
+/// `tiles` are in flat tile order (matching `flatten`); `counts` is the per-axis tile grid.
+/// each tile holds `global_interior / counts` cells per axis. the per-field copy reuses the
+/// proven `LocalCopy` cell-walk (host-side over managed memory; the caller drains the devices
+/// first), so the gather shares the exchange's tested index arithmetic.
+pub fn gather_interiors<const D: usize, const DOF: usize, M: MemorySpace>(
+    global: &FieldStore<D, DOF, M>,
+    tiles: &[&FieldStore<D, DOF, M>],
+    counts: [usize; D],
+) {
+    let gint = &global.geom.interior;
+    // cells per tile per axis = global interior extent / tile count.
+    let m: [usize; D] = std::array::from_fn(|ax| gint.spaces[ax].size() / counts[ax]);
+    let glo: [isize; D] = std::array::from_fn(|ax| gint.spaces[ax].lo);
+
+    for (flat, tile) in tiles.iter().enumerate() {
+        let tc = unflatten(flat, counts);
+        let src_region = tile.geom.interior.clone();
+        // the m-cell sub-box of the global interior this tile owns (global coords).
+        let mut dst_region = global.geom.interior.clone();
+        for ax in 0..D {
+            let lo = glo[ax] + (tc[ax] * m[ax]) as isize;
+            dst_region = dst_region.slab(ax, (lo, lo + m[ax] as isize));
+        }
+        for (gf, tf) in data_fields(global).into_iter().zip(data_fields(tile)) {
+            LocalCopy.copy_region(tf, &src_region, gf, &dst_region, 0, 0);
+        }
+    }
+}
+
 /// the prim components the flux stage reconstructs from: rho, each velocity, pressure.
 fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
@@ -258,6 +313,71 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
         // lo interior -> hi ghost: source is the lo tile, dest is the hi tile.
         transport.copy_region(fl, &lo_src, fr, &hi_ghost, lo_dev, hi_dev);
     }
+}
+
+// prime factors of `n` in DESCENDING order (largest first), so the decomposition places the
+// big cuts before the small ones onto the longest axes.
+fn prime_factors_desc(mut n: usize) -> Vec<usize> {
+    let mut factors = Vec::new();
+    let mut d = 2;
+    while d * d <= n {
+        while n % d == 0 {
+            factors.push(d);
+            n /= d;
+        }
+        d += 1;
+    }
+    if n > 1 {
+        factors.push(n);
+    }
+    factors.reverse(); // ascending -> descending
+    factors
+}
+
+/// choose a per-axis tile count whose product is `n_parts`, minimizing halo surface by cutting
+/// the LONGEST axes first, subject to each axis count evenly dividing that axis's cells. errors
+/// if no such factorization exists (e.g. a prime `n_parts` that divides no axis). `n_parts == 1`
+/// is the monolithic `[1; D]`.
+///
+/// greedy and deterministic: prime-factor `n_parts` largest-first, and place each factor on the
+/// axis with the most cells-per-current-tile that stays evenly divisible. good enough for the
+/// regular grids simbi runs; a user override (Config) can bypass it when a specific shape is
+/// wanted.
+pub fn decompose_grid<const D: usize>(
+    n_cells: [usize; D],
+    n_parts: usize,
+) -> Result<[usize; D], String> {
+    let mut counts = [1usize; D];
+    if n_parts <= 1 {
+        return Ok(counts);
+    }
+    for f in prime_factors_desc(n_parts) {
+        // among axes that remain evenly divisible after multiplying by `f`, take the longest
+        // current tile edge (n_cells/counts) -- cut the biggest piece to balance surface area.
+        let mut best: Option<usize> = None;
+        let mut best_len = 0usize;
+        for ax in 0..D {
+            if n_cells[ax] % (counts[ax] * f) == 0 {
+                let len = n_cells[ax] / counts[ax];
+                if len > best_len {
+                    best_len = len;
+                    best = Some(ax);
+                }
+            }
+        }
+        match best {
+            Some(ax) => counts[ax] *= f,
+            None => {
+                return Err(format!(
+                    "cannot split grid {n_cells:?} across {n_parts} gpus: prime factor {f} divides \
+                     no remaining axis evenly (each per-axis tile count must divide that axis's \
+                     cells). pick a gpu count whose factors divide the resolution, or set an \
+                     explicit decomposition."
+                ))
+            }
+        }
+    }
+    Ok(counts)
 }
 
 // row-major (axis-0 slowest) flat index over a box of size `dims`, and its inverse. the
@@ -317,6 +437,122 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
         }
         processed[axis] = true;
     }
+}
+
+// drain every UNIQUE tile device's context so async writes are visible to a consumer running
+// in another context (the cross-device read barrier). no-op on a host backend. mirrors the
+// oracle's `sync_devices` (docs/design/37 M2).
+#[cfg(feature = "gpu")]
+fn drain_devices<M: MemorySpace>(devices: &[i32]) {
+    if !M::IS_DEVICE_ACCESSIBLE {
+        return;
+    }
+    let mut seen: Vec<i32> = Vec::new();
+    for &d in devices {
+        if !seen.contains(&d) {
+            seen.push(d);
+            symbi_xpu::with_device(d, ctx_sync);
+        }
+    }
+}
+
+#[cfg(not(feature = "gpu"))]
+fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
+
+/// drive a decomposed simulation: `stores.len()` tiles evolved in LOCKSTEP at a shared dt,
+/// with a same-level halo exchange after each ssp stage. this IS the proven oracle loop
+/// (`symbi/tests/decomp_equivalence.rs::run`), lifted into production so the multi-gpu python
+/// entry and the oracle share ONE tested path (docs/design/37 M4).
+///
+/// - `stores[i]` / `kernels[i]`: tile i's field store + kernel set, in flat tile order
+///   (matching `flatten(tile_coord, counts)`).
+/// - `counts`: the per-axis tile grid; `devices[i]`: tile i's logical device (device identity
+///   lives in the decomposition, not the field).
+/// - `transport`: moves halos (`LocalCopy` host, `DeviceCopy`/`StagedCopy` single-gpu,
+///   `PeerCopy` cross-gpu).
+/// - `on_checkpoint(iteration, time)`: fires every `interval` steps (and once at the end);
+///   returning `Break` stops the run. the device queue is drained before each call so the
+///   callback can read coherent tile state for output.
+///
+/// the global dt is the min over all tiles' cfl -- identical to a monolithic run, since the
+/// union of the tile interiors is the monolithic interior. rk2 exchanges BETWEEN stages so the
+/// corrector reconstructs from each neighbor's stage-updated interior.
+#[allow(clippy::too_many_arguments)]
+pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
+    stores: &[&FieldStore<D, DOF, M, f64>],
+    kernels: &[&K],
+    counts: [usize; D],
+    devices: &[i32],
+    ts: Timestepping,
+    start_time: f64,
+    t_final: f64,
+    interval: u64,
+    transport: &T,
+    mut on_checkpoint: F,
+) where
+    M: MemorySpace,
+    K: KernelSet<D, DOF, M, f64>,
+    T: HaloTransport,
+    F: FnMut(u64, f64) -> ControlFlow<()>,
+{
+    let stages = ts.stages();
+    let multistage = stages.len() > 1;
+    let n = stores.len();
+    debug_assert_eq!(n, kernels.len(), "stores/kernels length mismatch");
+    debug_assert_eq!(n, devices.len(), "stores/devices length mismatch");
+
+    // prime prim + ghosts (the stage entry contract), then seed the cut halos.
+    for i in 0..n {
+        symbi_xpu::with_device(devices[i], || {
+            kernels[i].c2p(stores[i]);
+            kernels[i].ghost_fill(stores[i]);
+        });
+    }
+    drain_devices::<M>(devices);
+    exchange_grid(stores, counts, devices, transport);
+
+    let mut t = start_time;
+    let mut iter: u64 = 0;
+    let mut last_cb: u64 = 0;
+    while t < t_final {
+        // global dt = min over tiles' cfl, clamped so the last step lands exactly on t_final.
+        let mut dt = t_final - t;
+        for i in 0..n {
+            dt = dt.min(symbi_xpu::with_device(devices[i], || kernels[i].cfl(stores[i])));
+        }
+        // snapshot u_n once before the stages for multi-stage schemes (the corrector reads it).
+        if multistage {
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || kernels[i].snapshot(stores[i]));
+            }
+        }
+        for &(a0, ac) in stages {
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || {
+                    for dd in 0..D {
+                        kernels[i].flux(stores[i], dd);
+                    }
+                    kernels[i].godunov_stage(stores[i], dt, a0, ac);
+                    kernels[i].c2p(stores[i]);
+                    kernels[i].ghost_fill(stores[i]);
+                });
+            }
+            // refresh the cut halos from each neighbor's stage-updated interior.
+            drain_devices::<M>(devices);
+            exchange_grid(stores, counts, devices, transport);
+        }
+        t += dt;
+        iter += 1;
+        if iter - last_cb >= interval {
+            last_cb = iter;
+            drain_devices::<M>(devices);
+            if on_checkpoint(iter, t).is_break() {
+                return;
+            }
+        }
+    }
+    drain_devices::<M>(devices);
+    let _ = on_checkpoint(iter, t);
 }
 
 // the gather/scatter kernels for `StagedCopy`: pack a strided strip into a contiguous
@@ -614,5 +850,48 @@ impl HaloTransport for PeerCopy {
                 ctx_sync();
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decompose_grid;
+
+    #[test]
+    fn decompose_one_part_is_monolithic() {
+        assert_eq!(decompose_grid([64usize], 1).unwrap(), [1]);
+        assert_eq!(decompose_grid([64usize, 32], 1).unwrap(), [1, 1]);
+    }
+
+    #[test]
+    fn decompose_cuts_longest_axis_first() {
+        assert_eq!(decompose_grid([64usize], 2).unwrap(), [2]);
+        assert_eq!(decompose_grid([64usize, 64], 2).unwrap(), [2, 1]);
+        assert_eq!(decompose_grid([64usize, 64], 4).unwrap(), [2, 2]);
+        assert_eq!(decompose_grid([64usize, 64, 64], 8).unwrap(), [2, 2, 2]);
+        // products always equal the part count.
+        for parts in [2usize, 4, 8, 16] {
+            let c = decompose_grid([64usize, 64, 64], parts).unwrap();
+            assert_eq!(c.iter().product::<usize>(), parts);
+        }
+    }
+
+    #[test]
+    fn decompose_respects_divisibility() {
+        // 48 = 16*3, evenly splittable into 16 along one axis.
+        assert_eq!(decompose_grid([48usize], 16).unwrap(), [16]);
+        // every per-axis count must divide its axis: each tile gets whole cells.
+        let c = decompose_grid([96usize, 48], 12).unwrap();
+        assert_eq!(c.iter().product::<usize>(), 12);
+        assert_eq!(96 % c[0], 0);
+        assert_eq!(48 % c[1], 0);
+    }
+
+    #[test]
+    fn decompose_errors_when_indivisible() {
+        // 3 divides neither 100-cell axis.
+        assert!(decompose_grid([100usize, 100], 3).is_err());
+        // 16 tiles cannot fit on an 8-cell axis.
+        assert!(decompose_grid([8usize], 16).is_err());
     }
 }

@@ -42,10 +42,9 @@
 
 use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::sim::decomp::{exchange_grid, flatten, unflatten, LocalCopy};
+use symbi::sim::decomp::{evolve_decomposed, flatten, unflatten, LocalCopy};
 #[cfg(feature = "gpu")]
 use symbi::sim::decomp::{DeviceCopy, PeerCopy, StagedCopy};
-use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
@@ -152,71 +151,27 @@ macro_rules! decomp_harness {
                     .collect()
             }
 
-            // drive the reusable module exchange over this harness's `(Sim, Kern)` tiles.
-            // the device drain (no-op on cpu) makes the prior async gpu writes visible to the
-            // transport; the sims deref to their `FieldStore` for the module's signature.
-            fn exchange_all(tiles: &[(Sim, Kern)], counts: [usize; $d]) {
-                // every tile may have run its physics in a different context; drain them all
-                // so the transport (on device 0, over managed-global memory) sees current
-                // interiors. the transport drains its own launches before returning.
-                sync_devices();
-                let tile_refs: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-                // the tile->device map: device identity lives in the decomposition, not on
-                // the field. parallel to `tile_refs` (both indexed by flat tile order).
-                let devices: Vec<i32> = (0..tiles.len()).map(tile_device).collect();
-                exchange_grid(&tile_refs, counts, &devices, &$transport);
-            }
-
-            // advance every tile one step at a shared dt, driving the SSP stage table
-            // ourselves so the halo exchange can be interleaved BETWEEN stages (rk2 needs
-            // the cut ghosts refreshed from each neighbor's stage-updated interior, not just
-            // once per step). for adiabatic hydro the per-stage sequence is flux(all dirs)
-            // -> godunov_stage -> c2p -> ghost_fill; the mhd / source / body hooks are no-ops.
+            // drive the PRODUCTION decomposed evolve loop (symbi-sim::decomp) over this
+            // harness's tiles. the oracle now TESTS the same function the multi-gpu python entry
+            // runs (docs/design/37 M4) -- the hand-rolled loop is gone, so a divergence between
+            // proof and production is impossible. interval = u64::MAX: no mid-run callback, the
+            // equivalence check reads the final state via `global_den`.
             fn run(tiles: &mut [(Sim, Kern)], counts: [usize; $d], ts: Timestepping) {
-                let stages = ts.stages();
-                let multistage = stages.len() > 1;
-
-                // prime prim + ghosts (the stage's entry contract), then seed the cut halos.
-                for (flat, (sim, k)) in tiles.iter_mut().enumerate() {
-                    with_device(tile_device(flat), || {
-                        k.c2p(sim);
-                        k.ghost_fill(sim);
-                    });
-                }
-                exchange_all(tiles, counts);
-
-                let mut t = 0.0;
-                while t < T_FINAL {
-                    // the global dt is the min over all tiles -- identical to the monolithic
-                    // cfl since the union of the tile interiors is the monolithic interior.
-                    let mut dt = T_FINAL - t;
-                    for (flat, (sim, k)) in tiles.iter().enumerate() {
-                        dt = dt.min(with_device(tile_device(flat), || k.cfl(sim)));
-                    }
-                    // snapshot u_n once before the stages for multi-stage schemes (the
-                    // corrector reads it via a0 > 0).
-                    if multistage {
-                        for (flat, (sim, k)) in tiles.iter_mut().enumerate() {
-                            with_device(tile_device(flat), || k.snapshot(sim));
-                        }
-                    }
-                    for &(a0, ac) in stages {
-                        for (flat, (sim, k)) in tiles.iter_mut().enumerate() {
-                            with_device(tile_device(flat), || {
-                                for dd in 0..$d {
-                                    k.flux(sim, dd);
-                                }
-                                k.godunov_stage(sim, dt, a0, ac);
-                                k.c2p(sim);
-                                k.ghost_fill(sim);
-                            });
-                        }
-                        // refresh the cut halos from each neighbor's stage-updated interior,
-                        // so the next stage (or step) reconstructs from current neighbor data.
-                        exchange_all(tiles, counts);
-                    }
-                    t += dt;
-                }
+                let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+                let kernels: Vec<_> = tiles.iter().map(|(_, k)| k).collect();
+                let devices: Vec<i32> = (0..tiles.len()).map(tile_device).collect();
+                evolve_decomposed(
+                    &stores,
+                    &kernels,
+                    counts,
+                    &devices,
+                    ts,
+                    0.0,
+                    T_FINAL,
+                    u64::MAX,
+                    &$transport,
+                    |_, _| std::ops::ControlFlow::Continue(()),
+                );
             }
 
             // scatter every tile's interior density into one global N^D grid, indexed by

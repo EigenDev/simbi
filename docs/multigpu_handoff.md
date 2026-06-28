@@ -171,6 +171,32 @@ behavior is not):
 
 the in-process + single-gpu tests stay the oracle; a new transport must keep them green.
 
+PHASE B (the production multi-gpu run loop, design-37 M4) is underway. the python `gpus=N`
+knob is wired (Phase A: `SimbiProblem.gpus` -> `Config.n_gpus` -> `validate_gpu_request`,
+default 1 = current path, >1 guarded). increment 1 DONE: `decomp::evolve_decomposed` -- the
+proven oracle lockstep loop (cfl-min -> per-stage flux/update -> halo exchange, with a
+checkpoint callback) lifted into `symbi-sim` as a reusable production function. the equivalence
+oracle now CALLS it (its hand-rolled loop is gone), so production and proof are the same code.
+increments 2-4 DONE (hydro v1, compile-checked cpu+cuda; real multi-gpu is cluster/oversubscribe
+-validated): `decompose_grid` (auto tile-grid, 4/4 unit tests); `gather_interiors` (reassemble
+tiles -> one global sim, reusing the proven `copy_region`); and the `build_and_run_hydro_decomposed!`
+macro in symbi-py -- builds N tiles per regime/dim/geom (cut/physical boundaries + IC scatter,
+each on its own device via `with_device`), evolves via `evolve_decomposed`, and gathers ->
+EXISTING single-grid checkpoint writer for output. `dispatch_and_run` routes `gpus>1` to it;
+`validate_gpu_request` allows it (device-count guard + a `SYMBI_GPU_OVERSUBSCRIBE` hatch to fold
+logical devices onto fewer physical ones for a single-card correctness test). transport is
+`StagedCopy` (managed-memory pack/unpack; PeerCopy/nvlink is the perf follow-up).
+
+v1 SCOPE / guards (all error loudly rather than silently single-gpu): gpus>1 is HYDRO only
+(newtonian/srhd; other regimes error in `dispatch_and_run`), non-AMR, no immersed bodies, no
+user sources, no mesh motion. checkpoint cadence is LINEAR `checkpoint_interval` (log cadence +
+live display are single-grid only). these are the v2 todo list.
+
+LOCAL VALIDATION RECIPE (single card): `./dev.py install --gpu`, then run a hydro problem twice
+-- `gpus=1`, and `SYMBI_GPU_OVERSUBSCRIBE=1 ... gpus=2` -- and diff the checkpoints; they must
+agree to round-off (the decomposed evolve is the oracle-proven `evolve_decomposed`). on the
+cluster, drop the env var and use real devices.
+
 the iron rule: never advance a transport without its equivalence test green first. the
 test is the contract.
 

@@ -1338,6 +1338,14 @@ macro_rules! build_and_run_hydro {
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
 
+        // gpus>1 -> the decomposed multi-gpu path (validated separately above by
+        // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
+        if cfg.n_gpus > 1 {
+            return build_and_run_hydro_decomposed!(
+                $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
+            );
+        }
+
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
@@ -1419,6 +1427,202 @@ macro_rules! build_and_run_hydro {
             .with_solver(solver)
             .expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
+    }};
+}
+
+/// the multi-gpu (gpus>1) hydro path (docs/design/37 M4, design/38). decompose the domain into
+/// `cfg.n_gpus` tiles, bind each tile to a device, evolve them in lockstep with halo exchange
+/// (the oracle-proven `decomp::evolve_decomposed`), and for output gather the tiles into one
+/// full-size sim written by the EXISTING single-grid checkpoint path. v1 is single-level hydro:
+/// refinement / immersed bodies / user sources with gpus>1 are refused above. checkpoint cadence
+/// is the LINEAR `checkpoint_interval`; the log cadence + live display are single-grid only for
+/// now. correctness is the same oracle contract (decomposed == monolithic to round-off),
+/// validated locally by `gpus=2` on one card (NDEV) and on the cluster across real devices.
+macro_rules! build_and_run_hydro_decomposed {
+    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, evolve_decomposed, gather_interiors, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
+
+        // v1 multi-gpu = single-level hydro. these interactions are deferred (each needs its own
+        // multi-tile handling); refuse rather than silently ignore.
+        if cfg.refinement_enabled {
+            return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
+        }
+        if !cfg.bodies.is_empty() {
+            return Err("gpus>1 does not yet support immersed bodies; set gpus=1".to_string());
+        }
+        if cfg.source_json.is_some() {
+            return Err("gpus>1 does not yet support user source expressions; set gpus=1".to_string());
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        // choose the tile grid (product == n_gpus), validate even divisibility.
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let solver = cfg.solver;
+        // the physical (domain-external) boundaries; internal faces become CoarseFine cuts.
+        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+
+        // build N tiles, each allocated + substrate-built in its own device context.
+        let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
+                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        // local cell -> global cell -> global lin (axis-0-fastest, matches the
+                        // python generators and the single-grid build).
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            let g = tc[ax] * m[ax] + idx[ax] as usize;
+                            lin += g * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        Prim {
+                            rho: row[0],
+                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                            pre: row[1 + $d],
+                        }
+                    })
+                    .build();
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                Ok((sim, sub))
+            })?;
+            tiles.push(built);
+        }
+
+        // one full-size sim as the OUTPUT view: the gather scatters tile interiors into it and
+        // the existing writer serializes it. lives on device 0 (it is only touched at output).
+        let global = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+            .cells(n)
+            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .boundaries(phys)
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .cyl_plane(cfg.cyl_plane)
+            .allocate()
+            .map_err(|e| format!("global output sim allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                // seed the full IC (gather overwrites the interior each checkpoint); local idx
+                // is the global cell for the full-size grid.
+                let mut lin = 0usize;
+                let mut stride = 1usize;
+                for ax in 0..$d {
+                    lin += idx[ax] as usize * stride;
+                    stride *= n[ax];
+                }
+                let row = &prims[lin];
+                Prim {
+                    rho: row[0],
+                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                    pre: row[1 + $d],
+                }
+            })
+            .build();
+
+        let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+        let kernels: Vec<_> = tiles.iter().map(|(_, k)| k).collect();
+        let devices: Vec<i32> = (0..ntiles as i32).collect();
+
+        // single-device builds compile this path but never reach it (validate_gpu_request rejects
+        // gpus>1 without a gpu feature); the gpu build moves halos with StagedCopy over managed
+        // memory (correct across real devices; PeerCopy/nvlink is the later perf increment).
+        #[cfg(feature = "gpu")]
+        let transport = symbi::sim::decomp::StagedCopy;
+        #[cfg(not(feature = "gpu"))]
+        let transport = symbi::sim::decomp::LocalCopy;
+
+        let cp_dt = if cfg.checkpoint_interval > 0.0 {
+            cfg.checkpoint_interval * cfg.time_unit
+        } else {
+            f64::INFINITY
+        };
+        let cp_width = checkpoint_time_width(cfg);
+        let gstore: &_ = &global;
+
+        // write the t=start initial condition (the gather captures the seeded tiles' primitives).
+        if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+            gather_interiors(gstore, &stores, counts);
+            let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+            let _ = write_hierarchy_checkpoint(
+                &[&global],
+                &checkpoint_name(cfg, &tag),
+                &checkpoint_metadata(cfg, cfg.checkpoint_index),
+            );
+        }
+
+        let mut next_cp = cfg.start_time + cp_dt;
+        let mut cp_index = cfg.checkpoint_index + 1;
+        evolve_decomposed(
+            &stores,
+            &kernels,
+            counts,
+            &devices,
+            cfg.timestepping,
+            cfg.start_time,
+            cfg.t_final,
+            1,
+            &transport,
+            |_iter, time| {
+                // linear time cadence: write at most one checkpoint per crossed boundary.
+                if time + f64::EPSILON >= next_cp {
+                    gather_interiors(gstore, &stores, counts);
+                    let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                    let _ = write_hierarchy_checkpoint(
+                        &[&global],
+                        &checkpoint_name(cfg, &tag),
+                        &checkpoint_metadata(cfg, cp_index),
+                    );
+                    while next_cp <= time {
+                        next_cp += cp_dt;
+                    }
+                    cp_index += 1;
+                }
+                std::ops::ControlFlow::Continue(())
+            },
+        );
+
+        // the canonical final snapshot, mirroring the single-grid run.
+        gather_interiors(gstore, &stores, counts);
+        let _ = write_hierarchy_checkpoint(
+            &[&global],
+            &format!("{}final.h5", cfg.data_dir),
+            &checkpoint_metadata(cfg, cp_index),
+        );
+        Ok(())
     }};
 }
 
@@ -1995,6 +2199,20 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                     (AMR body sync not wired yet)"
             .to_string());
     }
+    // gpus>1 takes the decomposed run loop, wired for single-level hydro only (docs/design/37
+    // M4). reject every other case HERE so a multi-gpu request never silently runs on one device.
+    if cfg.n_gpus > 1 {
+        if !matches!(cfg.regime.as_str(), "newtonian" | "srhd") {
+            return Err(format!(
+                "gpus>1 is wired for hydro (newtonian, srhd) only; regime '{}' runs single-gpu \
+                 for now (set gpus=1)",
+                cfg.regime
+            ));
+        }
+        if cfg.mesh_motion {
+            return Err("gpus>1 does not yet support mesh motion (moving mesh); set gpus=1".to_string());
+        }
+    }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
         "srhd" => hydro_dispatch!(cfg, prims, Srhd, Srhd),
@@ -2162,15 +2380,29 @@ fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
     {
         let avail = symbi::symbi_xpu::device_count().unwrap_or(0) as usize;
         if n_gpus > avail {
-            return Err(format!(
-                "gpus={n_gpus} requested, but only {avail} gpu(s) are visible. select/limit with \
-                 CUDA_VISIBLE_DEVICES or ROCR_VISIBLE_DEVICES, or lower gpus."
-            ));
+            // OVERSUBSCRIBE escape hatch (docs/design/37 M2): fold N logical devices onto the
+            // available physical ones (distinct contexts via the modulo map in cuda.rs/hip.rs).
+            // no real parallelism, but it lets the WHOLE decomposed path (build + scatter +
+            // evolve + gather + checkpoint) be validated on a single card -- run the same problem
+            // at gpus=1 and gpus=2 and diff the checkpoints. opt-in so a genuine "too few gpus"
+            // misconfiguration on a cluster still errors loudly.
+            if std::env::var("SYMBI_GPU_OVERSUBSCRIBE").is_err() {
+                return Err(format!(
+                    "gpus={n_gpus} requested, but only {avail} gpu(s) are visible. select/limit \
+                     with CUDA_VISIBLE_DEVICES or ROCR_VISIBLE_DEVICES, lower gpus, or set \
+                     SYMBI_GPU_OVERSUBSCRIBE=1 to fold the logical devices onto the {avail} \
+                     physical one(s) for a correctness test."
+                ));
+            }
+            eprintln!(
+                "warning: gpus={n_gpus} > {avail} visible; oversubscribing onto {avail} physical \
+                 device(s) (SYMBI_GPU_OVERSUBSCRIBE) -- correctness check only, no speedup."
+            );
         }
-        Err(format!(
-            "gpus={n_gpus} is valid ({avail} device(s) visible) but the multi-gpu run loop is not \
-             yet wired (docs/design/37 M4); set gpus=1 for now."
-        ))
+        // the decomposed run loop is wired for hydro (docs/design/37 M4); per-regime support is
+        // enforced in `dispatch_and_run` so non-hydro regimes error instead of silently falling
+        // back to one device.
+        Ok(())
     }
 }
 
