@@ -218,6 +218,28 @@ macro_rules! decomp_harness {
                     "decomposition {counts:?} (D={}, {ts:?}) vs monolithic density max err {max_err:e}",
                     $d
                 );
+
+                // ALSO exercise `gather_interiors` -- the production checkpoint gather the python
+                // multi-gpu path runs (docs/design/37 M4). reassemble the decomposed tiles into a
+                // full-size global sim and confirm its density equals the direct read. this covers
+                // the gather index arithmetic (mirror of the IC scatter) across every topology
+                // here -- the one piece the python path uses that `evolve_decomposed` does not.
+                let bnd = Boundaries(std::array::from_fn(|_| [BoundaryType::Outflow; 2]));
+                let global = make([N; $d], [0.0; $d], bnd, ts);
+                let stores: Vec<_> = dec.iter().map(|(s, _)| &**s).collect();
+                device_sync::<$mem>();
+                symbi::sim::decomp::gather_interiors(&*global.0, &stores, counts);
+                let gathered = global_den(std::slice::from_ref(&global), [1; $d]);
+                let gather_err = gathered
+                    .iter()
+                    .zip(&dec_vals)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                assert!(
+                    gather_err < 1e-12,
+                    "gather_interiors {counts:?} (D={}, {ts:?}) vs direct read max err {gather_err:e}",
+                    $d
+                );
             }
         }
     };
@@ -290,22 +312,14 @@ fn gpu_rk2_quad_tile_2d_grid() {
     gpu_d2::assert_matches([2, 2], Timestepping::Rk2);
 }
 
-// the multi-gpu peer transport. tiles are split across logical devices 0 and 1; on a 2+ gpu
-// node the 2x2 exchange moves halos with `cuMemcpyPeer` over nvlink and must still reproduce
-// the monolithic run. SELF-SKIPS on a single card -- the peer move needs two physical devices
-// (a context cannot peer with itself), so this is the one milestone validated on the cluster,
-// not locally. peer access is best-effort enabled (cuMemcpyPeer falls back through host if the
-// link is absent, so the correctness assertion holds either way).
+// the multi-gpu peer transport, now the UNIVERSAL transport. `PeerCopy` is adaptive: on this
+// single card the two logical devices fold onto the same physical gpu, can't peer, and it stages
+// over managed memory; on a 2+ gpu node the SAME code moves halos with `cuMemcpyPeer` over
+// nvlink. so this runs EVERYWHERE -- no self-skip -- and proves the one transport that ships to
+// the cluster is correct here too. `enable_peer_mesh` is a no-op when no pair can peer.
 #[cfg(feature = "gpu")]
 #[test]
 fn gpu_peer_rk2_quad_tile_2d_grid() {
-    if symbi_xpu::device_count().unwrap_or(0) < 2 {
-        eprintln!("skipping gpu_peer_rk2_quad_tile_2d_grid: needs >= 2 gpus");
-        return;
-    }
-    if symbi_xpu::can_access_peer(0, 1).unwrap_or(false) {
-        symbi_xpu::enable_peer_access(0, 1).ok();
-        symbi_xpu::enable_peer_access(1, 0).ok();
-    }
+    symbi::sim::decomp::enable_peer_mesh(&[0, 1]);
     gpu_peer_d2::assert_matches([2, 2], Timestepping::Rk2);
 }

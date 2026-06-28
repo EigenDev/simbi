@@ -26,7 +26,7 @@ use symbi_algebra::{Domain, Side};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 #[cfg(feature = "gpu")]
-use symbi_xpu::{ctx_sync, memcpy_peer, DeviceMemory, MAX_GPUS};
+use symbi_xpu::{can_access_peer, ctx_sync, memcpy_peer, DeviceMemory, MAX_GPUS};
 #[cfg(feature = "gpu")]
 use symbi_xpu::runtime::{current_dispatcher, GpuRuntime};
 #[cfg(feature = "gpu")]
@@ -268,14 +268,22 @@ pub fn gather_interiors<const D: usize, const DOF: usize, M: MemorySpace>(
     }
 }
 
-/// the prim components the flux stage reconstructs from: rho, each velocity, pressure.
+/// the CELL-CENTERED components the flux stage reconstructs from: rho, each velocity, pressure,
+/// and -- for MHD -- the cell-centered magnetic field `bcell` (the reconstruction reads it like
+/// any other primitive). hydro/iso stores have no `mhd`, so the bcell tail is empty there and
+/// the exchange is unchanged. the STAGGERED `bface` is exchanged separately (`bface_strips`),
+/// since its faces live on a different domain than the cells.
 fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     store: &FieldStore<D, DOF, M>,
 ) -> Vec<&Field<f64, D, M>> {
-    std::iter::once(&store.fields.prim.rho)
+    let mut fields: Vec<&Field<f64, D, M>> = std::iter::once(&store.fields.prim.rho)
         .chain(store.fields.prim.vel.iter())
         .chain(store.fields.prim.pre.as_ref())
-        .collect()
+        .collect();
+    if let Some(mhd) = store.fields.mhd.as_ref() {
+        fields.extend(mhd.bcell.b.iter());
+    }
+    fields
 }
 
 /// exchange same-level halos across the shared face between `lo` (its hi face on `axis`)
@@ -526,13 +534,22 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 symbi_xpu::with_device(devices[i], || kernels[i].snapshot(stores[i]));
             }
         }
-        for &(a0, ac) in stages {
+        for (sidx, &(a0, ac)) in stages.iter().enumerate() {
+            let stage = (sidx + 1) as u8; // 1-based: post_godunov saves the emf at stage 1, averages at 2.
             for i in 0..n {
                 symbi_xpu::with_device(devices[i], || {
+                    // the full per-stage pipeline (evolve.rs STAGE_PIPELINE). wave_speeds / efield
+                    // / post_godunov are the MHD constrained-transport hooks; they are no-op
+                    // defaults for hydro + iso, so this is byte-identical to the prior sequence
+                    // there, and drives the CT curl (edge emf -> bface -> bcell) for mhd. source /
+                    // body phases are gated off (multi-gpu v1 has neither).
+                    kernels[i].wave_speeds(stores[i]);
                     for dd in 0..D {
                         kernels[i].flux(stores[i], dd);
                     }
+                    kernels[i].efield(stores[i]);
                     kernels[i].godunov_stage(stores[i], dt, a0, ac);
+                    kernels[i].post_godunov(stores[i], dt, stage);
                     kernels[i].c2p(stores[i]);
                     kernels[i].ghost_fill(stores[i]);
                 });
@@ -728,6 +745,56 @@ fn ensure_peer_bufs(pool: &mut [Option<PeerBufs>; MAX_GPUS], dev: i32, n: usize)
     }
 }
 
+// cached `can_access_peer(src, dst)` results: -1 unknown, 0 no, 1 yes. the driver query is
+// cheap but called per face per field per step, so memoize it (device topology is fixed for a
+// run). thread_local to match the pooled buffers (no Send/Sync on the cache).
+#[cfg(feature = "gpu")]
+thread_local! {
+    static PEER_CAP: std::cell::RefCell<[[i8; MAX_GPUS]; MAX_GPUS]> =
+        const { std::cell::RefCell::new([[-1i8; MAX_GPUS]; MAX_GPUS]) };
+}
+
+/// can logical device `src` DIRECTLY peer-access `dst`? memoized. false when they fold onto the
+/// same physical card (a device cannot peer with itself) or there is no p2p link -- in which
+/// case `PeerCopy` stages over managed memory instead. this is the single switch that makes one
+/// transport correct on every machine.
+#[cfg(feature = "gpu")]
+fn peer_ok(src: i32, dst: i32) -> bool {
+    PEER_CAP.with(|c| {
+        let mut cap = c.borrow_mut();
+        let cached = cap[src as usize][dst as usize];
+        if cached >= 0 {
+            return cached == 1;
+        }
+        let ok = can_access_peer(src, dst).unwrap_or(false);
+        cap[src as usize][dst as usize] = ok as i8;
+        ok
+    })
+}
+
+/// enable bidirectional peer access for every directly-peerable pair among `devices`, once at
+/// setup. pairs that cannot peer (same card / no link) are skipped -- `PeerCopy` stages those.
+/// idempotent and best-effort: a failure to enable just means that pair stages instead of peers.
+#[cfg(feature = "gpu")]
+pub fn enable_peer_mesh(devices: &[i32]) {
+    let mut uniq: Vec<i32> = Vec::new();
+    for &d in devices {
+        if !uniq.contains(&d) {
+            uniq.push(d);
+        }
+    }
+    for &a in &uniq {
+        for &b in &uniq {
+            if a != b && peer_ok(a, b) {
+                let _ = symbi_xpu::enable_peer_access(a, b);
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "gpu"))]
+pub fn enable_peer_mesh(_devices: &[i32]) {}
+
 /// the cross-device halo transport (docs/design/37 M3): gather the strip into the source
 /// device's contiguous buffer, `cuMemcpyPeer` it to the destination device's buffer over the
 /// link (nvlink intra-node), then scatter it into the destination strip. the gather and
@@ -753,8 +820,13 @@ impl HaloTransport for PeerCopy {
             LocalCopy.copy_region(src, src_region, dst, dst_region, src_dev, dst_dev);
             return;
         }
-        // same device: no link to cross -- the proven staged gather/scatter handles it.
-        if src_dev == dst_dev {
+        // fall back to the staged copy (contiguous gather/scatter over managed memory, correct
+        // for ANY device pair) unless the two logical devices can DIRECTLY peer. this is the
+        // universal-transport invariant: the SAME `PeerCopy` works on one card (logical devices
+        // fold onto the same physical gpu -> no peer -> staged), on a node with nvlink (real peer
+        // -> cuMemcpyPeer fast path), and on a node without p2p (staged) -- for any gpu count, no
+        // machine-specific code. only a genuine cross-device link takes the peer path below.
+        if src_dev == dst_dev || !peer_ok(src_dev, dst_dev) {
             StagedCopy.copy_region(src, src_region, dst, dst_region, src_dev, dst_dev);
             return;
         }

@@ -40,6 +40,7 @@ use symbi_hydro::state::PrimG;
 use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
 use symbi_sim::checkpoint::write_hierarchy_checkpoint;
+use symbi_sim::state::SimStateGeneric;
 use symbi_sim::state::CtMethod;
 
 // =============================================================================
@@ -1430,6 +1431,101 @@ macro_rules! build_and_run_hydro {
     }};
 }
 
+/// the REGIME-AGNOSTIC decomposed run loop (docs/design/37 M4): evolve N pre-built tiles in
+/// lockstep with the UNIVERSAL `PeerCopy` transport (real peer where a link exists, staged over
+/// managed memory otherwise -- so the SAME code runs on one card with `--gpus 2` and on a node
+/// with `--gpus 8`, no machine-specific branch), gathering into `global` for output through the
+/// existing single-grid checkpoint writer. every regime's decomposed build feeds this one loop;
+/// adding a regime is just a tile-build, not a new loop. v1 cadence is linear `checkpoint_interval`.
+fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    cfg: &Config,
+    tiles: Vec<(SimStateGeneric<R, D, DOF, M, E, S, Mem>, K)>,
+    global: SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    counts: [usize; D],
+) -> Result<(), String>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    use symbi::sim::decomp::{enable_peer_mesh, evolve_decomposed, gather_interiors};
+
+    let ntiles = tiles.len();
+    let devices: Vec<i32> = (0..ntiles as i32).collect();
+    // open peer links once (no-op for pairs that can't peer; those stage).
+    enable_peer_mesh(&devices);
+
+    let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+    let kernels: Vec<_> = tiles.iter().map(|(_, k)| k).collect();
+
+    // the UNIVERSAL transport: adaptive peer/staged. single-device builds compile the host arm
+    // but never reach this fn (gpus>1 needs a gpu feature; validate_gpu_request enforces it).
+    #[cfg(feature = "gpu")]
+    let transport = symbi::sim::decomp::PeerCopy;
+    #[cfg(not(feature = "gpu"))]
+    let transport = symbi::sim::decomp::LocalCopy;
+
+    let cp_dt = if cfg.checkpoint_interval > 0.0 {
+        cfg.checkpoint_interval * cfg.time_unit
+    } else {
+        f64::INFINITY
+    };
+    let cp_width = checkpoint_time_width(cfg);
+
+    // t=start initial condition.
+    if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+        gather_interiors(&global, &stores, counts);
+        let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+        let _ = write_hierarchy_checkpoint(
+            &[&global],
+            &checkpoint_name(cfg, &tag),
+            &checkpoint_metadata(cfg, cfg.checkpoint_index),
+        );
+    }
+
+    let mut next_cp = cfg.start_time + cp_dt;
+    let mut cp_index = cfg.checkpoint_index + 1;
+    evolve_decomposed(
+        &stores,
+        &kernels,
+        counts,
+        &devices,
+        cfg.timestepping,
+        cfg.start_time,
+        cfg.t_final,
+        1,
+        &transport,
+        |_iter, time| {
+            if time + f64::EPSILON >= next_cp {
+                gather_interiors(&global, &stores, counts);
+                let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                let _ = write_hierarchy_checkpoint(
+                    &[&global],
+                    &checkpoint_name(cfg, &tag),
+                    &checkpoint_metadata(cfg, cp_index),
+                );
+                while next_cp <= time {
+                    next_cp += cp_dt;
+                }
+                cp_index += 1;
+            }
+            std::ops::ControlFlow::Continue(())
+        },
+    );
+
+    // canonical final snapshot, mirroring the single-grid run.
+    gather_interiors(&global, &stores, counts);
+    let _ = write_hierarchy_checkpoint(
+        &[&global],
+        &format!("{}final.h5", cfg.data_dir),
+        &checkpoint_metadata(cfg, cp_index),
+    );
+    Ok(())
+}
+
 /// the multi-gpu (gpus>1) hydro path (docs/design/37 M4, design/38). decompose the domain into
 /// `cfg.n_gpus` tiles, bind each tile to a device, evolve them in lockstep with halo exchange
 /// (the oracle-proven `decomp::evolve_decomposed`), and for output gather the tiles into one
@@ -1440,7 +1536,7 @@ macro_rules! build_and_run_hydro {
 /// validated locally by `gpus=2` on one card (NDEV) and on the cluster across real devices.
 macro_rules! build_and_run_hydro_decomposed {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
-        use symbi::sim::decomp::{decompose_grid, evolve_decomposed, gather_interiors, unflatten};
+        use symbi::sim::decomp::{decompose_grid, unflatten};
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
@@ -1553,76 +1649,9 @@ macro_rules! build_and_run_hydro_decomposed {
             })
             .build();
 
-        let stores: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-        let kernels: Vec<_> = tiles.iter().map(|(_, k)| k).collect();
-        let devices: Vec<i32> = (0..ntiles as i32).collect();
-
-        // single-device builds compile this path but never reach it (validate_gpu_request rejects
-        // gpus>1 without a gpu feature); the gpu build moves halos with StagedCopy over managed
-        // memory (correct across real devices; PeerCopy/nvlink is the later perf increment).
-        #[cfg(feature = "gpu")]
-        let transport = symbi::sim::decomp::StagedCopy;
-        #[cfg(not(feature = "gpu"))]
-        let transport = symbi::sim::decomp::LocalCopy;
-
-        let cp_dt = if cfg.checkpoint_interval > 0.0 {
-            cfg.checkpoint_interval * cfg.time_unit
-        } else {
-            f64::INFINITY
-        };
-        let cp_width = checkpoint_time_width(cfg);
-        let gstore: &_ = &global;
-
-        // write the t=start initial condition (the gather captures the seeded tiles' primitives).
-        if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
-            gather_interiors(gstore, &stores, counts);
-            let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
-            let _ = write_hierarchy_checkpoint(
-                &[&global],
-                &checkpoint_name(cfg, &tag),
-                &checkpoint_metadata(cfg, cfg.checkpoint_index),
-            );
-        }
-
-        let mut next_cp = cfg.start_time + cp_dt;
-        let mut cp_index = cfg.checkpoint_index + 1;
-        evolve_decomposed(
-            &stores,
-            &kernels,
-            counts,
-            &devices,
-            cfg.timestepping,
-            cfg.start_time,
-            cfg.t_final,
-            1,
-            &transport,
-            |_iter, time| {
-                // linear time cadence: write at most one checkpoint per crossed boundary.
-                if time + f64::EPSILON >= next_cp {
-                    gather_interiors(gstore, &stores, counts);
-                    let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
-                    let _ = write_hierarchy_checkpoint(
-                        &[&global],
-                        &checkpoint_name(cfg, &tag),
-                        &checkpoint_metadata(cfg, cp_index),
-                    );
-                    while next_cp <= time {
-                        next_cp += cp_dt;
-                    }
-                    cp_index += 1;
-                }
-                std::ops::ControlFlow::Continue(())
-            },
-        );
-
-        // the canonical final snapshot, mirroring the single-grid run.
-        gather_interiors(gstore, &stores, counts);
-        let _ = write_hierarchy_checkpoint(
-            &[&global],
-            &format!("{}final.h5", cfg.data_dir),
-            &checkpoint_metadata(cfg, cp_index),
-        );
-        Ok(())
+        // hand the built tiles + output sim to the regime-agnostic decomposed loop (evolve +
+        // gather + checkpoint, universal transport). every regime shares this loop.
+        run_decomposed_loop(cfg, tiles, global, counts)
     }};
 }
 
@@ -1999,6 +2028,116 @@ macro_rules! imhd_dispatch {
     };
 }
 
+/// the multi-gpu (gpus>1) ISOTHERMAL path: the iso sibling of `build_and_run_hydro_decomposed!`.
+/// builds N iso tiles + a global output sim and hands them to the shared `run_decomposed_loop`
+/// (universal transport). v1 is GLOBALLY isothermal (uniform cs); locally-isothermal cs(x) needs
+/// per-tile cs^2 setup and is deferred (guarded). same non-AMR / no-bodies / no-source scope.
+macro_rules! build_and_run_iso_decomposed {
+    ($cfg:expr, $prims:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
+
+        if cfg.refinement_enabled {
+            return Err("gpus>1 does not yet support mesh refinement; set gpus=1".to_string());
+        }
+        if !cfg.bodies.is_empty() {
+            return Err("gpus>1 does not yet support immersed bodies; set gpus=1".to_string());
+        }
+        if cfg.source_json.is_some() {
+            return Err("gpus>1 does not yet support user source expressions; set gpus=1".to_string());
+        }
+        if cfg.locally_isothermal {
+            return Err("gpus>1 does not yet support locally-isothermal cs(x); set gpus=1 or use globally isothermal".to_string());
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+
+        let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
+                let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            let g = tc[ax] * m[ax] + idx[ax] as usize;
+                            lin += g * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        PrimG::<f64, $d, IsoModel> {
+                            rho: row[0],
+                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                            pre: Default::default(),
+                        }
+                    })
+                    .build();
+                let sub = sim.substrate().theta(theta);
+                Ok((sim, sub))
+            })?;
+            tiles.push(built);
+        }
+
+        let global = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
+            .cells(n)
+            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .boundaries(phys)
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .cyl_plane(cfg.cyl_plane)
+            .allocate()
+            .map_err(|e| format!("global output sim allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                let mut lin = 0usize;
+                let mut stride = 1usize;
+                for ax in 0..$d {
+                    lin += idx[ax] as usize * stride;
+                    stride *= n[ax];
+                }
+                let row = &prims[lin];
+                PrimG::<f64, $d, IsoModel> {
+                    rho: row[0],
+                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                    pre: Default::default(),
+                }
+            })
+            .build();
+
+        run_decomposed_loop(cfg, tiles, global, counts)
+    }};
+}
+
 /// build one monomorphized ISOTHERMAL HYDRO sim (IsoNewtonian + Isothermal eos,
 /// DOF=D) and drive it. the iso primitive has NO pressure slot (IsoModel ZST), so
 /// `prim_gen` yields (rho, v1..vD). iso is HLLE-only by physics (no contact wave),
@@ -2014,6 +2153,11 @@ macro_rules! build_and_run_iso {
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
+
+        // gpus>1 -> the decomposed iso path; gpus<=1 -> the single-device path below.
+        if cfg.n_gpus > 1 {
+            return build_and_run_iso_decomposed!($cfg, $prims, $d, $geom, $geom_ty);
+        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -2202,10 +2346,10 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     // gpus>1 takes the decomposed run loop, wired for single-level hydro only (docs/design/37
     // M4). reject every other case HERE so a multi-gpu request never silently runs on one device.
     if cfg.n_gpus > 1 {
-        if !matches!(cfg.regime.as_str(), "newtonian" | "srhd") {
+        if !matches!(cfg.regime.as_str(), "newtonian" | "srhd" | "isothermal") {
             return Err(format!(
-                "gpus>1 is wired for hydro (newtonian, srhd) only; regime '{}' runs single-gpu \
-                 for now (set gpus=1)",
+                "gpus>1 is wired for hydro (newtonian, srhd, isothermal) only; regime '{}' runs \
+                 single-gpu for now (set gpus=1)",
                 cfg.regime
             ));
         }
