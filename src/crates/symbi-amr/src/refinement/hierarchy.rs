@@ -614,119 +614,145 @@ where
     /// loop mirrors sim/evolve.rs::step — the bit-for-bit gate holds the two
     /// in lockstep.
     fn advance_level(&mut self, level: usize, dt: f64, alpha0: f64) {
-        let has_finer = level + 1 < self.levels.len();
-        let has_coarser = level > 0;
+        self.level_step_begin(level, dt);
+        let n = self.levels[level].state.timestepping.stages().len();
+        for ii in 0..n {
+            self.level_stage(level, ii, dt, alpha0);
+        }
+        self.level_step_tail(level, dt, alpha0);
+    }
 
-        // snapshot this level's prims at its step start for the finer level's
-        // time-interpolated ghost prolongation.
+    /// step prologue: snapshot this level's prims (for the finer level's time-interpolated ghost
+    /// prolongation) + the rk u_n snapshot. extracted from `advance_level` (which calls begin /
+    /// stage* / tail in order -- bit-for-bit unchanged) so the DECOMPOSED root driver can drive the
+    /// root stages stage-by-stage with a root halo exchange BETWEEN stages (rk2-root requires the
+    /// corrector to read each neighbor's stage-1 update, exactly like the single-level exchange).
+    pub fn level_step_begin(&mut self, level: usize, dt: f64) {
+        let has_finer = level + 1 < self.levels.len();
         if has_finer {
             prof("refine_save_prim", || save_prim_old(&self.levels[level]));
         }
-
         self.levels[level].state.dt = dt;
+        let stages = self.levels[level].state.timestepping.stages();
+        if stages.len() > 1 {
+            let l = &self.levels[level];
+            prof("snapshot", || l.kernels.snapshot(&l.state));
+        }
+    }
+
+    /// one SSP stage `ii` of level `level` -- the body of `advance_level`'s stage loop. `alpha0` is
+    /// this level's substep start as a fraction of the parent step (0 on the root). pure extraction.
+    pub fn level_stage(&mut self, level: usize, ii: usize, dt: f64, alpha0: f64) {
+        let has_finer = level + 1 < self.levels.len();
+        let has_coarser = level > 0;
         let stages = self.levels[level].state.timestepping.stages();
         let n = stages.len();
         let weights = flux_weights(stages);
         let stage_time = stage_time_fractions(stages);
-        if n > 1 {
-            let l = &self.levels[level];
-            prof("snapshot", || l.kernels.snapshot(&l.state));
-        }
         let additive_source = self.levels[level].kernels.has_additive_source();
-        for (ii, &(a0, ac)) in stages.iter().enumerate() {
-            let l = &self.levels[level];
-            if additive_source {
-                prof("snapshot_stage", || l.kernels.snapshot_stage(&l.state));
-            }
-            l.kernels.wave_speeds(&l.state);
-            prof("flux", || {
-                for dd in 0..NDIM {
-                    l.kernels.flux(&l.state, dd);
-                }
-            });
-            // register accumulation between flux and the stage update. the
-            // per-stage weight is the stage's EFFECTIVE flux contribution
-            // after the ssp convex recombination, so the step total is dt.
-            prof("refine_flux_reg", || {
-                if has_finer {
-                    let reg = &self.flux_registers[level];
-                    let l = &self.levels[level];
-                    if uniform_cartesian(&l.state) {
-                        if ii == 0 {
-                            reg.zero_uniform();
-                        }
-                        for dd in 0..NDIM {
-                            reg.accumulate_coarse_uniform(
-                                &l.state.fields.flux,
-                                &l.state.geom.dx,
-                                dd,
-                                weights[ii] * dt,
-                            );
-                        }
-                    } else {
-                        if ii == 0 {
-                            reg.zero();
-                        }
-                        let geo = l.state.geom.block_geometry(l.state.physics.metric);
-                        for dd in 0..NDIM {
-                            reg.accumulate_coarse(&l.state.fields.flux, &geo, dd, weights[ii] * dt);
-                        }
-                    }
-                }
-                if has_coarser {
-                    let reg = &self.flux_registers[level - 1];
-                    let l = &self.levels[level];
-                    if uniform_cartesian(&l.state) {
-                        for dd in 0..NDIM {
-                            reg.accumulate_fine_uniform(
-                                &l.state.fields.flux,
-                                &l.state.geom.dx,
-                                dd,
-                                weights[ii] * dt,
-                            );
-                        }
-                    } else {
-                        let geo = l.state.geom.block_geometry(l.state.physics.metric);
-                        for dd in 0..NDIM {
-                            reg.accumulate_fine(
-                                &l.state.fields.flux,
-                                &geo,
-                                dd,
-                                weights[ii] * dt,
-                                RATIO,
-                            );
-                        }
-                    }
-                }
-            });
-            let l = &self.levels[level];
-            prof("efield", || l.kernels.efield(&l.state));
-            prof("godunov_stage", || {
-                l.kernels.godunov_stage(&l.state, dt, a0, ac)
-            });
-            prof("post_godunov", || {
-                l.kernels.post_godunov(&l.state, dt, stage_tag(ii, n))
-            });
-            if additive_source {
-                prof("source_apply", || l.kernels.source_apply(&l.state, ac * dt));
-            }
-            if l.state.has_bodies() {
-                prof("body_source", || l.kernels.body_source(&l.state, ac * dt));
-            }
-            prof("c2p", || l.kernels.c2p(&l.state));
-            // c2p over the full allocated domain recomputed the coarse-fine
-            // prim ghosts from stale cons; re-prolong them at the time of the
-            // state entering the NEXT stage (the last stage's tail lands on
-            // the substep end = the next substep's start) before the physical
-            // fill reads corners.
-            if has_coarser {
-                prof("refine_prolong", || {
-                    self.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64)
-                });
-            }
-            let l = &self.levels[level];
-            prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+        let (a0, ac) = stages[ii];
+
+        let l = &self.levels[level];
+        if additive_source {
+            prof("snapshot_stage", || l.kernels.snapshot_stage(&l.state));
         }
+        l.kernels.wave_speeds(&l.state);
+        prof("flux", || {
+            for dd in 0..NDIM {
+                l.kernels.flux(&l.state, dd);
+            }
+        });
+        // register accumulation between flux and the stage update. the
+        // per-stage weight is the stage's EFFECTIVE flux contribution
+        // after the ssp convex recombination, so the step total is dt.
+        prof("refine_flux_reg", || {
+            if has_finer {
+                let reg = &self.flux_registers[level];
+                let l = &self.levels[level];
+                if uniform_cartesian(&l.state) {
+                    if ii == 0 {
+                        reg.zero_uniform();
+                    }
+                    for dd in 0..NDIM {
+                        reg.accumulate_coarse_uniform(
+                            &l.state.fields.flux,
+                            &l.state.geom.dx,
+                            dd,
+                            weights[ii] * dt,
+                        );
+                    }
+                } else {
+                    if ii == 0 {
+                        reg.zero();
+                    }
+                    let geo = l.state.geom.block_geometry(l.state.physics.metric);
+                    for dd in 0..NDIM {
+                        reg.accumulate_coarse(&l.state.fields.flux, &geo, dd, weights[ii] * dt);
+                    }
+                }
+            }
+            if has_coarser {
+                let reg = &self.flux_registers[level - 1];
+                let l = &self.levels[level];
+                if uniform_cartesian(&l.state) {
+                    for dd in 0..NDIM {
+                        reg.accumulate_fine_uniform(
+                            &l.state.fields.flux,
+                            &l.state.geom.dx,
+                            dd,
+                            weights[ii] * dt,
+                        );
+                    }
+                } else {
+                    let geo = l.state.geom.block_geometry(l.state.physics.metric);
+                    for dd in 0..NDIM {
+                        reg.accumulate_fine(
+                            &l.state.fields.flux,
+                            &geo,
+                            dd,
+                            weights[ii] * dt,
+                            RATIO,
+                        );
+                    }
+                }
+            }
+        });
+        let l = &self.levels[level];
+        prof("efield", || l.kernels.efield(&l.state));
+        prof("godunov_stage", || {
+            l.kernels.godunov_stage(&l.state, dt, a0, ac)
+        });
+        prof("post_godunov", || {
+            l.kernels.post_godunov(&l.state, dt, stage_tag(ii, n))
+        });
+        if additive_source {
+            prof("source_apply", || l.kernels.source_apply(&l.state, ac * dt));
+        }
+        if l.state.has_bodies() {
+            prof("body_source", || l.kernels.body_source(&l.state, ac * dt));
+        }
+        prof("c2p", || l.kernels.c2p(&l.state));
+        // c2p over the full allocated domain recomputed the coarse-fine
+        // prim ghosts from stale cons; re-prolong them at the time of the
+        // state entering the NEXT stage (the last stage's tail lands on
+        // the substep end = the next substep's start) before the physical
+        // fill reads corners.
+        if has_coarser {
+            prof("refine_prolong", || {
+                self.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64)
+            });
+        }
+        let l = &self.levels[level];
+        prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+    }
+
+    /// step epilogue: emf bookkeeping (mhd) + the finer-level subcycle + restrict + reflux + the
+    /// level clock. pure extraction from `advance_level`. for the DECOMPOSED root the driver calls
+    /// this AFTER the (exchanged) root stages; the fine subcycle here is tile-local (the patch lives
+    /// inside one tile), so it reuses the recursive `advance_level` on the finer level unchanged.
+    pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) {
+        let has_finer = level + 1 < self.levels.len();
+        let has_coarser = level > 0;
 
         // emf bookkeeping (mhd): after the stage loop the efield buffers hold
         // the EFFECTIVE per-step EMF (post_godunov wrote the rk2 time-average

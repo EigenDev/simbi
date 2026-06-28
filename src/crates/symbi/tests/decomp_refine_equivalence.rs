@@ -54,14 +54,14 @@ fn patch() -> RefinementRegion<2> {
     RefinementRegion { x_lo: [0.125, 0.125], x_hi: [0.375, 0.375] }
 }
 
-fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
+fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Timestepping) -> Sim {
     Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(cells)
         .spacing([DX; 2])
         .origin(origin)
         .boundaries(bnd)
         .cfl(CFL)
-        .timestepping(Timestepping::Euler)
+        .timestepping(ts)
         .allocate()
         .expect("root sim construction failed")
         .set_initial(|[x, y]| {
@@ -71,9 +71,11 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>) -> Sim {
         .build()
 }
 
-// the MONOLITHIC reference: one full-grid root + the refined patch.
-fn build_mono() -> Hier {
-    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow));
+// the MONOLITHIC reference: one full-grid root + the refined patch, run via the CANONICAL
+// `hier.evolve()` (so the oracle validates BOTH the decomposition AND that the staged driver
+// reproduces the canonical recursive advance).
+fn build_mono(ts: Timestepping) -> Hier {
+    let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), ts);
     let k = kset(&root);
     let mut h = Hier::with_refinement(root, k, &[patch()], ProlongOrder::Plm, kset)
         .expect("mono hierarchy");
@@ -85,7 +87,7 @@ fn build_mono() -> Hier {
 // the DECOMPOSED build: `counts` root tiles. tile 0 (containing the patch) is a 2-level hierarchy;
 // every other tile is single-level. each tile's root carries CoarseFine on internal faces + the
 // physical boundary outside, so the root halo exchange owns the cut.
-fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
+fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     let m: [usize; 2] = std::array::from_fn(|a| N / counts[a]);
     let total: usize = counts.iter().product();
     let mut tiles = Vec::with_capacity(total);
@@ -97,7 +99,7 @@ fn build_tiles(counts: [usize; 2]) -> Vec<Hier> {
             let hi = if tc[a] == counts[a] - 1 { BoundaryType::Outflow } else { BoundaryType::CoarseFine };
             [lo, hi]
         }));
-        let root = build_root(m, origin, bnd);
+        let root = build_root(m, origin, bnd, ts);
         // the patch lives in the single tile whose physical extent contains it (the bottom-left
         // quadrant -> tile 0 for every tested topology). check BOTH axes.
         let owns_patch = (0..2).all(|a| {
@@ -133,9 +135,14 @@ fn exchange_root(tiles: &mut [Hier], counts: [usize; 2]) {
     }
 }
 
-// the phase-1 decomposed AMR driver: lockstep root steps with a between-step root halo exchange.
-fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64) {
+// the decomposed AMR driver: lockstep root steps, the root halo exchanged BETWEEN root stages (the
+// rk2 corrector reads each neighbor's stage-1 update, exactly like the single-level decomposition).
+// each root step: global dt (min over tiles) -> begin -> { root stage; exchange }* -> tail (the
+// tile-local fine subcycle + reflux) -> root clock -> a final exchange for the next step's stage 0.
+// hydro only (no mesh motion / bodies in the root post-step -- those combinations are deferred).
+fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping) {
     exchange_root(tiles, counts); // cut halos current before the first flux
+    let nstages = ts.stages().len();
     let mut t = 0.0;
     while t < t_final {
         let gdt = tiles
@@ -144,9 +151,20 @@ fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64) {
             .fold(f64::INFINITY, f64::min)
             .min(t_final - t);
         for h in tiles.iter_mut() {
-            h.evolve(t + gdt).expect("tile root step"); // exactly one root step at gdt
+            h.level_step_begin(0, gdt);
         }
-        exchange_root(tiles, counts);
+        for ii in 0..nstages {
+            for h in tiles.iter_mut() {
+                h.level_stage(0, ii, gdt, 0.0);
+            }
+            exchange_root(tiles, counts); // between-stage root halo exchange
+        }
+        for h in tiles.iter_mut() {
+            h.level_step_tail(0, gdt, 0.0); // tile-local fine subcycle + restrict + reflux
+            h.levels[0].state.time += gdt; // the root clock (step_root's tail, hydro-only here)
+            h.levels[0].state.iteration += 1;
+        }
+        exchange_root(tiles, counts); // tail's c2p touched the cut halo; refresh for the next step
         t += gdt;
     }
 }
@@ -202,13 +220,13 @@ fn max_err(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b).map(|(x, y)| (x - y).abs()).fold(0.0_f64, f64::max)
 }
 
-fn assert_refine_matches(counts: [usize; 2]) {
-    let mut mono = vec![build_mono()];
-    run_decomposed(&mut mono, [1, 1], T_FINAL);
-    let mono_c = composite_fine(&mono, [1, 1]);
+fn assert_refine_matches(counts: [usize; 2], ts: Timestepping) {
+    let mut mono = build_mono(ts);
+    mono.evolve(T_FINAL).expect("mono evolve"); // CANONICAL recursive advance
+    let mono_c = composite_fine(std::slice::from_ref(&mono), [1, 1]);
 
-    let mut dec = build_tiles(counts);
-    run_decomposed(&mut dec, counts, T_FINAL);
+    let mut dec = build_tiles(counts, ts);
+    run_decomposed(&mut dec, counts, T_FINAL, ts);
     let dec_c = composite_fine(&dec, counts);
 
     assert!(
@@ -226,17 +244,35 @@ fn assert_refine_matches(counts: [usize; 2]) {
 
 #[test]
 fn refine_euler_two_tile_x_cut() {
-    assert_refine_matches([2, 1]);
+    assert_refine_matches([2, 1], Timestepping::Euler);
 }
 
 #[test]
 fn refine_euler_two_tile_y_cut() {
-    assert_refine_matches([1, 2]);
+    assert_refine_matches([1, 2], Timestepping::Euler);
 }
 
 // the 2x2 grid: the patch sits in tile 0 (bottom-left quadrant); the other three tiles are
 // single-level. exercises the root halo exchange across both cuts with a refined tile present.
 #[test]
 fn refine_euler_quad_tile_2d_grid() {
-    assert_refine_matches([2, 2]);
+    assert_refine_matches([2, 2], Timestepping::Euler);
+}
+
+// RK2 root (phase 2): the root halo MUST be exchanged between the two root stages -- the corrector
+// reads each neighbor's stage-1 update. a between-step-only exchange would diverge here. driven by
+// the extracted level_step_begin / level_stage / level_step_tail seam.
+#[test]
+fn refine_rk2_two_tile_x_cut() {
+    assert_refine_matches([2, 1], Timestepping::Rk2);
+}
+
+#[test]
+fn refine_rk2_two_tile_y_cut() {
+    assert_refine_matches([1, 2], Timestepping::Rk2);
+}
+
+#[test]
+fn refine_rk2_quad_tile_2d_grid() {
+    assert_refine_matches([2, 2], Timestepping::Rk2);
 }
