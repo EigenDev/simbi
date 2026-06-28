@@ -24,16 +24,19 @@ use symbi_algebra::{Domain, Side};
 use symbi_grid::Field;
 use symbi_xpu::MemorySpace;
 #[cfg(feature = "cuda")]
-use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
+use symbi_xpu::cuda::{ctx_sync, memcpy_peer, UnifiedMemory, MAX_GPUS};
 #[cfg(feature = "cuda")]
 use symbi_xpu::runtime::{cuda_runtime::current_dispatcher, GpuRuntime};
 #[cfg(feature = "cuda")]
-use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
+use symbi_xpu::{with_device, KernelArgs, LaunchConfig, MemoryBlock};
 
 /// move `src` over `src_region` into `dst` over `dst_region`, cell-for-cell. the two
 /// regions have identical shape (same per-axis extents); the transport pairs them by
-/// iteration order. impls: `LocalCopy` (in-process), and later a gpu peer copy and an
-/// mpi pack/send/unpack.
+/// iteration order. `src_dev`/`dst_dev` are the LOGICAL devices the two fields live on --
+/// the one piece of device identity a cross-device exchange genuinely needs (the rest of the
+/// code uses the ambient current-device model, docs/design/37). single-device transports
+/// (`LocalCopy`, `DeviceCopy`, `StagedCopy`) ignore them; `PeerCopy` uses them to drive
+/// `cuMemcpyPeer` between the two devices.
 pub trait HaloTransport {
     fn copy_region<const D: usize, M: MemorySpace>(
         &self,
@@ -41,6 +44,8 @@ pub trait HaloTransport {
         src_region: &Domain<D>,
         dst: &Field<f64, D, M>,
         dst_region: &Domain<D>,
+        src_dev: i32,
+        dst_dev: i32,
     );
 }
 
@@ -54,6 +59,8 @@ impl HaloTransport for LocalCopy {
         src_region: &Domain<D>,
         dst: &Field<f64, D, M>,
         dst_region: &Domain<D>,
+        _src_dev: i32,
+        _dst_dev: i32,
     ) {
         let sv = src.view();
         let mut dv = dst.view_mut();
@@ -116,10 +123,12 @@ impl HaloTransport for DeviceCopy {
         src_region: &Domain<D>,
         dst: &Field<f64, D, M>,
         dst_region: &Domain<D>,
+        _src_dev: i32,
+        _dst_dev: i32,
     ) {
         // the kernel dereferences device pointers; a host backend has none.
         if !M::IS_DEVICE_ACCESSIBLE {
-            LocalCopy.copy_region(src, src_region, dst, dst_region);
+            LocalCopy.copy_region(src, src_region, dst, dst_region, _src_dev, _dst_dev);
             return;
         }
 
@@ -228,6 +237,8 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     axis: usize,
     processed: &[bool; D],
     counts: &[usize; D],
+    lo_dev: i32,
+    hi_dev: i32,
     transport: &T,
 ) {
     let ng = lo.geom.ng as isize;
@@ -242,8 +253,10 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
     let lo_src = hi_ghost.slab(axis, (i_hi_lo - ng, i_hi_lo));
 
     for (fl, fr) in prim_fields(lo).into_iter().zip(prim_fields(hi)) {
-        transport.copy_region(fr, &hi_src, fl, &lo_ghost); // hi interior -> lo ghost
-        transport.copy_region(fl, &lo_src, fr, &hi_ghost); // lo interior -> hi ghost
+        // hi interior -> lo ghost: source is the hi tile (hi_dev), dest is the lo tile (lo_dev).
+        transport.copy_region(fr, &hi_src, fl, &lo_ghost, hi_dev, lo_dev);
+        // lo interior -> hi ghost: source is the lo tile, dest is the hi tile.
+        transport.copy_region(fl, &lo_src, fr, &hi_ghost, lo_dev, hi_dev);
     }
 }
 
@@ -275,13 +288,18 @@ pub fn unflatten<const D: usize>(mut flat: usize, dims: [usize; D]) -> [usize; D
 /// (local host copy, gpu kernel, or a future peer/mpi impl). each adjacent pair is
 /// independent (reads interior, writes ghosts; an interior tile's lo/hi ghosts are distinct
 /// cells), so pair order within an axis is free.
+/// `devices[flatten(tile_coord, counts)]` is the logical device each tile lives on, parallel
+/// to `tiles`. device identity lives here, in the decomposition's tile->device map (the way a
+/// real spmd driver keeps it), not on the field -- the exchange is the one cross-device step.
 pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTransport>(
     tiles: &[&FieldStore<D, DOF, M>],
     counts: [usize; D],
+    devices: &[i32],
     transport: &T,
 ) {
     let total: usize = counts.iter().product();
     debug_assert_eq!(tiles.len(), total, "tiles slice length does not match counts");
+    debug_assert_eq!(devices.len(), total, "devices slice length does not match counts");
     let mut processed = [false; D];
     for axis in 0..D {
         for flat in 0..total {
@@ -291,9 +309,11 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
             }
             let mut tc_hi = tc;
             tc_hi[axis] += 1;
-            let lo = tiles[flatten(tc, counts)];
-            let hi = tiles[flatten(tc_hi, counts)];
-            exchange_faces(lo, hi, axis, &processed, &counts, transport);
+            let lo_flat = flatten(tc, counts);
+            let hi_flat = flatten(tc_hi, counts);
+            let lo = tiles[lo_flat];
+            let hi = tiles[hi_flat];
+            exchange_faces(lo, hi, axis, &processed, &counts, devices[lo_flat], devices[hi_flat], transport);
         }
         processed[axis] = true;
     }
@@ -357,9 +377,11 @@ impl HaloTransport for StagedCopy {
         src_region: &Domain<D>,
         dst: &Field<f64, D, M>,
         dst_region: &Domain<D>,
+        _src_dev: i32,
+        _dst_dev: i32,
     ) {
         if !M::IS_DEVICE_ACCESSIBLE {
-            LocalCopy.copy_region(src, src_region, dst, dst_region);
+            LocalCopy.copy_region(src, src_region, dst, dst_region, _src_dev, _dst_dev);
             return;
         }
         let n = src_region.volume();
@@ -435,6 +457,162 @@ impl HaloTransport for StagedCopy {
             }
             // drain before the pooled buffers are reused next call.
             ctx_sync();
+        });
+    }
+}
+
+// pooled staging buffers for `PeerCopy`, one set PER logical device: the index array (a strip
+// is gathered/scattered on its own device) and the contiguous f64 buffer the peer move
+// transfers. allocated in the owning device's context so each buffer is resident on its gpu.
+#[cfg(feature = "cuda")]
+struct PeerBufs {
+    idx: MemoryBlock<UnifiedMemory>,
+    buf: MemoryBlock<UnifiedMemory>,
+    cap: usize,
+}
+
+#[cfg(feature = "cuda")]
+thread_local! {
+    static PEER_BUFS: std::cell::RefCell<[Option<PeerBufs>; MAX_GPUS]> =
+        const { std::cell::RefCell::new([const { None }; MAX_GPUS]) };
+}
+
+// ensure device `dev` has staging buffers of at least `n` elements, allocated in its context.
+#[cfg(feature = "cuda")]
+fn ensure_peer_bufs(pool: &mut [Option<PeerBufs>; MAX_GPUS], dev: i32, n: usize) {
+    let slot = &mut pool[dev as usize];
+    if slot.as_ref().map_or(true, |b| b.cap < n) {
+        let (idx, buf) = with_device(dev, || {
+            (
+                MemoryBlock::<UnifiedMemory>::for_elements::<u32>(n).expect("peer idx alloc"),
+                MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n).expect("peer buf alloc"),
+            )
+        });
+        *slot = Some(PeerBufs { idx, buf, cap: n });
+    }
+}
+
+/// the cross-device halo transport (docs/design/37 M3): gather the strip into the source
+/// device's contiguous buffer, `cuMemcpyPeer` it to the destination device's buffer over the
+/// link (nvlink intra-node), then scatter it into the destination strip. the gather and
+/// scatter ARE `StagedCopy`'s proven halves; only the peer move in the middle is new. when
+/// `src_dev == dst_dev` there is nothing to move across, so it defers to the proven
+/// single-device `StagedCopy`. host fallback for a cpu backend. NOT exercisable on one gpu (a
+/// device cannot peer with itself); the equivalence oracle runs it on a real multi-gpu node.
+#[cfg(feature = "cuda")]
+pub struct PeerCopy;
+
+#[cfg(feature = "cuda")]
+impl HaloTransport for PeerCopy {
+    fn copy_region<const D: usize, M: MemorySpace>(
+        &self,
+        src: &Field<f64, D, M>,
+        src_region: &Domain<D>,
+        dst: &Field<f64, D, M>,
+        dst_region: &Domain<D>,
+        src_dev: i32,
+        dst_dev: i32,
+    ) {
+        if !M::IS_DEVICE_ACCESSIBLE {
+            LocalCopy.copy_region(src, src_region, dst, dst_region, src_dev, dst_dev);
+            return;
+        }
+        // same device: no link to cross -- the proven staged gather/scatter handles it.
+        if src_dev == dst_dev {
+            StagedCopy.copy_region(src, src_region, dst, dst_region, src_dev, dst_dev);
+            return;
+        }
+
+        let n = src_region.volume();
+        debug_assert_eq!(n, dst_region.volume(), "src/dst strip shapes differ");
+        if n == 0 {
+            return;
+        }
+        let sdom = src.domain();
+        let ddom = dst.domain();
+        let src_ptr = src.as_ptr() as u64;
+        let dst_ptr = dst.as_mut_ptr() as u64;
+        let n_u32 = n as u32;
+        let config = LaunchConfig::for_1d(n_u32, 64);
+
+        PEER_BUFS.with(|cell| {
+            // stage 0: ensure both devices have buffers, write the per-cell flat offsets into
+            // each device's index buffer (host writes to managed memory), then take the raw
+            // device pointers so the borrow ends before any launch.
+            let (src_idx_ptr, src_buf_ptr, dst_idx_ptr, dst_buf_ptr) = {
+                let mut pool = cell.borrow_mut();
+                ensure_peer_bufs(&mut pool, src_dev, n);
+                ensure_peer_bufs(&mut pool, dst_dev, n);
+
+                let sp = pool[src_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
+                for (i, sc) in src_region.iter().enumerate() {
+                    unsafe { *sp.add(i) = sdom.flat_index(sc) as u32 };
+                }
+                let dp = pool[dst_dev as usize].as_mut().unwrap().idx.as_mut_ptr::<u32>();
+                for (i, dc) in dst_region.iter().enumerate() {
+                    unsafe { *dp.add(i) = ddom.flat_index(dc) as u32 };
+                }
+
+                let s = pool[src_dev as usize].as_mut().unwrap();
+                let src_idx_ptr = s.idx.as_ptr::<u32>() as u64;
+                let src_buf_ptr = s.buf.as_mut_ptr::<f64>() as u64;
+                let d = pool[dst_dev as usize].as_mut().unwrap();
+                let dst_idx_ptr = d.idx.as_ptr::<u32>() as u64;
+                let dst_buf_ptr = d.buf.as_mut_ptr::<f64>() as u64;
+                (src_idx_ptr, src_buf_ptr, dst_idx_ptr, dst_buf_ptr)
+            };
+
+            // stage 1: gather on the source device -- src_buf[i] = src[sidx[i]].
+            with_device(src_dev, || {
+                let gather = current_dispatcher().jit_kernel_keyed(
+                    HALO_GATHER_KERNEL,
+                    "decomp/halo_gather",
+                    "halo_gather",
+                );
+                let mut g = KernelArgs::new();
+                g.push(&src_ptr);
+                g.push(&src_buf_ptr);
+                g.push(&src_idx_ptr);
+                g.push(&n_u32);
+                unsafe {
+                    current_dispatcher()
+                        .runtime()
+                        .launch(&gather, config, g.as_mut_slice())
+                        .expect("peer gather launch failed");
+                }
+                ctx_sync();
+            });
+
+            // stage 2: move the contiguous buffer across the link (synchronous).
+            memcpy_peer(
+                dst_buf_ptr,
+                dst_dev,
+                src_buf_ptr,
+                src_dev,
+                n * std::mem::size_of::<f64>(),
+            )
+            .expect("cuMemcpyPeer failed");
+
+            // stage 3: scatter on the destination device -- dst[didx[i]] = dst_buf[i].
+            with_device(dst_dev, || {
+                let scatter = current_dispatcher().jit_kernel_keyed(
+                    HALO_SCATTER_KERNEL,
+                    "decomp/halo_scatter",
+                    "halo_scatter",
+                );
+                let mut s = KernelArgs::new();
+                s.push(&dst_ptr);
+                s.push(&dst_buf_ptr);
+                s.push(&dst_idx_ptr);
+                s.push(&n_u32);
+                unsafe {
+                    current_dispatcher()
+                        .runtime()
+                        .launch(&scatter, config, s.as_mut_slice())
+                        .expect("peer scatter launch failed");
+                }
+                ctx_sync();
+            });
         });
     }
 }

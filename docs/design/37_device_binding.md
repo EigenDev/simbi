@@ -93,11 +93,20 @@ host-orchestrated exchange on device 0 over managed-global memory, and still mat
 monolithic run to < 1e-12. NOT validated locally: real parallelism (the contexts share one
 gpu) and true cross-gpu access.
 
-M3 -- peer access bindings + the peer `HaloTransport`: `StagedCopy` gather on src device,
-`cuMemcpyPeer` of the contiguous buffer to the dst device's buffer, scatter on dst device.
-LOCALLY: the gather/scatter are already proven; the peer move between two contexts on one
-device is a same-device copy (validates wiring, not nvlink). the real cross-gpu peer copy +
-nvlink is the cluster-tested piece -- one well-defined call.
+M3 (DONE -- coded + compiles; cross-gpu behavior is cluster-validated only) -- peer access
+bindings + the peer `HaloTransport`. `symbi-xpu/src/cuda.rs` gained `can_access_peer`,
+`enable_peer_access` (idempotent), and `memcpy_peer` (takes the two device CONTEXTS, so the
+logical->physical map composes), plus a `device_ctx` split out of `ensure_init_device` so a
+peer op can hold another device's context without rebinding the thread. `decomp::PeerCopy`
+gathers the strip on the src device, `cuMemcpyPeer`s the contiguous buffer to the dst device,
+and scatters there -- the gather/scatter are `StagedCopy`'s proven halves; only the middle
+move is new. KEY DESIGN: device identity is threaded through the EXCHANGE (`copy_region` /
+`exchange_faces` / `exchange_grid` gained a `src_dev`/`dst_dev` pair, fed by a `devices: &[i32]`
+map parallel to the tiles), NOT added to `Field` -- the single-device transports ignore the
+pair; only `PeerCopy` uses it. `src_dev == dst_dev` defers to `StagedCopy`. the
+`gpu_peer_rk2_quad_tile_2d_grid` oracle self-skips on < 2 gpus (a context cannot peer with
+itself) and drives the real cross-device exchange on the cluster. NOT validated locally: the
+nvlink move itself.
 
 M4 (NEEDS the node) -- real multi-gpu run: tiles on distinct gpus, nvlink peer copy,
 distributed cfl reduce across devices, perf/scaling. the oracle (mono vs decomposed) still

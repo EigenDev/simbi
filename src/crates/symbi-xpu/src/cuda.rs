@@ -41,6 +41,8 @@ const CUDA_SUCCESS: CUresult = 0;
 const CU_MEM_ATTACH_GLOBAL: c_uint = 1;
 const CU_EVENT_DISABLE_TIMING: c_uint = 2;
 const CU_STREAM_NON_BLOCKING: c_uint = 1;
+// re-enabling peer access that is already enabled is success for our purposes.
+const CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED: CUresult = 704;
 
 // =============================================================================
 // raw CUDA driver API bindings
@@ -88,6 +90,17 @@ unsafe extern "C" {
     fn cuDeviceGetName(name: *mut c_char, len: c_int, dev: CUdevice) -> CUresult;
     fn cuDeviceTotalMem_v2(bytes: *mut usize, dev: CUdevice) -> CUresult;
     fn cuDeviceGetCount(count: *mut c_int) -> CUresult;
+    // peer access + cross-device copy (docs/design/37 M3). cuMemcpyPeer takes the source and
+    // destination CONTEXTS, so the logical->physical context mapping composes automatically.
+    fn cuMemcpyPeer(
+        dst: CUdeviceptr,
+        dst_ctx: CUcontext,
+        src: CUdeviceptr,
+        src_ctx: CUcontext,
+        byte_count: usize,
+    ) -> CUresult;
+    fn cuDeviceCanAccessPeer(can: *mut c_int, dev: CUdevice, peer: CUdevice) -> CUresult;
+    fn cuCtxEnablePeerAccess(peer_ctx: CUcontext, flags: c_uint) -> CUresult;
 }
 
 // CUdevice_attribute enum values (cuda.h): the SM compute capability of a device.
@@ -237,10 +250,12 @@ pub fn device_count() -> error::Result<i32> {
     Ok(count)
 }
 
-/// ensure device `ord`'s context exists and is current on this thread; returns it.
-fn ensure_init_device(ord: i32) -> error::Result<CUcontext> {
+/// get-or-create device `ord`'s context WITHOUT changing this thread's current device. peer
+/// ops need a handle to ANOTHER device's context (for cuMemcpyPeer / cuCtxEnablePeerAccess)
+/// while the current device stays put, so the context creation is split from the rebind.
+fn device_ctx(ord: i32) -> CUcontext {
     assert!((ord as usize) < MAX_GPUS, "device ordinal {ord} exceeds MAX_GPUS");
-    let ctx = CUDA_CTX[ord as usize]
+    CUDA_CTX[ord as usize]
         .get_or_init(|| {
             unsafe {
                 // these panics are acceptable — init happens once per device at startup.
@@ -268,7 +283,12 @@ fn ensure_init_device(ord: i32) -> error::Result<CUcontext> {
                 SyncCtx(ctx)
             }
         })
-        .0;
+        .0
+}
+
+/// ensure device `ord`'s context exists and is current on this thread; returns it.
+fn ensure_init_device(ord: i32) -> error::Result<CUcontext> {
+    let ctx = device_ctx(ord);
     unsafe { check(cuCtxSetCurrent(ctx), "cuCtxSetCurrent")? };
     Ok(ctx)
 }
@@ -291,6 +311,65 @@ pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
     ensure_init_device(prev).expect("with_device: restore device");
     CURRENT_DEVICE.with(|c| c.set(prev));
     r
+}
+
+// =============================================================================
+// peer access (docs/design/37 M3): direct device-to-device halo copy. the peer
+// `HaloTransport` gathers a strip on the source device, moves the contiguous buffer to the
+// destination device with `memcpy_peer`, then scatters there. on a single gpu these are not
+// exercised (one device cannot peer with itself); they run on a real multi-gpu node.
+// =============================================================================
+
+/// can device `ord` directly read memory resident on device `peer`? false when the link is
+/// absent (the caller then falls back to a staged copy through host/managed memory). logical
+/// ordinals map onto physical devices the same way contexts do (modulo the device count).
+pub fn can_access_peer(ord: i32, peer: i32) -> error::Result<bool> {
+    let mut count: c_int = 0;
+    unsafe {
+        check(cuInit(0), "cuInit")?;
+        check(cuDeviceGetCount(&mut count), "cuDeviceGetCount")?;
+    }
+    if count <= 0 {
+        return Ok(false);
+    }
+    let (mut a, mut b): (CUdevice, CUdevice) = (0, 0);
+    let mut flag: c_int = 0;
+    unsafe {
+        check(cuDeviceGet(&mut a, ord % count), "cuDeviceGet")?;
+        check(cuDeviceGet(&mut b, peer % count), "cuDeviceGet")?;
+        check(cuDeviceCanAccessPeer(&mut flag, a, b), "cuDeviceCanAccessPeer")?;
+    }
+    Ok(flag != 0)
+}
+
+/// enable direct peer access from device `ord` to memory on device `peer`. directional: call
+/// both ways for a bidirectional halo exchange. idempotent -- "already enabled" is treated as
+/// success, so it is safe to call once per neighbor pair at setup.
+pub fn enable_peer_access(ord: i32, peer: i32) -> error::Result<()> {
+    let peer_ctx = device_ctx(peer);
+    with_device(ord, || {
+        let res = unsafe { cuCtxEnablePeerAccess(peer_ctx, 0) };
+        if res == CUDA_SUCCESS || res == CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED {
+            Ok(())
+        } else {
+            Err(XpuError::new("cuCtxEnablePeerAccess", res))
+        }
+    })
+}
+
+/// copy `bytes` from `src` (resident on `src_ord`) to `dst` (resident on `dst_ord`),
+/// synchronously, over the peer link. takes the two device contexts, so it honors the same
+/// logical->physical mapping as every other binding. this is the one new primitive in the
+/// multi-gpu transport -- the gather/scatter halves are already proven by `StagedCopy`.
+pub fn memcpy_peer(dst: u64, dst_ord: i32, src: u64, src_ord: i32, bytes: usize) -> error::Result<()> {
+    let dst_ctx = device_ctx(dst_ord);
+    let src_ctx = device_ctx(src_ord);
+    unsafe {
+        check(
+            cuMemcpyPeer(dst as CUdeviceptr, dst_ctx, src as CUdeviceptr, src_ctx, bytes),
+            "cuMemcpyPeer",
+        )
+    }
 }
 
 // =============================================================================

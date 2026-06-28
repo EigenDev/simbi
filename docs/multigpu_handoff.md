@@ -129,10 +129,18 @@ it back, exactly what a peer/mpi move transfers between ranks.
 remaining (NEEDS 2+ gpus / a node; the structure is locally developable, the cross-gpu
 behavior is not):
 
-1. peer transport: a `HaloTransport` impl = `StagedCopy`'s gather, then `cuMemcpyPeer`
-   (nvlink) of the contiguous buffer to the neighbor device's buffer, then `StagedCopy`'s
-   scatter. only the middle move is new; the gather/scatter are proven. (later, multi-node:
-   swap the move for an mpi send/recv.)
+1. peer transport: DONE (coded, compiles, NOT locally validatable -- needs 2 gpus).
+   `decomp::PeerCopy` is a `HaloTransport` impl = `StagedCopy`'s gather on the source device,
+   then `cuMemcpyPeer` (nvlink) of the contiguous buffer to the neighbor device's buffer, then
+   `StagedCopy`'s scatter on the dest device. only the middle move is new; the gather/scatter
+   are the proven halves. device identity is threaded through the EXCHANGE (a `devices: &[i32]`
+   map parallel to the tiles, passed to `exchange_grid`/`exchange_faces`/`copy_region`), NOT put
+   on the `Field` -- the single-device transports ignore the device pair; only `PeerCopy` uses
+   it. peer bindings live in `symbi-xpu/src/cuda.rs`: `can_access_peer`, `enable_peer_access`
+   (idempotent), `memcpy_peer` (context-based, so the logical->physical map composes). the
+   `gpu_peer_rk2_quad_tile_2d_grid` test self-skips on < 2 gpus and runs the real cross-device
+   exchange on the cluster; `src_dev == dst_dev` defers to `StagedCopy`. (later, multi-node:
+   swap the middle move for an mpi send/recv.)
 2. device binding (scoped in docs/design/37; one process drives many gpus intra-node).
    M1 DONE: the xpu globals are now per-device -- `symbi-xpu/src/cuda.rs` has a per-device
    context registry (`CUDA_CTX: [OnceLock; MAX_GPUS]`), `current_device()`, `with_device(ord,
@@ -154,8 +162,10 @@ behavior is not):
    device 0) to < 1e-12 on the gpu harnesses. run: `cargo test -p symbi-xpu --features cuda
    --test multi_device --release` and `cargo test -p symbi --features cuda --test
    decomp_equivalence --release`.
-   remaining: M3 peer-access bindings + the peer `HaloTransport` (`StagedCopy` gather +
-   `cuMemcpyPeer` + scatter); M4 (needs the node) real multi-gpu + distributed cfl.
+   M3 DONE (coded, compiles, cluster-validated only): peer-access bindings + the peer
+   `HaloTransport` (`PeerCopy` = `StagedCopy` gather + `cuMemcpyPeer` + scatter), device pair
+   threaded through the exchange. see item 1 above. remaining: M4 (needs the node) real
+   multi-gpu + distributed cfl.
 3. distributed cfl via a cross-rank reduce; distributed checkpoint i/o. under SPMD bind each
    rank with `CUDA_VISIBLE_DEVICES` so the single-device code stays valid per rank.
 

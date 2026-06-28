@@ -44,7 +44,7 @@ use symbi::regimes::substrate_gpu::device_sync;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::decomp::{exchange_grid, flatten, unflatten, LocalCopy};
 #[cfg(feature = "cuda")]
-use symbi::sim::decomp::{DeviceCopy, StagedCopy};
+use symbi::sim::decomp::{DeviceCopy, PeerCopy, StagedCopy};
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -161,7 +161,10 @@ macro_rules! decomp_harness {
                 // interiors. the transport drains its own launches before returning.
                 sync_devices();
                 let tile_refs: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
-                exchange_grid(&tile_refs, counts, &$transport);
+                // the tile->device map: device identity lives in the decomposition, not on
+                // the field. parallel to `tile_refs` (both indexed by flat tile order).
+                let devices: Vec<i32> = (0..tiles.len()).map(tile_device).collect();
+                exchange_grid(&tile_refs, counts, &devices, &$transport);
             }
 
             // advance every tile one step at a shared dt, driving the SSP stage table
@@ -279,6 +282,11 @@ decomp_harness!(gpu_d1, 1, CudaSpace, UnifiedMemory, DeviceCopy);
 // the 2x2 grid exercises StagedCopy: the gather/scatter pack/unpack that peer-copy reuses.
 #[cfg(feature = "cuda")]
 decomp_harness!(gpu_d2, 2, CudaSpace, UnifiedMemory, StagedCopy);
+// the peer-copy transport: tiles round-robin onto NDEV LOGICAL devices, so on a 2+ gpu node
+// the 2x2 grid drives real cross-device `cuMemcpyPeer` halos. self-skips on a single card (a
+// device cannot peer with itself); the math oracle still applies, now across real devices.
+#[cfg(feature = "cuda")]
+decomp_harness!(gpu_peer_d2, 2, CudaSpace, UnifiedMemory, PeerCopy);
 
 #[test]
 fn euler_two_tile_1d() {
@@ -325,4 +333,24 @@ fn gpu_rk2_four_tile_1d() {
 #[test]
 fn gpu_rk2_quad_tile_2d_grid() {
     gpu_d2::assert_matches([2, 2], Timestepping::Rk2);
+}
+
+// the multi-gpu peer transport. tiles are split across logical devices 0 and 1; on a 2+ gpu
+// node the 2x2 exchange moves halos with `cuMemcpyPeer` over nvlink and must still reproduce
+// the monolithic run. SELF-SKIPS on a single card -- the peer move needs two physical devices
+// (a context cannot peer with itself), so this is the one milestone validated on the cluster,
+// not locally. peer access is best-effort enabled (cuMemcpyPeer falls back through host if the
+// link is absent, so the correctness assertion holds either way).
+#[cfg(feature = "cuda")]
+#[test]
+fn gpu_peer_rk2_quad_tile_2d_grid() {
+    if symbi_xpu::cuda::device_count().unwrap_or(0) < 2 {
+        eprintln!("skipping gpu_peer_rk2_quad_tile_2d_grid: needs >= 2 gpus");
+        return;
+    }
+    if symbi_xpu::cuda::can_access_peer(0, 1).unwrap_or(false) {
+        symbi_xpu::cuda::enable_peer_access(0, 1).ok();
+        symbi_xpu::cuda::enable_peer_access(1, 0).ok();
+    }
+    gpu_peer_d2::assert_matches([2, 2], Timestepping::Rk2);
 }
