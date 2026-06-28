@@ -286,10 +286,38 @@ fn prim_fields<const D: usize, const DOF: usize, M: MemorySpace>(
     fields
 }
 
+/// the ghost strip on a STAGGERED face field's own allocated domain (for MHD `bface`). mirrors
+/// `ghost_strip` but takes the field's `alloc` domain instead of the cell `geom.allocated`, and
+/// extends the interior by one on the field's NORMAL axis `d` (a face field has one extra face
+/// past the last cell on its normal axis). used only for `d != axis`, where `axis` is transverse
+/// to the face and indexes like cells.
+fn face_ghost_strip<const D: usize>(
+    alloc: &Domain<D>,
+    geom: &PartitionGeometry<D>,
+    axis: usize,
+    side: Side,
+    d: usize,
+    processed: &[bool; D],
+    counts: &[usize; D],
+) -> Domain<D> {
+    let ng = geom.ng as isize;
+    let mut strip = alloc.boundary(axis, side, ng);
+    for b in 0..D {
+        if b != axis && !processed[b] && counts[b] > 1 {
+            // clip to interior on un-processed cut axes (two-pass corner rule). on the face's
+            // own normal axis there is one extra face past the last interior cell.
+            let hi_ext = if b == d { 1 } else { 0 };
+            strip = strip.slab(b, (geom.interior.spaces[b].lo, geom.interior.spaces[b].hi + hi_ext));
+        }
+    }
+    strip
+}
+
 /// exchange same-level halos across the shared face between `lo` (its hi face on `axis`)
 /// and `hi` (its lo face). `processed` marks the axes already exchanged this pass (for
-/// the two-pass transverse rule); `counts` is the per-axis tile count. fills only the
-/// prim ghost cells -- cons ghosts are never read by the flux stage.
+/// the two-pass transverse rule); `counts` is the per-axis tile count. fills the prim + bcell
+/// ghost cells and -- for MHD -- the staggered `bface` transverse halos (cons ghosts are never
+/// read by the flux stage).
 ///
 /// each ghost strip and its source strip share global cell positions and shape; the
 /// source strip is the ghost strip shifted along `axis` to the neighbor's matching
@@ -320,6 +348,30 @@ pub fn exchange_faces<const D: usize, const DOF: usize, M: MemorySpace, T: HaloT
         transport.copy_region(fr, &hi_src, fl, &lo_ghost, hi_dev, lo_dev);
         // lo interior -> hi ghost: source is the lo tile, dest is the hi tile.
         transport.copy_region(fl, &lo_src, fr, &hi_ghost, lo_dev, hi_dev);
+    }
+
+    // MHD: exchange the STAGGERED face-B transverse halos. only `bface[d]` with `d != axis`
+    // carries a halo on `axis` (the face is transverse to the cut, so `axis` indexes it like
+    // cells); fill that halo from the neighbor exactly like the cell ghosts. the NORMAL face
+    // `bface[axis]` (the shared interface face) is NOT copied: it is seeded identically and both
+    // tiles apply the same CT curl -- the consistent edge emfs come from the exchanged transverse
+    // halos + prim + bcell -- so it stays bit-identical. the div-B oracle validates this.
+    if let (Some(lo_mhd), Some(hi_mhd)) = (lo.fields.mhd.as_ref(), hi.fields.mhd.as_ref()) {
+        for d in 0..D {
+            if d == axis {
+                continue;
+            }
+            let fl = &lo_mhd.bface[d];
+            let fr = &hi_mhd.bface[d];
+            let lo_alloc = fl.domain();
+            let hi_alloc = fr.domain();
+            let lo_ghost_f = face_ghost_strip(&lo_alloc, &lo.geom, axis, Side::Hi, d, processed, counts);
+            let hi_src_f = lo_ghost_f.slab(axis, (i_lo_hi, i_lo_hi + ng));
+            let hi_ghost_f = face_ghost_strip(&hi_alloc, &hi.geom, axis, Side::Lo, d, processed, counts);
+            let lo_src_f = hi_ghost_f.slab(axis, (i_hi_lo - ng, i_hi_lo));
+            transport.copy_region(fr, &hi_src_f, fl, &lo_ghost_f, hi_dev, lo_dev);
+            transport.copy_region(fl, &lo_src_f, fr, &hi_ghost_f, lo_dev, hi_dev);
+        }
     }
 }
 
