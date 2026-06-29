@@ -57,3 +57,11 @@ split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
 debug = false
+
+# symbi-substrate's heavily-monomorphized + inlined kernels produce a lexical-scope tree deep
+# enough that llvm's recursive dwarf emitter (createAndAddScopeChildren) overflows the compiler
+# stack -> SIGBUS, even at line-tables-only. dropping its debuginfo dodges the recursion while
+# keeping the fast unoptimized codegen, so `cargo test` (debug) works on the full symbi stack.
+# the cost is panic file:line in this one crate only; all other crates keep line-tables-only.
+[profile.dev.package.symbi-substrate]
+debug = false

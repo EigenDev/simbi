@@ -47,6 +47,9 @@ pub mod backends;
 pub mod class;
 pub mod emit;
 
+// keystone: symbolic div(curl B) = 0 checker over the traced curl DAG.
+pub mod proof;
+
 // the typed trace <-> dispatch ABI vocabulary (field-buffer / scalar-param / mesh
 // names) lives in the leaf `symbi-abi` crate so this IR carries the generic
 // `FieldBind`/`ScalarBind` containers without spelling the closed domain vocabulary

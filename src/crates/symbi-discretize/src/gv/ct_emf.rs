@@ -138,7 +138,7 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec
         let r_hi = gv_axis_face_at(0, spacing[0], 1);
         let r_c = (r_lo + r_hi) * Gv::from_f64(0.5);
         let ez_rp = gv_field_at("ez", "ez", 2, &[1, 0]);
-        b - dt * (Gv::ONE / r_c) * inv_dr * (r_hi * ez_rp - r_lo * ez)
+        b + dt * (Gv::ONE / r_c) * inv_dr * (r_hi * ez_rp - r_lo * ez)
     };
     (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
 }
@@ -187,9 +187,9 @@ pub fn rmhd_ct_curl_cyl_rphi_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, V
 ///   dir=1 (B_th, theta-face):  dB_th/dt  = +(1/r_c) d_r(r * E_phi)                     (r  = grid axis 0)
 /// r_f is the r-FACE radius (where B_r lives); r_c / th_c are the staggered cell centers. mirrors
 /// `rmhd_ct_curl_cyl_rz_gv` with the added sin(theta) area weight on the B_r update (and the
-/// opposite B_theta sign vs the cylinder's B_z). VALIDATION NOTE: derived from the continuous curl;
-/// the staggered div(B)=0 preservation for a POLOIDAL field still needs a dedicated test (the
-/// toroidal-injection case exercises this on a zero in-plane field, so it is trivially div-free).
+/// opposite B_theta sign vs the cylinder's B_z). div(B)=0 preservation for a nontrivial POLOIDAL
+/// (B_r, B_theta) field is pinned by tests/rmhd_ct_curl_2d_sph_poloidal_divb.rs: B = curl(A_phi)
+/// through this kernel, area-weighted div machine-zero before AND after a curl(E_phi) step.
 pub fn rmhd_ct_curl_2d_sph_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let b = Gv::field("b", "b");
@@ -579,6 +579,46 @@ fn uct_master_emf(cx: &UctDir, cy: &UctDir, vbar_x: Gv, vbar_y: Gv, by_e: Gv, by
     let adv_y = vbar_y * (cy.al * bx_s + cy.ar * bx_n);
     let dif_y = zero_g - (cy.dr * bx_n - cy.dl * bx_s);
     adv_x + dif_x + adv_y + dif_y
+}
+
+/// proof entry point for the upwind-pairing invariant. traces `uct_master_emf` in ISOLATION with
+/// symbolic param leaves: the four staggered face reads {by_w, by_e, bx_n, bx_s} as the "fields"
+/// and the uct coefficients {vbar_x/y, al/ar/dl/dr per dir} as opaque scalars. because the master
+/// composition is LINEAR in the faces (all the wave-speed nonlinearity lives UPSTREAM, in cx/cy),
+/// `symbi_ir::proof::LinForm` reads off each face's exact coefficient polynomial, and the upwind
+/// invariant — a^L weights the UPWIND face (by_w for +x, bx_s for +y) — becomes a coefficient
+/// check at graph-build time. instant, and it covers ALL uct emf kernels at once: every one of
+/// them composes through `uct_master_emf`. `swap` passes by_w/by_e in each other's argument slots
+/// to inject the ct_emf.rs anti-upwind bug, for the negative control.
+#[doc(hidden)]
+pub fn uct_master_emf_proof_kernel(swap: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let cx = UctDir {
+        al: Gv::param("al_x"),
+        ar: Gv::param("ar_x"),
+        dl: Gv::param("dl_x"),
+        dr: Gv::param("dr_x"),
+    };
+    let cy = UctDir {
+        al: Gv::param("al_y"),
+        ar: Gv::param("ar_y"),
+        dl: Gv::param("dl_y"),
+        dr: Gv::param("dr_y"),
+    };
+    let vbar_x = Gv::param("vbar_x");
+    let vbar_y = Gv::param("vbar_y");
+    let by_e = Gv::param("by_e");
+    let by_w = Gv::param("by_w");
+    let bx_n = Gv::param("bx_n");
+    let bx_s = Gv::param("bx_s");
+    // correct arg order is (.., by_e, by_w, bx_n, bx_s); swapping by_e<->by_w in the call
+    // reproduces the anti-upwind pairing the gate must reject (a^L lands on the downwind face).
+    let emf = if swap {
+        uct_master_emf(&cx, &cy, vbar_x, vbar_y, by_w, by_e, bx_n, bx_s)
+    } else {
+        uct_master_emf(&cx, &cy, vbar_x, vbar_y, by_e, by_w, bx_n, bx_s)
+    };
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
 }
 
 
