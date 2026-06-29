@@ -539,25 +539,26 @@ pub fn compute_skymap_deposit_spherical(
     if ni == 0 || n_pix == 0 || half_width <= 0.0 {
         return image;
     }
-    // n_mu / n_phi / theta_max are legacy tessellation knobs; the EATS-annulus parametrization
-    // below replaces the mu grid with the contributing cone shell, so only n_phi (the azimuth
-    // floor) is used. observer_direction is irrelevant for a SPHERE (same image from any angle).
-    // all kept in the signature for binding compatibility.
-    let _ = (theta_max, n_mu, observer_direction);
+    // n_mu / n_phi / theta_max / observer_direction are legacy/irrelevant: a SPHERE looks the same
+    // from any angle, and the azimuth is integrated ANALYTICALLY (no tessellation). kept for the
+    // binding signature.
+    let _ = (theta_max, n_mu, n_phi, observer_direction);
     let p = cond.p;
     let t_prime_s = (cond.current_time * scales.time).value();
     let one_plus_z = 1.0 + redshift;
     let c = C_LIGHT.value();
 
-    // a SPHERICALLY-SYMMETRIC blast looks the same from every direction, so the image depends only
-    // on the EATS, not the observer angle: at observer time t_obs the visible emitters are those
-    // whose direction makes angle alpha to the line of sight with r.n = r*cos(alpha) in the arrival
-    // window. that is a thin CONE SHELL (annulus) about the LOS. parametrize directly by
-    // (radius, cos alpha, azimuth psi) -- the doppler/emissivity depend only on cos alpha, and the
-    // ring projects to a centered circle of radius rho = r*sin(alpha). this is exact at ANY angle,
-    // visits ONLY the contributing directions (fast), and samples psi at pixel resolution (smooth).
+    // a SPHERICALLY-SYMMETRIC blast is azimuthally symmetric on the sky: the image is a function of
+    // the projected radius rho ALONE. so accumulate the 1D RADIAL flux profile and render it as
+    // image[x,y] = profile(sqrt(x^2+y^2)) -- the azimuth integral is the analytic factor 2*pi, with
+    // NO per-azimuth loop. the EATS at t_obs selects, per shell radius r, the cone cos(alpha)=r.n/r
+    // in the arrival window; that ring projects to rho = r*sin(alpha). cost is O(n_radii*n_cos) +
+    // O(n_pix^2), independent of how thin the shock is (millions of zones at high gamma stay fast).
     let proj_lo = c * (t_prime_s - (obs_time_s + half_window_s) / one_plus_z);
     let proj_hi = c * (t_prime_s - (obs_time_s - half_window_s) / one_plus_z);
+
+    let n_rho = n_pix;
+    let mut radial_flux = vec![0.0; n_rho];
 
     for ii in 0..ni {
         let r = (x1[ii] * scales.length).value();
@@ -574,16 +575,14 @@ pub fn compute_skymap_deposit_spherical(
         let (x1l, x1r) = radial_shell_edges(x1, ii);
         let cell = cell_state(cond, scales, fields, ii, p, t_prime_s);
         // Zrake's j'_nu' is the ISOTROPIC (per-steradian) comoving emissivity; `emissivity` is the
-        // angle-integrated form, so divide by 4 pi. the lab transform is then j_nu = delta^2 j'_nu'
-        // (the j_nu/nu^2 invariant), applied below as delta^doppler_power.
+        // angle-integrated form, so divide by 4 pi. lab transform j_nu = delta^2 j'_nu' (the
+        // j_nu/nu^2 invariant), applied below as delta^doppler_power.
         let j_peak = emissivity(cell.bfield, cell.n_e, p).value() / (4.0 * PI); // [erg/(s Hz cm^3 sr)]
         let nu_c = Frequency::new(cell.nu_c);
         let nu_m = Frequency::new(cell.nu_m);
-        // the radial shell volume (no solid angle yet); dV of a (dcos, dpsi) cell = shell_vol*dcos*dpsi.
         let shell_vol = (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * scales.length.cubed().value();
 
-        // sample the cos band across its projected RADIAL width at ~pixel resolution (floored so a
-        // razor-thin window still samples); the dense radial grid fills the rest of the gradient.
+        // sample the cos band across its projected RADIAL width at ~pixel resolution.
         let width_px = ((cos_hi - cos_lo) * r) / (2.0 * half_width) * n_pix as f64;
         let n_cos = (width_px.ceil() as usize).clamp(2, n_pix);
         let dcos = (cos_hi - cos_lo) / n_cos as f64;
@@ -591,30 +590,42 @@ pub fn compute_skymap_deposit_spherical(
         for kc in 0..n_cos {
             let cos_a = cos_lo + (kc as f64 + 0.5) * dcos;
             let sin_a = (1.0 - cos_a * cos_a).max(0.0).sqrt();
-            // doppler + emissivity depend ONLY on cos_a (angle to the LOS), hoisted out of psi.
             let delta = 1.0 / (cell.w * (1.0 - cell.beta * cos_a));
             let nu_prime = Frequency::new(frequency_hz * one_plus_z / delta);
             let j_nu = j_peak * spectral_shape(p, nu_prime, nu_c, nu_m);
-
-            // this cone ring projects to a CENTERED circle of radius rho = r*sin_a; sample its
-            // azimuth at ~pixel resolution so it tiles (no spokes). dphi shrinks with n_psi -> flux
-            // conserved; total work scales with the image area.
+            // the FULL ring at rho = r*sin_a: its azimuth integral is the factor 2*pi (dV = shell_vol
+            // dcos dpsi, integrated over psi -> shell_vol dcos 2*pi).
+            let ring_flux = delta.powf(doppler_power) * j_nu * shell_vol * dcos * 2.0 * PI * emit_dt_s;
             let rho = r * sin_a;
-            let rho_px = rho / (2.0 * half_width) * n_pix as f64;
-            let n_psi = ((2.0 * PI * rho_px).ceil() as usize).clamp(n_phi.max(8), 8 * n_pix);
-            let dpsi = 2.0 * PI / n_psi as f64;
-            let dvolume = shell_vol * dcos * dpsi;
-            let contrib = delta.powf(doppler_power) * j_nu * dvolume * emit_dt_s;
+            let bin = (rho / half_width * n_rho as f64) as usize;
+            if bin < n_rho {
+                radial_flux[bin] += ring_flux;
+            }
+        }
+    }
 
-            for kp in 0..n_psi {
-                let psi = (kp as f64 + 0.5) * dpsi;
-                let q1 = rho * psi.cos();
-                let q2 = rho * psi.sin();
-                let ix = (((q1 + half_width) / (2.0 * half_width)) * n_pix as f64) as isize;
-                let iy = (((q2 + half_width) / (2.0 * half_width)) * n_pix as f64) as isize;
-                if ix >= 0 && iy >= 0 && (ix as usize) < n_pix && (iy as usize) < n_pix {
-                    image[iy as usize * n_pix + ix as usize] += contrib;
-                }
+    // render the radial profile onto the 2D grid: each pixel takes its radial bin's flux shared
+    // equally among the pixels in that bin, so image.sum() == total flux and image/pixel_area is the
+    // surface brightness (the calibration is unchanged). azimuthally exact -> no spokes.
+    let px = 2.0 * half_width / n_pix as f64;
+    let mut count = vec![0u32; n_rho];
+    for iy in 0..n_pix {
+        let y = -half_width + (iy as f64 + 0.5) * px;
+        for ix in 0..n_pix {
+            let x = -half_width + (ix as f64 + 0.5) * px;
+            let bin = ((x * x + y * y).sqrt() / half_width * n_rho as f64) as usize;
+            if bin < n_rho {
+                count[bin] += 1;
+            }
+        }
+    }
+    for iy in 0..n_pix {
+        let y = -half_width + (iy as f64 + 0.5) * px;
+        for ix in 0..n_pix {
+            let x = -half_width + (ix as f64 + 0.5) * px;
+            let bin = ((x * x + y * y).sqrt() / half_width * n_rho as f64) as usize;
+            if bin < n_rho && count[bin] > 0 {
+                image[iy * n_pix + ix] = radial_flux[bin] / count[bin] as f64;
             }
         }
     }

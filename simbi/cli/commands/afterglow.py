@@ -209,6 +209,29 @@ def _calibrate_deposit(image, half_width_cm, observer, time_window_day):
     return surface_brightness, flux_total_mjy
 
 
+def _progress(iterable, total, label):
+    """lightweight carriage-return progress for long multi-snapshot loops (no extra deps).
+    writes count / % / rate / ETA to stderr so it overwrites in place and never pollutes stdout."""
+    import sys
+    import time
+
+    t0 = time.time()
+    step = max(1, total // 200)
+    for ii, item in enumerate(iterable, 1):
+        yield item
+        if ii == total or ii % step == 0:
+            dt = time.time() - t0
+            rate = ii / dt if dt > 0 else 0.0
+            eta = (total - ii) / rate if rate > 0 else 0.0
+            sys.stderr.write(
+                f"\r  {label}: {ii}/{total} ({100 * ii / total:3.0f}%)  "
+                f"{rate:5.1f}/s  eta {eta:4.0f}s   "
+            )
+            sys.stderr.flush()
+    sys.stderr.write("\n")
+    sys.stderr.flush()
+
+
 def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, frequency):
     """DETERMINISTIC deposition over the snapshot ARRAY: each hydro checkpoint deposits its lab-frame
     emissivity onto a SHARED sky grid via the EATS, accumulated. noise-free (no photon sampling) ->
@@ -243,7 +266,7 @@ def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, 
 
     print(f"depositing {len(paths)} snapshots onto a {n_pix}x{n_pix} grid (deterministic)...")
     image = np.zeros(n_pix * n_pix)
-    for path, dt_code in zip(paths, durations):
+    for path, dt_code in _progress(zip(paths, durations), len(paths), "depositing"):
         data = read_simulation(path)
         sim_cond = {
             "dt": dt_code if dt_code > 0.0 else data.metadata.dt,
