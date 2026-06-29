@@ -214,10 +214,15 @@ pub trait Metric<S: Scalar, const D: usize> {
     ///   S = S_pressure + S_inertial
     ///
     /// cartesian: S_inertial = 0.
+    ///
+    /// `mom` is the REGIME-AGNOSTIC conserved momentum density (Newtonian `rho v`,
+    /// relativistic `rho h W^2 v`): the source is the bilinear `S^i = -Gamma^i_jk mom^j v^k`,
+    /// so the same code serves every regime AND the magnetic tension (call with `mom = b`,
+    /// `vel = b` for `-Gamma(b, b)`).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, D>, rho: S, vel: Tensor<S, D>,
+        &self, x: Tensor<S, D>, mom: Tensor<S, D>, vel: Tensor<S, D>,
     ) -> Tensor<S, D> {
-        let _ = (x, rho, vel);
+        let _ = (x, mom, vel);
         Tensor::zeros()
     }
 }
@@ -373,7 +378,7 @@ impl<S: Scalar> Metric<S, 1> for Spherical {
 
     /// 1D spherical inertial: no resolved angular velocity -> zero.
     fn momentum_source_inertial(
-        &self, _x: Tensor<S, 1>, _rho: S, _vel: Tensor<S, 1>,
+        &self, _x: Tensor<S, 1>, _mom: Tensor<S, 1>, _vel: Tensor<S, 1>,
     ) -> Tensor<S, 1> {
         Tensor::zeros()
     }
@@ -456,16 +461,18 @@ impl<S: Scalar> Metric<S, 2> for Spherical {
         ])
     }
 
-    /// 2D spherical inertial: centrifugal + coriolis, no pressure.
+    /// 2D spherical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
+    /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, 2>, rho: S, vel: Tensor<S, 2>,
+        &self, x: Tensor<S, 2>, mom: Tensor<S, 2>, vel: Tensor<S, 2>,
     ) -> Tensor<S, 2> {
         let r = x[0];
-        let vr = vel[0];
+        let mr = mom[0];
+        let mt = mom[1];
         let vt = vel[1];
         Tensor::new([
-            rho * vt * vt / r,
-            S::ZERO - rho * vr * vt / r,
+            mt * vt / r,
+            S::ZERO - mr * vt / r,
         ])
     }
 }
@@ -566,20 +573,24 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
         ])
     }
 
-    /// 3D spherical inertial: centrifugal + coriolis, no pressure.
+    /// 3D spherical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
+    /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, 3>, rho: S, vel: Tensor<S, 3>,
+        &self, x: Tensor<S, 3>, mom: Tensor<S, 3>, vel: Tensor<S, 3>,
     ) -> Tensor<S, 3> {
         let r = x[0];
         let theta = x[1];
+        let mr = mom[0];
+        let mt = mom[1];
+        let mp = mom[2];
         let vr = vel[0];
         let vt = vel[1];
         let vp = vel[2];
         let cot = theta.cos() / theta.sin();
         Tensor::new([
-            rho * (vt * vt + vp * vp) / r,
-            (rho * vp * vp * cot - rho * vr * vt) / r,
-            -rho * vp * (vr + vt * cot) / r,
+            (mt * vt + mp * vp) / r,
+            (mp * vp * cot - mr * vt) / r,
+            S::ZERO - mp * (vr + vt * cot) / r,
         ])
     }
 }
@@ -634,7 +645,7 @@ impl<S: Scalar> Metric<S, 1> for Cylindrical {
 
     /// 1D cylindrical inertial: no resolved angular velocity -> zero.
     fn momentum_source_inertial(
-        &self, _x: Tensor<S, 1>, _rho: S, _vel: Tensor<S, 1>,
+        &self, _x: Tensor<S, 1>, _mom: Tensor<S, 1>, _vel: Tensor<S, 1>,
     ) -> Tensor<S, 1> {
         Tensor::zeros()
     }
@@ -683,7 +694,7 @@ impl<S: Scalar> Metric<S, 2> for Cylindrical {
 
     /// 2D cylindrical inertial: no resolved angular velocity -> zero.
     fn momentum_source_inertial(
-        &self, _x: Tensor<S, 2>, _rho: S, _vel: Tensor<S, 2>,
+        &self, _x: Tensor<S, 2>, _mom: Tensor<S, 2>, _vel: Tensor<S, 2>,
     ) -> Tensor<S, 2> {
         Tensor::zeros()
     }
@@ -760,20 +771,118 @@ impl<S: Scalar> Metric<S, 3> for Cylindrical {
         ])
     }
 
-    /// 3D cylindrical inertial: centrifugal + coriolis, no pressure.
+    /// 3D cylindrical inertial: centrifugal + coriolis, no pressure. regime-agnostic via the
+    /// CONSERVED momentum density `mom`: S = -Gamma(mom, v).
     fn momentum_source_inertial(
-        &self, x: Tensor<S, 3>, rho: S, vel: Tensor<S, 3>,
+        &self, x: Tensor<S, 3>, mom: Tensor<S, 3>, vel: Tensor<S, 3>,
     ) -> Tensor<S, 3> {
         let r = x[0];
-        let vr = vel[0];
+        let mr = mom[0];
+        let mp = mom[1];
         let vp = vel[1];
         Tensor::new([
-            rho * vp * vp / r,
-            -rho * vr * vp / r,
+            mp * vp / r,
+            S::ZERO - mr * vp / r,
             S::ZERO,
         ])
     }
 }
+
+/// 2D cylindrical DISK in the (r, phi) plane — the accretion-disk reduction (z razor-thin /
+/// integrated out), DISTINCT from the (r, z) axisymmetric `impl Metric<S, 2> for Cylindrical`.
+/// component 1 (phi) is the RESOLVED swirl, so the inertial source is NONZERO (centrifugal +
+/// coriolis), unlike the (r, z) case. mirror of `Cylindrical`'s 3D (r, phi, z) impl with z dropped.
+///   gamma_{ij} = diag(1, r^2),  sqrt(gamma) = r,  h = (1, r)
+#[derive(Debug, Clone, Copy)]
+pub struct CylindricalRPhi;
+
+impl<S: Scalar> Metric<S, 2> for CylindricalRPhi {
+    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
+
+    fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
+        let r = x[0];
+        Matrix::diag(Tensor::new([S::ONE, r * r]))
+    }
+
+    fn spatial_metric_inv(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
+        let r = x[0];
+        Matrix::diag(Tensor::new([S::ONE, S::ONE / (r * r)]))
+    }
+
+    fn sqrt_det_gamma(&self, x: Tensor<S, 2>) -> S {
+        x[0] // r
+    }
+
+    fn scale_factors(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        Tensor::new([S::ONE, x[0]])
+    }
+
+    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        let (r, phi) = (x[0], x[1]);
+        Tensor::new([r * phi.cos(), r * phi.sin()])
+    }
+
+    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        let (cx, cy) = (x[0], x[1]);
+        let r = (cx * cx + cy * cy).sqrt();
+        let phi = cy.atan2(cx);
+        Tensor::new([r, phi])
+    }
+
+    fn vector_to_cartesian(&self, x: Tensor<S, 2>, v: Physical<S, 2>) -> Embedded<S, 2> {
+        let phi = x[1];
+        let cp = phi.cos();
+        let sp = phi.sin();
+        Embedded::new(Tensor::new([
+            v[0] * cp - v[1] * sp,
+            v[0] * sp + v[1] * cp,
+        ]))
+    }
+
+    fn vector_from_cartesian(&self, x: Tensor<S, 2>, v: Embedded<S, 2>) -> Physical<S, 2> {
+        let phi = x[1];
+        let cp = phi.cos();
+        let sp = phi.sin();
+        Physical::new(Tensor::new([
+            v[0] * cp + v[1] * sp,
+            S::ZERO - v[0] * sp + v[1] * cp,
+        ]))
+    }
+
+    fn volume_factor(&self, x: Tensor<S, 2>) -> S {
+        x[0]
+    }
+
+    /// 2D (r, phi) disk: S_r = (rho*V_p^2 + p)/r, S_p = -rho*V_r*V_p/r.
+    fn momentum_source(
+        &self, x: Tensor<S, 2>, rho: S, vel: Tensor<S, 2>, p: S,
+    ) -> Tensor<S, 2> {
+        let r = x[0];
+        let vr = vel[0];
+        let vp = vel[1];
+        Tensor::new([
+            (rho * vp * vp + p) / r,
+            S::ZERO - rho * vr * vp / r,
+        ])
+    }
+
+    /// 2D (r, phi) disk inertial: centrifugal + coriolis, regime-agnostic via the CONSERVED
+    /// momentum density `mom`: S = -Gamma(mom, v).
+    fn momentum_source_inertial(
+        &self, x: Tensor<S, 2>, mom: Tensor<S, 2>, vel: Tensor<S, 2>,
+    ) -> Tensor<S, 2> {
+        let r = x[0];
+        let mr = mom[0];
+        let mp = mom[1];
+        let vp = vel[1];
+        Tensor::new([
+            mp * vp / r,
+            S::ZERO - mr * vp / r,
+        ])
+    }
+}
+
+impl<S: Scalar> DiagonalMetric<S, 2> for CylindricalRPhi {}
 
 // ============================================================
 // diagonality proofs: all realized geometries are diagonal (flat + orthogonal-curvilinear),
@@ -1377,7 +1486,7 @@ mod tests {
     fn test_cartesian_inertial_zero() {
         let x = Tensor::new([1.0, 2.0, 3.0]);
         let vel = Tensor::new([1.0, 0.5, -0.3]);
-        let s = Cartesian.momentum_source_inertial(x, 1.0, vel);
+        let s = Cartesian.momentum_source_inertial(x, vel, vel);
         for ii in 0..3 {
             assert!(approx(s[ii], 0.0));
         }
@@ -1385,7 +1494,7 @@ mod tests {
 
     #[test]
     fn test_spherical_1d_inertial_zero() {
-        let s = Spherical.momentum_source_inertial(Tensor::new([2.0]), 1.0, Tensor::new([0.5]));
+        let s = Spherical.momentum_source_inertial(Tensor::new([2.0]), Tensor::new([0.5]), Tensor::new([0.5]));
         assert!(approx(s[0], 0.0));
     }
 
@@ -1396,7 +1505,7 @@ mod tests {
         let vr = 1.0;
         let vt = 0.5;
         let x = Tensor::new([r, PI / 4.0]);
-        let s = Spherical.momentum_source_inertial(x, rho, Tensor::new([vr, vt]));
+        let s = Spherical.momentum_source_inertial(x, Tensor::new([rho * vr, rho * vt]), Tensor::new([vr, vt]));
         // inertial_r = rho*vt^2/r, inertial_t = -rho*vr*vt/r
         assert!(approx(s[0], rho * vt * vt / r));
         assert!(approx(s[1], -rho * vr * vt / r));
@@ -1414,7 +1523,7 @@ mod tests {
         let x = Tensor::new([r, theta]);
         let vel = Tensor::new([vr, vt]);
         let full = Spherical.momentum_source(x, rho, vel, p);
-        let inertial = Spherical.momentum_source_inertial(x, rho, vel);
+        let inertial = Spherical.momentum_source_inertial(x, Tensor::new([rho * vr, rho * vt]), vel);
         // pressure_r = 2p/r, pressure_t = p*cot(theta)/r
         let cot = theta.cos() / theta.sin();
         assert!(approx(full[0], inertial[0] + 2.0 * p / r));
@@ -1428,7 +1537,7 @@ mod tests {
         let rho = 1.0;
         let vel = Tensor::new([0.5, 0.3, 0.2]);
         let x = Tensor::new([r, theta, 0.0]);
-        let s = Spherical.momentum_source_inertial(x, rho, vel);
+        let s = Spherical.momentum_source_inertial(x, Tensor::new([rho * vel[0], rho * vel[1], rho * vel[2]]), vel);
         let vr = vel[0]; let vt = vel[1]; let vp = vel[2];
         let cot = theta.cos() / theta.sin();
         assert!(approx(s[0], rho * (vt * vt + vp * vp) / r));
@@ -1446,13 +1555,13 @@ mod tests {
         let p = 99.0;
         let x = Tensor::new([r, theta, 0.0]);
         let full = Spherical.momentum_source(x, rho, vel, p);
-        let inertial = Spherical.momentum_source_inertial(x, rho, vel);
+        let inertial = Spherical.momentum_source_inertial(x, Tensor::new([rho * vel[0], rho * vel[1], rho * vel[2]]), vel);
         assert!(approx(full[2], inertial[2]));
     }
 
     #[test]
     fn test_cylindrical_1d_inertial_zero() {
-        let s = Cylindrical.momentum_source_inertial(Tensor::new([4.0]), 1.0, Tensor::new([0.5]));
+        let s = Cylindrical.momentum_source_inertial(Tensor::new([4.0]), Tensor::new([0.5]), Tensor::new([0.5]));
         assert!(approx(s[0], 0.0));
     }
 
@@ -1463,9 +1572,38 @@ mod tests {
         let vr = 0.5;
         let vp = 0.8;
         let x = Tensor::new([r, 0.0, 0.0]);
-        let s = Cylindrical.momentum_source_inertial(x, rho, Tensor::new([vr, vp, 1.0]));
+        let s = Cylindrical.momentum_source_inertial(x, Tensor::new([rho * vr, rho * vp, rho * 1.0]), Tensor::new([vr, vp, 1.0]));
         assert!(approx(s[0], rho * vp * vp / r));
         assert!(approx(s[1], -rho * vr * vp / r));
         assert!(approx(s[2], 0.0));
+    }
+
+    #[test]
+    fn test_cylindrical_rphi_2d_disk() {
+        // the (r, phi) disk: phi is the RESOLVED swirl, so the inertial is NONZERO — unlike the
+        // (r, z) axisymmetric Cylindrical<2>, which is identically zero. this is the distinction
+        // that makes the new type necessary for 2D disk sims.
+        let r = 3.0;
+        let rho = 2.0;
+        let vr = 0.5;
+        let vp = 0.8;
+        let p = 1.5;
+        let x = Tensor::new([r, 0.7]); // (r, phi)
+        let vel = Tensor::new([vr, vp]);
+        let mom = Tensor::new([rho * vr, rho * vp]);
+
+        let inertial = CylindricalRPhi.momentum_source_inertial(x, mom, vel);
+        assert!(approx(inertial[0], rho * vp * vp / r)); // S_r = mom_phi v_phi / r
+        assert!(approx(inertial[1], -rho * vr * vp / r)); // S_phi = -mom_r v_phi / r
+
+        // full source = inertial + the r-pressure term p/r (phi has no pressure source).
+        let full = CylindricalRPhi.momentum_source(x, rho, vel, p);
+        assert!(approx(full[0], inertial[0] + p / r));
+        assert!(approx(full[1], inertial[1]));
+
+        // sqrt(gamma) = r — DISTINCT from the (r, z) reduction, which zeroes this exact swirl.
+        assert!(approx(CylindricalRPhi.sqrt_det_gamma(x), r));
+        let rz = Cylindrical.momentum_source_inertial(x, mom, vel);
+        assert!(approx(rz[0], 0.0) && approx(rz[1], 0.0));
     }
 }

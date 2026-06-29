@@ -38,14 +38,16 @@ fn cylindrical_rz_swirl_source_matches_analytic() {
     //   S_phi = -mom_r*v_phi/r                              (angular-momentum, the swirl law)
     //   S_z   = 0                                           (z-faces z-invariant; no curvature)
     // uniform state: rho=1 (cons.mom = rho*v = v), p=1, v = (v_r, v_phi, v_z).
-    let (vr, vphi, _vz, p) = (0.1_f64, 0.3_f64, 0.05_f64, 1.0_f64);
+    let (vr, vphi, vz, p) = (0.1_f64, 0.3_f64, 0.05_f64, 1.0_f64);
 
     let out = KernelRun::new(geometric_momentum_source_probe_gv(
         Coords::Cylindrical, &[Spacing::Uniform; 2], &[0, 2], 2, 3,
         GeoSource::Hydro { inertial: true },
     ))
     .grid([NR, NZ])
-    .fields(&[("pre", p), ("mom_0", vr), ("mom_1", vphi), ("prim_v0", vr), ("prim_v1", vphi)])
+    // mom_2 (the z momentum) is created by the probe (cons_mom over ncomp=3) but unused by the
+    // (r,phi)-plane swirl source — bind it so the harness has every field input satisfied.
+    .fields(&[("pre", p), ("mom_0", vr), ("mom_1", vphi), ("mom_2", vz), ("prim_v0", vr), ("prim_v1", vphi)])
     .scalars(&[("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", Z0), ("dx_1", DZ)])
     .run();
 

@@ -296,10 +296,10 @@ where
     ///   S_pressure[i] = p * (A^i_R - A^i_L) / V
     #[inline]
     pub fn momentum_source_inertial(
-        &self, idx: [isize; D], rho: S, vel: Tensor<S, D>,
+        &self, idx: [isize; D], mom: Tensor<S, D>, vel: Tensor<S, D>,
     ) -> Tensor<S, D> {
         let x = self.centroid(idx);
-        self.metric.momentum_source_inertial(x, rho, vel)
+        self.metric.momentum_source_inertial(x, mom, vel)
     }
 }
 

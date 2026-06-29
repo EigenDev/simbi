@@ -19,6 +19,9 @@ symbi-algebra = { path = "../symbi-algebra" }
 # the dep flip (design/gv_algebra_unification.md §2): discretize instantiates the
 # carrier-generic symbi-hydro physics at S=Gv to BUILD kernels — one physics source.
 symbi-hydro   = { path = "../symbi-hydro" }
+# the SINGLE-SOURCE geometric Christoffel source: discretize traces `Metric<Gv, D>` at S=Gv
+# instead of re-deriving the spherical/cylindrical inertial by hand (B1). one geometry source.
+symbi-geometry = { path = "../symbi-geometry" }
 
 [dev-dependencies]
 # the bridge test builds a user-expression Dag and lowers it via symbi_hydro::expr_bridge.

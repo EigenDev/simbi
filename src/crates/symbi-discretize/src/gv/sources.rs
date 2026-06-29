@@ -5,6 +5,7 @@
 // =============================================================================
 
 use super::*;
+use symbi_geometry::{Cylindrical, CylindricalRPhi, Metric, Spherical};
 
 
 // =============================================================================
@@ -40,9 +41,19 @@ pub enum GeoSource {
 
 
 /// the centrifugal/coriolis INERTIAL momentum source per component `S^i = -Gamma^i_jk mom^j
-/// v^k` (the velocity-quadratic geometric terms), in Gv. REGIME-AGNOSTIC via the conserved `mom`
-/// (Newtonian rho v -> rho v^2; relativistic rho h W^2 v -> wgam2 v^2). `centroid` is
-/// COORDINATE-indexed (r at [0], theta at [1]); one source per carried component (`ncomp`).
+/// v^k` (the velocity-quadratic geometric terms), in Gv. delegates to the SINGLE-SOURCE
+/// carrier-generic `Metric<Gv, D>::momentum_source_inertial` (symbi-geometry) instead of
+/// re-deriving the Christoffel by hand — one geometry source for the whole codebase (B1).
+///
+/// REGIME-AGNOSTIC via the conserved `mom` (Newtonian rho v; relativistic rho h W^2 v): the
+/// source is the bilinear `-Gamma(mom, v)`, so this same call ALSO serves the magnetic tension
+/// `-Gamma(b, b)` (caller passes `mom = vel = b`). `centroid` is COORDINATE-indexed (r at [0],
+/// theta/phi at [1]). dispatch is on the number of PROVIDED momentum components `mom.len()` (the
+/// Hydro branch supplies the gridded `ndim`; the MHD branches supply the full `ncomp`); the
+/// momentum slot order is COORDINATE order, so cylindrical 2-component is the (r,phi) DISK plane
+/// (e.g. an (r,z) grid with swirl carries [r, phi]) -> `CylindricalRPhi`, NOT the (r,z)
+/// `Cylindrical<2>` axisymmetric reduction (which would zero the swirl). the result is padded to
+/// the full `ncomp` DOF — suppressed trailing components (e.g. z) carry zero inertial.
 fn inertial_momentum_sources_gv(
     ncomp: usize,
     coords: Coords,
@@ -50,50 +61,31 @@ fn inertial_momentum_sources_gv(
     vel: &[Gv],
     centroid: &[Gv],
 ) -> Vec<Gv> {
-    let mut s = vec![Gv::ZERO; ncomp];
-    if coords == Coords::Cartesian {
-        return s; // flat space: no inertial source.
+    // const-D bridge: build the fixed-rank tensors from the runtime slices, evaluate the metric's
+    // inertial source, splat back to a per-component Vec of length `mom.len()`.
+    fn run<M, const D: usize>(metric: M, mom: &[Gv], vel: &[Gv], x: &[Gv]) -> Vec<Gv>
+    where
+        M: Metric<Gv, D>,
+    {
+        let s = metric.momentum_source_inertial(
+            Tensor::from_fn(|i| x[i]),
+            Tensor::from_fn(|i| mom[i]),
+            Tensor::from_fn(|i| vel[i]),
+        );
+        (0..D).map(|i| s[i]).collect()
     }
-    let inv_r = Gv::ONE / centroid[0]; // 1/r (centroid radial)
-    match coords {
-        // spherical (r, theta, phi): each `rho v_a v_b` term is `mom_a v_b`.
-        Coords::Spherical => {
-            // S_r = (sum_t mom_t v_t) / r — the carried transverse components.
-            let mut sum: Option<Gv> = None;
-            for t in 1..ncomp {
-                let mvt = mom[t] * vel[t];
-                sum = Some(match sum {
-                    None => mvt,
-                    Some(a) => a + mvt,
-                });
-            }
-            if let Some(sum) = sum {
-                s[0] = sum * inv_r;
-            }
-            if ncomp >= 2 {
-                let cot = centroid[1].cos() / centroid[1].sin();
-                // S_theta = (mom_phi v_phi cot - mom_r v_theta) / r.
-                let mut num = Gv::ZERO - mom[0] * vel[1];
-                if ncomp >= 3 {
-                    num = num + mom[2] * vel[2] * cot;
-                }
-                s[1] = num * inv_r;
-                if ncomp >= 3 {
-                    // S_phi = -mom_phi (v_r + v_theta cot) / r.
-                    let inner = vel[0] + vel[1] * cot;
-                    s[2] = Gv::ZERO - mom[2] * inner * inv_r;
-                }
-            }
-        }
-        // cylindrical (r, phi, z): phi (component 1) is the swirl; z has no inertial source.
-        Coords::Cylindrical => {
-            if ncomp >= 2 {
-                s[0] = mom[1] * vel[1] * inv_r; // S_r = mom_phi v_phi / r
-                s[1] = Gv::ZERO - mom[0] * vel[1] * inv_r; // S_phi = -mom_r v_phi / r
-            }
-        }
-        Coords::Cartesian => unreachable!(),
-    }
+    let mut s = match (coords, mom.len()) {
+        (Coords::Cartesian, _) => Vec::new(), // flat space: no inertial source.
+        (Coords::Spherical, 1) => run::<_, 1>(Spherical, mom, vel, centroid),
+        (Coords::Spherical, 2) => run::<_, 2>(Spherical, mom, vel, centroid),
+        (Coords::Spherical, 3) => run::<_, 3>(Spherical, mom, vel, centroid),
+        (Coords::Cylindrical, 1) => run::<_, 1>(Cylindrical, mom, vel, centroid),
+        (Coords::Cylindrical, 2) => run::<_, 2>(CylindricalRPhi, mom, vel, centroid),
+        (Coords::Cylindrical, 3) => run::<_, 3>(Cylindrical, mom, vel, centroid),
+        (c, d) => panic!("inertial source: unsupported (coords {c:?}, components {d})"),
+    };
+    // suppressed trailing DOF (e.g. z in an (r,phi)+z layout) carry zero inertial.
+    s.resize(ncomp, Gv::ZERO);
     s
 }
 
