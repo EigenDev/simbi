@@ -1,0 +1,320 @@
+// =============================================================================
+// poly.rs
+//
+// the COEFFICIENT RING of the div(curl B)=0 proof: an integer multivariate
+// polynomial `Poly` (in scalar-param names) and a rational function `RatFun`
+// (num/den over `Poly`) for the curvilinear scale-factor weights. plus the
+// `FieldTerm` leaf key (field name + integer stencil offset) and the covariant
+// coord-shift `shift_poly_coords`. pure algebra — no IR/graph dependency.
+//
+// usage:
+//  let p = Poly::var("dt").mul(&Poly::var("id_p1")); // a degree-2 monomial
+//  let r = RatFun::recip(Poly::var("x_lo_0"));       // 1/r
+// =============================================================================
+
+use std::collections::BTreeMap;
+
+/// a multivariate polynomial in scalar-param names with i64 coefficients. a
+/// monomial is a sorted map `name -> power` (the empty map = the constant
+/// monomial); the poly is `monomial -> coefficient`. zero coefficients are
+/// pruned on every operation so `is_zero` is just "no terms".
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Poly {
+    pub(crate) terms: BTreeMap<BTreeMap<String, u32>, i64>,
+}
+
+impl Poly {
+    /// the zero polynomial.
+    pub fn zero() -> Self {
+        Poly { terms: BTreeMap::new() }
+    }
+
+    /// an integer constant polynomial.
+    pub fn constant(c: i64) -> Self {
+        let mut p = Poly::zero();
+        if c != 0 {
+            p.terms.insert(BTreeMap::new(), c);
+        }
+        p
+    }
+
+    /// the degree-1 monomial for a single scalar-param variable.
+    pub fn var(name: &str) -> Self {
+        let mut mono = BTreeMap::new();
+        mono.insert(name.to_string(), 1u32);
+        let mut p = Poly::zero();
+        p.terms.insert(mono, 1);
+        p
+    }
+
+    /// true iff every coefficient is zero (the canonical form prunes zeros, so
+    /// this is just an emptiness check).
+    pub fn is_zero(&self) -> bool {
+        self.terms.is_empty()
+    }
+
+    /// the integer coefficient of the squarefree monomial that is the product of
+    /// `vars` (each to the first power); 0 if that monomial is absent. lets a
+    /// caller assert a specific advective pairing survives in an emf coefficient,
+    /// e.g. `coefficient_of(&["vbar_x", "al_x"])` is the weight on the al*by_w
+    /// product — the upwind-pairing proof.
+    pub fn coefficient_of(&self, vars: &[&str]) -> i64 {
+        let mut mono = BTreeMap::new();
+        for v in vars {
+            *mono.entry((*v).to_string()).or_insert(0u32) += 1;
+        }
+        self.terms.get(&mono).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn add_assign(&mut self, other: &Poly) {
+        for (mono, &c) in &other.terms {
+            let e = self.terms.entry(mono.clone()).or_insert(0);
+            *e += c;
+            if *e == 0 {
+                self.terms.remove(mono);
+            }
+        }
+    }
+
+    pub(crate) fn neg(&self) -> Poly {
+        let mut p = Poly::zero();
+        for (mono, &c) in &self.terms {
+            p.terms.insert(mono.clone(), -c);
+        }
+        p
+    }
+
+    /// rewrite variable names through `rename` (`old -> new`); names absent from
+    /// the map pass through. powers are preserved (a renamed var keeps its
+    /// exponent). used to canonicalize the per-dir generic scalar params
+    /// (id_p1/id_p2) to their physical-axis identity before telescoping.
+    pub(crate) fn rename_vars(&self, rename: &std::collections::HashMap<String, String>) -> Poly {
+        let mut out = Poly::zero();
+        for (mono, &c) in &self.terms {
+            let mut new_mono = BTreeMap::new();
+            for (name, &pow) in mono {
+                let nn = rename.get(name).cloned().unwrap_or_else(|| name.clone());
+                *new_mono.entry(nn).or_insert(0) += pow;
+            }
+            let e = out.terms.entry(new_mono).or_insert(0);
+            *e += c;
+        }
+        out.terms.retain(|_, &mut c| c != 0);
+        out
+    }
+
+    pub(crate) fn mul(&self, other: &Poly) -> Poly {
+        let mut out = Poly::zero();
+        for (ma, &ca) in &self.terms {
+            for (mb, &cb) in &other.terms {
+                let mut mono = ma.clone();
+                for (name, &pow) in mb {
+                    *mono.entry(name.clone()).or_insert(0) += pow;
+                }
+                let e = out.terms.entry(mono).or_insert(0);
+                *e += ca * cb;
+            }
+        }
+        out.terms.retain(|_, &mut c| c != 0);
+        out
+    }
+
+    /// substitute the variable `name -> name + delta` (integer shift), expanding
+    /// `name^k -> (name + delta)^k` exactly by the binomial theorem (repeated
+    /// multiply). this is the CURVILINEAR shift's effect on a coefficient that
+    /// depends on the cell coord `c_N`: translating the cell by `delta` along axis
+    /// N shifts the geometry r/sin arguments built from `c_N`. the cartesian proof
+    /// did not need this (its coefficients are translation-invariant constants).
+    pub(crate) fn subst_shift(&self, name: &str, delta: i64) -> Poly {
+        if delta == 0 {
+            return self.clone();
+        }
+        // (name + delta) as a degree-1 poly.
+        let mut lin = Poly::var(name);
+        lin.add_assign(&Poly::constant(delta));
+        let mut out = Poly::zero();
+        for (mono, &c) in &self.terms {
+            let pow = mono.get(name).copied().unwrap_or(0);
+            // the part of the monomial WITHOUT `name`.
+            let mut rest_mono = mono.clone();
+            rest_mono.remove(name);
+            let mut term = Poly::zero();
+            term.terms.insert(rest_mono, c);
+            for _ in 0..pow {
+                term = term.mul(&lin);
+            }
+            out.add_assign(&term);
+        }
+        out
+    }
+
+    /// public polynomial sum `self + other` (for tests assembling area weights).
+    pub fn plus(&self, other: &Poly) -> Poly {
+        let mut out = self.clone();
+        out.add_assign(other);
+        out
+    }
+
+    /// public polynomial product `self * other` (for tests assembling area weights).
+    pub fn times(&self, other: &Poly) -> Poly {
+        self.mul(other)
+    }
+
+    /// the opaque `sin(theta at half-unit offset `two_m`)` symbol as a degree-1
+    /// monomial — the public constructor for tests building area weights by hand.
+    /// two_m is 2m: an integer face offset has two_m = 2*offset; the cell-center
+    /// has two_m = 2*c + 1 reduced to its half-unit (e.g. center of cell 0 = 1).
+    pub fn sin_sym(two_m: i64) -> Poly {
+        let mut p = Poly::zero();
+        let mut mono = BTreeMap::new();
+        mono.insert(format!("sin_th@{two_m}"), 1u32);
+        p.terms.insert(mono, 1);
+        p
+    }
+
+    /// rename one variable to another in-place across all monomials (used to remap
+    /// an opaque `sin@m` symbol to `sin@(m + delta)` under a theta shift).
+    pub(crate) fn rename_one(&self, from: &str, to: &str) -> Poly {
+        let mut map = std::collections::HashMap::new();
+        map.insert(from.to_string(), to.to_string());
+        self.rename_vars(&map)
+    }
+}
+
+// =============================================================================
+// RATIONAL-FUNCTION coefficient layer — the CURVILINEAR extension.
+//
+// the spherical CT curl multiplies edge EMFs by scale-factor weights h_p (= r,
+// r*sin(theta)) and divides by the face-center prefactor 1/(h_p1c h_p2c) and the
+// transverse widths. so its coefficients are RATIONAL FUNCTIONS, not integer
+// polynomials. the variable set is:
+//   - x_lo_0, dx_0, c_0   : `r` at any offset is AFFINE x_lo_0 + (c_0 + off)*dx_0,
+//                           a real polynomial (r^2 in an area equals r*r in an
+//                           h-product — r must be a true symbol, not opaque).
+//   - x_lo_1, dx_1, c_1   : the theta argument is likewise affine, but enters ONLY
+//                           through sin(.) — see below.
+//   - x_lo_2, dx_2, c_2   : phi; appears only in widths (sin has no phi dep).
+//   - dt
+//   - sin_th@<2m>         : sin(theta at offset m*dx_1 from the cell) is an OPAQUE
+//                           variable keyed by 2m (half-units, so cell-center 1/2
+//                           offsets are integral keys). there is NO polynomial
+//                           relation between sin at distinct offsets; the SAME
+//                           global theta-edge maps to the SAME symbol in adjacent
+//                           cells — that shared-symbol property makes the
+//                           divergence telescope.
+// the coord-shift is COVARIANT: shifting the cell by e_dir shifts the field reads
+// AND the c_N / sin@m the coefficients depend on (geometry at cell c+e_dir differs
+// from geometry at cell c). this mirrors the numerical test's absolute-index area
+// weights area_r/area_th/area_ph.
+// =============================================================================
+
+/// a rational function num/den over `Poly`. INVARIANT: `den` is never the zero
+/// polynomial — denominators are products of nonzero affine r-polys, opaque sin
+/// symbols, and nonzero integer constants, so cross-multiplication never divides
+/// by zero. `is_zero` is `num.is_zero()` (the denominator is structurally
+/// nonzero); equality is by cross-multiplied numerator difference. no gcd
+/// reduction is performed — common-denominator + numerator-zero suffices to PROVE
+/// cancellation, which is all the div(curl B)=0 checker needs (KISS).
+#[derive(Clone, Debug)]
+pub struct RatFun {
+    pub(crate) num: Poly,
+    pub(crate) den: Poly,
+}
+
+impl RatFun {
+    pub(crate) fn from_poly(p: Poly) -> Self {
+        RatFun { num: p, den: Poly::constant(1) }
+    }
+
+    /// public num/den constructor (for tests building the area weights). `den` must
+    /// be structurally nonzero (a product of r-polys / sin symbols / constants).
+    pub fn new(num: Poly, den: Poly) -> Self {
+        assert!(!den.is_zero(), "proof(rat): RatFun with a zero denominator");
+        RatFun { num, den }
+    }
+
+    /// the reciprocal 1/p of a (nonzero) polynomial.
+    pub fn recip(p: Poly) -> Self {
+        RatFun::new(Poly::constant(1), p)
+    }
+
+    pub(crate) fn zero() -> Self {
+        RatFun::from_poly(Poly::zero())
+    }
+
+    pub(crate) fn is_zero(&self) -> bool {
+        self.num.is_zero()
+    }
+
+    pub(crate) fn neg(&self) -> RatFun {
+        RatFun { num: self.num.neg(), den: self.den.clone() }
+    }
+
+    pub(crate) fn add(&self, other: &RatFun) -> RatFun {
+        // a/b + c/d = (a*d + c*b) / (b*d).
+        let mut num = self.num.mul(&other.den);
+        num.add_assign(&other.num.mul(&self.den));
+        let den = self.den.mul(&other.den);
+        RatFun { num, den }
+    }
+
+    pub(crate) fn sub(&self, other: &RatFun) -> RatFun {
+        self.add(&other.neg())
+    }
+
+    /// the product of two rational functions (public for tests assembling the area
+    /// weight from r and sin factors).
+    pub fn mul(&self, other: &RatFun) -> RatFun {
+        RatFun { num: self.num.mul(&other.num), den: self.den.mul(&other.den) }
+    }
+
+    pub(crate) fn div(&self, other: &RatFun) -> RatFun {
+        // a/b / (c/d) = (a*d) / (b*c). other.num is structurally nonzero (it is a
+        // product of r-polys / sin symbols / constants), so b*c stays nonzero.
+        assert!(!other.num.is_zero(), "proof: division by a zero rational function");
+        RatFun { num: self.num.mul(&other.den), den: self.den.mul(&other.num) }
+    }
+
+    /// apply the covariant coord shift to BOTH num and den: c_N -> c_N + delta_N
+    /// and sin_th@<2m> -> sin_th@<2m + 2*delta_theta>.
+    pub(crate) fn shift_coords(&self, delta: &[i64]) -> RatFun {
+        RatFun { num: shift_poly_coords(&self.num, delta), den: shift_poly_coords(&self.den, delta) }
+    }
+}
+
+/// shift a coefficient polynomial under a cell translation by `delta` (per axis):
+/// substitute each `c_N -> c_N + delta[N]` and remap every opaque sin symbol
+/// `sin_th@<2m>` to `sin_th@<2m + 2*delta[1]>` (theta is axis 1; the sin argument
+/// translates by delta[1] cells).
+pub(crate) fn shift_poly_coords(p: &Poly, delta: &[i64]) -> Poly {
+    let mut out = p.clone();
+    for (ax, &d) in delta.iter().enumerate() {
+        if d != 0 {
+            out = out.subst_shift(&format!("c_{ax}"), d);
+        }
+    }
+    // remap sin symbols by the theta shift (axis 1).
+    let dth = *delta.get(1).unwrap_or(&0);
+    if dth != 0 {
+        // collect the sin symbols present, then rename each by +2*dth half-units.
+        let mut syms: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for mono in out.terms.keys() {
+            for name in mono.keys() {
+                if name.starts_with("sin_th@") {
+                    syms.insert(name.clone());
+                }
+            }
+        }
+        for s in syms {
+            let half_units: i64 = s["sin_th@".len()..].parse().expect("malformed sin symbol");
+            let to = format!("sin_th@{}", half_units + 2 * dth);
+            out = out.rename_one(&s, &to);
+        }
+    }
+    out
+}
+
+/// a field read at a known integer stencil offset — the LEAF of a curl DAG. the
+/// key is the IR field-load name (e.g. `e_p1`); the offset is the per-axis
+/// integer shift the `LoadAt` (or direct `Param`) read resolves to.
+pub type FieldTerm = (String, Vec<i32>);
