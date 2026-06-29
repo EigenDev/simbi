@@ -30,6 +30,7 @@ mod extract;
 mod linform;
 mod poly;
 
+pub use extract::extract_scalar;
 pub use linform::{LinForm, LinFormR};
 pub use poly::{FieldTerm, Poly, RatFun};
 

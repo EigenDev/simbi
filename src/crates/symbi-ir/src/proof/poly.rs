@@ -172,6 +172,18 @@ impl Poly {
         p
     }
 
+    /// the opaque `cos(theta at half-unit offset `two_m`)` symbol as a degree-1
+    /// monomial — the cos analog of `sin_sym`, keyed the SAME way (`cos_th@<2m>`).
+    /// the spherical r-face solid angle Omega = (cos(theta_lo) - cos(theta_hi)) dphi
+    /// uses these; keyed by the global theta edge so adjacent cells share the symbol.
+    pub fn cos_sym(two_m: i64) -> Poly {
+        let mut p = Poly::zero();
+        let mut mono = BTreeMap::new();
+        mono.insert(format!("cos_th@{two_m}"), 1u32);
+        p.terms.insert(mono, 1);
+        p
+    }
+
     /// rename one variable to another in-place across all monomials (used to remap
     /// an opaque `sin@m` symbol to `sin@(m + delta)` under a theta shift).
     pub(crate) fn rename_one(&self, from: &str, to: &str) -> Poly {
@@ -276,16 +288,25 @@ impl RatFun {
     }
 
     /// apply the covariant coord shift to BOTH num and den: c_N -> c_N + delta_N
-    /// and sin_th@<2m> -> sin_th@<2m + 2*delta_theta>.
-    pub(crate) fn shift_coords(&self, delta: &[i64]) -> RatFun {
+    /// and sin_th@<2m>/cos_th@<2m> -> @<2m + 2*delta_theta>. public so a
+    /// conservation test can form `area_lo.shift_coords(&e_r)` directly.
+    pub fn shift_coords(&self, delta: &[i64]) -> RatFun {
         RatFun { num: shift_poly_coords(&self.num, delta), den: shift_poly_coords(&self.den, delta) }
+    }
+
+    /// EXACT symbolic equality: `self - other` is the zero rational function (the
+    /// cross-multiplied numerator difference cancels to no terms). the public
+    /// conservation-proof primitive (area_hi == area_lo-shifted).
+    pub fn equals(&self, other: &RatFun) -> bool {
+        self.sub(other).is_zero()
     }
 }
 
 /// shift a coefficient polynomial under a cell translation by `delta` (per axis):
-/// substitute each `c_N -> c_N + delta[N]` and remap every opaque sin symbol
-/// `sin_th@<2m>` to `sin_th@<2m + 2*delta[1]>` (theta is axis 1; the sin argument
-/// translates by delta[1] cells).
+/// substitute each `c_N -> c_N + delta[N]` and remap every opaque sin/cos symbol
+/// `@<2m>` to `@<2m + 2*delta[1]>` (theta is axis 1; the trig argument translates
+/// by delta[1] cells). a shift with delta[1] == 0 (e.g. the r-direction step) leaves
+/// every theta-keyed symbol UNTOUCHED — the remap is purely along axis 1.
 pub(crate) fn shift_poly_coords(p: &Poly, delta: &[i64]) -> Poly {
     let mut out = p.clone();
     for (ax, &d) in delta.iter().enumerate() {
@@ -293,22 +314,24 @@ pub(crate) fn shift_poly_coords(p: &Poly, delta: &[i64]) -> Poly {
             out = out.subst_shift(&format!("c_{ax}"), d);
         }
     }
-    // remap sin symbols by the theta shift (axis 1).
+    // remap sin/cos symbols by the theta shift (axis 1).
     let dth = *delta.get(1).unwrap_or(&0);
     if dth != 0 {
-        // collect the sin symbols present, then rename each by +2*dth half-units.
-        let mut syms: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        for mono in out.terms.keys() {
-            for name in mono.keys() {
-                if name.starts_with("sin_th@") {
-                    syms.insert(name.clone());
+        // collect the theta-keyed trig symbols present, then rename each by +2*dth half-units.
+        for prefix in ["sin_th@", "cos_th@"] {
+            let mut syms: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            for mono in out.terms.keys() {
+                for name in mono.keys() {
+                    if name.starts_with(prefix) {
+                        syms.insert(name.clone());
+                    }
                 }
             }
-        }
-        for s in syms {
-            let half_units: i64 = s["sin_th@".len()..].parse().expect("malformed sin symbol");
-            let to = format!("sin_th@{}", half_units + 2 * dth);
-            out = out.rename_one(&s, &to);
+            for s in syms {
+                let half_units: i64 = s[prefix.len()..].parse().expect("malformed trig symbol");
+                let to = format!("{}{}", prefix, half_units + 2 * dth);
+                out = out.rename_one(&s, &to);
+            }
         }
     }
     out

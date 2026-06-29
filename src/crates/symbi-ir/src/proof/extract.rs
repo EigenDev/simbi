@@ -12,8 +12,6 @@
 //  let lr = LinFormR::extract_rat(&kernel.graph, root, &fields, &scalars);
 // =============================================================================
 
-use std::collections::BTreeMap;
-
 use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, Op};
 
 use super::linform::{LinForm, LinFormR};
@@ -35,6 +33,18 @@ impl LinFormR {
             RValue::Lin(lf) => lf,
             RValue::Scalar(_) => LinFormR::empty(),
         }
+    }
+}
+
+/// extract a field-FREE geometry node as a pure rational-function scalar. a geometry
+/// factor (face area, inverse volume, centroid) reads no fields, so `eval_rat`
+/// returns `RValue::Scalar`; this returns that RatFun. panics if the node turns out
+/// to be field-dependent (a `Lin`) — that would mean the wrong root was passed. the
+/// public entry for the curvilinear conservation proof (area_hi == area_lo-shifted).
+pub fn extract_scalar(graph: &Graph, root: NodeId, scalars: &[&str]) -> RatFun {
+    match eval_rat(graph, root, &[], scalars) {
+        RValue::Scalar(r) => r,
+        RValue::Lin(_) => panic!("proof(rat): extract_scalar on a field-dependent node"),
     }
 }
 
@@ -145,6 +155,16 @@ fn eval_rat_elementwise(
             };
             RValue::Scalar(RatFun::from_poly(sin_symbol(&arg)))
         }
+        ElementWiseOp::Cos => {
+            // cos of the SAME affine theta argument -> the opaque cos_th@<2m> symbol,
+            // keyed identically to sin so the same global theta-edge shares the symbol.
+            // the spherical r-face solid angle Omega = (cos(tl) - cos(th)) dphi uses this.
+            let arg = match eval_rat(graph, ins[0], fields, scalars) {
+                RValue::Scalar(r) => r,
+                RValue::Lin(_) => panic!("proof(rat): cos of a field-dependent argument — nonlinear"),
+            };
+            RValue::Scalar(RatFun::from_poly(cos_symbol(&arg)))
+        }
         other => panic!("proof(rat): unsupported element-wise op in curvilinear curl DAG: {other:?}"),
     }
 }
@@ -161,9 +181,24 @@ fn eval_rat_elementwise(
 /// coefficients are both D, and the bare-dx_1 coefficient is D*m, so 2m =
 /// 2*(D*m)/D.
 fn sin_symbol(arg: &RatFun) -> Poly {
+    Poly::sin_sym(theta_offset_two_m(arg, "sin"))
+}
+
+/// cos of the SAME affine theta argument -> `cos_th@<2m>`, keyed identically to sin
+/// (the global theta edge maps to the same half-unit offset 2m), so the spherical
+/// solid-angle cos(tl)-cos(th) shares the edge symbol across adjacent cells.
+fn cos_symbol(arg: &RatFun) -> Poly {
+    Poly::cos_sym(theta_offset_two_m(arg, "cos"))
+}
+
+/// resolve the half-unit theta offset 2m off an affine sin/cos argument
+/// `x_lo_1 + (c_1 + m)*dx_1` (denominator D from the cell-center /2). in D*arg the
+/// x_lo_1 and c_1*dx_1 coeffs are both D and the bare-dx_1 coeff is D*m, so
+/// 2m = 2*(D*m)/D. `trig` names the caller for the panic messages.
+fn theta_offset_two_m(arg: &RatFun, trig: &str) -> i64 {
     let d = const_value(&arg.den)
-        .expect("proof(rat): sin of a theta argument with a non-constant denominator");
-    assert!(d != 0, "proof(rat): sin theta argument has a zero denominator");
+        .unwrap_or_else(|| panic!("proof(rat): {trig} of a theta argument with a non-constant denominator"));
+    assert!(d != 0, "proof(rat): {trig} theta argument has a zero denominator");
     let xlo1 = arg.num.coefficient_of(&["x_lo_1"]);
     let c1dx1 = arg.num.coefficient_of(&["c_1", "dx_1"]);
     let dx1_offset = arg.num.coefficient_of(&["dx_1"]); // the bare dx_1*(D*m) term
@@ -172,12 +207,7 @@ fn sin_symbol(arg: &RatFun) -> Poly {
     // 2m = 2 * (D*m) / D, must be integral.
     let twice = 2 * dx1_offset;
     assert!(twice % d == 0, "proof(rat): theta offset 2m = {twice}/{d} is not a half-integer multiple of dx_1");
-    let two_m = twice / d;
-    let mut p = Poly::zero();
-    let mut mono = BTreeMap::new();
-    mono.insert(format!("sin_th@{two_m}"), 1u32);
-    p.terms.insert(mono, 1);
-    p
+    twice / d
 }
 
 /// the integer value of a constant polynomial (the empty monomial's coefficient if
