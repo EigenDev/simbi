@@ -527,6 +527,22 @@ pub fn adiabatic_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String
 }
 
 
+/// adiabatic HLLC-LM face flux: the same builder as `adiabatic_hllc_flux_gv` but with the
+/// FLEISCHMANN et al. (2020) low-mach / low-dissipation arm -- the anti-diffusive star-state flux is
+/// scaled by the adaptive `phi` (local mach, with shock / interface / alignment overrides), which
+/// recovers standard HLLC at supersonic faces and central differencing at zero mach. cures the
+/// grid-aligned shock instability AND the HLLC low-mach over-dissipation. newtonian only (the
+/// relativistic HLLC bodies ignore the LM correction). the `phi` helpers are fully branchless
+/// (`S::select`), so the Fleischmann arm traces at S = Gv just like the Standard arm.
+pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
+    let flux = hllc(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Fleischmann);
+    let writes = euler_flux_writes(&flux);
+    (end_trace(), writes)
+}
+
+
 /// SRHD HLLC face flux — Mignone-Bodo (2005) quadratic for the contact speed.
 /// mirrors `euler_hlle_flux_gv(&Srhd, ...)` but calls `riemann::hllc_srhd`.
 pub fn srhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {

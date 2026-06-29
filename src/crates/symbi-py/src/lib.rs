@@ -276,6 +276,8 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
     match s {
         "hlle" => Ok(Solver::Hlle),
         "hllc" => Ok(Solver::Hllc),
+        // fleischmann (2020) low-mach / low-dissipation HLLC (newtonian only).
+        "hllc_lm" | "hllc-lm" => Ok(Solver::HllcLm),
         "hlld" => Ok(Solver::Hlld),
         other => Err(PyValueError::new_err(format!("unknown solver '{other}'"))),
     }

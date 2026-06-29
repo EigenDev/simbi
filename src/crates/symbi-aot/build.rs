@@ -732,6 +732,17 @@ fn gen_adiabatic_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8) {
+    let name = format!("adiabatic_face_flux_hllc_lm_{ndim}d_{dir}");
+    let (k, writes) = match ndim {
+        1 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<1>(dir),
+        2 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<2>(dir),
+        3 => symbi_discretize::gv::adiabatic_hllc_lm_flux_gv::<3>(dir),
+        _ => panic!("adiabatic_hllc_lm_flux_gv: unsupported ndim {ndim}"),
+    };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 fn gen_srhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
     let name = format!("srhd_face_flux_hllc_{ndim}d_{dir}");
     let (k, writes) = match ndim {
@@ -1244,6 +1255,7 @@ fn main() {
             // regime that has a contact wave. iso is HLLE-only by physics. cartesian
             // only for now (curvilinear HLLC = follow-up).
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir);
+            gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir);
             gen_srhd_hllc_face_flux(&out_dir, ndim, dir);
         }
     }

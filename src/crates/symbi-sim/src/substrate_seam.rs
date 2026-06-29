@@ -113,6 +113,8 @@ where
 pub enum Solver {
     Hlle,
     Hllc,
+    /// HLLC with the Fleischmann (2020) low-mach / low-dissipation correction (newtonian only).
+    HllcLm,
     Hlld,
 }
 
@@ -122,6 +124,7 @@ impl Solver {
         match self {
             Solver::Hlle => "",
             Solver::Hllc => "_hllc",
+            Solver::HllcLm => "_hllc_lm",
             Solver::Hlld => "_hlld",
         }
     }
@@ -142,6 +145,10 @@ impl Solver {
             Solver::Hllc => {
                 !regime.is_mhd() || matches!(regime, RegimeKind::NewtonianMhd | RegimeKind::Rmhd)
             }
+            // HLLC-LM: the Fleischmann (2020) low-mach / low-dissipation HLLC. emitted for the
+            // adiabatic (newtonian euler) flux only -- the LM correction is a non-relativistic gas
+            // closure; iso has no contact wave, and the relativistic / mhd HLLC bodies ignore it.
+            Solver::HllcLm => matches!(regime, RegimeKind::Newtonian),
             Solver::Hlld => regime.is_mhd(),
         }
     }
