@@ -49,7 +49,7 @@ use super::transfer::{
 };
 use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage_time_fractions};
 use symbi_sim::hydro_ops::scan_c2p_errors;
-use symbi_sim::decomp::{drain_devices, exchange_grid, HaloTransport};
+use symbi_sim::decomp::{drain_devices, exchange_grid, flatten, unflatten, HaloTransport};
 use symbi_sim::state::{
     Boundaries, BoundaryType, FieldStore, PrimFieldsGeneric, SimStateGeneric, Timestepping,
     array_field_zeros, axis_name,
@@ -755,12 +755,23 @@ where
     /// inside one tile), so it reuses the recursive `advance_level` on the finer level unchanged.
     pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) {
         let has_finer = level + 1 < self.levels.len();
-        let has_coarser = level > 0;
+        self.level_tail_emf(level, dt);
+        if has_finer {
+            self.level_subcycle(level, dt);
+            self.level_restrict_reflux(level, alpha0);
+        }
+        self.level_clock(level, dt);
+    }
 
-        // emf bookkeeping (mhd): after the stage loop the efield buffers hold
-        // the EFFECTIVE per-step EMF (post_godunov wrote the rk2 time-average
-        // in place before the single curl application; euler keeps the raw
-        // stage EMF) — sample it for the registers on both sides.
+    /// emf register bookkeeping (mhd) after the stage loop: the efield buffers hold the EFFECTIVE
+    /// per-step EMF (post_godunov wrote the rk2 time-average in place before the single curl; euler
+    /// keeps the raw stage EMF) -- sample it into the coarse-side register (a finer level exists)
+    /// and the fine-side register (a coarser level exists). no-op for hydro. PURE EXTRACTION from
+    /// level_step_tail so the DECOMPOSED driver can interpose a fine-level halo exchange between the
+    /// root stages and the (driver-controlled) fine subcycle.
+    pub fn level_tail_emf(&self, level: usize, dt: f64) {
+        let has_finer = level + 1 < self.levels.len();
+        let has_coarser = level > 0;
         let is_mhd = self.levels[level].state.fields.mhd.is_some();
         if has_finer && is_mhd {
             prof("refine_emf", || {
@@ -781,66 +792,81 @@ where
                 reg.accumulate_fine(&l.state.fields.mhd.as_ref().unwrap().efield, dt);
             });
         }
+    }
 
-        // subcycle the finer level, then restrict + reflux.
-        if has_finer {
-            let fine_dt = dt / RATIO as f64;
-            for sub in 0..RATIO {
-                let alpha = sub as f64 / RATIO as f64;
-                prof("refine_prolong", || self.prolong_cf(level + 1, alpha));
-                let f = &self.levels[level + 1];
-                prof("ghost_fill", || f.kernels.ghost_fill(&f.state));
-                self.advance_level(level + 1, fine_dt, alpha);
-            }
-
-            prof("refine_restrict", || {
-                let (lo, hi) = self.levels.split_at(level + 1);
-                let coarse = &lo[level];
-                let fine = &hi[0];
-                let cov = coarse.coverage.as_ref().unwrap();
-                restrict_cons(&fine.state.fields.cons, &coarse.state.fields.cons, cov);
-                // mhd: restrict the staggered B (interface faces included),
-                // reflux the outside faces from the edge-EMF mismatch, then
-                // re-derive cell B + the magnetic-energy correction over the
-                // coverage plus the one-cell shell whose faces just changed.
-                if is_mhd {
-                    let cmhd = coarse.state.fields.mhd.as_ref().unwrap();
-                    let fmhd = fine.state.fields.mhd.as_ref().unwrap();
-                    for aa in 0..NDIM {
-                        restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
-                    }
-                    restrict_bface(&fmhd.bface, &cmhd.bface, cov);
-                    let inv_dx: [f64; NDIM] =
-                        std::array::from_fn(|ax| 1.0 / coarse.state.geom.dx[ax]);
-                    self.emf_registers[level]
-                        .as_ref()
-                        .unwrap()
-                        .apply(&cmhd.bface, &inv_dx);
-                    let shell = shell_around(cov, &coarse.state.geom.interior);
-                    bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
-                }
-            });
-            prof("refine_reflux_apply", || {
-                let l = &self.levels[level];
-                if uniform_cartesian(&l.state) {
-                    self.flux_registers[level]
-                        .apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
-                } else {
-                    let geo = l.state.geom.block_geometry(l.state.physics.metric);
-                    self.flux_registers[level].apply(&l.state.fields.cons, &geo);
-                }
-            });
-            let l = &self.levels[level];
-            prof("c2p", || l.kernels.c2p(&l.state));
-            if has_coarser {
-                prof("refine_prolong", || {
-                    self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64)
-                });
-            }
-            let l = &self.levels[level];
-            prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+    /// the MONOLITHIC finer-level subcycle: RATIO substeps of level `level+1`, each prolonged from
+    /// this level's time-interpolated prims. the DECOMPOSED driver REPLICATES this loop but drives
+    /// each fine substep's stages with a fine-level halo exchange between them (the fine patch may
+    /// span a tile cut), so this method is the single-tile reference. PURE EXTRACTION.
+    fn level_subcycle(&mut self, level: usize, dt: f64) {
+        let fine_dt = dt / RATIO as f64;
+        for sub in 0..RATIO {
+            let alpha = sub as f64 / RATIO as f64;
+            prof("refine_prolong", || self.prolong_cf(level + 1, alpha));
+            let f = &self.levels[level + 1];
+            prof("ghost_fill", || f.kernels.ghost_fill(&f.state));
+            self.advance_level(level + 1, fine_dt, alpha);
         }
+    }
 
+    /// restrict the finer level into this level's coverage + apply the flux/emf reflux + re-derive
+    /// prim (and, if this level has a coarser parent, re-prolong its coarse-fine ghosts). runs AFTER
+    /// the finer-level subcycle. the flux/emf registers are TILE-LOCAL (a coarse cell + the fine
+    /// cells at its face are co-located), so the decomposed driver calls this per tile unchanged.
+    /// PURE EXTRACTION.
+    pub fn level_restrict_reflux(&mut self, level: usize, alpha0: f64) {
+        let has_coarser = level > 0;
+        let is_mhd = self.levels[level].state.fields.mhd.is_some();
+        prof("refine_restrict", || {
+            let (lo, hi) = self.levels.split_at(level + 1);
+            let coarse = &lo[level];
+            let fine = &hi[0];
+            let cov = coarse.coverage.as_ref().unwrap();
+            restrict_cons(&fine.state.fields.cons, &coarse.state.fields.cons, cov);
+            // mhd: restrict the staggered B (interface faces included),
+            // reflux the outside faces from the edge-EMF mismatch, then
+            // re-derive cell B + the magnetic-energy correction over the
+            // coverage plus the one-cell shell whose faces just changed.
+            if is_mhd {
+                let cmhd = coarse.state.fields.mhd.as_ref().unwrap();
+                let fmhd = fine.state.fields.mhd.as_ref().unwrap();
+                for aa in 0..NDIM {
+                    restrict_cell_field(&fmhd.bcell[aa], &cmhd.bcell[aa], cov);
+                }
+                restrict_bface(&fmhd.bface, &cmhd.bface, cov);
+                let inv_dx: [f64; NDIM] =
+                    std::array::from_fn(|ax| 1.0 / coarse.state.geom.dx[ax]);
+                self.emf_registers[level]
+                    .as_ref()
+                    .unwrap()
+                    .apply(&cmhd.bface, &inv_dx);
+                let shell = shell_around(cov, &coarse.state.geom.interior);
+                bcell_from_bface_region(cmhd, coarse.state.fields.cons.nrg_field(), &shell);
+            }
+        });
+        prof("refine_reflux_apply", || {
+            let l = &self.levels[level];
+            if uniform_cartesian(&l.state) {
+                self.flux_registers[level]
+                    .apply_uniform(&l.state.fields.cons, &l.state.geom.dx);
+            } else {
+                let geo = l.state.geom.block_geometry(l.state.physics.metric);
+                self.flux_registers[level].apply(&l.state.fields.cons, &geo);
+            }
+        });
+        let l = &self.levels[level];
+        prof("c2p", || l.kernels.c2p(&l.state));
+        if has_coarser {
+            prof("refine_prolong", || {
+                self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64)
+            });
+        }
+        let l = &self.levels[level];
+        prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
+    }
+
+    /// advance this level's clock (fine levels only; the root clock is the driver's). PURE EXTRACTION.
+    fn level_clock(&mut self, level: usize, dt: f64) {
         if level > 0 {
             let s = &mut self.levels[level].state;
             s.time += dt;
@@ -849,8 +875,9 @@ where
     }
 
     /// fill level `level`'s coarse-fine prim ghosts from its parent's
-    /// time-interpolated prims: `(1 - alpha)*prim_old + alpha*prim_new`.
-    fn prolong_cf(&self, level: usize, alpha: f64) {
+    /// time-interpolated prims: `(1 - alpha)*prim_old + alpha*prim_new`. pub so the DECOMPOSED
+    /// driver can drive the fine subcycle (prolong -> fine ghost -> fine stages with exchange).
+    pub fn prolong_cf(&self, level: usize, alpha: f64) {
         let parent = &self.levels[level - 1];
         let fine = &self.levels[level];
         let prim_old = parent
@@ -1084,17 +1111,76 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 }
 
 // =============================================================================
-// decomposed hierarchy driver (refinement x decomposition, phase 1-2)
+// decomposed hierarchy driver (refinement x decomposition, phases 1-3)
 // =============================================================================
 
-/// the root-level halo exchange across tiles + a per-tile root `ghost_fill`. only the ROOT level
-/// is exchanged: the refined patches are tile-local (each lives inside one root tile's interior),
-/// so every fine level's coupling stays within its owning tile. drains the devices first (the
-/// cross-device read barrier), exchanges the prim reconstruction fields on the root `FieldStore`s
-/// (cut faces are `CoarseFine`, so `ghost_fill` leaves them for the exchange), then re-fills the
-/// physical boundary ghosts. used both to prime the tiles and BETWEEN root stages.
-fn exchange_root_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+/// the sub-grid of tiles that carry the first fine level. for SMR (one refined box per level) the
+/// refined tiles form a contiguous rectangle; `order[k]` is the tile index at fine-flatten position
+/// `k`, and `devices[k]`/`counts` give that sub-grid's device map + shape for `exchange_grid`. when
+/// the patch is TILE-LOCAL the sub-grid is 1x1, so the fine exchange is a no-op (phases 1-2); when
+/// the patch SPANS cuts the sub-grid has internal cuts and the fine halos are exchanged (phase 3).
+pub struct FineSubgrid<const NDIM: usize> {
+    pub counts: [usize; NDIM],
+    pub order: Vec<usize>,
+    pub devices: Vec<i32>,
+}
+
+/// derive the first-fine-level sub-grid from which tiles carry a fine level. None if no tile is
+/// refined. asserts the refined tiles fill a rectangle (the SMR single-box invariant). pub so the
+/// python decomposed-refinement loop can gather the fine level with the same tile order + counts.
+pub fn fine_subgrid<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>(
     tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    counts: [usize; NDIM],
+    devices: &[i32],
+) -> Option<FineSubgrid<NDIM>>
+where
+    R: Regime<f64, NDIM>,
+    M: Metric<f64, NDIM> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+    K: KernelSet<NDIM, DOF, Mem, f64>,
+{
+    let refined: Vec<usize> = (0..tiles.len()).filter(|&i| tiles[i].levels.len() > 1).collect();
+    if refined.is_empty() {
+        return None;
+    }
+    // the tile-coord bounding box of the refined tiles -> the fine sub-grid shape.
+    let mut lo = [usize::MAX; NDIM];
+    let mut hi = [0usize; NDIM];
+    for &i in &refined {
+        let tc = unflatten(i, counts);
+        for ax in 0..NDIM {
+            lo[ax] = lo[ax].min(tc[ax]);
+            hi[ax] = hi[ax].max(tc[ax]);
+        }
+    }
+    let sub_counts: [usize; NDIM] = std::array::from_fn(|ax| hi[ax] - lo[ax] + 1);
+    let nsub: usize = sub_counts.iter().product();
+    // place each refined tile at its position in the sub-grid's flatten order.
+    let mut order = vec![usize::MAX; nsub];
+    for &i in &refined {
+        let tc = unflatten(i, counts);
+        let rc: [usize; NDIM] = std::array::from_fn(|ax| tc[ax] - lo[ax]);
+        order[flatten(rc, sub_counts)] = i;
+    }
+    assert!(
+        order.iter().all(|&i| i != usize::MAX),
+        "refinement x decomposition: refined tiles do not form a rectangle (SMR is single-box)"
+    );
+    let sub_devices: Vec<i32> = order.iter().map(|&i| devices[i]).collect();
+    Some(FineSubgrid { counts: sub_counts, order, devices: sub_devices })
+}
+
+/// exchange one LEVEL's halos across an ordered set of tiles (a sub-grid of shape `counts`), then
+/// per-tile `ghost_fill` at that level. `order[k]` is the tile index at flatten position `k`;
+/// `devices[k]` is order-aligned. cut faces are `CoarseFine` (so `ghost_fill` leaves them for the
+/// exchange); the sub-grid's OUTER faces are the patch's coarse-fine boundary (prolong-filled) or a
+/// physical boundary, neither of which `exchange_grid` touches (it moves only internal cuts).
+fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T>(
+    tiles: &[Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
+    level: usize,
+    order: &[usize],
     counts: [usize; NDIM],
     devices: &[i32],
     transport: &T,
@@ -1109,31 +1195,32 @@ fn exchange_root_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, 
 {
     drain_devices::<Mem>(devices);
     {
-        let roots: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
-            tiles.iter().map(|h| &*h.levels[0].state).collect();
-        exchange_grid(&roots, counts, devices, transport);
+        let states: Vec<&FieldStore<NDIM, DOF, Mem, f64>> =
+            order.iter().map(|&i| &*tiles[i].levels[level].state).collect();
+        exchange_grid(&states, counts, devices, transport);
     }
-    for (i, h) in tiles.iter().enumerate() {
-        symbi_xpu::with_device(devices[i], || {
-            h.levels[0].kernels.ghost_fill(&h.levels[0].state)
+    for (k, &i) in order.iter().enumerate() {
+        symbi_xpu::with_device(devices[k], || {
+            tiles[i].levels[level].kernels.ghost_fill(&tiles[i].levels[level].state)
         });
     }
 }
 
-/// the DECOMPOSED hierarchy driver (refinement x decomposition, phase 1-2: TILE-LOCAL static
-/// refinement, euler OR rk2 root). lockstep-advance N per-tile hierarchies whose refined patches
-/// each live inside a single root tile; the EXISTING recursive advance (`level_step_tail`'s fine
-/// subcycle) drives each tile's sub-hierarchy unchanged, and the only cross-tile coupling is the
-/// ROOT halo exchange -- done BETWEEN root stages (the rk2 corrector reads each neighbor's stage-1
-/// update; a between-step-only exchange is euler-correct only). the flux/emf reflux registers stay
-/// tile-local (a coarse cell and the fine cells at its face are co-located). global dt = min over
-/// tiles of `root_cfl_dt()` (clamped to t_final), so each tile's internal cfl clamp collapses to
-/// the same dt. proven `decomposed == monolithic` by `symbi/tests/decomp_refine_equivalence.rs`.
+/// the DECOMPOSED hierarchy driver (refinement x decomposition, phases 1-3): lockstep-advance N
+/// per-tile hierarchies, decomposing the ROOT and the FIRST FINE level. the root stages run with a
+/// root halo exchange BETWEEN them (rk2 corrector reads each neighbor's stage-1 update); the fine
+/// subcycle is driven here so its stages can exchange the FINE halos between fine tiles when a patch
+/// SPANS a tile cut (phase 3). for a TILE-LOCAL patch the fine sub-grid is 1x1, so the fine exchange
+/// is a no-op and this reduces to phases 1-2 exactly. the flux/emf reflux registers stay TILE-LOCAL
+/// (a coarse cell + the fine cells at its face are co-located; any register write to a cut-adjacent
+/// GHOST is overwritten by the next root exchange). global dt = min over tiles of `root_cfl_dt()`.
+/// proven `decomposed == monolithic` by `decomp_refine_equivalence.rs` (1-2) + `..._p3_..` (3).
 ///
-/// hydro only in the root post-step: mesh motion + immersed bodies combined with refinement-decomp
-/// are deferred (the root clock is advanced directly here, skipping step_root's motion/body tail).
-/// `on_checkpoint(iteration, time, &tiles)` fires every `interval` root steps and once at the end
-/// (the devices are drained first so the callback reads coherent tile state).
+/// LEVELS 2+ are advanced TILE-LOCALLY (inside the level-1 fine tile, via the recursive
+/// `level_step_tail(1)`); decomposing a patch that spans a cut on a level >= 2 is future work.
+/// hydro only in the root post-step (mesh motion / immersed bodies + refinement-decomp deferred;
+/// the root clock is advanced directly). `on_checkpoint(iteration, time, &tiles)` fires every
+/// `interval` root steps and once at the end (devices drained first).
 #[allow(clippy::too_many_arguments)]
 pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K, T, F>(
     tiles: &mut [Hierarchy<R, NDIM, DOF, M, E, S, Mem, K>],
@@ -1158,9 +1245,11 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
     let n = tiles.len();
     let nstages = ts.stages().len();
     debug_assert_eq!(n, devices.len(), "tiles/devices length mismatch");
+    let root_order: Vec<usize> = (0..n).collect();
+    let fine = fine_subgrid(tiles, counts, devices);
 
     // cut halos current before the first flux.
-    exchange_root_halos(tiles, counts, devices, transport);
+    exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
 
     let mut t = start_time;
     let mut iter: u64 = 0;
@@ -1174,26 +1263,63 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || tiles[i].level_step_begin(0, gdt));
         }
-        // the root SSP stages, with a root halo exchange between each (rk2 corrector reads the
-        // neighbor's stage-1 update -- the same contract as the single-level decomposition).
+        // the root SSP stages, with a root halo exchange between each.
         for ii in 0..nstages {
             for i in 0..n {
                 symbi_xpu::with_device(devices[i], || tiles[i].level_stage(0, ii, gdt, 0.0));
             }
-            exchange_root_halos(tiles, counts, devices, transport);
+            exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
         }
-        // the tile-local fine subcycle + restrict + reflux (the existing recursive advance), then
+        // root emf bookkeeping (mhd; no-op for hydro + unrefined tiles).
+        for i in 0..n {
+            symbi_xpu::with_device(devices[i], || tiles[i].level_tail_emf(0, gdt));
+        }
+        // the FINE subcycle, decomposed across the refined tiles: RATIO substeps, each fine substep
+        // driven stage-by-stage with a fine halo exchange (a no-op for a tile-local 1x1 sub-grid).
+        if let Some(fg) = &fine {
+            let fine_dt = gdt / RATIO as f64;
+            for sub in 0..RATIO {
+                let alpha = sub as f64 / RATIO as f64;
+                for (k, &i) in fg.order.iter().enumerate() {
+                    symbi_xpu::with_device(fg.devices[k], || {
+                        tiles[i].prolong_cf(1, alpha);
+                        tiles[i].levels[1].kernels.ghost_fill(&tiles[i].levels[1].state);
+                    });
+                }
+                // fill the fine cut halo before the fine flux reads it.
+                exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
+                for (k, &i) in fg.order.iter().enumerate() {
+                    symbi_xpu::with_device(fg.devices[k], || tiles[i].level_step_begin(1, fine_dt));
+                }
+                for jj in 0..nstages {
+                    for (k, &i) in fg.order.iter().enumerate() {
+                        symbi_xpu::with_device(fg.devices[k], || {
+                            tiles[i].level_stage(1, jj, fine_dt, alpha)
+                        });
+                    }
+                    exchange_level_halos(tiles, 1, &fg.order, fg.counts, &fg.devices, transport);
+                }
+                for (k, &i) in fg.order.iter().enumerate() {
+                    symbi_xpu::with_device(fg.devices[k], || {
+                        tiles[i].level_step_tail(1, fine_dt, alpha)
+                    });
+                }
+            }
+            // tile-local restrict + flux/emf reflux + c2p + ghost on each refined tile's root.
+            for (k, &i) in fg.order.iter().enumerate() {
+                symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_reflux(0, 0.0));
+            }
+        }
         // the root clock (hydro-only: motion / bodies in the root post-step are deferred).
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || {
-                tiles[i].level_step_tail(0, gdt, 0.0);
                 tiles[i].levels[0].state.time += gdt;
                 tiles[i].levels[0].state.iteration += 1;
             });
         }
-        // the tail's c2p recomputed prim over the allocated domain (incl. the cut halo from stale
-        // halo cons); refresh the cut halos for the next step's stage 0.
-        exchange_root_halos(tiles, counts, devices, transport);
+        // the restrict/c2p recomputed root prim over the allocated domain (incl. the cut halo from
+        // stale halo cons, and the cut-adjacent reflux ghosts); refresh for the next step's stage 0.
+        exchange_level_halos(tiles, 0, &root_order, counts, devices, transport);
 
         t += gdt;
         iter += 1;

@@ -1169,6 +1169,29 @@ fn refinement_regions_nd<const D: usize>(
     Ok(out)
 }
 
+/// clip each global refinement region to one tile's physical extent `[origin, origin + cells*dx]`,
+/// keeping only the regions that genuinely overlap (more than ~half a coarse cell on every axis, so
+/// region_to_domain rounds to >= 1 cell). a TILE-LOCAL patch survives in exactly one tile; a patch
+/// SPANNING a cut is split into the abutting tiles, each clipped to its own slab (the per-tile
+/// hierarchies then share the cut on the fine level, exchanged by `evolve_hierarchy_decomposed`).
+fn clip_regions_to_tile<const D: usize>(
+    regions: &[RefinementRegion<D>],
+    origin: [f64; D],
+    cells: [usize; D],
+    dx: [f64; D],
+) -> Vec<RefinementRegion<D>> {
+    let hi: [f64; D] = std::array::from_fn(|a| origin[a] + cells[a] as f64 * dx[a]);
+    let mut out = Vec::new();
+    for r in regions {
+        let lo: [f64; D] = std::array::from_fn(|a| r.x_lo[a].max(origin[a]));
+        let up: [f64; D] = std::array::from_fn(|a| r.x_hi[a].min(hi[a]));
+        if (0..D).all(|a| up[a] - lo[a] > 0.5 * dx[a]) {
+            out.push(RefinementRegion { x_lo: lo, x_hi: up });
+        }
+    }
+    out
+}
+
 /// the effective slope-limiter theta passed to the substrate. PLM uses the
 /// config `plm_theta` (default 1.5, theta-MC limiter); PCM — i.e., first-order /
 /// `order=1` — maps to theta = 0, which collapses minmod3 to a zero slope, so
@@ -1574,14 +1597,267 @@ where
     Ok(())
 }
 
+/// the multi-gpu (gpus>1) REFINED path: decompose a 2-level static-refinement hierarchy. each tile
+/// is a per-tile `Hierarchy` (its root slab + the global refinement region CLIPPED to that slab, or
+/// single-level where the region misses it); `evolve_hierarchy_decomposed` drives them in lockstep
+/// (root + first-fine-level halo exchange, oracle-proven by decomp_refine_equivalence +
+/// decomp_refine_p3_equivalence). for OUTPUT, gather each level into the global hierarchy -- the
+/// root over `counts`, the fine over the `fine_subgrid` sub-grid (a decomposition of the global
+/// fine level) -- and write all its levels through the existing multi-level checkpoint writer.
+/// v1: a SINGLE refined region (the lib driver decomposes the root + first fine level).
+fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    cfg: &Config,
+    mut tiles: Vec<Hierarchy<R, D, DOF, M, E, S, Mem, K>>,
+    global: Hierarchy<R, D, DOF, M, E, S, Mem, K>,
+    counts: [usize; D],
+) -> Result<(), String>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    use symbi::sim::decomp::{enable_peer_mesh, gather_interiors};
+    use symbi::sim::refinement::{evolve_hierarchy_decomposed, fine_subgrid};
+
+    let ntiles = tiles.len();
+    let devices: Vec<i32> = (0..ntiles as i32).collect();
+    enable_peer_mesh(&devices);
+
+    #[cfg(feature = "gpu")]
+    let transport = symbi::sim::decomp::PeerCopy;
+    #[cfg(not(feature = "gpu"))]
+    let transport = symbi::sim::decomp::LocalCopy;
+
+    let cp_dt = if cfg.checkpoint_interval > 0.0 {
+        cfg.checkpoint_interval * cfg.time_unit
+    } else {
+        f64::INFINITY
+    };
+    let cp_width = checkpoint_time_width(cfg);
+
+    // the fine sub-grid (which tiles carry a fine level + their order/counts) for the fine gather.
+    let fg = fine_subgrid(&tiles, counts, &devices);
+
+    // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
+    // over the fine sub-grid), then write all the global levels through the multi-level writer.
+    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
+        let roots: Vec<_> = tiles.iter().map(|h| &*h.levels[0].state).collect();
+        gather_interiors(&*global.levels[0].state, &roots, counts);
+        if let Some(fg) = &fg {
+            let fines: Vec<_> = fg.order.iter().map(|&i| &*tiles[i].levels[1].state).collect();
+            gather_interiors(&*global.levels[1].state, &fines, fg.counts);
+        }
+        let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
+        let _ = write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index));
+    };
+
+    // t=start initial condition.
+    if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+        let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+        write_cp(&tiles, &checkpoint_name(cfg, &tag), cfg.checkpoint_index);
+    }
+
+    let mut next_cp = cfg.start_time + cp_dt;
+    let mut cp_index = cfg.checkpoint_index + 1;
+    evolve_hierarchy_decomposed(
+        &mut tiles,
+        counts,
+        &devices,
+        &transport,
+        cfg.timestepping,
+        cfg.start_time,
+        cfg.t_final,
+        1,
+        |_iter, time, tiles| {
+            if time + f64::EPSILON >= next_cp {
+                let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                write_cp(tiles, &checkpoint_name(cfg, &tag), cp_index);
+                while next_cp <= time {
+                    next_cp += cp_dt;
+                }
+                cp_index += 1;
+            }
+            std::ops::ControlFlow::Continue(())
+        },
+    );
+
+    // canonical final snapshot.
+    write_cp(&tiles, &format!("{}final.h5", cfg.data_dir), cp_index);
+    Ok(())
+}
+
+/// the multi-gpu (gpus>1) REFINED hydro path: per-tile static-refinement hierarchies driven by the
+/// oracle-proven `evolve_hierarchy_decomposed` (root + first-fine-level halo exchange; phases 1-3).
+/// each tile builds its root slab + the global refinement region CLIPPED to that slab (single-level
+/// where the region misses it); a patch that spans a cut is split into the abutting tiles and the
+/// fine halos are exchanged at the cut. output gathers each level into the global hierarchy (root
+/// over `counts`, fine over the fine sub-grid) and writes the multi-level checkpoint. v1: PLAIN
+/// hydro + a single refined region (bodies / sources / motion with refinement-decomp are refused).
+macro_rules! build_and_run_hydro_decomposed_refined {
+    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
+        // the per-tile / global hierarchy type. DOF = D for hydro; the kernel set is the substrate's
+        // associated type (matches what `sim.substrate()` yields).
+        type Hier = Hierarchy<
+            $regime_ty,
+            $d,
+            $d,
+            $geom_ty,
+            IdealGas<f64>,
+            DefaultSpace,
+            DefaultMemory,
+            <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet,
+        >;
+
+        // refined decomposition v1 = plain hydro. these combinations each need their own cross-level
+        // multi-tile handling; refuse rather than silently ignore.
+        if !cfg.bodies.is_empty() {
+            return Err("gpus>1 + refinement does not yet support immersed bodies; set gpus=1".to_string());
+        }
+        if cfg.source_json.is_some() {
+            return Err("gpus>1 + refinement does not yet support user sources; set gpus=1".to_string());
+        }
+        if cfg.mesh_motion {
+            return Err("gpus>1 + refinement does not yet support mesh motion; set gpus=1".to_string());
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let solver = cfg.solver;
+        let prolong = prolong_order_for(&cfg.reconstruction_name);
+        let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
+
+        // build N per-tile hierarchies (root slab + the clipped region, or single-level).
+        let mut tiles: Vec<Hier> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let phys = boundaries_nd::<$d>(&cfg.boundaries);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, dx);
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<Hier, String> {
+                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(dx)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            lin += (tc[ax] * m[ax] + idx[ax] as usize) * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        Prim {
+                            rho: row[0],
+                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                            pre: row[1 + $d],
+                        }
+                    })
+                    .build();
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                let make = |s: &Sim| {
+                    s.substrate().theta(theta).with_solver(solver).expect("fine kernel set")
+                };
+                let mut h = if tile_regions.is_empty() {
+                    Hierarchy::single(sim, sub)
+                } else {
+                    let h = Hierarchy::with_refinement(sim, sub, &tile_regions, prolong, make)
+                        .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?;
+                    h.seed_fine_from_coarse()
+                        .map_err(|e| format!("tile {flat} fine seed: {e:?}"))?;
+                    h
+                };
+                h.prime();
+                Ok(h)
+            })?;
+            tiles.push(built);
+        }
+
+        // the full-size OUTPUT hierarchy (root + the full region): gather scatters each level's tile
+        // interiors into it. lives on device 0 (touched only at output).
+        let global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
+            let groot = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                .cells(n)
+                .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                .spacing(dx)
+                .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
+                .cfl(cfg.cfl)
+                .timestepping(cfg.timestepping)
+                .cyl_plane(cfg.cyl_plane)
+                .allocate()
+                .map_err(|e| format!("global output allocate: {e:?}"))?
+                .set_initial_indexed(|idx, _x| {
+                    let mut lin = 0usize;
+                    let mut stride = 1usize;
+                    for ax in 0..$d {
+                        lin += idx[ax] as usize * stride;
+                        stride *= n[ax];
+                    }
+                    let row = &prims[lin];
+                    Prim {
+                        rho: row[0],
+                        vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                        pre: row[1 + $d],
+                    }
+                })
+                .build();
+            let gsub = groot
+                .substrate()
+                .theta(theta)
+                .with_solver(solver)
+                .map_err(|e| format!("global substrate/solver: {e:?}"))?;
+            let make = |s: &Sim| {
+                s.substrate().theta(theta).with_solver(solver).expect("fine kernel set")
+            };
+            let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, make)
+                .map_err(|e| format!("global refinement build: {e:?}"))?;
+            gh.seed_fine_from_coarse()
+                .map_err(|e| format!("global fine seed: {e:?}"))?;
+            Ok(gh)
+        })?;
+
+        run_refined_decomposed_loop(cfg, tiles, global, counts)
+    }};
+}
+
 /// the multi-gpu (gpus>1) hydro path (docs/design/37 M4, design/38). decompose the domain into
 /// `cfg.n_gpus` tiles, bind each tile to a device, evolve them in lockstep with halo exchange
 /// (the oracle-proven `decomp::evolve_decomposed`), and for output gather the tiles into one
 /// full-size sim written by the EXISTING single-grid checkpoint path. v1 is single-level hydro:
-/// refinement / immersed bodies / user sources with gpus>1 are refused above. checkpoint cadence
-/// is the LINEAR `checkpoint_interval`; the log cadence + live display are single-grid only for
-/// now. correctness is the same oracle contract (decomposed == monolithic to round-off),
-/// validated locally by `gpus=2` on one card (NDEV) and on the cluster across real devices.
+/// refinement uses the decomposed-hierarchy path above; immersed bodies / user sources are wired.
+/// checkpoint cadence is the LINEAR `checkpoint_interval`; the log cadence + live display are
+/// single-grid only for now. correctness is the same oracle contract (decomposed == monolithic).
 macro_rules! build_and_run_hydro_decomposed {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::{decompose_grid, unflatten};
@@ -1589,10 +1865,12 @@ macro_rules! build_and_run_hydro_decomposed {
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
 
-        // v1 multi-gpu = single-level hydro. these interactions are deferred (each needs its own
-        // multi-tile handling); refuse rather than silently ignore.
+        // refinement + gpus>1 takes the decomposed-HIERARCHY path (per-tile hierarchies + the
+        // root/fine halo exchange); plain single-level continues below.
         if cfg.refinement_enabled {
-            return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
+            return build_and_run_hydro_decomposed_refined!(
+                $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
+            );
         }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
