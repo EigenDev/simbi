@@ -286,8 +286,13 @@ where
             (Vec::new(), Vec::new())
         };
 
+    // the owned interior index range [0, ncells) per axis, in the SAME reversed (storage) axis order
+    // as `mesh_cells` and the `dim_*` geometry. WITHOUT the reverse, owned is (x, y, ..) while
+    // global_cells / dims are (.., y, x): the reader then pairs the y geometry with the x extent, and
+    // a NON-square AMR fine patch renders transposed / offset (a square grid hides it -- both orders
+    // agree). matches the `(0..D).rev()` walk used for `mesh_cells` above.
     let owned_start: Vec<i64> = vec![0; D];
-    let owned_fin: Vec<i64> = resolution.iter().map(|&n| n as i64).collect();
+    let owned_fin: Vec<i64> = (0..D).rev().map(|ax| interior.spaces[ax].size() as i64).collect();
 
     Snapshot {
         resolution,

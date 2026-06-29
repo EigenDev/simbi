@@ -727,10 +727,24 @@ where
         let _ = table.set_log_file(std::path::Path::new(&p));
     }
 
-    // zone-cycle throughput: the interior cell count per root step. wall-clock
-    // deltas across the row cadence give the instantaneous update rate; the run
-    // total gives the average. this is the number a user watches.
-    let n_zones: u64 = (0..cfg.dims).map(|ax| cfg.n_cells[ax] as u64).product();
+    // zone-cycle throughput: the ACTUAL interior cell-updates per ROOT step. for a refined run this
+    // is NOT just the base grid -- each level ll subcycles RATIO^ll times per root step over its own
+    // (finer, larger) interior, so the honest count is sum_ll (interior_cells_ll * RATIO^ll). a
+    // single-level run reduces to the base interior, unchanged. without this, AMR reports only the
+    // coarse zones while the wall-clock includes all the hidden fine work, so the rate reads ~RATIO^d
+    // too low. (RATIO = 2, the baked transfer ratio.)
+    let n_zones: u64 = {
+        let mut eff = 0u64;
+        let mut subcycle = 1u64; // RATIO^ll for level ll
+        for level in hier.levels.iter() {
+            let cells: u64 = (0..cfg.dims)
+                .map(|ax| level.state.geom.interior.spaces[ax].size() as u64)
+                .product();
+            eff += cells * subcycle;
+            subcycle *= 2;
+        }
+        eff
+    };
     let cp_width = checkpoint_time_width(cfg);
     // body diagnostics: a separate, user-defined cadence (natural units), only
     // when the run has bodies and a positive interval. one `<dir>diagnostics.dat`

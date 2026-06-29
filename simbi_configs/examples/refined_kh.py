@@ -1,29 +1,18 @@
 # =============================================================================
 # refined_kh.py
 #
-# kelvin-helmholtz instability on a STATICALLY REFINED mesh -- the classic 2d
-# shear-instability demo, with one fine box covering the shear layers where all
-# the structure lives. a coarse base grid resolves the bulk flow cheaply while a
-# refined central STRIP (full width, the central y-band) doubles the resolution
-# across the two interfaces, where the vortex roll-ups are resolution-hungry.
+# the SAME kelvin-helmholtz problem as kh.py, on a STATICALLY REFINED mesh: one
+# fine box over the central shear region where the vortex roll-ups live. the IC
+# is byte-identical to kh.py (so a refined run and a uniform kh.py run are the
+# same physics, only the grid differs). the hierarchy is checkpointed as level_0
+# (coarse) + level_1 (fine); the fine interior is seeded by prolongation from the
+# coarse IC.
 #
-# why this problem: KH vortices are notoriously resolution-dependent -- a coarse
-# grid smears the roll-ups into a fuzzy band, a fine grid resolves the spiral
-# cores. refining ONLY the central strip (static / SMR) captures the action at
-# fine-grid quality for a fraction of the cells. the interfaces at y = +/-0.25
-# sit well inside the strip; the coarse-fine boundaries (y = +/-0.375) lie in the
-# quiet outer flow.
-#
-# multi-gpu: this is also the headline refinement x decomposition example. run it
-# on N gpus with `--gpus N`; the root grid is split into tiles, the fine strip is
-# split with them (its halos exchanged at the cuts), and the checkpoint is gathered
-# back into one coarse + one fine level -- identical to the single-gpu output. to
-# validate on one card: run `--gpus 1` and `SYMBI_GPU_OVERSUBSCRIBE=1 --gpus 2`
-# and diff the checkpoints.
-#
-# the IC is a SMOOTH double shear layer (tanh ramps) with a single-mode vy seed
-# localized at the interfaces -- reproducible and symmetric, so the refinement
-# benefit is unambiguous rather than buried in grid-seeded noise.
+# multi-gpu: this also exercises refinement x decomposition. run on N gpus (single
+# node) with `--gpus N` -- the root grid is tiled, the fine box is tiled with it
+# (its halos exchanged at the cuts), and the gathered checkpoint matches the
+# single-gpu output. validate on one card: `--gpus 1` vs
+# `SYMBI_GPU_OVERSUBSCRIBE=1 --gpus 2`, then diff the checkpoints.
 # =============================================================================
 from pathlib import Path
 from typing import Annotated
@@ -31,51 +20,59 @@ from typing import Annotated
 import numpy as np
 
 from simbi import ProblemParam, SimbiProblem
-from simbi.types import BoundaryCondition, CoordSystem, Regime, Solver
+from simbi.types import (
+    BoundaryCondition,
+    CellSpacing,
+    CoordSystem,
+    Regime,
+    Solver,
+)
 from simbi.types.typing import GasStateGenerator, InitialStateType
+
+# constants for initial conditions (identical to kh.py)
+SEED = 12345
+rng = np.random.default_rng(SEED)
+PEEK_TO_PEEK = 0.01
 
 
 class RefinedKelvinHelmholtz(SimbiProblem):
-    """kelvin-helmholtz instability with one refined central strip."""
+    """kelvin-helmholtz instability with one refined central box (cf. kh.py)."""
 
-    # ---- physics ----
+    # physics
     adiabatic_index: Annotated[
         float, ProblemParam(5.0 / 3.0, description="adiabatic index")
     ]
-    rho_in: Annotated[
-        float, ProblemParam(2.0, description="density of the central (fast) layer")
+    rhoL: Annotated[
+        float, ProblemParam(2.0, description="density in the central layer")
     ]
-    rho_out: Annotated[
-        float, ProblemParam(1.0, description="density of the outer (slow) layers")
+    rhoR: Annotated[
+        float, ProblemParam(1.0, description="density in the outer regions")
     ]
-    v_shear: Annotated[
-        float,
-        ProblemParam(0.5, description="half the velocity jump across each interface"),
+    vxT: Annotated[
+        float, ProblemParam(0.5, description="x-velocity in the central layer")
     ]
-    pressure: Annotated[
-        float, ProblemParam(2.5, description="uniform pressure (pressure balance)")
+    vxB: Annotated[
+        float, ProblemParam(-0.5, description="x-velocity in the outer regions")
     ]
-    shear_width: Annotated[
-        float,
-        ProblemParam(0.02, description="tanh shear-layer half-thickness"),
+    pL: Annotated[
+        float, ProblemParam(2.5, description="pressure in the central layer")
     ]
-    seed_amp: Annotated[
-        float,
-        ProblemParam(0.01, description="single-mode vy perturbation amplitude"),
-    ]
-    seed_modes: Annotated[
-        int,
-        ProblemParam(2, description="number of vy perturbation wavelengths across x"),
+    pR: Annotated[
+        float, ProblemParam(2.5, description="pressure in the outer regions")
     ]
 
-    # ---- coarse base grid ----
+    # domain
     resolution: Annotated[
-        tuple[int, int, int],
-        ProblemParam((128, 128, 1), cli=True, description="coarse (nx, ny, 1)"),
+        tuple[int, int],
+        ProblemParam(
+            (256, 256), cli=True, description="coarse base zones in x and y"
+        ),
     ]
     bounds: Annotated[
         list[tuple[float, float]],
-        ProblemParam([(-0.5, 0.5), (-0.5, 0.5)], description="domain bounds"),
+        ProblemParam(
+            [(-0.5, 0.5), (-0.5, 0.5)], description="domain boundaries"
+        ),
     ]
     coord_system: Annotated[
         CoordSystem,
@@ -84,15 +81,25 @@ class RefinedKelvinHelmholtz(SimbiProblem):
     regime: Annotated[
         Regime, ProblemParam(Regime.NEWTONIAN, description="physics regime")
     ]
+    x1_spacing: Annotated[
+        CellSpacing,
+        ProblemParam(
+            CellSpacing.LINEAR, description="grid spacing in x1 direction"
+        ),
+    ]
+
+    # numerics
     boundary_conditions: Annotated[
         BoundaryCondition,
-        ProblemParam(BoundaryCondition.PERIODIC, description="periodic in x and y"),
+        ProblemParam(
+            BoundaryCondition.PERIODIC, description="boundary conditions"
+        ),
     ]
     solver: Annotated[
         Solver, ProblemParam(Solver.HLLC, description="numerical solver")
     ]
 
-    # ---- static mesh refinement: one fine strip across the shear layers ----
+    # ---- static mesh refinement: one fine box over the central shear region ----
     refinement_enabled: Annotated[
         bool, ProblemParam(True, description="enable mesh refinement")
     ]
@@ -102,8 +109,10 @@ class RefinedKelvinHelmholtz(SimbiProblem):
     refinement_regions: Annotated[
         list[list[float]],
         ProblemParam(
-            [[-0.5, 0.5, -0.375, 0.375]],
-            description="one fine strip: full x, central y-band covering both interfaces",
+            # one fine box over the shear layers (interfaces at y = +/-0.25, with
+            # margin), wide in x but kept interior to the domain. [x_lo, x_hi, y_lo, y_hi].
+            [[-0.4375, 0.4375, -0.375, 0.375]],
+            description="one fine box over the central mixing region",
         ),
     ]
     refinement_ratios: Annotated[
@@ -111,7 +120,7 @@ class RefinedKelvinHelmholtz(SimbiProblem):
         ProblemParam([2], description="coarse->fine refinement ratio per jump"),
     ]
 
-    # ---- simulation control ----
+    # simulation control
     data_directory: Annotated[
         Path,
         ProblemParam(
@@ -123,37 +132,39 @@ class RefinedKelvinHelmholtz(SimbiProblem):
     ]
     end_time: Annotated[
         float,
-        ProblemParam(2.0, cli=True, checkpoint_safe=True, description="end time"),
+        ProblemParam(
+            20.0, cli=True, checkpoint_safe=True, description="end time"
+        ),
     ]
 
     def initial_primitive_state(self) -> InitialStateType:
-        """smooth double shear layer + single-mode vy seed; prim is (rho, vx, vy, p)."""
+        """generate initial primitive state for kelvin-helmholtz instability."""
 
         def gas_state() -> GasStateGenerator:
-            nx, ny, _ = self.resolution
-            (xmin, xmax), (ymin, ymax) = self.bounds[0], self.bounds[1]
+            nx, ny = self.resolution
+            xmin, xmax = self.bounds[0]
+            ymin, ymax = self.bounds[1]
+
             dx = (xmax - xmin) / nx
             dy = (ymax - ymin) / ny
-            sigma = self.shear_width
-            kx = 2.0 * np.pi * self.seed_modes / (xmax - xmin)
 
-            for _kk in range(1):
-                for jj in range(ny):
-                    y = ymin + (jj + 0.5) * dy
-                    # smooth top-hat: ~1 in the central band |y| < 0.25, ~0 outside,
-                    # with tanh ramps of half-thickness sigma at y = +/-0.25.
-                    band = 0.5 * (
-                        np.tanh((y + 0.25) / sigma) - np.tanh((y - 0.25) / sigma)
-                    )
-                    rho = self.rho_out + (self.rho_in - self.rho_out) * band
-                    vx = -self.v_shear + 2.0 * self.v_shear * band
-                    # single-mode vy seed, localized at the two interfaces.
-                    envelope = np.exp(-(((y - 0.25) / 0.05) ** 2)) + np.exp(
-                        -(((y + 0.25) / 0.05) ** 2)
-                    )
-                    for ii in range(nx):
-                        x = xmin + (ii + 0.5) * dx
-                        vy = self.seed_amp * np.sin(kx * x) * envelope
-                        yield (rho, vx, vy, self.pressure)
+            for jj in range(ny):
+                y = ymin + jj * dy
+                for ii in range(nx):
+                    vx_noise = PEEK_TO_PEEK * np.sin(2 * np.pi * rng.normal())
+                    vy_noise = PEEK_TO_PEEK * np.sin(2 * np.pi * rng.normal())
+
+                    if abs(y) < 0.25:
+                        rho = self.rhoL
+                        vx = self.vxT + vx_noise
+                        vy = 0.0 + vy_noise
+                        p = self.pL
+                    else:
+                        rho = self.rhoR
+                        vx = self.vxB + vx_noise
+                        vy = 0.0 + vy_noise
+                        p = self.pR
+
+                    yield (rho, vx, vy, p)
 
         return gas_state
