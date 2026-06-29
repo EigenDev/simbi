@@ -13,7 +13,9 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-cuda = ["symbi/cuda"]
+gpu = ["symbi/gpu"]
+cuda = ["gpu", "symbi/cuda"]
+hip = ["gpu", "symbi/hip"]
 
 [dependencies]
 symbi = { path = "../symbi" }

@@ -13,7 +13,7 @@ from typing import Any, Optional, Sequence
 from .utils.colors import bcolors
 
 # directories that never hold simbi configs. pruned from the recursive walk so a
-# symlinked config tree (e.g. simbi_configs/science -> a sibling repo) does not
+# symlinked config tree (e.g., simbi_configs/science -> a sibling repo) does not
 # drag in its virtualenv / caches / build artifacts. any hidden dir (leading
 # dot, catches .venv/.git/.tox/...) is pruned too.
 _EXCLUDED_DIRS = frozenset(

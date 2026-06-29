@@ -19,7 +19,7 @@
 // difference is the codegen path. wall-time ratio = pure codegen
 // overhead. if A ~= B, the IR pipeline preserves rustc's optimisation
 // opportunities and any speed-up has to come from the algorithm. if B >> A,
-// the IR is leaking ops (e.g. unfolded `x * 0.0`, dropped strength
+// the IR is leaking ops (e.g., unfolded `x * 0.0`, dropped strength
 // reductions) and the codegen pipeline is the lever.
 //
 // usage:
@@ -28,17 +28,17 @@
 
 use std::time::Instant;
 
-use symbi_aot::{
-    rmhd_wave_speed_map_3d, BufHandle, Buf, KernelInvocation,
-};
 use symbi_algebra::Tensor;
-use symbi_hydro::{rmhd::rmhd_magnetosonic_cfl_speeds, IdealGas, MhdPrim, Prim};
+use symbi_aot::{Buf, BufHandle, KernelInvocation, rmhd_wave_speed_map_3d};
+use symbi_hydro::{IdealGas, MhdPrim, Prim, rmhd::rmhd_magnetosonic_cfl_speeds};
 
 fn parse_arg<T: std::str::FromStr>(flag: &str, default: T) -> T {
     let args: Vec<String> = std::env::args().collect();
     for w in args.windows(2) {
         if w[0] == flag {
-            if let Ok(v) = w[1].parse::<T>() { return v; }
+            if let Ok(v) = w[1].parse::<T>() {
+                return v;
+            }
         }
     }
     default
@@ -47,30 +47,43 @@ fn parse_arg<T: std::str::FromStr>(flag: &str, default: T) -> T {
 // generate a million-cell field of physically-realistic RMHD prims. uses a
 // deterministic LCG so both paths see EXACTLY the same input — any disagreement
 // is then pure floating-point pattern, not initial-condition skew.
-fn make_fields(n: usize) -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+fn make_fields(
+    n: usize,
+) -> (
+    Vec<f64>,
+    Vec<f64>,
+    Vec<f64>,
+    Vec<f64>,
+    Vec<f64>,
+    Vec<f64>,
+    Vec<f64>,
+    Vec<f64>,
+) {
     // small subluminal velocities, modest B field, modest pressure.
     let mut rho = vec![0.0; n];
-    let mut v0  = vec![0.0; n];
-    let mut v1  = vec![0.0; n];
-    let mut v2  = vec![0.0; n];
+    let mut v0 = vec![0.0; n];
+    let mut v1 = vec![0.0; n];
+    let mut v2 = vec![0.0; n];
     let mut pre = vec![0.0; n];
-    let mut b0  = vec![0.0; n];
-    let mut b1  = vec![0.0; n];
-    let mut b2  = vec![0.0; n];
+    let mut b0 = vec![0.0; n];
+    let mut b1 = vec![0.0; n];
+    let mut b2 = vec![0.0; n];
     let mut s: u64 = 0x9E37_79B9_7F4A_7C15;
     let mut nxt = || {
-        s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((s >> 33) as f64) / (u32::MAX as f64)
     };
     for ii in 0..n {
         rho[ii] = 1.0 + 0.5 * nxt();
-        v0[ii]  = 0.4 * (nxt() - 0.5);
-        v1[ii]  = 0.4 * (nxt() - 0.5);
-        v2[ii]  = 0.4 * (nxt() - 0.5);
+        v0[ii] = 0.4 * (nxt() - 0.5);
+        v1[ii] = 0.4 * (nxt() - 0.5);
+        v2[ii] = 0.4 * (nxt() - 0.5);
         pre[ii] = 1.0 + 0.5 * nxt();
-        b0[ii]  = 0.6 * (nxt() - 0.5);
-        b1[ii]  = 0.6 * (nxt() - 0.5);
-        b2[ii]  = 0.6 * (nxt() - 0.5);
+        b0[ii] = 0.6 * (nxt() - 0.5);
+        b1[ii] = 0.6 * (nxt() - 0.5);
+        b2[ii] = 0.6 * (nxt() - 0.5);
     }
     (rho, v0, v1, v2, pre, b0, b1, b2)
 }
@@ -83,7 +96,10 @@ fn main() {
     let eos = IdealGas { gamma };
     let inv_dx = [128.0_f64, 128.0, 128.0];
 
-    eprintln!("[codegen_diff] cells = {}, repeats = {}, gamma = {}", n, repeats, gamma);
+    eprintln!(
+        "[codegen_diff] cells = {}, repeats = {}, gamma = {}",
+        n, repeats, gamma
+    );
 
     let (rho, v0, v1, v2, pre, b0, b1, b2) = make_fields(n);
     let mut lambda_a = vec![0.0_f64; n];
@@ -100,26 +116,34 @@ fn main() {
     let mut best_a = f64::INFINITY;
     for _ in 0..repeats {
         let t0 = Instant::now();
-        lambda_a.par_iter_mut().enumerate().with_min_len(16).for_each(|(ii, lam)| {
-            let prim: MhdPrim<f64, 3> = MhdPrim {
-                hydro: Prim {
-                    rho: rho[ii],
-                    vel: Tensor::new([v0[ii], v1[ii], v2[ii]]),
-                    pre: pre[ii],
-                },
-                mag: Tensor::new([b0[ii], b1[ii], b2[ii]]),
-            };
-            let mut lambda = 0.0_f64;
-            for dd in 0..3 {
-                let nhat = Tensor::<f64, 3>::unit(dd);
-                let (sl, sr) = rmhd_magnetosonic_cfl_speeds(&eos, &prim, &nhat);
-                let s = sl.abs().max(sr.abs()) * inv_dx[dd];
-                if s > lambda { lambda = s; }
-            }
-            *lam = lambda;
-        });
+        lambda_a
+            .par_iter_mut()
+            .enumerate()
+            .with_min_len(16)
+            .for_each(|(ii, lam)| {
+                let prim: MhdPrim<f64, 3> = MhdPrim {
+                    hydro: Prim {
+                        rho: rho[ii],
+                        vel: Tensor::new([v0[ii], v1[ii], v2[ii]]),
+                        pre: pre[ii],
+                    },
+                    mag: Tensor::new([b0[ii], b1[ii], b2[ii]]),
+                };
+                let mut lambda = 0.0_f64;
+                for dd in 0..3 {
+                    let nhat = Tensor::<f64, 3>::unit(dd);
+                    let (sl, sr) = rmhd_magnetosonic_cfl_speeds(&eos, &prim, &nhat);
+                    let s = sl.abs().max(sr.abs()) * inv_dx[dd];
+                    if s > lambda {
+                        lambda = s;
+                    }
+                }
+                *lam = lambda;
+            });
         let dt = t0.elapsed().as_secs_f64();
-        if dt < best_a { best_a = dt; }
+        if dt < best_a {
+            best_a = dt;
+        }
     }
 
     // ---------- path B: IR-emitted via AOT registry ----------
@@ -137,15 +161,51 @@ fn main() {
         {
             let inv = KernelInvocation {
                 buffers: vec![
-                    Buf { handle: BufHandle::Host(&rho), lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::Host(&v0),  lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::Host(&v1),  lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::Host(&v2),  lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::Host(&pre), lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::Host(&b0),  lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::Host(&b1),  lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::Host(&b2),  lo: &alo, extent: &aext },
-                    Buf { handle: BufHandle::HostMut(&mut lambda_b), lo: &alo, extent: &aext },
+                    Buf {
+                        handle: BufHandle::Host(&rho),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::Host(&v0),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::Host(&v1),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::Host(&v2),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::Host(&pre),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::Host(&b0),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::Host(&b1),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::Host(&b2),
+                        lo: &alo,
+                        extent: &aext,
+                    },
+                    Buf {
+                        handle: BufHandle::HostMut(&mut lambda_b),
+                        lo: &alo,
+                        extent: &aext,
+                    },
                 ],
                 grid: &grid,
                 dom_lo: &dom_lo,
@@ -155,7 +215,9 @@ fn main() {
             inv.run_cpu(rmhd_wave_speed_map_3d::<f64>);
         }
         let dt = t0.elapsed().as_secs_f64();
-        if dt < best_b { best_b = dt; }
+        if dt < best_b {
+            best_b = dt;
+        }
     }
 
     // ---------- numerical sanity ----------
@@ -171,9 +233,15 @@ fn main() {
         let abs_diff = (a - b).abs();
         let scale = a.abs().max(b.abs()).max(1e-30);
         let rel = abs_diff / scale;
-        if abs_diff > max_abs { max_abs = abs_diff; }
-        if rel > max_rel     { max_rel = rel; }
-        if rel > 1e-10       { n_disagree += 1; }
+        if abs_diff > max_abs {
+            max_abs = abs_diff;
+        }
+        if rel > max_rel {
+            max_rel = rel;
+        }
+        if rel > 1e-10 {
+            n_disagree += 1;
+        }
     }
 
     let ns_per_cell_a = best_a * 1e9 / n as f64;
@@ -190,6 +258,8 @@ fn main() {
     println!("    wall:        {:.3} ms", best_b * 1e3);
     println!("    ns/cell:     {:.1}", ns_per_cell_b);
     println!("\n  B/A ratio:   {:.2}x", ratio);
-    println!("  numerical agreement: max |a-b| = {:.3e}, max rel = {:.3e}, disagreeing cells (rel > 1e-10) = {}/{}\n",
-        max_abs, max_rel, n_disagree, n);
+    println!(
+        "  numerical agreement: max |a-b| = {:.3e}, max rel = {:.3e}, disagreeing cells (rel > 1e-10) = {}/{}\n",
+        max_abs, max_rel, n_disagree, n
+    );
 }

@@ -10,12 +10,10 @@
 // depending on `symbi-ir` (that would be a circular dep — `symbi-ir` already
 // depends on `symbi-algebra` for `Tensor`, `FieldElement`, `Domain`).
 //
-// (the legacy `Scalar` / `Selectable` traits previously lived here; deleted
-// 2026-05-30 in Tier 1 chunk 5 of the Scalar migration. the production `Scalar`
-// in `symbi_ir::algebra` carries this structural surface as part of its trait
-// bag, so a workspace-wide `S: symbi_ir::algebra::Scalar` automatically
-// satisfies `S: symbi_algebra::Numeric` and the matrix/tensor methods Just
-// Work over the new carrier.)
+// the production `Scalar` in `symbi_ir::algebra` carries this structural surface
+// as part of its trait bag, so a workspace-wide `S: symbi_ir::algebra::Scalar`
+// automatically satisfies `S: symbi_algebra::Numeric` and the matrix/tensor
+// methods work over that carrier.
 // =============================================================================
 
 use std::ops::{

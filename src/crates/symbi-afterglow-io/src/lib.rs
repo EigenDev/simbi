@@ -37,13 +37,13 @@ use symbi_io::{DataBuf, IoError, Result, TreeBuf};
 #[derive(Clone, Copy, Debug)]
 pub struct CgsScales {
     /// cm per code length.
-    pub length:   f64,
+    pub length: f64,
     /// g/cm^3 per code density.
-    pub density:  f64,
+    pub density: f64,
     /// erg/cm^3 per code pressure.
     pub pressure: f64,
     /// seconds per code time.
-    pub time:     f64,
+    pub time: f64,
 }
 
 /// synthesized angular resolution for reduced-dimension runs: `n_phi` azimuthal cells for an
@@ -51,40 +51,55 @@ pub struct CgsScales {
 #[derive(Clone, Copy, Debug)]
 pub struct Synth {
     pub n_theta: usize,
-    pub n_phi:   usize,
+    pub n_phi: usize,
 }
 
 impl Default for Synth {
     fn default() -> Self {
-        Synth { n_theta: 64, n_phi: 128 }
+        Synth {
+            n_theta: 64,
+            n_phi: 128,
+        }
     }
 }
 
 /// the raw arrays pulled from one checkpoint, before geometry mapping.
 struct Raw {
-    coords:    Coords,
-    dims:      usize,
-    centers:   Vec<Vec<f64>>, // x1..xD cell centers (code units)
-    rho:       Vec<f64>,
-    pre:       Vec<f64>,
-    vel:       Vec<Vec<f64>>, // v1..vD (units of c)
+    coords: Coords,
+    dims: usize,
+    centers: Vec<Vec<f64>>, // x1..xD cell centers (code units)
+    rho: Vec<f64>,
+    pre: Vec<f64>,
+    vel: Vec<Vec<f64>>, // v1..vD (units of c)
     time_code: f64,
 }
 
 fn f64_dataset(g: &TreeBuf, name: &str) -> Result<Vec<f64>> {
-    let ds = g.find_dataset(name).ok_or_else(|| IoError::MissingPath(name.into()))?;
+    let ds = g
+        .find_dataset(name)
+        .ok_or_else(|| IoError::MissingPath(name.into()))?;
     match &ds.data {
         DataBuf::F64(v) => Ok(v.clone()),
-        _ => Err(IoError::TypeMismatch { path: name.into(), expected: "f64", actual: "?" }),
+        _ => Err(IoError::TypeMismatch {
+            path: name.into(),
+            expected: "f64",
+            actual: "?",
+        }),
     }
 }
 
 fn usize_dataset(g: &TreeBuf, name: &str) -> Result<Vec<usize>> {
-    let ds = g.find_dataset(name).ok_or_else(|| IoError::MissingPath(name.into()))?;
+    let ds = g
+        .find_dataset(name)
+        .ok_or_else(|| IoError::MissingPath(name.into()))?;
     match &ds.data {
         DataBuf::U64(v) => Ok(v.iter().map(|&x| x as usize).collect()),
         DataBuf::I64(v) => Ok(v.iter().map(|&x| x as usize).collect()),
-        _ => Err(IoError::TypeMismatch { path: name.into(), expected: "int", actual: "?" }),
+        _ => Err(IoError::TypeMismatch {
+            path: name.into(),
+            expected: "int",
+            actual: "?",
+        }),
     }
 }
 
@@ -113,7 +128,9 @@ fn parse_coords(s: &str) -> Result<Coords> {
 
 fn read_raw(path: &Path) -> Result<Raw> {
     let tree = Hdf5Backend.read(path)?;
-    let meta = tree.find_group("metadata").ok_or_else(|| IoError::MissingPath("metadata".into()))?;
+    let meta = tree
+        .find_group("metadata")
+        .ok_or_else(|| IoError::MissingPath("metadata".into()))?;
     let dims = meta
         .find_attr("dimensions")
         .ok_or_else(|| IoError::MissingPath("metadata/dimensions".into()))?
@@ -124,8 +141,12 @@ fn read_raw(path: &Path) -> Result<Raw> {
         .as_f64("metadata/time")?;
     let coords = parse_coords(&str_attr(meta, "coord_system")?)?;
 
-    let level0 = tree.find_group("level_0").ok_or_else(|| IoError::MissingPath("level_0".into()))?;
-    let mesh = level0.find_group("mesh").ok_or_else(|| IoError::MissingPath("level_0/mesh".into()))?;
+    let level0 = tree
+        .find_group("level_0")
+        .ok_or_else(|| IoError::MissingPath("level_0".into()))?;
+    let mesh = level0
+        .find_group("mesh")
+        .ok_or_else(|| IoError::MissingPath("level_0/mesh".into()))?;
 
     // v2.0 mesh: cell centers are REBUILT from the geometry description
     // (global_cells + per-dim start/end attrs), not stored coordinate arrays.
@@ -138,8 +159,14 @@ fn read_raw(path: &Path) -> Result<Raw> {
             let dim = geometry
                 .find_group(&format!("dim_{ax}"))
                 .ok_or_else(|| IoError::MissingPath(format!("level_0/mesh/geometry/dim_{ax}")))?;
-            let start = dim.find_attr("start").ok_or_else(|| IoError::MissingPath("dim/start".into()))?.as_f64("start")?;
-            let end = dim.find_attr("end").ok_or_else(|| IoError::MissingPath("dim/end".into()))?.as_f64("end")?;
+            let start = dim
+                .find_attr("start")
+                .ok_or_else(|| IoError::MissingPath("dim/start".into()))?
+                .as_f64("start")?;
+            let end = dim
+                .find_attr("end")
+                .ok_or_else(|| IoError::MissingPath("dim/end".into()))?
+                .as_f64("end")?;
             let n = global_cells[ax];
             let dx = (end - start) / n as f64;
             Ok((0..n).map(|i| start + (i as f64 + 0.5) * dx).collect())
@@ -147,21 +174,35 @@ fn read_raw(path: &Path) -> Result<Raw> {
         .collect::<Result<_>>()?;
 
     // v2.0 fields: primitives live under partition_0/hydro.
-    let part = level0.find_group("partition_0").ok_or_else(|| IoError::MissingPath("level_0/partition_0".into()))?;
-    let hydro = part.find_group("hydro").ok_or_else(|| IoError::MissingPath("level_0/partition_0/hydro".into()))?;
+    let part = level0
+        .find_group("partition_0")
+        .ok_or_else(|| IoError::MissingPath("level_0/partition_0".into()))?;
+    let hydro = part
+        .find_group("hydro")
+        .ok_or_else(|| IoError::MissingPath("level_0/partition_0/hydro".into()))?;
     let prim = hydro
         .find_group("primitives")
         .ok_or_else(|| IoError::MissingPath("level_0/partition_0/hydro/primitives".into()))?;
 
-    let vel = (0..dims).map(|ax| f64_dataset(prim, &format!("v{}", ax + 1))).collect::<Result<_>>()?;
+    let vel = (0..dims)
+        .map(|ax| f64_dataset(prim, &format!("v{}", ax + 1)))
+        .collect::<Result<_>>()?;
     let rho = f64_dataset(prim, "rho")?;
     let pre = f64_dataset(prim, "pre")?;
 
-    Ok(Raw { coords, dims, centers, rho, pre, vel, time_code })
+    Ok(Raw {
+        coords,
+        dims,
+        centers,
+        rho,
+        pre,
+        vel,
+        time_code,
+    })
 }
 
 /// per-cell width (code units) from cell centers: arithmetic midpoints, boundary cells use the
-/// adjacent gap. works for uniform or stretched (e.g. log-radial) grids.
+/// adjacent gap. works for uniform or stretched (e.g., log-radial) grids.
 fn cell_widths(centers: &[f64]) -> Vec<f64> {
     let n = centers.len();
     (0..n)
@@ -204,7 +245,15 @@ fn build_cells(raw: &Raw, scales: &CgsScales, synth: &Synth, t_emission: f64) ->
     let mut cells = Vec::new();
     // a small helper to push one cell from role-ordered (coord, velocity, volume).
     let push = |coord: [f64; 3], v: [f64; 3], idx: usize, vol: f64, out: &mut Vec<Cell>| {
-        out.push(Cell::from_coords(cs, coord, v, raw.rho[idx] * rho_s, raw.pre[idx] * pre_s, vol, t_emission));
+        out.push(Cell::from_coords(
+            cs,
+            coord,
+            v,
+            raw.rho[idx] * rho_s,
+            raw.pre[idx] * pre_s,
+            vol,
+            t_emission,
+        ));
     };
 
     match (cs, dims) {
@@ -214,7 +263,11 @@ fn build_cells(raw: &Raw, scales: &CgsScales, synth: &Synth, t_emission: f64) ->
                 for i2 in 0..n[1] {
                     for i1 in 0..n[0] {
                         let idx = flat(&[i1, i2, i3]);
-                        let (r, th, ph) = (raw.centers[0][i1] * l, raw.centers[1][i2], raw.centers[2][i3]);
+                        let (r, th, ph) = (
+                            raw.centers[0][i1] * l,
+                            raw.centers[1][i2],
+                            raw.centers[2][i3],
+                        );
                         let vol = r * r * th.sin().abs() * (w[0][i1] * l) * w[1][i2] * w[2][i3];
                         let v = [raw.vel[0][idx], raw.vel[1][idx], raw.vel[2][idx]];
                         push([r, th, ph], v, idx, vol, &mut cells);
@@ -260,7 +313,11 @@ fn build_cells(raw: &Raw, scales: &CgsScales, synth: &Synth, t_emission: f64) ->
                 for i2 in 0..n[1] {
                     for i1 in 0..n[0] {
                         let idx = flat(&[i1, i2, i3]);
-                        let (r, ph, z) = (raw.centers[0][i1] * l, raw.centers[1][i2], raw.centers[2][i3] * l);
+                        let (r, ph, z) = (
+                            raw.centers[0][i1] * l,
+                            raw.centers[1][i2],
+                            raw.centers[2][i3] * l,
+                        );
                         let vol = r * (w[0][i1] * l) * w[1][i2] * (w[2][i3] * l);
                         let v = [raw.vel[0][idx], raw.vel[1][idx], raw.vel[2][idx]];
                         push([r, ph, z], v, idx, vol, &mut cells);
@@ -291,8 +348,11 @@ fn build_cells(raw: &Raw, scales: &CgsScales, synth: &Synth, t_emission: f64) ->
                 for i2 in 0..n[1] {
                     for i1 in 0..n[0] {
                         let idx = flat(&[i1, i2, i3]);
-                        let coord =
-                            [raw.centers[0][i1] * l, raw.centers[1][i2] * l, raw.centers[2][i3] * l];
+                        let coord = [
+                            raw.centers[0][i1] * l,
+                            raw.centers[1][i2] * l,
+                            raw.centers[2][i3] * l,
+                        ];
                         let vol = (w[0][i1] * l) * (w[1][i2] * l) * (w[2][i3] * l);
                         let v = [raw.vel[0][idx], raw.vel[1][idx], raw.vel[2][idx]];
                         push(coord, v, idx, vol, &mut cells);
@@ -328,7 +388,11 @@ pub fn read_cells(path: &Path, scales: &CgsScales, synth: &Synth) -> Result<Vec<
 /// cadence would need a per-checkpoint emission window, which the single-`dt` weighting here does
 /// not model. loads every checkpoint's primitives into memory — for very large sequences, call
 /// `read_cells` per file and weight each batch with its own `Microphysics.dt`.
-pub fn read_sequence(paths: &[&Path], scales: &CgsScales, synth: &Synth) -> Result<(Vec<Cell>, f64)> {
+pub fn read_sequence(
+    paths: &[&Path],
+    scales: &CgsScales,
+    synth: &Synth,
+) -> Result<(Vec<Cell>, f64)> {
     if paths.is_empty() {
         return Ok((Vec::new(), 0.0));
     }
@@ -340,7 +404,11 @@ pub fn read_sequence(paths: &[&Path], scales: &CgsScales, synth: &Synth) -> Resu
         let mut c = build_cells(raw, scales, synth, times[i])?;
         cells.append(&mut c);
     }
-    let dt0 = if times.len() > 1 { (times[1] - times[0]).abs() } else { times[0].max(1.0) };
+    let dt0 = if times.len() > 1 {
+        (times[1] - times[0]).abs()
+    } else {
+        times[0].max(1.0)
+    };
     Ok((cells, dt0))
 }
 
@@ -349,7 +417,12 @@ mod tests {
     use super::*;
 
     fn scales() -> CgsScales {
-        CgsScales { length: 1.0e15, density: 1.0e-24, pressure: 1.0e-3, time: 1.0e5 }
+        CgsScales {
+            length: 1.0e15,
+            density: 1.0e-24,
+            pressure: 1.0e-3,
+            time: 1.0e5,
+        }
     }
 
     // spherical 2D (r, theta) broadcasts over a synthesized phi grid: cell count = Nr*Ntheta*Nphi,
@@ -373,16 +446,30 @@ mod tests {
             vel: vec![vec![0.5; len], vec![0.0; len]], // purely radial (vr=0.5, vtheta=0)
             time_code: 10.0,
         };
-        let synth = Synth { n_theta: 8, n_phi: 6 };
+        let synth = Synth {
+            n_theta: 8,
+            n_phi: 6,
+        };
         let cells = build_cells(&raw, &scales(), &synth, 1.0e6).unwrap();
         assert_eq!(cells.len(), nr * nth * synth.n_phi);
-        assert!(cells.iter().all(|c| c.volume > 0.0), "positive proper volumes");
+        assert!(
+            cells.iter().all(|c| c.volume > 0.0),
+            "positive proper volumes"
+        );
         // a radial velocity is parallel to the position direction.
         for c in &cells {
-            let rmag = (c.position[0].powi(2) + c.position[1].powi(2) + c.position[2].powi(2)).sqrt();
-            let bmag = (c.beta_vec[0].powi(2) + c.beta_vec[1].powi(2) + c.beta_vec[2].powi(2)).sqrt();
-            let cos = (c.position[0] * c.beta_vec[0] + c.position[1] * c.beta_vec[1] + c.position[2] * c.beta_vec[2]) / (rmag * bmag);
-            assert!((cos - 1.0).abs() < 1e-9, "radial velocity should align with r-hat");
+            let rmag =
+                (c.position[0].powi(2) + c.position[1].powi(2) + c.position[2].powi(2)).sqrt();
+            let bmag =
+                (c.beta_vec[0].powi(2) + c.beta_vec[1].powi(2) + c.beta_vec[2].powi(2)).sqrt();
+            let cos = (c.position[0] * c.beta_vec[0]
+                + c.position[1] * c.beta_vec[1]
+                + c.position[2] * c.beta_vec[2])
+                / (rmag * bmag);
+            assert!(
+                (cos - 1.0).abs() < 1e-9,
+                "radial velocity should align with r-hat"
+            );
         }
     }
 
@@ -399,13 +486,22 @@ mod tests {
             vel: vec![vec![0.0], vec![0.6]], // v1=vr=0, v2=vz=0.6 (purely vertical)
             time_code: 1.0,
         };
-        let synth = Synth { n_theta: 1, n_phi: 4 };
+        let synth = Synth {
+            n_theta: 1,
+            n_phi: 4,
+        };
         let cells = build_cells(&raw, &scales(), &synth, 1.0e6).unwrap();
         assert_eq!(cells.len(), synth.n_phi);
         // v2 = vz -> the velocity is purely along +z for every azimuth (cylindrical z is lab z).
         for c in &cells {
-            assert!(c.beta_vec[2] > 0.59 && c.beta_vec[2] < 0.61, "v2 must map to lab v_z");
-            assert!(c.beta_vec[0].abs() < 1e-9 && c.beta_vec[1].abs() < 1e-9, "no in-plane velocity");
+            assert!(
+                c.beta_vec[2] > 0.59 && c.beta_vec[2] < 0.61,
+                "v2 must map to lab v_z"
+            );
+            assert!(
+                c.beta_vec[0].abs() < 1e-9 && c.beta_vec[1].abs() < 1e-9,
+                "no in-plane velocity"
+            );
         }
     }
 

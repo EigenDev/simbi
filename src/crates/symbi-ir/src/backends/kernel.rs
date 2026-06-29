@@ -4,8 +4,8 @@
 // chalkboard-pipeline kernel emitter (R.6.d.2). given a scalarized
 // tensor IR graph plus the kernel-mode side-tables (field-read keys
 // with their dotted runtime paths, field writes, scalar user params),
-// produces a complete __global__ kernel matching the legacy view_t
-// ABI in `symbi_ir::emit::emit_kernel`.
+// produces a complete __global__ kernel over the per-cell view ABI
+// (the `__symbi_View<T>` buffer struct).
 //
 // the per-cell math comes from `tensor::scalarize_kernel` — one
 // shared body of let-bindings across all outputs. the kernel surface
@@ -85,7 +85,7 @@ pub struct KernelEmitInputs<'a> {
 
 /// the C-FAMILY backend spelling for the shared kernel driver (`emit_render`):
 /// CUDA AND HIP (doc 15 §7). produces an `extern "C" __global__` kernel over raw
-/// `<precision>*` buffers (the view_t-ABI shape); the header + global qualifier
+/// `<precision>*` buffers (the per-cell view ABI shape); the header + global qualifier
 /// vary by `target.target` (`emit::header` / `global_qualifier`), so HIP is a
 /// pure token-map with zero physics edits. Metal (MSL: buffer-index ABI, no
 /// `double`) needs its OWN renderer, not this one.
@@ -101,8 +101,8 @@ impl CRenderer {
 
 impl KernelRenderer for CRenderer {
     fn preamble(&self, device_preamble: &[String]) -> String {
-        // Phase 1B-3: every CUDA kernel takes its buffers as `__symbi_View<T>`
-        // structs (the C++ `view_t` mirror) — one struct per buffer carrying
+        // every CUDA kernel takes its buffers as `__symbi_View<T>`
+        // structs — one struct per buffer carrying
         // ptr + lo + pre-multiplied strides. emit the struct typedef ONCE in the
         // preamble so the kernel signature can spell `__symbi_View field0`.
         // the host side packs a matching POD into the kernel arg buffer (see
@@ -166,7 +166,7 @@ impl KernelRenderer for CRenderer {
     }
     fn coord_decl(&self, axis: u8, element: ElementTy) -> String {
         // an integer coord (the substrate) stays integer; a float coord (the
-        // legacy macro path) casts to the precision type.
+        // macro path) casts to the precision type.
         let cv = COORD_VARS[axis as usize];
         if matches!(element, ElementTy::I32 | ElementTy::U32) {
             format!("    int _coord_{axis} = {cv};")
@@ -363,8 +363,8 @@ pub fn prepared_from_ir(ir: &str) -> Prepared {
 /// into the name — adding HIP/Metal is a new match arm here, never a new `*_cuda`
 /// function (doc 15 §8 invariant 3). one blob renders every backend AND both
 /// precisions (precision is a render-algebra parameter, doc 15 §4); the source then
-/// feeds the backend's runtime compiler (NVRTC/hiprtc/Metal, step 3c). this replaces
-/// the build-time `.cu` consts — the accelerator no longer ships pre-rendered text.
+/// feeds the backend's runtime compiler (NVRTC/hiprtc/Metal, step 3c). the
+/// accelerator renders source at runtime rather than shipping pre-rendered text.
 pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelDescriptor {
     let prepared = prepared_from_ir(ir);
     let tcfg = TargetConfig { target, precision };
@@ -382,11 +382,11 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
     }
 }
 
-// the NVRTC-safe identity + combine for a grid reduction at `precision`. unlike the
-// legacy `ReductionOp::combine_expr`, min/max use the INLINE TERNARY (not fmin/fmax)
-// — fmin/fmax come from <math.h> which NVRTC does not include (same class of bug the
-// flux INFINITY fix caught), and the ternary matches the project's my_min/my_max
-// semantics. the identities are plain finite literals (no INFINITY macro).
+// the NVRTC-safe identity + combine for a grid reduction at `precision`. min/max
+// use the INLINE TERNARY (not fmin/fmax) — fmin/fmax come from <math.h> which
+// NVRTC does not include (same class of bug the flux INFINITY fix caught), and the
+// ternary matches the CPU carrier's min/max semantics. the identities are plain
+// finite literals (no INFINITY macro).
 fn reduction_identity_combine(op: ReductionOp, precision: Precision) -> (&'static str, fn(&str, &str) -> String) {
     let f32 = matches!(precision, Precision::F32);
     match op {
@@ -420,7 +420,7 @@ pub const REDUCTION_BLOCK_SIZE: u32 = 256;
 /// is a later extension). the CPU algebra of the same reduce is the host fold in
 /// `substrate_gpu::field_max_reduce` (doc 15 §2: "a host loop").
 ///
-/// ABI (extends the view_t per-cell ABI with a linear thread map + partials):
+/// ABI (extends the per-cell view ABI with a linear thread map + partials):
 ///   buf0, total_cells, grid_size_{0..}, dom_lo_{0..}, [ndim>=2] buf_extent_0_{0..},
 ///   buf_lo_0_{0..}, partials
 pub fn render_field_reduction(
@@ -464,7 +464,7 @@ pub fn render_field_reduction(
     out.push_str("    unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x;\n");
     out.push_str(&format!("    {ty} val = {identity};\n"));
     out.push_str("    if (gid < total_cells) {\n");
-    // linear gid -> absolute multi-d coord (signed; coord is absolute, view_t ABI).
+    // linear gid -> absolute multi-d coord (signed; coord is absolute, view ABI).
     match ndim {
         1 => out.push_str("        int ii = (int)gid + dom_lo_0;\n"),
         2 => {
@@ -714,7 +714,7 @@ mod tests {
         // reaches the host dt guard ([[feedback_no_silent_floors]]); the bare ternary
         // drops NaN. `x != x` is the NVRTC-safe NaN test.
         assert!(s.contains("(sdata[tid] != sdata[tid])"), "max must guard NaN via x!=x: {s}");
-        // value loaded at the cell via the view_t index; one buffer binding (input).
+        // value loaded at the cell via the view index; one buffer binding (input).
         assert!(s.contains("val = field0.data["));
         assert_eq!(desc.field_bindings.len(), 1);
         assert!(!desc.field_bindings[0].is_output);

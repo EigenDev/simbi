@@ -1,8 +1,8 @@
 // =============================================================================
 // observe.rs
 //
-// observer-side reductions over a photon catalog (ported from the legacy `rad.cpp`
-// `*_from_events` functions): collapse a `Vec<PhotonEvent>` into the three afterglow
+// observer-side reductions over a photon catalog: collapse a `Vec<PhotonEvent>` into
+// the three afterglow
 // observables for a chosen line of sight —
 //   - `compute_lightcurve_from_events`   : flux density vs observer time & frequency,
 //   - `compute_skymap_from_events`       : surface brightness on the plane of the sky,
@@ -189,7 +189,7 @@ pub fn compute_lightcurve_from_events(
 /// the OBSERVER-DIRECTION doppler boost `delta^doppler_power` (delta recomputed from the fluid
 /// velocity — radial, magnitude from the stored lorentz factor — toward the line of sight, NOT
 /// the packet's own random emission direction). this is the relativistic beaming that produces
-/// the limb-brightened ring; the legacy discarded it. the EATS arrival time
+/// the limb-brightened ring. the EATS arrival time
 /// t_obs = (1+z)(t_em - r.n/c) within `+/- time_window/2` selects the surface; the image extent
 /// is set by the in-window events (so the visible ring fills the frame).
 ///
@@ -453,8 +453,8 @@ mod tests {
     }
 
     // the cartesian grid has NO central singularity: a uniform disk of (delta=1) emitters maps
-    // to a roughly uniform image — no spurious bright center. (the legacy polar 1/theta
-    // normalization would spike the center; this is the regression pin for that fix.)
+    // to a roughly uniform image — no spurious bright center. (a polar 1/theta
+    // normalization would spike the center; this pins that the cartesian binning does not.)
     #[test]
     fn skymap_has_no_central_singularity() {
         let r = 1.0e16;

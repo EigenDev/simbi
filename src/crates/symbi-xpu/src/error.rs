@@ -16,7 +16,7 @@ use std::fmt;
 pub struct XpuError {
     /// which operation failed.
     pub operation: &'static str,
-    /// vendor-specific error code (e.g. CUresult for CUDA).
+    /// vendor-specific error code (e.g., CUresult for CUDA).
     pub code: i32,
     /// human-readable detail.
     pub detail: String,
@@ -24,7 +24,11 @@ pub struct XpuError {
 
 impl fmt::Display for XpuError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "xpu: {} failed (error code {})", self.operation, self.code)?;
+        write!(
+            f,
+            "xpu: {} failed (error code {})",
+            self.operation, self.code
+        )?;
         if !self.detail.is_empty() {
             write!(f, ": {}", self.detail)?;
         }

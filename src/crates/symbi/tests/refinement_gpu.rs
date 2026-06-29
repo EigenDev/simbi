@@ -202,7 +202,7 @@ fn gpu_two_level_mhd_preserves_divb() {
     let dx = 1.0 / N as f64;
     let dz = 1.0 / NZ as f64;
     // build to Ready with a trivial seed (cells + uniform faces); fill_ot then overwrites the full
-    // staggered OT state raw — the same post-construction fill the old ::new path used.
+    // staggered OT state raw — a post-construction fill of the seeded state.
     let coarse = MhdSim::<CudaSpace, UnifiedMemory>::build(NewtonianMhd, IdealGas { gamma: G }, Cartesian)
         .cells([N, N, NZ])
         .spacing([dx, dx, dz])

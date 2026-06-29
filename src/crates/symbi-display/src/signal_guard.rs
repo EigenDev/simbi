@@ -1,8 +1,7 @@
 // =============================================================================
 // signal_guard.rs
 //
-// run-scoped graceful-interrupt + terminal recovery. mirrors the c++
-// `helpers::catch_signals()` / `InterruptException` flow: a caught signal does
+// run-scoped graceful-interrupt + terminal recovery. a caught signal does
 // NOT kill the process outright — it sets a stop flag the evolution loop polls,
 // so the driver can write a restart checkpoint and unwind cleanly before
 // exiting. a SECOND signal force-kills (the escape hatch when a checkpoint
@@ -12,7 +11,7 @@
 // SIG_DFL), `SignalGuard` is RAII and run-scoped:
 //   - `install()` saves the previous dispositions and traps the signals.
 //   - `stop_requested()` is polled by the loop.
-//   - `Drop` restores the previous dispositions (e.g. python's handlers) and
+//   - `Drop` restores the previous dispositions (e.g., python's handlers) and
 //     shows the cursor, so a caught signal NEVER leaves the terminal broken
 //     and never permanently steals python's Ctrl-C.
 //
@@ -64,8 +63,7 @@ static IN_ALT: AtomicBool = AtomicBool::new(false);
 // saved and restored on leave AND from the signal handler, so neither a clean
 // exit nor a hard-kill ever strands the shell with echo off.
 static RAW_ACTIVE: AtomicBool = AtomicBool::new(false);
-static mut SAVED_TERMIOS: std::mem::MaybeUninit<libc::termios> =
-    std::mem::MaybeUninit::uninit();
+static mut SAVED_TERMIOS: std::mem::MaybeUninit<libc::termios> = std::mem::MaybeUninit::uninit();
 
 /// disable echo + canonical input on stdin (fd 0), preserving the prior
 /// discipline for restore. no-op when stdin is not a tty.
@@ -124,7 +122,11 @@ unsafe extern "C" fn handler(signum: i32) {
         // runs even for the SECOND signal's SIG_DFL kill window — the buffer is
         // already restored, so a hard kill never strands the shell in alt mode.
         if IN_ALT.swap(false, Ordering::SeqCst) {
-            libc::write(2, LEAVE_ALT_BYTES.as_ptr() as *const _, LEAVE_ALT_BYTES.len());
+            libc::write(
+                2,
+                LEAVE_ALT_BYTES.as_ptr() as *const _,
+                LEAVE_ALT_BYTES.len(),
+            );
             // drop any queued mouse/scroll reports so they don't surface at the
             // shell prompt after we exit (tcflush is async-signal-safe).
             libc::tcflush(0, libc::TCIFLUSH);
@@ -182,7 +184,7 @@ impl SignalGuard {
 
 impl Drop for SignalGuard {
     fn drop(&mut self) {
-        // restore the previous dispositions (e.g. python's Ctrl-C handler) and
+        // restore the previous dispositions (e.g., python's Ctrl-C handler) and
         // make the cursor visible regardless of how the run ended.
         for (ii, &sig) in TRAPPED.iter().enumerate() {
             // SAFETY: restoring a disposition captured from `libc::signal`.
@@ -223,7 +225,7 @@ impl ScreenGuard {
     }
 
     /// leave the alternate screen, restoring the primary buffer + cursor + mouse
-    /// modes. idempotent — safe to call before `Drop` (e.g. to print a final
+    /// modes. idempotent — safe to call before `Drop` (e.g., to print a final
     /// frame on the primary screen). if a signal already restored the buffer the
     /// escape write is skipped, but stdin is still drained.
     pub fn leave(&mut self) {

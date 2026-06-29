@@ -142,7 +142,7 @@ def create_plot_data(
     sliced_fields = apply_slicing(full_dim_fields, slice_spec)
 
     # field-value normalization: divide each field by a constant, or its own "max"/"min"
-    # (M&DZ-style "relative to max value": pass the number, e.g. max(initial)).
+    # (M&DZ-style "relative to max value": pass the number, e.g., max(initial)).
     norm = getattr(getattr(config, "plot", None), "norm", None)
     if norm is not None and sliced_fields:
         import numpy as np

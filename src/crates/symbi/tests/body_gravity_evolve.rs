@@ -117,12 +117,12 @@ fn central_gravity_pulls_fluid_inward_through_evolve() {
 // -----------------------------------------------------------------------------
 // GPU<->CPU parity of the body_gravity_source kernel.
 // -----------------------------------------------------------------------------
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[test]
 fn body_gravity_gpu_matches_cpu() {
     use symbi_algebra::Domain;
     use symbi_grid::Field;
-    use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+    use symbi_xpu::{DeviceSpace, DeviceMemory};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()
@@ -188,17 +188,17 @@ fn body_gravity_gpu_matches_cpu() {
     }
 
     let host = build::<CpuSpace, HostMemory>();
-    let dev = build::<CudaSpace, UnifiedMemory>();
+    let dev = build::<DeviceSpace, DeviceMemory>();
     let hset =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &host.geom.allocated);
     let dset =
-        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, 0.4, &dev.geom.allocated);
+        AdiabaticSubstrateKernelSet::<DeviceMemory, f64, 2>::new(GAMMA, 0.4, &dev.geom.allocated);
 
     hset.body_source(&host, 0.01);
     dset.body_source(&dev, 0.01);
     // launches are asynchronous: drain the device queue before the host reads
     // the unified buffers (the B12 host-read barrier).
-    symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
+    symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
 
     let interior = &host.geom.interior;
     for k in 0..2 {
@@ -319,10 +319,10 @@ fn black_hole_records_accretion_without_changing_mass() {
 // -----------------------------------------------------------------------------
 // GPU<->CPU parity of the backward feedback (body_feedback kernel + device reduction).
 // -----------------------------------------------------------------------------
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[test]
 fn body_feedback_gpu_matches_cpu() {
-    use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+    use symbi_xpu::{DeviceSpace, DeviceMemory};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()
@@ -368,11 +368,11 @@ fn body_feedback_gpu_matches_cpu() {
     }
 
     let host = build::<CpuSpace, HostMemory>();
-    let dev = build::<CudaSpace, UnifiedMemory>();
+    let dev = build::<DeviceSpace, DeviceMemory>();
     let hset =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &host.geom.allocated);
     let dset =
-        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, 0.4, &dev.geom.allocated);
+        AdiabaticSubstrateKernelSet::<DeviceMemory, f64, 2>::new(GAMMA, 0.4, &dev.geom.allocated);
 
     hset.body_feedback(&host, 0.01);
     dset.body_feedback(&dev, 0.01);
@@ -481,11 +481,11 @@ fn curvilinear_central_gravity_is_radial() {
     assert!(checked > 8, "too few cells checked ({checked})");
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[test]
 fn curvilinear_body_source_gpu_matches_cpu() {
     use symbi_geometry::Cylindrical;
-    use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+    use symbi_xpu::{DeviceSpace, DeviceMemory};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()
@@ -534,16 +534,16 @@ fn curvilinear_body_source_gpu_matches_cpu() {
     }
 
     let host = build::<CpuSpace, HostMemory>();
-    let dev = build::<CudaSpace, UnifiedMemory>();
+    let dev = build::<DeviceSpace, DeviceMemory>();
     let hset =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &host.geom.allocated);
     let dset =
-        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 2>::new(GAMMA, 0.4, &dev.geom.allocated);
+        AdiabaticSubstrateKernelSet::<DeviceMemory, f64, 2>::new(GAMMA, 0.4, &dev.geom.allocated);
     hset.body_source(&host, 0.01);
     dset.body_source(&dev, 0.01);
     // launches are asynchronous: drain the device queue before the host reads
     // the unified buffers (the B12 host-read barrier).
-    symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
+    symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
 
     let interior = &host.geom.interior;
     let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0);
@@ -633,11 +633,11 @@ fn spherical_central_gravity_is_radial() {
     assert!(checked > 8, "too few cells checked ({checked})");
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[test]
 fn spherical_3d_body_gpu_matches_cpu() {
     use symbi_geometry::Spherical;
-    use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
+    use symbi_xpu::{DeviceSpace, DeviceMemory};
     use symbi_xpu::{ExecutionSpace, MemorySpace};
 
     fn build<S: ExecutionSpace, Mem: MemorySpace>()
@@ -682,18 +682,18 @@ fn spherical_3d_body_gpu_matches_cpu() {
     }
 
     let host = build::<CpuSpace, HostMemory>();
-    let dev = build::<CudaSpace, UnifiedMemory>();
+    let dev = build::<DeviceSpace, DeviceMemory>();
     let hset =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &host.geom.allocated);
     let dset =
-        AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 3>::new(GAMMA, 0.4, &dev.geom.allocated);
+        AdiabaticSubstrateKernelSet::<DeviceMemory, f64, 3>::new(GAMMA, 0.4, &dev.geom.allocated);
 
     // forward source diff.
     hset.body_source(&host, 0.01);
     dset.body_source(&dev, 0.01);
     // launches are asynchronous: drain the device queue before the host reads
     // the unified buffers (the B12 host-read barrier).
-    symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
+    symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
     let interior = &host.geom.interior;
     let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0);
     for c in interior.iter() {

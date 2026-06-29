@@ -407,7 +407,11 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
 
     # Iterate from finest level (end of list) to coarsest (start)
     for field in reversed(fields_2d):
-        x_edges, y_edges = field.domain
+        # field.domain is in DATA-STORAGE order (slow..fast = [y, x] for 2D), matching the
+        # values array shape (ny, nx) -- see prepare_field_level. unpack it the same way, NOT as
+        # (x, y): otherwise the y-edges drive the x-loop and `values[j, i]` runs off axis 0 on a
+        # non-square (refined) patch. a square level hides the swap (both edge arrays are equal).
+        y_edges, x_edges = field.domain
         values = field.values
 
         # Create cell patches for this level

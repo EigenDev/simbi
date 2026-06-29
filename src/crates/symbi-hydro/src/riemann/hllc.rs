@@ -3,8 +3,7 @@
 //
 // the HLLC three-wave riemann solvers — one function per regime, all
 // rotationally and dimensionally invariant (nhat-parametrized, generic over
-// `S: Scalar` and `const D: usize`). mirrors the C++ design in
-// `cpp_src/physics/hydro/solvers/hllc.hpp`: a `ShockwaveLimiter` parameter
+// `S: Scalar` and `const D: usize`). a `ShockwaveLimiter` parameter
 // selects the variant (Standard / Fleischmann LM / Quirk-fallback); the
 // relativistic regimes ignore it.
 //
@@ -34,7 +33,7 @@ use super::{DIVZERO_GUARD, NULL_FIELD_THRESHOLD};
 /// the Quirk fallback gate shared by every regime — `D > 1` AND
 /// `shock_smoother == Quirk`. the `D > 1` half is a compile-time check
 /// (`const D: usize` is fixed per monomorphization, so the dead branch
-/// drops at codegen for D = 1), matching the C++ `if constexpr (rank > 1)`.
+/// drops at codegen for D = 1), the `if constexpr (rank > 1)` guard.
 /// the `Quirk` half is runtime, but at S = Gv trace time `shock_smoother`
 /// is fixed by the host that built the trace, so the match below
 /// monomorphizes too — no per-cell smoother branch leaks into the kernel.
@@ -158,8 +157,7 @@ fn star_state<S: Scalar, const D: usize>(
 ///   - `Fleischmann`  — symmetric flux (fleischmann eq 11) with adaptive phi.
 ///   - `Quirk`        — in `D > 1`, falls back to HLLE per-cell when
 ///                      `quirk_strong_shock` fires (relative pressure jump
-///                      exceeds `QUIRK_THRESHOLD`). matches C++
-///                      `cpp_src/physics/hydro/solvers/hllc.hpp:223-228`.
+///                      exceeds `QUIRK_THRESHOLD`).
 pub fn hllc<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
@@ -173,7 +171,7 @@ pub fn hllc<S: Scalar, const D: usize>(
     // Quirk fallback to HLLE — `D > 1` is a compile-time const guard, the
     // `Quirk` arm matches at host build time; per-cell mask via
     // `quirk_strong_shock` picks HLLE for shocked faces, HLLC for everything
-    // else. mirrors the C++ early-return in the `constexpr if (rank > 1)`.
+    // else. the early-return lives in the `constexpr if (rank > 1)` guard.
     if quirk_gate_active::<D>(shock_smoother) {
         let mask = quirk_strong_shock(prim_l.pre, prim_r.pre);
         return S::branch(mask,
@@ -333,7 +331,7 @@ fn srhd_star_state<S: Scalar, const D: usize>(
 
 /// HLLC for special-relativistic hydrodynamics (mignone-bodo 2005). ONE
 /// function for all dimensions and directions. honors the `Quirk` fallback
-/// in `D > 1` (matches C++ srhd hllc at `hllc.hpp:310-316`); the Fleischmann
+/// in `D > 1`; the Fleischmann
 /// LM correction does NOT apply to relativistic regimes (treated as
 /// Standard if requested).
 pub fn hllc_srhd<S: Scalar, const D: usize>(
@@ -405,8 +403,7 @@ fn hllc_srhd_body<S: Scalar, const D: usize>(
 /// builds on the HLL intermediate state, solves a quadratic for the contact
 /// speed `a_star`, branches on whether the normal B-field is null. ONE
 /// function for all dimensions and directions. carrier-generic over `S`.
-/// honors the `Quirk` fallback in `D > 1` (matches C++ rmhd hllc at
-/// `hllc.hpp:367-372`); Fleischmann LM does not apply to relativistic
+/// honors the `Quirk` fallback in `D > 1`; Fleischmann LM does not apply to relativistic
 /// regimes (treated as Standard if requested). reads the pressure jump
 /// from the hydro half of the MHD primitive (`prim_l.hydro.pre`).
 pub fn hllc_rmhd<S: Scalar, const D: usize>(
@@ -755,7 +752,7 @@ mod tests {
 
     #[test]
     fn hllc_quirk_is_a_noop_in_1d() {
-        // the Quirk fallback is gated on `D > 1` (C++ `if constexpr (rank > 1)`).
+        // the Quirk fallback is gated on `D > 1` (`if constexpr (rank > 1)`).
         // in 1D the gate fires `false` AT COMPILE TIME and the standard HLLC
         // body runs — so Quirk and Standard must be bit-identical even on a
         // strong-shock 1D problem (sod). protects against regression in the
@@ -793,7 +790,7 @@ mod tests {
         // MUST equal the HLLE flux on that face (not HLLC). this is the actual
         // safety guarantee Quirk provides: carbuncle-prone shocks take the
         // dissipative two-wave solver instead of the contact-resolving three-
-        // wave one. matches C++ `hllc.hpp:223-228`.
+        // wave one.
         let eos = IdealGas { gamma: 1.4 };
         let prim_l = Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 };
         let prim_r = Prim { rho: 0.125, vel: Tensor::new([0.0, 0.0]), pre: 0.1 };

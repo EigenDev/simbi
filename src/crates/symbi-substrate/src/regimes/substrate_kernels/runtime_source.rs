@@ -29,7 +29,7 @@ use super::layout::{alloc_layout, exec_layout};
 use super::params::{geom_scalar, motion_scalar, physical_geom, ScalarBind};
 
 /// dispatch a RUNTIME-BUILT IR kernel — one whose neutral IR blob was produced at sim
-/// startup (not AOT-baked into the registry), e.g. a python-authored user source lowered
+/// startup (not AOT-baked into the registry), e.g., a python-authored user source lowered
 /// via `source_apply_from_built_gv` -> `prepared_to_ir`. binds the kernel's buffers by its
 /// own manifest (`kernel_bindings_from_ir`) through `resolve_path`, and its scalar params
 /// by name through `resolve_scalar`, then launches on-device (render + NVRTC-JIT, cached by
@@ -124,7 +124,7 @@ pub struct RuntimeSource {
 /// field runtime-paths (`resolve_path` keys, in buffer order) and the scalar-param names.
 pub(crate) struct FusedCpuKernel {
     kernel: symbi_jit::CompiledKernel,
-    /// `field_inputs` as typed refs in in-buffer order (parsed once at build; e.g. `cons.den`,
+    /// `field_inputs` as typed refs in in-buffer order (parsed once at build; e.g., `cons.den`,
     /// `u_n.mom_0`, `mass_flux[0]`) — the host bind path is string-free.
     in_refs: Vec<FieldRef>,
     /// write targets as typed refs in out-buffer order (the in-place `cons.*` targets).
@@ -136,7 +136,7 @@ pub(crate) struct FusedCpuKernel {
 
 impl RuntimeSource {
     /// build from spec-validated `(target, BuiltSource)` pairs. `has_energy` comes from the
-    /// attaching kernel-set's `RegimeSpec` (e.g. `NEWTONIAN_SPEC.has_energy` /
+    /// attaching kernel-set's `RegimeSpec` (e.g., `NEWTONIAN_SPEC.has_energy` /
     /// `ISO_NEWTONIAN_SPEC.has_energy`), NOT the caller — the set IS the regime.
     pub fn new(built: Vec<(String, BuiltSource)>, params: Vec<f64>, has_energy: bool) -> Arc<Self> {
         let eval = SourceEvaluator::from_built(&built);
@@ -205,15 +205,13 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     let eval = &rs.eval;
     let rs_params = &rs.params;
 
-    // the PURE-OP + SINGLE-WRITER model (the C++ op/executor separation). each cell's op READS the
+    // the PURE-OP + SINGLE-WRITER model (op/executor separation). each cell's op READS the
     // stage input and COMPUTES its source contribution `s`; the ONLY field mutation is
     // `Field::add_assign_checked` — the audited writer, whose bounds check is RELEASE-ACTIVE. the op
     // never writes a field directly, so there is exactly one place writes happen and they are
     // checked. parallelism is a flat `par_iter` over the interior coords: each coord is handled by
     // exactly ONE thread (disjoint cells), so the read-modify-write is race-free BY CONSTRUCTION,
-    // and a bad index PANICS loudly instead of corrupting the heap. this replaces both the serial
-    // loop and the earlier hand-parallel rewrite (over `DomainForEach::for_each` + unchecked
-    // `ViewMut::set`) that corrupted the heap.
+    // and a bad index PANICS loudly instead of corrupting the heap.
     let coords: Vec<[isize; D]> = sim.geom.interior.iter().collect();
     coords.par_iter().for_each(|&c| {
         let rho = (*u.den.at(c)).to_f64();

@@ -10,7 +10,7 @@ use super::*;
 /// the Gardiner & Stone CT-contact edge EMF (the SOFT-SIGN blend), carrier-generic at S=Gv.
 /// a pointwise function of the 4 face EMFs, 4 cell-corner
 /// EMFs, and 4 density fluxes: `s = f/(|f|+eps)`; `0.5*((a+b) + s*(a-b))`, transitions
-/// continuously through f=0 (= the C++ hard 3-way sign in the |f|>>eps limit). div(B) unaffected.
+/// continuously through f=0 (= a hard 3-way sign in the |f|>>eps limit). div(B) unaffected.
 fn ct_contact_emf_gv(face_e: [Gv; 4], cell_e: [Gv; 4], dflux: [Gv; 4]) -> Gv {
     let [en, es, ee, ew] = face_e;
     let [ene, enw, ese, esw] = cell_e;

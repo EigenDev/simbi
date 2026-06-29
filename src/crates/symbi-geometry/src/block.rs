@@ -176,8 +176,8 @@ where
     /// for Kerr-Schild (volume_factor includes sqrt(1+2M/r)):
     ///   - O(dx^4) accurate, consistent with the second-order PDE solver
     ///
-    /// this replaces the previous hardcoded per-geometry formulas with a single
-    /// general path that works for ANY metric.
+    /// a single general path that works for ANY metric, with no hardcoded
+    /// per-geometry formulas.
     #[inline]
     pub fn volume(&self, idx: [isize; D]) -> S {
         // 2-point Gauss-Legendre: points at +/- 1/sqrt(3), weights = 1

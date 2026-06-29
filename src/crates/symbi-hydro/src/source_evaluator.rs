@@ -137,7 +137,7 @@ impl SourceEvaluator {
 
     /// build the evaluator directly from already-lowered `(target_field, BuiltSource)` pairs — the
     /// RUNTIME path. unlike [`Self::new`] (which composes a `SimulationLaws` of compile-time
-    /// fn-builders, AOT), this takes `BuiltSource` VALUES — e.g. `expr_bridge::build_user_source`'s
+    /// fn-builders, AOT), this takes `BuiltSource` VALUES — e.g., `expr_bridge::build_user_source`'s
     /// output from a `SourceConfig` loaded at sim startup (python -> json, no recompile). each
     /// field's `BuiltSource` is scalarized into per-component `LoweredFn`s, exactly as `new` does.
     /// panics on a duplicate target field (the caller should pre-merge same-field sources).

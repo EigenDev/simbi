@@ -17,7 +17,7 @@
 // =============================================================================
 
 use symbi_aot::{CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar};
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 use symbi_aot::{compute_strides, copy_extent, copy_lo};
 use symbi_ir::emit::ReductionOp;
 use symbi_xpu::MemorySpace;
@@ -27,14 +27,14 @@ use symbi_xpu::MemorySpace;
 /// 16 bytes strides + 16 bytes extent = 56 bytes, naturally 8-byte aligned. one
 /// of these is passed by value per buffer to every GPU kernel (Phase 1B-3). cfg-gated to
 /// the `cuda` feature: cpu-only builds never construct one.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct DeviceView {
-    data:    *const std::ffi::c_void,
-    lo:      [i32; 4],
+    data: *const std::ffi::c_void,
+    lo: [i32; 4],
     strides: [i32; 4],
-    extent:  [i32; 4],
+    extent: [i32; 4],
 }
 
 // static ABI assertions: the CUDA `__symbi_View` struct emitted by the kernel
@@ -44,14 +44,29 @@ struct DeviceView {
 // alignment change from a new `#[derive]`) would silently mis-bind every kernel
 // arg. catch it at compile time rather than as garbled physics. `offset_of!` is
 // stable since 1.77.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 const _: () = {
     use std::mem::{offset_of, size_of};
-    assert!(size_of::<DeviceView>() == 56,         "DeviceView size drifted from 56 bytes");
-    assert!(offset_of!(DeviceView, data)    == 0,  "DeviceView.data offset drifted");
-    assert!(offset_of!(DeviceView, lo)      == 8,  "DeviceView.lo offset drifted");
-    assert!(offset_of!(DeviceView, strides) == 24, "DeviceView.strides offset drifted");
-    assert!(offset_of!(DeviceView, extent)  == 40, "DeviceView.extent offset drifted");
+    assert!(
+        size_of::<DeviceView>() == 56,
+        "DeviceView size drifted from 56 bytes"
+    );
+    assert!(
+        offset_of!(DeviceView, data) == 0,
+        "DeviceView.data offset drifted"
+    );
+    assert!(
+        offset_of!(DeviceView, lo) == 8,
+        "DeviceView.lo offset drifted"
+    );
+    assert!(
+        offset_of!(DeviceView, strides) == 24,
+        "DeviceView.strides offset drifted"
+    );
+    assert!(
+        offset_of!(DeviceView, extent) == 40,
+        "DeviceView.extent offset drifted"
+    );
 };
 
 // =============================================================================
@@ -65,7 +80,7 @@ const _: () = {
 // no `&dyn` — the backend is a zero-size type param, fully monomorphized;
 // `DefaultGpuBackend` binds the compiled-in choice at the dispatch boundary.
 // =============================================================================
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub trait GpuBackend: 'static {
     // the device runtime (alloc/launch/sync) this backend drives.
     type Runtime: symbi_xpu::runtime::GpuRuntime;
@@ -90,25 +105,54 @@ impl GpuBackend for CudaBackend {
 
     #[inline]
     fn dispatcher() -> &'static symbi_xpu::runtime::KernelDispatcher<Self::Runtime> {
-        &symbi_xpu::runtime::cuda_runtime::DISPATCHER
+        symbi_xpu::runtime::cuda_runtime::current_dispatcher()
     }
 
     #[inline]
     fn push_field(args: &mut symbi_xpu::KernelArgs, ptr: *const u8, lo: &[i32], extent: &[u32]) {
         let view = DeviceView {
-            data:    ptr as *const std::ffi::c_void,
-            lo:      copy_lo(lo),
+            data: ptr as *const std::ffi::c_void,
+            lo: copy_lo(lo),
             strides: compute_strides(extent),
-            extent:  copy_extent(extent),
+            extent: copy_extent(extent),
         };
         args.push(&view);
     }
 }
 
-// the compiled-in default backend (the only one today). a second backend flips this
-// alias under its own feature; the dispatch boundary calls `run_gpu::<DefaultGpuBackend, _>`.
+// the hip backend (docs/design/38): same `Target::Hip` (renders the identical cuda-c++ source),
+// the hip per-device dispatcher, and the SAME `DeviceView` launch ABI as cuda.
+#[cfg(feature = "hip")]
+pub struct HipBackend;
+
+#[cfg(feature = "hip")]
+impl GpuBackend for HipBackend {
+    type Runtime = symbi_xpu::runtime::hip_runtime::HipRuntime;
+    const TARGET: symbi_ir::emit::Target = symbi_ir::emit::Target::Hip;
+
+    #[inline]
+    fn dispatcher() -> &'static symbi_xpu::runtime::KernelDispatcher<Self::Runtime> {
+        symbi_xpu::runtime::hip_runtime::current_dispatcher()
+    }
+
+    #[inline]
+    fn push_field(args: &mut symbi_xpu::KernelArgs, ptr: *const u8, lo: &[i32], extent: &[u32]) {
+        let view = DeviceView {
+            data: ptr as *const std::ffi::c_void,
+            lo: copy_lo(lo),
+            strides: compute_strides(extent),
+            extent: copy_extent(extent),
+        };
+        args.push(&view);
+    }
+}
+
+// the compiled-in default backend. each backend feature binds the alias to its own struct; the
+// dispatch boundary calls `run_gpu::<DefaultGpuBackend, _>`. cuda wins if both are set.
 #[cfg(feature = "cuda")]
 pub type DefaultGpuBackend = CudaBackend;
+#[cfg(all(feature = "hip", not(feature = "cuda")))]
+pub type DefaultGpuBackend = HipBackend;
 
 /// the regime-AGNOSTIC CFL reduction: max over `domain` of a per-cell wave-speed
 /// scratch field. thin wrapper over the general `field_reduce` — every regime
@@ -133,14 +177,14 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     op: ReductionOp,
 ) -> f64 {
     if Mem::IS_DEVICE_ACCESSIBLE {
-        #[cfg(feature = "cuda")]
+        #[cfg(feature = "gpu")]
         {
             return field_reduce_device::<DefaultGpuBackend, _, _, D>(field, domain, op);
         }
-        #[cfg(not(feature = "cuda"))]
+        #[cfg(not(feature = "gpu"))]
         {
             let _ = op;
-            unreachable!("device-accessible memory requires the cuda feature");
+            unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
         }
     }
     // host fold (the CPU algebra of the Reduce morphism, doc 15 §2). LARGE
@@ -187,8 +231,12 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
     match op {
         ReductionOp::Add => (0.0, |a, b| a + b),
         ReductionOp::Mul => (1.0, |a, b| a * b),
-        ReductionOp::Min => (f64::INFINITY, |a, b| if a != a || b != b { f64::NAN } else { a.min(b) }),
-        ReductionOp::Max => (f64::NEG_INFINITY, |a, b| if a != a || b != b { f64::NAN } else { a.max(b) }),
+        ReductionOp::Min => (f64::INFINITY, |a, b| {
+            if a != a || b != b { f64::NAN } else { a.min(b) }
+        }),
+        ReductionOp::Max => (f64::NEG_INFINITY, |a, b| {
+            if a != a || b != b { f64::NAN } else { a.max(b) }
+        }),
     }
 }
 
@@ -204,19 +252,19 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
 /// host fold, so concurrent reductions from multiple threads serialize on
 /// the cache rather than racing on the buffer. uncontended in the single-
 /// simulation case (the common one); cheap when contested.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
     bytes_needed: usize,
     f: impl FnOnce(*mut Sc) -> R,
 ) -> R {
     use std::sync::{Mutex, OnceLock};
-    use symbi_xpu::cuda::UnifiedMemory;
+    use symbi_xpu::DeviceMemory;
     use symbi_xpu::MemoryBlock;
 
     // one slot per precision. `is_f64` discriminates at compile time via
     // size_of::<Sc>() so the lookup is monomorphized.
-    static F64_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<UnifiedMemory>>>> = OnceLock::new();
-    static F32_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<UnifiedMemory>>>> = OnceLock::new();
+    static F64_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
+    static F32_PARTIALS: OnceLock<Mutex<Option<MemoryBlock<DeviceMemory>>>> = OnceLock::new();
     let slot = if std::mem::size_of::<Sc>() == std::mem::size_of::<f64>() {
         F64_PARTIALS.get_or_init(|| Mutex::new(None))
     } else {
@@ -225,13 +273,13 @@ fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
     let mut guard = slot.lock().unwrap();
     let need_grow = match guard.as_ref() {
         Some(blk) => blk.bytes() < bytes_needed,
-        None      => true,
+        None => true,
     };
     if need_grow {
         // round up to next power of 2 to amortize future growths.
         let alloc_bytes = bytes_needed.next_power_of_two().max(256);
         *guard = Some(
-            MemoryBlock::<UnifiedMemory>::new(alloc_bytes)
+            MemoryBlock::<DeviceMemory>::new(alloc_bytes)
                 .expect("unified alloc for reduction partials"),
         );
     }
@@ -246,20 +294,29 @@ fn with_cached_partials<Sc: Scalar + OrderedNumeric, R>(
 /// the window, and fold the per-block partials on the host (only num_blocks scalars
 /// cross). the field's allocated domain gives the view_t buffer layout; the `domain`
 /// arg is the reduced window (interior).
-#[cfg(feature = "cuda")]
-fn field_reduce_device<B: GpuBackend, Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+#[cfg(feature = "gpu")]
+fn field_reduce_device<
+    B: GpuBackend,
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+    const D: usize,
+>(
     field: &symbi_grid::Field<Sc, D, Mem>,
     domain: &symbi_algebra::Domain<D>,
     op: ReductionOp,
 ) -> f64 {
     use symbi_ir::emit::Precision;
-    use symbi_ir::{render_field_reduction, REDUCTION_BLOCK_SIZE};
-    use symbi_xpu::cuda::ctx_sync;
+    use symbi_ir::{REDUCTION_BLOCK_SIZE, render_field_reduction};
+    use symbi_xpu::ctx_sync;
     use symbi_xpu::runtime::GpuRuntime;
     use symbi_xpu::LaunchConfig;
 
     let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
-    let precision = if is_f64 { Precision::F64 } else { Precision::F32 };
+    let precision = if is_f64 {
+        Precision::F64
+    } else {
+        Precision::F32
+    };
     let op_tag = match op {
         ReductionOp::Add => "add",
         ReductionOp::Mul => "mul",
@@ -342,17 +399,17 @@ where
     F: FnOnce(&[CpuField<'_, Sc>], &mut [CpuFieldMut<'_, Sc>], &[u32], &[i32], &[i32], &[Sc]),
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
-        #[cfg(feature = "cuda")]
+        #[cfg(feature = "gpu")]
         {
             let _ = &cpu;
             run_gpu::<DefaultGpuBackend, _>(inv, ir, kernel_name);
         }
-        #[cfg(not(feature = "cuda"))]
+        #[cfg(not(feature = "gpu"))]
         {
-            // UnifiedMemory (the only device-accessible space) exists ONLY under the
-            // cuda feature, so this branch is unreachable in a non-cuda build.
+            // device-accessible memory (DeviceMemory) exists ONLY under a gpu feature, so
+            // this branch is unreachable in a host-only build.
             let _ = (ir, kernel_name, cpu);
-            unreachable!("device-accessible memory requires the cuda feature");
+            unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
         }
     } else {
         let _ = (ir, kernel_name);
@@ -374,13 +431,13 @@ where
 // the cache value bundles the descriptor with a precomputed `module_key` (the string
 // the dispatcher uses to look up the JITed CUDA module) — formatting it on every
 // launch was one String alloc per dispatch.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 struct CachedDesc {
-    desc:       symbi_ir::emit::KernelDescriptor,
+    desc: symbi_ir::emit::KernelDescriptor,
     module_key: String,
 }
 
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 static RENDER_CACHE: std::sync::LazyLock<
     std::sync::RwLock<std::collections::HashMap<(String, bool), std::sync::Arc<CachedDesc>>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
@@ -388,17 +445,17 @@ static RENDER_CACHE: std::sync::LazyLock<
 /// the per-block dynamic-smem budget we size tiled launches against. Turing (sm_75,
 /// the RTX 2070 dev part) allows 48 KB of dynamic `__shared__` without the
 /// `cudaFuncSetAttribute` opt-in; staying under it keeps the launch portable.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 const TILED_SMEM_LIMIT: usize = 48 * 1024;
 
 /// pick a BLOCK shape for a smem-tiled launch: balanced (cube-ish), clamped to the
 /// grid, total <= 256 threads, and — critically — whose `(block + 2*halo)` slab
 /// times `cell_bytes` fits `TILED_SMEM_LIMIT`. tries decreasing cube edges and
 /// shrinks the largest dim to meet the thread cap. `SYMBI_TILE_BLOCK="8,8,4"`
-/// overrides for the tile-size sweep (docs/design/22 §G). this REPLACES the
+/// overrides for the tile-size sweep (docs/design/22 §G). this is used in place of the
 /// warp-first `block_for` for tiled kernels, whose [32,8,1] shape blows the slab
 /// when the halo sits on a thin (block=1) axis.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn tiled_block(ndim: usize, grid: &[u32], halo: &[u8], cell_bytes: usize) -> [u32; 3] {
     if let Some(b) = env_tile_block(ndim) {
         return b;
@@ -416,7 +473,9 @@ fn tiled_block(ndim: usize, grid: &[u32], halo: &[u8], cell_bytes: usize) -> [u3
             }
             b[amax] = (b[amax] / 2).max(1);
         }
-        let slab: usize = (0..ndim).map(|a| (b[a] + 2 * halo[a] as u32) as usize).product();
+        let slab: usize = (0..ndim)
+            .map(|a| (b[a] + 2 * halo[a] as u32) as usize)
+            .product();
         if b[0] * b[1] * b[2] <= 256 && slab * cell_bytes <= TILED_SMEM_LIMIT {
             return b;
         }
@@ -426,7 +485,7 @@ fn tiled_block(ndim: usize, grid: &[u32], halo: &[u8], cell_bytes: usize) -> [u3
 
 /// the explicit per-process tiled-block override `SYMBI_TILE_BLOCK="bx,by,bz"`
 /// (the leading `ndim` entries are used). `None` if unset/unparseable.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 fn env_tile_block(ndim: usize) -> Option<[u32; 3]> {
     let raw = std::env::var("SYMBI_TILE_BLOCK").ok()?;
     let mut b = [1u32; 3];
@@ -444,9 +503,9 @@ fn env_tile_block(ndim: usize) -> Option<[u32; 3]> {
 /// the amr hierarchy's api boundaries and host scans, and any test comparing
 /// device buffers right after a dispatch.
 pub fn device_sync<Mem: MemorySpace>() {
-    #[cfg(feature = "cuda")]
+    #[cfg(feature = "gpu")]
     if Mem::IS_DEVICE_ACCESSIBLE {
-        symbi_xpu::cuda::ctx_sync();
+        symbi_xpu::ctx_sync();
     }
 }
 
@@ -459,8 +518,12 @@ pub fn gpu_launch_count() -> u64 {
     GPU_LAUNCH_COUNT.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-#[cfg(feature = "cuda")]
-fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(inv: KernelInvocation<Sc>, ir: &str, kernel_name: &str) {
+#[cfg(feature = "gpu")]
+fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
+    inv: KernelInvocation<Sc>,
+    ir: &str,
+    kernel_name: &str,
+) {
     GPU_LAUNCH_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     use symbi_aot::BufHandle;
     use symbi_ir::emit::Precision;
@@ -468,13 +531,17 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(inv: KernelInvocation<Sc>
     // **B12** — ctx_sync no longer called per-launch; same-stream CUDA semantics
     // serialize kernel-to-kernel ordering. ctx_sync stays in field_reduce_device
     // (line 151) where it actually crosses host↔device for the cfl host-fold.
-    use symbi_xpu::runtime::GpuRuntime;
     use symbi_xpu::LaunchConfig;
+    use symbi_xpu::runtime::GpuRuntime;
 
     // precision is the scalar's width: f64 -> 8 bytes, f32 -> 4. render the kernel at
     // that precision so the device reads the buffers (which ARE `Sc`) correctly.
     let is_f64 = std::mem::size_of::<Sc>() == std::mem::size_of::<f64>();
-    let precision = if is_f64 { Precision::F64 } else { Precision::F32 };
+    let precision = if is_f64 {
+        Precision::F64
+    } else {
+        Precision::F32
+    };
     // render once per (kernel, precision); subsequent launches reuse the descriptor.
     // fast path: read-locked HashMap lookup. after the first launch of each kernel
     // this is uncontended and ~free; eliminates the per-launch Mutex acquire that
@@ -491,19 +558,29 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(inv: KernelInvocation<Sc>
                     // sort field_bindings by buffer_index ONCE at cache time so the
                     // per-launch walk is just a linear iter, no heap-Vec, no sort.
                     d.field_bindings.sort_by_key(|b| b.buffer_index);
-                    let module_key = format!("{}#{}",
-                        d.kernel_name,
-                        if is_f64 { "f64" } else { "f32" },
-                    );
-                    std::sync::Arc::new(CachedDesc { desc: d, module_key })
+                    let module_key =
+                        format!("{}#{}", d.kernel_name, if is_f64 { "f64" } else { "f32" },);
+                    std::sync::Arc::new(CachedDesc {
+                        desc: d,
+                        module_key,
+                    })
                 })
                 .clone()
         }
     };
     let desc = &cached.desc;
-    debug_assert_eq!(desc.kernel_name, kernel_name, "IR blob kernel name mismatch");
+    debug_assert_eq!(
+        desc.kernel_name, kernel_name,
+        "IR blob kernel name mismatch"
+    );
 
-    let KernelInvocation { buffers, grid, dom_lo, ints, scalars } = inv;
+    let KernelInvocation {
+        buffers,
+        grid,
+        dom_lo,
+        ints,
+        scalars,
+    } = inv;
     let ndim = grid.len();
 
     // build two stack-resident lookup tables from inv.buffers: one for Host slots
@@ -515,23 +592,27 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(inv: KernelInvocation<Sc>
     const MAX_BUFS_PER_KIND: usize = 48;
     const EMPTY_I32: &[i32] = &[];
     const EMPTY_U32: &[u32] = &[];
-    let mut host_lookup: [(*const u8, &[i32], &[u32]); MAX_BUFS_PER_KIND]
-        = [(std::ptr::null(), EMPTY_I32, EMPTY_U32); MAX_BUFS_PER_KIND];
-    let mut hostmut_lookup: [(*const u8, &[i32], &[u32]); MAX_BUFS_PER_KIND]
-        = [(std::ptr::null(), EMPTY_I32, EMPTY_U32); MAX_BUFS_PER_KIND];
+    let mut host_lookup: [(*const u8, &[i32], &[u32]); MAX_BUFS_PER_KIND] =
+        [(std::ptr::null(), EMPTY_I32, EMPTY_U32); MAX_BUFS_PER_KIND];
+    let mut hostmut_lookup: [(*const u8, &[i32], &[u32]); MAX_BUFS_PER_KIND] =
+        [(std::ptr::null(), EMPTY_I32, EMPTY_U32); MAX_BUFS_PER_KIND];
     let mut host_n = 0usize;
     let mut hostmut_n = 0usize;
     for b in &buffers {
         match &b.handle {
             BufHandle::Host(s) => {
-                assert!(host_n < MAX_BUFS_PER_KIND,
-                    "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} input buffers; raise MAX_BUFS_PER_KIND");
+                assert!(
+                    host_n < MAX_BUFS_PER_KIND,
+                    "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} input buffers; raise MAX_BUFS_PER_KIND"
+                );
                 host_lookup[host_n] = (s.as_ptr() as *const u8, b.lo, b.extent);
                 host_n += 1;
             }
             BufHandle::HostMut(s) => {
-                assert!(hostmut_n < MAX_BUFS_PER_KIND,
-                    "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} output buffers; raise MAX_BUFS_PER_KIND");
+                assert!(
+                    hostmut_n < MAX_BUFS_PER_KIND,
+                    "run_gpu('{kernel_name}'): kernel has > {MAX_BUFS_PER_KIND} output buffers; raise MAX_BUFS_PER_KIND"
+                );
                 hostmut_lookup[hostmut_n] = (s.as_ptr() as *const u8, b.lo, b.extent);
                 hostmut_n += 1;
             }
@@ -542,7 +623,8 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(inv: KernelInvocation<Sc>
     // kernel name don't shadow each other in one process. module_key is precomputed
     // at cache time (see `CachedDesc`) so the dispatch path here is a slice borrow,
     // not a `format!()`.
-    let kernel = B::dispatcher().jit_kernel_keyed(&desc.source, &cached.module_key, &desc.kernel_name);
+    let kernel =
+        B::dispatcher().jit_kernel_keyed(&desc.source, &cached.module_key, &desc.kernel_name);
 
     // block shape is EXTENT-AWARE (`block_for`): a warp on the contiguous axis-0 (coalesced)
     // + transverse dims clamped to the actual `grid` extents, so a quasi-1D/2D run (a 3D
@@ -551,7 +633,7 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(inv: KernelInvocation<Sc>
     // Gate 3: a tiled kernel needs a block shape that BOUNDS the per-block smem
     // slab `prod_a (block_a + 2*halo_a) * sizeof(S) * n_fields` under the device
     // limit. the warp-first `block_for` shape ([32,8,1]) makes a pathological slab
-    // when the halo is on a thin (block=1) axis — e.g. dir-2 flux: 32*8*(1+4) cells
+    // when the halo is on a thin (block=1) axis — e.g., dir-2 flux: 32*8*(1+4) cells
     // -> ~100 KB for 10 fields, past Turing's 48 KB. so a tiled launch picks a
     // BALANCED block (cube-ish, fits smem) instead. block dims are read at runtime
     // by the kernel (blockDim.*), so only the byte count crosses here.
@@ -581,9 +663,13 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(inv: KernelInvocation<Sc>
         let (mut hi, mut mi) = (0usize, 0usize);
         for binding in &desc.field_bindings {
             let (ptr, lo, extent) = if binding.is_output {
-                let t = hostmut_lookup[mi]; mi += 1; t
+                let t = hostmut_lookup[mi];
+                mi += 1;
+                t
             } else {
-                let t = host_lookup[hi]; hi += 1; t
+                let t = host_lookup[hi];
+                hi += 1;
+                t
             };
             B::push_field(args, ptr, lo, extent);
         }

@@ -69,6 +69,13 @@ documentation = "https://github.com/EigenDev/simbi"
 manifest-path = "src/crates/symbi-py/Cargo.toml"
 python-source = "."
 module-name = "simbi.libs.cpu_ext"
+# skip auditwheel repair on wheel builds. repair vendors libhdf5, libcuda, and
+# libnvrtc into the wheel with hash-renamed sonames behind a `simbi.libs` rpath.
+# that bundles libcuda, which must resolve to the host driver at runtime, and it
+# leaves the bundle dir unplaced for this source layout, so the extension fails to
+# import. users already have hdf5 and the cuda driver (see the readme requirements),
+# so a wheel that links the system libraries is correct and matches `maturin develop`.
+skip-auditwheel = true
 
 [tool.mypy]
 ignore_missing_imports = true

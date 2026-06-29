@@ -282,8 +282,8 @@ pub fn uniform_accel_probe_gv<const D: usize>() -> (GvKernel, Vec<(String, Field
 /// `source_spec::user_force_*` / `user_cooling_source`) into a Gv trace — binding each declared
 /// param to a runtime Gv scalar of the same name — and write its outputs `s_k`. a user expression
 /// FUSES into a kernel graph and RENDERS (CPU + CUDA) through the exact same `splice_built_source_into`
-/// path a built-in source uses (the elegance over the C++ `dag/`: the user script becomes compiled
-/// kernel code, not a per-cell register-VM walk). carrier-equivalence + the work-energy coupling are
+/// path a built-in source uses: the user script becomes compiled kernel code, not a per-cell
+/// register-VM walk. carrier-equivalence + the work-energy coupling are
 /// gated by `source_term_carrier.rs`.
 pub fn splice_user_source_gv(
     built: &symbi_hydro::source_spec::BuiltSource,

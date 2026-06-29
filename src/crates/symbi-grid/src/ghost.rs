@@ -12,16 +12,13 @@
 // ghost coordinates to interior coordinates. the field's view handles
 // strided memory access. each concern is separate.
 //
-// mirrors C++ geometry/boundary/index_map.hpp + grid/ghost.hpp +
-// geometry/boundary/driver.hpp.
-//
 // usage:
 //   ghost_fill(&field, &allocated, &interior, &boundaries, &exec)?;
 // =============================================================================
 
-use symbi_algebra::Domain;
-use symbi_xpu::{ExecutionSpace, MemorySpace, Executor};
 use crate::field::Field;
+use symbi_algebra::Domain;
+use symbi_xpu::{ExecutionSpace, Executor, MemorySpace};
 
 // =============================================================================
 // ghost region classification
@@ -83,7 +80,11 @@ pub fn analyze_ghost_regions<const D: usize>(
             _ => GhostType::Corner,
         };
 
-        result.push(GhostRegion { domain: region.clone(), ghost_type, directions });
+        result.push(GhostRegion {
+            domain: region.clone(),
+            ghost_type,
+            directions,
+        });
     }
 
     result
@@ -99,7 +100,7 @@ pub enum BcType {
     Periodic,
     Outflow,
     Reflect,
-    /// skip ghost fill on this face (filled externally, e.g. by AMR prolongation).
+    /// skip ghost fill on this face (filled externally, e.g., by AMR prolongation).
     Skip,
 }
 
@@ -119,7 +120,9 @@ pub fn periodic_remap<const D: usize>(
     let mut out = coord;
     let mut val = out[dim] - start;
     val = val % len;
-    if val < 0 { val += len; }
+    if val < 0 {
+        val += len;
+    }
     out[dim] = start + val;
     out
 }
@@ -134,19 +137,18 @@ pub fn clamp_remap<const D: usize>(
     hi: isize,
 ) -> [isize; D] {
     let mut out = coord;
-    if out[dim] < lo { out[dim] = lo; }
-    else if out[dim] >= hi { out[dim] = hi - 1; }
+    if out[dim] < lo {
+        out[dim] = lo;
+    } else if out[dim] >= hi {
+        out[dim] = hi - 1;
+    }
     out
 }
 
 /// reflective coordinate map for one axis.
 /// mirrors around a pivot: coord[dim] = 2*pivot - 1 - coord[dim].
 #[inline]
-pub fn mirror_remap<const D: usize>(
-    coord: [isize; D],
-    dim: usize,
-    pivot: isize,
-) -> [isize; D] {
+pub fn mirror_remap<const D: usize>(coord: [isize; D], dim: usize, pivot: isize) -> [isize; D] {
     let mut out = coord;
     out[dim] = 2 * pivot - 1 - out[dim];
     out
@@ -161,36 +163,42 @@ pub fn build_bc_map<const D: usize>(
     boundaries: &[[BcType; 2]; D], // [lo, hi] per axis
 ) -> impl Fn([isize; D]) -> [isize; D] + Clone {
     // collect per-axis remap info
-    let remap_info: [(FaceSide, BcType, isize, isize); D] =
-        std::array::from_fn(|ax| {
-            let side = region.directions[ax];
-            let bc = match side {
-                FaceSide::Minus => boundaries[ax][0],
-                FaceSide::Plus => boundaries[ax][1],
-                FaceSide::None => BcType::Periodic, // no contact — use identity (periodic is identity in-range)
-            };
-            let lo = interior.spaces[ax].lo;
-            let hi = interior.spaces[ax].hi;
-            (side, bc, lo, hi)
-        });
+    let remap_info: [(FaceSide, BcType, isize, isize); D] = std::array::from_fn(|ax| {
+        let side = region.directions[ax];
+        let bc = match side {
+            FaceSide::Minus => boundaries[ax][0],
+            FaceSide::Plus => boundaries[ax][1],
+            FaceSide::None => BcType::Periodic, // no contact — use identity (periodic is identity in-range)
+        };
+        let lo = interior.spaces[ax].lo;
+        let hi = interior.spaces[ax].hi;
+        (side, bc, lo, hi)
+    });
 
     move |coord: [isize; D]| -> [isize; D] {
         let mut out = coord;
         for ax in 0..D {
             let (side, bc, lo, hi) = remap_info[ax];
-            if side == FaceSide::None { continue; }
+            if side == FaceSide::None {
+                continue;
+            }
 
             match bc {
                 BcType::Periodic => {
                     let len = hi - lo;
                     let mut val = out[ax] - lo;
                     val = val % len;
-                    if val < 0 { val += len; }
+                    if val < 0 {
+                        val += len;
+                    }
                     out[ax] = lo + val;
                 }
                 BcType::Outflow => {
-                    if out[ax] < lo { out[ax] = lo; }
-                    else if out[ax] >= hi { out[ax] = hi - 1; }
+                    if out[ax] < lo {
+                        out[ax] = lo;
+                    } else if out[ax] >= hi {
+                        out[ax] = hi - 1;
+                    }
                 }
                 BcType::Reflect => {
                     let pivot = if side == FaceSide::Minus { lo } else { hi };
@@ -219,11 +227,19 @@ fn region_touches_skip<const D: usize>(
     let mut any_contact = false;
     for ax in 0..D {
         let is_skip = match region.directions[ax] {
-            FaceSide::Minus => { any_contact = true; boundaries[ax][0] == BcType::Skip },
-            FaceSide::Plus => { any_contact = true; boundaries[ax][1] == BcType::Skip },
+            FaceSide::Minus => {
+                any_contact = true;
+                boundaries[ax][0] == BcType::Skip
+            }
+            FaceSide::Plus => {
+                any_contact = true;
+                boundaries[ax][1] == BcType::Skip
+            }
             FaceSide::None => true, // no contact — doesn't count
         };
-        if !is_skip { return false; }
+        if !is_skip {
+            return false;
+        }
     }
     any_contact // at least one contact and all are Skip
 }
@@ -241,7 +257,9 @@ pub fn ghost_fill_field<const D: usize, S: ExecutionSpace, M: MemorySpace>(
     let regions = analyze_ghost_regions(allocated, interior);
 
     for region in &regions {
-        if region_touches_skip(region, boundaries) { continue; }
+        if region_touches_skip(region, boundaries) {
+            continue;
+        }
         let bc_map = build_bc_map(region, interior, boundaries);
         let src_view = field.view();
 
@@ -271,7 +289,9 @@ pub fn ghost_fill_all<const D: usize>(
     let regions = analyze_ghost_regions(allocated, interior);
 
     for region in &regions {
-        if region_touches_skip(region, boundaries) { continue; }
+        if region_touches_skip(region, boundaries) {
+            continue;
+        }
         let bc_map = build_bc_map(region, interior, boundaries);
         for coord in &region.domain {
             let src_coord = bc_map(coord);
@@ -293,7 +313,9 @@ pub fn ghost_fill_all_reflect<const D: usize>(
     let regions = analyze_ghost_regions(allocated, interior);
 
     for region in &regions {
-        if region_touches_skip(region, boundaries) { continue; }
+        if region_touches_skip(region, boundaries) {
+            continue;
+        }
         let bc_map = build_bc_map(region, interior, boundaries);
 
         // build reflect bitmask: bit ax is set if this region contacts
@@ -305,7 +327,9 @@ pub fn ghost_fill_all_reflect<const D: usize>(
                 FaceSide::Plus => boundaries[ax][1] == BcType::Reflect,
                 FaceSide::None => false,
             };
-            if is_reflect { reflect_mask |= 1 << ax; }
+            if is_reflect {
+                reflect_mask |= 1 << ax;
+            }
         }
 
         for coord in &region.domain {
@@ -322,12 +346,20 @@ pub fn ghost_fill_all_reflect<const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{Space, Domain};
+    use symbi_algebra::{Domain, Space};
 
     #[test]
     fn ghost_regions_1d() {
-        let allocated = Domain::new([Space { name: "i", lo: -2, hi: 12 }]);
-        let interior = Domain::new([Space { name: "i", lo: 0, hi: 10 }]);
+        let allocated = Domain::new([Space {
+            name: "i",
+            lo: -2,
+            hi: 12,
+        }]);
+        let interior = Domain::new([Space {
+            name: "i",
+            lo: 0,
+            hi: 10,
+        }]);
         let regions = analyze_ghost_regions(&allocated, &interior);
         // 1D: 2 regions (left ghost, right ghost)
         assert_eq!(regions.len(), 2);
@@ -338,12 +370,28 @@ mod tests {
     #[test]
     fn ghost_regions_2d() {
         let allocated = Domain::new([
-            Space { name: "i", lo: -2, hi: 12 },
-            Space { name: "j", lo: -2, hi: 12 },
+            Space {
+                name: "i",
+                lo: -2,
+                hi: 12,
+            },
+            Space {
+                name: "j",
+                lo: -2,
+                hi: 12,
+            },
         ]);
         let interior = Domain::new([
-            Space { name: "i", lo: 0, hi: 10 },
-            Space { name: "j", lo: 0, hi: 10 },
+            Space {
+                name: "i",
+                lo: 0,
+                hi: 10,
+            },
+            Space {
+                name: "j",
+                lo: 0,
+                hi: 10,
+            },
         ]);
         let regions = analyze_ghost_regions(&allocated, &interior);
         // 2D: 3^2 - 1 = 8 regions (4 faces + 4 corners)
@@ -357,9 +405,21 @@ mod tests {
         let ng = 2_isize;
         let nn = 10_isize;
         let allocated = Domain::new([
-            Space { name: "i", lo: -ng, hi: nn + ng },
-            Space { name: "j", lo: -ng, hi: nn + ng },
-            Space { name: "k", lo: -ng, hi: nn + ng },
+            Space {
+                name: "i",
+                lo: -ng,
+                hi: nn + ng,
+            },
+            Space {
+                name: "j",
+                lo: -ng,
+                hi: nn + ng,
+            },
+            Space {
+                name: "k",
+                lo: -ng,
+                hi: nn + ng,
+            },
         ]);
         let interior = allocated.contract(ng);
         let regions = analyze_ghost_regions(&allocated, &interior);
@@ -409,12 +469,16 @@ mod tests {
 
     #[test]
     fn ghost_fill_periodic_1d() {
-        use symbi_xpu::{CpuSpace, HostMemory, Executor};
         use crate::Field;
+        use symbi_xpu::{CpuSpace, Executor, HostMemory};
 
         let ng = 2_isize;
         let nn = 10_isize;
-        let allocated = Domain::new([Space { name: "i", lo: -ng, hi: nn + ng }]);
+        let allocated = Domain::new([Space {
+            name: "i",
+            lo: -ng,
+            hi: nn + ng,
+        }]);
         let interior = allocated.contract(ng);
         let exec = Executor::<CpuSpace>::new(0).unwrap();
 
@@ -438,12 +502,16 @@ mod tests {
 
     #[test]
     fn ghost_fill_outflow_1d() {
-        use symbi_xpu::{CpuSpace, HostMemory, Executor};
         use crate::Field;
+        use symbi_xpu::{CpuSpace, Executor, HostMemory};
 
         let ng = 2_isize;
         let nn = 10_isize;
-        let allocated = Domain::new([Space { name: "i", lo: -ng, hi: nn + ng }]);
+        let allocated = Domain::new([Space {
+            name: "i",
+            lo: -ng,
+            hi: nn + ng,
+        }]);
         let interior = allocated.contract(ng);
         let exec = Executor::<CpuSpace>::new(0).unwrap();
 
@@ -466,15 +534,23 @@ mod tests {
 
     #[test]
     fn ghost_fill_periodic_2d() {
-        use symbi_xpu::{CpuSpace, HostMemory, Executor};
         use crate::Field;
+        use symbi_xpu::{CpuSpace, Executor, HostMemory};
 
         let ng = 1_isize;
         let nx = 4_isize;
         let ny = 4_isize;
         let allocated = Domain::new([
-            Space { name: "i", lo: -ng, hi: nx + ng },
-            Space { name: "j", lo: -ng, hi: ny + ng },
+            Space {
+                name: "i",
+                lo: -ng,
+                hi: nx + ng,
+            },
+            Space {
+                name: "j",
+                lo: -ng,
+                hi: ny + ng,
+            },
         ]);
         let interior = allocated.contract(ng);
         let exec = Executor::<CpuSpace>::new(0).unwrap();
@@ -506,15 +582,27 @@ mod tests {
 
     #[test]
     fn ghost_fill_periodic_3d() {
-        use symbi_xpu::{CpuSpace, HostMemory, Executor};
         use crate::Field;
+        use symbi_xpu::{CpuSpace, Executor, HostMemory};
 
         let ng = 1_isize;
         let nn = 4_isize;
         let allocated = Domain::new([
-            Space { name: "i", lo: -ng, hi: nn + ng },
-            Space { name: "j", lo: -ng, hi: nn + ng },
-            Space { name: "k", lo: -ng, hi: nn + ng },
+            Space {
+                name: "i",
+                lo: -ng,
+                hi: nn + ng,
+            },
+            Space {
+                name: "j",
+                lo: -ng,
+                hi: nn + ng,
+            },
+            Space {
+                name: "k",
+                lo: -ng,
+                hi: nn + ng,
+            },
         ]);
         let interior = allocated.contract(ng);
         let exec = Executor::<CpuSpace>::new(0).unwrap();
@@ -523,7 +611,9 @@ mod tests {
         // fill interior: value = 100*i + 10*j + k
         for coord in &interior {
             let [ii, jj, kk] = coord;
-            field.view_mut().set(coord, (100 * ii + 10 * jj + kk) as f64);
+            field
+                .view_mut()
+                .set(coord, (100 * ii + 10 * jj + kk) as f64);
         }
 
         let boundaries = [[BcType::Periodic; 2]; 3];

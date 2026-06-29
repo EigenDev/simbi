@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn enthalpy_density_matches_inline_form() {
-        // matches the rho * enthalpy * lorentz_factor_sq expression rmhd/algebra.rs used to inline.
+        // matches the rho * enthalpy * lorentz_factor_sq expression.
         let eos = IdealGas { gamma: 1.4 };
         let (rho, pre, v_sq) = (1.3, 0.7, 0.36); // |v| = 0.6c
         let want = rho * enthalpy(&eos, rho, pre) * lorentz_factor_sq(v_sq);

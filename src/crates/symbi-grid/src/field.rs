@@ -3,11 +3,9 @@
 //
 // the field: owns memory, bound to a domain. the simulation's data container.
 //
-// clone = shallow (shared handle, same as C++ field_t).
+// clone = shallow (shared handle).
 // reads/writes go through views (view/view_mut) or coord-indexed at/set,
 // which the #[symbi::kernel(coord)] macro lowers to.
-//
-// mirrors C++ grid::field_t<T, Rank>.
 //
 // usage:
 //   let f = Field::<f64, 2>::zeros(&domain)?;
@@ -16,10 +14,10 @@
 //   f.set([i, j], x);        // write (interior mutability)
 // =============================================================================
 
-use symbi_algebra::Domain;
-use symbi_xpu::{MemorySpace, MemoryBlock, SharedHandle, DefaultMemory};
-use crate::centering::{Centering, Cell};
+use crate::centering::{Cell, Centering};
 use crate::view::{View, ViewMut};
+use symbi_algebra::Domain;
+use symbi_xpu::{DefaultMemory, MemoryBlock, MemorySpace, SharedHandle};
 
 // =============================================================================
 // field
@@ -33,8 +31,12 @@ pub enum Locality {
 }
 
 impl Locality {
-    pub fn is_gpu(self) -> bool { self == Locality::Gpu }
-    pub fn is_cpu(self) -> bool { self == Locality::Cpu }
+    pub fn is_gpu(self) -> bool {
+        self == Locality::Gpu
+    }
+    pub fn is_cpu(self) -> bool {
+        self == Locality::Cpu
+    }
 }
 
 /// memory-backed field over a domain. clone = shallow.
@@ -69,7 +71,11 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     /// allocate a field over the given domain, zero-initialized.
     pub fn zeros(domain: &Domain<D>) -> symbi_xpu::Result<Self> {
         let block = MemoryBlock::<M>::for_elements::<T>(domain.volume())?;
-        let locality = if M::IS_DEVICE_ACCESSIBLE { Locality::Gpu } else { Locality::Cpu };
+        let locality = if M::IS_DEVICE_ACCESSIBLE {
+            Locality::Gpu
+        } else {
+            Locality::Cpu
+        };
         Ok(Field {
             storage: SharedHandle::new(block),
             domain: domain.clone(),
@@ -107,12 +113,11 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
 
     /// flat index from coordinate. delegates to `Domain::flat_index` so
     /// `Field` and `View` agree on the storage convention (axis 0 fastest).
-    /// **previously**, this method hand-rolled its own "last axis fastest"
-    /// formula independent of `Domain::strides()` — a fatal divergence: the
-    /// kernel dispatch wrote via `View` using `Domain`'s strides, while host
-    /// `Field::at`/`Field::set` read via this method using the opposite
-    /// formula. writes and reads landed at different addresses, and tests
-    /// that mixed kernel writes with `Field::at` reads silently got garbage.
+    /// this must not hand-roll an independent formula: the kernel dispatch
+    /// writes via `View` using `Domain`'s strides, while host
+    /// `Field::at`/`Field::set` read via this method. any divergence would
+    /// land writes and reads at different addresses and silently corrupt
+    /// code that mixes kernel writes with `Field::at` reads.
     #[inline]
     fn flat_index(&self, coord: [isize; D]) -> usize {
         self.domain.flat_index(coord)
@@ -129,7 +134,9 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     #[inline]
     pub fn set(&self, coord: [isize; D], val: T) {
         let idx = self.flat_index(coord);
-        unsafe { *(self.storage.get().as_ptr::<T>() as *mut T).add(idx) = val; }
+        unsafe {
+            *(self.storage.get().as_ptr::<T>() as *mut T).add(idx) = val;
+        }
     }
 
     /// accumulate `delta` into the value at `coord`, with a RELEASE-ACTIVE bounds check.
@@ -159,7 +166,7 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
     // ---- direct access for initialization ----
 
     /// raw mutable pointer to the underlying storage.
-    /// use only for initialization (e.g. filling initial data).
+    /// use only for initialization (e.g., filling initial data).
     pub fn as_mut_ptr(&self) -> *mut T {
         self.storage.get().as_ptr::<T>() as *mut T
     }
@@ -177,11 +184,15 @@ impl<T: Copy + Default + 'static, const D: usize, M: MemorySpace, C: Centering> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use symbi_algebra::{Space, Domain};
+    use symbi_algebra::{Domain, Space};
     use symbi_xpu::HostMemory;
 
     fn dom_1d(n: isize) -> Domain<1> {
-        Domain::new([Space { name: "x", lo: 0, hi: n }])
+        Domain::new([Space {
+            name: "x",
+            lo: 0,
+            hi: n,
+        }])
     }
 
     #[test]

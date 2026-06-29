@@ -6,11 +6,8 @@
 // LIVE tensor IR emitters (`tensor/emit_kernel.rs`, `tensor::emit_cuda` /
 // `tensor::emit_cpu`).
 //
-// the legacy Graph-walking scalar emitter that once lived here
-// (`emit_kernel` / `emit_elemental` / `emit_reduction` + `node_ref` /
-// `emit_op_expr` / `coord_components_for`) was retired with the Gen-2 pipeline;
 // the live emitters walk the tensor IR directly. only the descriptors + the
-// ABI-shared helpers remain.
+// ABI-shared helpers remain in this module.
 // =============================================================================
 
 // ---- target and precision ----
@@ -111,9 +108,7 @@ pub(crate) fn global_qualifier(target: Target) -> &'static str {
 //   * `ny_{b}` / `nz_{b}` (CPU) or `(int)_ny_{b}` / `(int)_nz_{b}` (CUDA) are
 //     the per-buffer per-axis extents (the stride product is computed inline)
 //
-// once the View-struct migration lands (the C++ `view_t` mirror), this whole
-// module collapses into a single `view.at(coord)` call site and these emitters
-// disappear. this is the interim DRY consolidation.
+// this is the DRY consolidation of the per-buffer index arithmetic.
 // =============================================================================
 
 /// which source language the emitter renders to. drives the small syntactic

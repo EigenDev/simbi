@@ -4,7 +4,7 @@
 // common-subexpression elimination pass over LoweredFn / KernelScalarized.
 //
 // motivation: the scalarizer produces fully-inlined ScalarExpr trees. when
-// the source graph has shared sub-graphs (e.g. wave-speed coefficients
+// the source graph has shared sub-graphs (e.g., wave-speed coefficients
 // reused across all conserved-flux components in a riemann kernel), the
 // same subexpression is duplicated at every consumer. for large kernels
 // the duplication is multiplicative — newton_face_flux_3d emitted single
@@ -71,11 +71,7 @@ pub fn cse_kernel(k: &mut KernelScalarized) {
 
 // ----- internals -----
 
-fn cse_in_place(
-    body:    &mut Vec<ScalarStmt>,
-    outputs: &mut Vec<ScalarExpr>,
-    prefix:  &str,
-) {
+fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefix: &str) {
     // **docs/design/23 step 2: scope-aware CSE.** before the flat-pass below
     // runs, recursively CSE each `Scope`'s body so duplicates LOCAL to a
     // scope land inside that scope's braces (the scope acts as a hoisting
@@ -128,7 +124,7 @@ fn cse_in_place(
         counts,
         emitted: HashMap::new(),
         next_id,
-        prefix:  prefix.to_string(),
+        prefix: prefix.to_string(),
     };
     let body_take = std::mem::take(body);
     let mut rewritten: Vec<ScalarStmt> = Vec::with_capacity(body_take.len());
@@ -141,7 +137,7 @@ fn cse_in_place(
         let (e, _) = rewrite_expr(out, &mut state, &mut rewritten);
         new_outputs.push(e);
     }
-    *body    = rewritten;
+    *body = rewritten;
     *outputs = new_outputs;
 
     // pass 3: drop lets orphaned by pass 2's re-hoisting (see `dce_in_place`).
@@ -156,7 +152,7 @@ fn cse_in_place(
 // both mint a `{prefix}<n>` Let for the SAME value: the scalarizer hoists it
 // once, then pass 2 (numbering ABOVE the scalarizer's temps) hoists the
 // identical value again under a fresh name and rewrites every USE site to the
-// new temp — orphaning the scalarizer's Let (e.g. `__cse_0 = __cse_1`, read by
+// new temp — orphaning the scalarizer's Let (e.g., `__cse_0 = __cse_1`, read by
 // nobody). pass 2 only ever ADDS statements, so the orphan survives into the
 // emitted kernel, inflating the body and the `pressure` metric (which counts
 // every live Let). this final sweep drops every immutable `Let` whose name is
@@ -169,8 +165,12 @@ fn mark_expr_vars(e: &ScalarExpr, out: &mut HashSet<String>) {
     // not a child expr — `children()` only yields the index sub-expr). then recurse the SSOT
     // children for every sub-expression.
     match e {
-        ScalarExpr::Var(name) => { out.insert(name.clone()); }
-        ScalarExpr::IndexInto { container, .. } => { out.insert(container.clone()); }
+        ScalarExpr::Var(name) => {
+            out.insert(name.clone());
+        }
+        ScalarExpr::IndexInto { container, .. } => {
+            out.insert(container.clone());
+        }
         _ => {}
     }
     for c in e.children() {
@@ -208,9 +208,11 @@ fn collect_reads(body: &[ScalarStmt], out: &mut HashSet<String>) {
 /// called on.
 fn drop_dead_lets(body: &mut Vec<ScalarStmt>, read: &HashSet<String>) -> bool {
     let before = body.len();
-    body.retain(|stmt| !matches!(stmt,
+    body.retain(|stmt| {
+        !matches!(stmt,
         ScalarStmt::Let { name, value, .. }
-            if !read.contains(name) && !expr_has_free_call(value)));
+            if !read.contains(name) && !expr_has_free_call(value))
+    });
     body.len() != before
 }
 
@@ -244,7 +246,11 @@ fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
     use crate::graph::ConstValue;
     for stmt in body.iter_mut() {
         match stmt {
-            ScalarStmt::Scope { body: scope_body, result, .. } => {
+            ScalarStmt::Scope {
+                body: scope_body,
+                result,
+                ..
+            } => {
                 // wrap the scope's `result` into a single-element outputs vec,
                 // run a fresh CSE over the scope's body, write back the
                 // (possibly Var-rewritten) result.
@@ -262,7 +268,11 @@ fn recursive_cse_scopes(body: &mut Vec<ScalarStmt>, prefix: &str) {
             ScalarStmt::If { then_body, .. } => {
                 recursive_cse_scopes(then_body, prefix);
             }
-            ScalarStmt::IfElse { then_body, else_body, .. } => {
+            ScalarStmt::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => {
                 // both cond arms are opaque to the OUTER flat CSE (branch
                 // scope), but a Scope nested inside an arm still benefits from
                 // per-scope CSE — recurse into each arm to find it.
@@ -284,7 +294,9 @@ fn max_temp_index(body: &[ScalarStmt], prefix: &str) -> Option<usize> {
         // derived from `ScalarStmt::binding_name` + `child_stmt_bodies`.
         for s in stmts {
             if let Some(name) = s.binding_name()
-                && let Some(idx) = name.strip_prefix(prefix).and_then(|r| r.parse::<usize>().ok())
+                && let Some(idx) = name
+                    .strip_prefix(prefix)
+                    .and_then(|r| r.parse::<usize>().ok())
             {
                 *max = Some(max.map_or(idx, |m: usize| m.max(idx)));
             }
@@ -302,7 +314,7 @@ fn max_temp_index(body: &[ScalarStmt], prefix: &str) -> Option<usize> {
 
 /// FxHash-like 64-bit mix. fast, deterministic, low collision in our
 /// regime. not cryptographic.
-const SEED:  u64 = 0xcbf29ce484222325; // FNV-style seed
+const SEED: u64 = 0xcbf29ce484222325; // FNV-style seed
 const PRIME: u64 = 0x100000001b3;
 
 #[inline]
@@ -311,32 +323,49 @@ fn mix(h: u64, x: u64) -> u64 {
 }
 
 /// distinct domain tags so structurally different shapes can't
-/// accidentally collide (e.g. BinOp vs Select).
-const TAG_CONST:        u64 = 0x01;
-const TAG_VAR:          u64 = 0x02;
-const TAG_BINOP:        u64 = 0x03;
-const TAG_UNARYOP:      u64 = 0x04;
-const TAG_METHODCALL:   u64 = 0x05;
-const TAG_SELECT:       u64 = 0x06;
-const TAG_INDEXINTO:    u64 = 0x07;
-const TAG_FIELDLOADAT:  u64 = 0x08;
-const TAG_FREECALL:     u64 = 0x09;
-const TAG_CAST:         u64 = 0x0a;
+/// accidentally collide (e.g., BinOp vs Select).
+const TAG_CONST: u64 = 0x01;
+const TAG_VAR: u64 = 0x02;
+const TAG_BINOP: u64 = 0x03;
+const TAG_UNARYOP: u64 = 0x04;
+const TAG_METHODCALL: u64 = 0x05;
+const TAG_SELECT: u64 = 0x06;
+const TAG_INDEXINTO: u64 = 0x07;
+const TAG_FIELDLOADAT: u64 = 0x08;
+const TAG_FREECALL: u64 = 0x09;
+const TAG_CAST: u64 = 0x0a;
 
 fn hash_str(s: &str) -> u64 {
     let mut h = SEED;
-    for b in s.bytes() { h = mix(h, b as u64); }
+    for b in s.bytes() {
+        h = mix(h, b as u64);
+    }
     h
 }
 
 fn hash_const(v: &ConstValue) -> u64 {
     let mut h = mix(SEED, TAG_CONST);
     match v {
-        ConstValue::F64(x) => { h = mix(h, 0x64);  h = mix(h, x.to_bits()); }
-        ConstValue::F32(x) => { h = mix(h, 0x32);  h = mix(h, x.to_bits() as u64); }
-        ConstValue::I32(x) => { h = mix(h, 0x33);  h = mix(h, *x as u32 as u64); }
-        ConstValue::U32(x) => { h = mix(h, 0x35);  h = mix(h, *x as u64); }
-        ConstValue::Bool(b) => { h = mix(h, 0x36); h = mix(h, *b as u64); }
+        ConstValue::F64(x) => {
+            h = mix(h, 0x64);
+            h = mix(h, x.to_bits());
+        }
+        ConstValue::F32(x) => {
+            h = mix(h, 0x32);
+            h = mix(h, x.to_bits() as u64);
+        }
+        ConstValue::I32(x) => {
+            h = mix(h, 0x33);
+            h = mix(h, *x as u32 as u64);
+        }
+        ConstValue::U32(x) => {
+            h = mix(h, 0x35);
+            h = mix(h, *x as u64);
+        }
+        ConstValue::Bool(b) => {
+            h = mix(h, 0x36);
+            h = mix(h, *b as u64);
+        }
     }
     h
 }
@@ -360,12 +389,18 @@ fn hash_expr_step(e: &ScalarExpr, child_hashes: &[u64]) -> u64 {
             // and mul are bit-commutative, so reusing one order for the other
             // does not perturb the emitted numerics.
             let (op_tag, commutative) = match op {
-                BinaryKind::Add   => (1, true),  BinaryKind::Sub   => (2, false),
-                BinaryKind::Mul   => (3, true),  BinaryKind::Div   => (4, false),
-                BinaryKind::Eq    => (5, true),  BinaryKind::Ne    => (6, true),
-                BinaryKind::Lt    => (7, false), BinaryKind::Le    => (8, false),
-                BinaryKind::Gt    => (9, false), BinaryKind::Ge    => (10, false),
-                BinaryKind::BitOr => (11, true), BinaryKind::BitAnd => (12, true),
+                BinaryKind::Add => (1, true),
+                BinaryKind::Sub => (2, false),
+                BinaryKind::Mul => (3, true),
+                BinaryKind::Div => (4, false),
+                BinaryKind::Eq => (5, true),
+                BinaryKind::Ne => (6, true),
+                BinaryKind::Lt => (7, false),
+                BinaryKind::Le => (8, false),
+                BinaryKind::Gt => (9, false),
+                BinaryKind::Ge => (10, false),
+                BinaryKind::BitOr => (11, true),
+                BinaryKind::BitAnd => (12, true),
                 BinaryKind::BitXor => (13, true),
             };
             let mut h = mix(SEED, TAG_BINOP);
@@ -382,7 +417,10 @@ fn hash_expr_step(e: &ScalarExpr, child_hashes: &[u64]) -> u64 {
             h
         }
         ScalarExpr::UnaryOp(op, _) => {
-            let op_tag = match op { UnaryKind::Neg => 1, UnaryKind::Not => 2 };
+            let op_tag = match op {
+                UnaryKind::Neg => 1,
+                UnaryKind::Not => 2,
+            };
             let mut h = mix(SEED, TAG_UNARYOP);
             h = mix(h, op_tag);
             h = mix(h, child_hashes[0]);
@@ -397,30 +435,40 @@ fn hash_expr_step(e: &ScalarExpr, child_hashes: &[u64]) -> u64 {
         ScalarExpr::MethodCall { method, .. } => {
             let mut h = mix(SEED, TAG_METHODCALL);
             h = mix(h, hash_str(method));
-            for &c in child_hashes { h = mix(h, c); }
+            for &c in child_hashes {
+                h = mix(h, c);
+            }
             h
         }
         ScalarExpr::Select { .. } => {
             let mut h = mix(SEED, TAG_SELECT);
-            for &c in child_hashes { h = mix(h, c); }
+            for &c in child_hashes {
+                h = mix(h, c);
+            }
             h
         }
         ScalarExpr::IndexInto { container, .. } => {
             let mut h = mix(SEED, TAG_INDEXINTO);
             h = mix(h, hash_str(container));
-            for &c in child_hashes { h = mix(h, c); }
+            for &c in child_hashes {
+                h = mix(h, c);
+            }
             h
         }
         ScalarExpr::FieldLoadAt { field_key, .. } => {
             let mut h = mix(SEED, TAG_FIELDLOADAT);
             h = mix(h, hash_str(field_key));
-            for &c in child_hashes { h = mix(h, c); }
+            for &c in child_hashes {
+                h = mix(h, c);
+            }
             h
         }
         ScalarExpr::FreeCall { name, .. } => {
             let mut h = mix(SEED, TAG_FREECALL);
             h = mix(h, hash_str(name));
-            for &c in child_hashes { h = mix(h, c); }
+            for &c in child_hashes {
+                h = mix(h, c);
+            }
             h
         }
     }
@@ -469,11 +517,18 @@ fn cost_class(e: &ScalarExpr) -> CostClass {
             BinaryKind::Div => CostClass::Medium,
             // every other binary (add/sub/mul/comparisons/bitops) is
             // one ALU op = cheap.
-            BinaryKind::Add | BinaryKind::Sub | BinaryKind::Mul
-            | BinaryKind::Eq  | BinaryKind::Ne | BinaryKind::Lt | BinaryKind::Le
-            | BinaryKind::Gt  | BinaryKind::Ge
-            | BinaryKind::BitOr | BinaryKind::BitAnd | BinaryKind::BitXor
-                => CostClass::Cheap,
+            BinaryKind::Add
+            | BinaryKind::Sub
+            | BinaryKind::Mul
+            | BinaryKind::Eq
+            | BinaryKind::Ne
+            | BinaryKind::Lt
+            | BinaryKind::Le
+            | BinaryKind::Gt
+            | BinaryKind::Ge
+            | BinaryKind::BitOr
+            | BinaryKind::BitAnd
+            | BinaryKind::BitXor => CostClass::Cheap,
         },
         ScalarExpr::UnaryOp(op, _) => match op {
             // both Neg and Not are single-instruction.
@@ -483,23 +538,21 @@ fn cost_class(e: &ScalarExpr) -> CostClass {
         ScalarExpr::Cast { .. } => CostClass::Cheap,
         ScalarExpr::MethodCall { method, .. } => match method.as_str() {
             // medium: few-cycle ALU specials.
-            "sqrt" | "abs" | "min" | "max" | "floor" | "ceil"
-            | "is_finite" | "is_nan"
-                => CostClass::Medium,
+            "sqrt" | "abs" | "min" | "max" | "floor" | "ceil" | "is_finite" | "is_nan" => {
+                CostClass::Medium
+            }
             // expensive: SFU / library calls. transcendentals + pow.
-            "sin"  | "cos"  | "tan"  | "asin" | "acos" | "atan" | "atan2"
-            | "exp" | "exp2" | "ln"  | "log2" | "log10"
-            | "sinh"| "cosh" | "tanh"| "asinh"| "acosh"| "atanh"
-            | "powf"| "powi" | "hypot"
-                => CostClass::Expensive,
+            "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2" | "exp" | "exp2" | "ln"
+            | "log2" | "log10" | "sinh" | "cosh" | "tanh" | "asinh" | "acosh" | "atanh"
+            | "powf" | "powi" | "hypot" => CostClass::Expensive,
             // unknown methods default to Expensive — a conservative bias
             // toward hoisting unfamiliar ops (better one extra register
             // than a stalling recompute of something we mis-cheap'd).
             _ => CostClass::Expensive,
         },
-        ScalarExpr::IndexInto   { .. } => CostClass::Memory,
+        ScalarExpr::IndexInto { .. } => CostClass::Memory,
         ScalarExpr::FieldLoadAt { .. } => CostClass::Memory,
-        ScalarExpr::FreeCall    { .. } => CostClass::Expensive,
+        ScalarExpr::FreeCall { .. } => CostClass::Expensive,
     }
 }
 
@@ -510,11 +563,11 @@ fn cost_class(e: &ScalarExpr) -> CostClass {
 #[inline]
 fn hoist_threshold(c: CostClass) -> usize {
     match c {
-        CostClass::Trivial   => usize::MAX,
-        CostClass::Cheap     => 4,
-        CostClass::Medium    => 2,
+        CostClass::Trivial => usize::MAX,
+        CostClass::Cheap => 4,
+        CostClass::Medium => 2,
         CostClass::Expensive => 2,
-        CostClass::Memory    => 2,
+        CostClass::Memory => 2,
     }
 }
 
@@ -534,8 +587,10 @@ fn height_ge(e: &ScalarExpr, k: usize) -> bool {
         return true;
     }
     match e {
-        ScalarExpr::Const(_) | ScalarExpr::Var(_)
-        | ScalarExpr::IndexInto { .. } | ScalarExpr::FieldLoadAt { .. } => false,
+        ScalarExpr::Const(_)
+        | ScalarExpr::Var(_)
+        | ScalarExpr::IndexInto { .. }
+        | ScalarExpr::FieldLoadAt { .. } => false,
         ScalarExpr::UnaryOp(_, a) => height_ge(a, k - 1),
         ScalarExpr::Cast { value, .. } => height_ge(value, k - 1),
         ScalarExpr::BinOp(_, a, b) => height_ge(a, k - 1) || height_ge(b, k - 1),
@@ -579,13 +634,15 @@ fn is_f64_expr(e: &ScalarExpr) -> bool {
         ScalarExpr::Const(_) => false,
         ScalarExpr::Var(_) => true, // assume f64; conservative
         ScalarExpr::BinOp(op, a, _b) => {
-            matches!(op,
-                BinaryKind::Add | BinaryKind::Sub
-              | BinaryKind::Mul | BinaryKind::Div)
-            && is_f64_expr(a)
+            matches!(
+                op,
+                BinaryKind::Add | BinaryKind::Sub | BinaryKind::Mul | BinaryKind::Div
+            ) && is_f64_expr(a)
         }
         ScalarExpr::UnaryOp(_, a) => is_f64_expr(a),
-        ScalarExpr::MethodCall { method, receiver, .. } => {
+        ScalarExpr::MethodCall {
+            method, receiver, ..
+        } => {
             // is_finite / is_nan return bool; everything else returns
             // the receiver's element type.
             !matches!(method.as_str(), "is_finite" | "is_nan") && is_f64_expr(receiver)
@@ -618,29 +675,29 @@ fn count_and_hash(e: &ScalarExpr, counts: &mut HashMap<u64, usize>) -> u64 {
     let child_hashes = match e {
         ScalarExpr::Const(_) | ScalarExpr::Var(_) => Vec::new(),
         ScalarExpr::BinOp(_, a, b) => {
-            vec![
-                count_and_hash(a, counts),
-                count_and_hash(b, counts),
-            ]
+            vec![count_and_hash(a, counts), count_and_hash(b, counts)]
         }
         ScalarExpr::UnaryOp(_, a) => vec![count_and_hash(a, counts)],
         ScalarExpr::MethodCall { receiver, args, .. } => {
             let mut v = Vec::with_capacity(1 + args.len());
             v.push(count_and_hash(receiver, counts));
-            for a in args { v.push(count_and_hash(a, counts)); }
+            for a in args {
+                v.push(count_and_hash(a, counts));
+            }
             v
         }
         ScalarExpr::Select { cond, then, else_ } => {
             vec![
-                count_and_hash(cond,  counts),
-                count_and_hash(then,  counts),
+                count_and_hash(cond, counts),
+                count_and_hash(then, counts),
                 count_and_hash(else_, counts),
             ]
         }
         ScalarExpr::IndexInto { index, .. } => vec![count_and_hash(index, counts)],
-        ScalarExpr::FieldLoadAt { components, .. } => {
-            components.iter().map(|c| count_and_hash(c, counts)).collect()
-        }
+        ScalarExpr::FieldLoadAt { components, .. } => components
+            .iter()
+            .map(|c| count_and_hash(c, counts))
+            .collect(),
         ScalarExpr::FreeCall { args, .. } => {
             args.iter().map(|a| count_and_hash(a, counts)).collect()
         }
@@ -664,7 +721,7 @@ struct RewriteState {
     /// hash -> temp name, once a Let has been physically emitted.
     emitted: HashMap<u64, String>,
     next_id: usize,
-    prefix:  String,
+    prefix: String,
 }
 
 impl RewriteState {
@@ -675,11 +732,7 @@ impl RewriteState {
     }
 }
 
-fn rewrite_stmt(
-    stmt:     ScalarStmt,
-    state:    &mut RewriteState,
-    out_body: &mut Vec<ScalarStmt>,
-) {
+fn rewrite_stmt(stmt: ScalarStmt, state: &mut RewriteState, out_body: &mut Vec<ScalarStmt>) {
     // single source of truth via `with_child_expr`: thread the expression
     // rewriter through whatever expression this statement carries (none for
     // For / Break — both fall through). `rewrite_expr` may push CSE lets into
@@ -694,8 +747,8 @@ fn rewrite_stmt(
 /// the rewritten expression and its structural hash so the parent
 /// can compose its own hash without re-walking.
 fn rewrite_expr(
-    e:        ScalarExpr,
-    state:    &mut RewriteState,
+    e: ScalarExpr,
+    state: &mut RewriteState,
     out_body: &mut Vec<ScalarStmt>,
 ) -> (ScalarExpr, u64) {
     // recurse into children first.
@@ -707,13 +760,20 @@ fn rewrite_expr(
         ScalarExpr::BinOp(op, a, b) => {
             let (ra, ha) = rewrite_expr(*a, state, out_body);
             let (rb, hb) = rewrite_expr(*b, state, out_body);
-            (ScalarExpr::BinOp(op, Box::new(ra), Box::new(rb)), vec![ha, hb])
+            (
+                ScalarExpr::BinOp(op, Box::new(ra), Box::new(rb)),
+                vec![ha, hb],
+            )
         }
         ScalarExpr::UnaryOp(op, a) => {
             let (ra, ha) = rewrite_expr(*a, state, out_body);
             (ScalarExpr::UnaryOp(op, Box::new(ra)), vec![ha])
         }
-        ScalarExpr::MethodCall { receiver, method, args } => {
+        ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
             let (rr, hr) = rewrite_expr(*receiver, state, out_body);
             let mut new_args = Vec::with_capacity(args.len());
             let mut hashes = Vec::with_capacity(1 + args.len());
@@ -723,23 +783,42 @@ fn rewrite_expr(
                 new_args.push(ra);
                 hashes.push(ha);
             }
-            (ScalarExpr::MethodCall { receiver: Box::new(rr), method, args: new_args }, hashes)
+            (
+                ScalarExpr::MethodCall {
+                    receiver: Box::new(rr),
+                    method,
+                    args: new_args,
+                },
+                hashes,
+            )
         }
         ScalarExpr::Select { cond, then, else_ } => {
-            let (rc, hc) = rewrite_expr(*cond,  state, out_body);
-            let (rt, ht) = rewrite_expr(*then,  state, out_body);
+            let (rc, hc) = rewrite_expr(*cond, state, out_body);
+            let (rt, ht) = rewrite_expr(*then, state, out_body);
             let (re, he) = rewrite_expr(*else_, state, out_body);
-            (ScalarExpr::Select {
-                cond:  Box::new(rc),
-                then:  Box::new(rt),
-                else_: Box::new(re),
-            }, vec![hc, ht, he])
+            (
+                ScalarExpr::Select {
+                    cond: Box::new(rc),
+                    then: Box::new(rt),
+                    else_: Box::new(re),
+                },
+                vec![hc, ht, he],
+            )
         }
         ScalarExpr::IndexInto { container, index } => {
             let (ri, hi) = rewrite_expr(*index, state, out_body);
-            (ScalarExpr::IndexInto { container, index: Box::new(ri) }, vec![hi])
+            (
+                ScalarExpr::IndexInto {
+                    container,
+                    index: Box::new(ri),
+                },
+                vec![hi],
+            )
         }
-        ScalarExpr::FieldLoadAt { field_key, components } => {
+        ScalarExpr::FieldLoadAt {
+            field_key,
+            components,
+        } => {
             let mut new_components = Vec::with_capacity(components.len());
             let mut hashes = Vec::with_capacity(components.len());
             for c in components {
@@ -747,7 +826,13 @@ fn rewrite_expr(
                 new_components.push(rc);
                 hashes.push(hc);
             }
-            (ScalarExpr::FieldLoadAt { field_key, components: new_components }, hashes)
+            (
+                ScalarExpr::FieldLoadAt {
+                    field_key,
+                    components: new_components,
+                },
+                hashes,
+            )
         }
         ScalarExpr::FreeCall { name, args } => {
             let mut new_args = Vec::with_capacity(args.len());
@@ -757,11 +842,23 @@ fn rewrite_expr(
                 new_args.push(ra);
                 hashes.push(ha);
             }
-            (ScalarExpr::FreeCall { name, args: new_args }, hashes)
+            (
+                ScalarExpr::FreeCall {
+                    name,
+                    args: new_args,
+                },
+                hashes,
+            )
         }
         ScalarExpr::Cast { to, value } => {
             let (rv, hv) = rewrite_expr(*value, state, out_body);
-            (ScalarExpr::Cast { to, value: Box::new(rv) }, vec![hv])
+            (
+                ScalarExpr::Cast {
+                    to,
+                    value: Box::new(rv),
+                },
+                vec![hv],
+            )
         }
     };
     let self_hash = hash_expr_step(&rewritten, &child_hashes);
@@ -782,16 +879,13 @@ fn rewrite_expr(
     //     separate Let element.
     let count = state.counts.get(&self_hash).copied().unwrap_or(0);
     let threshold = effective_threshold(&rewritten);
-    if count >= threshold
-        && !is_trivial(&rewritten)
-        && is_f64_expr(&rewritten)
-    {
+    if count >= threshold && !is_trivial(&rewritten) && is_f64_expr(&rewritten) {
         let temp_name = state.fresh_name();
         state.emitted.insert(self_hash, temp_name.clone());
         out_body.push(ScalarStmt::Let {
-            name:    temp_name.clone(),
+            name: temp_name.clone(),
             element: ElementTy::F64,
-            value:   rewritten,
+            value: rewritten,
         });
         return (ScalarExpr::Var(temp_name), self_hash);
     }
@@ -807,7 +901,9 @@ mod tests {
     use crate::ConstValue;
     use crate::passes::scalarize::{BinaryKind, ScalarExpr, ScalarStmt};
 
-    fn v(name: &str) -> ScalarExpr { ScalarExpr::Var(name.to_string()) }
+    fn v(name: &str) -> ScalarExpr {
+        ScalarExpr::Var(name.to_string())
+    }
 
     /// regression: commutative ops hash operand-order-independently, so
     /// `a op b` and `b op a` produce the SAME hash (and collapse in cse);
@@ -820,19 +916,30 @@ mod tests {
         let ab = [11u64, 22u64];
         let ba = [22u64, 11u64];
         for (op, expect_equal) in [
-            (BinaryKind::Add, true), (BinaryKind::Mul, true),
-            (BinaryKind::Eq, true), (BinaryKind::Ne, true),
-            (BinaryKind::BitOr, true), (BinaryKind::BitAnd, true),
+            (BinaryKind::Add, true),
+            (BinaryKind::Mul, true),
+            (BinaryKind::Eq, true),
+            (BinaryKind::Ne, true),
+            (BinaryKind::BitOr, true),
+            (BinaryKind::BitAnd, true),
             (BinaryKind::BitXor, true),
-            (BinaryKind::Sub, false), (BinaryKind::Div, false),
-            (BinaryKind::Lt, false), (BinaryKind::Le, false),
-            (BinaryKind::Gt, false), (BinaryKind::Ge, false),
+            (BinaryKind::Sub, false),
+            (BinaryKind::Div, false),
+            (BinaryKind::Lt, false),
+            (BinaryKind::Le, false),
+            (BinaryKind::Gt, false),
+            (BinaryKind::Ge, false),
         ] {
             let e = ScalarExpr::BinOp(op, Box::new(v("a")), Box::new(v("b")));
             let h_ab = hash_expr_step(&e, &ab);
             let h_ba = hash_expr_step(&e, &ba);
-            assert_eq!(h_ab == h_ba, expect_equal,
-                "{:?}: order-equality should be {}", op, expect_equal);
+            assert_eq!(
+                h_ab == h_ba,
+                expect_equal,
+                "{:?}: order-equality should be {}",
+                op,
+                expect_equal
+            );
         }
     }
 
@@ -856,14 +963,18 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(ba()), Box::new(v("t"))),
         ];
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
+        assert_eq!(
+            body.len(),
+            1,
             "a*b and b*a must collapse to one cse temp, got {} lets: {:?}",
-            body.len(), body);
+            body.len(),
+            body
+        );
     }
 
     /// regression: depth-aware cheap threshold. a DEEP cheap chain (height >= 3,
-    /// e.g. `((a*b)*c)*d`) shared twice hoists at 2 uses; a SHALLOW cheap share
-    /// (height 1, e.g. `a-b`) shared twice stays inline (base threshold 4).
+    /// e.g., `((a*b)*c)*d`) shared twice hoists at 2 uses; a SHALLOW cheap share
+    /// (height 1, e.g., `a-b`) shared twice stays inline (base threshold 4).
     #[test]
     fn depth_aware_cheap_threshold() {
         let mul = |a: ScalarExpr, b: ScalarExpr| {
@@ -878,19 +989,28 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(deep()), Box::new(v("q"))),
         ];
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
-            "deep cheap chain shared twice must hoist, got {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "deep cheap chain shared twice must hoist, got {:?}",
+            body
+        );
 
         // a-b : height 1, cheap. shared twice -> must NOT hoist (base threshold 4).
         let shallow = || ScalarExpr::BinOp(BinaryKind::Sub, Box::new(v("a")), Box::new(v("b")));
         assert!(!height_ge(&shallow(), 3));
         let mut body2: Vec<ScalarStmt> = vec![];
-        let mut outputs2 = vec![
-            ScalarExpr::BinOp(BinaryKind::Mul, Box::new(shallow()), Box::new(shallow())),
-        ];
+        let mut outputs2 = vec![ScalarExpr::BinOp(
+            BinaryKind::Mul,
+            Box::new(shallow()),
+            Box::new(shallow()),
+        )];
         cse_in_place(&mut body2, &mut outputs2, "__cse_");
-        assert!(body2.is_empty(),
-            "shallow cheap share at 2 uses must stay inline, got {:?}", body2);
+        assert!(
+            body2.is_empty(),
+            "shallow cheap share at 2 uses must stay inline, got {:?}",
+            body2
+        );
     }
 
     /// regression: pass 2 can re-hoist a value the scalarizer already hoisted,
@@ -914,7 +1034,12 @@ mod tests {
         ];
         cse_in_place(&mut body, &mut outputs, "__cse_");
         // exactly one surviving Let (the shared a/b), no orphan.
-        assert_eq!(body.len(), 1, "orphaned let must be dropped, body={:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "orphaned let must be dropped, body={:?}",
+            body
+        );
         // every surviving let is actually read by the outputs.
         let mut read = HashSet::new();
         for o in &outputs {
@@ -930,9 +1055,11 @@ mod tests {
     #[test]
     fn no_cse_when_no_shared_subexpr() {
         let mut body: Vec<ScalarStmt> = vec![];
-        let mut outputs = vec![
-            ScalarExpr::BinOp(BinaryKind::Add, Box::new(v("x")), Box::new(v("y"))),
-        ];
+        let mut outputs = vec![ScalarExpr::BinOp(
+            BinaryKind::Add,
+            Box::new(v("x")),
+            Box::new(v("y")),
+        )];
         cse_in_place(&mut body, &mut outputs, "__cse_");
         assert!(body.is_empty(), "no CSE Lets expected: {:?}", body);
         assert_eq!(
@@ -980,9 +1107,9 @@ mod tests {
         // (medium-class, threshold 2) so the share triggers under step 4.
         let pre = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("a")), Box::new(v("a")));
         let mut body: Vec<ScalarStmt> = vec![ScalarStmt::Let {
-            name:    "__cse_0".to_string(),
+            name: "__cse_0".to_string(),
             element: crate::ElementTy::F64,
-            value:   pre,
+            value: pre,
         }];
         // one output READS the pre-hoisted __cse_0 so it is live (a realistic
         // scalarizer temp that is actually used) — otherwise pass-3 dce would
@@ -991,8 +1118,11 @@ mod tests {
         let yy = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("y")), Box::new(v("z")));
         let mut outputs = vec![
             ScalarExpr::BinOp(BinaryKind::Add, Box::new(yy.clone()), Box::new(v("p"))),
-            ScalarExpr::BinOp(BinaryKind::Sub, Box::new(yy.clone()),
-                Box::new(ScalarExpr::Var("__cse_0".to_string()))),
+            ScalarExpr::BinOp(
+                BinaryKind::Sub,
+                Box::new(yy.clone()),
+                Box::new(ScalarExpr::Var("__cse_0".to_string())),
+            ),
         ];
         cse_in_place(&mut body, &mut outputs, "__cse_");
 
@@ -1004,8 +1134,15 @@ mod tests {
             })
             .collect();
         let unique: std::collections::HashSet<&String> = names.iter().collect();
-        assert_eq!(names.len(), unique.len(), "duplicate temp declaration: {names:?}");
-        assert!(names.iter().any(|n| n == "__cse_0"), "pre-hoisted name kept: {names:?}");
+        assert_eq!(
+            names.len(),
+            unique.len(),
+            "duplicate temp declaration: {names:?}"
+        );
+        assert!(
+            names.iter().any(|n| n == "__cse_0"),
+            "pre-hoisted name kept: {names:?}"
+        );
         assert!(
             names.iter().any(|n| n == "__cse_1"),
             "CSE must continue numbering above the hoisted __cse_0: {names:?}"
@@ -1017,7 +1154,7 @@ mod tests {
         // step 4: both fixtures must be medium-class so 2 uses suffices.
         // inner = Div(x, w); outer = Div(inner, y). both shared 2× across the
         // two outputs. deepest-first emission ordering is unchanged.
-        let xx   = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("w")));
+        let xx = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("w")));
         let xxpy = ScalarExpr::BinOp(BinaryKind::Div, Box::new(xx.clone()), Box::new(v("y")));
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = vec![
@@ -1050,7 +1187,11 @@ mod tests {
             ScalarExpr::BinOp(BinaryKind::Sub, Box::new(v("x")), Box::new(one.clone())),
         ];
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert!(body.is_empty(), "trivial subexprs must not be hoisted: {:?}", body);
+        assert!(
+            body.is_empty(),
+            "trivial subexprs must not be hoisted: {:?}",
+            body
+        );
     }
 
     #[test]
@@ -1071,17 +1212,16 @@ mod tests {
     }
 
     /// the load-bearing test: a chain of duplicated subtrees that
-    /// would be quadratic-time in the old key_of implementation. this
-    /// builds a 16-deep binary tree where each subtree is shared with
-    /// its sibling — total node count is 2^17 - 1 = 131071, but the
-    /// number of DISTINCT subexpressions is only 17. the old CSE would
-    /// generate 17 keys totalling 131071 characters (cheap per key)
-    /// but call count_in_expr 131071 times — each call's key_of
-    /// walking the full subtree. that's ~10^10 character operations.
-    /// the new CSE walks each node exactly once: ~10^5 ops total.
+    /// would be quadratic-time under a key_of that re-serializes each
+    /// subtree. this builds a 16-deep binary tree where each subtree is
+    /// shared with its sibling — total node count is 2^17 - 1 = 131071, but
+    /// the number of DISTINCT subexpressions is only 17. a re-walking key_of
+    /// would call count_in_expr 131071 times, each walking the full subtree
+    /// — ~10^10 character operations. CSE walks each node exactly once:
+    /// ~10^5 ops total.
     ///
     /// the test budget here is conservative (no time assertion);
-    /// completion in test mode confirms the algorithmic fix.
+    /// completion in test mode confirms the linear walk.
     #[test]
     fn deeply_duplicated_tree_completes_quickly() {
         // step 4: switch the duplicated op from Mul (cheap, threshold 4) to
@@ -1106,13 +1246,13 @@ mod tests {
         // the output is a Div whose two children are the same Var
         // pointing at the topmost CSE temp (one level below the root).
         match &outputs[0] {
-            ScalarExpr::BinOp(BinaryKind::Div, a, b) => {
-                match (&**a, &**b) {
-                    (ScalarExpr::Var(na), ScalarExpr::Var(nb)) => assert_eq!(na, nb,
-                        "topmost Div should reference the same CSE temp on both sides"),
-                    other => panic!("expected (Var, Var), got {:?}", other),
-                }
-            }
+            ScalarExpr::BinOp(BinaryKind::Div, a, b) => match (&**a, &**b) {
+                (ScalarExpr::Var(na), ScalarExpr::Var(nb)) => assert_eq!(
+                    na, nb,
+                    "topmost Div should reference the same CSE temp on both sides"
+                ),
+                other => panic!("expected (Var, Var), got {:?}", other),
+            },
             other => panic!("expected top-level Div, got {:?}", other),
         }
     }
@@ -1132,7 +1272,11 @@ mod tests {
 
     /// helper: a Let with the standard f64 element.
     fn let_f64(name: &str, value: ScalarExpr) -> ScalarStmt {
-        ScalarStmt::Let { name: name.to_string(), element: ElementTy::F64, value }
+        ScalarStmt::Let {
+            name: name.to_string(),
+            element: ElementTy::F64,
+            value,
+        }
     }
 
     /// **the load-bearing law**: a duplicated subexpression INSIDE a Scope is
@@ -1153,9 +1297,11 @@ mod tests {
         let xy_div = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));
         let inner_let = let_f64(
             "z",
-            ScalarExpr::BinOp(BinaryKind::Mul,
+            ScalarExpr::BinOp(
+                BinaryKind::Mul,
                 Box::new(xy_div.clone()),
-                Box::new(xy_div.clone())),
+                Box::new(xy_div.clone()),
+            ),
         );
         let inner_result = ScalarExpr::BinOp(
             BinaryKind::Add,
@@ -1168,24 +1314,38 @@ mod tests {
         cse_in_place(&mut body, &mut outputs, "__cse_");
 
         // the OUTER body must still be just the one Scope statement.
-        assert_eq!(body.len(), 1, "outer body should have exactly the Scope; got {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "outer body should have exactly the Scope; got {:?}",
+            body
+        );
         // the Scope's BODY must have grown from 1 stmt (the inner let) to 2
         // (a hoisted __cse_N let for x/y, then the original `z = ...`).
         match &body[0] {
-            ScalarStmt::Scope { body: scope_body, .. } => {
+            ScalarStmt::Scope {
+                body: scope_body, ..
+            } => {
                 assert!(
                     scope_body.len() >= 2,
                     "scope body should contain hoisted CSE let + original; got {} stmts: {:?}",
-                    scope_body.len(), scope_body,
+                    scope_body.len(),
+                    scope_body,
                 );
                 // the first stmt of the scope body should be a CSE let — the
                 // hoisted `x / y`.
                 match &scope_body[0] {
                     ScalarStmt::Let { name, value, .. } => {
-                        assert!(name.starts_with("__cse_"),
-                            "first stmt in scope body should be a CSE let, got name={name}");
+                        assert!(
+                            name.starts_with("__cse_"),
+                            "first stmt in scope body should be a CSE let, got name={name}"
+                        );
                         // its value must be (x / y) — that's the hoisted candidate.
-                        assert_eq!(*value, xy_div, "hoisted let must be (x / y); got {:?}", value);
+                        assert_eq!(
+                            *value, xy_div,
+                            "hoisted let must be (x / y); got {:?}",
+                            value
+                        );
                     }
                     other => panic!("first scope stmt should be a Let, got {:?}", other),
                 }
@@ -1206,7 +1366,10 @@ mod tests {
         // step 4: each scope independently hoists Div (medium, threshold 2).
         let x1 = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));
         let inner = |name: &str| -> Vec<ScalarStmt> {
-            vec![let_f64(name, ScalarExpr::BinOp(BinaryKind::Add, Box::new(x1.clone()), Box::new(x1.clone())))]
+            vec![let_f64(
+                name,
+                ScalarExpr::BinOp(BinaryKind::Add, Box::new(x1.clone()), Box::new(x1.clone())),
+            )]
         };
 
         let mut body = vec![
@@ -1223,10 +1386,14 @@ mod tests {
         for stmt in &body {
             match stmt {
                 ScalarStmt::Scope { body: sb, .. } => {
-                    let has_cse_let = sb.iter().any(|s| {
-                        matches!(s, ScalarStmt::Let { name, .. } if name.starts_with("__cse_"))
-                    });
-                    assert!(has_cse_let, "each scope should have its own CSE let; body = {:?}", sb);
+                    let has_cse_let = sb.iter().any(
+                        |s| matches!(s, ScalarStmt::Let { name, .. } if name.starts_with("__cse_")),
+                    );
+                    assert!(
+                        has_cse_let,
+                        "each scope should have its own CSE let; body = {:?}",
+                        sb
+                    );
                 }
                 _ => panic!("expected Scope, got {:?}", stmt),
             }
@@ -1285,16 +1452,19 @@ mod tests {
     }
 
     /// cheap-class at the threshold-1 boundary: a Mul shared 3 times must NOT
-    /// hoist (cheap threshold = 4). this is the load-bearing policy reversal —
-    /// the OLD pass would have hoisted any 2× share.
+    /// hoist (cheap threshold = 4). a share count below the cheap threshold is
+    /// left in place.
     #[test]
     fn cheap_below_threshold_stays_inline() {
         let mul = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("x")), Box::new(v("y")));
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(mul, 3);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert!(body.is_empty(),
-            "cheap-class Mul shared 3× must NOT hoist; got body = {:?}", body);
+        assert!(
+            body.is_empty(),
+            "cheap-class Mul shared 3× must NOT hoist; got body = {:?}",
+            body
+        );
     }
 
     /// cheap-class at the threshold: a Mul shared 4 times MUST hoist.
@@ -1304,8 +1474,12 @@ mod tests {
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(mul, 4);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
-            "cheap-class Mul shared 4× must hoist exactly once; got body = {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "cheap-class Mul shared 4× must hoist exactly once; got body = {:?}",
+            body
+        );
     }
 
     /// medium-class (Div) at the threshold: 2 shares hoist.
@@ -1315,8 +1489,12 @@ mod tests {
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(div, 2);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
-            "medium-class Div shared 2× must hoist exactly once; got body = {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "medium-class Div shared 2× must hoist exactly once; got body = {:?}",
+            body
+        );
     }
 
     /// medium-class (sqrt) at the threshold: 2 shares hoist. MethodCall
@@ -1325,14 +1503,18 @@ mod tests {
     fn medium_method_at_threshold_hoists() {
         let sqrt = ScalarExpr::MethodCall {
             receiver: Box::new(v("x")),
-            method:   "sqrt".to_string(),
-            args:     vec![],
+            method: "sqrt".to_string(),
+            args: vec![],
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(sqrt, 2);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
-            "medium-class sqrt shared 2× must hoist; got body = {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "medium-class sqrt shared 2× must hoist; got body = {:?}",
+            body
+        );
     }
 
     /// expensive (transcendental) at the threshold: 2 shares hoist. this is
@@ -1341,14 +1523,18 @@ mod tests {
     fn expensive_transcendental_at_threshold_hoists() {
         let sin = ScalarExpr::MethodCall {
             receiver: Box::new(v("x")),
-            method:   "sin".to_string(),
-            args:     vec![],
+            method: "sin".to_string(),
+            args: vec![],
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(sin, 2);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
-            "expensive sin shared 2× must hoist; got body = {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "expensive sin shared 2× must hoist; got body = {:?}",
+            body
+        );
     }
 
     /// expensive (exp) at single use: must NOT hoist. the policy is
@@ -1357,16 +1543,21 @@ mod tests {
     fn expensive_single_use_stays_inline() {
         let exp = ScalarExpr::MethodCall {
             receiver: Box::new(v("x")),
-            method:   "exp".to_string(),
-            args:     vec![],
+            method: "exp".to_string(),
+            args: vec![],
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = vec![ScalarExpr::BinOp(
-            BinaryKind::Add, Box::new(exp), Box::new(v("k")),
+            BinaryKind::Add,
+            Box::new(exp),
+            Box::new(v("k")),
         )];
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert!(body.is_empty(),
-            "expensive single-use exp must NOT hoist; got body = {:?}", body);
+        assert!(
+            body.is_empty(),
+            "expensive single-use exp must NOT hoist; got body = {:?}",
+            body
+        );
     }
 
     /// memory-class (FieldLoadAt) at the threshold: 2 shares hoist. once the
@@ -1374,14 +1565,18 @@ mod tests {
     #[test]
     fn memory_field_load_at_threshold_hoists() {
         let load = ScalarExpr::FieldLoadAt {
-            field_key:  "rho".to_string(),
+            field_key: "rho".to_string(),
             components: vec![v("i"), v("j")],
         };
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(load, 2);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
-            "memory FieldLoadAt shared 2× must hoist; got body = {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "memory FieldLoadAt shared 2× must hoist; got body = {:?}",
+            body
+        );
     }
 
     /// trivial (Const, Var) at any share count: never hoists.
@@ -1391,15 +1586,21 @@ mod tests {
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(v("x"), 10);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert!(body.is_empty(),
-            "trivial Var shared 10× must NOT hoist; got body = {:?}", body);
+        assert!(
+            body.is_empty(),
+            "trivial Var shared 10× must NOT hoist; got body = {:?}",
+            body
+        );
 
         // Const shared 10 times: must NOT hoist either.
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(ScalarExpr::Const(ConstValue::F64(2.5)), 10);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert!(body.is_empty(),
-            "trivial Const shared 10× must NOT hoist; got body = {:?}", body);
+        assert!(
+            body.is_empty(),
+            "trivial Const shared 10× must NOT hoist; got body = {:?}",
+            body
+        );
     }
 
     /// FreeCall (unknown function): defaults to Expensive class, so 2 shares
@@ -1413,8 +1614,12 @@ mod tests {
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = shared_n_times(call, 2);
         cse_in_place(&mut body, &mut outputs, "__cse_");
-        assert_eq!(body.len(), 1,
-            "FreeCall shared 2× must hoist (expensive class); got body = {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "FreeCall shared 2× must hoist (expensive class); got body = {:?}",
+            body
+        );
     }
 
     /// **the load-bearing demonstration**: a kernel that mixes cheap and
@@ -1429,24 +1634,38 @@ mod tests {
         // sin → hoist (expensive ≥ 2). mul → stay inline (cheap < 4).
         let sin = ScalarExpr::MethodCall {
             receiver: Box::new(v("x")),
-            method:   "sin".to_string(),
-            args:     vec![],
+            method: "sin".to_string(),
+            args: vec![],
         };
         let mul = ScalarExpr::BinOp(BinaryKind::Mul, Box::new(v("a")), Box::new(v("b")));
-        let out0 = ScalarExpr::BinOp(BinaryKind::Add, Box::new(sin.clone()), Box::new(mul.clone()));
-        let scaled = ScalarExpr::BinOp(BinaryKind::Mul,
-            Box::new(mul.clone()), Box::new(ScalarExpr::Const(ConstValue::F64(2.0))));
+        let out0 = ScalarExpr::BinOp(
+            BinaryKind::Add,
+            Box::new(sin.clone()),
+            Box::new(mul.clone()),
+        );
+        let scaled = ScalarExpr::BinOp(
+            BinaryKind::Mul,
+            Box::new(mul.clone()),
+            Box::new(ScalarExpr::Const(ConstValue::F64(2.0))),
+        );
         let out1 = ScalarExpr::BinOp(BinaryKind::Add, Box::new(sin.clone()), Box::new(scaled));
 
         let mut body: Vec<ScalarStmt> = vec![];
         let mut outputs = vec![out0, out1];
         cse_in_place(&mut body, &mut outputs, "__cse_");
         // exactly one CSE Let — for sin(x). a*b stays inline (cheap, only 2 shares).
-        assert_eq!(body.len(), 1,
-            "expected exactly one CSE Let (for sin); got body = {:?}", body);
+        assert_eq!(
+            body.len(),
+            1,
+            "expected exactly one CSE Let (for sin); got body = {:?}",
+            body
+        );
         match &body[0] {
-            ScalarStmt::Let { value, .. } => assert_eq!(*value, sin,
-                "the lone hoist must be sin(x); got {:?}", value),
+            ScalarStmt::Let { value, .. } => assert_eq!(
+                *value, sin,
+                "the lone hoist must be sin(x); got {:?}",
+                value
+            ),
             other => panic!("expected Let, got {:?}", other),
         }
     }
@@ -1456,31 +1675,34 @@ mod tests {
     /// careless edit of the classifier.
     #[test]
     fn cost_class_table_is_exact() {
-        assert_eq!(cost_class(&v("x")),                                CostClass::Trivial);
-        assert_eq!(cost_class(&ScalarExpr::Const(ConstValue::F64(1.0))), CostClass::Trivial);
+        assert_eq!(cost_class(&v("x")), CostClass::Trivial);
+        assert_eq!(
+            cost_class(&ScalarExpr::Const(ConstValue::F64(1.0))),
+            CostClass::Trivial
+        );
 
         let bin = |op| ScalarExpr::BinOp(op, Box::new(v("a")), Box::new(v("b")));
         assert_eq!(cost_class(&bin(BinaryKind::Add)), CostClass::Cheap);
         assert_eq!(cost_class(&bin(BinaryKind::Sub)), CostClass::Cheap);
         assert_eq!(cost_class(&bin(BinaryKind::Mul)), CostClass::Cheap);
         assert_eq!(cost_class(&bin(BinaryKind::Div)), CostClass::Medium);
-        assert_eq!(cost_class(&bin(BinaryKind::Lt)),  CostClass::Cheap);
+        assert_eq!(cost_class(&bin(BinaryKind::Lt)), CostClass::Cheap);
 
         let mc = |name: &str| ScalarExpr::MethodCall {
             receiver: Box::new(v("x")),
-            method:   name.to_string(),
-            args:     vec![],
+            method: name.to_string(),
+            args: vec![],
         };
         assert_eq!(cost_class(&mc("sqrt")), CostClass::Medium);
-        assert_eq!(cost_class(&mc("abs")),  CostClass::Medium);
-        assert_eq!(cost_class(&mc("sin")),  CostClass::Expensive);
-        assert_eq!(cost_class(&mc("cos")),  CostClass::Expensive);
-        assert_eq!(cost_class(&mc("exp")),  CostClass::Expensive);
-        assert_eq!(cost_class(&mc("ln")),   CostClass::Expensive);
+        assert_eq!(cost_class(&mc("abs")), CostClass::Medium);
+        assert_eq!(cost_class(&mc("sin")), CostClass::Expensive);
+        assert_eq!(cost_class(&mc("cos")), CostClass::Expensive);
+        assert_eq!(cost_class(&mc("exp")), CostClass::Expensive);
+        assert_eq!(cost_class(&mc("ln")), CostClass::Expensive);
         assert_eq!(cost_class(&mc("powf")), CostClass::Expensive);
 
         let load = ScalarExpr::FieldLoadAt {
-            field_key:  "u".to_string(),
+            field_key: "u".to_string(),
             components: vec![v("i")],
         };
         assert_eq!(cost_class(&load), CostClass::Memory);
@@ -1489,11 +1711,11 @@ mod tests {
     /// **threshold table**: trivial = MAX, cheap = 4, medium/expensive/memory = 2.
     #[test]
     fn hoist_threshold_table_is_exact() {
-        assert_eq!(hoist_threshold(CostClass::Trivial),   usize::MAX);
-        assert_eq!(hoist_threshold(CostClass::Cheap),     4);
-        assert_eq!(hoist_threshold(CostClass::Medium),    2);
+        assert_eq!(hoist_threshold(CostClass::Trivial), usize::MAX);
+        assert_eq!(hoist_threshold(CostClass::Cheap), 4);
+        assert_eq!(hoist_threshold(CostClass::Medium), 2);
         assert_eq!(hoist_threshold(CostClass::Expensive), 2);
-        assert_eq!(hoist_threshold(CostClass::Memory),    2);
+        assert_eq!(hoist_threshold(CostClass::Memory), 2);
     }
 
     /// **nested-scope correctness**: a Scope-inside-a-Scope still gets per-scope
@@ -1512,7 +1734,10 @@ mod tests {
         let x1 = ScalarExpr::BinOp(BinaryKind::Div, Box::new(v("x")), Box::new(v("y")));
         let inner_scope = scope_stmt(
             "m",
-            vec![let_f64("p", ScalarExpr::BinOp(BinaryKind::Mul, Box::new(x1.clone()), Box::new(x1)))],
+            vec![let_f64(
+                "p",
+                ScalarExpr::BinOp(BinaryKind::Mul, Box::new(x1.clone()), Box::new(x1)),
+            )],
             v("p"),
         );
         let outer_scope = scope_stmt(
@@ -1529,19 +1754,28 @@ mod tests {
 
         // inner scope should have a CSE let for (x+1).
         match &body[0] {
-            ScalarStmt::Scope { body: outer_body, .. } => {
+            ScalarStmt::Scope {
+                body: outer_body, ..
+            } => {
                 // outer scope's body has one statement: the inner Scope.
                 assert_eq!(outer_body.len(), 1);
                 match &outer_body[0] {
-                    ScalarStmt::Scope { body: inner_body, .. } => {
+                    ScalarStmt::Scope {
+                        body: inner_body, ..
+                    } => {
                         let has_cse_let = inner_body.iter().any(|s| {
                             matches!(s, ScalarStmt::Let { name, .. } if name.starts_with("__cse_"))
                         });
-                        assert!(has_cse_let,
+                        assert!(
+                            has_cse_let,
                             "inner scope should contain hoisted CSE let; body = {:?}",
-                            inner_body);
+                            inner_body
+                        );
                     }
-                    other => panic!("outer scope's first stmt should be inner Scope, got {:?}", other),
+                    other => panic!(
+                        "outer scope's first stmt should be inner Scope, got {:?}",
+                        other
+                    ),
                 }
             }
             other => panic!("outer body[0] should be outer Scope, got {:?}", other),

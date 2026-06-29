@@ -43,7 +43,7 @@ use std::collections::HashSet;
 
 use std::collections::HashMap;
 use symbi_ir::graph::{ElementWiseOp, Graph, NodeId, Op as GOp};
-use symbi_ir::{splice_graph, Symbol};
+use symbi_ir::{Symbol, splice_graph};
 
 use crate::regime_spec::RegimeSpec;
 use crate::source_spec::{BuiltSource, SourceKind, SourceSpec};
@@ -86,7 +86,7 @@ impl FusedSourceFamily {
     pub fn source_id(&self) -> &'static str {
         match self {
             Self::UniformAcceleration { .. } => "uniform_accel",
-            Self::PointMassGravity { .. }    => "point_mass_grav",
+            Self::PointMassGravity { .. } => "point_mass_grav",
         }
     }
 
@@ -95,11 +95,15 @@ impl FusedSourceFamily {
     /// they pass into `FusedSourceBinding::new(source_id, &pairs[..])`.
     pub fn scalar_pairs(&self) -> Vec<(String, f64)> {
         match self {
-            Self::UniformAcceleration { g_ext, .. } => g_ext.iter().enumerate()
+            Self::UniformAcceleration { g_ext, .. } => g_ext
+                .iter()
+                .enumerate()
                 .map(|(k, g)| (format!("g_ext_{k}"), *g))
                 .collect(),
             Self::PointMassGravity { gm, xm, eps } => {
-                let mut pairs: Vec<(String, f64)> = xm.iter().enumerate()
+                let mut pairs: Vec<(String, f64)> = xm
+                    .iter()
+                    .enumerate()
                     .map(|(k, x)| (format!("xm_{k}"), *x))
                     .collect();
                 pairs.push(("gm".to_string(), *gm));
@@ -183,13 +187,19 @@ impl std::ops::Add for Overlay {
 /// position `xm`, softening length `eps` (pass `eps = 0` for the bare point particle). fused
 /// (AOT slug `point_mass_grav`).
 pub fn point_mass(gm: f64, xm: Vec<f64>, eps: f64) -> Overlay {
-    Overlay { fused: vec![FusedSourceFamily::PointMassGravity { gm, xm, eps }], specs: Vec::new() }
+    Overlay {
+        fused: vec![FusedSourceFamily::PointMassGravity { gm, xm, eps }],
+        specs: Vec::new(),
+    }
 }
 
 /// **uniform external acceleration** overlay — a constant per-axis body force
 /// `g_ext`. fused (AOT slug `uniform_accel`).
 pub fn uniform_accel(g_ext: Vec<f64>) -> Overlay {
-    Overlay { fused: vec![FusedSourceFamily::UniformAcceleration { g_ext }], specs: Vec::new() }
+    Overlay {
+        fused: vec![FusedSourceFamily::UniformAcceleration { g_ext }],
+        specs: Vec::new(),
+    }
 }
 
 /// the runtime composition of intrinsic laws + overlay sources for one
@@ -208,7 +218,7 @@ pub struct SimulationLaws<'a> {
     pub ib: Vec<SourceSpec>,
     pub user: Vec<SourceSpec>,
     /// **B6-iv Phase 4c**: the AOT-fused source families bound for this
-    /// simulation. typically ONE family (e.g. uniform_accel) — but the
+    /// simulation. typically ONE family (e.g., uniform_accel) — but the
     /// derivation accepts more for future composite slugs (e.g.
     /// `"uniform_accel_pointmass"`). today's substrate consumes the FIRST
     /// family via `derive_fused_binding(d)`.
@@ -230,16 +240,20 @@ impl<'a> SimulationLaws<'a> {
     }
 
     pub fn with_geometric(mut self, sources: Vec<SourceSpec>) -> Self {
-        self.geometric = sources; self
+        self.geometric = sources;
+        self
     }
     pub fn with_gravity(mut self, sources: Vec<SourceSpec>) -> Self {
-        self.gravity = sources; self
+        self.gravity = sources;
+        self
     }
     pub fn with_ib(mut self, sources: Vec<SourceSpec>) -> Self {
-        self.ib = sources; self
+        self.ib = sources;
+        self
     }
     pub fn with_user(mut self, sources: Vec<SourceSpec>) -> Self {
-        self.user = sources; self
+        self.user = sources;
+        self
     }
 
     /// **B6-iv Phase 4c**: append a fused-source family to this simulation's
@@ -281,10 +295,10 @@ impl<'a> SimulationLaws<'a> {
         }
         for spec in overlay.specs {
             match spec.kind {
-                SourceKind::Geometric    => self.geometric.push(spec),
-                SourceKind::Gravity      => self.gravity.push(spec),
+                SourceKind::Geometric => self.geometric.push(spec),
+                SourceKind::Gravity => self.gravity.push(spec),
                 SourceKind::ImmersedBody => self.ib.push(spec),
-                SourceKind::UserDefined  => self.user.push(spec),
+                SourceKind::UserDefined => self.user.push(spec),
             }
         }
         self
@@ -296,7 +310,7 @@ impl<'a> SimulationLaws<'a> {
     /// then routes through the unfused godunov, the prior default).
     ///
     /// today this picks the FIRST family in `fused_families`; multi-family
-    /// composite slugs (e.g. `"uniform_accel_pointmass"`) are a future
+    /// composite slugs (e.g., `"uniform_accel_pointmass"`) are a future
     /// extension once the AOT bake-matrix grows. a SimulationLaws with two
     /// families currently logs a `debug_assert` so silent dropping never
     /// goes unnoticed.
@@ -314,7 +328,8 @@ impl<'a> SimulationLaws<'a> {
     /// gravity, IB, user). the substrate emitter walks this to build the
     /// per-field source accumulator.
     pub fn overlays(&self) -> impl Iterator<Item = &SourceSpec> {
-        self.geometric.iter()
+        self.geometric
+            .iter()
             .chain(self.gravity.iter())
             .chain(self.ib.iter())
             .chain(self.user.iter())
@@ -391,14 +406,17 @@ impl<'a> SimulationLaws<'a> {
                 None => translated,
                 Some(prev) => {
                     assert_eq!(
-                        prev.len(), translated.len(),
+                        prev.len(),
+                        translated.len(),
                         "build_total_source: overlays for field '{field}' must \
                          emit the same component count (got {} vs {})",
-                        prev.len(), translated.len(),
+                        prev.len(),
+                        translated.len(),
                     );
-                    prev.into_iter().zip(translated).map(|(a, b)| {
-                        dest.element_wise(ElementWiseOp::Add, vec![a, b], None)
-                    }).collect()
+                    prev.into_iter()
+                        .zip(translated)
+                        .map(|(a, b)| dest.element_wise(ElementWiseOp::Add, vec![a, b], None))
+                        .collect()
                 }
             });
         }
@@ -469,7 +487,8 @@ fn redeclare_params(dest: &mut Graph, src: &Graph) -> HashMap<Symbol, NodeId> {
     let mut subst: HashMap<Symbol, NodeId> = HashMap::new();
     for (_id, node, ty) in src.iter() {
         if let GOp::Param(sym) = &node.op {
-            subst.entry(sym.clone())
+            subst
+                .entry(sym.clone())
                 .or_insert_with(|| dest.add_param(sym.clone(), ty.clone(), node.span));
         }
     }
@@ -487,7 +506,7 @@ pub enum CompositionError {
         field: &'static str,
     },
     /// an overlay source targets a field the regime does not declare.
-    /// catches typos + cross-regime composition errors (e.g. attaching
+    /// catches typos + cross-regime composition errors (e.g., attaching
     /// rmhd-targeted overlays to newtonian).
     UnknownTargetField {
         kind: SourceKind,
@@ -511,10 +530,10 @@ pub enum CompositionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{NEWTONIAN_SPEC, ISO_NEWTONIAN_SPEC};
+    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
     use crate::source_spec::{
-        spherical_geometric_sources, point_mass_gravity_sources,
-        rigid_body_penalty_sources, accretion_sink_sources,
+        accretion_sink_sources, point_mass_gravity_sources, rigid_body_penalty_sources,
+        spherical_geometric_sources,
     };
 
     #[test]
@@ -539,12 +558,15 @@ mod tests {
         let kinds: Vec<SourceKind> = sim.overlays().map(|s| s.kind).collect();
         // expected: [Geometric, Gravity, Gravity, ImmersedBody]
         //           (spherical 1 source; gravity 2 sources; IB 1 source)
-        assert_eq!(kinds, vec![
-            SourceKind::Geometric,
-            SourceKind::Gravity,
-            SourceKind::Gravity,
-            SourceKind::ImmersedBody,
-        ]);
+        assert_eq!(
+            kinds,
+            vec![
+                SourceKind::Geometric,
+                SourceKind::Gravity,
+                SourceKind::Gravity,
+                SourceKind::ImmersedBody,
+            ]
+        );
     }
 
     #[test]
@@ -568,17 +590,22 @@ mod tests {
 
         // and the kinds on each field are diagnostic-distinct.
         let mom_kinds: Vec<SourceKind> = sim.sources_for("mom").map(|s| s.kind).collect();
-        assert_eq!(mom_kinds, vec![
-            SourceKind::Geometric, SourceKind::Gravity, SourceKind::ImmersedBody,
-        ]);
+        assert_eq!(
+            mom_kinds,
+            vec![
+                SourceKind::Geometric,
+                SourceKind::Gravity,
+                SourceKind::ImmersedBody,
+            ]
+        );
     }
 
     #[test]
     fn fields_with_overlays_dedupes_correctly() {
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_geometric(spherical_geometric_sources(3))   // mom
+            .with_geometric(spherical_geometric_sources(3)) // mom
             .with_gravity(point_mass_gravity_sources(3, true)) // mom + nrg
-            .with_ib(accretion_sink_sources(3));               // den
+            .with_ib(accretion_sink_sources(3)); // den
 
         let fields = sim.fields_with_overlays();
         assert_eq!(fields.len(), 3, "den + mom + nrg are all targeted");
@@ -638,7 +665,11 @@ mod tests {
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_user(bogus);
         let err = sim.validate().expect_err("unknown target_field must fail");
         match err {
-            CompositionError::UnknownTargetField { kind, target, regime } => {
+            CompositionError::UnknownTargetField {
+                kind,
+                target,
+                regime,
+            } => {
                 assert_eq!(kind, SourceKind::UserDefined);
                 assert_eq!(target, "bogus_field");
                 assert_eq!(regime, "newtonian");
@@ -651,7 +682,11 @@ mod tests {
     // test above; never invoked because validate() catches the error first.
     fn bogus_builder(_d: usize) -> crate::source_spec::BuiltSource {
         let g = symbi_ir::graph::Graph::new();
-        crate::source_spec::BuiltSource { graph: g, params: Vec::new(), outputs: Vec::new() }
+        crate::source_spec::BuiltSource {
+            graph: g,
+            params: Vec::new(),
+            outputs: Vec::new(),
+        }
     }
 
     #[test]
@@ -666,7 +701,10 @@ mod tests {
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC).with_geometric(bogus_geom);
         assert!(matches!(
             sim.validate(),
-            Err(CompositionError::UnknownTargetField { kind: SourceKind::Geometric, .. })
+            Err(CompositionError::UnknownTargetField {
+                kind: SourceKind::Geometric,
+                ..
+            })
         ));
     }
 
@@ -699,18 +737,27 @@ mod tests {
         use symbi_ir::backends::interp::{Backend, Cpu};
         use symbi_ir::passes::scalarize::scalarize;
         let lowered = scalarize(&built.graph, output, "total_source");
-        let inputs: Vec<f64> = built.params.iter().map(|pname| {
-            values.iter().find(|(n, _)| *n == pname.as_str())
-                .map(|(_, v)| *v)
-                .unwrap_or_else(|| panic!("eval_built: missing param '{pname}'"))
-        }).collect();
+        let inputs: Vec<f64> = built
+            .params
+            .iter()
+            .map(|pname| {
+                values
+                    .iter()
+                    .find(|(n, _)| *n == pname.as_str())
+                    .map(|(_, v)| *v)
+                    .unwrap_or_else(|| panic!("eval_built: missing param '{pname}'"))
+            })
+            .collect();
         Cpu.eval_elemental(&lowered, &inputs)[0]
     }
 
     #[test]
     fn build_total_source_returns_none_for_empty_field() {
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC);
-        assert!(sim.build_total_source("mom", 2).is_none(), "no overlays => None");
+        assert!(
+            sim.build_total_source("mom", 2).is_none(),
+            "no overlays => None"
+        );
     }
 
     #[test]
@@ -720,20 +767,32 @@ mod tests {
         // the splice operation introduces no algebraic drift.
         use crate::regime_spec::law_params;
         use crate::source_spec::source_params;
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_geometric(spherical_geometric_sources(2));
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_geometric(spherical_geometric_sources(2));
         let combined = sim.build_total_source("mom", 2).expect("one source");
-        assert_eq!(combined.outputs.len(), 2, "2D momentum source has 2 components");
+        assert_eq!(
+            combined.outputs.len(),
+            2,
+            "2D momentum source has 2 components"
+        );
 
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1);
-        let x0 = source_params::x(0); let x1 = source_params::x(1);
-        let r = 2.0; let theta = 1.0;
-        let rho = 1.5; let vr = 0.3; let vt = 0.4; let p = 0.8;
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let r = 2.0;
+        let theta = 1.0;
+        let rho = 1.5;
+        let vr = 0.3;
+        let vt = 0.4;
+        let p = 0.8;
         let values: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
-            (v0.as_str(), vr), (v1.as_str(), vt),
+            (v0.as_str(), vr),
+            (v1.as_str(), vt),
             (law_params::PRE, p),
-            (x0.as_str(), r), (x1.as_str(), theta),
+            (x0.as_str(), r),
+            (x1.as_str(), theta),
         ];
 
         // cross-validate against the individual spherical builder.
@@ -755,7 +814,7 @@ mod tests {
         // ELEMENTWISE SUM of the individual contributions. proves the
         // additive-composition contract end-to-end.
         use crate::regime_spec::law_params;
-        use crate::source_spec::{source_params, gravity_params};
+        use crate::source_spec::{gravity_params, source_params};
 
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(spherical_geometric_sources(2))
@@ -765,19 +824,30 @@ mod tests {
         assert_eq!(combined.outputs.len(), 2);
 
         // evaluate at a concrete state. note: gravity needs (xm, gm).
-        let r = 2.0; let theta = 0.8;
-        let rho = 1.3; let vr = 0.4; let vt = 0.2; let p = 0.9;
-        let xm = [0.5, 0.5]; let gm = 1.2;
+        let r = 2.0;
+        let theta = 0.8;
+        let rho = 1.3;
+        let vr = 0.4;
+        let vt = 0.2;
+        let p = 0.9;
+        let xm = [0.5, 0.5];
+        let gm = 1.2;
 
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1);
-        let x0 = source_params::x(0); let x1 = source_params::x(1);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
         let values: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
-            (v0.as_str(), vr), (v1.as_str(), vt),
+            (v0.as_str(), vr),
+            (v1.as_str(), vt),
             (law_params::PRE, p),
-            (x0.as_str(), r), (x1.as_str(), theta),
-            (xm0.as_str(), xm[0]), (xm1.as_str(), xm[1]),
+            (x0.as_str(), r),
+            (x1.as_str(), theta),
+            (xm0.as_str(), xm[0]),
+            (xm1.as_str(), xm[1]),
             (gravity_params::GM, gm),
             (gravity_params::EPS, 0.0),
         ];
@@ -804,7 +874,7 @@ mod tests {
         // spherical geometric + gravity + rigid penalty. the additive
         // composition contract scales beyond pairs.
         use crate::regime_spec::law_params;
-        use crate::source_spec::{ib_params, source_params, gravity_params};
+        use crate::source_spec::{gravity_params, ib_params, source_params};
 
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(spherical_geometric_sources(2))
@@ -814,29 +884,46 @@ mod tests {
         let combined = sim.build_total_source("mom", 2).expect("three sources");
         assert_eq!(combined.outputs.len(), 2);
 
-        let r = 2.0; let theta = 0.7;
-        let rho = 1.2; let vr = 0.2; let vt = 0.3; let p = 0.7;
-        let xm = [0.0, 0.0]; let gm = 1.0;
-        let body_xm = [r, theta]; let body_radius = 5.0; // inside body
-        let vbody = [0.0, 0.0]; let k_strength = 50.0;
+        let r = 2.0;
+        let theta = 0.7;
+        let rho = 1.2;
+        let vr = 0.2;
+        let vt = 0.3;
+        let p = 0.7;
+        let xm = [0.0, 0.0];
+        let gm = 1.0;
+        let body_xm = [r, theta];
+        let body_radius = 5.0; // inside body
+        let vbody = [0.0, 0.0];
+        let k_strength = 50.0;
 
-        let v0 = law_params::vel(0); let v1 = law_params::vel(1);
-        let x0 = source_params::x(0); let x1 = source_params::x(1);
-        let xm0 = gravity_params::xm(0); let xm1 = gravity_params::xm(1);
-        let bxm0 = ib_params::body_xm(0); let bxm1 = ib_params::body_xm(1);
-        let vb0 = ib_params::vbody(0); let vb1 = ib_params::vbody(1);
+        let v0 = law_params::vel(0);
+        let v1 = law_params::vel(1);
+        let x0 = source_params::x(0);
+        let x1 = source_params::x(1);
+        let xm0 = gravity_params::xm(0);
+        let xm1 = gravity_params::xm(1);
+        let bxm0 = ib_params::body_xm(0);
+        let bxm1 = ib_params::body_xm(1);
+        let vb0 = ib_params::vbody(0);
+        let vb1 = ib_params::vbody(1);
 
         let values: Vec<(&str, f64)> = vec![
             (law_params::RHO, rho),
-            (v0.as_str(), vr), (v1.as_str(), vt),
+            (v0.as_str(), vr),
+            (v1.as_str(), vt),
             (law_params::PRE, p),
-            (x0.as_str(), r), (x1.as_str(), theta),
-            (xm0.as_str(), xm[0]), (xm1.as_str(), xm[1]),
+            (x0.as_str(), r),
+            (x1.as_str(), theta),
+            (xm0.as_str(), xm[0]),
+            (xm1.as_str(), xm[1]),
             (gravity_params::GM, gm),
             (gravity_params::EPS, 0.0),
-            (bxm0.as_str(), body_xm[0]), (bxm1.as_str(), body_xm[1]),
+            (bxm0.as_str(), body_xm[0]),
+            (bxm1.as_str(), body_xm[1]),
             (ib_params::BODY_RADIUS, body_radius),
-            (vb0.as_str(), vbody[0]), (vb1.as_str(), vbody[1]),
+            (vb0.as_str(), vbody[0]),
+            (vb1.as_str(), vbody[1]),
             (ib_params::PENALTY_STRENGTH, k_strength),
         ];
 
@@ -879,7 +966,11 @@ mod tests {
         assert_eq!(sorted, deduped, "param manifest must have no duplicates");
 
         // sanity: rho appears once (both sources declared it).
-        let rho_count = combined.params.iter().filter(|p| p.as_str() == "rho").count();
+        let rho_count = combined
+            .params
+            .iter()
+            .filter(|p| p.as_str() == "rho")
+            .count();
         assert_eq!(rho_count, 1, "shared `rho` param must appear exactly once");
     }
 
@@ -895,21 +986,34 @@ mod tests {
         // `.sqrt()`), and there is no carrier-generic `S::from_f64` wrap.
         use crate::source_spec::point_mass_gravity_sources;
 
-        let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_gravity(point_mass_gravity_sources(2, false));
-        let built = sim.build_total_source("mom", 2)
+        let sim =
+            SimulationLaws::new(&NEWTONIAN_SPEC).with_gravity(point_mass_gravity_sources(2, false));
+        let built = sim
+            .build_total_source("mom", 2)
             .expect("gravity mom source");
 
         // the PRIMARY path (the production emitter via GpuSourceKernel) produces
         // the source-ABI kernel from the graph: function-style sqrt, raw
         // literals, no carrier wrap — via scalarize + emit_source_kernel.
         let prim = symbi_ir::backends::cuda::emit_source_kernel(
-            &built.graph, &built.params, &built.outputs, "mom_source",
+            &built.graph,
+            &built.params,
+            &built.outputs,
+            "mom_source",
         );
         assert!(prim.contains("extern \"C\" __global__ void mom_source("));
-        assert!(prim.contains("sqrt("), "primary emit uses libdevice sqrt; got:\n{prim}");
-        assert!(!prim.contains(".sqrt()"), "primary emit must not use method form");
-        assert!(!prim.contains("S::from_f64"), "primary emit must not carrier-wrap");
+        assert!(
+            prim.contains("sqrt("),
+            "primary emit uses libdevice sqrt; got:\n{prim}"
+        );
+        assert!(
+            !prim.contains(".sqrt()"),
+            "primary emit must not use method form"
+        );
+        assert!(
+            !prim.contains("S::from_f64"),
+            "primary emit must not carrier-wrap"
+        );
     }
 
     #[test]
@@ -923,7 +1027,8 @@ mod tests {
             .with_gravity(point_mass_gravity_sources(3, true))
             .with_user(uniform_acceleration_sources(3, true));
 
-        sim.validate().expect("user source must validate like any other kind");
+        sim.validate()
+            .expect("user source must validate like any other kind");
 
         // mom gets: gravity_mom + uniform_accel_mom = 2 sources.
         // nrg gets: gravity_nrg + uniform_accel_nrg = 2 sources.
@@ -971,7 +1076,8 @@ mod tests {
             .with_geometric(cylindrical_geometric_sources(3))
             .with_gravity(point_mass_gravity_sources(3, true))
             .with_ib(accretion_sink_sources(3));
-        sim.validate().expect("canonical newtonian disk stack must validate");
+        sim.validate()
+            .expect("canonical newtonian disk stack must validate");
 
         // den has the accretion sink, mom has gravity + cyl geometric,
         // nrg has gravity energy.
@@ -991,15 +1097,19 @@ mod tests {
         // fused-family derivation AND same bucketed specs. kepler's path.
         let gm = 1.5;
         let xm = vec![0.0, 0.0];
-        let via_surface = SimulationLaws::new(&ISO_NEWTONIAN_SPEC)
-            .with(point_mass(gm, xm.clone(), 0.0), 2);
+        let via_surface =
+            SimulationLaws::new(&ISO_NEWTONIAN_SPEC).with(point_mass(gm, xm.clone(), 0.0), 2);
         let via_setter = SimulationLaws::new(&ISO_NEWTONIAN_SPEC)
             .with_fused_family(FusedSourceFamily::PointMassGravity { gm, xm, eps: 0.0 }, 2);
 
         // the substrate-facing derivation is identical (slug + scalar pairs).
-        assert_eq!(via_surface.derive_fused_binding(), via_setter.derive_fused_binding());
+        assert_eq!(
+            via_surface.derive_fused_binding(),
+            via_setter.derive_fused_binding()
+        );
         // and the validation-facing bucket contents are identical.
-        let kinds = |s: &SimulationLaws| -> Vec<SourceKind> { s.overlays().map(|x| x.kind).collect() };
+        let kinds =
+            |s: &SimulationLaws| -> Vec<SourceKind> { s.overlays().map(|x| x.kind).collect() };
         assert_eq!(kinds(&via_surface), kinds(&via_setter));
         assert_eq!(via_surface.gravity.len(), via_setter.gravity.len());
     }
@@ -1018,9 +1128,10 @@ mod tests {
 
         // associativity: (a + b) + c == a + (b + c) on the fused-id sequence.
         let c = point_mass(3.0, vec![0.0, 1.0], 0.0);
-        let left  = ((a.clone() + b.clone()) + c.clone()).fused;
+        let left = ((a.clone() + b.clone()) + c.clone()).fused;
         let right = (a + (b + c)).fused;
-        let ids = |v: &[FusedSourceFamily]| -> Vec<&str> { v.iter().map(|f| f.source_id()).collect() };
+        let ids =
+            |v: &[FusedSourceFamily]| -> Vec<&str> { v.iter().map(|f| f.source_id()).collect() };
         assert_eq!(ids(&left), ids(&right));
     }
 
@@ -1030,8 +1141,10 @@ mod tests {
         // two fused families. (derive_fused_binding picks the FIRST — the
         // documented single-family substrate limit; the 2nd awaits the additive
         // pass or a composite slug.)
-        let laws = SimulationLaws::new(&ISO_NEWTONIAN_SPEC)
-            .with(point_mass(1.0, vec![0.0, 0.0], 0.0) + uniform_accel(vec![0.0, -1.0]), 2);
+        let laws = SimulationLaws::new(&ISO_NEWTONIAN_SPEC).with(
+            point_mass(1.0, vec![0.0, 0.0], 0.0) + uniform_accel(vec![0.0, -1.0]),
+            2,
+        );
         assert_eq!(laws.fused_families.len(), 2);
         assert!(!laws.gravity.is_empty(), "point_mass buckets into gravity");
         assert!(!laws.user.is_empty(), "uniform_accel buckets into user");

@@ -10,19 +10,18 @@
 // Metal) is one `KernelRenderer` impl; a feature is one edit here, not N across
 // parallel emitters.
 //
-// `emit_kernel_cpu` and `emit_kernel_from_lowering` become thin wrappers over
-// `emit_kernel_render` with `RustRenderer` / `CRenderer`. the byte-for-byte
-// output is unchanged (the CPU emitter tests + the CUDA emitter tests + the PTX
-// gate are the regression anchors) — except the CUDA path now GAINS the base-read
-// gate (it used to emit dead `double key = buf[cell];` reads).
+// `emit_kernel_cpu` and `emit_kernel_from_lowering` are thin wrappers over
+// `emit_kernel_render` with `RustRenderer` / `CRenderer` (the CPU emitter tests +
+// the CUDA emitter tests + the PTX gate are the regression anchors). the base-read
+// gate elides dead `double key = buf[cell];` reads on the CUDA path.
 // =============================================================================
 
 use std::collections::{BTreeMap, HashMap};
 
 use crate::backends::kernel::KernelEmitInputs;
-use crate::passes::scalarize::{scalarize_kernel, KernelScalarized, ScalarExpr, ScalarStmt};
-use crate::{ElementTy, Graph, NodeId};
 use crate::emit::{FieldBinding, KernelDescriptor};
+use crate::passes::scalarize::{KernelScalarized, ScalarExpr, ScalarStmt, scalarize_kernel};
+use crate::{ElementTy, Graph, NodeId};
 use symbi_abi::FieldBind;
 use symbi_abi::ScalarBind;
 
@@ -73,10 +72,12 @@ pub trait KernelRenderer {
     fn index_lang(&self) -> crate::emit::IndexLang;
     /// when `true`, `render_source` skips emitting the per-buffer `buf_lo_<b>_<a>`
     /// and `buf_extent_<b>_<a>` scalar kernel args — the renderer bundles that
-    /// layout into its `buffer_param` (e.g. a `View` struct that carries the
-    /// pointer + lo + pre-multiplied strides). default = `false` (Rust / legacy
-    /// scattered ABI). CUDA returns `true` once migrated to the View struct.
-    fn skip_scattered_buffer_layout_args(&self) -> bool { false }
+    /// layout into its `buffer_param` (e.g., a `View` struct that carries the
+    /// pointer + lo + pre-multiplied strides). default = `false` (the scattered
+    /// ABI). CUDA returns `true` (the View struct bundles the layout).
+    fn skip_scattered_buffer_layout_args(&self) -> bool {
+        false
+    }
     /// the flat buffer index from rendered component strings. ALWAYS delegates
     /// to `emit::emit_flat_index` with `index_lang()` — implementations are
     /// one-liners. defined as a trait method (not a free function) so future
@@ -122,7 +123,13 @@ pub trait KernelRenderer {
     /// `comps` are the rendered absolute index components; the renderer derives the
     /// per-axis local offset `threadIdx + halo + (comp - coord_var)`. `None` =
     /// backend has no smem; the driver uses the gmem path.
-    fn tiled_load_expr(&self, _key: &str, _halo: &[u8], _ndim: u8, _comps: &[String]) -> Option<String> {
+    fn tiled_load_expr(
+        &self,
+        _key: &str,
+        _halo: &[u8],
+        _ndim: u8,
+        _comps: &[String],
+    ) -> Option<String> {
         None
     }
     /// the base (cell-center) read of a TILED field, as a full decl line
@@ -136,9 +143,9 @@ pub trait KernelRenderer {
 /// (key, buffer) pairs in field-input order. built once in `render` from
 /// `Prepared::tile_spec` and threaded into the FieldLoadAt rewrite + `render_source`.
 struct TileCtx {
-    halo:   Vec<u8>,
+    halo: Vec<u8>,
     fields: Vec<(String, u32)>,
-    keys:   std::collections::HashSet<String>,
+    keys: std::collections::HashSet<String>,
 }
 
 /// the backend-NEUTRAL prepared form of a kernel: the scalarized body, the buffer
@@ -149,43 +156,43 @@ struct TileCtx {
 /// runtime deserializes and `render`s it for any accelerator.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Prepared {
-    pub kernel_name:      String,
-    pub ndim:             u8,
+    pub kernel_name: String,
+    pub ndim: u8,
     /// the shared scalarized body + outputs (FieldLoadAt NOT yet rewritten).
-    pub scalarized:       KernelScalarized,
+    pub scalarized: KernelScalarized,
     /// buffer assignment (inputs first, then output-only), in buffer order.
-    pub bindings:         Vec<FieldBinding>,
+    pub bindings: Vec<FieldBinding>,
     /// (IR-side key, born-typed runtime binding) per field input, in buffer order. the
     /// key gates the base cell read + resolves FieldLoadAt; the FieldBind picks the buf.
-    pub field_inputs:     Vec<(String, FieldBind)>,
+    pub field_inputs: Vec<(String, FieldBind)>,
     /// born-typed runtime binding per field write, zipped against `scalarized.outputs`.
     /// classified once at `prepare` (the transient `KernelEmitInputs` still carries raw write
     /// strings; the producer-mint of typed writes is the Stage-2 step).
-    pub field_writes:     Vec<FieldBind>,
+    pub field_writes: Vec<FieldBind>,
     /// scalar kernel args (dt, gamma, …), born typed: a `Ref` over the closed
     /// dispatch vocabulary or a `Spec` open spec/user knob. minted in `prepare`
     /// from the producer's string names; `name()` recovers the exact original
     /// spelling for codegen, so the emitted kernel source is unchanged.
-    pub scalar_params:    Vec<ScalarBind>,
+    pub scalar_params: Vec<ScalarBind>,
     /// kernel-coord component axes referenced by the body.
     pub coord_components: Vec<u8>,
     /// device-function definitions to emit ahead of the kernel (GPU preamble).
-    pub device_preamble:  Vec<String>,
+    pub device_preamble: Vec<String>,
     /// element type per scalar/coord param (resolved from the graph's Param nodes;
     /// not derivable from the other fields, so it travels with the artifact).
     /// BTreeMap, NOT HashMap: this struct serializes into the build-time `.ir.json`
     /// artifact, and a HashMap serializes in random per-process order — making the
     /// generated IR non-reproducible build-to-build (spurious diffs / cache churn).
     /// only ever read via `.get(name)`, so the ordering is otherwise irrelevant.
-    pub param_elem:       BTreeMap<String, ElementTy>,
+    pub param_elem: BTreeMap<String, ElementTy>,
     /// the shared-memory tile spec (Gate 3, docs/design/22), threaded from the
     /// `GvKernel`. when `Some`, the C-family renderer emits a cooperative smem
     /// prefetch prelude + redirects the tiled fields' stencil reads to `__shared__`;
     /// other renderers (CPU) ignore it. serialized into the build-time artifact so
     /// the runtime render path (`render_from_ir`) sees the same intent.
     #[serde(default)]
-    pub tile_spec:        Option<crate::gv::TileSpec>,
-    /// PROTOTYPE (view_t precursor): when true, every buffer is guaranteed to
+    pub tile_spec: Option<crate::gv::TileSpec>,
+    /// when true, every buffer is guaranteed to
     /// share buffer 0's allocated layout (same `lo`/`strides`), so the per-cell
     /// flat index is computed ONCE from buffer 0 and aliased to every other
     /// buffer — the `View` collapse of N strided index computations into one.
@@ -195,7 +202,7 @@ pub struct Prepared {
     /// derived in `prepare` from the kernel name until real per-field layout
     /// identity lands. the carrier oracle is the correctness gate.
     #[serde(default)]
-    pub coalesce_layout:  bool,
+    pub coalesce_layout: bool,
 }
 
 /// emit a scalarized stencil kernel for `R`'s backend — `prepare` then `render`.
@@ -234,14 +241,15 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
     // reads AND writes are born-typed FieldBind now (docs/design/38 L2 Stage 2). the buffer map
     // keys on FieldBind, so the in-place detection (a read whose buffer is also written) is
     // spelling-invariant by construction.
-    let write_fields: std::collections::HashSet<FieldBind> =
-        inputs.field_writes.iter().map(|(_, w, _)| w.clone()).collect();
+    let write_fields: std::collections::HashSet<FieldBind> = inputs
+        .field_writes
+        .iter()
+        .map(|(_, w, _)| w.clone())
+        .collect();
     let mut bindings: Vec<FieldBinding> = Vec::new();
     let mut buf_idx_by_runtime: HashMap<FieldBind, u32> = HashMap::new();
     for (_, runtime_path) in inputs.field_inputs {
-        if write_fields.contains(runtime_path)
-            || buf_idx_by_runtime.contains_key(runtime_path)
-        {
+        if write_fields.contains(runtime_path) || buf_idx_by_runtime.contains_key(runtime_path) {
             continue; // in-place fields are placed with the outputs; dedup repeats.
         }
         let buf_idx = bindings.len() as u32;
@@ -276,18 +284,26 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         .collect();
 
     Prepared {
-        kernel_name:      inputs.kernel_name.to_string(),
-        ndim:             inputs.ndim,
+        kernel_name: inputs.kernel_name.to_string(),
+        ndim: inputs.ndim,
         scalarized,
         bindings,
-        field_inputs:     inputs.field_inputs.to_vec(),
-        field_writes:     inputs.field_writes.iter().map(|(_, rt, _)| rt.clone()).collect(),
-        scalar_params:    inputs.scalar_params.iter().map(|s| ScalarBind::from_name(s)).collect(),
+        field_inputs: inputs.field_inputs.to_vec(),
+        field_writes: inputs
+            .field_writes
+            .iter()
+            .map(|(_, rt, _)| rt.clone())
+            .collect(),
+        scalar_params: inputs
+            .scalar_params
+            .iter()
+            .map(|s| ScalarBind::from_name(s))
+            .collect(),
         coord_components: inputs.coord_components.to_vec(),
-        device_preamble:  inputs.device_preamble.to_vec(),
+        device_preamble: inputs.device_preamble.to_vec(),
         param_elem,
-        tile_spec:        inputs.tile_spec.cloned(),
-        coalesce_layout:  inputs.coalesce_layout,
+        tile_spec: inputs.tile_spec.cloned(),
+        coalesce_layout: inputs.coalesce_layout,
     }
 }
 
@@ -316,7 +332,11 @@ pub fn kernel_scalar_params_typed_from_ir(ir: &str) -> Vec<(ScalarBind, bool)> {
         .scalar_params
         .iter()
         .map(|bind| {
-            let is_int = prepared.param_elem.get(&bind.name()).map(|e| e.is_integer()).unwrap_or(false);
+            let is_int = prepared
+                .param_elem
+                .get(&bind.name())
+                .map(|e| e.is_integer())
+                .unwrap_or(false);
             (bind.clone(), is_int)
         })
         .collect()
@@ -349,19 +369,30 @@ pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescrip
     // real field inputs. `fields` follows field_inputs order so the smem slab
     // layout is deterministic. an empty/None spec => no tiling (flat path).
     let tile: Option<TileCtx> = prepared.tile_spec.as_ref().map(|spec| {
-        let keys: std::collections::HashSet<String> = spec.tiled_field_keys.iter().cloned().collect();
+        let keys: std::collections::HashSet<String> =
+            spec.tiled_field_keys.iter().cloned().collect();
         let fields: Vec<(String, u32)> = prepared
             .field_inputs
             .iter()
             .filter(|(k, _)| keys.contains(k))
             .map(|(k, _)| (k.clone(), key_to_buf[k]))
             .collect();
-        TileCtx { halo: spec.halo.clone(), fields, keys }
+        TileCtx {
+            halo: spec.halo.clone(),
+            fields,
+            keys,
+        }
     });
 
     // resolve every FieldLoadAt to a `buf<idx>[<flat>]` Var (backend-specific) — or
     // a `tile_<key>[..]` smem read for a tiled field on a smem-capable backend.
-    rewrite_field_load_at_stmts(&mut prepared.scalarized.body, prepared.ndim, &key_to_buf, tile.as_ref(), r);
+    rewrite_field_load_at_stmts(
+        &mut prepared.scalarized.body,
+        prepared.ndim,
+        &key_to_buf,
+        tile.as_ref(),
+        r,
+    );
     for out in prepared.scalarized.outputs.iter_mut() {
         rewrite_field_load_at(out, prepared.ndim, &key_to_buf, tile.as_ref(), r);
     }
@@ -372,17 +403,23 @@ pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescrip
     let scalar_is_int: Vec<bool> = prepared
         .scalar_params
         .iter()
-        .map(|bind| prepared.param_elem.get(&bind.name()).map(|e| e.is_integer()).unwrap_or(false))
+        .map(|bind| {
+            prepared
+                .param_elem
+                .get(&bind.name())
+                .map(|e| e.is_integer())
+                .unwrap_or(false)
+        })
         .collect();
     KernelDescriptor {
         source,
-        kernel_name:    prepared.kernel_name,
+        kernel_name: prepared.kernel_name,
         field_bindings: prepared.bindings,
         // the descriptor's `param_names` stay string-typed (the producer-facing
         // signature order); `name()` recovers each bind's exact original spelling.
-        param_names:    prepared.scalar_params.iter().map(|b| b.name()).collect(),
+        param_names: prepared.scalar_params.iter().map(|b| b.name()).collect(),
         scalar_is_int,
-        tile_spec:      prepared.tile_spec,
+        tile_spec: prepared.tile_spec,
     }
 }
 
@@ -453,8 +490,15 @@ fn render_source<R: KernelRenderer>(
         out.push('\n');
     }
     for &axis in &p.coord_components {
-        assert!((axis as usize) < ndim, "coord_components axis {axis} but ndim {ndim}");
-        let elem = p.param_elem.get(&format!("_coord_{axis}")).copied().unwrap_or(ElementTy::F64);
+        assert!(
+            (axis as usize) < ndim,
+            "coord_components axis {axis} but ndim {ndim}"
+        );
+        let elem = p
+            .param_elem
+            .get(&format!("_coord_{axis}"))
+            .copied()
+            .unwrap_or(ElementTy::F64);
         out.push_str(&r.coord_decl(axis, elem));
         out.push('\n');
     }
@@ -467,7 +511,12 @@ fn render_source<R: KernelRenderer>(
     // all backends — `r.index_lang()` picks the syntax (Rust vs CUDA vs ...).
     let lang = r.index_lang();
     for b in 0..n_buffers {
-        out.push_str(&crate::emit::emit_cell_index_base(lang, p.ndim, b, p.coalesce_layout));
+        out.push_str(&crate::emit::emit_cell_index_base(
+            lang,
+            p.ndim,
+            b,
+            p.coalesce_layout,
+        ));
         out.push('\n');
     }
 
@@ -502,8 +551,11 @@ fn render_source<R: KernelRenderer>(
     // ---- diagnostic: a param the scalarizer kept but no caller declared (a
     //      wiring bug). emit a comment rather than silently drop. emits nothing
     //      for well-formed kernels, so output is unchanged in the normal case.
-    let coord_names: Vec<String> =
-        p.coord_components.iter().map(|a| format!("_coord_{a}")).collect();
+    let coord_names: Vec<String> = p
+        .coord_components
+        .iter()
+        .map(|a| format!("_coord_{a}"))
+        .collect();
     let scalar_names: Vec<String> = p.scalar_params.iter().map(|s| s.name()).collect();
     let declared: std::collections::HashSet<&str> = p
         .field_inputs
@@ -566,13 +618,16 @@ fn rewrite_field_load_at<R: KernelRenderer>(
 ) {
     use ScalarExpr::*;
     match e {
-        FieldLoadAt { field_key, components } => {
+        FieldLoadAt {
+            field_key,
+            components,
+        } => {
             for c in components.iter_mut() {
                 rewrite_field_load_at(c, ndim, key_to_buf, tile, r);
             }
-            let buf_idx = *key_to_buf
-                .get(field_key)
-                .unwrap_or_else(|| panic!("FieldLoadAt: field_key '{field_key}' has no buffer slot"));
+            let buf_idx = *key_to_buf.get(field_key).unwrap_or_else(|| {
+                panic!("FieldLoadAt: field_key '{field_key}' has no buffer slot")
+            });
             assert_eq!(
                 components.len(),
                 ndim as usize,
@@ -580,8 +635,10 @@ fn rewrite_field_load_at<R: KernelRenderer>(
                 components.len(),
             );
             let coord_vars = &COORD_VARS[..ndim as usize];
-            let comp_strs: Vec<String> =
-                components.iter().map(|c| r.render_index_component(c, coord_vars)).collect();
+            let comp_strs: Vec<String> = components
+                .iter()
+                .map(|c| r.render_index_component(c, coord_vars))
+                .collect();
             // a tiled field on a smem-capable backend reads from `__shared__`;
             // otherwise (untiled field, or CPU) the gmem flat-index path.
             let smem = tile
@@ -606,7 +663,10 @@ fn rewrite_field_load_at<R: KernelRenderer>(
 
 // ----- the base-read gate (shared: applies to every backend) -----
 
-pub(crate) fn scalarized_uses_var(s: &crate::passes::scalarize::KernelScalarized, name: &str) -> bool {
+pub(crate) fn scalarized_uses_var(
+    s: &crate::passes::scalarize::KernelScalarized,
+    name: &str,
+) -> bool {
     s.body.iter().any(|st| stmt_uses_var(st, name))
         || s.outputs.iter().any(|e| expr_uses_var(e, name))
 }
@@ -614,7 +674,10 @@ pub(crate) fn scalarized_uses_var(s: &crate::passes::scalarize::KernelScalarized
 fn stmt_uses_var(s: &ScalarStmt, name: &str) -> bool {
     // derived from `ScalarStmt::child_expr` + `child_stmt_bodies`.
     s.child_expr().is_some_and(|e| expr_uses_var(e, name))
-        || s.child_stmt_bodies().iter().flat_map(|b| b.iter()).any(|st| stmt_uses_var(st, name))
+        || s.child_stmt_bodies()
+            .iter()
+            .flat_map(|b| b.iter())
+            .any(|st| stmt_uses_var(st, name))
 }
 
 fn expr_uses_var(e: &ScalarExpr, name: &str) -> bool {
@@ -625,9 +688,9 @@ fn expr_uses_var(e: &ScalarExpr, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::emit::{Precision, Target, TargetConfig};
     use crate::backends::kernel::CRenderer;
     use crate::backends::kernel_cpu::RustRenderer;
+    use crate::emit::{Precision, Target, TargetConfig};
     use crate::morphism::MorphismKind;
     use crate::{ConstValue, ElementTy, ElementWiseOp, Symbol, TensorTy, TranscendentalOp};
 
@@ -640,15 +703,19 @@ mod tests {
     #[test]
     fn prepared_ir_round_trips_for_both_backends() {
         let mut g = Graph::new();
-        let u  = g.add_param(Symbol::intern("u"), TensorTy::scalar(ElementTy::F64), None);
+        let u = g.add_param(Symbol::intern("u"), TensorTy::scalar(ElementTy::F64), None);
         let dt = g.add_param(Symbol::intern("dt"), TensorTy::scalar(ElementTy::F64), None);
-        let c0 = g.add_param(Symbol::intern("_coord_0"), TensorTy::scalar(ElementTy::F64), None);
+        let c0 = g.add_param(
+            Symbol::intern("_coord_0"),
+            TensorTy::scalar(ElementTy::F64),
+            None,
+        );
         let one = g.add_const(ConstValue::F64(1.0), None);
         let two = g.add_const(ConstValue::F64(2.0), None);
         // u[coord+1] - u[coord], scaled by 2.0 * dt, then sin(...).
         let c0_hi = g.element_wise(ElementWiseOp::Add, vec![c0, one], None);
-        let u_hi  = g.load_at(Symbol::intern("u"), vec![c0_hi], None);
-        let diff  = g.morphism(MorphismKind::Diff { axis: 0 }, vec![u, u_hi], None);
+        let u_hi = g.load_at(Symbol::intern("u"), vec![c0_hi], None);
+        let diff = g.morphism(MorphismKind::Diff { axis: 0 }, vec![u, u_hi], None);
         let scaled = g.element_wise(ElementWiseOp::Mul, vec![diff, two], None);
         let scaled = g.element_wise(ElementWiseOp::Mul, vec![scaled, dt], None);
         let out = g.transcendental(TranscendentalOp::Sin, vec![scaled], None);
@@ -659,14 +726,18 @@ mod tests {
         let field_writes = [("out".to_string(), FieldBind::from_path("out"), out)];
         let coord_components = [0u8];
         let inputs = KernelEmitInputs {
-            kernel_name:      "roundtrip_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
-            field_inputs:     &field_inputs,
-            scalar_params:    &scalar_params,
-            field_writes:     &field_writes,
+            kernel_name: "roundtrip_1d",
+            coalesce_layout: false,
+            ndim: 1,
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
+            field_inputs: &field_inputs,
+            scalar_params: &scalar_params,
+            field_writes: &field_writes,
             coord_components: &coord_components,
-            device_preamble:  &[],
+            device_preamble: &[],
             tile_spec: None,
         };
 
@@ -676,11 +747,17 @@ mod tests {
 
         // CUDA backend: source byte-identical after round-trip.
         let cuda = CRenderer {
-            target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+            target: TargetConfig {
+                target: Target::Cuda,
+                precision: Precision::F64,
+            },
         };
         let cuda_a = render(prepared.clone(), &cuda);
         let cuda_b = render(restored.clone(), &cuda);
-        assert_eq!(cuda_a.source, cuda_b.source, "CUDA source differs after round-trip");
+        assert_eq!(
+            cuda_a.source, cuda_b.source,
+            "CUDA source differs after round-trip"
+        );
         assert_eq!(cuda_a.kernel_name, cuda_b.kernel_name);
         assert_eq!(cuda_a.param_names, cuda_b.param_names);
         assert_eq!(cuda_a.field_bindings.len(), cuda_b.field_bindings.len());
@@ -688,21 +765,42 @@ mod tests {
         // Rust (CPU) backend: source byte-identical after round-trip.
         let rust_a = render(prepared.clone(), &RustRenderer::new());
         let rust_b = render(restored, &RustRenderer::new());
-        assert_eq!(rust_a.source, rust_b.source, "Rust source differs after round-trip");
+        assert_eq!(
+            rust_a.source, rust_b.source,
+            "Rust source differs after round-trip"
+        );
 
         // non-trivial: the serde-sensitive shapes actually survive into the source.
-        assert!(cuda_a.source.contains("sin("), "CUDA lost the method call:\n{}", cuda_a.source);
-        assert!(rust_a.source.contains(".sin()"), "Rust lost the method call:\n{}", rust_a.source);
+        assert!(
+            cuda_a.source.contains("sin("),
+            "CUDA lost the method call:\n{}",
+            cuda_a.source
+        );
+        assert!(
+            rust_a.source.contains(".sin()"),
+            "Rust lost the method call:\n{}",
+            rust_a.source
+        );
         // the shifted FieldLoadAt was rewritten to a buffer index (NOT serialized as
         // a backend-specific form — it round-trips as a neutral FieldLoadAt).
-        assert!(cuda_a.source.contains("field0.data["), "CUDA: stencil load not rewritten:\n{}", cuda_a.source);
+        assert!(
+            cuda_a.source.contains("field0.data["),
+            "CUDA: stencil load not rewritten:\n{}",
+            cuda_a.source
+        );
     }
 
     // the floats that broke naive serde_json (NaN/Inf -> null): the bit-pattern
     // ConstValue serde must round-trip them exactly.
     #[test]
     fn non_finite_consts_survive_serde() {
-        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.1_f64, -2.5_f64] {
+        for x in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            0.1_f64,
+            -2.5_f64,
+        ] {
             let cv = ConstValue::F64(x);
             let json = serde_json::to_string(&cv).expect("serialize ConstValue");
             let back: ConstValue = serde_json::from_str(&json).expect("deserialize ConstValue");

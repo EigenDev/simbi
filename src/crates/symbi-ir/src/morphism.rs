@@ -27,23 +27,23 @@
 /// dimensionality constraint a morphism imposes on the enclosing graph.
 ///
 /// when an IR graph contains multiple morphisms, the effective constraint
-/// is the intersection of all of them — the strictest one wins. e.g. a
+/// is the intersection of all of them — the strictest one wins. e.g., a
 /// graph with both `Curl { Exactly(3) }` and `Diff { AnyD }` is `Exactly(3)`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DimConstraint {
-    /// the morphism makes sense at any ndim ≥ 1 (e.g. Diff, FaceAvg).
+    /// the morphism makes sense at any ndim ≥ 1 (e.g., Diff, FaceAvg).
     AnyD,
     /// the morphism makes sense only at exactly this ndim
-    /// (e.g. Curl is ThreeD-only; ε^{ijk} is rank-3).
+    /// (e.g., Curl is ThreeD-only; ε^{ijk} is rank-3).
     Exactly(u8),
     /// the morphism makes sense at this ndim or higher.
-    /// reserved for future morphisms (e.g. Determinant<N> requires D ≥ N).
+    /// reserved for future morphisms (e.g., Determinant<N> requires D ≥ N).
     AtLeast(u8),
 }
 
 impl DimConstraint {
     /// the strictest of two constraints. returns None when they are
-    /// mutually unsatisfiable (e.g. `Exactly(2)` ∩ `Exactly(3)` = None).
+    /// mutually unsatisfiable (e.g., `Exactly(2)` ∩ `Exactly(3)` = None).
     pub fn intersect(self, other: Self) -> Option<Self> {
         use DimConstraint::*;
         match (self, other) {
@@ -130,7 +130,7 @@ impl MorphismKind {
 ///     (or only AnyD morphisms); no restriction at the algebra level.
 ///     legacy `_nd` suffix and explicit `ndim = N` hints still apply.
 ///   - `None` — the graph contains two morphisms with mutually
-///     unsatisfiable constraints (e.g. `Exactly(2)` ∩ `Exactly(3)`). this
+///     unsatisfiable constraints (e.g., `Exactly(2)` ∩ `Exactly(3)`). this
 ///     is a graph-composition error; the proc-macro should surface it
 ///     at expansion time rather than silently emit no PTX.
 ///
@@ -145,7 +145,7 @@ pub fn graph_dim_constraint(graph: &crate::graph::Graph) -> Option<DimConstraint
             constraint = constraint.intersect(kind.dim_constraint())?;
         }
     }
-    // F5.4-retire: graph-level pin from `Graph::pin_ndim` (e.g. set by
+    // F5.4-retire: graph-level pin from `Graph::pin_ndim` (e.g., set by
     // the macro dispatcher for kernels whose physics is ndim-restricted
     // beyond what the morphism kinds alone express).
     if let Some(n) = graph.pinned_ndim() {

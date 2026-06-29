@@ -4,10 +4,9 @@
 // integration test suite that pins the behavior of the tensor IR end-to-end:
 //   build graph -> scalarize -> emit_cpu / emit_cuda
 //
-// each test corresponds to a chalkboard-math operation users will write
-// via the macro layer (R.5). when R.5 retires the legacy `tensor_rewrite`
-// module (in symbi-macros), THIS file is what proves every behavior the
-// old syn-rewrite pass produced is reproducible through the new IR.
+// each test corresponds to a chalkboard-math operation users write
+// via the macro layer (R.5). this file pins every behavior reachable
+// through the IR.
 //
 // section index:
 //   1. vector ops via Einsum  (dot, norm, sum, trace-style)
@@ -510,9 +509,9 @@ fn cuda_matmul_emits_struct_return() {
 
 #[test]
 fn cuda_abs_emits_ternary_not_fabs() {
-    // task #43: emit `(x < 0.0 ? -x : x)` matching C++ my_abs, not the
+    // emit `(x < 0.0 ? -x : x)` (the carrier's ternary abs), not the
     // libdevice fabs() whose IEEE 754-2008 NaN/signed-zero semantics
-    // differ from C++ at shock-edge primitives.
+    // differ at shock-edge primitives.
     let mut g = Graph::new();
     let x = g.add_scalar_param("x", ElementTy::F64);
     let r = g.element_wise(ElementWiseOp::Abs, vec![x], None);

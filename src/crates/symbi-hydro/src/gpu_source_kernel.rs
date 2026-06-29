@@ -162,7 +162,7 @@ impl GpuSourceKernel {
 // the source builders (source_spec.rs) emit ONLY Const / Param / ElementWise /
 // Transcendental(Cos,Sin) / Select — all of which scalarize + emit cleanly on
 // the primary path. there is no higher-order Op (LoadAt / IterateInline) on
-// this path, so the old `UnsupportedOp` fallback has no live consumer.
+// this path, so the `UnsupportedOp` fallback has no live consumer.
 
 fn wrap_global(
     graph: &symbi_ir::graph::Graph,

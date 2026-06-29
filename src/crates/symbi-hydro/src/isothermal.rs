@@ -303,9 +303,8 @@ mod tests {
 
     #[test]
     fn iso_zero_density_yields_non_finite_velocity() {
-        // divide-by-zero is IEEE, not a panic. previously this was
-        // masked by a 1e-12 floor; now it surfaces as +inf so callers
-        // upstream can detect and act (e.g. dt reduction).
+        // divide-by-zero is IEEE, not a panic. it surfaces as +inf so callers
+        // upstream can detect and act (e.g., dt reduction).
         let regime = IsoNewtonian;
         let eos = Isothermal { cs: 1.0 };
         let cons = IsoCons { den: 0.0, mom: Tensor::new([1.0]), nrg: Zero::default() };

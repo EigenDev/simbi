@@ -182,11 +182,11 @@ fn newton_sqrt<S: Scalar>(a: S, x0: S) -> S {
 // `scalarize(graph, output, name)` path which doesn't set up the iterate body
 // context — IterAcc lowers outside an IterateInline loop body and panics.
 //
-// the iterate impl is structurally identical to the legacy Gv impl (same graph
-// ops, same FREEZE LAW). f64-side iterate freeze is already pinned by Tier 0's
+// the iterate impl is structurally identical to the Gv impl (same graph
+// ops, same FREEZE LAW). f64-side iterate freeze is pinned by Tier 0's
 // `f64_iterate_freeze_holds_pre_convergence_value` test. the carrier-equivalence
-// (Gv trace + interp) for iterate lands in Chunk 5 once the symbi-discretize
-// carrier_oracle.rs harness migrates to the new trait — that harness drives
+// (Gv trace + interp) for iterate is covered by the symbi-discretize
+// carrier_oracle.rs harness — that harness drives
 // `scalarize_kernel` + the production interp and validates iterate via real
 // srhd/rmhd c2p round-trips.
 #[test]

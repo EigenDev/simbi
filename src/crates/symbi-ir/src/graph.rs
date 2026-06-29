@@ -67,11 +67,26 @@ impl Eq for ConstValue {}
 impl std::hash::Hash for ConstValue {
     fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
         match self {
-            ConstValue::F64(x) => { 0u8.hash(h); x.to_bits().hash(h); }
-            ConstValue::F32(x) => { 1u8.hash(h); x.to_bits().hash(h); }
-            ConstValue::I32(x) => { 2u8.hash(h); x.hash(h); }
-            ConstValue::U32(x) => { 3u8.hash(h); x.hash(h); }
-            ConstValue::Bool(b) => { 4u8.hash(h); b.hash(h); }
+            ConstValue::F64(x) => {
+                0u8.hash(h);
+                x.to_bits().hash(h);
+            }
+            ConstValue::F32(x) => {
+                1u8.hash(h);
+                x.to_bits().hash(h);
+            }
+            ConstValue::I32(x) => {
+                2u8.hash(h);
+                x.hash(h);
+            }
+            ConstValue::U32(x) => {
+                3u8.hash(h);
+                x.hash(h);
+            }
+            ConstValue::Bool(b) => {
+                4u8.hash(h);
+                b.hash(h);
+            }
         }
     }
 }
@@ -143,32 +158,57 @@ pub enum DimIndex {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ElementWiseOp {
     // arithmetic binary
-    Add, Sub, Mul, Div, Min, Max,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Min,
+    Max,
     // integer floor division (rounds toward negative infinity) — the index-space
     // primitive for refinement-lattice pullbacks (amr prolong: coarse parent of a
     // possibly-negative fine ghost index). integer-only: renders as `div_euclid`
     // (rust), an explicit floor-division ternary (cuda). never promotes to float.
     FloorDiv,
     // arithmetic unary
-    Neg, Abs, Sqrt, Floor, Ceil, Round, Trunc,
+    Neg,
+    Abs,
+    Sqrt,
+    Floor,
+    Ceil,
+    Round,
+    Trunc,
     // transcendental unary (input: float, result: float)
-    Sin, Cos, Acos, Sinh, Cosh, Asinh, Acosh,
+    Sin,
+    Cos,
+    Acos,
+    Sinh,
+    Cosh,
+    Asinh,
+    Acosh,
     // transcendental binary: Pow(a, b) = a^b (float)
     Pow,
     // numeric conversion (the usual-arithmetic-conversions primitive): `Cast(to)(x)`
     // converts `x` to element type `to`. inserted IMPLICITLY by `element_wise` to
-    // promote a mixed-type op's narrower operand (e.g. an i32 index times an f64
+    // promote a mixed-type op's narrower operand (e.g., an i32 index times an f64
     // grid width) — callers never write it. unary; result element is `to`.
     Cast(ElementTy),
     // comparison binary (result: Bool)
-    Eq, Ne, Lt, Le, Gt, Ge,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
     // classification unary (input: float, result: Bool)
-    IsFinite, IsNaN,
+    IsFinite,
+    IsNaN,
     // bitwise / logical binary. on integer inputs: bitwise. on Bool
     // inputs: logical (Rust's `&&` / `||` / `^` reduce to these
     // after eager evaluation — pure-functional bodies don't observe
     // short-circuit). result element matches input.
-    BitAnd, BitOr, BitXor,
+    BitAnd,
+    BitOr,
+    BitXor,
     // bitwise / logical unary. on integer inputs: bitwise complement.
     // on Bool inputs: logical NOT (Rust's `!`). result element matches input.
     // backs the `Mask: Not` requirement on the carrier `Scalar::Mask`.
@@ -178,12 +218,22 @@ pub enum ElementWiseOp {
 impl ElementWiseOp {
     pub fn arity(self) -> usize {
         match self {
-            ElementWiseOp::Add | ElementWiseOp::Sub | ElementWiseOp::Mul | ElementWiseOp::Div
+            ElementWiseOp::Add
+            | ElementWiseOp::Sub
+            | ElementWiseOp::Mul
+            | ElementWiseOp::Div
             | ElementWiseOp::FloorDiv
-            | ElementWiseOp::Min | ElementWiseOp::Max
-            | ElementWiseOp::Eq | ElementWiseOp::Ne | ElementWiseOp::Lt | ElementWiseOp::Le
-            | ElementWiseOp::Gt | ElementWiseOp::Ge
-            | ElementWiseOp::BitAnd | ElementWiseOp::BitOr | ElementWiseOp::BitXor
+            | ElementWiseOp::Min
+            | ElementWiseOp::Max
+            | ElementWiseOp::Eq
+            | ElementWiseOp::Ne
+            | ElementWiseOp::Lt
+            | ElementWiseOp::Le
+            | ElementWiseOp::Gt
+            | ElementWiseOp::Ge
+            | ElementWiseOp::BitAnd
+            | ElementWiseOp::BitOr
+            | ElementWiseOp::BitXor
             | ElementWiseOp::Pow => 2,
             _ => 1,
         }
@@ -193,9 +243,14 @@ impl ElementWiseOp {
     pub fn returns_bool(self) -> bool {
         matches!(
             self,
-            ElementWiseOp::Eq | ElementWiseOp::Ne | ElementWiseOp::Lt | ElementWiseOp::Le
-                | ElementWiseOp::Gt | ElementWiseOp::Ge
-                | ElementWiseOp::IsFinite | ElementWiseOp::IsNaN
+            ElementWiseOp::Eq
+                | ElementWiseOp::Ne
+                | ElementWiseOp::Lt
+                | ElementWiseOp::Le
+                | ElementWiseOp::Gt
+                | ElementWiseOp::Ge
+                | ElementWiseOp::IsFinite
+                | ElementWiseOp::IsNaN
         )
     }
 
@@ -203,52 +258,84 @@ impl ElementWiseOp {
     pub fn requires_float(self) -> bool {
         matches!(
             self,
-            ElementWiseOp::Sqrt | ElementWiseOp::IsFinite | ElementWiseOp::IsNaN
-                | ElementWiseOp::Floor | ElementWiseOp::Ceil
-                | ElementWiseOp::Round | ElementWiseOp::Trunc
-                | ElementWiseOp::Sin | ElementWiseOp::Cos | ElementWiseOp::Acos
-                | ElementWiseOp::Sinh | ElementWiseOp::Cosh
-                | ElementWiseOp::Asinh | ElementWiseOp::Acosh | ElementWiseOp::Pow
+            ElementWiseOp::Sqrt
+                | ElementWiseOp::IsFinite
+                | ElementWiseOp::IsNaN
+                | ElementWiseOp::Floor
+                | ElementWiseOp::Ceil
+                | ElementWiseOp::Round
+                | ElementWiseOp::Trunc
+                | ElementWiseOp::Sin
+                | ElementWiseOp::Cos
+                | ElementWiseOp::Acos
+                | ElementWiseOp::Sinh
+                | ElementWiseOp::Cosh
+                | ElementWiseOp::Asinh
+                | ElementWiseOp::Acosh
+                | ElementWiseOp::Pow
         )
     }
 
     pub fn name(self) -> &'static str {
         match self {
-            ElementWiseOp::Add => "Add",  ElementWiseOp::Sub => "Sub",
-            ElementWiseOp::Mul => "Mul",  ElementWiseOp::Div => "Div",
+            ElementWiseOp::Add => "Add",
+            ElementWiseOp::Sub => "Sub",
+            ElementWiseOp::Mul => "Mul",
+            ElementWiseOp::Div => "Div",
             ElementWiseOp::FloorDiv => "FloorDiv",
-            ElementWiseOp::Min => "Min",  ElementWiseOp::Max => "Max",
-            ElementWiseOp::Neg => "Neg",  ElementWiseOp::Abs => "Abs",
+            ElementWiseOp::Min => "Min",
+            ElementWiseOp::Max => "Max",
+            ElementWiseOp::Neg => "Neg",
+            ElementWiseOp::Abs => "Abs",
             ElementWiseOp::Sqrt => "Sqrt",
-            ElementWiseOp::Floor => "Floor", ElementWiseOp::Ceil => "Ceil",
-            ElementWiseOp::Round => "Round", ElementWiseOp::Trunc => "Trunc",
-            ElementWiseOp::Eq => "Eq", ElementWiseOp::Ne => "Ne",
-            ElementWiseOp::Lt => "Lt", ElementWiseOp::Le => "Le",
-            ElementWiseOp::Gt => "Gt", ElementWiseOp::Ge => "Ge",
-            ElementWiseOp::IsFinite => "IsFinite", ElementWiseOp::IsNaN => "IsNaN",
-            ElementWiseOp::Sin => "Sin", ElementWiseOp::Cos => "Cos", ElementWiseOp::Acos => "Acos",
-            ElementWiseOp::Sinh => "Sinh", ElementWiseOp::Cosh => "Cosh",
-            ElementWiseOp::Asinh => "Asinh", ElementWiseOp::Acosh => "Acosh",
+            ElementWiseOp::Floor => "Floor",
+            ElementWiseOp::Ceil => "Ceil",
+            ElementWiseOp::Round => "Round",
+            ElementWiseOp::Trunc => "Trunc",
+            ElementWiseOp::Eq => "Eq",
+            ElementWiseOp::Ne => "Ne",
+            ElementWiseOp::Lt => "Lt",
+            ElementWiseOp::Le => "Le",
+            ElementWiseOp::Gt => "Gt",
+            ElementWiseOp::Ge => "Ge",
+            ElementWiseOp::IsFinite => "IsFinite",
+            ElementWiseOp::IsNaN => "IsNaN",
+            ElementWiseOp::Sin => "Sin",
+            ElementWiseOp::Cos => "Cos",
+            ElementWiseOp::Acos => "Acos",
+            ElementWiseOp::Sinh => "Sinh",
+            ElementWiseOp::Cosh => "Cosh",
+            ElementWiseOp::Asinh => "Asinh",
+            ElementWiseOp::Acosh => "Acosh",
             ElementWiseOp::Pow => "Pow",
             ElementWiseOp::BitAnd => "BitAnd",
-            ElementWiseOp::BitOr  => "BitOr",
+            ElementWiseOp::BitOr => "BitOr",
             ElementWiseOp::BitXor => "BitXor",
             ElementWiseOp::BitNot => "BitNot",
             ElementWiseOp::Cast(_) => "Cast",
         }
     }
 
-    /// does this op participate in the usual arithmetic conversions — i.e. a binary
+    /// does this op participate in the usual arithmetic conversions — i.e., a binary
     /// numeric op whose mixed int/float operands should promote to a common float
     /// type? arithmetic + comparison promote; bitwise + the conversion op itself do
     /// not (bitwise needs matching int/bool; Cast is unary).
     pub fn promotes(self) -> bool {
         matches!(
             self,
-            ElementWiseOp::Add | ElementWiseOp::Sub | ElementWiseOp::Mul | ElementWiseOp::Div
-                | ElementWiseOp::Min | ElementWiseOp::Max | ElementWiseOp::Pow
-                | ElementWiseOp::Eq | ElementWiseOp::Ne | ElementWiseOp::Lt | ElementWiseOp::Le
-                | ElementWiseOp::Gt | ElementWiseOp::Ge
+            ElementWiseOp::Add
+                | ElementWiseOp::Sub
+                | ElementWiseOp::Mul
+                | ElementWiseOp::Div
+                | ElementWiseOp::Min
+                | ElementWiseOp::Max
+                | ElementWiseOp::Pow
+                | ElementWiseOp::Eq
+                | ElementWiseOp::Ne
+                | ElementWiseOp::Lt
+                | ElementWiseOp::Le
+                | ElementWiseOp::Gt
+                | ElementWiseOp::Ge
         )
     }
 }
@@ -289,7 +376,7 @@ impl ReduceOp {
         match self {
             ReduceOp::Min => "Min",
             ReduceOp::Max => "Max",
-            ReduceOp::Or  => "Or",
+            ReduceOp::Or => "Or",
             ReduceOp::And => "And",
             ReduceOp::Xor => "Xor",
         }
@@ -311,13 +398,26 @@ impl ReduceOp {
 /// ULP — same rule as the existing scalar IR.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TranscendentalOp {
-    Sin, Cos, Tan,
-    Asin, Acos, Atan,
+    Sin,
+    Cos,
+    Tan,
+    Asin,
+    Acos,
+    Atan,
     Atan2,
-    Exp, Exp2, Log, Log2, Log10,
-    Sinh, Cosh, Tanh,
-    Asinh, Acosh, Atanh,
-    Pow, Hypot,
+    Exp,
+    Exp2,
+    Log,
+    Log2,
+    Log10,
+    Sinh,
+    Cosh,
+    Tanh,
+    Asinh,
+    Acosh,
+    Atanh,
+    Pow,
+    Hypot,
 }
 
 impl TranscendentalOp {
@@ -330,18 +430,26 @@ impl TranscendentalOp {
 
     pub fn name(self) -> &'static str {
         match self {
-            TranscendentalOp::Sin => "Sin",   TranscendentalOp::Cos => "Cos",
+            TranscendentalOp::Sin => "Sin",
+            TranscendentalOp::Cos => "Cos",
             TranscendentalOp::Tan => "Tan",
-            TranscendentalOp::Asin => "Asin", TranscendentalOp::Acos => "Acos",
-            TranscendentalOp::Atan => "Atan", TranscendentalOp::Atan2 => "Atan2",
-            TranscendentalOp::Exp => "Exp",   TranscendentalOp::Exp2 => "Exp2",
-            TranscendentalOp::Log => "Log",   TranscendentalOp::Log2 => "Log2",
+            TranscendentalOp::Asin => "Asin",
+            TranscendentalOp::Acos => "Acos",
+            TranscendentalOp::Atan => "Atan",
+            TranscendentalOp::Atan2 => "Atan2",
+            TranscendentalOp::Exp => "Exp",
+            TranscendentalOp::Exp2 => "Exp2",
+            TranscendentalOp::Log => "Log",
+            TranscendentalOp::Log2 => "Log2",
             TranscendentalOp::Log10 => "Log10",
-            TranscendentalOp::Sinh => "Sinh", TranscendentalOp::Cosh => "Cosh",
+            TranscendentalOp::Sinh => "Sinh",
+            TranscendentalOp::Cosh => "Cosh",
             TranscendentalOp::Tanh => "Tanh",
-            TranscendentalOp::Asinh => "Asinh", TranscendentalOp::Acosh => "Acosh",
+            TranscendentalOp::Asinh => "Asinh",
+            TranscendentalOp::Acosh => "Acosh",
             TranscendentalOp::Atanh => "Atanh",
-            TranscendentalOp::Pow => "Pow", TranscendentalOp::Hypot => "Hypot",
+            TranscendentalOp::Pow => "Pow",
+            TranscendentalOp::Hypot => "Hypot",
         }
     }
 }
@@ -395,7 +503,7 @@ pub enum Op {
     /// the kernel-coord field-read pattern (Param + emit_kernel prelude)
     /// is the right primitive when the read coordinate IS the kernel
     /// iteration; LoadAt covers the second case (gather at a runtime
-    /// source coord, e.g. ghost-fill remap).
+    /// source coord, e.g., ghost-fill remap).
     LoadAt(Symbol, Vec<NodeId>),
     /// F2.C: a first-class function value. references a `FnDef`
     /// stored in the graph's `lambdas` table by FnId. the lambda's
@@ -408,10 +516,7 @@ pub enum Op {
     /// NodeId pointing at an `Op::Lambda` in the same graph. `args`
     /// match the lambda's FnDef.params in count and type. result type
     /// equals the type of the lambda's body output.
-    Apply {
-        lambda: NodeId,
-        args:   Vec<NodeId>,
-    },
+    Apply { lambda: NodeId, args: Vec<NodeId> },
     /// F2.F: bounded fold. canonical catamorphism over the natural
     /// number `count`. `lambda` must be `Op::Lambda` with FnDef of
     /// shape `(Acc, Idx) -> Acc`. semantics:
@@ -435,8 +540,8 @@ pub enum Op {
     /// rejection, etc.) live at the host level outside the IR.
     Fold {
         lambda: NodeId,
-        init:   NodeId,
-        count:  NodeId,
+        init: NodeId,
+        count: NodeId,
     },
     /// F4: physics morphism primitive. carries a `MorphismKind`
     /// (Diff / FaceAvg / Curl / …) whose `dim_constraint()` participates
@@ -445,9 +550,12 @@ pub enum Op {
     /// rationale: makes physics intent first-class in the IR. the
     /// proc-macro reads dim constraints off the Morphism nodes instead
     /// of relying on the `_3d` naming convention. emit lowers each
-    /// MorphismKind variant to its semantic stencil (e.g. Diff(f, ax)
+    /// MorphismKind variant to its semantic stencil (e.g., Diff(f, ax)
     /// lowers to f[+ax] - f[coord]).
-    Morphism { kind: crate::morphism::MorphismKind, args: Vec<NodeId> },
+    Morphism {
+        kind: crate::morphism::MorphismKind,
+        args: Vec<NodeId>,
+    },
     /// component `idx` of the current accumulator VECTOR inside an `IterateInline`
     /// loop body — a rank-0 placeholder leaf the scalarizer resolves to the loop's
     /// `idx`-th mutable accumulator local. scalar loops use a 1-component vector
@@ -472,10 +580,10 @@ pub enum Op {
     /// the `N` assigns AFTER the whole cone (so the update is simultaneous), and
     /// the node's value is `accs[result]` post-loop. `count` is a literal bound.
     IterateInline {
-        accs:   Vec<NodeId>,
-        inits:  Vec<NodeId>,
-        steps:  Vec<NodeId>,
-        count:  usize,
+        accs: Vec<NodeId>,
+        inits: Vec<NodeId>,
+        steps: Vec<NodeId>,
+        count: usize,
         result: u32,
         /// optional EARLY-BREAK predicate (rank-0 Bool). when `Some`, the
         /// scalarizer emits `if break_when { break; }` at the END of the loop
@@ -508,17 +616,14 @@ pub enum Op {
     /// - `Op::Scope` BYPASSES hash-cons (see `push()`): each scope is a
     ///   distinct lexical region, even if two scopes happen to share the
     ///   same body+result shape.
-    Scope {
-        body:   Vec<NodeId>,
-        result: NodeId,
-    },
+    Scope { body: Vec<NodeId>, result: NodeId },
     /// the DUAL of `IterateInline`: a real data-dependent branch. `cond` is a
     /// rank-0 Bool (Mask). exactly ONE arm executes at runtime — `then_results`
     /// when `cond` is true, `else_results` otherwise. each `*_body` lists the
     /// NodeIds CREATED inside that arm's `S::cond` closure (insertion order);
     /// they are lowered INSIDE the arm's brace so the codegen evaluates them
-    /// only on the taken path. this is what lets carrier-generic physics match
-    /// the C++ early-conditional cost (skip the whole quartic on a fast path)
+    /// only on the taken path. this is what lets carrier-generic physics get
+    /// the early-out cost (skip the whole quartic on a fast path)
     /// instead of paying compute-all-paths via `Op::Select`.
     ///
     /// `*_results` are vectors so the vector form (`cond_vec`, the dual of
@@ -536,10 +641,10 @@ pub enum Op {
     /// - bypasses hash-cons (see `push()`): each branch is a distinct lexical
     ///   region.
     IfElse {
-        cond:         NodeId,
-        then_body:    Vec<NodeId>,
+        cond: NodeId,
+        then_body: Vec<NodeId>,
         then_results: Vec<NodeId>,
-        else_body:    Vec<NodeId>,
+        else_body: Vec<NodeId>,
         else_results: Vec<NodeId>,
     },
     /// extract component `index` of a MULTI-OUTPUT node (today: an `Op::IfElse`
@@ -548,10 +653,7 @@ pub enum Op {
     /// component — the lightweight projection that lets `cond_vec` return N
     /// distinct scalar values from a SINGLE shared branch (the arm computation
     /// is traced once; each output is one `Proj`). rank-0 scalar.
-    Proj {
-        source: NodeId,
-        index:  u32,
-    },
+    Proj { source: NodeId, index: u32 },
 }
 
 // =============================================================================
@@ -590,13 +692,15 @@ impl Op {
 
             // Vec<NodeId> field.
             Op::ElementWise(_, ins)
-          | Op::Transcendental(_, ins)
-          | Op::Construct(ins)
-          | Op::Einsum(_, ins)
-          | Op::LoadAt(_, ins)
-          | Op::Apply { args: ins, .. }
-          | Op::Morphism { args: ins, .. } => {
-                for n in ins.iter_mut() { *n = f(*n)?; }
+            | Op::Transcendental(_, ins)
+            | Op::Construct(ins)
+            | Op::Einsum(_, ins)
+            | Op::LoadAt(_, ins)
+            | Op::Apply { args: ins, .. }
+            | Op::Morphism { args: ins, .. } => {
+                for n in ins.iter_mut() {
+                    *n = f(*n)?;
+                }
                 Ok(())
             }
 
@@ -607,18 +711,34 @@ impl Op {
                 *e = f(*e)?;
                 Ok(())
             }
-            Op::Fold { lambda, init, count } => {
+            Op::Fold {
+                lambda,
+                init,
+                count,
+            } => {
                 *lambda = f(*lambda)?;
-                *init   = f(*init)?;
-                *count  = f(*count)?;
+                *init = f(*init)?;
+                *count = f(*count)?;
                 Ok(())
             }
 
             // multiple Vec<NodeId> fields + optional NodeId.
-            Op::IterateInline { accs, inits, steps, break_when, .. } => {
-                for n in accs.iter_mut()  { *n = f(*n)?; }
-                for n in inits.iter_mut() { *n = f(*n)?; }
-                for n in steps.iter_mut() { *n = f(*n)?; }
+            Op::IterateInline {
+                accs,
+                inits,
+                steps,
+                break_when,
+                ..
+            } => {
+                for n in accs.iter_mut() {
+                    *n = f(*n)?;
+                }
+                for n in inits.iter_mut() {
+                    *n = f(*n)?;
+                }
+                for n in steps.iter_mut() {
+                    *n = f(*n)?;
+                }
                 if let Some(bw) = break_when {
                     *bw = f(*bw)?;
                 }
@@ -628,7 +748,9 @@ impl Op {
             // **docs/design/23 step 3b**: `body` is a Vec<NodeId> of scope-local
             // temps, `result` is the value the scope returns. both get remapped.
             Op::Scope { body, result } => {
-                for n in body.iter_mut() { *n = f(*n)?; }
+                for n in body.iter_mut() {
+                    *n = f(*n)?;
+                }
                 *result = f(*result)?;
                 Ok(())
             }
@@ -636,12 +758,26 @@ impl Op {
             // the IfElse dual: cond + both arm bodies + both result vecs are
             // all NodeId edges. listing the bodies (not just the results) keeps
             // arm-internal nodes reachable for DCE — same rule as Op::Scope.
-            Op::IfElse { cond, then_body, then_results, else_body, else_results } => {
+            Op::IfElse {
+                cond,
+                then_body,
+                then_results,
+                else_body,
+                else_results,
+            } => {
                 *cond = f(*cond)?;
-                for n in then_body.iter_mut()    { *n = f(*n)?; }
-                for n in then_results.iter_mut() { *n = f(*n)?; }
-                for n in else_body.iter_mut()    { *n = f(*n)?; }
-                for n in else_results.iter_mut() { *n = f(*n)?; }
+                for n in then_body.iter_mut() {
+                    *n = f(*n)?;
+                }
+                for n in then_results.iter_mut() {
+                    *n = f(*n)?;
+                }
+                for n in else_body.iter_mut() {
+                    *n = f(*n)?;
+                }
+                for n in else_results.iter_mut() {
+                    *n = f(*n)?;
+                }
                 Ok(())
             }
 
@@ -668,12 +804,11 @@ impl Op {
     }
 
     /// re-insert this op (already remapped to live in `target`'s NodeId space)
-    /// by calling the matching public builder on `target`. ONE arm per variant
-    /// — the third (and last) Phase-3 site that used to dispatch per-variant
-    /// (alongside `try_map_inputs` and `inputs`) collapses to one call.
+    /// by calling the matching public builder on `target`. ONE arm per variant,
+    /// dispatched in a single call (alongside `try_map_inputs` and `inputs`).
     ///
     /// caller contract: every NodeId field of `self` MUST already be a valid
-    /// id in `target` (i.e. `try_map_inputs` has been run against the splice
+    /// id in `target` (i.e., `try_map_inputs` has been run against the splice
     /// remap). builders re-run shape inference / hash-consing on `target`.
     ///
     /// `Param` and `Lambda` are NOT generically dispatchable:
@@ -687,35 +822,48 @@ impl Op {
     /// before delegating to `dispatch_builder`.
     pub fn dispatch_builder(self, target: &mut Graph, span: Option<Span>) -> NodeId {
         match self {
-            Op::Const(v)                    => target.add_const(v, span),
-            Op::Construct(elems)            => target.construct(elems, span),
-            Op::Index(input, dims)          => target.index(input, dims, span),
-            Op::Broadcast(input, shape)     => target.broadcast(input, shape, span),
-            Op::ElementWise(op, inputs)     => target.element_wise(op, inputs, span),
-            Op::Transcendental(op, inputs)  => target.transcendental(op, inputs, span),
-            Op::Reduce(op, axes, input)     => target.reduce(op, axes, input, span),
-            Op::Select(c, t, e)             => target.select(c, t, e, span),
-            Op::Einsum(spec, inputs)        => {
+            Op::Const(v) => target.add_const(v, span),
+            Op::Construct(elems) => target.construct(elems, span),
+            Op::Index(input, dims) => target.index(input, dims, span),
+            Op::Broadcast(input, shape) => target.broadcast(input, shape, span),
+            Op::ElementWise(op, inputs) => target.element_wise(op, inputs, span),
+            Op::Transcendental(op, inputs) => target.transcendental(op, inputs, span),
+            Op::Reduce(op, axes, input) => target.reduce(op, axes, input, span),
+            Op::Select(c, t, e) => target.select(c, t, e, span),
+            Op::Einsum(spec, inputs) => {
                 let spec_str = crate::passes::splice::einsum_spec_to_string(&spec);
                 target.einsum(&spec_str, inputs, span)
             }
-            Op::LoadAt(sym, components)     => target.load_at(sym, components, span),
-            Op::Apply { lambda, args }      => target.apply(lambda, args, span),
-            Op::Fold { lambda, init, count } => target.fold(lambda, init, count, span),
-            Op::Morphism { kind, args }     => target.morphism(kind, args, span),
-            Op::IterAcc(idx)                => target.iter_acc(idx, span),
-            Op::IterateInline { accs, inits, steps, count, result, break_when } => {
-                target.iterate_inline(accs, inits, steps, count, result, break_when, span)
-            }
+            Op::LoadAt(sym, components) => target.load_at(sym, components, span),
+            Op::Apply { lambda, args } => target.apply(lambda, args, span),
+            Op::Fold {
+                lambda,
+                init,
+                count,
+            } => target.fold(lambda, init, count, span),
+            Op::Morphism { kind, args } => target.morphism(kind, args, span),
+            Op::IterAcc(idx) => target.iter_acc(idx, span),
+            Op::IterateInline {
+                accs,
+                inits,
+                steps,
+                count,
+                result,
+                break_when,
+            } => target.iterate_inline(accs, inits, steps, count, result, break_when, span),
             // **docs/design/23 step 3b**: Op::Scope rebuilt by direct push
             // through the `scope_op` builder (which derives ty from result
             // and bypasses hash-cons).
             Op::Scope { body, result } => target.scope_op(body, result, span),
             // the IfElse dual rebuilt through `if_else` (derives ty from
             // then_results[0], bypasses hash-cons like scope_op).
-            Op::IfElse { cond, then_body, then_results, else_body, else_results } => {
-                target.if_else(cond, then_body, then_results, else_body, else_results, span)
-            }
+            Op::IfElse {
+                cond,
+                then_body,
+                then_results,
+                else_body,
+                else_results,
+            } => target.if_else(cond, then_body, then_results, else_body, else_results, span),
             Op::Proj { source, index } => target.proj(source, index, span),
             // Param / Lambda CANNOT be dispatched generically — Param needs a
             // param_subst lookup (cross-graph), Lambda needs FnDef cloning
@@ -734,7 +882,7 @@ impl Op {
 /// one IR node: its `Op` plus optional source span for diagnostics.
 #[derive(Clone, Debug)]
 pub struct Node {
-    pub op:   Op,
+    pub op: Op,
     pub span: Option<Span>,
 }
 
@@ -760,27 +908,25 @@ pub struct FnId(pub u32);
 /// and produce one device function; Apply sites emit a call.
 #[derive(Clone, Debug)]
 pub struct FnDef {
-    pub name:   Symbol,
+    pub name: Symbol,
     pub params: Vec<(Symbol, TensorTy)>,
-    pub body:   Graph,
+    pub body: Graph,
     pub output: NodeId,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Graph {
-    nodes:  Vec<Node>,
-    types:  Vec<TensorTy>,
+    nodes: Vec<Node>,
+    types: Vec<TensorTy>,
     params: Vec<(Symbol, NodeId)>,
     /// name -> param NodeId, for fast lookup during macro expansion.
     /// duplicates rejected at insertion time.
     param_index: HashMap<Symbol, NodeId>,
     output: Option<NodeId>,
     errors: Vec<ShapeError>,
-    /// F5.4-retire: graph-level dim constraint. when set, restricts the
-    /// kernel to a specific ndim during macro emission. previously this
-    /// information was embedded in `MorphismKind::CtEdgeEmf` / `::Curl`
-    /// variants and recovered by `graph_dim_constraint`; with those
-    /// variants retired the constraint is now carried explicitly here.
+    /// graph-level dim constraint. when set, restricts the
+    /// kernel to a specific ndim during macro emission. the constraint is
+    /// carried explicitly here.
     /// `None` means "no graph-level constraint" (combine with per-Morphism
     /// constraints from Diff/FaceAvg, which are AnyD anyway).
     pinned_ndim: Option<u8>,
@@ -942,11 +1088,7 @@ impl Graph {
                 span,
             });
             // poison: rank-0 placeholder so downstream queries don't panic.
-            return self.push(
-                Op::Construct(elems),
-                TensorTy::scalar(ElementTy::F64),
-                span,
-            );
+            return self.push(Op::Construct(elems), TensorTy::scalar(ElementTy::F64), span);
         }
         let first_ty = self.types[elems[0].0 as usize].clone();
         let mut joined_class = first_ty.class;
@@ -996,11 +1138,11 @@ impl Graph {
         new_shape.push(DimExpr::Literal(elems.len()));
         new_shape.extend(first_ty.shape.iter().cloned());
         let out_ty = TensorTy {
-            element:  first_ty.element,
-            rank:     first_ty.rank + 1,
-            shape:    new_shape,
+            element: first_ty.element,
+            rank: first_ty.rank + 1,
+            shape: new_shape,
             variance: first_ty.variance,
-            class:    joined_class,
+            class: joined_class,
         };
         self.push(Op::Construct(elems), out_ty, span)
     }
@@ -1009,12 +1151,7 @@ impl Graph {
     /// Literal indices against Literal axes are bounds-checked at build
     /// time. variance becomes Untagged on the result — extracting a
     /// scalar drops index-position meaning.
-    pub fn index(
-        &mut self,
-        tensor: NodeId,
-        idxs: Vec<DimIndex>,
-        span: Option<Span>,
-    ) -> NodeId {
+    pub fn index(&mut self, tensor: NodeId, idxs: Vec<DimIndex>, span: Option<Span>) -> NodeId {
         let t = self.types[tensor.0 as usize].clone();
         if idxs.len() as u32 != t.rank {
             self.record_error(ShapeError::RankMismatch {
@@ -1039,11 +1176,11 @@ impl Graph {
             }
         }
         let out_ty = TensorTy {
-            element:  t.element,
-            rank:     0,
-            shape:    vec![],
+            element: t.element,
+            rank: 0,
+            shape: vec![],
             variance: VarianceTag::Untagged,
-            class:    t.class,
+            class: t.class,
         };
         self.push(Op::Index(tensor, idxs), out_ty, span)
     }
@@ -1059,18 +1196,18 @@ impl Graph {
         let t = self.types[tensor.0 as usize].clone();
         if !broadcasts_to(&t.shape, &target) {
             self.record_error(ShapeError::BroadcastIncompatible {
-                left:    t.shape.clone(),
-                right:   target.clone(),
+                left: t.shape.clone(),
+                right: target.clone(),
                 span,
                 context: "Broadcast".to_string(),
             });
         }
         let out_ty = TensorTy {
-            element:  t.element,
-            rank:     target.len() as u32,
-            shape:    target.clone(),
+            element: t.element,
+            rank: target.len() as u32,
+            shape: target.clone(),
             variance: t.variance,
-            class:    t.class,
+            class: t.class,
         };
         self.push(Op::Broadcast(tensor, target), out_ty, span)
     }
@@ -1094,13 +1231,19 @@ impl Graph {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "ElementWise({}) requires {} input(s), got {}",
-                    op.name(), want_arity, inputs.len()
+                    op.name(),
+                    want_arity,
+                    inputs.len()
                 ),
                 span,
             });
             return self.push(
                 Op::ElementWise(op, inputs),
-                TensorTy::scalar(if op.returns_bool() { ElementTy::Bool } else { ElementTy::F64 }),
+                TensorTy::scalar(if op.returns_bool() {
+                    ElementTy::Bool
+                } else {
+                    ElementTy::F64
+                }),
                 span,
             );
         }
@@ -1118,7 +1261,7 @@ impl Graph {
 
         // the usual arithmetic conversions: a binary numeric op with mixed int/float
         // operands promotes the narrower operand to the common float type via an
-        // IMPLICIT `Cast` (e.g. an i32 index times an f64 grid width -> both f64).
+        // IMPLICIT `Cast` (e.g., an i32 index times an f64 grid width -> both f64).
         // homogeneous ops are untouched (no Cast inserted), so existing kernels are
         // byte-identical. this is the one bridge from index space to physical space.
         if want_arity == 2 && op.promotes() {
@@ -1128,11 +1271,17 @@ impl Graph {
                         let mut ty = in_tys[k].clone();
                         ty.element = common;
                         let arg = inputs[k];
-                        inputs[k] =
-                            self.push(Op::ElementWise(ElementWiseOp::Cast(common), vec![arg]), ty, span);
+                        inputs[k] = self.push(
+                            Op::ElementWise(ElementWiseOp::Cast(common), vec![arg]),
+                            ty,
+                            span,
+                        );
                     }
                 }
-                in_tys = inputs.iter().map(|id| self.types[id.0 as usize].clone()).collect();
+                in_tys = inputs
+                    .iter()
+                    .map(|id| self.types[id.0 as usize].clone())
+                    .collect();
             }
         }
 
@@ -1141,10 +1290,10 @@ impl Graph {
         for (i, t) in in_tys.iter().enumerate().skip(1) {
             if t.element != first_elem {
                 self.record_error(ShapeError::ElementMismatch {
-                    left:    first_elem,
-                    right:   t.element,
-                    span_a:  in_spans[0],
-                    span_b:  in_spans[i],
+                    left: first_elem,
+                    right: t.element,
+                    span_a: in_spans[0],
+                    span_b: in_spans[i],
                     context: format!("ElementWise({}) input {}", op.name(), i),
                 });
             }
@@ -1153,7 +1302,8 @@ impl Graph {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "ElementWise({}) requires a float input, got {}",
-                    op.name(), first_elem
+                    op.name(),
+                    first_elem
                 ),
                 span,
             });
@@ -1163,9 +1313,7 @@ impl Graph {
         // expression — the float->int gather smell the lattice algebra bans.
         if matches!(op, ElementWiseOp::FloorDiv) && !first_elem.is_integer() {
             self.record_error(ShapeError::Other {
-                message: format!(
-                    "ElementWise(FloorDiv) requires integer inputs, got {first_elem}"
-                ),
+                message: format!("ElementWise(FloorDiv) requires integer inputs, got {first_elem}"),
                 span,
             });
         }
@@ -1178,8 +1326,8 @@ impl Graph {
                 Some(s) => s,
                 None => {
                     self.record_error(ShapeError::BroadcastIncompatible {
-                        left:    in_tys[0].shape.clone(),
-                        right:   in_tys[1].shape.clone(),
+                        left: in_tys[0].shape.clone(),
+                        right: in_tys[1].shape.clone(),
                         span,
                         context: format!("ElementWise({})", op.name()),
                     });
@@ -1204,10 +1352,10 @@ impl Graph {
                 (a, b) if a == b => a,
                 _ => {
                     self.record_error(ShapeError::VarianceMismatch {
-                        left:    l,
-                        right:   r,
-                        span_a:  in_spans[0],
-                        span_b:  in_spans[1],
+                        left: l,
+                        right: r,
+                        span_a: in_spans[0],
+                        span_b: in_spans[1],
                         context: format!("ElementWise({})", op.name()),
                     });
                     VarianceTag::Untagged
@@ -1233,11 +1381,11 @@ impl Graph {
         let out_class = in_tys.iter().fold(DetClass::Det, |a, t| a.join(t.class));
 
         let out_ty = TensorTy {
-            element:  out_element,
-            rank:     out_shape.len() as u32,
-            shape:    out_shape,
+            element: out_element,
+            rank: out_shape.len() as u32,
+            shape: out_shape,
             variance: out_variance,
-            class:    out_class,
+            class: out_class,
         };
         // Phase 4: arithmetic-identity smart-constructor fold. catches the
         // patterns the IR is most prone to emit when contracting against unit
@@ -1261,7 +1409,9 @@ impl Graph {
     /// always bit-exact zero / one, so this is the safe case the smart
     /// constructor needs (no signed-zero / `NaN==NaN` traps).
     fn const_eq(&self, id: NodeId, target: f64) -> bool {
-        let Op::Const(c) = &self.nodes[id.0 as usize].op else { return false };
+        let Op::Const(c) = &self.nodes[id.0 as usize].op else {
+            return false;
+        };
         match c {
             ConstValue::F64(x) => *x == target,
             ConstValue::F32(x) => *x as f64 == target,
@@ -1285,28 +1435,39 @@ impl Graph {
     /// `passes/scalarize.rs::fold_arith_identity` MUST match this set
     /// exactly (`{ Add[0], Sub[0], Mul[1], Div[1] }`); changes to either
     /// layer require a matching change to the other.
-    fn fold_arith_identity(
-        &self,
-        op: ElementWiseOp,
-        a: NodeId,
-        b: NodeId,
-    ) -> Option<NodeId> {
+    fn fold_arith_identity(&self, op: ElementWiseOp, a: NodeId, b: NodeId) -> Option<NodeId> {
         match op {
             ElementWiseOp::Add => {
-                if self.const_eq(b, 0.0) { Some(a) }
-                else if self.const_eq(a, 0.0) { Some(b) }
-                else { None }
+                if self.const_eq(b, 0.0) {
+                    Some(a)
+                } else if self.const_eq(a, 0.0) {
+                    Some(b)
+                } else {
+                    None
+                }
             }
             ElementWiseOp::Sub => {
-                if self.const_eq(b, 0.0) { Some(a) } else { None }
+                if self.const_eq(b, 0.0) {
+                    Some(a)
+                } else {
+                    None
+                }
             }
             ElementWiseOp::Mul => {
-                if self.const_eq(b, 1.0) { Some(a) }
-                else if self.const_eq(a, 1.0) { Some(b) }
-                else { None }
+                if self.const_eq(b, 1.0) {
+                    Some(a)
+                } else if self.const_eq(a, 1.0) {
+                    Some(b)
+                } else {
+                    None
+                }
             }
             ElementWiseOp::Div => {
-                if self.const_eq(b, 1.0) { Some(a) } else { None }
+                if self.const_eq(b, 1.0) {
+                    Some(a)
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -1326,7 +1487,9 @@ impl Graph {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "Transcendental({}) requires {} input(s), got {}",
-                    op.name(), want_arity, inputs.len()
+                    op.name(),
+                    want_arity,
+                    inputs.len()
                 ),
                 span,
             });
@@ -1351,7 +1514,8 @@ impl Graph {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "Transcendental({}) requires a float input, got {}",
-                    op.name(), first_elem
+                    op.name(),
+                    first_elem
                 ),
                 span,
             });
@@ -1359,10 +1523,10 @@ impl Graph {
         for (i, t) in in_tys.iter().enumerate().skip(1) {
             if t.element != first_elem {
                 self.record_error(ShapeError::ElementMismatch {
-                    left:    first_elem,
-                    right:   t.element,
-                    span_a:  in_spans[0],
-                    span_b:  in_spans[i],
+                    left: first_elem,
+                    right: t.element,
+                    span_a: in_spans[0],
+                    span_b: in_spans[i],
                     context: format!("Transcendental({}) input {}", op.name(), i),
                 });
             }
@@ -1375,8 +1539,8 @@ impl Graph {
                 Some(s) => s,
                 None => {
                     self.record_error(ShapeError::BroadcastIncompatible {
-                        left:    in_tys[0].shape.clone(),
-                        right:   in_tys[1].shape.clone(),
+                        left: in_tys[0].shape.clone(),
+                        right: in_tys[1].shape.clone(),
                         span,
                         context: format!("Transcendental({})", op.name()),
                     });
@@ -1398,8 +1562,10 @@ impl Graph {
                 (a, b) if a == b => a,
                 _ => {
                     self.record_error(ShapeError::VarianceMismatch {
-                        left: l, right: r,
-                        span_a: in_spans[0], span_b: in_spans[1],
+                        left: l,
+                        right: r,
+                        span_a: in_spans[0],
+                        span_b: in_spans[1],
                         context: format!("Transcendental({})", op.name()),
                     });
                     VarianceTag::Untagged
@@ -1408,11 +1574,11 @@ impl Graph {
         };
 
         let out_ty = TensorTy {
-            element:  first_elem,
-            rank:     out_shape.len() as u32,
-            shape:    out_shape,
+            element: first_elem,
+            rank: out_shape.len() as u32,
+            shape: out_shape,
             variance: out_variance,
-            class:    DetClass::Tainted,
+            class: DetClass::Tainted,
         };
         self.push(Op::Transcendental(op, inputs), out_ty, span)
     }
@@ -1441,7 +1607,9 @@ impl Graph {
                 self.record_error(ShapeError::Other {
                     message: format!(
                         "Reduce({}) axis {} out of bounds for rank {}",
-                        op.name(), a, t.rank
+                        op.name(),
+                        a,
+                        t.rank
                     ),
                     span,
                 });
@@ -1452,7 +1620,8 @@ impl Graph {
                     self.record_error(ShapeError::Other {
                         message: format!(
                             "Reduce({}) axes must be sorted ascending without duplicates; got {:?}",
-                            op.name(), axes
+                            op.name(),
+                            axes
                         ),
                         span,
                     });
@@ -1468,7 +1637,8 @@ impl Graph {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "Reduce({}) does not accept element type {}",
-                    op.name(), t.element
+                    op.name(),
+                    t.element
                 ),
                 span,
             });
@@ -1487,11 +1657,11 @@ impl Graph {
         };
 
         let out_ty = TensorTy {
-            element:  t.element,
-            rank:     out_shape.len() as u32,
-            shape:    out_shape,
+            element: t.element,
+            rank: out_shape.len() as u32,
+            shape: out_shape,
             variance: VarianceTag::Untagged,
-            class:    t.class,
+            class: t.class,
         };
         self.push(Op::Reduce(op, axes, input), out_ty, span)
     }
@@ -1516,19 +1686,16 @@ impl Graph {
 
         if c.element != ElementTy::Bool {
             self.record_error(ShapeError::Other {
-                message: format!(
-                    "Select condition must have element Bool, got {}",
-                    c.element
-                ),
+                message: format!("Select condition must have element Bool, got {}", c.element),
                 span: c_span.or(span),
             });
         }
         if t.element != e.element {
             self.record_error(ShapeError::ElementMismatch {
-                left:    t.element,
-                right:   e.element,
-                span_a:  t_span,
-                span_b:  e_span,
+                left: t.element,
+                right: e.element,
+                span_a: t_span,
+                span_b: e_span,
                 context: "Select then/else".to_string(),
             });
         }
@@ -1538,8 +1705,8 @@ impl Graph {
             Some(s) => s,
             None => {
                 self.record_error(ShapeError::BroadcastIncompatible {
-                    left:    t.shape.clone(),
-                    right:   e.shape.clone(),
+                    left: t.shape.clone(),
+                    right: e.shape.clone(),
                     span,
                     context: "Select then/else".to_string(),
                 });
@@ -1550,8 +1717,8 @@ impl Graph {
             Some(s) => s,
             None => {
                 self.record_error(ShapeError::BroadcastIncompatible {
-                    left:    shape_te.clone(),
-                    right:   c.shape.clone(),
+                    left: shape_te.clone(),
+                    right: c.shape.clone(),
                     span,
                     context: "Select cond vs then/else".to_string(),
                 });
@@ -1566,10 +1733,10 @@ impl Graph {
             (a, b) if a == b => a,
             _ => {
                 self.record_error(ShapeError::VarianceMismatch {
-                    left:    t.variance,
-                    right:   e.variance,
-                    span_a:  t_span,
-                    span_b:  e_span,
+                    left: t.variance,
+                    right: e.variance,
+                    span_a: t_span,
+                    span_b: e_span,
                     context: "Select then/else".to_string(),
                 });
                 VarianceTag::Untagged
@@ -1577,11 +1744,11 @@ impl Graph {
         };
 
         let out_ty = TensorTy {
-            element:  t.element,
-            rank:     out_shape.len() as u32,
-            shape:    out_shape,
+            element: t.element,
+            rank: out_shape.len() as u32,
+            shape: out_shape,
             variance: out_variance,
-            class:    c.class.join(t.class).join(e.class),
+            class: c.class.join(t.class).join(e.class),
         };
         self.push(Op::Select(cond, then_branch, else_branch), out_ty, span)
     }
@@ -1603,12 +1770,7 @@ impl Graph {
     ///   7. check variance pairing on contracted labels
     ///   8. assemble output shape: ellipsis batch dims + named output dims
     ///   9. element + class propagation
-    pub fn einsum(
-        &mut self,
-        spec_str: &str,
-        inputs: Vec<NodeId>,
-        span: Option<Span>,
-    ) -> NodeId {
+    pub fn einsum(&mut self, spec_str: &str, inputs: Vec<NodeId>, span: Option<Span>) -> NodeId {
         // step 1: parse.
         let spec = match parse_einsum_spec(spec_str) {
             Ok(s) => s,
@@ -1617,7 +1779,10 @@ impl Graph {
                 // poison: rank-0 placeholder so downstream queries don't panic.
                 return self.push(
                     Op::Einsum(
-                        EinsumSpec { inputs: vec![], output: vec![] },
+                        EinsumSpec {
+                            inputs: vec![],
+                            output: vec![],
+                        },
                         inputs,
                     ),
                     TensorTy::scalar(ElementTy::F64),
@@ -1639,7 +1804,7 @@ impl Graph {
         // step 1b: input arity vs spec.
         if spec.inputs.len() != inputs.len() {
             self.record_error(ShapeError::EinsumInputArityMismatch {
-                spec_inputs:   spec.inputs.len(),
+                spec_inputs: spec.inputs.len(),
                 actual_inputs: inputs.len(),
                 span,
             });
@@ -1656,10 +1821,10 @@ impl Graph {
         for (i, t) in in_tys.iter().enumerate() {
             if t.element != first_elem {
                 self.record_error(ShapeError::ElementMismatch {
-                    left:    first_elem,
-                    right:   t.element,
-                    span_a:  in_spans.first().copied().flatten(),
-                    span_b:  in_spans[i],
+                    left: first_elem,
+                    right: t.element,
+                    span_a: in_spans.first().copied().flatten(),
+                    span_b: in_spans[i],
                     context: format!("Einsum input {}", i),
                 });
             }
@@ -1670,10 +1835,10 @@ impl Graph {
         // (left_labels, ellipsis_dims, right_labels). when an input has no
         // ellipsis, ellipsis_dims is empty.
         struct InputCtx<'a> {
-            left:          &'a [Atom],
-            has_ellipsis:  bool,
+            left: &'a [Atom],
+            has_ellipsis: bool,
             ellipsis_dims: Vec<DimExpr>,
-            right:         &'a [Atom],
+            right: &'a [Atom],
         }
 
         let mut ctxs: Vec<InputCtx<'_>> = Vec::with_capacity(spec.inputs.len());
@@ -1686,23 +1851,23 @@ impl Graph {
                     if atom_list.len() != in_rank {
                         self.record_error(ShapeError::EinsumRankMismatch {
                             input_index: i,
-                            expected:    atom_list.len() as u32,
-                            found:       in_rank as u32,
-                            span:        in_spans[i].or(span),
+                            expected: atom_list.len() as u32,
+                            found: in_rank as u32,
+                            span: in_spans[i].or(span),
                         });
                     }
                     (&atom_list[..], &[][..], false, Vec::<DimExpr>::new())
                 }
                 Some(idx) => {
-                    let left  = &atom_list[..idx];
+                    let left = &atom_list[..idx];
                     let right = &atom_list[idx + 1..];
                     let named_count = left.len() + right.len();
                     if in_rank < named_count {
                         self.record_error(ShapeError::EinsumRankMismatch {
                             input_index: i,
-                            expected:    named_count as u32,
-                            found:       in_rank as u32,
-                            span:        in_spans[i].or(span),
+                            expected: named_count as u32,
+                            found: in_rank as u32,
+                            span: in_spans[i].or(span),
                         });
                         (left, right, true, Vec::new())
                     } else {
@@ -1711,7 +1876,12 @@ impl Graph {
                     }
                 }
             };
-            ctxs.push(InputCtx { left, has_ellipsis, ellipsis_dims, right });
+            ctxs.push(InputCtx {
+                left,
+                has_ellipsis,
+                ellipsis_dims,
+                right,
+            });
         }
 
         // step 3: walk named labels and bind dim exprs. compare on
@@ -1721,13 +1891,17 @@ impl Graph {
             // axes in the input's shape that correspond to LEFT labels
             // start at index 0; RIGHT labels start at in_rank - right.len().
             let in_rank = in_tys[i].rank as usize;
-            let mut sites: Vec<(char, usize)> = Vec::new();  // (label, axis index)
+            let mut sites: Vec<(char, usize)> = Vec::new(); // (label, axis index)
             for (k, atom) in ctx.left.iter().enumerate() {
-                if let Atom::Label(c) = atom { sites.push((*c, k)); }
+                if let Atom::Label(c) = atom {
+                    sites.push((*c, k));
+                }
             }
             let right_start = in_rank.saturating_sub(ctx.right.len());
             for (k, atom) in ctx.right.iter().enumerate() {
-                if let Atom::Label(c) = atom { sites.push((*c, right_start + k)); }
+                if let Atom::Label(c) = atom {
+                    sites.push((*c, right_start + k));
+                }
             }
 
             for (label, axis) in sites {
@@ -1744,10 +1918,10 @@ impl Graph {
                         if *existing != dim {
                             self.record_error(ShapeError::DimMismatch {
                                 expected: existing.clone(),
-                                found:    dim,
-                                span_a:   *prior_span,
-                                span_b:   in_spans[i],
-                                context:  format!("einsum label '{}'", label),
+                                found: dim,
+                                span_a: *prior_span,
+                                span_b: in_spans[i],
+                                context: format!("einsum label '{}'", label),
                             });
                         }
                     }
@@ -1773,7 +1947,8 @@ impl Graph {
         // compute output's batch shape by broadcasting all input ellipsis_dims.
         let mut batch_shape: Vec<DimExpr> = Vec::new();
         if any_input_has_ellipsis && output_has_ellipsis {
-            let with_ell: Vec<&Vec<DimExpr>> = ctxs.iter()
+            let with_ell: Vec<&Vec<DimExpr>> = ctxs
+                .iter()
                 .filter(|c| c.has_ellipsis)
                 .map(|c| &c.ellipsis_dims)
                 .collect();
@@ -1784,8 +1959,8 @@ impl Graph {
                         Some(s) => batch_shape = s,
                         None => {
                             self.record_error(ShapeError::BroadcastIncompatible {
-                                left:    batch_shape.clone(),
-                                right:   (*other).clone(),
+                                left: batch_shape.clone(),
+                                right: (*other).clone(),
                                 span,
                                 context: "einsum batch ellipsis".to_string(),
                             });
@@ -1798,14 +1973,13 @@ impl Graph {
         // step 5: every named output label must appear in some input.
         let mut output_labels: Vec<char> = Vec::new();
         for a in &spec.output {
-            if let Atom::Label(c) = a { output_labels.push(*c); }
+            if let Atom::Label(c) = a {
+                output_labels.push(*c);
+            }
         }
         for c in &output_labels {
             if !bindings.iter().any(|(b, _, _)| b == c) {
-                self.record_error(ShapeError::EinsumOutputLabelNotInInputs {
-                    label: *c,
-                    span,
-                });
+                self.record_error(ShapeError::EinsumOutputLabelNotInInputs { label: *c, span });
             }
         }
 
@@ -1822,17 +1996,22 @@ impl Graph {
             }
         }
         for label in all_input_labels {
-            if output_labels.contains(&label) { continue; }  // batched, not contracted
+            if output_labels.contains(&label) {
+                continue;
+            } // batched, not contracted
             // collect variances of inputs carrying this label.
             let mut variances: Vec<(VarianceTag, Option<Span>)> = Vec::new();
             for (i, ctx) in ctxs.iter().enumerate() {
-                let carries = ctx.left.iter().chain(ctx.right.iter()).any(|a|
-                    matches!(a, Atom::Label(c) if *c == label));
+                let carries = ctx
+                    .left
+                    .iter()
+                    .chain(ctx.right.iter())
+                    .any(|a| matches!(a, Atom::Label(c) if *c == label));
                 if carries {
                     variances.push((in_tys[i].variance, in_spans[i]));
                 }
             }
-            // if there's only one carrier, nothing to pair (e.g. trace "ii->").
+            // if there's only one carrier, nothing to pair (e.g., trace "ii->").
             // if all Untagged, fine. otherwise: must have one Upper + one Lower somewhere.
             if variances.len() >= 2 {
                 let has_upper = variances.iter().any(|(v, _)| *v == VarianceTag::Upper);
@@ -1843,10 +2022,10 @@ impl Graph {
                     let v0 = variances[0];
                     let v1 = variances[1];
                     self.record_error(ShapeError::VarianceMismatch {
-                        left:    v0.0,
-                        right:   v1.0,
-                        span_a:  v0.1,
-                        span_b:  v1.1,
+                        left: v0.0,
+                        right: v1.0,
+                        span_a: v0.1,
+                        span_b: v1.1,
                         context: format!("einsum contracted label '{}'", label),
                     });
                 }
@@ -1866,35 +2045,36 @@ impl Graph {
         }
 
         let out_ty = TensorTy {
-            element:  first_elem,
-            rank:     out_shape.len() as u32,
-            shape:    out_shape,
+            element: first_elem,
+            rank: out_shape.len() as u32,
+            shape: out_shape,
             variance: VarianceTag::Untagged, // V1: einsum erases tensor-level variance
-            class:    out_class,
+            class: out_class,
         };
         self.push(Op::Einsum(spec, inputs), out_ty, span)
     }
 
     /// translate an EinsumParseError to a ShapeError variant.
-    fn record_parse_error(
-        &mut self,
-        err: crate::einsum::EinsumParseError,
-        span: Option<Span>,
-    ) {
+    fn record_parse_error(&mut self, err: crate::einsum::EinsumParseError, span: Option<Span>) {
         use crate::einsum::{EinsumParseError as P, SideIndex};
         let mapped = match err {
-            P::MissingArrow | P::MultipleArrows | P::BadCharacter { .. }
+            P::MissingArrow
+            | P::MultipleArrows
+            | P::BadCharacter { .. }
             | P::InvalidEllipsis { .. } => ShapeError::Other {
                 message: format!("einsum parse error: {}", err),
                 span,
             },
             P::MultipleEllipses { side_index } => ShapeError::EinsumMultipleEllipses {
-                side: match side_index { SideIndex::Input(_) => "input", SideIndex::Output => "output" },
+                side: match side_index {
+                    SideIndex::Input(_) => "input",
+                    SideIndex::Output => "output",
+                },
                 span,
             },
-            P::LabelLimitExceeded { count, max } => ShapeError::EinsumLabelOverLimit {
-                count, max, span,
-            },
+            P::LabelLimitExceeded { count, max } => {
+                ShapeError::EinsumLabelOverLimit { count, max, span }
+            }
         };
         self.record_error(mapped);
     }
@@ -1920,10 +2100,7 @@ impl Graph {
             let t = &self.types[c.0 as usize];
             if t.rank != 0 {
                 self.record_error(ShapeError::Other {
-                    message: format!(
-                        "LoadAt component {} must be rank-0, got rank {}",
-                        i, t.rank
-                    ),
+                    message: format!("LoadAt component {} must be rank-0, got rank {}", i, t.rank),
                     span,
                 });
             }
@@ -1934,7 +2111,6 @@ impl Graph {
             span,
         )
     }
-
 
     /// F4: physics morphism builder. each MorphismKind carries its own
     /// DimConstraint (consulted at ndim-inference time) and its own
@@ -1955,7 +2131,9 @@ impl Graph {
                 self.record_error(ShapeError::Other {
                     message: format!(
                         "Morphism({}) arg {} must be rank-0 scalar, got rank {}",
-                        kind.label(), i, t.rank
+                        kind.label(),
+                        i,
+                        t.rank
                     ),
                     span,
                 });
@@ -1981,7 +2159,9 @@ impl Graph {
                 message: format!(
                     "add_lambda: FnDef.output NodeId {:?} is out of bounds \
                      for body of length {}",
-                    fn_def.output, fn_def.body.len()),
+                    fn_def.output,
+                    fn_def.body.len()
+                ),
                 span,
             });
         }
@@ -2020,7 +2200,10 @@ impl Graph {
     pub fn fn_def(&self, lambda: NodeId) -> &FnDef {
         match &self.nodes[lambda.0 as usize].op {
             Op::Lambda(fn_id) => &self.lambdas[fn_id.0 as usize],
-            other => panic!("fn_def: NodeId {:?} is not a Lambda (got {:?})", lambda, other),
+            other => panic!(
+                "fn_def: NodeId {:?} is not a Lambda (got {:?})",
+                lambda, other
+            ),
         }
     }
 
@@ -2040,29 +2223,34 @@ impl Graph {
             other => {
                 self.record_error(ShapeError::Other {
                     message: format!(
-                        "apply: NodeId {:?} is not a Lambda (got {:?})", lambda, other),
+                        "apply: NodeId {:?} is not a Lambda (got {:?})",
+                        lambda, other
+                    ),
                     span,
                 });
                 // poison: rank-0 F64 placeholder.
                 return self.push(
                     Op::Apply { lambda, args },
                     TensorTy::scalar(ElementTy::F64),
-                    span);
+                    span,
+                );
             }
         };
         // clone the FnDef summary out before we borrow `self` mutably.
         let (param_count, expected_tys, result_ty) = {
             let fn_def = &self.lambdas[fn_id.0 as usize];
             let result_ty = fn_def.body.ty(fn_def.output).clone();
-            let expected_tys: Vec<TensorTy> = fn_def.params.iter()
-                .map(|(_, t)| t.clone()).collect();
+            let expected_tys: Vec<TensorTy> =
+                fn_def.params.iter().map(|(_, t)| t.clone()).collect();
             (fn_def.params.len(), expected_tys, result_ty)
         };
         if args.len() != param_count {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "apply: arity mismatch — lambda expects {} args, got {}",
-                    param_count, args.len()),
+                    param_count,
+                    args.len()
+                ),
                 span,
             });
         }
@@ -2072,8 +2260,8 @@ impl Graph {
                 self.record_error(ShapeError::Other {
                     message: format!(
                         "apply: arg {} type mismatch — lambda expects {:?}{:?}, got {:?}{:?}",
-                        i, expected.element, expected.shape,
-                        arg_ty.element, arg_ty.shape),
+                        i, expected.element, expected.shape, arg_ty.element, arg_ty.shape
+                    ),
                     span,
                 });
             }
@@ -2096,9 +2284,9 @@ impl Graph {
     pub fn fold(
         &mut self,
         lambda: NodeId,
-        init:   NodeId,
-        count:  NodeId,
-        span:   Option<Span>,
+        init: NodeId,
+        count: NodeId,
+        span: Option<Span>,
     ) -> NodeId {
         let fn_id = match &self.nodes[lambda.0 as usize].op {
             Op::Lambda(fid) => *fid,
@@ -2106,23 +2294,35 @@ impl Graph {
                 self.record_error(ShapeError::Other {
                     message: format!(
                         "fold: lambda NodeId {:?} is not a Lambda (got {:?})",
-                        lambda, other),
+                        lambda, other
+                    ),
                     span,
                 });
                 // poison: rank-0 F64.
                 return self.push(
-                    Op::Fold { lambda, init, count },
+                    Op::Fold {
+                        lambda,
+                        init,
+                        count,
+                    },
                     TensorTy::scalar(ElementTy::F64),
-                    span);
+                    span,
+                );
             }
         };
         // copy out the FnDef summary before borrowing self mutably.
         let (n_params, acc_ty_expected, idx_ty_expected, body_output_ty) = {
             let fn_def = &self.lambdas[fn_id.0 as usize];
             let body_output_ty = fn_def.body.ty(fn_def.output).clone();
-            let acc = fn_def.params.first().map(|(_, t)| t.clone())
+            let acc = fn_def
+                .params
+                .first()
+                .map(|(_, t)| t.clone())
                 .unwrap_or_else(|| TensorTy::scalar(ElementTy::F64));
-            let idx = fn_def.params.get(1).map(|(_, t)| t.clone())
+            let idx = fn_def
+                .params
+                .get(1)
+                .map(|(_, t)| t.clone())
                 .unwrap_or_else(|| TensorTy::scalar(ElementTy::I32));
             (fn_def.params.len(), acc, idx, body_output_ty)
         };
@@ -2130,7 +2330,8 @@ impl Graph {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "fold: body lambda must have exactly 2 params (Acc, Idx); got {}",
-                    n_params),
+                    n_params
+                ),
                 span,
             });
         }
@@ -2141,7 +2342,8 @@ impl Graph {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "fold: body's index param must be rank-0 integer; got {:?}{:?}",
-                    idx_ty_expected.element, idx_ty_expected.shape),
+                    idx_ty_expected.element, idx_ty_expected.shape
+                ),
                 span,
             });
         }
@@ -2153,38 +2355,48 @@ impl Graph {
                 message: format!(
                     "fold: body output type {:?}{:?} does not match \
                      accumulator type {:?}{:?}",
-                    body_output_ty.element, body_output_ty.shape,
-                    acc_ty_expected.element, acc_ty_expected.shape),
+                    body_output_ty.element,
+                    body_output_ty.shape,
+                    acc_ty_expected.element,
+                    acc_ty_expected.shape
+                ),
                 span,
             });
         }
         // init type must match accumulator type.
         let init_ty = self.types[init.0 as usize].clone();
-        if init_ty.element != acc_ty_expected.element
-            || init_ty.shape != acc_ty_expected.shape
-        {
+        if init_ty.element != acc_ty_expected.element || init_ty.shape != acc_ty_expected.shape {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "fold: init type {:?}{:?} does not match accumulator \
                      type {:?}{:?}",
-                    init_ty.element, init_ty.shape,
-                    acc_ty_expected.element, acc_ty_expected.shape),
+                    init_ty.element, init_ty.shape, acc_ty_expected.element, acc_ty_expected.shape
+                ),
                 span,
             });
         }
         // count must be rank-0 integer.
         let count_ty = &self.types[count.0 as usize];
-        let count_is_integer = count_ty.rank == 0
-            && matches!(count_ty.element, ElementTy::I32 | ElementTy::U32);
+        let count_is_integer =
+            count_ty.rank == 0 && matches!(count_ty.element, ElementTy::I32 | ElementTy::U32);
         if !count_is_integer {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "fold: count must be rank-0 integer; got {:?}{:?}",
-                    count_ty.element, count_ty.shape),
+                    count_ty.element, count_ty.shape
+                ),
                 span,
             });
         }
-        self.push(Op::Fold { lambda, init, count }, acc_ty_expected, span)
+        self.push(
+            Op::Fold {
+                lambda,
+                init,
+                count,
+            },
+            acc_ty_expected,
+            span,
+        )
     }
 
     /// docs/design/14: a fresh `IterAcc(idx)` placeholder (rank-0 F64) for inline
@@ -2204,12 +2416,7 @@ impl Graph {
     /// bypasses hash-cons (see `push()`): two scopes with identical body+
     /// result vectors stay distinct NodeIds because each represents a
     /// distinct lexical region in the user's code.
-    pub fn scope_op(
-        &mut self,
-        body:   Vec<NodeId>,
-        result: NodeId,
-        span:   Option<Span>,
-    ) -> NodeId {
+    pub fn scope_op(&mut self, body: Vec<NodeId>, result: NodeId, span: Option<Span>) -> NodeId {
         let ty = self
             .types
             .get(result.0 as usize)
@@ -2228,18 +2435,20 @@ impl Graph {
     /// distinct lexical region.
     pub fn if_else(
         &mut self,
-        cond:         NodeId,
-        then_body:    Vec<NodeId>,
+        cond: NodeId,
+        then_body: Vec<NodeId>,
         then_results: Vec<NodeId>,
-        else_body:    Vec<NodeId>,
+        else_body: Vec<NodeId>,
         else_results: Vec<NodeId>,
-        span:         Option<Span>,
+        span: Option<Span>,
     ) -> NodeId {
         if then_results.len() != else_results.len() {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "if_else: then/else result count mismatch ({}/{})",
-                    then_results.len(), else_results.len()),
+                    then_results.len(),
+                    else_results.len()
+                ),
                 span,
             });
         }
@@ -2249,7 +2458,13 @@ impl Graph {
             .cloned()
             .unwrap_or_else(|| TensorTy::scalar(ElementTy::F64));
         self.push(
-            Op::IfElse { cond, then_body, then_results, else_body, else_results },
+            Op::IfElse {
+                cond,
+                then_body,
+                then_results,
+                else_body,
+                else_results,
+            },
             ty,
             span,
         )
@@ -2275,19 +2490,22 @@ impl Graph {
     /// see `iterate_inline_scalar`.
     pub fn iterate_inline(
         &mut self,
-        accs:       Vec<NodeId>,
-        inits:      Vec<NodeId>,
-        steps:      Vec<NodeId>,
-        count:      usize,
-        result:     u32,
+        accs: Vec<NodeId>,
+        inits: Vec<NodeId>,
+        steps: Vec<NodeId>,
+        count: usize,
+        result: u32,
         break_when: Option<NodeId>,
-        span:       Option<Span>,
+        span: Option<Span>,
     ) -> NodeId {
         if accs.len() != inits.len() || accs.len() != steps.len() {
             self.record_error(ShapeError::Other {
                 message: format!(
                     "iterate_inline: accs/inits/steps length mismatch ({}/{}/{})",
-                    accs.len(), inits.len(), steps.len()),
+                    accs.len(),
+                    inits.len(),
+                    steps.len()
+                ),
                 span,
             });
         }
@@ -2301,24 +2519,48 @@ impl Graph {
         }
         let acc_ty = self
             .types
-            .get(inits.get(result as usize).map(|n| n.0 as usize).unwrap_or(0))
+            .get(
+                inits
+                    .get(result as usize)
+                    .map(|n| n.0 as usize)
+                    .unwrap_or(0),
+            )
             .cloned()
             .unwrap_or_else(|| TensorTy::scalar(ElementTy::F64));
-        self.push(Op::IterateInline { accs, inits, steps, count, result, break_when }, acc_ty, span)
+        self.push(
+            Op::IterateInline {
+                accs,
+                inits,
+                steps,
+                count,
+                result,
+                break_when,
+            },
+            acc_ty,
+            span,
+        )
     }
 
     /// the scalar (N=1) inline iteration — a fixed-bound masked Newton. wraps the
     /// vector form with one accumulator. `acc` must be `IterAcc(0)`.
     pub fn iterate_inline_scalar(
         &mut self,
-        acc:        NodeId,
-        init:       NodeId,
-        step:       NodeId,
-        count:      usize,
+        acc: NodeId,
+        init: NodeId,
+        step: NodeId,
+        count: usize,
         break_when: Option<NodeId>,
-        span:       Option<Span>,
+        span: Option<Span>,
     ) -> NodeId {
-        self.iterate_inline(vec![acc], vec![init], vec![step], count, 0, break_when, span)
+        self.iterate_inline(
+            vec![acc],
+            vec![init],
+            vec![step],
+            count,
+            0,
+            break_when,
+            span,
+        )
     }
 
     // ----- cross-graph splice -----
@@ -2330,7 +2572,7 @@ impl Graph {
     /// boundary). a memo keyed on the source `NodeId` keeps shared subterms shared.
     ///
     /// LEAF resolution: every `Param(sym)` is handed to `resolve_leaf`. return `Some(dst)` to
-    /// bind the leaf to an existing node in `self` (the splice point — e.g. a field read the
+    /// bind the leaf to an existing node in `self` (the splice point — e.g., a field read the
     /// destination already built); return `None` to recreate it as a fresh param of the same
     /// type. constants are recreated verbatim.
     ///
@@ -2381,13 +2623,16 @@ impl Graph {
             // einsum / apply / loadat would either need cross-graph FnDef cloning
             // or are not used inside the grafted regime fragments.
             Op::Lambda(_)
-          | Op::Apply { .. }
-          | Op::Fold { .. }
-          | Op::Morphism { .. }
-          | Op::Einsum(_, _)
-          | Op::IterAcc(_)
-          | Op::IterateInline { .. } => {
-                panic!("import_subgraph: unsupported op {:?} (pointwise physics only)", op)
+            | Op::Apply { .. }
+            | Op::Fold { .. }
+            | Op::Morphism { .. }
+            | Op::Einsum(_, _)
+            | Op::IterAcc(_)
+            | Op::IterateInline { .. } => {
+                panic!(
+                    "import_subgraph: unsupported op {:?} (pointwise physics only)",
+                    op
+                )
             }
             // generic path: recurse on every NodeId field (populating `memo`),
             // then re-insert via `Op::dispatch_builder`. one match arm covers
@@ -2399,7 +2644,10 @@ impl Graph {
                 // per-variant scatter avoided by hand.
                 let mut children: Vec<NodeId> = Vec::new();
                 let _: Result<(), std::convert::Infallible> =
-                    generic.clone().try_map_inputs(|id| { children.push(id); Ok(id) });
+                    generic.clone().try_map_inputs(|id| {
+                        children.push(id);
+                        Ok(id)
+                    });
                 for child in children {
                     let _ = self.import_node(src, child, resolve_leaf, memo);
                 }
@@ -2428,19 +2676,28 @@ impl Graph {
         // `Gv::scope` call site is a distinct lexical region; deduping two
         // scopes with identical body+result vectors would collapse them into
         // one, but they could be CALLED from different outer contexts where
-        // identity matters (e.g. two scopes inside an `Op::Fold` body would
+        // identity matters (e.g., two scopes inside an `Op::Fold` body would
         // each iterate, and merging them would conflate iterations).
-        let bypass = matches!(&op,
-            Op::Param(_) | Op::Lambda(_) | Op::IterAcc(_) | Op::Scope { .. } | Op::IfElse { .. });
+        let bypass = matches!(
+            &op,
+            Op::Param(_) | Op::Lambda(_) | Op::IterAcc(_) | Op::Scope { .. } | Op::IfElse { .. }
+        );
         if !bypass {
             if let Some(&existing) = self.hashcons.get(&(op.clone(), ty.clone())) {
                 return existing;
             }
         }
         let id = NodeId(self.nodes.len() as u32);
-        self.nodes.push(Node { op: op.clone(), span });
+        self.nodes.push(Node {
+            op: op.clone(),
+            span,
+        });
         self.types.push(ty.clone());
-        debug_assert_eq!(self.nodes.len(), self.types.len(), "nodes and types out of sync");
+        debug_assert_eq!(
+            self.nodes.len(),
+            self.types.len(),
+            "nodes and types out of sync"
+        );
         if !bypass {
             self.hashcons.insert((op, ty), id);
         }
@@ -2455,7 +2712,9 @@ mod tests {
     use super::*;
     use crate::{DimExpr, error::ShapeError};
 
-    fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
+    fn lit(n: usize) -> DimExpr {
+        DimExpr::Literal(n)
+    }
 
     // ---- NodeId ----
 
@@ -2473,8 +2732,8 @@ mod tests {
     fn const_value_reports_correct_element() {
         assert_eq!(ConstValue::F64(0.0).element(), ElementTy::F64);
         assert_eq!(ConstValue::F32(0.0).element(), ElementTy::F32);
-        assert_eq!(ConstValue::I32(0).element(),   ElementTy::I32);
-        assert_eq!(ConstValue::U32(0).element(),   ElementTy::U32);
+        assert_eq!(ConstValue::I32(0).element(), ElementTy::I32);
+        assert_eq!(ConstValue::U32(0).element(), ElementTy::U32);
         assert_eq!(ConstValue::Bool(false).element(), ElementTy::Bool);
     }
 
@@ -2515,11 +2774,7 @@ mod tests {
     #[test]
     fn add_param_records_in_params_list() {
         let mut g = Graph::new();
-        let id = g.add_param(
-            Symbol::intern("x"),
-            TensorTy::scalar(ElementTy::F64),
-            None,
-        );
+        let id = g.add_param(Symbol::intern("x"), TensorTy::scalar(ElementTy::F64), None);
         assert_eq!(g.params().len(), 1);
         assert_eq!(g.params()[0].0.as_str(), "x");
         assert_eq!(g.params()[0].1, id);
@@ -2528,16 +2783,8 @@ mod tests {
     #[test]
     fn duplicate_param_returns_existing_id() {
         let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("x"),
-            TensorTy::scalar(ElementTy::F64),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("x"),
-            TensorTy::scalar(ElementTy::F64),
-            None,
-        );
+        let a = g.add_param(Symbol::intern("x"), TensorTy::scalar(ElementTy::F64), None);
+        let b = g.add_param(Symbol::intern("x"), TensorTy::scalar(ElementTy::F64), None);
         assert_eq!(a, b);
         assert_eq!(g.params().len(), 1, "duplicate must not append");
     }
@@ -2566,8 +2813,8 @@ mod tests {
     #[test]
     fn rank_n_param_is_supported() {
         let mut g = Graph::new();
-        let ty = TensorTy::from_shape(ElementTy::F64, vec![lit(3)])
-            .with_variance(VarianceTag::Upper);
+        let ty =
+            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper);
         let id = g.add_param(Symbol::intern("v"), ty.clone(), None);
         assert_eq!(g.ty(id), &ty);
     }
@@ -2591,7 +2838,8 @@ mod tests {
         let a = g.add_const(ConstValue::F64(1.0), None);
         let b = g.add_scalar_param("p", ElementTy::I32);
 
-        let pairs: Vec<(NodeId, ElementTy)> = g.iter().map(|(id, _, ty)| (id, ty.element)).collect();
+        let pairs: Vec<(NodeId, ElementTy)> =
+            g.iter().map(|(id, _, ty)| (id, ty.element)).collect();
         assert_eq!(pairs, vec![(a, ElementTy::F64), (b, ElementTy::I32)]);
     }
 
@@ -2636,7 +2884,10 @@ mod tests {
         let a = g.add_param(Symbol::intern("a"), TensorTy::scalar(ElementTy::F64), None);
         let b = g.add_param(Symbol::intern("b"), TensorTy::scalar(ElementTy::F64), None);
         let _ = g.element_wise(ElementWiseOp::FloorDiv, vec![a, b], None);
-        assert!(g.has_errors(), "FloorDiv on floats must record a shape error");
+        assert!(
+            g.has_errors(),
+            "FloorDiv on floats must record a shape error"
+        );
     }
 
     // ---- error accumulator (R.1.e) ----
@@ -2676,14 +2927,26 @@ mod tests {
     #[test]
     fn errors_accumulate_in_insertion_order() {
         let mut g = Graph::new();
-        g.record_error(ShapeError::Other { message: "one".into(), span: None });
-        g.record_error(ShapeError::Other { message: "two".into(), span: None });
-        g.record_error(ShapeError::Other { message: "three".into(), span: None });
+        g.record_error(ShapeError::Other {
+            message: "one".into(),
+            span: None,
+        });
+        g.record_error(ShapeError::Other {
+            message: "two".into(),
+            span: None,
+        });
+        g.record_error(ShapeError::Other {
+            message: "three".into(),
+            span: None,
+        });
         let drained = g.take_errors();
         assert_eq!(drained.len(), 3);
         // verify order
         let msgs: Vec<String> = drained.iter().map(|e| e.summary()).collect();
-        assert_eq!(msgs, vec!["one".to_string(), "two".to_string(), "three".to_string()]);
+        assert_eq!(
+            msgs,
+            vec!["one".to_string(), "two".to_string(), "three".to_string()]
+        );
     }
 
     #[test]
@@ -2693,7 +2956,10 @@ mod tests {
         let mut g = Graph::new();
         let n = g.add_const(ConstValue::F64(0.0), None);
         assert!(!g.has_errors());
-        g.record_error(ShapeError::Other { message: "x".into(), span: None });
+        g.record_error(ShapeError::Other {
+            message: "x".into(),
+            span: None,
+        });
         // node count unchanged
         assert_eq!(g.len(), 1);
         // and the node is still queryable
@@ -2758,7 +3024,11 @@ mod tests {
         let b = g.add_const(ConstValue::F32(2.0), None);
         let _ = g.construct(vec![a, b], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("element")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("element")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -2793,7 +3063,11 @@ mod tests {
         );
         let _ = g.construct(vec![up, dn], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("variance")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("variance")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -2922,7 +3196,7 @@ mod tests {
     #[test]
     fn broadcast_incompatible_errors() {
         let mut g = Graph::new();
-        let v = vec3(&mut g);  // shape [3]
+        let v = vec3(&mut g); // shape [3]
         let _ = g.broadcast(v, vec![lit(5)], None);
         let err = g.errors()[0].summary();
         assert!(err.contains("incompatible"), "{}", err);
@@ -3013,7 +3287,11 @@ mod tests {
         let b = g.add_scalar_param("b", ElementTy::F32);
         let _ = g.element_wise(ElementWiseOp::Add, vec![a, b], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("element")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("element")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3023,7 +3301,11 @@ mod tests {
         let b = vec_f64(&mut g, "b", 5);
         let _ = g.element_wise(ElementWiseOp::Add, vec![a, b], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("incompatible")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("incompatible")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3042,7 +3324,11 @@ mod tests {
         let a = g.add_scalar_param("a", ElementTy::I32);
         let _ = g.element_wise(ElementWiseOp::IsNaN, vec![a], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("float")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("float")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3060,7 +3346,7 @@ mod tests {
     #[test]
     fn elementwise_scalar_times_tensor_inherits_variance() {
         let mut g = Graph::new();
-        let s = scalar_f64(&mut g, "s");  // Untagged
+        let s = scalar_f64(&mut g, "s"); // Untagged
         let v = g.add_param(
             Symbol::intern("v"),
             TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
@@ -3085,7 +3371,11 @@ mod tests {
         );
         let _ = g.element_wise(ElementWiseOp::Add, vec![up, dn], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("variance")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("variance")),
+            "{:?}",
+            summaries
+        );
     }
 
     // ---- R.2.b: Transcendental ----
@@ -3134,7 +3424,11 @@ mod tests {
         let a = g.add_scalar_param("a", ElementTy::I32);
         let _ = g.transcendental(TranscendentalOp::Sin, vec![a], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("float")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("float")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3225,7 +3519,11 @@ mod tests {
         let v = vec_f64(&mut g, "v", 3);
         let _ = g.reduce(ReduceOp::Min, vec![5], v, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("out of bounds")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("out of bounds")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3238,7 +3536,11 @@ mod tests {
         );
         let _ = g.reduce(ReduceOp::Min, vec![2, 0], m, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("sorted")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("sorted")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3251,7 +3553,11 @@ mod tests {
         );
         let _ = g.reduce(ReduceOp::Max, vec![0, 0], m, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("sorted")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("sorted")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3260,7 +3566,11 @@ mod tests {
         let v = vec_f64(&mut g, "v", 3);
         let _ = g.reduce(ReduceOp::And, vec![0], v, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("element type")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("element type")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3291,7 +3601,11 @@ mod tests {
     // ---- R.2.c: Select ----
 
     fn bool_scalar(g: &mut Graph, name: &str) -> NodeId {
-        g.add_param(Symbol::intern(name), TensorTy::scalar(ElementTy::Bool), None)
+        g.add_param(
+            Symbol::intern(name),
+            TensorTy::scalar(ElementTy::Bool),
+            None,
+        )
     }
 
     #[test]
@@ -3309,9 +3623,9 @@ mod tests {
     #[test]
     fn select_broadcasts_cond_then_else() {
         let mut g = Graph::new();
-        let c = bool_scalar(&mut g, "c");                      // scalar
-        let t = vec_f64(&mut g, "t", 4);                       // [4]
-        let e = scalar_f64(&mut g, "e");                       // scalar
+        let c = bool_scalar(&mut g, "c"); // scalar
+        let t = vec_f64(&mut g, "t", 4); // [4]
+        let e = scalar_f64(&mut g, "e"); // scalar
         let r = g.select(c, t, e, None);
         assert!(!g.has_errors());
         assert_eq!(g.ty(r).shape, vec![lit(4)]);
@@ -3320,12 +3634,16 @@ mod tests {
     #[test]
     fn select_non_bool_cond_errors() {
         let mut g = Graph::new();
-        let c = scalar_f64(&mut g, "c");                       // wrong: not Bool
+        let c = scalar_f64(&mut g, "c"); // wrong: not Bool
         let t = scalar_f64(&mut g, "t");
         let e = scalar_f64(&mut g, "e");
         let _ = g.select(c, t, e, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("Bool")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("Bool")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3336,7 +3654,11 @@ mod tests {
         let e = g.add_scalar_param("e", ElementTy::F32);
         let _ = g.select(c, t, e, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("element")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("element")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3347,7 +3669,11 @@ mod tests {
         let e = vec_f64(&mut g, "e", 5);
         let _ = g.select(c, t, e, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("incompatible")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("incompatible")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3385,7 +3711,11 @@ mod tests {
         );
         let _ = g.select(c, t, e, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("variance")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("variance")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3509,7 +3839,10 @@ mod tests {
         );
         let r = g.einsum("ij,jk->ik", vec![m, n], None);
         assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).shape, vec![DimExpr::generic("D"), DimExpr::generic("D")]);
+        assert_eq!(
+            g.ty(r).shape,
+            vec![DimExpr::generic("D"), DimExpr::generic("D")]
+        );
     }
 
     // batched ellipsis
@@ -3589,7 +3922,11 @@ mod tests {
         let w = upper_vec(&mut g, "w", 3);
         let _ = g.einsum("i,i->", vec![v, w], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("variance")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("variance")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3599,7 +3936,11 @@ mod tests {
         let w = lower_vec(&mut g, "w", 3);
         let _ = g.einsum("i,i->", vec![v, w], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("variance")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("variance")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3607,7 +3948,7 @@ mod tests {
         // Untagged paired with anything is fine for V1 (rule § 2.5).
         let mut g = Graph::new();
         let v = upper_vec(&mut g, "v", 3);
-        let w = vec_f64(&mut g, "w", 3);   // Untagged
+        let w = vec_f64(&mut g, "w", 3); // Untagged
         let r = g.einsum("i,i->", vec![v, w], None);
         assert!(!g.has_errors(), "errors: {:?}", g.errors());
         assert_eq!(g.ty(r).rank, 0);
@@ -3623,7 +3964,11 @@ mod tests {
         let b = vec_f64(&mut g, "b", 4);
         let _ = g.einsum("i,i->", vec![a, b], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("dim mismatch")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("dim mismatch")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3634,7 +3979,11 @@ mod tests {
         let m = mat_f64(&mut g, "M", 3, 3);
         let _ = g.einsum("ij,jk->ik", vec![v, m], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("rank")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("rank")),
+            "{:?}",
+            summaries
+        );
     }
 
     // arity / spec errors
@@ -3645,14 +3994,20 @@ mod tests {
         let v = vec_f64(&mut g, "v", 3);
         let _ = g.einsum("i,i->", vec![v], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("2 inputs") && s.contains("1")), "{:?}", summaries);
+        assert!(
+            summaries
+                .iter()
+                .any(|s| s.contains("2 inputs") && s.contains("1")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
     fn einsum_parse_error_recorded() {
         let mut g = Graph::new();
         let v = vec_f64(&mut g, "v", 3);
-        let _ = g.einsum("ij", vec![v], None);  // missing arrow
+        let _ = g.einsum("ij", vec![v], None); // missing arrow
         assert!(g.has_errors());
     }
 
@@ -3661,9 +4016,13 @@ mod tests {
         let mut g = Graph::new();
         let a = vec_f64(&mut g, "a", 3);
         let b = vec_f64(&mut g, "b", 4);
-        let _ = g.einsum("i,j->k", vec![a, b], None);  // 'k' undefined
+        let _ = g.einsum("i,j->k", vec![a, b], None); // 'k' undefined
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("'k'")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("'k'")),
+            "{:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3671,11 +4030,12 @@ mod tests {
         let mut g = Graph::new();
         let a = vec_f64(&mut g, "a", 3);
         let b = vec_f64(&mut g, "b", 3);
-        let _ = g.einsum("i,i->...", vec![a, b], None);  // output has ..., inputs don't
+        let _ = g.einsum("i,i->...", vec![a, b], None); // output has ..., inputs don't
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
         assert!(
             summaries.iter().any(|s| s.contains("'...'")),
-            "{:?}", summaries,
+            "{:?}",
+            summaries,
         );
     }
 
@@ -3692,7 +4052,7 @@ mod tests {
             TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3)]),
             None,
         );
-        let _ = g.einsum("...i,...i->", vec![a, b], None);  // inputs have ..., output doesn't
+        let _ = g.einsum("...i,...i->", vec![a, b], None); // inputs have ..., output doesn't
         assert!(g.has_errors());
     }
 
@@ -3704,7 +4064,8 @@ mod tests {
         let a = upper_vec(&mut g, "a", 3);
         let b = g.add_param(
             Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_class(DetClass::Tainted)
+            TensorTy::from_shape(ElementTy::F64, vec![lit(3)])
+                .with_class(DetClass::Tainted)
                 .with_variance(VarianceTag::Lower),
             None,
         );
@@ -3724,7 +4085,11 @@ mod tests {
         );
         let _ = g.einsum("i,i->", vec![a, b], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("element")), "{:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("element")),
+            "{:?}",
+            summaries
+        );
     }
 
     // ---- F2.A: hash-cons contract ----
@@ -3815,7 +4180,7 @@ mod tests {
         let x = body.add_scalar_param("x", ElementTy::F64);
         let sq = body.element_wise(ElementWiseOp::Mul, vec![x, x], None);
         FnDef {
-            name:   Symbol::intern("square"),
+            name: Symbol::intern("square"),
             params: vec![(Symbol::intern("x"), TensorTy::scalar(ElementTy::F64))],
             body,
             output: sq,
@@ -3866,8 +4231,11 @@ mod tests {
         let b = g.add_scalar_param("b", ElementTy::F64);
         let _ = g.apply(l, vec![a, b], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("arity mismatch")),
-            "expected arity error, got {:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("arity mismatch")),
+            "expected arity error, got {:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3882,8 +4250,11 @@ mod tests {
         );
         let _ = g.apply(l, vec![v], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("type mismatch")),
-            "expected type-mismatch error, got {:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("type mismatch")),
+            "expected type-mismatch error, got {:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3894,8 +4265,11 @@ mod tests {
         // c is not a Lambda — Apply must error and produce a poison node
         let _ = g.apply(c, vec![a], None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("not a Lambda")),
-            "expected not-a-Lambda error, got {:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("not a Lambda")),
+            "expected not-a-Lambda error, got {:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -3963,14 +4337,14 @@ mod tests {
     fn build_inc_fold_fn() -> FnDef {
         let mut body = Graph::new();
         let acc = body.add_scalar_param("acc", ElementTy::F64);
-        let _i  = body.add_scalar_param("i",   ElementTy::I32);
+        let _i = body.add_scalar_param("i", ElementTy::I32);
         let one = body.add_const(ConstValue::F64(1.0), None);
         let out = body.element_wise(ElementWiseOp::Add, vec![acc, one], None);
         FnDef {
-            name:   Symbol::intern("inc_fold_body"),
+            name: Symbol::intern("inc_fold_body"),
             params: vec![
                 (Symbol::intern("acc"), TensorTy::scalar(ElementTy::F64)),
-                (Symbol::intern("i"),   TensorTy::scalar(ElementTy::I32)),
+                (Symbol::intern("i"), TensorTy::scalar(ElementTy::I32)),
             ],
             body,
             output: out,
@@ -3982,14 +4356,18 @@ mod tests {
         let mut g = Graph::new();
         let l = g.add_lambda(build_inc_fold_fn(), None);
         let init = g.add_const(ConstValue::F64(0.0), None);
-        let n    = g.add_const(ConstValue::I32(60), None);
+        let n = g.add_const(ConstValue::I32(60), None);
         let r = g.fold(l, init, n, None);
         // result type = accumulator type = scalar F64.
         assert_eq!(g.ty(r).rank, 0);
         assert_eq!(g.ty(r).element, ElementTy::F64);
         assert!(!g.has_errors(), "errors: {:?}", g.errors());
         match &g.node(r).op {
-            Op::Fold { lambda, init: i, count: c } => {
+            Op::Fold {
+                lambda,
+                init: i,
+                count: c,
+            } => {
                 assert_eq!(*lambda, l);
                 assert_eq!(*i, init);
                 assert_eq!(*c, n);
@@ -4002,12 +4380,15 @@ mod tests {
     fn fold_rejects_non_lambda_first_arg() {
         let mut g = Graph::new();
         let init = g.add_const(ConstValue::F64(0.0), None);
-        let n    = g.add_const(ConstValue::I32(10), None);
+        let n = g.add_const(ConstValue::I32(10), None);
         // pass init (a Const) where the lambda should be.
         let _ = g.fold(init, init, n, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("not a Lambda")),
-            "expected not-a-Lambda error, got {:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("not a Lambda")),
+            "expected not-a-Lambda error, got {:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -4016,11 +4397,14 @@ mod tests {
         let l = g.add_lambda(build_inc_fold_fn(), None);
         // init type is I32 but accumulator type is F64 — mismatch.
         let bad_init = g.add_const(ConstValue::I32(0), None);
-        let n        = g.add_const(ConstValue::I32(10), None);
+        let n = g.add_const(ConstValue::I32(10), None);
         let _ = g.fold(l, bad_init, n, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("init type")),
-            "expected init-type error, got {:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("init type")),
+            "expected init-type error, got {:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -4032,8 +4416,13 @@ mod tests {
         let bad_count = g.add_const(ConstValue::F64(60.0), None);
         let _ = g.fold(l, init, bad_count, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("count must be rank-0 integer")),
-            "expected count-type error, got {:?}", summaries);
+        assert!(
+            summaries
+                .iter()
+                .any(|s| s.contains("count must be rank-0 integer")),
+            "expected count-type error, got {:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -4042,11 +4431,14 @@ mod tests {
         let mut g = Graph::new();
         let l = g.add_lambda(build_square_fn(), None);
         let init = g.add_const(ConstValue::F64(0.0), None);
-        let n    = g.add_const(ConstValue::I32(10), None);
+        let n = g.add_const(ConstValue::I32(10), None);
         let _ = g.fold(l, init, n, None);
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(summaries.iter().any(|s| s.contains("exactly 2 params")),
-            "expected arity error, got {:?}", summaries);
+        assert!(
+            summaries.iter().any(|s| s.contains("exactly 2 params")),
+            "expected arity error, got {:?}",
+            summaries
+        );
     }
 
     #[test]
@@ -4054,10 +4446,13 @@ mod tests {
         let mut g = Graph::new();
         let l = g.add_lambda(build_inc_fold_fn(), None);
         let init = g.add_const(ConstValue::F64(0.0), None);
-        let n    = g.add_const(ConstValue::I32(60), None);
+        let n = g.add_const(ConstValue::I32(60), None);
         let r1 = g.fold(l, init, n, None);
         let r2 = g.fold(l, init, n, None);
-        assert_eq!(r1, r2, "two folds with identical (lambda, init, count) collapse");
+        assert_eq!(
+            r1, r2,
+            "two folds with identical (lambda, init, count) collapse"
+        );
     }
 
     #[test]
@@ -4098,21 +4493,19 @@ mod tests {
 
         // root is Sqrt(Add(Mul(x, x), 7)) — the leaf `a` resolved to the dst param x.
         match &dst.node(imported).op {
-            Op::ElementWise(ElementWiseOp::Sqrt, ins) => {
-                match &dst.node(ins[0]).op {
-                    Op::ElementWise(ElementWiseOp::Add, add_ins) => {
-                        match &dst.node(add_ins[0]).op {
-                            Op::ElementWise(ElementWiseOp::Mul, mul_ins) => {
-                                assert_eq!(mul_ins[0], x, "leaf a should remap to dst param x");
-                                assert_eq!(mul_ins[1], x, "the shared leaf collapses to one node");
-                            }
-                            other => panic!("expected Mul, got {other:?}"),
+            Op::ElementWise(ElementWiseOp::Sqrt, ins) => match &dst.node(ins[0]).op {
+                Op::ElementWise(ElementWiseOp::Add, add_ins) => {
+                    match &dst.node(add_ins[0]).op {
+                        Op::ElementWise(ElementWiseOp::Mul, mul_ins) => {
+                            assert_eq!(mul_ins[0], x, "leaf a should remap to dst param x");
+                            assert_eq!(mul_ins[1], x, "the shared leaf collapses to one node");
                         }
-                        assert_eq!(add_ins[1], seven, "leaf b should remap to the dst const 7");
+                        other => panic!("expected Mul, got {other:?}"),
                     }
-                    other => panic!("expected Add, got {other:?}"),
+                    assert_eq!(add_ins[1], seven, "leaf b should remap to the dst const 7");
                 }
-            }
+                other => panic!("expected Add, got {other:?}"),
+            },
             other => panic!("expected Sqrt root, got {other:?}"),
         }
         // no spurious params: only `x` was declared in dst (b mapped to a const, a to x).
@@ -4129,8 +4522,15 @@ mod tests {
         let mut dst = Graph::new();
         let imported = dst.import_subgraph(&src, root, |_| None);
         assert!(!dst.has_errors());
-        assert_eq!(dst.params().len(), 1, "the unmapped leaf is recreated as a param");
-        assert_eq!(dst.param(&Symbol::intern("free")), Some(imported_child(&dst, imported)));
+        assert_eq!(
+            dst.params().len(),
+            1,
+            "the unmapped leaf is recreated as a param"
+        );
+        assert_eq!(
+            dst.param(&Symbol::intern("free")),
+            Some(imported_child(&dst, imported))
+        );
     }
 
     fn imported_child(g: &Graph, id: NodeId) -> NodeId {

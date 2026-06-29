@@ -16,7 +16,11 @@ symbi-ir = { path = "../symbi-ir" }
 
 [features]
 default = []
-cuda = []
+# `gpu` is the umbrella: it gates backend-agnostic device code. `cuda`/`hip` select the
+# concrete backend and each imply `gpu`. exactly one concrete backend at a time (lib.rs enforces).
+gpu = []
+cuda = ["gpu"]
+hip = ["gpu"]
 
 [lints]
 workspace = true

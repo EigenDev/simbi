@@ -19,7 +19,7 @@
 // python frontend; both are sibling adapters above this pure core, never baked in.
 //
 // all physics is CGS (gauss, Hz, erg, cm, s); `QuantScales` converts the sim's
-// code units to CGS, mirroring the legacy `quant_scales_t`.
+// code units to CGS.
 //
 // usage:
 //  let flux = symbi_afterglow::light_curve(&cond, &scales, &fields, &mesh, &tbins, ckpt_index);
@@ -58,7 +58,7 @@ use units::{EnergyDensity, Frequency, Length, MassDensity, Time, Velocity};
 /// the observation + microphysics conditions for one snapshot's flux contribution. angles in
 /// radians, distances in cm, frequencies in Hz; `current_time`/`dt` are in CODE units (scaled to
 /// seconds via `QuantScales::time`). `redshift` is carried for the phase-3 transfer path; the
-/// phase-1 EATS light curve uses the luminosity distance directly (matching the legacy `calc_fnu`).
+/// phase-1 EATS light curve uses the luminosity distance directly.
 #[derive(Clone, Debug)]
 pub struct SimConditions {
     /// snapshot timestep [code units] — the emitting cell's effective lifetime.
@@ -83,7 +83,7 @@ pub struct SimConditions {
     pub nus: Vec<Frequency>,
 }
 
-/// code-unit -> CGS conversion scales (mirrors the legacy `quant_scales_t`). a quantity in code
+/// code-unit -> CGS conversion scales. a quantity in code
 /// units is multiplied by its scale to reach CGS: `rho_cgs = rho_code * rho`, etc.
 #[derive(Clone, Copy, Debug)]
 pub struct QuantScales {

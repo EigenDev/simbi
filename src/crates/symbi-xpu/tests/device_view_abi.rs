@@ -28,7 +28,7 @@
 #![cfg(feature = "cuda")]
 
 use symbi_xpu::cuda::{ctx_sync, UnifiedMemory};
-use symbi_xpu::runtime::{cuda_runtime::DISPATCHER, GpuRuntime};
+use symbi_xpu::runtime::{cuda_runtime::current_dispatcher, GpuRuntime};
 use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
 // host-side mirror of the CUDA `__symbi_View` struct. MUST match the
@@ -89,12 +89,12 @@ fn device_view_abi_roundtrip() {
     // JIT-compile + launch the one-thread probe — same path substrate_gpu.rs
     // uses for every kernel, just with a hand-written source instead of one
     // rendered from a substrate IR blob.
-    let kernel = DISPATCHER.jit_kernel(ABI_PROBE_SRC, "abi_probe");
+    let kernel = current_dispatcher().jit_kernel(ABI_PROBE_SRC, "abi_probe");
     let mut args = KernelArgs::new();
     args.push(&view);
     let config = LaunchConfig::for_1d(1, 1);
     unsafe {
-        DISPATCHER
+        current_dispatcher()
             .runtime()
             .launch(&kernel, config, args.as_mut_slice())
             .expect("abi_probe launch failed");

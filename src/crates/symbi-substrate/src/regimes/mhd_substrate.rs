@@ -200,8 +200,8 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     if fusable {
         // the FUSED gas + cell-B predictor in ONE launch, bound BY MANIFEST via `dispatch_named`
         // (same regime-agnostic seam as the unfused stage) — resolve_path maps the conserved /
-        // flux / geo-source-prim / bc_/bcn_/bf_ paths to the sim buffers. the old hand-built list
-        // was RMHD-shaped (prim.rho first) and would scramble NMHD/IMHD curvilinear fusion.
+        // flux / geo-source-prim / bc_/bcn_/bf_ paths to the sim buffers. a hand-built list
+        // would be RMHD-shaped (prim.rho first) and scramble NMHD/IMHD curvilinear fusion.
         let fname = if is_euler {
             format!("{gas_prefix}_godunov_and_bcell_euler{sfx}_{D}d")
         } else {
@@ -216,8 +216,8 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // the GAS conserved update (D/S_k/tau or D/S_k) via the runtime-coefficient stage kernel,
     // bound BY MANIFEST through `dispatch_named` — the curvilinear geo-source prim reads are
     // regime-specific (RMHD rho/vel/pre/mag, NMHD/IMHD vel/mag/pre, different orders), so the
-    // buffer layout MUST track the kernel artifact. the old hand-built list was RMHD-shaped and
-    // scrambled NMHD/IMHD whenever DOF != D (the cyl r-z plane), draining mass at machine speed.
+    // buffer layout MUST track the kernel artifact. a hand-built list would be RMHD-shaped and
+    // scramble NMHD/IMHD whenever DOF != D (the cyl r-z plane), draining mass at machine speed.
     let gname = format!("{gas_prefix}_godunov_stage{sfx}_{D}d");
     let gscalars = scalars_for(&gname, &scalar);
     let pre_bind = if has_energy {
@@ -678,7 +678,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 
     // the curl bface update: per IN-PLANE face axis dir (0..D), dB_dir/dt = -(curl E)_dir
     // from its incident edges. cartesian binds the transverse inverse-widths; curvilinear
-    // the per-cell geom weights (3D for now). a face with no incident edges (e.g. Bx in
+    // the per-cell geom weights (3D for now). a face with no incident edges (e.g., Bx in
     // 1.5D) is simply not updated — it stays at its constant IC.
     let curvilinear = sim.geom.coords != symbi_geometry::Geometry::Cartesian;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);

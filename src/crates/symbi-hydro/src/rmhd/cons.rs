@@ -5,7 +5,7 @@
 // the rescale (Eqs. 22-25), the bracketing `find_mu_plus` (root of Eq. 49), the
 // master residual `kkc_fmu44` (Eq. 44), and the 6-state false-position root `mu`
 // (Illinois half-damp, sticky `done`), then the algebraic recovery. carrier-generic
-// (every C++ branch is a traceable `select`); at S=Gv it lowers to one
+// (every branch is a traceable `select`); at S=Gv it lowers to one
 // multi-accumulator IterateInline, at S=f64/f32 it is the false-position loop.
 // =============================================================================
 
@@ -21,14 +21,14 @@ const RMHD_MAX_ITER: usize = 100;
 /// convergence tolerance for false-position iteration (also the B=0 divzero guard).
 const CONVERGENCE_TOL: f64 = 1e-12;
 /// pressure floor for specific internal energy bound (zero-T floor, RMHD KKC-specific:
-/// keeps f_upper0 >= 0; matches the C++ `pfloor = 1e-3`). NOT a diagnostic threshold.
+/// keeps f_upper0 >= 0; `pfloor = 1e-3`). NOT a diagnostic threshold.
 const PRESSURE_FLOOR_EPS: f64 = 1e-3;
 
 /// KKC Eq. 49 bracketing function (enthalpy limit h0 = 1): `mu*sqrt(1 + rbar_sq) - 1`,
 /// whose root brackets `mu_plus`. carrier-generic. TEST-ONLY: production `find_mu_plus`
 /// collapsed to the constant `1` (its proof is `kkc_fmu49(1) >= 0` unconditionally — see the
 /// doc on `find_mu_plus`), so this is no longer called on the hot path; it survives only to
-/// pin the C++ `helpers::kkc_fmu49` parity + as the instrumented bracket-search probe.
+/// pin `kkc_fmu49` parity + as the instrumented bracket-search probe.
 #[cfg(test)]
 fn kkc_fmu49<S: Scalar>(mu: S, bee_sq: S, rdb_sq: S, r: S) -> S {
     let x = S::ONE / (S::ONE + mu * bee_sq);
@@ -37,7 +37,7 @@ fn kkc_fmu49<S: Scalar>(mu: S, bee_sq: S, rdb_sq: S, r: S) -> S {
 }
 
 /// KKC Eq. 44 master function (h0 = 1): the residual `mu - muhat` whose root is the
-/// c2p solution. carrier-generic — every C++ branch is a traceable `select`.
+/// c2p solution. carrier-generic — every branch is a traceable `select`.
 #[allow(clippy::too_many_arguments)]
 fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: S, gamma: S) -> S {
     let half = S::from_f64(0.5);
@@ -125,7 +125,7 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
 
     // KKC false-position over `kkc_fmu44`, producing the root `mu`. the 6-state bracket
     // freezes on the OLD sticky `done` so the iteration that first converges still WRITES
-    // its mu and the next freezes it (exact C++ do-while semantics; see iterate_vec).
+    // its mu and the next freezes it (do-while semantics; see iterate_vec).
     let muu0 = find_mu_plus(bee_sq, rdb_sq, r_mag);
     let f_lower0 = kkc(S::ZERO);
     let f_upper0 = kkc(muu0);
@@ -136,11 +136,11 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
             let (mul, muu, f_lo, f_hi, done) = (s[0], s[1], s[2], s[3], s[5]);
             let mu = (mul * f_hi - muu * f_lo) / (f_hi - f_lo);
             let ff = kkc(mu);
-            // C++: ff*f_upper < 0 ? {mul=muu; f_lo=f_hi} : {f_lo *= 0.5}; muu=mu, f_hi=ff.
+            // ff*f_upper < 0 ? {mul=muu; f_lo=f_hi} : {f_lo *= 0.5}; muu=mu, f_hi=ff.
             let cond = (ff * f_hi).cmp_lt(S::ZERO);
             let mul_n = S::select(cond, muu, mul);
             let f_lo_n = S::select(cond, f_hi, half * f_lo);
-            // C++ post-update test: |mul-muu| <= eps OR |ff| <= eps.
+            // post-update test: |mul-muu| <= eps OR |ff| <= eps.
             let conv = (mul_n - mu).abs().min(ff.abs()).cmp_lt(eps);
             let done_n = done.max(S::select(conv, S::ONE, S::ZERO)); // sticky
             [mul_n, mu, f_lo_n, ff, mu, done_n]
@@ -218,14 +218,14 @@ mod tests {
     use super::*;
     use crate::eos::IdealGas;
 
-    // straight-Rust transcription of cpp_src/utility/helpers.hpp::kkc_fmu49.
+    // direct f64 reference for `kkc_fmu49` (KKC Eq. 49).
     fn ref_fmu49(mu: f64, beesq: f64, beedrsq: f64, r: f64) -> f64 {
         let x = 1.0 / (1.0 + mu * beesq);
         let rbar_sq = r * r * x * x + mu * x * (1.0 + x) * beedrsq;
         mu * (1.0 + rbar_sq).sqrt() - 1.0
     }
 
-    // straight-Rust transcription of cpp_src/utility/helpers.hpp::kkc_fmu44.
+    // direct f64 reference for `kkc_fmu44` (KKC Eq. 44).
     #[allow(clippy::too_many_arguments)]
     fn ref_fmu44(mu: f64, r: f64, rperp: f64, beesq: f64, beedrsq: f64, qterm: f64, dterm: f64, gamma: f64) -> f64 {
         let x = 1.0 / (1.0 + mu * beesq);
@@ -249,9 +249,9 @@ mod tests {
         mu - muhat
     }
 
-    // transcription of the FULL helpers.hpp::find_mu_plus (doubling + bisection + break)
-    // that the carrier-generic bisection elides; agreement to ~1e-9 proves the elision.
-    // ORPHANED: kept as the C++ reference, but no test currently asserts against it
+    // the FULL find_mu_plus (doubling + bisection + break) that the carrier-generic
+    // bisection elides; agreement to ~1e-9 proves the elision.
+    // ORPHANED: kept as the analytic reference, but no test currently asserts against it
     // (the comparison was lost). allow(dead_code) preserves the reference until it is
     // re-wired into an elision-equivalence test or removed.
     #[allow(dead_code)]

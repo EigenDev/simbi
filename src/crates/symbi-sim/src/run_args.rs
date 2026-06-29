@@ -160,7 +160,7 @@ impl Default for CliConfigBuilder {
             cfl: 0.4,
             recon: Reconstruction::Plm,
             solver: Solver::Hlle,
-            theta: 1.5, // C++ default plm_theta (stencil_view.hpp)
+            theta: 1.5, // default plm_theta
             timestepping: crate::state::Timestepping::Rk2,
             data_dir: "output".into(),
         }

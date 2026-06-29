@@ -5,13 +5,16 @@
 # simbi build/install wrapper around MATURIN (which drives cargo directly).
 # the rust backend (src/crates/symbi-py) builds the pyo3 extension installed
 # as simbi/libs/cpu_ext; the unchanged `simbi.libs.cpu_ext` import loads it.
-# gpu is a cargo FEATURE: `--gpu` -> `--features cuda` (kernels JIT via NVRTC at
-# runtime; build.rs links libcuda/libnvrtc — no nvcc/meson needed).
+# gpu is a cargo FEATURE: `--gpu`/`--cuda` -> nvidia (`--features cuda`, NVRTC JIT,
+# links libcuda/libnvrtc); `--hip` -> amd (`--features hip`, hipRTC JIT, links
+# libamdhip64/libhiprtc under ROCM_PATH). no nvcc/hipcc/meson needed. both produce
+# the gpu_ext extension, which coexists with cpu_ext.
 # usage:
 #  ./dev.py install            # maturin develop --release (editable build + install)
 #  ./dev.py build              # maturin build --release (wheel in src/target/wheels)
 #  (no-uv path: `pip install -e .` builds editable via the maturin backend directly)
-#  ./dev.py build --gpu        # rust gpu build (cargo 'cuda' feature)
+#  ./dev.py build --gpu        # nvidia gpu build (cargo 'cuda' feature)
+#  ./dev.py install --hip      # amd gpu build (cargo 'hip' feature, ROCm)
 #  ./dev.py clean [--all]      # remove extensions; --all also runs cargo clean
 # =============================================================================
 
@@ -73,8 +76,12 @@ def run(cmd, **kwargs) -> None:
 
 def _features(args) -> str:
     feats = [f.strip() for f in (args.features or "").split(",") if f.strip()]
+    # `--gpu`/`--cuda` -> the nvidia backend; `--hip` -> the amd backend (docs/design/38).
+    # mutually exclusive: the rust crate compile_error!s if both are set.
     if getattr(args, "gpu", False) and "cuda" not in feats:
         feats.append("cuda")
+    if getattr(args, "hip", False) and "hip" not in feats:
+        feats.append("hip")
     return ",".join(feats)
 
 
@@ -90,7 +97,9 @@ def _common(args) -> list:
 
 
 def _is_gpu_build(args) -> bool:
-    return "cuda" in _features(args).split(",")
+    # any gpu backend (cuda or hip) produces the gpu_ext extension.
+    feats = set(_features(args).split(","))
+    return bool(feats & {"cuda", "hip"})
 
 
 def _finalize_gpu_ext() -> None:
@@ -113,6 +122,34 @@ def _finalize_gpu_ext() -> None:
         renamed += 1
     if renamed == 0:
         print("warning: no cpu_ext dylib found to rename to gpu_ext", file=sys.stderr)
+
+
+def _stash_cpu_ext() -> list:
+    """move any existing cpu_ext dylib aside before a cuda build. the cuda build
+    writes to the cpu_ext filename (the crate `[lib] name`) before `_finalize_gpu_ext`
+    renames it to gpu_ext, so without this it would clobber an existing cpu backend.
+    returns a list of (stashed_path, original_path) to restore afterwards."""
+    lib_dir = Path("simbi/libs")
+    stashed = []
+    for src in lib_dir.glob("cpu_ext.*.so"):
+        bak = src.with_name(src.name + ".cpubak")
+        src.replace(bak)
+        stashed.append((bak, src))
+    return stashed
+
+
+def _restore_cpu_ext(stashed: list) -> None:
+    """put the stashed cpu_ext dylib back beside the freshly-built gpu_ext so the two
+    backends coexist. the cuda build's cpu_ext was renamed to gpu_ext, so the cpu_ext
+    filename is free again."""
+    for bak, dst in stashed:
+        if dst.exists():
+            # a cpu_ext already exists (the rename did not run, e.g., build failed before
+            # finalize); keep what is there and drop the stash.
+            bak.unlink()
+        else:
+            bak.replace(dst)
+            print(f"gpu build: preserved existing {dst.name} beside gpu_ext")
 
 
 def _require_cargo() -> None:
@@ -152,9 +189,18 @@ def install_command(args) -> None:
         cmd += ["--extras", ",".join(extras)]
     print("building + installing (maturin develop, editable)...")
     start = time.time()
-    run(cmd, env=venv_env(), verbose=args.verbose)
-    if _is_gpu_build(args):
-        _finalize_gpu_ext()
+    # the cuda build writes to the cpu_ext filename before it is renamed to gpu_ext,
+    # so stash an existing cpu_ext first and restore it after. this lets the cpu and
+    # gpu extensions live side by side instead of the gpu build clobbering the cpu one.
+    gpu = _is_gpu_build(args)
+    stashed = _stash_cpu_ext() if gpu else []
+    try:
+        run(cmd, env=venv_env(), verbose=args.verbose)
+        if gpu:
+            _finalize_gpu_ext()
+    finally:
+        if gpu:
+            _restore_cpu_ext(stashed)
     print(f"done in {time.time() - start:.1f}s")
     try:
         result = subprocess.run(
@@ -237,12 +283,18 @@ def _add_build_args(p) -> None:
     p.add_argument(
         "--features",
         default="",
-        help="comma-separated cargo features (e.g. cuda)",
+        help="comma-separated cargo features (e.g., cuda)",
     )
     p.add_argument(
         "--gpu",
         action="store_true",
-        help="gpu build -> cargo 'cuda' feature (NVRTC JIT)",
+        help="nvidia gpu build -> cargo 'cuda' feature (NVRTC JIT)",
+    )
+    p.add_argument(
+        "--hip",
+        action="store_true",
+        help="amd gpu build -> cargo 'hip' feature (hipRTC JIT, ROCm). set ROCM_PATH / "
+        "SYMBI_HIP_ARCH if rocm is not at /opt/rocm or arch auto-detect is insufficient",
     )
 
 

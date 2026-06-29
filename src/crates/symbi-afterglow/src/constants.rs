@@ -2,7 +2,7 @@
 // constants.rs
 //
 // physical constants in CGS (Gaussian) units — the system the afterglow synchrotron
-// physics is written in (ported from the legacy `constants.hpp`). each constant is a
+// physics is written in. each constant is a
 // typed `Quantity` (src/units.rs) so it carries its dimension into the formulae and a
 // dimensional mistake is a compile error. `PI` stays a bare f64 (it is dimensionless).
 //

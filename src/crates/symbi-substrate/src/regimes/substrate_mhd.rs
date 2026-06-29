@@ -43,7 +43,7 @@ use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
 
-/// the per-coordinate metric scale factor `h` (mirrors `gv::gv_scale_factor`, in f64): the
+/// the per-coordinate metric scale factor `h` (in f64): the
 /// physical width along an axis is `h * coordinate_width`. cartesian = 1; spherical theta = r,
 /// phi = r*sin(theta); cylindrical phi = r.
 #[inline]

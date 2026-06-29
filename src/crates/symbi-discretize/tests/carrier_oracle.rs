@@ -513,7 +513,7 @@ fn rmhd_flux_matches_native_physics() {
 // |sr|)` — the PURE carrier-generic physics. that is a clean f64 reference, so we oracle the
 // cartesian-uniform case. (curvilinear / non-uniform maps couple an in-kernel metric width
 // with no carrier-generic f64 reference; their physics is already covered by the flux oracles
-// + the rmhd_wave_speeds-vs-C++ test, so we do NOT invent a geometry reference for them.)
+// + the rmhd_wave_speeds test, so we do NOT invent a geometry reference for them.)
 // =============================================================================
 
 const CART_1D: [Spacing; 1] = [Spacing::Uniform];

@@ -122,39 +122,11 @@ where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace
     let Some(im) = sim.immersed.as_mut() else { return; };
     let step_deltas = im.diagnostics.consolidate();
 
-    // record feedback as DIAGNOSTICS — the body's GRAVITATING mass is held FIXED (a
-    // fixed-potential sink: the fluid is removed + the accretion measured, but the central
-    // potential does not drift). force/torque are the instantaneous disk-on-body reaction
-    // (recorded for output; the prescribed binary motion below does not consume them). the
-    // would-be accreted mass accumulates into total_accreted_mass (the mdot diagnostic) WITHOUT
-    // changing body.mass.
-    let bodies = &mut im.bodies;
-    for delta in &step_deltas {
-        if delta.idx < bodies.len() {
-            let body = bodies.get_mut(delta.idx);
-            body.force = delta.force_delta;
-            body.torque = delta.torque_delta;
-
-            if let symbi_ib::BodyKind::BlackHole {
-                ref mut total_accreted_mass,
-                ref mut accretion_rate,
-                ..
-            } = body.kind
-            {
-                // diagnostics only: cumulative would-be accretion + instantaneous mdot.
-                *total_accreted_mass += delta.mass_delta;
-                *accretion_rate = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
-            }
-        }
-    }
-
-    // advance binary orbital motion (Keplerian rotation)
-    if let Some(advanced) = symbi_ib::advance_binary(bodies, dt) {
-        for ii in 0..advanced.len().min(bodies.len()) {
-            bodies.get_mut(ii).position = advanced[ii].position;
-            bodies.get_mut(ii).velocity = advanced[ii].velocity;
-        }
-    }
+    // record feedback as DIAGNOSTICS + advance the prescribed binary orbit (the body's GRAVITATING
+    // mass is held FIXED -- a fixed-potential sink: the fluid is removed + accretion measured, but
+    // the central potential does not drift; force/torque are recorded for output, not consumed by
+    // the prescribed motion). the SAME apply the decomposed body step uses with its cross-tile sum.
+    symbi_ib::apply_body_deltas(&mut im.bodies, &step_deltas, dt);
 
     im.diagnostics.reset();
 }

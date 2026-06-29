@@ -3,9 +3,8 @@
 //
 // the sim <-> substrate seam: the abstractions the sim core needs to TALK ABOUT
 // substrates without depending on any concrete regime KernelSet (docs/design/41).
-// previously these lived one layer too high — `KernelSet` inside the `evolve`
-// integrator, the `Solver`/`RegimeKind` enums inside `regimes/substrate_kernels`
-// — which forced `FieldStore`/`state.rs` to depend UP into `regimes` (the cycle).
+// homing `KernelSet` and the `Solver`/`RegimeKind` enums here keeps
+// `FieldStore`/`state.rs` from depending UP into `regimes` (which would be a cycle).
 //
 // homed here in `symbi-sim`, every reference from the sim core points DOWN; the
 // concrete kernelsets in the `symbi` crate's `regimes/` IMPLEMENT `KernelSet` and
@@ -25,8 +24,8 @@
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
-use symbi_ir::algebra::Scalar;
 use symbi_hydro::regime::Regime;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use crate::state::FieldStore;
@@ -41,7 +40,7 @@ use crate::state::FieldStore;
 ///
 /// source terms (gravity, geometric) are fused into godunov_euler and
 /// godunov_rk2. unused sources produce zero via scalar parameters
-/// (e.g. body_mass = 0.0). no separate source passes.
+/// (e.g., body_mass = 0.0). no separate source passes.
 /// `NDIM` = grid dimension, `DOF` = vector (momentum-component) dimension (docs/design/18);
 /// they coincide for the natural case and diverge for axisymmetric (DOF>NDIM).
 // the kernel-set sees ONLY the `FieldStore` (docs/design/35 R3): its 4 storage params, never
@@ -64,7 +63,7 @@ where
     fn ghost_fill(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
     fn snapshot(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
 
-    /// post-godunov hook (e.g. constrained transport for MHD). default: no-op.
+    /// post-godunov hook (e.g., constrained transport for MHD). default: no-op.
     fn post_godunov(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _stage: u8) {}
 
     /// electric field computation (MHD). default: no-op.
@@ -82,7 +81,9 @@ where
 
     /// does this kernel set carry a NON-fused (additive) source overlay? gates the per-stage
     /// `snapshot_stage` + `source_apply` in `step()`. default: false (fused / source-free sets).
-    fn has_additive_source(&self) -> bool { false }
+    fn has_additive_source(&self) -> bool {
+        false
+    }
 
     /// snapshot the stage-INPUT cons into `u_stage`, BEFORE the godunov stage overwrites it.
     /// the additive `source_apply` then evaluates `S` at this state — the same state the fused
@@ -112,6 +113,8 @@ where
 pub enum Solver {
     Hlle,
     Hllc,
+    /// HLLC with the Fleischmann (2020) low-mach / low-dissipation correction (newtonian only).
+    HllcLm,
     Hlld,
 }
 
@@ -121,6 +124,7 @@ impl Solver {
         match self {
             Solver::Hlle => "",
             Solver::Hllc => "_hllc",
+            Solver::HllcLm => "_hllc_lm",
             Solver::Hlld => "_hlld",
         }
     }
@@ -138,7 +142,13 @@ impl Solver {
             // regimes NMHD and RMHD (the UCT edge EMF reduces to the HLL EMF for B_x != 0 — the
             // contact carries no transverse field, M&DZ p.11 — so HLLC-MHD = HLLC flux + HLL EMF).
             // EXCLUDED: isothermal MHD (no thermal contact, no HLLC flux kernel built).
-            Solver::Hllc => !regime.is_mhd() || matches!(regime, RegimeKind::NewtonianMhd | RegimeKind::Rmhd),
+            Solver::Hllc => {
+                !regime.is_mhd() || matches!(regime, RegimeKind::NewtonianMhd | RegimeKind::Rmhd)
+            }
+            // HLLC-LM: the Fleischmann (2020) low-mach / low-dissipation HLLC. emitted for the
+            // adiabatic (newtonian euler) flux only -- the LM correction is a non-relativistic gas
+            // closure; iso has no contact wave, and the relativistic / mhd HLLC bodies ignore it.
+            Solver::HllcLm => matches!(regime, RegimeKind::Newtonian),
             Solver::Hlld => regime.is_mhd(),
         }
     }
@@ -171,7 +181,10 @@ impl RegimeKind {
     }
     /// whether this family carries a magnetic field (the only distinction the solver matrix needs).
     pub fn is_mhd(self) -> bool {
-        matches!(self, RegimeKind::Rmhd | RegimeKind::NewtonianMhd | RegimeKind::IsoMhd)
+        matches!(
+            self,
+            RegimeKind::Rmhd | RegimeKind::NewtonianMhd | RegimeKind::IsoMhd
+        )
     }
 }
 
@@ -204,8 +217,17 @@ mod solver_matrix_tests {
         }
         // HLLC is valid for the energy-carrying MHD regimes (contact-resolving flux + HLL EMF)
         // but NOT isothermal MHD (no thermal contact / no HLLC kernel).
-        assert!(Solver::Hllc.valid_for(RegimeKind::NewtonianMhd), "hllc valid for nmhd");
-        assert!(Solver::Hllc.valid_for(RegimeKind::Rmhd), "hllc valid for rmhd");
-        assert!(!Solver::Hllc.valid_for(RegimeKind::IsoMhd), "hllc invalid for iso-mhd (no contact)");
+        assert!(
+            Solver::Hllc.valid_for(RegimeKind::NewtonianMhd),
+            "hllc valid for nmhd"
+        );
+        assert!(
+            Solver::Hllc.valid_for(RegimeKind::Rmhd),
+            "hllc valid for rmhd"
+        );
+        assert!(
+            !Solver::Hllc.valid_for(RegimeKind::IsoMhd),
+            "hllc invalid for iso-mhd (no contact)"
+        );
     }
 }

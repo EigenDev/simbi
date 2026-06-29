@@ -112,7 +112,7 @@ class SystemManifest:
 
     @classmethod
     def from_named_model(cls, name: str) -> "SystemManifest":
-        """build from a registered USER_SCALES model (e.g. 'blandford-mckee')."""
+        """build from a registered USER_SCALES model (e.g., 'blandford-mckee')."""
         m = get_scale_model(name)
         return cls(
             length_scale=float(m.length_scale.cgs.value),

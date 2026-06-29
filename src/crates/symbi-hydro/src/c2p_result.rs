@@ -117,9 +117,9 @@ pub const C2P_FAILURE_FLOOR: f64 = 1e-12;
 //
 // these are POST-HOC flags on the RAW recovered state — NO silent floor: the caller returns
 // the raw recovery value, this only reports what is non-physical (feedback_no_silent_floors).
-// thresholds are dimensionally clean and match the C++ reference (`conversion.hpp`):
+// thresholds are dimensionally clean:
 //   * NON_FINITE       : rho or pressure is NaN.
-//   * NEGATIVE_PRESSURE: pressure < 0 (strict; C++ `peq < 0` / `pg < 0`). a near-zero
+//   * NEGATIVE_PRESSURE: pressure < 0 (strict). a near-zero
 //                        positive pressure is the valid cold limit, not an error — so no
 //                        arbitrary `1e-12` / `1e-12*rho` floor.
 //   * SUPERLUMINAL     : v^2 >= 1 (the Lorentz factor is finite only for v^2 < 1) or v^2

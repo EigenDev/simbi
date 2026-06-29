@@ -43,7 +43,7 @@ pub struct GvKernel {
     /// empty for pointwise kernels. feeds `KernelEmitInputs::coord_components`.
     pub coord_components: Vec<u8>,
     /// the launch grade this kernel is to be issued over. fusion (`try_fuse`)
-    /// requires both sides to share a grade; untagged legacy kernels never
+    /// requires both sides to share a grade; untagged kernels never
     /// fuse. see `LaunchGrade` and `try_fuse`.
     pub grade: LaunchGrade,
     /// optional shared-memory tile specification. when `Some`, the CUDA emit is
@@ -136,7 +136,7 @@ impl LaunchGrade {
         }
     }
 
-    /// the sentinel that opts out of fusion. used by the legacy `end_trace()`.
+    /// the sentinel that opts out of fusion. used by `end_trace()`.
     pub fn untagged() -> Self {
         Self::default()
     }
@@ -229,9 +229,8 @@ pub fn begin_trace() {
 /// take the finished trace (graph + manifest) out, closing it.
 ///
 /// the resulting kernel is **untagged** — it will not participate in
-/// `try_fuse`. legacy callers that don't care about fusion get exactly the
-/// previous behavior. new callers should prefer `end_trace_for_domain(d)` to
-/// opt into the fusion algebra.
+/// `try_fuse`. callers that don't care about fusion use this; callers that
+/// want the fusion algebra should prefer `end_trace_for_domain(d)`.
 pub fn end_trace() -> GvKernel {
     end_trace_with(LaunchGrade::untagged())
 }
@@ -260,7 +259,7 @@ pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
 
 /// run `f` in a FRESH, isolated trace and return the finished (untagged) kernel + `f`'s result.
 /// any trace already active on this thread is SAVED before and RESTORED after — so this is safe
-/// to call WHILE another trace is open (e.g. building a sub-source `BuiltSource` partway through
+/// to call WHILE another trace is open (e.g., building a sub-source `BuiltSource` partway through
 /// a godunov trace). without this, the inner `begin_trace`/`end_trace` would clobber the outer
 /// trace and the next outer `Gv` op would panic "outside an active trace".
 pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
@@ -613,7 +612,7 @@ impl Gv {
     }
 
     /// a per-cell field read: `key` is the IR-side buffer-load name, `runtime` the
-    /// dotted path the dispatch binds the buffer to (e.g. `"cons.den"`). recorded
+    /// dotted path the dispatch binds the buffer to (e.g., `"cons.den"`). recorded
     /// (deduped) in the kernel ABI manifest — this is the input binding for a
     /// carrier-generic physics fn instantiated at Gv.
     pub fn field(key: &str, runtime: impl Into<FieldBind>) -> Gv {
@@ -653,7 +652,7 @@ impl Gv {
         })))
     }
 
-    /// a scalar kernel param (e.g. `gamma`), recorded (deduped) in the manifest signature.
+    /// a scalar kernel param (e.g., `gamma`), recorded (deduped) in the manifest signature.
     pub fn scalar(name: &str) -> Gv {
         Gv(GvVal::Node(with_trace(|t| {
             let id = t.graph.add_scalar_param(name, ElementTy::F64);
@@ -770,8 +769,7 @@ impl symbi_algebra::algebra::Numeric for Gv {
 // Bool-typed." `BitAnd` / `BitOr` / `Not` emit the corresponding graph Bool
 // ops (`ElementWiseOp::BitAnd` / `BitOr` / `BitNot`).
 //
-// the legacy `impl Scalar for Gv` against `symbi_algebra::Scalar` was deleted
-// 2026-05-30 (Tier 1 chunk 5); this is the single carrier surface workspace-wide.
+// this is the single carrier surface workspace-wide.
 // =============================================================================
 
 /// type-safe Mask wrapper for Gv. wraps a Gv carrying a Bool-typed graph
@@ -894,7 +892,7 @@ impl crate::algebra::Scalar for Gv {
     // same convention as `scope`). emit an Op::IfElse carrying the cond, both
     // arm bodies, and each arm's result. scalarize lowers the arm bodies
     // INSIDE their respective `if`/`else` brace so only the taken arm executes
-    // — the carrier-portable form of the C++ early-conditional.
+    // — the carrier-portable form of an early-out conditional.
     //
     // shared upstream values (the cond, any pre-branch subexpression) are
     // created BEFORE the closures, so they fall OUTSIDE both ranges and stay in
@@ -922,7 +920,7 @@ impl crate::algebra::Scalar for Gv {
     // the N-output lazy branch: one Op::IfElse, N results, N Op::Proj outputs.
     // the SHARED arm computation is traced once (each closure runs once); each
     // returned Gv is a projection of the same branch. this is what lets a
-    // multi-output fast-path (e.g. the (sl, sr) wave-speed Eq.57/58/quartic
+    // multi-output fast-path (e.g., the (sl, sr) wave-speed Eq.57/58/quartic
     // selection) skip the whole quartic on the fast path. mirrors `cond` per
     // arm; the only addition is the N-element result vectors + the projections.
     fn cond_vec<const N: usize>(
@@ -974,7 +972,7 @@ impl crate::algebra::Scalar for Gv {
 
     fn powi(self, n: i32) -> Gv {
         // lower to repeated multiplication (exponentiation by squaring), NOT Pow/powf:
-        // `f64::powi` raises a NEGATIVE base exactly (e.g. (-2)^2 = 4), but CUDA
+        // `f64::powi` raises a NEGATIVE base exactly (e.g., (-2)^2 = 4), but CUDA
         // `powf(neg, 2.0)` = NaN — a carrier-equivalence break (f64 host != Gv kernel).
         // n is a small integer constant at trace time, so the multiply chain unrolls into
         // the DAG; it also avoids the transcendental `powf` call entirely.
@@ -1435,7 +1433,7 @@ mod fusion_laws {
     }
 
     /// existing fusion laws don't regress when both kernels declare `None`
-    /// for `tile_spec` (the legacy path). identity + grade-mismatch +
+    /// for `tile_spec` (the untiled path). identity + grade-mismatch +
     /// untagged still flow through `try_fuse` unchanged.
     #[test]
     fn untiled_kernels_still_fuse_as_before() {
@@ -1595,7 +1593,7 @@ mod powi_carrier_equiv {
     use crate::passes::scalarize::scalarize;
 
     // `Gv::powi` must NOT lower to Pow/powf: `f64::powi` raises a NEGATIVE base exactly
-    // (e.g. (-2)^2 = 4), but `powf(neg, 2.0)` = NaN on CUDA — a carrier-equivalence break
+    // (e.g., (-2)^2 = 4), but `powf(neg, 2.0)` = NaN on CUDA — a carrier-equivalence break
     // (the f64 host path != the traced kernel). this pins the structural fix (multiply
     // chain, no Pow node) AND the numeric agreement with `f64::powi` on negative bases.
     #[test]

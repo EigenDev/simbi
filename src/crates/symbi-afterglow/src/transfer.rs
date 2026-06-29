@@ -1,13 +1,13 @@
 // =============================================================================
 // transfer.rs
 //
-// the monte-carlo photon-transfer path (ported from the legacy `rad.cpp`):
+// the monte-carlo photon-transfer path:
 //   - `generate_photon_events` samples relativistically-beamed synchrotron photon
 //     packets from a hydro snapshot. each packet's COMOVING FREQUENCY is drawn from
 //     the cell's broken-power-law synchrotron spectrum, and it carries an equal share
-//     of the cell's emitted energy. (this is the proper energy/frequency model: the
-//     legacy stored a single `energy` and misused energy/h as a frequency, so the
-//     monte-carlo spectrum could not reproduce the analytic one — now it does.)
+//     of the cell's emitted energy. (this is the proper energy/frequency model:
+//     storing a single `energy` and misusing energy/h as a frequency would prevent the
+//     monte-carlo spectrum from reproducing the analytic one; separate fields do.)
 //   - `monte_carlo_radiative_transfer` propagates packets through the medium with
 //     synchrotron self-absorption, thomson scattering, and optional pair production.
 //
@@ -16,9 +16,9 @@
 // the one exception is the empirical SSA coefficient, whose calibrated prefactor carries
 // implicit units and is therefore computed in raw f64 (documented at its site).
 //
-// deviations from the legacy (all deliberate; "C++ is reference, not gospel"):
+// design properties:
 //   - the proper energy/frequency model above (separate nu_emit and energy_weight),
-//   - seeded deterministic RNG (src/rng.rs) instead of std::random_device,
+//   - seeded deterministic RNG (src/rng.rs) for reproducibility,
 //   - correct relativistic-aberration beaming (a rotation, not a magnitude scale),
 //   - per-photon absorption path length (0.1 * emission radius), not 0.1 * x1[0],
 //   - SSA / pair-production keyed on the photon energy h*nu_emit, not the packet weight.
@@ -151,13 +151,17 @@ fn sample_emission_frequency(
 /// (unit vector, fluid frame) by a fluid element moving along `rhat` (unit vector) with
 /// speed `beta` (units of c). relativistic aberration changes the angle to `rhat` from
 /// acos(mu') to acos((mu'+beta)/(1+beta mu')); the result is that rotation applied in the
-/// (rhat, nprime) plane — a proper rotation yielding a UNIT vector. (the legacy scaled
-/// `nprime` by cos(rotation), which de-normalizes the direction; this is the fix.)
+/// (rhat, nprime) plane — a proper rotation yielding a UNIT vector. (scaling
+/// `nprime` by cos(rotation) would de-normalize the direction; the rotation does not.)
 fn beam_direction(rhat: [f64; 3], nprime: [f64; 3], beta: f64) -> [f64; 3] {
     let mu = dot(rhat, nprime);
     let mu_beam = (mu + beta) / (1.0 + beta * mu);
     // the component of nprime perpendicular to rhat, normalized (the in-plane tangent).
-    let perp = [nprime[0] - mu * rhat[0], nprime[1] - mu * rhat[1], nprime[2] - mu * rhat[2]];
+    let perp = [
+        nprime[0] - mu * rhat[0],
+        nprime[1] - mu * rhat[1],
+        nprime[2] - mu * rhat[2],
+    ];
     let sin_a = norm(perp);
     if sin_a < 1.0e-12 {
         // emission along the boost axis: aberration leaves it along rhat.
@@ -174,12 +178,12 @@ fn beam_direction(rhat: [f64; 3], nprime: [f64; 3], beta: f64) -> [f64; 3] {
 
 /// per-cell physical state needed to weight, beam, and spectrally sample a photon packet.
 pub(crate) struct CellState {
-    pub(crate) bfield:    MagneticField,
-    pub(crate) n_e:       NumberDensity,
-    pub(crate) beta:      f64,
-    pub(crate) w:         f64,
-    pub(crate) nu_c:      f64,
-    pub(crate) nu_m:      f64,
+    pub(crate) bfield: MagneticField,
+    pub(crate) n_e: NumberDensity,
+    pub(crate) beta: f64,
+    pub(crate) w: f64,
+    pub(crate) nu_c: f64,
+    pub(crate) nu_m: f64,
     pub(crate) gamma_min: f64,
 }
 
@@ -233,7 +237,14 @@ fn cell_state(
     let rho = (fields.rho[idx] * scales.rho).value();
     let pre = (fields.pre[idx] * scales.pre).value();
     CellState::from_physical(
-        rho, pre, beta(gb), cond.adiabatic_index, cond.eps_e, cond.eps_b, p, t_prime_s / w,
+        rho,
+        pre,
+        beta(gb),
+        cond.adiabatic_index,
+        cond.eps_e,
+        cond.eps_b,
+        p,
+        t_prime_s / w,
     )
 }
 
@@ -259,7 +270,11 @@ pub(crate) fn emit_packets(
     // sample comoving frequencies over a broad band bracketing the spectral breaks.
     let nu_lo = cell.nu_c.min(cell.nu_m) * 10.0_f64.powf(-SPECTRUM_DECADES);
     let nu_hi = cell.nu_c.max(cell.nu_m) * 10.0_f64.powf(SPECTRUM_DECADES);
-    let beta_vec = [cell.beta * vhat[0], cell.beta * vhat[1], cell.beta * vhat[2]];
+    let beta_vec = [
+        cell.beta * vhat[0],
+        cell.beta * vhat[1],
+        cell.beta * vhat[2],
+    ];
 
     for _ in 0..n_packets {
         if out.len() as u64 >= max_events {
@@ -275,24 +290,24 @@ pub(crate) fn emit_packets(
 
         out.push(PhotonEvent {
             t_emission,
-            x:              position[0],
-            y:              position[1],
-            z:              position[2],
+            x: position[0],
+            y: position[1],
+            z: position[2],
             nu_emit,
-            energy_weight:  packet_weight,
-            px:             dir[0],
-            py:             dir[1],
-            pz:             dir[2],
-            stokes_i:       1.0,
-            stokes_q:       0.0,
-            stokes_u:       0.0,
-            stokes_v:       0.0,
+            energy_weight: packet_weight,
+            px: dir[0],
+            py: dir[1],
+            pz: dir[2],
+            stokes_i: 1.0,
+            stokes_q: 0.0,
+            stokes_u: 0.0,
+            stokes_v: 0.0,
             doppler_factor: delta_doppler(cell.w, beta_vec, dir),
             beta_vec,
-            optical_depth:  0.0,
+            optical_depth: 0.0,
             cell_id,
-            absorbed:       false,
-            n_scatter:      0,
+            absorbed: false,
+            n_scatter: 0,
         });
     }
 }
@@ -341,8 +356,11 @@ pub fn generate_photon_events(
     let n_azimuth = if resolved_phi { nk } else { AXISYM_N_PHI };
 
     let total_cells = (ni * nj * n_azimuth) as u64;
-    let photons_target =
-        if photons_per_cell > 0 { photons_per_cell } else { (max_events / total_cells).max(4) };
+    let photons_target = if photons_per_cell > 0 {
+        photons_per_cell
+    } else {
+        (max_events / total_cells).max(4)
+    };
 
     // <gamma^2> for a power law N(gamma)~gamma^-p above gamma_min: (p-1)/(p-3) gamma_min^2 for
     // p>3, else gamma_min^2 (the high-gamma integral does not converge, use the lower bound).
@@ -359,7 +377,11 @@ pub fn generate_photon_events(
 
         for jj in 0..nj {
             let dx2 = if nj > 1 { x2[1] - x2[0] } else { 2.0 * PI };
-            let dcos = if nj > 1 { (x2[jj].cos() - (x2[jj] + dx2).cos()).abs() } else { 2.0 };
+            let dcos = if nj > 1 {
+                (x2[jj].cos() - (x2[jj] + dx2).cos()).abs()
+            } else {
+                2.0
+            };
             let jreal = if mesh.data_dim > 1 { jj } else { 0 };
 
             for kk in 0..n_azimuth {
@@ -400,8 +422,17 @@ pub fn generate_photon_events(
                 // radial flow: cell at r_center along rhat, velocity also along rhat.
                 let position = [r_center * rhat[0], r_center * rhat[1], r_center * rhat[2]];
                 emit_packets(
-                    &mut events, &mut rng, &cell, p, t_prime_s, position, rhat, packet_weight,
-                    photons_target, max_events, idx as u32,
+                    &mut events,
+                    &mut rng,
+                    &cell,
+                    p,
+                    t_prime_s,
+                    position,
+                    rhat,
+                    packet_weight,
+                    photons_target,
+                    max_events,
+                    idx as u32,
                 );
             }
         }
@@ -411,7 +442,7 @@ pub fn generate_photon_events(
 }
 
 /// generate photon packets from a 1D RADIAL profile over a SYNTHESIZED equal-solid-angle
-/// sphere — the right tool for imaging a spherically-symmetric (e.g. Blandford-McKee) blast,
+/// sphere — the right tool for imaging a spherically-symmetric (e.g., Blandford-McKee) blast,
 /// where the emission sphere must be tessellated independently of the (degenerate) hydro
 /// angular mesh. directions are sampled as `mu = cos(theta)` uniform on `[cos(theta_max), 1]`
 /// (so every direction cell has equal solid angle) crossed with uniform `phi`; the radial
@@ -492,8 +523,17 @@ pub fn generate_photon_events_spherical(
                 let rhat = [sin_theta * phi.cos(), sin_theta * phi.sin(), mu];
                 let position = [r_center * rhat[0], r_center * rhat[1], r_center * rhat[2]];
                 emit_packets(
-                    &mut events, &mut rng, &cell, p, t_prime_s, position, rhat, packet_weight,
-                    photons_per_dir, max_events, ii as u32,
+                    &mut events,
+                    &mut rng,
+                    &cell,
+                    p,
+                    t_prime_s,
+                    position,
+                    rhat,
+                    packet_weight,
+                    photons_per_dir,
+                    max_events,
+                    ii as u32,
                 );
             }
         }
@@ -580,7 +620,8 @@ pub fn compute_skymap_deposit_spherical(
         let j_peak = emissivity(cell.bfield, cell.n_e, p).value() / (4.0 * PI); // [erg/(s Hz cm^3 sr)]
         let nu_c = Frequency::new(cell.nu_c);
         let nu_m = Frequency::new(cell.nu_m);
-        let shell_vol = (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * scales.length.cubed().value();
+        let shell_vol =
+            (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * scales.length.cubed().value();
 
         // sample the cos band across its projected RADIAL width at ~pixel resolution.
         let width_px = ((cos_hi - cos_lo) * r) / (2.0 * half_width) * n_pix as f64;
@@ -595,7 +636,8 @@ pub fn compute_skymap_deposit_spherical(
             let j_nu = j_peak * spectral_shape(p, nu_prime, nu_c, nu_m);
             // the FULL ring at rho = r*sin_a: its azimuth integral is the factor 2*pi (dV = shell_vol
             // dcos dpsi, integrated over psi -> shell_vol dcos 2*pi).
-            let ring_flux = delta.powf(doppler_power) * j_nu * shell_vol * dcos * 2.0 * PI * emit_dt_s;
+            let ring_flux =
+                delta.powf(doppler_power) * j_nu * shell_vol * dcos * 2.0 * PI * emit_dt_s;
             let rho = r * sin_a;
             let bin = (rho / half_width * n_rho as f64) as usize;
             if bin < n_rho {
@@ -737,46 +779,55 @@ pub fn monte_carlo_radiative_transfer(
 mod tests {
     use super::*;
     use crate::synchrotron::powerlaw_flux;
-    use crate::units::{EnergyDensity, Frequency, Length, MassDensity, SpectralPower, Time, Velocity};
+    use crate::units::{
+        EnergyDensity, Frequency, Length, MassDensity, SpectralPower, Time, Velocity,
+    };
 
     fn conditions() -> SimConditions {
         SimConditions {
-            dt:              1.0,
-            theta_obs:       0.0,
+            dt: 1.0,
+            theta_obs: 0.0,
             adiabatic_index: 4.0 / 3.0,
-            current_time:    1.0e6,
-            p:               2.5,
-            redshift:        0.0,
-            eps_e:           0.1,
-            eps_b:           0.01,
-            d_l:             Length::new(1.0e26),
-            nus:             vec![],
+            current_time: 1.0e6,
+            p: 2.5,
+            redshift: 0.0,
+            eps_e: 0.1,
+            eps_b: 0.01,
+            d_l: Length::new(1.0e26),
+            nus: vec![],
         }
     }
     fn scales() -> QuantScales {
         QuantScales {
-            time:     Time::new(1.0),
-            pre:      EnergyDensity::new(1.0),
-            rho:      MassDensity::new(1.0),
+            time: Time::new(1.0),
+            pre: EnergyDensity::new(1.0),
+            rho: MassDensity::new(1.0),
             velocity: Velocity::new(1.0),
-            length:   Length::new(1.0),
+            length: Length::new(1.0),
         }
     }
 
     struct Snap {
-        x1:  Vec<f64>,
-        x2:  Vec<f64>,
+        x1: Vec<f64>,
+        x2: Vec<f64>,
         rho: Vec<f64>,
-        gb:  Vec<f64>,
+        gb: Vec<f64>,
         pre: Vec<f64>,
     }
     fn snapshot() -> Snap {
         let ni = 6;
         let nj = 4;
-        let x1: Vec<f64> =
-            (0..ni).map(|i| 1.0e16 * 10.0_f64.powf(i as f64 / (ni as f64 - 1.0))).collect();
+        let x1: Vec<f64> = (0..ni)
+            .map(|i| 1.0e16 * 10.0_f64.powf(i as f64 / (ni as f64 - 1.0)))
+            .collect();
         let x2: Vec<f64> = (0..nj).map(|j| 0.2 + 0.4 * j as f64).collect();
-        Snap { x1, x2, rho: vec![1.0e-24; ni], gb: vec![10.0; ni], pre: vec![1.0e-6; ni] }
+        Snap {
+            x1,
+            x2,
+            rho: vec![1.0e-24; ni],
+            gb: vec![10.0; ni],
+            pre: vec![1.0e-6; ni],
+        }
     }
 
     // the frequency sampler reproduces the analytic broken power law: histogramming many
@@ -794,7 +845,9 @@ mod tests {
         let nbins = 48;
         let lg_lo = nu_lo.log10();
         let lg_hi = nu_hi.log10();
-        let edges: Vec<f64> = (0..=nbins).map(|i| 10.0_f64.powf(lg_lo + (lg_hi - lg_lo) * i as f64 / nbins as f64)).collect();
+        let edges: Vec<f64> = (0..=nbins)
+            .map(|i| 10.0_f64.powf(lg_lo + (lg_hi - lg_lo) * i as f64 / nbins as f64))
+            .collect();
         let mut counts = vec![0.0f64; nbins];
 
         let mut rng = Rng::seed(2024);
@@ -810,7 +863,16 @@ mod tests {
         // recovered F_nu at each bin center, and the analytic shape there.
         let center = |b: usize| (edges[b] * edges[b + 1]).sqrt();
         let f_mc = |b: usize| counts[b] / (edges[b + 1] - edges[b]);
-        let f_an = |nu: f64| powerlaw_flux(SpectralPower::new(1.0), p, Frequency::new(nu), Frequency::new(nu_c), Frequency::new(nu_m)).value();
+        let f_an = |nu: f64| {
+            powerlaw_flux(
+                SpectralPower::new(1.0),
+                p,
+                Frequency::new(nu),
+                Frequency::new(nu_c),
+                Frequency::new(nu_m),
+            )
+            .value()
+        };
 
         // compare recovered vs analytic slope across each spectral segment (two interior bins
         // a decade-ish apart). the slope is regime-independent of the unknown overall scale.
@@ -819,7 +881,10 @@ mod tests {
             let (ba, bb) = (bin_of(&edges, nu_a), bin_of(&edges, nu_b));
             let s_mc = slope(f_mc(ba), f_mc(bb), center(ba), center(bb));
             let s_an = slope(f_an(center(ba)), f_an(center(bb)), center(ba), center(bb));
-            assert!((s_mc - expected).abs() < 0.08, "mc slope {s_mc} vs {expected} (analytic {s_an})");
+            assert!(
+                (s_mc - expected).abs() < 0.08,
+                "mc slope {s_mc} vs {expected} (analytic {s_an})"
+            );
         };
         probe(1.0e7, 1.0e9, 1.0 / 3.0); // below nu_m
         probe(1.0e11, 1.0e13, -0.5 * (p - 1.0)); // nu_m..nu_c
@@ -850,10 +915,16 @@ mod tests {
         }
         let beta = 0.8;
         let dir = beam_direction(rhat, nprime, beta);
-        assert!((norm(dir) - 1.0).abs() < 1e-12, "beamed direction must be a unit vector");
+        assert!(
+            (norm(dir) - 1.0).abs() < 1e-12,
+            "beamed direction must be a unit vector"
+        );
         let mu = dot(rhat, nprime);
         let mu_beam = (mu + beta) / (1.0 + beta * mu);
-        assert!((dot(rhat, dir) - mu_beam).abs() < 1e-12, "aberrated angle mismatch");
+        assert!(
+            (dot(rhat, dir) - mu_beam).abs() < 1e-12,
+            "aberrated angle mismatch"
+        );
     }
 
     // generation is reproducible, respects the event cap, emits finite positive weights, and
@@ -863,16 +934,35 @@ mod tests {
         let cond = conditions();
         let sc = scales();
         let s = snapshot();
-        let fields = HydroFields { rho: &s.rho, gamma_beta: &s.gb, pre: &s.pre };
-        let mesh = Mesh { x1: &s.x1, x2: &s.x2, x3: None, data_dim: 1 };
+        let fields = HydroFields {
+            rho: &s.rho,
+            gamma_beta: &s.gb,
+            pre: &s.pre,
+        };
+        let mesh = Mesh {
+            x1: &s.x1,
+            x2: &s.x2,
+            x3: None,
+            data_dim: 1,
+        };
 
         let a = generate_photon_events(&cond, &sc, &fields, &mesh, 1, 10_000, 5);
         let b = generate_photon_events(&cond, &sc, &fields, &mesh, 1, 10_000, 5);
         assert_eq!(a, b, "same seed -> identical catalog");
         assert!(!a.is_empty());
-        assert!(a.iter().all(|e| e.energy_weight.is_finite() && e.energy_weight > 0.0));
-        assert!(a.iter().all(|e| e.nu_emit.is_finite() && e.nu_emit > 0.0), "positive frequencies");
-        assert!(a.iter().all(|e| (norm([e.px, e.py, e.pz]) - 1.0).abs() < 1e-9), "unit directions");
+        assert!(
+            a.iter()
+                .all(|e| e.energy_weight.is_finite() && e.energy_weight > 0.0)
+        );
+        assert!(
+            a.iter().all(|e| e.nu_emit.is_finite() && e.nu_emit > 0.0),
+            "positive frequencies"
+        );
+        assert!(
+            a.iter()
+                .all(|e| (norm([e.px, e.py, e.pz]) - 1.0).abs() < 1e-9),
+            "unit directions"
+        );
 
         let capped = generate_photon_events(&cond, &sc, &fields, &mesh, 1, 7, 5);
         assert!(capped.len() as u64 <= 7, "max_events respected");
@@ -884,8 +974,17 @@ mod tests {
         let cond = conditions();
         let sc = scales();
         let s = snapshot();
-        let fields = HydroFields { rho: &s.rho, gamma_beta: &s.gb, pre: &s.pre };
-        let mesh = Mesh { x1: &s.x1, x2: &s.x2, x3: None, data_dim: 1 };
+        let fields = HydroFields {
+            rho: &s.rho,
+            gamma_beta: &s.gb,
+            pre: &s.pre,
+        };
+        let mesh = Mesh {
+            x1: &s.x1,
+            x2: &s.x2,
+            x3: None,
+            data_dim: 1,
+        };
 
         let base = generate_photon_events(&cond, &sc, &fields, &mesh, 1, 10_000, 5);
         let mut e1 = base.clone();
@@ -893,31 +992,47 @@ mod tests {
         monte_carlo_radiative_transfer(&mut e1, &cond, &sc, &fields, &mesh, 9, true, false);
         monte_carlo_radiative_transfer(&mut e2, &cond, &sc, &fields, &mesh, 9, true, false);
         assert_eq!(e1, e2, "same seed -> identical transfer outcome");
-        assert!(e1.iter().all(|e| e.optical_depth >= 0.0), "non-negative optical depth");
+        assert!(
+            e1.iter().all(|e| e.optical_depth >= 0.0),
+            "non-negative optical depth"
+        );
     }
 
     // the spherical generator synthesizes a full sphere from a 1d radial profile with
-    // equal-solid-angle sampling: <mu> ~ 0 and both hemispheres are populated (the legacy tied
-    // emission directions to the hydro mesh, so a 1d run had no sphere at all).
+    // equal-solid-angle sampling: <mu> ~ 0 and both hemispheres are populated (tying
+    // emission directions to the hydro mesh would leave a 1d run with no sphere at all).
     #[test]
     fn spherical_generation_fills_the_sphere_uniformly() {
         let cond = conditions();
         let sc = scales();
         let ni = 4;
-        let x1: Vec<f64> =
-            (0..ni).map(|i| 1.0e16 * 10.0_f64.powf(i as f64 / (ni as f64 - 1.0))).collect();
+        let x1: Vec<f64> = (0..ni)
+            .map(|i| 1.0e16 * 10.0_f64.powf(i as f64 / (ni as f64 - 1.0)))
+            .collect();
         let (rho, gb, pre) = (vec![1.0e-24; ni], vec![10.0; ni], vec![1.0e-6; ni]);
-        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+        let fields = HydroFields {
+            rho: &rho,
+            gamma_beta: &gb,
+            pre: &pre,
+        };
 
-        let a = generate_photon_events_spherical(&cond, &sc, &fields, &x1, 5, PI, 20, 40, 2, 1_000_000);
-        let b = generate_photon_events_spherical(&cond, &sc, &fields, &x1, 5, PI, 20, 40, 2, 1_000_000);
+        let a =
+            generate_photon_events_spherical(&cond, &sc, &fields, &x1, 5, PI, 20, 40, 2, 1_000_000);
+        let b =
+            generate_photon_events_spherical(&cond, &sc, &fields, &x1, 5, PI, 20, 40, 2, 1_000_000);
         assert_eq!(a, b, "same seed -> identical catalog");
         assert!(!a.is_empty());
 
         let mus: Vec<f64> = a.iter().map(|e| e.z / e.radius()).collect();
         let mean = mus.iter().sum::<f64>() / mus.len() as f64;
-        assert!(mean.abs() < 0.05, "equal-solid-angle sampling -> <mu> ~ 0, got {mean}");
-        assert!(mus.iter().any(|&m| m > 0.5) && mus.iter().any(|&m| m < -0.5), "both hemispheres");
+        assert!(
+            mean.abs() < 0.05,
+            "equal-solid-angle sampling -> <mu> ~ 0, got {mean}"
+        );
+        assert!(
+            mus.iter().any(|&m| m > 0.5) && mus.iter().any(|&m| m < -0.5),
+            "both hemispheres"
+        );
     }
 
     // pair production destroys photons whose ENERGY h*nu_emit is above threshold.
@@ -926,18 +1041,43 @@ mod tests {
         let cond = conditions();
         let sc = scales();
         let s = snapshot();
-        let fields = HydroFields { rho: &s.rho, gamma_beta: &s.gb, pre: &s.pre };
-        let mesh = Mesh { x1: &s.x1, x2: &s.x2, x3: None, data_dim: 1 };
+        let fields = HydroFields {
+            rho: &s.rho,
+            gamma_beta: &s.gb,
+            pre: &s.pre,
+        };
+        let mesh = Mesh {
+            x1: &s.x1,
+            x2: &s.x2,
+            x3: None,
+            data_dim: 1,
+        };
         // nu_emit chosen so h*nu_emit >> 8e-7 erg threshold.
         let mut ev = vec![PhotonEvent {
-            t_emission: 0.0, x: 1.0e16, y: 0.0, z: 0.0,
-            nu_emit: 1.0e21, energy_weight: 1.0,
-            px: 1.0, py: 0.0, pz: 0.0,
-            stokes_i: 1.0, stokes_q: 0.0, stokes_u: 0.0, stokes_v: 0.0,
-            doppler_factor: 1.0, beta_vec: [0.0, 0.0, 0.0], optical_depth: 0.0,
-            cell_id: 0, absorbed: false, n_scatter: 0,
+            t_emission: 0.0,
+            x: 1.0e16,
+            y: 0.0,
+            z: 0.0,
+            nu_emit: 1.0e21,
+            energy_weight: 1.0,
+            px: 1.0,
+            py: 0.0,
+            pz: 0.0,
+            stokes_i: 1.0,
+            stokes_q: 0.0,
+            stokes_u: 0.0,
+            stokes_v: 0.0,
+            doppler_factor: 1.0,
+            beta_vec: [0.0, 0.0, 0.0],
+            optical_depth: 0.0,
+            cell_id: 0,
+            absorbed: false,
+            n_scatter: 0,
         }];
         monte_carlo_radiative_transfer(&mut ev, &cond, &sc, &fields, &mesh, 3, false, true);
-        assert!(ev[0].absorbed, "super-threshold photon should pair-produce away");
+        assert!(
+            ev[0].absorbed,
+            "super-threshold photon should pair-produce away"
+        );
     }
 }

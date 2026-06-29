@@ -212,9 +212,9 @@ mod tests {
 
     // DELIBERATE no-clamp pin: the branch-free kernel body (`srhd_recover`, what the
     // substrate c2p kernel computes) must return a NON-FINITE prim for unphysical cons
-    // (s_mag > d + tau => v_sq >= 1 => 1/sqrt(1-v_sq) blows up). this matches the C++
-    // reference (helpers::newton_fg is unguarded; the outer loop detects !isfinite) and
-    // is REQUIRED by feedback_no_silent_floors: the kernel path has no ErrorCode channel,
+    // (s_mag > d + tau => v_sq >= 1 => 1/sqrt(1-v_sq) blows up). the newton_fg step is
+    // unguarded and the outer loop detects !isfinite; this is
+    // REQUIRED by feedback_no_silent_floors: the kernel path has no ErrorCode channel,
     // so the NaN must propagate to the CFL max-reduction (now NaN-propagating, item 1)
     // and trip check_dt_or_panic. clamping v_sq here would silently recover a garbage
     // finite state and defeat that guard. if this test fails because someone added a

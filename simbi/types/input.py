@@ -60,6 +60,7 @@ class CellSpacing(str, ExtendedEnum):
 class TimeStepping(str, ExtendedEnum):
     RK1 = "rk1"
     RK2 = "rk2"
+    RK3 = "rk3"
 
 
 class Reconstruction(str, ExtendedEnum):
@@ -78,6 +79,7 @@ class Limiter(str, ExtendedEnum):
 class Solver(str, ExtendedEnum):
     HLLE = "hlle"
     HLLC = "hllc"
+    HLLC_LM = "hllc_lm"  # fleischmann (2020) low-mach / low-dissipation HLLC (newtonian)
     HLLD = "hlld"
 
 

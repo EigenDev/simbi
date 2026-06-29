@@ -77,14 +77,14 @@ impl<R: GpuRuntime> KernelDispatcher<R> {
 
     /// get the kernel handle for `source`, compiling via the runtime's OWN JIT
     /// (NVRTC) and caching the module per kernel_name — for callers that build a
-    /// non-standard arg array (e.g. interleaved int/float scalar params) and launch
+    /// non-standard arg array (e.g., interleaved int/float scalar params) and launch
     /// via `runtime()` themselves. no caller-supplied compile closure.
     pub fn jit_kernel(&self, source: &str, kernel_name: &str) -> R::Kernel {
         self.jit_kernel_keyed(source, kernel_name, kernel_name)
     }
 
     /// like `jit_kernel`, but the module cache is keyed by `cache_key` (which may
-    /// encode e.g. the precision) while the entry point is resolved by `entry_name`
+    /// encode e.g., the precision) while the entry point is resolved by `entry_name`
     /// (the real symbol in the PTX). lets the SAME kernel name compile at two
     /// precisions in one process without the f32 module shadowing the f64 one.
     ///
@@ -191,8 +191,94 @@ pub mod cuda_runtime {
         }
     }
 
-    /// the global CUDA dispatcher. initialized on first use.
-    pub static DISPATCHER: std::sync::LazyLock<KernelDispatcher<CudaRuntime>> =
-        std::sync::LazyLock::new(|| KernelDispatcher::new(CudaRuntime));
+    fn make_dispatcher() -> KernelDispatcher<CudaRuntime> {
+        KernelDispatcher::new(CudaRuntime)
+    }
+
+    // one dispatcher per device ordinal: cuda modules are bound to the context they were
+    // loaded into, so device N's kernels must live in device N's dispatcher (docs/design/37).
+    // each is initialized on first use, in whatever context is current at that point.
+    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<CudaRuntime>>; crate::cuda::MAX_GPUS] =
+        [const {
+            std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<CudaRuntime>)
+        }; crate::cuda::MAX_GPUS];
+
+    /// the dispatcher for the device whose context is current on this thread. callers JIT and
+    /// launch inside `cuda::with_device(ord, ...)`, so the modules land in the right context.
+    /// on the single-device path this is always device 0's dispatcher.
+    pub fn current_dispatcher() -> &'static KernelDispatcher<CudaRuntime> {
+        &DISPATCHERS[crate::cuda::current_device() as usize]
+    }
 }
+
+// =============================================================================
+// HIP runtime (docs/design/38). the amd sibling of cuda_runtime: hiprtc -> code object ->
+// hipModuleLoadData. same per-device dispatcher registry (modules are per-device), keyed on
+// the hip current-device ordinal.
+// =============================================================================
+
+#[cfg(feature = "hip")]
+pub mod hip_runtime {
+    use super::*;
+    use crate::hip::{HipSpace, HipModule, HipKernel, HipStream};
+    use crate::ExecutionSpace;
+
+    pub struct HipRuntime;
+
+    impl GpuRuntime for HipRuntime {
+        type Module = HipModule;
+        type Kernel = HipKernel;
+
+        fn compile(&self, source: &str, name: &str) -> crate::Result<Vec<u8>> {
+            crate::hiprtc::compile_code(source, name)
+        }
+
+        fn load_binary(&self, binary: &[u8]) -> crate::Result<HipModule> {
+            HipSpace::load_module(binary)
+        }
+
+        fn get_kernel(&self, module: &HipModule, name: &str) -> crate::Result<HipKernel> {
+            HipSpace::get_function(module, name)
+        }
+
+        unsafe fn launch(
+            &self,
+            kernel: &HipKernel,
+            config: LaunchConfig,
+            args: &mut [*mut std::ffi::c_void],
+        ) -> crate::Result<()> {
+            let stream = HipStream::null();
+            unsafe { HipSpace::launch(&stream, kernel, config, args) }
+        }
+    }
+
+    fn make_dispatcher() -> KernelDispatcher<HipRuntime> {
+        KernelDispatcher::new(HipRuntime)
+    }
+
+    // one dispatcher per device ordinal: hip modules are bound to the device they were loaded
+    // for, so device N's kernels must live in device N's dispatcher (docs/design/37).
+    static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<HipRuntime>>; crate::hip::MAX_GPUS] =
+        [const {
+            std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<HipRuntime>)
+        }; crate::hip::MAX_GPUS];
+
+    /// the dispatcher for the device bound on this thread. callers JIT and launch inside
+    /// `hip::with_device(ord, ...)`, so the modules land for the right device.
+    pub fn current_dispatcher() -> &'static KernelDispatcher<HipRuntime> {
+        &DISPATCHERS[crate::hip::current_device() as usize]
+    }
+}
+
+// =============================================================================
+// neutral backend selection (docs/design/38): downstream names `runtime::DeviceRuntime` and
+// `runtime::current_dispatcher()`; the active backend feature binds them. cuda wins if both
+// are somehow set (the hip arms are `not(cuda)`), so the tree never double-binds.
+// =============================================================================
+
+#[cfg(feature = "cuda")]
+pub use cuda_runtime::{current_dispatcher, CudaRuntime as DeviceRuntime};
+
+#[cfg(all(feature = "hip", not(feature = "cuda")))]
+pub use hip_runtime::{current_dispatcher, HipRuntime as DeviceRuntime};
 

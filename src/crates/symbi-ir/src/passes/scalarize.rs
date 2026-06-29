@@ -17,7 +17,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::einsum::{Atom, EinsumSpec};
-use crate::graph::{ConstValue, DimIndex, ElementWiseOp, Graph, NodeId, Op, ReduceOp, TranscendentalOp};
+use crate::graph::{
+    ConstValue, DimIndex, ElementWiseOp, Graph, NodeId, Op, ReduceOp, TranscendentalOp,
+};
 use crate::{DimExpr, ElementTy, Symbol, TensorTy};
 
 // ----- the lowered form -----
@@ -25,21 +27,36 @@ use crate::{DimExpr, ElementTy, Symbol, TensorTy};
 /// operator-based binary form: rendered as `a OP b` in target source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum BinaryKind {
-    Add, Sub, Mul, Div,
-    Eq, Ne, Lt, Le, Gt, Ge,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
     // bitwise / logical (also works for bool in Rust):
-    BitOr, BitAnd, BitXor,
+    BitOr,
+    BitAnd,
+    BitXor,
 }
 
 impl BinaryKind {
     pub fn rust_operator(self) -> &'static str {
         match self {
-            BinaryKind::Add => "+", BinaryKind::Sub => "-",
-            BinaryKind::Mul => "*", BinaryKind::Div => "/",
-            BinaryKind::Eq => "==", BinaryKind::Ne => "!=",
-            BinaryKind::Lt => "<",  BinaryKind::Le => "<=",
-            BinaryKind::Gt => ">",  BinaryKind::Ge => ">=",
-            BinaryKind::BitOr  => "|",
+            BinaryKind::Add => "+",
+            BinaryKind::Sub => "-",
+            BinaryKind::Mul => "*",
+            BinaryKind::Div => "/",
+            BinaryKind::Eq => "==",
+            BinaryKind::Ne => "!=",
+            BinaryKind::Lt => "<",
+            BinaryKind::Le => "<=",
+            BinaryKind::Gt => ">",
+            BinaryKind::Ge => ">=",
+            BinaryKind::BitOr => "|",
             BinaryKind::BitAnd => "&",
             BinaryKind::BitXor => "^",
         }
@@ -84,13 +101,13 @@ pub enum ScalarExpr {
     /// (docs/design/15 §3); construction sites pass a literal `.to_string()`.
     MethodCall {
         receiver: Box<ScalarExpr>,
-        method:   String,
-        args:     Vec<ScalarExpr>,
+        method: String,
+        args: Vec<ScalarExpr>,
     },
     /// ternary if/else: `if cond { then } else { else_ }`.
     Select {
-        cond:  Box<ScalarExpr>,
-        then:  Box<ScalarExpr>,
+        cond: Box<ScalarExpr>,
+        then: Box<ScalarExpr>,
         else_: Box<ScalarExpr>,
     },
     /// indexed access into an array-shaped param: `container[index]`.
@@ -99,7 +116,7 @@ pub enum ScalarExpr {
     /// both Rust and CUDA source.
     IndexInto {
         container: String,
-        index:     Box<ScalarExpr>,
+        index: Box<ScalarExpr>,
     },
     /// arbitrary-coord field load. `field_key` matches an IR-side field
     /// key (e.g., "prim_vel_0") that the dispatch / emit_kernel layer
@@ -112,26 +129,23 @@ pub enum ScalarExpr {
     /// (not produced by tensor::emit_cpu) so `gather_at(...)` runtime
     /// calls survive as-is on CPU.
     FieldLoadAt {
-        field_key:  String,
+        field_key: String,
         components: Vec<ScalarExpr>,
     },
     /// F1.B.8: free-function call by name with scalar args. emit lowers
     /// as `name(arg0, arg1, ...)` on both CPU and CUDA targets. the
     /// function definition lives outside this elemental — either a
-    /// legacy scalar elemental's `_cuda` accessor (for kernels that
+    /// scalar elemental's `_cuda` accessor (for kernels that
     /// chain through F1.B.8's opaque-call substrate) or a host
     /// function on the CPU path.
-    FreeCall {
-        name: String,
-        args: Vec<ScalarExpr>,
-    },
+    FreeCall { name: String, args: Vec<ScalarExpr> },
     /// numeric conversion `value as <to>` — the lowered form of
     /// `ElementWiseOp::Cast`, inserted by the graph's usual arithmetic conversions
-    /// (e.g. an i32 index promoted to f64 to multiply a grid width). emits a backend
+    /// (e.g., an i32 index promoted to f64 to multiply a grid width). emits a backend
     /// cast: Rust `S::from_f64(<value> as f64)` (generic) / `(<value>) as f64`, CUDA
     /// `(<float-ty>)(<value>)`.
     Cast {
-        to:    ElementTy,
+        to: ElementTy,
         value: Box<ScalarExpr>,
     },
 }
@@ -148,10 +162,12 @@ impl ScalarExpr {
             ScalarExpr::Const(_) | ScalarExpr::Var(_) => Vec::new(),
             ScalarExpr::BinOp(_, a, b) => vec![a.as_ref(), b.as_ref()],
             ScalarExpr::UnaryOp(_, a) => vec![a.as_ref()],
-            ScalarExpr::MethodCall { receiver, args, .. } =>
-                std::iter::once(receiver.as_ref()).chain(args.iter()).collect(),
-            ScalarExpr::Select { cond, then, else_ } =>
-                vec![cond.as_ref(), then.as_ref(), else_.as_ref()],
+            ScalarExpr::MethodCall { receiver, args, .. } => std::iter::once(receiver.as_ref())
+                .chain(args.iter())
+                .collect(),
+            ScalarExpr::Select { cond, then, else_ } => {
+                vec![cond.as_ref(), then.as_ref(), else_.as_ref()]
+            }
             ScalarExpr::IndexInto { index, .. } => vec![index.as_ref()],
             ScalarExpr::FieldLoadAt { components, .. } => components.iter().collect(),
             ScalarExpr::FreeCall { args, .. } => args.iter().collect(),
@@ -165,10 +181,12 @@ impl ScalarExpr {
             ScalarExpr::Const(_) | ScalarExpr::Var(_) => Vec::new(),
             ScalarExpr::BinOp(_, a, b) => vec![a.as_mut(), b.as_mut()],
             ScalarExpr::UnaryOp(_, a) => vec![a.as_mut()],
-            ScalarExpr::MethodCall { receiver, args, .. } =>
-                std::iter::once(receiver.as_mut()).chain(args.iter_mut()).collect(),
-            ScalarExpr::Select { cond, then, else_ } =>
-                vec![cond.as_mut(), then.as_mut(), else_.as_mut()],
+            ScalarExpr::MethodCall { receiver, args, .. } => std::iter::once(receiver.as_mut())
+                .chain(args.iter_mut())
+                .collect(),
+            ScalarExpr::Select { cond, then, else_ } => {
+                vec![cond.as_mut(), then.as_mut(), else_.as_mut()]
+            }
             ScalarExpr::IndexInto { index, .. } => vec![index.as_mut()],
             ScalarExpr::FieldLoadAt { components, .. } => components.iter_mut().collect(),
             ScalarExpr::FreeCall { args, .. } => args.iter_mut().collect(),
@@ -184,23 +202,23 @@ impl ScalarExpr {
 pub enum ScalarStmt {
     /// `let name: element = value;`
     Let {
-        name:    String,
+        name: String,
         element: ElementTy,
-        value:   ScalarExpr,
+        value: ScalarExpr,
     },
     /// `let mut name: element = init;` — used for loop-form reduction
     /// accumulators (zero-init, then CompoundAssign in the loop body).
     LetMut {
-        name:    String,
+        name: String,
         element: ElementTy,
-        init:    ScalarExpr,
+        init: ScalarExpr,
     },
     /// `name <op>= value;` — applied to a previously-declared LetMut
     /// inside a loop body. op is restricted to the four "reduction
     /// associative" forms: Add, Mul, BitOr, BitAnd, BitXor.
     CompoundAssign {
-        name:  String,
-        op:    BinaryKind,
+        name: String,
+        op: BinaryKind,
         value: ScalarExpr,
     },
     /// F2.F: `name = value;` — plain (non-compound) assignment.
@@ -208,25 +226,22 @@ pub enum ScalarStmt {
     /// lowering, where the body lambda returns a new accumulator that
     /// REPLACES (not accumulates into) the current one. CompoundAssign
     /// only covers reductive updates; Fold needs the general case.
-    Assign {
-        name:  String,
-        value: ScalarExpr,
-    },
+    Assign { name: String, value: ScalarExpr },
     /// `for iter in 0..bound { body }` — const-generic loop. bound is
     /// either Literal (rarely used; existing code unrolls these) or
     /// Generic (the const-generic identifier from the surrounding
-    /// context, e.g. "D"). emitters render as `for ii in 0..D` (Rust)
+    /// context, e.g., "D"). emitters render as `for ii in 0..D` (Rust)
     /// or `#pragma unroll\nfor (int ii = 0; ii < D; ++ii)` (CUDA).
     For {
-        iter:  String,
+        iter: String,
         bound: DimExpr,
-        body:  Vec<ScalarStmt>,
+        body: Vec<ScalarStmt>,
     },
     /// `if cond { then_body }` — emitted by `IterateInline` lowering to host
     /// the optional early-`break` after the step assigns. emitters render as
     /// the same `if` syntax in both Rust and CUDA.
     If {
-        cond:      ScalarExpr,
+        cond: ScalarExpr,
         then_body: Vec<ScalarStmt>,
     },
     /// `break;` — only valid inside a `For` body. emitters render as
@@ -262,10 +277,10 @@ pub enum ScalarStmt {
     /// through unchanged (treats them as ordinary statement containers).
     /// step 2 will add the LCA-aware placement rule.
     Scope {
-        name:    String,
+        name: String,
         element: ElementTy,
-        body:    Vec<ScalarStmt>,
-        result:  ScalarExpr,
+        body: Vec<ScalarStmt>,
+        result: ScalarExpr,
     },
     /// the DUAL of the `For`/`Break` iterate lowering: a real data-dependent
     /// branch where ONLY the taken arm executes. lowered from `Op::IfElse`
@@ -280,8 +295,8 @@ pub enum ScalarStmt {
     /// arm-internal lets die at their brace — the lifetime/branch info the
     /// codegen needs to evaluate only the taken arm (the compute-all-paths fix).
     IfElse {
-        outs:      Vec<(String, ElementTy)>,
-        cond:      ScalarExpr,
+        outs: Vec<(String, ElementTy)>,
+        cond: ScalarExpr,
         then_body: Vec<ScalarStmt>,
         else_body: Vec<ScalarStmt>,
     },
@@ -293,8 +308,8 @@ pub enum ScalarStmt {
 // every transformation pass (cse, FieldLoadAt rewrite, uses-var detection, the
 // fresh-name index scan) walks scalar statements the same way: visit the
 // immediate scalar expression a stmt CARRIES, then recurse into any child
-// statement bodies. those two notions used to be respelled inline in every
-// backend match — touching one to add a variant meant touching all five.
+// statement bodies. those two notions are encoded ONCE here rather than
+// respelled inline in every backend match.
 //
 // the four helpers below + `with_child_expr` are the one place that encodes
 // "which exprs belong to me" and "which sub-bodies do I own". every walk-style
@@ -313,18 +328,18 @@ impl ScalarStmt {
     /// no immediate expression (For's bound is a `DimExpr`, not a ScalarExpr).
     pub fn child_expr(&self) -> Option<&ScalarExpr> {
         match self {
-            ScalarStmt::Let           { value, .. } => Some(value),
-            ScalarStmt::LetMut        { init,  .. } => Some(init),
-            ScalarStmt::Assign        { value, .. } => Some(value),
-            ScalarStmt::CompoundAssign{ value, .. } => Some(value),
-            ScalarStmt::If            { cond,  .. } => Some(cond),
+            ScalarStmt::Let { value, .. } => Some(value),
+            ScalarStmt::LetMut { init, .. } => Some(init),
+            ScalarStmt::Assign { value, .. } => Some(value),
+            ScalarStmt::CompoundAssign { value, .. } => Some(value),
+            ScalarStmt::If { cond, .. } => Some(cond),
             // Scope's IMMEDIATE child expression is its `result` — the value
             // bound to `name` in the enclosing scope. body is a separate
             // sub-list (see `child_stmts`).
-            ScalarStmt::Scope         { result, .. } => Some(result),
+            ScalarStmt::Scope { result, .. } => Some(result),
             // IfElse's immediate expr is the `cond`; the arm results live as
             // trailing Assigns inside the sub-bodies (walked via child_stmts).
-            ScalarStmt::IfElse        { cond,   .. } => Some(cond),
+            ScalarStmt::IfElse { cond, .. } => Some(cond),
             ScalarStmt::For { .. } | ScalarStmt::Break => None,
         }
     }
@@ -333,13 +348,13 @@ impl ScalarStmt {
     /// FieldLoadAt rewrite, for example).
     pub fn child_expr_mut(&mut self) -> Option<&mut ScalarExpr> {
         match self {
-            ScalarStmt::Let           { value, .. } => Some(value),
-            ScalarStmt::LetMut        { init,  .. } => Some(init),
-            ScalarStmt::Assign        { value, .. } => Some(value),
-            ScalarStmt::CompoundAssign{ value, .. } => Some(value),
-            ScalarStmt::If            { cond,  .. } => Some(cond),
-            ScalarStmt::Scope         { result, .. } => Some(result),
-            ScalarStmt::IfElse        { cond,   .. } => Some(cond),
+            ScalarStmt::Let { value, .. } => Some(value),
+            ScalarStmt::LetMut { init, .. } => Some(init),
+            ScalarStmt::Assign { value, .. } => Some(value),
+            ScalarStmt::CompoundAssign { value, .. } => Some(value),
+            ScalarStmt::If { cond, .. } => Some(cond),
+            ScalarStmt::Scope { result, .. } => Some(result),
+            ScalarStmt::IfElse { cond, .. } => Some(cond),
             ScalarStmt::For { .. } | ScalarStmt::Break => None,
         }
     }
@@ -351,10 +366,14 @@ impl ScalarStmt {
     /// (IfElse) that a single `&[ScalarStmt]` return could not express.
     pub fn child_stmt_bodies(&self) -> Vec<&[ScalarStmt]> {
         match self {
-            ScalarStmt::For    { body, .. }      => vec![body],
-            ScalarStmt::If     { then_body, .. } => vec![then_body],
-            ScalarStmt::Scope  { body, .. }      => vec![body],
-            ScalarStmt::IfElse { then_body, else_body, .. } => vec![then_body, else_body],
+            ScalarStmt::For { body, .. } => vec![body],
+            ScalarStmt::If { then_body, .. } => vec![then_body],
+            ScalarStmt::Scope { body, .. } => vec![body],
+            ScalarStmt::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => vec![then_body, else_body],
             _ => Vec::new(),
         }
     }
@@ -363,11 +382,14 @@ impl ScalarStmt {
     /// disjoint struct fields, so borrowing both mutably at once is sound.
     pub fn child_stmt_bodies_mut(&mut self) -> Vec<&mut [ScalarStmt]> {
         match self {
-            ScalarStmt::For    { body, .. }      => vec![body.as_mut_slice()],
-            ScalarStmt::If     { then_body, .. } => vec![then_body.as_mut_slice()],
-            ScalarStmt::Scope  { body, .. }      => vec![body.as_mut_slice()],
-            ScalarStmt::IfElse { then_body, else_body, .. } =>
-                vec![then_body.as_mut_slice(), else_body.as_mut_slice()],
+            ScalarStmt::For { body, .. } => vec![body.as_mut_slice()],
+            ScalarStmt::If { then_body, .. } => vec![then_body.as_mut_slice()],
+            ScalarStmt::Scope { body, .. } => vec![body.as_mut_slice()],
+            ScalarStmt::IfElse {
+                then_body,
+                else_body,
+                ..
+            } => vec![then_body.as_mut_slice(), else_body.as_mut_slice()],
             _ => Vec::new(),
         }
     }
@@ -378,9 +400,9 @@ impl ScalarStmt {
     /// colliding with existing lets.
     pub fn binding_name(&self) -> Option<&str> {
         match self {
-            ScalarStmt::Let    { name, .. } |
-            ScalarStmt::LetMut { name, .. } |
-            ScalarStmt::Scope  { name, .. } => Some(name.as_str()),
+            ScalarStmt::Let { name, .. }
+            | ScalarStmt::LetMut { name, .. }
+            | ScalarStmt::Scope { name, .. } => Some(name.as_str()),
             // IfElse declares N result slots; surface the first (binding_name
             // feeds only the `__cse` prefix scan, and `__br` uses a different
             // prefix, so one representative name is sufficient).
@@ -399,13 +421,59 @@ impl ScalarStmt {
     /// `child_stmts`).
     pub fn with_child_expr(self, f: impl FnOnce(ScalarExpr) -> ScalarExpr) -> Self {
         match self {
-            ScalarStmt::Let           { name, element, value } => ScalarStmt::Let           { name, element, value: f(value) },
-            ScalarStmt::LetMut        { name, element, init  } => ScalarStmt::LetMut        { name, element, init:  f(init)  },
-            ScalarStmt::Assign        { name, value }          => ScalarStmt::Assign        { name, value: f(value) },
-            ScalarStmt::CompoundAssign{ name, op, value }      => ScalarStmt::CompoundAssign{ name, op, value: f(value) },
-            ScalarStmt::If            { cond, then_body }      => ScalarStmt::If            { cond: f(cond), then_body },
-            ScalarStmt::Scope         { name, element, body, result } => ScalarStmt::Scope { name, element, body, result: f(result) },
-            ScalarStmt::IfElse        { outs, cond, then_body, else_body } => ScalarStmt::IfElse { outs, cond: f(cond), then_body, else_body },
+            ScalarStmt::Let {
+                name,
+                element,
+                value,
+            } => ScalarStmt::Let {
+                name,
+                element,
+                value: f(value),
+            },
+            ScalarStmt::LetMut {
+                name,
+                element,
+                init,
+            } => ScalarStmt::LetMut {
+                name,
+                element,
+                init: f(init),
+            },
+            ScalarStmt::Assign { name, value } => ScalarStmt::Assign {
+                name,
+                value: f(value),
+            },
+            ScalarStmt::CompoundAssign { name, op, value } => ScalarStmt::CompoundAssign {
+                name,
+                op,
+                value: f(value),
+            },
+            ScalarStmt::If { cond, then_body } => ScalarStmt::If {
+                cond: f(cond),
+                then_body,
+            },
+            ScalarStmt::Scope {
+                name,
+                element,
+                body,
+                result,
+            } => ScalarStmt::Scope {
+                name,
+                element,
+                body,
+                result: f(result),
+            },
+            ScalarStmt::IfElse {
+                outs,
+                cond,
+                then_body,
+                else_body,
+            } => ScalarStmt::IfElse {
+                outs,
+                cond: f(cond),
+                then_body,
+                else_body,
+            },
             other => other,
         }
     }
@@ -417,20 +485,28 @@ impl ScalarStmt {
 /// in V1 (rank-1 only).
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LoweredParam {
-    pub name:      String,
-    pub element:   ElementTy,
+    pub name: String,
+    pub element: ElementTy,
     pub array_len: Option<DimExpr>,
 }
 
 impl LoweredParam {
     /// short-hand: a scalar param (no array_len).
     pub fn scalar(name: String, element: ElementTy) -> Self {
-        Self { name, element, array_len: None }
+        Self {
+            name,
+            element,
+            array_len: None,
+        }
     }
 
     /// short-hand: a rank-1 array param.
     pub fn array(name: String, element: ElementTy, len: DimExpr) -> Self {
-        Self { name, element, array_len: Some(len) }
+        Self {
+            name,
+            element,
+            array_len: Some(len),
+        }
     }
 }
 
@@ -439,12 +515,12 @@ impl LoweredParam {
 /// tensor). emitters turn this into target source.
 #[derive(Clone, Debug)]
 pub struct LoweredFn {
-    pub name:           String,
-    pub params:         Vec<LoweredParam>,
-    pub body:           Vec<ScalarStmt>,
-    pub results:        Vec<ScalarExpr>,
+    pub name: String,
+    pub params: Vec<LoweredParam>,
+    pub body: Vec<ScalarStmt>,
+    pub results: Vec<ScalarExpr>,
     pub result_element: ElementTy,
-    pub result_shape:   Vec<DimExpr>,
+    pub result_shape: Vec<DimExpr>,
 }
 
 // ----- the scalarizer -----
@@ -477,7 +553,7 @@ impl Binding {
             },
             Binding::Array { container } => ScalarExpr::IndexInto {
                 container: container.clone(),
-                index:     Box::new(idx),
+                index: Box::new(idx),
             },
         }
     }
@@ -487,8 +563,8 @@ impl Binding {
 /// produces a LoweredFn by per-op lowering rules.
 struct Scalarizer {
     bindings: HashMap<NodeId, Binding>,
-    params:   Vec<LoweredParam>,
-    body:     Vec<ScalarStmt>,
+    params: Vec<LoweredParam>,
+    body: Vec<ScalarStmt>,
     /// counter for generated temp names (loop iters, accumulators).
     next_temp: usize,
     /// the current `IterateInline` accumulator local names (one per vector
@@ -500,11 +576,11 @@ struct Scalarizer {
 impl Scalarizer {
     fn new() -> Self {
         Self {
-            bindings:  HashMap::new(),
-            params:    Vec::new(),
-            body:      Vec::new(),
+            bindings: HashMap::new(),
+            params: Vec::new(),
+            body: Vec::new(),
             next_temp: 0,
-            iter_acc:  None,
+            iter_acc: None,
         }
     }
 
@@ -554,11 +630,12 @@ impl Scalarizer {
         }
         let temp = self.fresh("cse");
         self.body.push(ScalarStmt::Let {
-            name:    temp.clone(),
+            name: temp.clone(),
             element: ty.element,
-            value:   expr.clone(),
+            value: expr.clone(),
         });
-        self.bindings.insert(id, Binding::Concrete(vec![ScalarExpr::Var(temp)]));
+        self.bindings
+            .insert(id, Binding::Concrete(vec![ScalarExpr::Var(temp)]));
     }
 
     fn fresh(&mut self, prefix: &str) -> String {
@@ -586,35 +663,33 @@ impl Scalarizer {
         let binding = match op {
             Op::Const(v) => Binding::Concrete(self.lower_const(v.clone())),
             Op::Param(sym) => self.lower_param(sym, ty),
-            Op::ElementWise(ewop, inputs) => Binding::Concrete(
-                self.lower_element_wise(*ewop, inputs, ty, graph)
-            ),
-            Op::Transcendental(trop, inputs) => Binding::Concrete(
-                self.lower_transcendental(*trop, inputs, ty, graph)
-            ),
+            Op::ElementWise(ewop, inputs) => {
+                Binding::Concrete(self.lower_element_wise(*ewop, inputs, ty, graph))
+            }
+            Op::Transcendental(trop, inputs) => {
+                Binding::Concrete(self.lower_transcendental(*trop, inputs, ty, graph))
+            }
             Op::Construct(inputs) => Binding::Concrete(self.lower_construct(inputs)),
             Op::Index(tensor, idxs) => Binding::Concrete(self.lower_index(*tensor, idxs, graph)),
-            Op::Broadcast(tensor, target_shape) => Binding::Concrete(
-                self.lower_broadcast(*tensor, target_shape, graph)
-            ),
-            Op::Reduce(rop, axes, input) => Binding::Concrete(
-                self.lower_reduce(*rop, axes, *input, ty, graph)
-            ),
-            Op::Select(cond, then_id, else_id) => Binding::Concrete(
-                self.lower_select(*cond, *then_id, *else_id, ty, graph)
-            ),
+            Op::Broadcast(tensor, target_shape) => {
+                Binding::Concrete(self.lower_broadcast(*tensor, target_shape, graph))
+            }
+            Op::Reduce(rop, axes, input) => {
+                Binding::Concrete(self.lower_reduce(*rop, axes, *input, ty, graph))
+            }
+            Op::Select(cond, then_id, else_id) => {
+                Binding::Concrete(self.lower_select(*cond, *then_id, *else_id, ty, graph))
+            }
             Op::Einsum(spec, inputs) => self.lower_einsum(spec, inputs, ty, graph),
-            Op::LoadAt(sym, comps) => Binding::Concrete(
-                self.lower_load_at(sym, comps)
-            ),
+            Op::LoadAt(sym, comps) => Binding::Concrete(self.lower_load_at(sym, comps)),
             // F2.C: Lambda is a callable value, not a tensor. it's only
             // consumed by Op::Apply, which extracts the FnDef name and
             // emits a FreeCall referencing the device function. lower
             // Lambda to a placeholder zero so any accidental reads
             // surface as obvious zeros rather than panics.
-            Op::Lambda(_) => Binding::Concrete(vec![
-                ScalarExpr::Const(crate::ConstValue::F64(0.0)),
-            ]),
+            Op::Lambda(_) => {
+                Binding::Concrete(vec![ScalarExpr::Const(crate::ConstValue::F64(0.0))])
+            }
             // F2.C: Apply lowers to a `FreeCall(name, args)` on the scalar
             // side — resolve the device-function name via `graph.fn_def`.
             Op::Apply { lambda, args } => {
@@ -626,23 +701,24 @@ impl Scalarizer {
             // (rank > 0 fold needs per-component LetMut + Assign — punted
             // until a real call site demands it). produces a Binding to
             // the accumulator's `Var(name)`.
-            Op::Fold { lambda, init, count } => {
-                Binding::Concrete(self.lower_fold(*lambda, *init, *count, ty, graph))
-            }
+            Op::Fold {
+                lambda,
+                init,
+                count,
+            } => Binding::Concrete(self.lower_fold(*lambda, *init, *count, ty, graph)),
             // F4.0c: Morphism lowering. each kind expands to a small
             // arithmetic expression over the two input args (the
             // proc-macro synthesizes `field[coord]` as args[0] and
             // `field[coord + e_axis]` as args[1] at the call site).
-            Op::Morphism { kind, args } => Binding::Concrete(
-                self.lower_morphism(*kind, args, ty)
-            ),
+            Op::Morphism { kind, args } => Binding::Concrete(self.lower_morphism(*kind, args, ty)),
             // docs/design/14: the loop accumulator placeholder resolves to the
             // mutable local set up by `lower_iterate_inline` (only while lowering
             // a loop's `step` cone).
             Op::IterAcc(idx) => Binding::Concrete(vec![ScalarExpr::Var(
                 self.iter_acc
                     .as_ref()
-                    .expect("IterAcc lowered outside an IterateInline loop body")[*idx as usize]
+                    .expect("IterAcc lowered outside an IterateInline loop body")
+                    [*idx as usize]
                     .clone(),
             )]),
             // extract one component of a multi-output node (an IfElse from
@@ -654,23 +730,23 @@ impl Scalarizer {
             // IterateInline is cone-partitioned: scalarize_kernel handles it
             // directly (skips the cone in the main pass, lowers it inside the
             // `for`), so it never reaches normal per-node dispatch.
-            Op::IterateInline { .. } => unreachable!(
-                "IterateInline is lowered in scalarize_kernel, not lower_node",
-            ),
+            Op::IterateInline { .. } => {
+                unreachable!("IterateInline is lowered in scalarize_kernel, not lower_node",)
+            }
             // **docs/design/23 step 3b**: Op::Scope is body-partitioned like
             // IterateInline. scalarize_kernel collects scope-owned NodeIds,
             // skips them in the main pass, then lowers each Scope via
             // `lower_scope` which emits a ScalarStmt::Scope wrapping the
             // body Lets in braces.
-            Op::Scope { .. } => unreachable!(
-                "Op::Scope is lowered in scalarize_kernel, not lower_node",
-            ),
+            Op::Scope { .. } => {
+                unreachable!("Op::Scope is lowered in scalarize_kernel, not lower_node",)
+            }
             // the IfElse dual is arm-body-partitioned like Op::Scope —
             // scalarize_kernel collects each arm's owned NodeIds, skips them in
             // the main pass, and lowers via `lower_if_else`.
-            Op::IfElse { .. } => unreachable!(
-                "Op::IfElse is lowered in scalarize_kernel, not lower_node",
-            ),
+            Op::IfElse { .. } => {
+                unreachable!("Op::IfElse is lowered in scalarize_kernel, not lower_node",)
+            }
         };
         self.bindings.insert(id, binding);
     }
@@ -681,19 +757,22 @@ impl Scalarizer {
     fn lower_fold(
         &mut self,
         lambda: NodeId,
-        init:   NodeId,
-        count:  NodeId,
+        init: NodeId,
+        count: NodeId,
         out_ty: &TensorTy,
-        graph:  &Graph,
+        graph: &Graph,
     ) -> Vec<ScalarExpr> {
         // V1 scope: rank-0 accumulator.
-        assert_eq!(out_ty.rank, 0,
-            "lower_fold V1: rank-0 accumulator only (got rank {})", out_ty.rank);
+        assert_eq!(
+            out_ty.rank, 0,
+            "lower_fold V1: rank-0 accumulator only (got rank {})",
+            out_ty.rank
+        );
         let acc_name = self.fresh("fold_acc");
         let iter_name = self.fresh("fold_i");
         let acc_elem = out_ty.element;
 
-        let init_expr  = self.require_concrete(init,  "Fold init")[0].clone();
+        let init_expr = self.require_concrete(init, "Fold init")[0].clone();
         let count_expr = self.require_concrete(count, "Fold count")[0].clone();
 
         // resolve the body lambda's FnDef.name for the FreeCall.
@@ -707,9 +786,9 @@ impl Scalarizer {
 
         // top-level: LetMut + For containing one Assign.
         self.body.push(ScalarStmt::LetMut {
-            name:    acc_name.clone(),
+            name: acc_name.clone(),
             element: acc_elem,
-            init:    init_expr,
+            init: init_expr,
         });
         let loop_bound = match count_expr {
             ScalarExpr::Const(ConstValue::I32(n)) => DimExpr::Literal(n as usize),
@@ -719,13 +798,14 @@ impl Scalarizer {
             // emit-layer extension. for V1 we require literal counts.
             other => panic!(
                 "lower_fold V1: count must be a literal integer Const; got {:?}",
-                other),
+                other
+            ),
         };
         self.body.push(ScalarStmt::For {
-            iter:  iter_name,
+            iter: iter_name,
             bound: loop_bound,
-            body:  vec![ScalarStmt::Assign {
-                name:  acc_name.clone(),
+            body: vec![ScalarStmt::Assign {
+                name: acc_name.clone(),
                 value: step_expr,
             }],
         });
@@ -754,13 +834,13 @@ impl Scalarizer {
     /// observable value through that name.
     fn lower_scope(
         &mut self,
-        scope_id:    NodeId,
-        body:        &[NodeId],
-        result:      NodeId,
-        result_ty:   &TensorTy,
+        scope_id: NodeId,
+        body: &[NodeId],
+        result: NodeId,
+        result_ty: &TensorTy,
         scope_owner: &HashMap<NodeId, NodeId>,
-        in_degrees:  &HashMap<NodeId, u32>,
-        graph:       &Graph,
+        in_degrees: &HashMap<NodeId, u32>,
+        graph: &Graph,
     ) {
         // capture the position where the scope's inner Lets will begin.
         let mark = self.body.len();
@@ -781,14 +861,23 @@ impl Scalarizer {
                 continue;
             }
             let bnode = graph.node(bid);
-            let bty   = graph.ty(bid).clone();
+            let bty = graph.ty(bid).clone();
             // dispatch nested Op::Scope BEFORE lower_node — lower_node
             // panics on Op::Scope (the unreachable arm; scopes go through
             // this specialized path).
-            if let Op::Scope { body: inner_body, result: inner_result } = &bnode.op {
+            if let Op::Scope {
+                body: inner_body,
+                result: inner_result,
+            } = &bnode.op
+            {
                 self.lower_scope(
-                    bid, inner_body, *inner_result, &bty,
-                    scope_owner, in_degrees, graph,
+                    bid,
+                    inner_body,
+                    *inner_result,
+                    &bty,
+                    scope_owner,
+                    in_degrees,
+                    graph,
                 );
                 continue;
             }
@@ -798,20 +887,19 @@ impl Scalarizer {
         }
         // resolve the result's expression NOW — bindings are populated and
         // we want this expression to be evaluated AS THE SCOPE'S TAIL VALUE
-        // (i.e. inside the brace block, after all the inner Lets, before the
+        // (i.e., inside the brace block, after all the inner Lets, before the
         // closing brace).
-        let result_expr =
-            self.require_concrete(result, "Op::Scope result")[0].clone();
+        let result_expr = self.require_concrete(result, "Op::Scope result")[0].clone();
         // peel off the inner body's Lets — these are the scope-local temps.
         let scope_body = self.body.split_off(mark);
         // mint a fresh outer name for the scope's observable value.
         let scope_name = self.fresh("__scope");
         // emit the ScalarStmt::Scope into the OUTER body.
         self.body.push(ScalarStmt::Scope {
-            name:    scope_name.clone(),
+            name: scope_name.clone(),
             element: result_ty.element,
-            body:    scope_body,
-            result:  result_expr,
+            body: scope_body,
+            result: result_expr,
         });
         // bind the Op::Scope NodeId to the outer scope-name var, so any
         // downstream consumer that references the scope sees `Var(scope_name)`.
@@ -830,31 +918,46 @@ impl Scalarizer {
     #[allow(clippy::too_many_arguments)]
     fn lower_if_else(
         &mut self,
-        ifelse_id:    NodeId,
-        cond:         NodeId,
-        then_body:    &[NodeId],
+        ifelse_id: NodeId,
+        cond: NodeId,
+        then_body: &[NodeId],
         then_results: &[NodeId],
-        else_body:    &[NodeId],
+        else_body: &[NodeId],
         else_results: &[NodeId],
-        graph:        &Graph,
+        graph: &Graph,
         branch_owner: &HashMap<NodeId, (NodeId, bool)>,
-        in_degrees:   &HashMap<NodeId, u32>,
+        in_degrees: &HashMap<NodeId, u32>,
     ) {
         let cond_expr = self.require_concrete(cond, "Op::IfElse cond")[0].clone();
         // one declared slot per output component, typed from each result node.
-        let outs: Vec<(String, ElementTy)> = then_results.iter()
+        let outs: Vec<(String, ElementTy)> = then_results
+            .iter()
             .map(|&r| (self.fresh("__br"), graph.ty(r).element))
             .collect();
         let names: Vec<String> = outs.iter().map(|(n, _)| n.clone()).collect();
         let then_stmts = self.lower_branch_arm(
-            ifelse_id, true, then_body, then_results, &names, branch_owner, in_degrees, graph,
+            ifelse_id,
+            true,
+            then_body,
+            then_results,
+            &names,
+            branch_owner,
+            in_degrees,
+            graph,
         );
         let else_stmts = self.lower_branch_arm(
-            ifelse_id, false, else_body, else_results, &names, branch_owner, in_degrees, graph,
+            ifelse_id,
+            false,
+            else_body,
+            else_results,
+            &names,
+            branch_owner,
+            in_degrees,
+            graph,
         );
         self.body.push(ScalarStmt::IfElse {
-            outs:      outs,
-            cond:      cond_expr,
+            outs: outs,
+            cond: cond_expr,
             then_body: then_stmts,
             else_body: else_stmts,
         });
@@ -874,14 +977,14 @@ impl Scalarizer {
     #[allow(clippy::too_many_arguments)]
     fn lower_branch_arm(
         &mut self,
-        ifelse_id:    NodeId,
-        is_then:      bool,
-        body:         &[NodeId],
-        results:      &[NodeId],
-        names:        &[String],
+        ifelse_id: NodeId,
+        is_then: bool,
+        body: &[NodeId],
+        results: &[NodeId],
+        names: &[String],
         branch_owner: &HashMap<NodeId, (NodeId, bool)>,
-        in_degrees:   &HashMap<NodeId, u32>,
-        graph:        &Graph,
+        in_degrees: &HashMap<NodeId, u32>,
+        graph: &Graph,
     ) -> Vec<ScalarStmt> {
         let mark = self.body.len();
         for &bid in body {
@@ -892,12 +995,26 @@ impl Scalarizer {
                 continue;
             }
             let bnode = graph.node(bid);
-            let bty   = graph.ty(bid).clone();
+            let bty = graph.ty(bid).clone();
             // dispatch a nested IfElse recursively (lower_node panics on it).
-            if let Op::IfElse { cond, then_body, then_results, else_body, else_results } = &bnode.op {
+            if let Op::IfElse {
+                cond,
+                then_body,
+                then_results,
+                else_body,
+                else_results,
+            } = &bnode.op
+            {
                 self.lower_if_else(
-                    bid, *cond, then_body, then_results, else_body, else_results,
-                    graph, branch_owner, in_degrees,
+                    bid,
+                    *cond,
+                    then_body,
+                    then_results,
+                    else_body,
+                    else_results,
+                    graph,
+                    branch_owner,
+                    in_degrees,
                 );
                 continue;
             }
@@ -906,27 +1023,31 @@ impl Scalarizer {
             self.maybe_hoist_to_let(bid, in_degrees, &bty);
         }
         // capture result exprs BEFORE split_off (bindings still resolve here).
-        let result_exprs: Vec<ScalarExpr> = results.iter()
+        let result_exprs: Vec<ScalarExpr> = results
+            .iter()
             .map(|&r| self.require_concrete(r, "Op::IfElse arm result")[0].clone())
             .collect();
         let mut arm = self.body.split_off(mark);
         for (name, value) in names.iter().zip(result_exprs) {
-            arm.push(ScalarStmt::Assign { name: name.clone(), value });
+            arm.push(ScalarStmt::Assign {
+                name: name.clone(),
+                value,
+            });
         }
         arm
     }
 
     fn lower_iterate_inline(
         &mut self,
-        iter_id:    NodeId,
-        inits:      &[NodeId],
-        steps:      &[NodeId],
-        count:      usize,
-        result:     usize,
+        iter_id: NodeId,
+        inits: &[NodeId],
+        steps: &[NodeId],
+        count: usize,
+        result: usize,
         break_when: Option<NodeId>,
-        cone:       &[NodeId],
+        cone: &[NodeId],
         in_degrees: &HashMap<NodeId, u32>,
-        graph:      &Graph,
+        graph: &Graph,
     ) {
         let iter_name = self.fresh("iter_i");
         // the mutable accumulator locals (one per component), BEFORE the loop.
@@ -934,9 +1055,9 @@ impl Scalarizer {
         for (j, &init) in inits.iter().enumerate() {
             let init_expr = self.require_concrete(init, "IterateInline init")[0].clone();
             self.body.push(ScalarStmt::LetMut {
-                name:    acc_names[j].clone(),
+                name: acc_names[j].clone(),
                 element: ElementTy::F64,
-                init:    init_expr,
+                init: init_expr,
             });
         }
         // lower the union cone INSIDE the loop (split_off captures its lets);
@@ -956,19 +1077,21 @@ impl Scalarizer {
             .collect();
         // resolve the break predicate, if any. it's part of the cone (above) so
         // its `Let`s are already in `loop_body`; here we just read its binding.
-        let break_expr: Option<ScalarExpr> = break_when.map(|bw|
-            self.require_concrete(bw, "IterateInline break_when")[0].clone()
-        );
+        let break_expr: Option<ScalarExpr> =
+            break_when.map(|bw| self.require_concrete(bw, "IterateInline break_when")[0].clone());
         self.iter_acc = None;
         let n = step_exprs.len();
         // temp names for the SIMULTANEOUS (Jacobi) update (N>1 only).
-        let tmp_names: Vec<String> =
-            if n > 1 { (0..n).map(|_| self.fresh("iter_next")).collect() } else { Vec::new() };
+        let tmp_names: Vec<String> = if n > 1 {
+            (0..n).map(|_| self.fresh("iter_next")).collect()
+        } else {
+            Vec::new()
+        };
         let mut loop_body = self.body.split_off(mark);
         if n == 1 {
             // scalar: one accumulator, no aliasing — assign directly.
             loop_body.push(ScalarStmt::Assign {
-                name:  acc_names[0].clone(),
+                name: acc_names[0].clone(),
                 value: step_exprs.into_iter().next().unwrap(),
             });
         } else {
@@ -985,7 +1108,7 @@ impl Scalarizer {
             }
             for j in 0..acc_names.len() {
                 loop_body.push(ScalarStmt::Assign {
-                    name:  acc_names[j].clone(),
+                    name: acc_names[j].clone(),
                     value: ScalarExpr::Var(tmp_names[j].clone()),
                 });
             }
@@ -998,14 +1121,14 @@ impl Scalarizer {
         // the dead work this break eliminates.
         if let Some(be) = break_expr {
             loop_body.push(ScalarStmt::If {
-                cond:     be,
+                cond: be,
                 then_body: vec![ScalarStmt::Break],
             });
         }
         self.body.push(ScalarStmt::For {
-            iter:  iter_name,
+            iter: iter_name,
             bound: DimExpr::Literal(count),
-            body:  loop_body,
+            body: loop_body,
         });
         self.bindings.insert(
             iter_id,
@@ -1033,11 +1156,7 @@ impl Scalarizer {
             MorphismKind::Diff { .. } => {
                 let a0 = self.require_concrete(args[0], "Diff arg 0")[0].clone();
                 let a1 = self.require_concrete(args[1], "Diff arg 1")[0].clone();
-                ScalarExpr::BinOp(
-                    BinaryKind::Sub,
-                    Box::new(a1),
-                    Box::new(a0),
-                )
+                ScalarExpr::BinOp(BinaryKind::Sub, Box::new(a1), Box::new(a0))
             }
             // FaceAvg(f, axis) = 0.5 * (f[coord] + f[+ax]) = 0.5 * (a0 + a1)
             MorphismKind::FaceAvg { .. } => {
@@ -1052,13 +1171,12 @@ impl Scalarizer {
                         Box::new(a1),
                     )),
                 )
-            }
-            // F5.4-retire: `MorphismKind::Curl` and `::CtEdgeEmf` were
-            // RMHD-specific. their stencil-building moved to the macro
-            // dispatcher (`symbi-macros::ir_builder::dispatch_curl_morphism`
-            // and `dispatch_ct_edge_emf_morphism`), where the curl is
-            // emitted inline as `ElementWise` nodes and the CT-EMF as a
-            // straight `OpaqueCall` tree. nothing for lower.rs to do.
+            } // F5.4-retire: `MorphismKind::Curl` and `::CtEdgeEmf` were
+              // RMHD-specific. their stencil-building moved to the macro
+              // dispatcher (`symbi-macros::ir_builder::dispatch_curl_morphism`
+              // and `dispatch_ct_edge_emf_morphism`), where the curl is
+              // emitted inline as `ElementWise` nodes and the CT-EMF as a
+              // straight `OpaqueCall` tree. nothing for lower.rs to do.
         };
         vec![body]
     }
@@ -1066,7 +1184,8 @@ impl Scalarizer {
     fn lower_opaque_call(&mut self, name: &Symbol, args: &[NodeId]) -> Vec<ScalarExpr> {
         // each arg is rank-0 by construction (Apply's scalar-function contract).
         // pull its single scalar binding and emit a FreeCall.
-        let arg_exprs: Vec<ScalarExpr> = args.iter()
+        let arg_exprs: Vec<ScalarExpr> = args
+            .iter()
             .map(|a| self.require_concrete(*a, "Apply arg")[0].clone())
             .collect();
         vec![ScalarExpr::FreeCall {
@@ -1079,11 +1198,12 @@ impl Scalarizer {
         // each component is rank-0 (enforced at graph.rs::load_at). pull
         // its single scalar binding and assemble a FieldLoadAt that the
         // emit_kernel rewrite pass will turn into `buf<idx>[<flat>]`.
-        let comp_exprs: Vec<ScalarExpr> = components.iter()
+        let comp_exprs: Vec<ScalarExpr> = components
+            .iter()
             .map(|c| self.require_concrete(*c, "LoadAt component")[0].clone())
             .collect();
         vec![ScalarExpr::FieldLoadAt {
-            field_key:  field_key.as_str().to_string(),
+            field_key: field_key.as_str().to_string(),
             components: comp_exprs,
         }]
     }
@@ -1114,7 +1234,9 @@ impl Scalarizer {
             let mut input_exprs: Vec<ScalarExpr> = Vec::with_capacity(arity);
             for (k, in_shape) in in_shapes.iter().enumerate() {
                 let flat = flat_index_with_broadcast(in_shape, &out_dims, out_idx);
-                input_exprs.push(self.require_concrete(inputs[k], "ElementWise/Transcendental")[flat].clone());
+                input_exprs.push(
+                    self.require_concrete(inputs[k], "ElementWise/Transcendental")[flat].clone(),
+                );
             }
             out.push(scalar_element_wise(op, input_exprs));
         }
@@ -1142,7 +1264,9 @@ impl Scalarizer {
             let mut input_exprs: Vec<ScalarExpr> = Vec::with_capacity(arity);
             for (k, in_shape) in in_shapes.iter().enumerate() {
                 let flat = flat_index_with_broadcast(in_shape, &out_dims, out_idx);
-                input_exprs.push(self.require_concrete(inputs[k], "ElementWise/Transcendental")[flat].clone());
+                input_exprs.push(
+                    self.require_concrete(inputs[k], "ElementWise/Transcendental")[flat].clone(),
+                );
             }
             out.push(scalar_transcendental(op, input_exprs));
         }
@@ -1260,8 +1384,8 @@ impl Scalarizer {
             let t = self.require_concrete(then_id, "Select")[tf].clone();
             let e = self.require_concrete(else_id, "Select")[ef].clone();
             out.push(ScalarExpr::Select {
-                cond:  Box::new(c),
-                then:  Box::new(t),
+                cond: Box::new(c),
+                then: Box::new(t),
                 else_: Box::new(e),
             });
         }
@@ -1279,7 +1403,11 @@ impl Scalarizer {
         // routes through the loop-form lowering (R.5.a V1: rank-0 output
         // and rank-1 generic inputs only).
         let any_generic = inputs.iter().any(|id| {
-            graph.ty(*id).shape.iter().any(|d| matches!(d, DimExpr::Generic(_)))
+            graph
+                .ty(*id)
+                .shape
+                .iter()
+                .any(|d| matches!(d, DimExpr::Generic(_)))
         });
         if any_generic {
             return self.lower_einsum_loop(spec, inputs, out_ty, graph);
@@ -1401,7 +1529,7 @@ impl Scalarizer {
                 .unwrap_or_else(|| {
                     // no contracted axes — output is just the product of inputs
                     // at the kept-index position. unreachable in practice: even
-                    // the no-contraction case (e.g. "i,j->ij") produces a single
+                    // the no-contraction case (e.g., "i,j->ij") produces a single
                     // c_idx = [], so products has exactly one entry.
                     panic!("einsum: empty product set — internal bug")
                 });
@@ -1436,7 +1564,8 @@ impl Scalarizer {
                 s.len() <= 1,
                 "scalarization R.5.a: const-generic einsum currently supports rank-1 inputs \
                  only (input {} has rank {}); rank-2+ generic needs follow-up phases",
-                i, s.len()
+                i,
+                s.len()
             );
         }
 
@@ -1464,9 +1593,9 @@ impl Scalarizer {
         // emit one accumulator: `let mut __acc_N: f64 = 0.0;`
         let acc_name = self.fresh("acc");
         self.body.push(ScalarStmt::LetMut {
-            name:    acc_name.clone(),
+            name: acc_name.clone(),
             element: out_ty.element,
-            init:    ScalarExpr::Const(zero_const(out_ty.element)),
+            init: ScalarExpr::Const(zero_const(out_ty.element)),
         });
 
         // emit nested For loops, one per contracted label.
@@ -1486,15 +1615,15 @@ impl Scalarizer {
             .reduce(|a, b| ScalarExpr::BinOp(BinaryKind::Mul, Box::new(a), Box::new(b)))
             .expect("einsum has at least one input");
         let body_stmt = ScalarStmt::CompoundAssign {
-            name:  acc_name.clone(),
-            op:    BinaryKind::Add,
+            name: acc_name.clone(),
+            op: BinaryKind::Add,
             value: prod,
         };
 
         self.body.push(ScalarStmt::For {
-            iter:  iter_name,
+            iter: iter_name,
             bound: dim,
-            body:  vec![body_stmt],
+            body: vec![body_stmt],
         });
 
         // result: a single scalar referring to the accumulator.
@@ -1525,9 +1654,14 @@ impl Scalarizer {
             let name = if idx.is_empty() {
                 base.clone()
             } else {
-                format!("{}{}", base, idx.iter().map(|i| format!("_{}", i)).collect::<String>())
+                format!(
+                    "{}{}",
+                    base,
+                    idx.iter().map(|i| format!("_{}", i)).collect::<String>()
+                )
             };
-            self.params.push(LoweredParam::scalar(name.clone(), ty.element));
+            self.params
+                .push(LoweredParam::scalar(name.clone(), ty.element));
             out.push(ScalarExpr::Var(name));
         }
         Binding::Concrete(out)
@@ -1587,8 +1721,8 @@ pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
 /// multi-component outputs panic with a clear message.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct KernelScalarized {
-    pub params:  Vec<LoweredParam>,
-    pub body:    Vec<ScalarStmt>,
+    pub params: Vec<LoweredParam>,
+    pub body: Vec<ScalarStmt>,
     pub outputs: Vec<ScalarExpr>,
 }
 
@@ -1641,8 +1775,16 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     // are claimed first). `branch_body` records each arm's set for eviction.
     let mut branch_owner: HashMap<NodeId, (NodeId, bool)> = HashMap::new();
     for (id, node, _) in graph.iter() {
-        if !reachable.contains(&id) { continue; }
-        if let Op::IterateInline { accs, steps, break_when, .. } = &node.op {
+        if !reachable.contains(&id) {
+            continue;
+        }
+        if let Op::IterateInline {
+            accs,
+            steps,
+            break_when,
+            ..
+        } = &node.op
+        {
             let cone = iterate_cone(graph, accs, steps, *break_when);
             for &c in &cone {
                 skip.insert(c);
@@ -1658,16 +1800,27 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
                 scope_owner.entry(b).or_insert(id);
             }
         }
-        if let Op::IfElse { then_body, else_body, .. } = &node.op {
-            for &b in then_body { branch_owner.entry(b).or_insert((id, true)); }
-            for &b in else_body { branch_owner.entry(b).or_insert((id, false)); }
+        if let Op::IfElse {
+            then_body,
+            else_body,
+            ..
+        } = &node.op
+        {
+            for &b in then_body {
+                branch_owner.entry(b).or_insert((id, true));
+            }
+            for &b in else_body {
+                branch_owner.entry(b).or_insert((id, false));
+            }
         }
     }
     // build the reverse `users` map for shared-claim eviction below. only
     // reachable nodes contribute; an unreachable user couldn't share anything.
     let mut users: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     for (id, node, _) in graph.iter() {
-        if !reachable.contains(&id) { continue; }
+        if !reachable.contains(&id) {
+            continue;
+        }
         for input in node.op.inputs() {
             users.entry(input).or_default().push(id);
         }
@@ -1708,8 +1861,12 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
         for &u in user_list {
             // the Op::Scope node references its result NodeId via its
             // structural `result` field — allowed ONLY for the result.
-            if u == owner_scope && is_result { continue; }
-            if body_set.contains(&u) { continue; }
+            if u == owner_scope && is_result {
+                continue;
+            }
+            if body_set.contains(&u) {
+                continue;
+            }
             // user is OUTSIDE the scope's body — shared. evict so main pass
             // lowers X at the outer level (the scope body still names the
             // outer's let in its `Var(...)` references). this handles BOTH
@@ -1753,12 +1910,22 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
             let (ifelse_id, is_then) = branch_owner[&x];
             // nested IfElse node: structural, lowered via recursive dispatch —
             // never evicted (mirrors the nested-Op::Scope rule).
-            if matches!(graph.node(x).op, Op::IfElse { .. }) { continue; }
-            let Some(user_list) = users.get(&x) else { continue; };
+            if matches!(graph.node(x).op, Op::IfElse { .. }) {
+                continue;
+            }
+            let Some(user_list) = users.get(&x) else {
+                continue;
+            };
             let escapes = user_list.iter().any(|&u| {
-                if u == ifelse_id { return false; }                                 // owning container
-                if branch_owner.get(&u) == Some(&(ifelse_id, is_then)) { return false; } // same arm, still
-                if is_structural_container_use(graph, u, x) { return false; }        // outer structural listing
+                if u == ifelse_id {
+                    return false;
+                } // owning container
+                if branch_owner.get(&u) == Some(&(ifelse_id, is_then)) {
+                    return false;
+                } // same arm, still
+                if is_structural_container_use(graph, u, x) {
+                    return false;
+                } // outer structural listing
                 true
             });
             if escapes {
@@ -1786,10 +1953,25 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
         if skip.contains(&id) {
             continue; // a loop cone OR scope body node — lowered inside its container
         }
-        if let Op::IterateInline { inits, steps, count, result, break_when, .. } = &node.op {
+        if let Op::IterateInline {
+            inits,
+            steps,
+            count,
+            result,
+            break_when,
+            ..
+        } = &node.op
+        {
             sc.lower_iterate_inline(
-                id, inits, steps, *count, *result as usize, *break_when,
-                &iter_cones[&id], &in_degrees, graph,
+                id,
+                inits,
+                steps,
+                *count,
+                *result as usize,
+                *break_when,
+                &iter_cones[&id],
+                &in_degrees,
+                graph,
             );
             continue;
         }
@@ -1797,23 +1979,39 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
             sc.lower_scope(id, body, *result, ty, &scope_owner, &in_degrees, graph);
             continue;
         }
-        if let Op::IfElse { cond, then_body, then_results, else_body, else_results } = &node.op {
+        if let Op::IfElse {
+            cond,
+            then_body,
+            then_results,
+            else_body,
+            else_results,
+        } = &node.op
+        {
             sc.lower_if_else(
-                id, *cond, then_body, then_results, else_body, else_results,
-                graph, &branch_owner, &in_degrees,
+                id,
+                *cond,
+                then_body,
+                then_results,
+                else_body,
+                else_results,
+                graph,
+                &branch_owner,
+                &in_degrees,
             );
             continue;
         }
         sc.lower_node(id, &node.op, ty, graph);
         sc.maybe_hoist_to_let(id, &in_degrees, ty);
     }
-    let lowered_outputs: Vec<ScalarExpr> = outputs.iter().map(|out| {
-        match sc.bindings.get(out) {
+    let lowered_outputs: Vec<ScalarExpr> = outputs
+        .iter()
+        .map(|out| match sc.bindings.get(out) {
             Some(Binding::Concrete(v)) if v.len() == 1 => v[0].clone(),
             Some(Binding::Concrete(v)) => panic!(
                 "scalarize_kernel: output node {:?} has {} scalar components; \
                  kernel writes must be rank-0 scalars",
-                out, v.len()
+                out,
+                v.len()
             ),
             Some(Binding::Array { .. }) => panic!(
                 "scalarize_kernel: output node {:?} produced an Array binding; \
@@ -1821,11 +2019,11 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
                 out
             ),
             None => panic!("scalarize_kernel: output node {:?} not lowered", out),
-        }
-    }).collect();
+        })
+        .collect();
     let mut k = KernelScalarized {
-        params:  sc.params,
-        body:    sc.body,
+        params: sc.params,
+        body: sc.body,
         outputs: lowered_outputs,
     };
     // F1.B.10: CSE pass. see comment in `scalarize`.
@@ -1839,7 +2037,9 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
 // "which fields of this variant are NodeIds" lives in `Op::try_map_inputs`
 // (single source of truth, Phase 3). callers now invoke `node.op.inputs()`
 // directly; this stub is kept only as a documentation anchor.
-fn op_inputs(op: &Op) -> Vec<NodeId> { op.inputs() }
+fn op_inputs(op: &Op) -> Vec<NodeId> {
+    op.inputs()
+}
 
 /// transitive backward reachability from a set of output nodes. used by
 /// `scalarize_kernel` to skip lowering of dead nodes — arithmetic that
@@ -1852,7 +2052,9 @@ fn reachable_from_outputs(graph: &Graph, outputs: &[NodeId]) -> HashSet<NodeId> 
     let mut reachable = HashSet::new();
     let mut stack: Vec<NodeId> = outputs.to_vec();
     while let Some(id) = stack.pop() {
-        if !reachable.insert(id) { continue; }
+        if !reachable.insert(id) {
+            continue;
+        }
         for input in graph.node(id).op.inputs() {
             stack.push(input);
         }
@@ -1865,21 +2067,30 @@ fn reachable_from_outputs(graph: &Graph, outputs: &[NodeId]) -> HashSet<NodeId> 
 /// `steps` whose `dep` flag is true, where `dep[n] = accs.contains(n) ||
 /// any(dep[input])`. returned in increasing-id (topological) order. loop-INVARIANT
 /// nodes (dep == false) stay in the main pass as kernel locals computed once.
-/// is `user`'s reference to `x` purely STRUCTURAL — i.e. `user` is a container
+/// is `user`'s reference to `x` purely STRUCTURAL — i.e., `user` is a container
 /// (IfElse / Scope) that lists `x` in its body for remap-safety/DCE but does
 /// NOT consume `x` as dataflow (cond / result)? such a reference must not count
 /// as a "use outside the arm" in the branch-eviction pass, otherwise nested
 /// cond arms (whose body ranges overlap their outer containers) get flattened.
 fn is_structural_container_use(graph: &Graph, user: NodeId, x: NodeId) -> bool {
     match &graph.node(user).op {
-        Op::IfElse { cond, then_results, else_results, .. } =>
-            *cond != x && !then_results.contains(&x) && !else_results.contains(&x),
+        Op::IfElse {
+            cond,
+            then_results,
+            else_results,
+            ..
+        } => *cond != x && !then_results.contains(&x) && !else_results.contains(&x),
         Op::Scope { result, .. } => *result != x,
         _ => false,
     }
 }
 
-fn iterate_cone(graph: &Graph, accs: &[NodeId], steps: &[NodeId], break_when: Option<NodeId>) -> Vec<NodeId> {
+fn iterate_cone(
+    graph: &Graph,
+    accs: &[NodeId],
+    steps: &[NodeId],
+    break_when: Option<NodeId>,
+) -> Vec<NodeId> {
     // union backward-reachable set from all `steps` (transitive inputs). also
     // seed from `break_when` so its acc-dependent expression is part of the
     // cone (lowered INSIDE the for-loop, not hoisted as a loop invariant —
@@ -1905,7 +2116,9 @@ fn iterate_cone(graph: &Graph, accs: &[NodeId], steps: &[NodeId], break_when: Op
             continue;
         }
         let d = accs.contains(&id)
-            || op_inputs(&node.op).iter().any(|i| *dep.get(i).unwrap_or(&false));
+            || op_inputs(&node.op)
+                .iter()
+                .any(|i| *dep.get(i).unwrap_or(&false));
         dep.insert(id, d);
         if d {
             cone.push(id);
@@ -1943,12 +2156,11 @@ fn flat_index(shape: &[usize], idx: &[usize]) -> usize {
 /// index, compute the flat index into the input's row-major bindings.
 /// follows numpy-style broadcasting: right-align input against output,
 /// and gather index 0 for any axis where the input dim is 1 or absent.
-fn flat_index_with_broadcast(
-    in_shape: &[usize],
-    out_shape: &[usize],
-    out_idx: &[usize],
-) -> usize {
-    debug_assert!(in_shape.len() <= out_shape.len(), "input rank exceeds output");
+fn flat_index_with_broadcast(in_shape: &[usize], out_shape: &[usize], out_idx: &[usize]) -> usize {
+    debug_assert!(
+        in_shape.len() <= out_shape.len(),
+        "input rank exceeds output"
+    );
     debug_assert_eq!(out_shape.len(), out_idx.len(), "out_idx rank mismatch");
     let offset = out_shape.len() - in_shape.len();
     let mut in_idx = Vec::with_capacity(in_shape.len());
@@ -1974,19 +2186,19 @@ fn scalar_element_wise(op: ElementWiseOp, mut inputs: Vec<ScalarExpr>) -> Scalar
         ElementWiseOp::Sub => binop_box(BinaryKind::Sub, &mut inputs),
         ElementWiseOp::Mul => binop_box(BinaryKind::Mul, &mut inputs),
         ElementWiseOp::Div => binop_box(BinaryKind::Div, &mut inputs),
-        ElementWiseOp::Eq  => binop_box(BinaryKind::Eq, &mut inputs),
-        ElementWiseOp::Ne  => binop_box(BinaryKind::Ne, &mut inputs),
-        ElementWiseOp::Lt  => binop_box(BinaryKind::Lt, &mut inputs),
-        ElementWiseOp::Le  => binop_box(BinaryKind::Le, &mut inputs),
-        ElementWiseOp::Gt  => binop_box(BinaryKind::Gt, &mut inputs),
-        ElementWiseOp::Ge  => binop_box(BinaryKind::Ge, &mut inputs),
+        ElementWiseOp::Eq => binop_box(BinaryKind::Eq, &mut inputs),
+        ElementWiseOp::Ne => binop_box(BinaryKind::Ne, &mut inputs),
+        ElementWiseOp::Lt => binop_box(BinaryKind::Lt, &mut inputs),
+        ElementWiseOp::Le => binop_box(BinaryKind::Le, &mut inputs),
+        ElementWiseOp::Gt => binop_box(BinaryKind::Gt, &mut inputs),
+        ElementWiseOp::Ge => binop_box(BinaryKind::Ge, &mut inputs),
         // operator-based binary (bitwise / logical on Bool)
         ElementWiseOp::BitAnd => binop_box(BinaryKind::BitAnd, &mut inputs),
-        ElementWiseOp::BitOr  => binop_box(BinaryKind::BitOr,  &mut inputs),
+        ElementWiseOp::BitOr => binop_box(BinaryKind::BitOr, &mut inputs),
         ElementWiseOp::BitXor => binop_box(BinaryKind::BitXor, &mut inputs),
         ElementWiseOp::BitNot => ScalarExpr::UnaryOp(UnaryKind::Not, Box::new(inputs.remove(0))),
         // method-based binary. min/max stay as method calls — every backend
-        // renders them as the C++ `my_min`/`my_max` ternary (`a<b?a:b` / `a>b?a:b`):
+        // renders them as the `a<b?a:b` / `a>b?a:b` ternary:
         // the cuda special-case arm, the interp/jit ternary, and the f64/f32
         // `Numeric` carrier. so CPU and GPU agree at NaN/signed-zero (tier-1 #2b)
         // WITHOUT lowering to a scoped `if`-select — that inlines nested min/max
@@ -2008,19 +2220,22 @@ fn scalar_element_wise(op: ElementWiseOp, mut inputs: Vec<ScalarExpr>) -> Scalar
         ElementWiseOp::Round => method_unary("round", &mut inputs),
         ElementWiseOp::Trunc => method_unary("trunc", &mut inputs),
         ElementWiseOp::IsFinite => method_unary("is_finite", &mut inputs),
-        ElementWiseOp::IsNaN    => method_unary("is_nan", &mut inputs),
+        ElementWiseOp::IsNaN => method_unary("is_nan", &mut inputs),
         // transcendental unary (interp + CUDA emit already know these names)
-        ElementWiseOp::Sin   => method_unary("sin", &mut inputs),
-        ElementWiseOp::Cos   => method_unary("cos", &mut inputs),
-        ElementWiseOp::Acos  => method_unary("acos", &mut inputs),
-        ElementWiseOp::Sinh  => method_unary("sinh", &mut inputs),
-        ElementWiseOp::Cosh  => method_unary("cosh", &mut inputs),
+        ElementWiseOp::Sin => method_unary("sin", &mut inputs),
+        ElementWiseOp::Cos => method_unary("cos", &mut inputs),
+        ElementWiseOp::Acos => method_unary("acos", &mut inputs),
+        ElementWiseOp::Sinh => method_unary("sinh", &mut inputs),
+        ElementWiseOp::Cosh => method_unary("cosh", &mut inputs),
         ElementWiseOp::Asinh => method_unary("asinh", &mut inputs),
         ElementWiseOp::Acosh => method_unary("acosh", &mut inputs),
         // transcendental binary: Rust .powf(b) / CUDA pow(a,b).
-        ElementWiseOp::Pow   => method_binary("powf", &mut inputs),
+        ElementWiseOp::Pow => method_binary("powf", &mut inputs),
         // numeric conversion (inserted by the graph's type promotion).
-        ElementWiseOp::Cast(to) => ScalarExpr::Cast { to, value: Box::new(pop(&mut inputs)) },
+        ElementWiseOp::Cast(to) => ScalarExpr::Cast {
+            to,
+            value: Box::new(pop(&mut inputs)),
+        },
     }
 }
 
@@ -2048,7 +2263,7 @@ fn const_zero_or_one(e: &ScalarExpr) -> Option<f64> {
 
 /// arithmetic-identity peephole on the scalar IR. eliminates the dead ops
 /// emitted by substrate constructions that contract against unit vectors
-/// (e.g. `v · ehat` for `ehat = (1, 0, 0)` lowers to `v0*1 + v1*0 + v2*0`).
+/// (e.g., `v · ehat` for `ehat = (1, 0, 0)` lowers to `v0*1 + v1*0 + v2*0`).
 ///
 /// SAFE set (the ONLY identities folded here):
 ///   `x + 0 -> x`,  `0 + x -> x`
@@ -2090,20 +2305,20 @@ fn method_unary(name: &'static str, inputs: &mut Vec<ScalarExpr>) -> ScalarExpr 
     let recv = inputs.remove(0);
     ScalarExpr::MethodCall {
         receiver: Box::new(recv),
-        method:   name.to_string(),
-        args:     vec![],
+        method: name.to_string(),
+        args: vec![],
     }
 }
 
 /// per-input context for einsum scalarization: positions of the
 /// left/right named-label spans + whether the input had an ellipsis.
 struct EinCtx<'a> {
-    left:           &'a [Atom],
-    right:          &'a [Atom],
-    has_ellipsis:   bool,
+    left: &'a [Atom],
+    right: &'a [Atom],
+    has_ellipsis: bool,
     /// for inputs with an ellipsis, the count of axes the ellipsis covers:
     /// `in_rank - left.len() - right.len()`. zero when no ellipsis.
-    ellipsis_rank:  usize,
+    ellipsis_rank: usize,
 }
 
 impl<'a> EinCtx<'a> {
@@ -2120,7 +2335,12 @@ impl<'a> EinCtx<'a> {
                 let left = &atoms[..idx];
                 let right = &atoms[idx + 1..];
                 let ellipsis_rank = in_rank.saturating_sub(left.len() + right.len());
-                EinCtx { left, right, has_ellipsis: true, ellipsis_rank }
+                EinCtx {
+                    left,
+                    right,
+                    has_ellipsis: true,
+                    ellipsis_rank,
+                }
             }
         }
     }
@@ -2128,15 +2348,23 @@ impl<'a> EinCtx<'a> {
     /// iterate `(label, input_axis_index)` for every named label across
     /// this input's left + right spans, in input-axis order.
     fn named_axes(&self) -> impl Iterator<Item = (char, usize)> + '_ {
-        let left_iter = self.left.iter().enumerate().filter_map(|(axis, atom)| match atom {
-            Atom::Label(c) => Some((*c, axis)),
-            _ => None,
-        });
+        let left_iter = self
+            .left
+            .iter()
+            .enumerate()
+            .filter_map(|(axis, atom)| match atom {
+                Atom::Label(c) => Some((*c, axis)),
+                _ => None,
+            });
         let right_start = self.left.len() + self.ellipsis_rank;
-        let right_iter = self.right.iter().enumerate().filter_map(move |(axis, atom)| match atom {
-            Atom::Label(c) => Some((*c, right_start + axis)),
-            _ => None,
-        });
+        let right_iter = self
+            .right
+            .iter()
+            .enumerate()
+            .filter_map(move |(axis, atom)| match atom {
+                Atom::Label(c) => Some((*c, right_start + axis)),
+                _ => None,
+            });
         left_iter.chain(right_iter)
     }
 }
@@ -2218,15 +2446,15 @@ fn fold_reduce(op: ReduceOp, vals: Vec<ScalarExpr>) -> ScalarExpr {
     it.fold(first, |acc, x| match op {
         ReduceOp::Min => ScalarExpr::MethodCall {
             receiver: Box::new(acc),
-            method:   "min".to_string(),
-            args:     vec![x],
+            method: "min".to_string(),
+            args: vec![x],
         },
         ReduceOp::Max => ScalarExpr::MethodCall {
             receiver: Box::new(acc),
-            method:   "max".to_string(),
-            args:     vec![x],
+            method: "max".to_string(),
+            args: vec![x],
         },
-        ReduceOp::Or  => ScalarExpr::BinOp(BinaryKind::BitOr,  Box::new(acc), Box::new(x)),
+        ReduceOp::Or => ScalarExpr::BinOp(BinaryKind::BitOr, Box::new(acc), Box::new(x)),
         ReduceOp::And => ScalarExpr::BinOp(BinaryKind::BitAnd, Box::new(acc), Box::new(x)),
         ReduceOp::Xor => ScalarExpr::BinOp(BinaryKind::BitXor, Box::new(acc), Box::new(x)),
     })
@@ -2234,11 +2462,11 @@ fn fold_reduce(op: ReduceOp, vals: Vec<ScalarExpr>) -> ScalarExpr {
 
 fn method_binary(name: &'static str, inputs: &mut Vec<ScalarExpr>) -> ScalarExpr {
     let recv = inputs.remove(0);
-    let arg  = inputs.remove(0);
+    let arg = inputs.remove(0);
     ScalarExpr::MethodCall {
         receiver: Box::new(recv),
-        method:   name.to_string(),
-        args:     vec![arg],
+        method: name.to_string(),
+        args: vec![arg],
     }
 }
 
@@ -2246,26 +2474,26 @@ fn method_binary(name: &'static str, inputs: &mut Vec<ScalarExpr>) -> ScalarExpr
 /// calls in Rust source (`x.sin()`, `y.atan2(x)`, etc.).
 fn scalar_transcendental(op: TranscendentalOp, mut inputs: Vec<ScalarExpr>) -> ScalarExpr {
     match op {
-        TranscendentalOp::Sin    => method_unary("sin",    &mut inputs),
-        TranscendentalOp::Cos    => method_unary("cos",    &mut inputs),
-        TranscendentalOp::Tan    => method_unary("tan",    &mut inputs),
-        TranscendentalOp::Asin   => method_unary("asin",   &mut inputs),
-        TranscendentalOp::Acos   => method_unary("acos",   &mut inputs),
-        TranscendentalOp::Atan   => method_unary("atan",   &mut inputs),
-        TranscendentalOp::Atan2  => method_binary("atan2", &mut inputs),
-        TranscendentalOp::Exp    => method_unary("exp",    &mut inputs),
-        TranscendentalOp::Exp2   => method_unary("exp2",   &mut inputs),
-        TranscendentalOp::Log    => method_unary("ln",     &mut inputs),
-        TranscendentalOp::Log2   => method_unary("log2",   &mut inputs),
-        TranscendentalOp::Log10  => method_unary("log10",  &mut inputs),
-        TranscendentalOp::Sinh   => method_unary("sinh",   &mut inputs),
-        TranscendentalOp::Cosh   => method_unary("cosh",   &mut inputs),
-        TranscendentalOp::Tanh   => method_unary("tanh",   &mut inputs),
-        TranscendentalOp::Asinh  => method_unary("asinh",  &mut inputs),
-        TranscendentalOp::Acosh  => method_unary("acosh",  &mut inputs),
-        TranscendentalOp::Atanh  => method_unary("atanh",  &mut inputs),
-        TranscendentalOp::Pow    => method_binary("powf",  &mut inputs),
-        TranscendentalOp::Hypot  => method_binary("hypot", &mut inputs),
+        TranscendentalOp::Sin => method_unary("sin", &mut inputs),
+        TranscendentalOp::Cos => method_unary("cos", &mut inputs),
+        TranscendentalOp::Tan => method_unary("tan", &mut inputs),
+        TranscendentalOp::Asin => method_unary("asin", &mut inputs),
+        TranscendentalOp::Acos => method_unary("acos", &mut inputs),
+        TranscendentalOp::Atan => method_unary("atan", &mut inputs),
+        TranscendentalOp::Atan2 => method_binary("atan2", &mut inputs),
+        TranscendentalOp::Exp => method_unary("exp", &mut inputs),
+        TranscendentalOp::Exp2 => method_unary("exp2", &mut inputs),
+        TranscendentalOp::Log => method_unary("ln", &mut inputs),
+        TranscendentalOp::Log2 => method_unary("log2", &mut inputs),
+        TranscendentalOp::Log10 => method_unary("log10", &mut inputs),
+        TranscendentalOp::Sinh => method_unary("sinh", &mut inputs),
+        TranscendentalOp::Cosh => method_unary("cosh", &mut inputs),
+        TranscendentalOp::Tanh => method_unary("tanh", &mut inputs),
+        TranscendentalOp::Asinh => method_unary("asinh", &mut inputs),
+        TranscendentalOp::Acosh => method_unary("acosh", &mut inputs),
+        TranscendentalOp::Atanh => method_unary("atanh", &mut inputs),
+        TranscendentalOp::Pow => method_binary("powf", &mut inputs),
+        TranscendentalOp::Hypot => method_binary("hypot", &mut inputs),
     }
 }
 
@@ -2300,7 +2528,9 @@ mod tests {
     use super::*;
     use crate::{TensorTy, VarianceTag};
 
-    fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
+    fn lit(n: usize) -> DimExpr {
+        DimExpr::Literal(n)
+    }
 
     // ---- F2.F: Op::Fold lowering ----
 
@@ -2311,29 +2541,29 @@ mod tests {
         //   LetMut __fold_acc_N = <init>
         //   For __fold_i_N in 0..count { Assign __fold_acc_N = body(...) }
         //   results: [Var(__fold_acc_N)]
-        use crate::graph::FnDef;
         use crate::Symbol;
+        use crate::graph::FnDef;
 
         let mut body = Graph::new();
         let bacc = body.add_scalar_param("acc", ElementTy::F64);
-        let _bi  = body.add_scalar_param("i",   ElementTy::I32);
-        let one  = body.add_const(ConstValue::F64(1.0), None);
+        let _bi = body.add_scalar_param("i", ElementTy::I32);
+        let one = body.add_const(ConstValue::F64(1.0), None);
         let bout = body.element_wise(ElementWiseOp::Add, vec![bacc, one], None);
         let fn_def = FnDef {
-            name:   Symbol::intern("inc"),
+            name: Symbol::intern("inc"),
             params: vec![
                 (Symbol::intern("acc"), TensorTy::scalar(ElementTy::F64)),
-                (Symbol::intern("i"),   TensorTy::scalar(ElementTy::I32)),
+                (Symbol::intern("i"), TensorTy::scalar(ElementTy::I32)),
             ],
             body,
             output: bout,
         };
 
         let mut g = Graph::new();
-        let l    = g.add_lambda(fn_def, None);
+        let l = g.add_lambda(fn_def, None);
         let init = g.add_const(ConstValue::F64(0.0), None);
-        let n    = g.add_const(ConstValue::I32(60), None);
-        let r    = g.fold(l, init, n, None);
+        let n = g.add_const(ConstValue::I32(60), None);
+        let r = g.fold(l, init, n, None);
 
         let f = scalarize(&g, r, "fold_test");
 
@@ -2359,8 +2589,12 @@ mod tests {
                 _ => {}
             }
         }
-        assert!(saw_letmut,        "expected LetMut for accumulator: {:?}", f.body);
-        assert!(saw_for_with_assign, "expected For containing Assign: {:?}", f.body);
+        assert!(saw_letmut, "expected LetMut for accumulator: {:?}", f.body);
+        assert!(
+            saw_for_with_assign,
+            "expected For containing Assign: {:?}",
+            f.body
+        );
 
         // result should be Var(__fold_acc_<N>).
         match &f.results[0] {
@@ -2377,27 +2611,37 @@ mod tests {
         // loop-INVARIANT (must stay outside the loop); the acc-dependent step
         // (a/acc, acc+.., 0.5*..) goes INSIDE — emitted ONCE, not unrolled.
         let mut g = Graph::new();
-        let a    = g.add_scalar_param("a", ElementTy::F64);
-        let acc  = g.iter_acc(0, None);
+        let a = g.add_scalar_param("a", ElementTy::F64);
+        let acc = g.iter_acc(0, None);
         let half = g.add_const(ConstValue::F64(0.5), None);
-        let aoa  = g.element_wise(ElementWiseOp::Div, vec![a, acc], None);    // a/acc
-        let sum  = g.element_wise(ElementWiseOp::Add, vec![acc, aoa], None);  // acc + a/acc
+        let aoa = g.element_wise(ElementWiseOp::Div, vec![a, acc], None); // a/acc
+        let sum = g.element_wise(ElementWiseOp::Add, vec![acc, aoa], None); // acc + a/acc
         let step = g.element_wise(ElementWiseOp::Mul, vec![half, sum], None); // 0.5*(...)
         let init = g.add_const(ConstValue::F64(1.0), None);
-        let it   = g.iterate_inline_scalar(acc, init, step, 8, None, None);
+        let it = g.iterate_inline_scalar(acc, init, step, 8, None, None);
         assert!(!g.has_errors(), "graph errors: {:?}", g.errors());
 
         let k = scalarize_kernel(&g, &[it]);
 
         // exactly ONE loop (the body emitted once, not 8x unrolled).
-        let fors: Vec<&ScalarStmt> =
-            k.body.iter().filter(|s| matches!(s, ScalarStmt::For { .. })).collect();
+        let fors: Vec<&ScalarStmt> = k
+            .body
+            .iter()
+            .filter(|s| matches!(s, ScalarStmt::For { .. }))
+            .collect();
         assert_eq!(fors.len(), 1, "expected exactly one loop: {:?}", k.body);
 
         // a LetMut accumulator precedes the loop.
-        let acc_name = match k.body.iter().find(|s| matches!(s, ScalarStmt::LetMut { .. })) {
+        let acc_name = match k
+            .body
+            .iter()
+            .find(|s| matches!(s, ScalarStmt::LetMut { .. }))
+        {
             Some(ScalarStmt::LetMut { name, .. }) => name.clone(),
-            _ => panic!("expected a LetMut accumulator before the loop: {:?}", k.body),
+            _ => panic!(
+                "expected a LetMut accumulator before the loop: {:?}",
+                k.body
+            ),
         };
 
         // the loop runs `count` times and ends with `acc = step`.
@@ -2405,14 +2649,17 @@ mod tests {
             assert_eq!(*bound, DimExpr::Literal(8));
             assert!(
                 matches!(body.last(), Some(ScalarStmt::Assign { name, .. }) if *name == acc_name),
-                "loop body must end with `acc = step`: {:?}", body,
+                "loop body must end with `acc = step`: {:?}",
+                body,
             );
             // the acc-dependent step IS inside the loop (a Div for a/acc).
             assert!(
-                body.iter().any(|s| matches!(s, ScalarStmt::Assign { value, .. }
+                body.iter()
+                    .any(|s| matches!(s, ScalarStmt::Assign { value, .. }
                     if expr_mentions_div(value))
-                    || matches!(s, ScalarStmt::Let { value, .. } if expr_mentions_div(value))),
-                "the acc-dependent step must be inside the loop: {:?}", body,
+                        || matches!(s, ScalarStmt::Let { value, .. } if expr_mentions_div(value))),
+                "the acc-dependent step must be inside the loop: {:?}",
+                body,
             );
         }
 
@@ -2442,37 +2689,73 @@ mod tests {
         let one = g.add_const(ConstValue::F64(1.0), None);
         // step: next_a = b ; next_b = a + b.
         let step1 = g.element_wise(ElementWiseOp::Add, vec![a0, a1], None);
-        let it = g.iterate_inline(vec![a0, a1], vec![one, one], vec![a1, step1], 5, 1, None, None);
+        let it = g.iterate_inline(
+            vec![a0, a1],
+            vec![one, one],
+            vec![a1, step1],
+            5,
+            1,
+            None,
+            None,
+        );
         assert!(!g.has_errors(), "graph errors: {:?}", g.errors());
 
         let k = scalarize_kernel(&g, &[it]);
 
         // two accumulator LetMuts before the loop.
-        let accs: Vec<String> = k.body.iter().filter_map(|s| match s {
-            ScalarStmt::LetMut { name, .. } => Some(name.clone()),
-            _ => None,
-        }).collect();
-        assert_eq!(accs.len(), 2, "expected 2 accumulator LetMuts: {:?}", k.body);
+        let accs: Vec<String> = k
+            .body
+            .iter()
+            .filter_map(|s| match s {
+                ScalarStmt::LetMut { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            accs.len(),
+            2,
+            "expected 2 accumulator LetMuts: {:?}",
+            k.body
+        );
 
         // the loop ends with the two assigns BOTH last (simultaneous), each reading
         // the OLD accumulator locals.
-        let for_body = k.body.iter().find_map(|s| match s {
-            ScalarStmt::For { body, .. } => Some(body.clone()),
-            _ => None,
-        }).expect("a For loop");
-        let assigns: Vec<&ScalarStmt> =
-            for_body.iter().filter(|s| matches!(s, ScalarStmt::Assign { .. })).collect();
-        assert_eq!(assigns.len(), 2, "expected 2 simultaneous assigns: {:?}", for_body);
+        let for_body = k
+            .body
+            .iter()
+            .find_map(|s| match s {
+                ScalarStmt::For { body, .. } => Some(body.clone()),
+                _ => None,
+            })
+            .expect("a For loop");
+        let assigns: Vec<&ScalarStmt> = for_body
+            .iter()
+            .filter(|s| matches!(s, ScalarStmt::Assign { .. }))
+            .collect();
+        assert_eq!(
+            assigns.len(),
+            2,
+            "expected 2 simultaneous assigns: {:?}",
+            for_body
+        );
         // they must be the LAST two statements (nothing reads a partially-updated acc).
         assert!(
             matches!(for_body[for_body.len() - 2], ScalarStmt::Assign { .. })
                 && matches!(for_body[for_body.len() - 1], ScalarStmt::Assign { .. }),
-            "the N assigns must be the final statements (simultaneous update): {:?}", for_body,
+            "the N assigns must be the final statements (simultaneous update): {:?}",
+            for_body,
         );
         // next_a = b: an Assign whose value is a bare Var (the other accumulator).
         assert!(
-            assigns.iter().any(|s| matches!(s, ScalarStmt::Assign { value: ScalarExpr::Var(_), .. })),
-            "next_a should be `= b` (a bare accumulator Var): {:?}", assigns,
+            assigns.iter().any(|s| matches!(
+                s,
+                ScalarStmt::Assign {
+                    value: ScalarExpr::Var(_),
+                    ..
+                }
+            )),
+            "next_a should be `= b` (a bare accumulator Var): {:?}",
+            assigns,
         );
         // result is the second component (b).
         assert!(matches!(&k.outputs[0], ScalarExpr::Var(n) if *n == accs[1]));
@@ -2496,10 +2779,17 @@ mod tests {
     #[test]
     fn row_major_rank_2_increments_inner_first() {
         let r = iter_row_major(&[2, 3]);
-        assert_eq!(r, vec![
-            vec![0, 0], vec![0, 1], vec![0, 2],
-            vec![1, 0], vec![1, 1], vec![1, 2],
-        ]);
+        assert_eq!(
+            r,
+            vec![
+                vec![0, 0],
+                vec![0, 1],
+                vec![0, 2],
+                vec![1, 0],
+                vec![1, 1],
+                vec![1, 2],
+            ]
+        );
     }
 
     #[test]
@@ -2523,7 +2813,10 @@ mod tests {
         assert_eq!(l.params.len(), 0);
         assert_eq!(l.body.len(), 0);
         assert_eq!(l.results.len(), 1);
-        assert!(matches!(l.results[0], ScalarExpr::Const(ConstValue::F64(_))));
+        assert!(matches!(
+            l.results[0],
+            ScalarExpr::Const(ConstValue::F64(_))
+        ));
         assert_eq!(l.result_element, ElementTy::F64);
         assert!(l.result_shape.is_empty());
     }
@@ -2584,7 +2877,10 @@ mod tests {
         let l = scalarize(&g, m, "f");
         assert_eq!(l.params.len(), 6);
         let names: Vec<&str> = l.params.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["M_0_0", "M_0_1", "M_0_2", "M_1_0", "M_1_1", "M_1_2"]);
+        assert_eq!(
+            names,
+            vec!["M_0_0", "M_0_1", "M_0_2", "M_1_0", "M_1_1", "M_1_2"]
+        );
     }
 
     #[test]
@@ -2629,7 +2925,7 @@ mod tests {
     #[should_panic(expected = "does not yet support const-generic dim")]
     fn rank_2_generic_panics_in_scalarization() {
         // V1 R.5.a only supports rank-1 generic params. rank-2 generic
-        // (e.g. matrix with generic dims) still panics.
+        // (e.g., matrix with generic dims) still panics.
         let mut g = Graph::new();
         let m = g.add_param(
             Symbol::intern("M"),
@@ -2667,10 +2963,20 @@ mod tests {
         assert!(matches!(&f.params[1].array_len, Some(DimExpr::Generic(_))));
         // body should contain a LetMut accumulator, a For loop, and the
         // loop body should contain a CompoundAssign.
-        assert!(f.body.iter().any(|s| matches!(s, ScalarStmt::LetMut { .. })));
+        assert!(
+            f.body
+                .iter()
+                .any(|s| matches!(s, ScalarStmt::LetMut { .. }))
+        );
         assert!(f.body.iter().any(|s| matches!(s, ScalarStmt::For { .. })));
         if let ScalarStmt::For { body, .. } = &f.body[1] {
-            assert!(body.iter().any(|s| matches!(s, ScalarStmt::CompoundAssign { op: BinaryKind::Add, .. })));
+            assert!(body.iter().any(|s| matches!(
+                s,
+                ScalarStmt::CompoundAssign {
+                    op: BinaryKind::Add,
+                    ..
+                }
+            )));
         } else {
             panic!("expected For at body[1]");
         }
@@ -2735,8 +3041,18 @@ mod tests {
             if let ScalarExpr::BinOp(BinaryKind::Add, lhs, rhs) = e {
                 let v_i = format!("v_{}", i);
                 let w_i = format!("w_{}", i);
-                assert!(matches!(&**lhs, ScalarExpr::Var(n) if *n == v_i), "lhs[{}]: {:?}", i, lhs);
-                assert!(matches!(&**rhs, ScalarExpr::Var(n) if *n == w_i), "rhs[{}]: {:?}", i, rhs);
+                assert!(
+                    matches!(&**lhs, ScalarExpr::Var(n) if *n == v_i),
+                    "lhs[{}]: {:?}",
+                    i,
+                    lhs
+                );
+                assert!(
+                    matches!(&**rhs, ScalarExpr::Var(n) if *n == w_i),
+                    "rhs[{}]: {:?}",
+                    i,
+                    rhs
+                );
             } else {
                 panic!("expected BinOp at {}, got {:?}", i, e);
             }
@@ -2823,7 +3139,12 @@ mod tests {
         let v = g.add_scalar_param("v", ElementTy::F64);
         let a = g.element_wise(ElementWiseOp::Abs, vec![v], None);
         let l = scalarize(&g, a, "f");
-        if let ScalarExpr::MethodCall { receiver, method, args } = &l.results[0] {
+        if let ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } = &l.results[0]
+        {
             assert!(matches!(&**receiver, ScalarExpr::Var(n) if n == "v"));
             assert_eq!(*method, "abs");
             assert!(args.is_empty());
@@ -2839,7 +3160,12 @@ mod tests {
         let b = g.add_scalar_param("b", ElementTy::F64);
         let m = g.element_wise(ElementWiseOp::Min, vec![a, b], None);
         let l = scalarize(&g, m, "f");
-        if let ScalarExpr::MethodCall { receiver, method, args } = &l.results[0] {
+        if let ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } = &l.results[0]
+        {
             assert!(matches!(&**receiver, ScalarExpr::Var(n) if n == "a"));
             assert_eq!(*method, "min");
             assert_eq!(args.len(), 1);
@@ -2857,7 +3183,10 @@ mod tests {
         let lt = g.element_wise(ElementWiseOp::Lt, vec![a, b], None);
         let l = scalarize(&g, lt, "f");
         assert_eq!(l.result_element, ElementTy::Bool);
-        assert!(matches!(&l.results[0], ScalarExpr::BinOp(BinaryKind::Lt, _, _)));
+        assert!(matches!(
+            &l.results[0],
+            ScalarExpr::BinOp(BinaryKind::Lt, _, _)
+        ));
     }
 
     #[test]
@@ -2881,7 +3210,12 @@ mod tests {
         let v = g.add_scalar_param("v", ElementTy::F64);
         let s = g.transcendental(TranscendentalOp::Sin, vec![v], None);
         let l = scalarize(&g, s, "f");
-        if let ScalarExpr::MethodCall { method, receiver, args } = &l.results[0] {
+        if let ScalarExpr::MethodCall {
+            method,
+            receiver,
+            args,
+        } = &l.results[0]
+        {
             assert_eq!(*method, "sin");
             assert!(matches!(&**receiver, ScalarExpr::Var(n) if n == "v"));
             assert!(args.is_empty());
@@ -2912,7 +3246,12 @@ mod tests {
         let e = g.add_scalar_param("e", ElementTy::F64);
         let r = g.transcendental(TranscendentalOp::Pow, vec![b, e], None);
         let l = scalarize(&g, r, "f");
-        if let ScalarExpr::MethodCall { receiver, method, args } = &l.results[0] {
+        if let ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } = &l.results[0]
+        {
             assert!(matches!(&**receiver, ScalarExpr::Var(n) if n == "b"));
             assert_eq!(*method, "powf");
             assert_eq!(args.len(), 1);
@@ -2949,7 +3288,10 @@ mod tests {
         let l = scalarize(&g, s, "f");
         assert_eq!(l.results.len(), 3);
         for (i, e) in l.results.iter().enumerate() {
-            if let ScalarExpr::MethodCall { receiver, method, .. } = e {
+            if let ScalarExpr::MethodCall {
+                receiver, method, ..
+            } = e
+            {
                 assert_eq!(*method, "cos");
                 let v_i = format!("v_{}", i);
                 assert!(matches!(&**receiver, ScalarExpr::Var(n) if *n == v_i));
@@ -2984,7 +3326,10 @@ mod tests {
         let v = g.construct(vec![a, b, c], None);
         let l = scalarize(&g, v, "f");
         assert_eq!(l.results.len(), 3);
-        assert!(matches!(&l.results[0], ScalarExpr::Const(ConstValue::F64(_))));
+        assert!(matches!(
+            &l.results[0],
+            ScalarExpr::Const(ConstValue::F64(_))
+        ));
     }
 
     #[test]
@@ -3002,12 +3347,28 @@ mod tests {
         );
         let m = g.construct(vec![v1, v2], None);
         let l = scalarize(&g, m, "f");
-        assert_eq!(l.results.len(), 6);  // 2x3 matrix
+        assert_eq!(l.results.len(), 6); // 2x3 matrix
         // verify row-major layout: result[0..3] from a, result[3..6] from b
-        if let ScalarExpr::Var(n) = &l.results[0] { assert_eq!(n, "a_0"); } else { panic!() }
-        if let ScalarExpr::Var(n) = &l.results[2] { assert_eq!(n, "a_2"); } else { panic!() }
-        if let ScalarExpr::Var(n) = &l.results[3] { assert_eq!(n, "b_0"); } else { panic!() }
-        if let ScalarExpr::Var(n) = &l.results[5] { assert_eq!(n, "b_2"); } else { panic!() }
+        if let ScalarExpr::Var(n) = &l.results[0] {
+            assert_eq!(n, "a_0");
+        } else {
+            panic!()
+        }
+        if let ScalarExpr::Var(n) = &l.results[2] {
+            assert_eq!(n, "a_2");
+        } else {
+            panic!()
+        }
+        if let ScalarExpr::Var(n) = &l.results[3] {
+            assert_eq!(n, "b_0");
+        } else {
+            panic!()
+        }
+        if let ScalarExpr::Var(n) = &l.results[5] {
+            assert_eq!(n, "b_2");
+        } else {
+            panic!()
+        }
     }
 
     // ---- R.3.c: Index ----
@@ -3145,13 +3506,23 @@ mod tests {
         let l = scalarize(&g, r, "f");
         assert_eq!(l.results.len(), 1);
         // result is acc.max(v_2) where acc is v_0.max(v_1).
-        if let ScalarExpr::MethodCall { receiver, method, args } = &l.results[0] {
+        if let ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } = &l.results[0]
+        {
             assert_eq!(method, "max");
             assert_eq!(args.len(), 1);
             // arg is v_2
             assert!(matches!(&args[0], ScalarExpr::Var(n) if n == "v_2"));
             // receiver is v_0.max(v_1)
-            if let ScalarExpr::MethodCall { receiver: r2, method: m2, args: a2 } = &**receiver {
+            if let ScalarExpr::MethodCall {
+                receiver: r2,
+                method: m2,
+                args: a2,
+            } = &**receiver
+            {
                 assert_eq!(m2, "max");
                 assert!(matches!(&**r2, ScalarExpr::Var(n) if n == "v_0"));
                 assert!(matches!(&a2[0], ScalarExpr::Var(n) if n == "v_1"));
@@ -3179,7 +3550,12 @@ mod tests {
         // we verify by walking down the chain and collecting the args.
         let mut visited: Vec<String> = vec![];
         let mut cur = &l.results[2];
-        while let ScalarExpr::MethodCall { receiver, method, args } = cur {
+        while let ScalarExpr::MethodCall {
+            receiver,
+            method,
+            args,
+        } = cur
+        {
             assert_eq!(method, "min");
             if let ScalarExpr::Var(n) = &args[0] {
                 visited.push(n.clone());
@@ -3209,7 +3585,10 @@ mod tests {
         // count the depth of the chain — should be 6 method calls + 1 leaf var.
         let mut count = 0;
         let mut cur = &l.results[0];
-        while let ScalarExpr::MethodCall { receiver, method, .. } = cur {
+        while let ScalarExpr::MethodCall {
+            receiver, method, ..
+        } = cur
+        {
             assert_eq!(*method, "max");
             count += 1;
             cur = &**receiver;
@@ -3246,7 +3625,10 @@ mod tests {
         );
         let r = g.reduce(ReduceOp::And, vec![0], v, None);
         let l = scalarize(&g, r, "f");
-        assert!(matches!(&l.results[0], ScalarExpr::BinOp(BinaryKind::BitAnd, _, _)));
+        assert!(matches!(
+            &l.results[0],
+            ScalarExpr::BinOp(BinaryKind::BitAnd, _, _)
+        ));
     }
 
     #[test]
@@ -3259,7 +3641,10 @@ mod tests {
         );
         let r = g.reduce(ReduceOp::Xor, vec![0], v, None);
         let l = scalarize(&g, r, "f");
-        assert!(matches!(&l.results[0], ScalarExpr::BinOp(BinaryKind::BitXor, _, _)));
+        assert!(matches!(
+            &l.results[0],
+            ScalarExpr::BinOp(BinaryKind::BitXor, _, _)
+        ));
     }
 
     // ---- R.3.d: Select ----
@@ -3320,26 +3705,40 @@ mod tests {
         match e {
             ScalarExpr::Const(_) => {}
             ScalarExpr::Var(n) => out.push(n.clone()),
-            ScalarExpr::BinOp(_, a, b) => { collect_vars(a, out); collect_vars(b, out); }
+            ScalarExpr::BinOp(_, a, b) => {
+                collect_vars(a, out);
+                collect_vars(b, out);
+            }
             ScalarExpr::UnaryOp(_, a) => collect_vars(a, out),
             ScalarExpr::MethodCall { receiver, args, .. } => {
                 collect_vars(receiver, out);
-                for a in args { collect_vars(a, out); }
+                for a in args {
+                    collect_vars(a, out);
+                }
             }
             ScalarExpr::Select { cond, then, else_ } => {
-                collect_vars(cond, out); collect_vars(then, out); collect_vars(else_, out);
+                collect_vars(cond, out);
+                collect_vars(then, out);
+                collect_vars(else_, out);
             }
             ScalarExpr::IndexInto { container, index } => {
                 out.push(container.clone());
                 collect_vars(index, out);
             }
-            ScalarExpr::FieldLoadAt { field_key, components } => {
+            ScalarExpr::FieldLoadAt {
+                field_key,
+                components,
+            } => {
                 out.push(field_key.clone());
-                for c in components { collect_vars(c, out); }
+                for c in components {
+                    collect_vars(c, out);
+                }
             }
             ScalarExpr::FreeCall { name, args } => {
                 out.push(name.clone());
-                for a in args { collect_vars(a, out); }
+                for a in args {
+                    collect_vars(a, out);
+                }
             }
             ScalarExpr::Cast { value, .. } => collect_vars(value, out),
         }
@@ -3355,7 +3754,9 @@ mod tests {
             ScalarExpr::UnaryOp(_, a) => count_binop(a, kind),
             ScalarExpr::MethodCall { receiver, args, .. } => {
                 let mut c = count_binop(receiver, kind);
-                for a in args { c += count_binop(a, kind); }
+                for a in args {
+                    c += count_binop(a, kind);
+                }
                 c
             }
             ScalarExpr::Select { cond, then, else_ } => {
@@ -3469,12 +3870,13 @@ mod tests {
         collect_vars(&l.results[0], &mut vars);
         // expected order: (i=0, j=0), (i=0, j=1), (i=1, j=0), (i=1, j=1).
         // for each cell: M_i_j, a_i, b_j.
-        assert_eq!(vars, vec![
-            "M_0_0", "a_0", "b_0",
-            "M_0_1", "a_0", "b_1",
-            "M_1_0", "a_1", "b_0",
-            "M_1_1", "a_1", "b_1",
-        ]);
+        assert_eq!(
+            vars,
+            vec![
+                "M_0_0", "a_0", "b_0", "M_0_1", "a_0", "b_1", "M_1_0", "a_1", "b_0", "M_1_1",
+                "a_1", "b_1",
+            ]
+        );
     }
 
     #[test]
@@ -3553,10 +3955,16 @@ mod tests {
         // batch 0 should reference a_0_0, b_0_0, a_0_1, b_0_1, a_0_2, b_0_2.
         let mut vars0 = vec![];
         collect_vars(&l.results[0], &mut vars0);
-        assert_eq!(vars0, vec!["a_0_0", "b_0_0", "a_0_1", "b_0_1", "a_0_2", "b_0_2"]);
+        assert_eq!(
+            vars0,
+            vec!["a_0_0", "b_0_0", "a_0_1", "b_0_1", "a_0_2", "b_0_2"]
+        );
         // batch 1 uses the _1_ slice.
         let mut vars1 = vec![];
         collect_vars(&l.results[1], &mut vars1);
-        assert_eq!(vars1, vec!["a_1_0", "b_1_0", "a_1_1", "b_1_1", "a_1_2", "b_1_2"]);
+        assert_eq!(
+            vars1,
+            vec!["a_1_0", "b_1_0", "a_1_1", "b_1_1", "a_1_2", "b_1_2"]
+        );
     }
 }

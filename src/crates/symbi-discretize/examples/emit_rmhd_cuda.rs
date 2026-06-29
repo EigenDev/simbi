@@ -60,9 +60,9 @@ fn main() {
     let (rmhd_f3, rmhd_f3w) = rmhd_flux_gv(3, 0, 0);
     emit_gv(&out_dir, "rmhd_face_flux_3d_0", 3, rmhd_f3, rmhd_f3w);
 
-    // the constrained-transport curl — the gv staggered stencil (div(B)=0 preserved). the old
-    // combined 2d curl was split per in-plane direction (dir=0 -> B_x, dir=1 -> B_y, both from
-    // the corner E_z). emit both.
+    // the constrained-transport curl — the gv staggered stencil (div(B)=0 preserved). the 2d curl
+    // is split per in-plane direction (dir=0 -> B_x, dir=1 -> B_y, both from the corner E_z).
+    // emit both.
     for dir in 0..2 {
         let (ct_k, ct_w) = rmhd_ct_curl_2d_dir_gv(dir);
         emit_gv(&out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, ct_k, ct_w);

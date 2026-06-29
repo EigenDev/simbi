@@ -27,20 +27,21 @@ use pyo3::types::PyDict;
 use symbi::prelude::*;
 use symbi::sim::refinement::transfer::prolong_field;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
-use symbi_algebra::Tensor;
 use symbi::symbi_grid::Field;
+use symbi_algebra::Tensor;
+use symbi_display::{ScreenGuard, SignalGuard, Table};
+use symbi_geometry::MotionState;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
-use symbi_sim::state::CtMethod;
 use symbi_hydro::mhd_state::MhdPrimG;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::state::PrimG;
-use symbi_geometry::MotionState;
+use symbi_ib::{Body, BodyCollection, BodyKind};
 use symbi_io::Metadata;
 use symbi_sim::checkpoint::write_hierarchy_checkpoint;
-use symbi_display::{ScreenGuard, SignalGuard, Table};
-use symbi_ib::{Body, BodyCollection, BodyKind};
+use symbi_sim::state::SimStateGeneric;
+use symbi_sim::state::CtMethod;
 
 // =============================================================================
 // parsed configuration — a plain-rust mirror of the python exec_dict. the
@@ -48,66 +49,70 @@ use symbi_ib::{Body, BodyCollection, BodyKind};
 // =============================================================================
 
 struct Config {
-    name:                String,
-    regime:              String,
-    coord_system:        String,
-    cyl_plane:           CylPlane,
-    dims:                usize,
-    n_cells:             [usize; 3],
-    x_lo:                [f64; 3],
-    dx:                  [f64; 3],
-    boundaries:          Vec<BoundaryType>,
-    cfl:                 f64,
-    gamma:               f64,
-    cs:                  f64,
-    locally_isothermal:  bool,
-    refinement_enabled:  bool,
+    name: String,
+    regime: String,
+    coord_system: String,
+    cyl_plane: CylPlane,
+    dims: usize,
+    n_cells: [usize; 3],
+    x_lo: [f64; 3],
+    dx: [f64; 3],
+    boundaries: Vec<BoundaryType>,
+    cfl: f64,
+    gamma: f64,
+    cs: f64,
+    locally_isothermal: bool,
+    refinement_enabled: bool,
     // each region is a flat [lo_0, hi_0, lo_1, hi_1, ..] bound list (2 per axis).
-    refinement_regions:  Vec<Vec<f64>>,
+    refinement_regions: Vec<Vec<f64>>,
     // homologous / translating mesh motion (linear: a_ddot = 0). a0/adot are the
     // scale-factor callables evaluated at start_time (set in run_simulation).
-    mesh_motion:         bool,
-    is_homologous:       bool,
-    scale_a0:            f64,
-    scale_adot:          f64,
-    solver:              Solver,
-    solver_name:         String,
-    ct_method:           CtMethod,
+    mesh_motion: bool,
+    is_homologous: bool,
+    scale_a0: f64,
+    scale_adot: f64,
+    solver: Solver,
+    solver_name: String,
+    ct_method: CtMethod,
     reconstruction_name: String,
-    timestepping:        Timestepping,
-    plm_theta:           f64,
-    dlogt:               f64,
-    viscosity:           f64,
-    x1_spacing:          String,
-    start_time:          f64,
+    timestepping: Timestepping,
+    plm_theta: f64,
+    dlogt: f64,
+    viscosity: f64,
+    x1_spacing: String,
+    start_time: f64,
     // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
     // start_time, which is the physical/resume clock (= checkpoint time on restart). 0 = unset ->
     // fall back to start_time (the common case where they coincide).
     checkpoint_log_anchor: f64,
-    checkpoint_index:    u64,
-    t_final:             f64,
+    checkpoint_index: u64,
+    t_final: f64,
     checkpoint_interval: f64,
-    data_dir:            String,
+    data_dir: String,
     // natural time unit for checkpoint names + display: reported time is
     // `time / time_unit`, labeled `time_unit_label` ("t" = code units).
-    time_unit:           f64,
-    time_unit_label:     String,
+    time_unit: f64,
+    time_unit_label: String,
     // immersed bodies (gravity / accretion sinks) parsed from the config's
     // `immersed_bodies` list; empty for body-free runs. dimension-agnostic raw
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
-    bodies:              Vec<BodyParams>,
+    bodies: Vec<BodyParams>,
     // a single user source expression in the rust `SourceConfig` wire format
     // (json string), or None. lowered + attached on the hydro path.
-    source_json:         Option<String>,
+    source_json: Option<String>,
     // mesh-motion scale-factor law a(t)/a_dot(t) as the `serialize_motion` wire (json), or None.
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
-    motion_json:         Option<String>,
+    motion_json: Option<String>,
     // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
     // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path for now.
-    driven_exprs:        Vec<String>,
+    driven_exprs: Vec<String>,
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
+    // number of gpus to decompose the domain across, intra-node (docs/design/37, 38). 1 =
+    // single device (the only path wired today). >1 is validated here but the decomposed run
+    // loop (M4) is not yet wired, so it errors -- the runtime knob, not the build backend.
+    n_gpus: usize,
 }
 
 /// dimension-agnostic raw body parameters from the python `immersed_bodies`
@@ -115,14 +120,14 @@ struct Config {
 /// ACCRETION=2). accretion fields are only meaningful when the ACCRETION bit
 /// is set (a black-hole sink); otherwise the body is a fixed-potential mass.
 struct BodyParams {
-    capability:       u64,
-    mass:             f64,
-    radius:           f64,
-    position:         Vec<f64>,
-    velocity:         Vec<f64>,
-    softening:        f64,
+    capability: u64,
+    mass: f64,
+    radius: f64,
+    position: Vec<f64>,
+    velocity: Vec<f64>,
+    softening: f64,
     accretion_radius: f64,
-    sink_rate:        f64,
+    sink_rate: f64,
 }
 
 // =============================================================================
@@ -130,7 +135,7 @@ struct BodyParams {
 // =============================================================================
 
 /// read a python enum field as its lowercase `.value` string; falls back to the
-/// raw value when the object is already a plain string (e.g. `regime`).
+/// raw value when the object is already a plain string (e.g., `regime`).
 fn enum_str(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<String> {
     let obj = dict
         .get_item(key)?
@@ -173,7 +178,8 @@ fn enum_str_or(dict: &Bound<'_, PyDict>, key: &str, default: &str) -> String {
         Ok(v) => v.extract().ok(),
         Err(_) => obj.extract().ok(),
     };
-    s.map(|s| s.to_lowercase()).unwrap_or_else(|| default.to_string())
+    s.map(|s| s.to_lowercase())
+        .unwrap_or_else(|| default.to_string())
 }
 
 /// read a user source-expression field (already in the rust `SourceConfig` wire
@@ -270,6 +276,8 @@ fn solver_from_str(s: &str) -> PyResult<Solver> {
     match s {
         "hlle" => Ok(Solver::Hlle),
         "hllc" => Ok(Solver::Hllc),
+        // fleischmann (2020) low-mach / low-dissipation HLLC (newtonian only).
+        "hllc_lm" | "hllc-lm" => Ok(Solver::HllcLm),
         "hlld" => Ok(Solver::Hlld),
         other => Err(PyValueError::new_err(format!("unknown solver '{other}'"))),
     }
@@ -279,7 +287,9 @@ fn ct_method_from_str(s: &str) -> PyResult<CtMethod> {
     match s {
         "contact" => Ok(CtMethod::Contact),
         "uct" => Ok(CtMethod::Uct),
-        other => Err(PyValueError::new_err(format!("unknown ct_method '{other}' (contact | uct)"))),
+        other => Err(PyValueError::new_err(format!(
+            "unknown ct_method '{other}' (contact | uct)"
+        ))),
     }
 }
 
@@ -289,7 +299,9 @@ fn timestepping_from_str(s: &str) -> PyResult<Timestepping> {
         "euler" | "rk1" => Ok(Timestepping::Euler),
         "rk2" => Ok(Timestepping::Rk2),
         "rk3" => Ok(Timestepping::Rk3),
-        other => Err(PyValueError::new_err(format!("unknown timestepping '{other}'"))),
+        other => Err(PyValueError::new_err(format!(
+            "unknown timestepping '{other}'"
+        ))),
     }
 }
 
@@ -298,7 +310,9 @@ fn boundary_from_str(s: &str) -> PyResult<BoundaryType> {
         "periodic" => Ok(BoundaryType::Periodic),
         "outflow" => Ok(BoundaryType::Outflow),
         "reflecting" | "reflect" => Ok(BoundaryType::Reflect),
-        other => Err(PyValueError::new_err(format!("unsupported boundary '{other}'"))),
+        other => Err(PyValueError::new_err(format!(
+            "unsupported boundary '{other}'"
+        ))),
     }
 }
 
@@ -326,7 +340,11 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         if let Some(b) = dict.get_item(&key)? {
             let (lo, hi): (f64, f64) = b.extract()?;
             x_lo[ii] = lo;
-            dx[ii] = if n_cells[ii] > 0 { (hi - lo) / n_cells[ii] as f64 } else { 1.0 };
+            dx[ii] = if n_cells[ii] > 0 {
+                (hi - lo) / n_cells[ii] as f64
+            } else {
+                1.0
+            };
         }
     }
 
@@ -337,9 +355,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     // per-face boundary-expression field names, in face order (2*axis + side): a `dynamic`
     // (DRIVEN) face reads its prescribed ghost state from the matching field.
     const BX_FIELDS: [&str; 6] = [
-        "bx1_inner_expressions", "bx1_outer_expressions",
-        "bx2_inner_expressions", "bx2_outer_expressions",
-        "bx3_inner_expressions", "bx3_outer_expressions",
+        "bx1_inner_expressions",
+        "bx1_outer_expressions",
+        "bx2_inner_expressions",
+        "bx2_outer_expressions",
+        "bx3_inner_expressions",
+        "bx3_outer_expressions",
     ];
     let mut boundaries = Vec::new();
     // driven (DYNAMIC) boundary expressions in Driven-id order; id == registration order ==
@@ -353,7 +374,10 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         };
         match s.to_lowercase().as_str() {
             "dynamic" => {
-                let field = BX_FIELDS.get(face).copied().unwrap_or("bx1_inner_expressions");
+                let field = BX_FIELDS
+                    .get(face)
+                    .copied()
+                    .unwrap_or("bx1_inner_expressions");
                 let json = get_source_json(dict, field)?.ok_or_else(|| {
                     PyValueError::new_err(format!(
                         "boundary face {face} is DYNAMIC but '{field}' is empty; \
@@ -484,6 +508,13 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_else(|| "t".to_string()),
         bodies: parse_bodies(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
+        n_gpus: dict
+            .get_item("gpus")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<usize>().ok())
+            .unwrap_or(1)
+            .max(1),
         // user source expressions (force/cooling/relax/raw) -> the rust source
         // front door. `gravity_source_expressions` is the conventional force slot;
         // `hydro_source_expressions` is the generic self-describing source. one
@@ -507,12 +538,22 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
     };
     let mut out = Vec::with_capacity(list.len());
     for item in &list {
-        let Ok(b) = item.downcast::<PyDict>() else { continue };
+        let Ok(b) = item.downcast::<PyDict>() else {
+            continue;
+        };
         let f = |k: &str| -> f64 {
-            b.get_item(k).ok().flatten().and_then(|v| v.extract().ok()).unwrap_or(0.0)
+            b.get_item(k)
+                .ok()
+                .flatten()
+                .and_then(|v| v.extract().ok())
+                .unwrap_or(0.0)
         };
         let v = |k: &str| -> Vec<f64> {
-            b.get_item(k).ok().flatten().and_then(|x| x.extract().ok()).unwrap_or_default()
+            b.get_item(k)
+                .ok()
+                .flatten()
+                .and_then(|x| x.extract().ok())
+                .unwrap_or_default()
         };
         let capability: u64 = b
             .get_item("capability")
@@ -600,15 +641,15 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
 /// AMR startup. generic over the concrete monomorphized hierarchy the macro builds.
 fn run_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     hier: &mut Hierarchy<R, D, DOF, M, E, S, Mem, K>,
-    cfg:  &Config,
+    cfg: &Config,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    R:   Regime<f64, D>,
-    M:   Metric<f64, D> + Copy + Send + Sync,
-    E:   Eos<f64> + Send + Sync,
-    S:   ExecutionSpace,
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Send + Sync,
+    S: ExecutionSpace,
     Mem: MemorySpace + Sync,
-    K:   KernelSet<D, DOF, Mem, f64>,
+    K: KernelSet<D, DOF, Mem, f64>,
 {
     let data_dir = &cfg.data_dir;
     // the checkpoint cadence is in NATURAL units: `checkpoint_interval * time_unit`
@@ -626,10 +667,14 @@ where
     // cadence for a run spanning many decades in time (a relativistic wind from a
     // tiny inner radius out to a huge one). otherwise the cadence is LINEAR at
     // cp_interval. `cp_at(fired)` returns the (fired+1)-th scheduled checkpoint time.
-    // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g. the inner
+    // the log cadence is anchored at checkpoint_log_anchor (a fixed reference, e.g., the inner
     // light-crossing), NOT start_time — so the schedule is identical across a fresh run and a
     // restart whose clock resumes at the checkpoint time. unset (0) -> start_time (they coincide).
-    let cp_anchor = if cfg.checkpoint_log_anchor > 0.0 { cfg.checkpoint_log_anchor } else { cfg.start_time };
+    let cp_anchor = if cfg.checkpoint_log_anchor > 0.0 {
+        cfg.checkpoint_log_anchor
+    } else {
+        cfg.start_time
+    };
     let cp_log = cfg.dlogt > 0.0 && cp_anchor > 0.0;
     let cp_tstart = cp_anchor;
     let cp_dlogt = cfg.dlogt;
@@ -657,8 +702,7 @@ where
         // on the run's own last checkpoint. an overshoot extends the width gracefully (format! never
         // truncates: width is a MINIMUM, so 99 -> 100); only a raw `ls` sees a cosmetic seam there,
         // since every reader sorts numerically (metadata/time, viz extract_timestep).
-        let projected =
-            (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
+        let projected = (cfg.t_final / cp_tstart).log10() / cp_dlogt + cfg.checkpoint_index as f64;
         ((projected.max(1.0) + 1.0).log10().ceil() as usize).max(1)
     } else {
         0
@@ -669,8 +713,10 @@ where
     // root level's clock; checkpoint writes post to the message board.
     let t_final = cfg.t_final;
     let setup = problem_setup_rows(cfg);
-    let setup_ref: Vec<[&str; 3]> =
-        setup.iter().map(|r| [r[0].as_str(), r[1].as_str(), r[2].as_str()]).collect();
+    let setup_ref: Vec<[&str; 3]> = setup
+        .iter()
+        .map(|r| [r[0].as_str(), r[1].as_str(), r[2].as_str()])
+        .collect();
     let title = if cfg.name.is_empty() {
         "SIMBI".to_string()
     } else {
@@ -683,10 +729,24 @@ where
         let _ = table.set_log_file(std::path::Path::new(&p));
     }
 
-    // zone-cycle throughput: the interior cell count per root step. wall-clock
-    // deltas across the row cadence give the instantaneous update rate; the run
-    // total gives the average. this is the number a user watches.
-    let n_zones: u64 = (0..cfg.dims).map(|ax| cfg.n_cells[ax] as u64).product();
+    // zone-cycle throughput: the ACTUAL interior cell-updates per ROOT step. for a refined run this
+    // is NOT just the base grid -- each level ll subcycles RATIO^ll times per root step over its own
+    // (finer, larger) interior, so the honest count is sum_ll (interior_cells_ll * RATIO^ll). a
+    // single-level run reduces to the base interior, unchanged. without this, AMR reports only the
+    // coarse zones while the wall-clock includes all the hidden fine work, so the rate reads ~RATIO^d
+    // too low. (RATIO = 2, the baked transfer ratio.)
+    let n_zones: u64 = {
+        let mut eff = 0u64;
+        let mut subcycle = 1u64; // RATIO^ll for level ll
+        for level in hier.levels.iter() {
+            let cells: u64 = (0..cfg.dims)
+                .map(|ax| level.state.geom.interior.spaces[ax].size() as u64)
+                .product();
+            eff += cells * subcycle;
+            subcycle *= 2;
+        }
+        eff
+    };
     let cp_width = checkpoint_time_width(cfg);
     // body diagnostics: a separate, user-defined cadence (natural units), only
     // when the run has bodies and a positive interval. one `<dir>diagnostics.dat`
@@ -718,9 +778,9 @@ where
     // with the prime the evolve driver runs at its own start.
     hier.prime();
 
-    // save the initial condition (t = 0) as the start-index checkpoint, matching
-    // the c++ driver: a fresh run (clock at zero, or index 0) writes its IC so the
-    // first output is the un-evolved state. then render the opening frame.
+    // save the initial condition (t = 0) as the start-index checkpoint: a fresh
+    // run (clock at zero, or index 0) writes its IC so the first output is the
+    // un-evolved state. then render the opening frame.
     {
         let (i0, t0, d0) = {
             let r = &hier.levels[0].state;
@@ -728,10 +788,18 @@ where
         };
         if t0 == 0.0 || cfg.checkpoint_index == 0 {
             let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
-            let ic = checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, t0, cfg.checkpoint_index));
-            match write_hierarchy_checkpoint(&states, &ic, &checkpoint_metadata(cfg, cfg.checkpoint_index)) {
+            let ic = checkpoint_name(
+                cfg,
+                &checkpoint_tag(cfg, cp_idx_width, cp_width, t0, cfg.checkpoint_index),
+            );
+            match write_hierarchy_checkpoint(
+                &states,
+                &ic,
+                &checkpoint_metadata(cfg, cfg.checkpoint_index),
+            ) {
                 Ok(_) => table.post_success(&format!(
-                    "checkpoint {ic}  ({}, initial condition)", fmt_time_msg(cfg, t0),
+                    "checkpoint {ic}  ({}, initial condition)",
+                    fmt_time_msg(cfg, t0),
                 )),
                 Err(e) => table.post_error(&format!("initial checkpoint failed: {e:?}")),
             }
@@ -739,7 +807,10 @@ where
         if let Some(dp) = &diag_path {
             if let Some(im) = hier.levels.last().and_then(|l| l.state.immersed.as_ref()) {
                 let _ = append_diagnostics(dp, t0, &im.bodies);
-                table.post_diagnostic(&format!("diagnostics {dp}  ({}, initial)", fmt_time_msg(cfg, t0)));
+                table.post_diagnostic(&format!(
+                    "diagnostics {dp}  ({}, initial)",
+                    fmt_time_msg(cfg, t0)
+                ));
             }
         }
         set_row(&mut table, i0, t0, d0, t_final, 0.0);
@@ -758,30 +829,39 @@ where
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let restart = checkpoint_name(cfg, "interrupted");
-            let _ = write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
+            let _ =
+                write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
             let _ = write_hierarchy_checkpoint(
-                &states, &format!("{data_dir}final.h5"), &checkpoint_metadata(cfg, cp_index),
+                &states,
+                &format!("{data_dir}final.h5"),
+                &checkpoint_metadata(cfg, cp_index),
             );
             table.post_warning(&format!(
                 "interrupted ({}) at {}, step {iter} — restart checkpoint {restart}",
-                guard.signal_name(), fmt_time_msg(cfg, time),
+                guard.signal_name(),
+                fmt_time_msg(cfg, time),
             ));
             return std::ops::ControlFlow::Break(());
         }
 
         // MESSAGE BOARD cadence: checkpoints fire on the time schedule. a single
-        // large dt can cross MULTIPLE interval boundaries (e.g. a cold-medium CFL
+        // large dt can cross MULTIPLE interval boundaries (e.g., a cold-medium CFL
         // step, or a coarse cadence); write EXACTLY ONE checkpoint for the current
         // state and advance next_cp past every boundary it crossed. the skipped
         // intermediate states were never computed, and the file name is keyed by
         // the current time — looping would just re-write the SAME file N times and
-        // spam the board with identical entries (the bug this replaces).
+        // spam the board with identical entries.
         let mut dirty = false;
         if time + 1e-12 >= next_cp && next_cp.is_finite() {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
-            let path = checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index));
+            let path = checkpoint_name(
+                cfg,
+                &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index),
+            );
             match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
-                Ok(_) => table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time))),
+                Ok(_) => {
+                    table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time)))
+                }
                 Err(e) => table.post_error(&format!("checkpoint {cp_index:04} failed: {e:?}")),
             }
             cp_index += 1;
@@ -818,8 +898,8 @@ where
 
         // BENCHMARK ROW cadence: update the live row every 100 root iterations,
         // faithfully and INDEPENDENT of the checkpoint cadence — the table need
-        // not move in lockstep with the message board (this mirrors the c++
-        // driver). the rate is measured over the elapsed 100-iteration window.
+        // not move in lockstep with the message board. the rate is measured over
+        // the elapsed 100-iteration window.
         if iter % 100 == 0 {
             let now = std::time::Instant::now();
             let elapsed = now.duration_since(last_inst).as_secs_f64();
@@ -849,7 +929,8 @@ where
         table.set_dynamic(false);
         let root = &hier.levels[0].state;
         table.post_warning(&format!(
-            "run halted at t = {:.4} after {} steps", root.time, root.iteration,
+            "run halted at t = {:.4} after {} steps",
+            root.time, root.iteration,
         ));
         table.refresh();
         return Ok(());
@@ -860,7 +941,11 @@ where
     write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))?;
     let root = &hier.levels[0].state;
     let wall = start.elapsed().as_secs_f64();
-    let avg = if wall > 1e-9 { n_zones as f64 * root.iteration as f64 / wall } else { 0.0 };
+    let avg = if wall > 1e-9 {
+        n_zones as f64 * root.iteration as f64 / wall
+    } else {
+        0.0
+    };
     // leave the alternate screen, then render ONE static final frame so the
     // completed dashboard persists on the primary buffer. post the summary
     // first so `draw_row`'s single refresh carries it.
@@ -868,7 +953,10 @@ where
     table.set_dynamic(false);
     table.post_success(&format!(
         "done — {} steps to t = {:.4} in {:.2}s (avg {} zone-cyc/s); final checkpoint {final_path}",
-        root.iteration, root.time, wall, humanize_rate(avg),
+        root.iteration,
+        root.time,
+        wall,
+        humanize_rate(avg),
     ));
     draw_row(&mut table, root.iteration, root.time, root.dt, t_final, avg);
     Ok(())
@@ -911,9 +999,9 @@ fn humanize_rate(r: f64) -> String {
 }
 
 /// the live-monitor "PROBLEM SETUP" sub-table rows (category, property, value).
-/// the single source of truth for run identification — it absorbs the parts of
-/// the old python rich summary a user actually watches: regime + eos, geometry
-/// + zone count, the numerical scheme, boundaries, and the resource estimate.
+/// the single source of truth for run identification — the parts of the run
+/// summary a user actually watches: regime + eos, geometry + zone count, the
+/// numerical scheme, boundaries, and the resource estimate.
 /// the slope-limiter name for the PLM reconstruction, keyed on `plm_theta` (mirrors `plm_theta_gv`):
 /// theta < 0 = van Leer; theta == 1 = minmod; theta == 2 = MC (monotonized central); otherwise the
 /// theta-MC family with the compression value shown.
@@ -940,7 +1028,11 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
     // cadence is stored in natural units; t_final in code units -> /time_unit).
     let unit = &cfg.time_unit_label;
     let custom_unit = unit != "t" && cfg.time_unit != 1.0;
-    let suffix = if custom_unit { format!(" {unit}") } else { String::new() };
+    let suffix = if custom_unit {
+        format!(" {unit}")
+    } else {
+        String::new()
+    };
     let cp = if cfg.checkpoint_interval > 0.0 {
         format!("{:.4}{suffix}", cfg.checkpoint_interval)
     } else {
@@ -951,29 +1043,59 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
         ["Regime".into(), "type".into(), cfg.regime.clone()],
         ["Regime".into(), "eos".into(), eos_label(cfg)],
         ["Geometry".into(), "coords".into(), cfg.coord_system.clone()],
-        ["Geometry".into(), "dimensions".into(), format!("{}D", cfg.dims)],
-        ["Geometry".into(), "resolution".into(), format!("{res}  ({n_zones} zones)")],
+        [
+            "Geometry".into(),
+            "dimensions".into(),
+            format!("{}D", cfg.dims),
+        ],
+        [
+            "Geometry".into(),
+            "resolution".into(),
+            format!("{res}  ({n_zones} zones)"),
+        ],
         ["Geometry".into(), "boundaries".into(), boundary_label(cfg)],
         ["Scheme".into(), "solver".into(), cfg.solver_name.clone()],
-        ["Scheme".into(), "reconstruction".into(), cfg.reconstruction_name.clone()],
-        ["Scheme".into(), "timestepping".into(), timestepping_label(cfg.timestepping)],
+        [
+            "Scheme".into(),
+            "reconstruction".into(),
+            cfg.reconstruction_name.clone(),
+        ],
+        [
+            "Scheme".into(),
+            "timestepping".into(),
+            timestepping_label(cfg.timestepping),
+        ],
         ["Scheme".into(), "cfl".into(), format!("{:.3}", cfg.cfl)],
         ["Run".into(), "t_final".into(), t_final_disp],
         ["Run".into(), "checkpoint dt".into(), cp],
-        ["Run".into(), "est. memory".into(), format!("{:.3} GB", est_memory_gb(cfg))],
+        [
+            "Run".into(),
+            "est. memory".into(),
+            format!("{:.3} GB", est_memory_gb(cfg)),
+        ],
         ["Run".into(), "output".into(), cfg.data_dir.clone()],
     ];
     // for PLM (2nd-order) runs, name the slope limiter (from plm_theta) under the reconstruction
     // row. pcm (1st order) has no limiter, so the row is omitted there.
     if cfg.reconstruction_name == "plm" {
         if let Some(i) = rows.iter().position(|r| r[1] == "reconstruction") {
-            rows.insert(i + 1, ["Scheme".into(), "limiter".into(), limiter_label(cfg.plm_theta)]);
+            rows.insert(
+                i + 1,
+                [
+                    "Scheme".into(),
+                    "limiter".into(),
+                    limiter_label(cfg.plm_theta),
+                ],
+            );
         }
     }
     // document the time unit only when it is not plain code units.
     if custom_unit {
-        rows.push(["Run".into(), "time unit".into(),
-            format!("1 {unit} = {:.4} code", cfg.time_unit)]);
+        rows.push([
+            "Run".into(),
+            "time unit".into(),
+            format!("1 {unit} = {:.4} code", cfg.time_unit),
+        ]);
     }
     rows
 }
@@ -991,7 +1113,7 @@ fn eos_label(cfg: &Config) -> String {
     }
 }
 
-/// per-axis boundary tags joined for display (e.g. "reflecting | outflow").
+/// per-axis boundary tags joined for display (e.g., "reflecting | outflow").
 fn boundary_label(cfg: &Config) -> String {
     if cfg.boundaries.is_empty() {
         "—".to_string()
@@ -1063,8 +1185,31 @@ fn refinement_regions_nd<const D: usize>(
     Ok(out)
 }
 
+/// clip each global refinement region to one tile's physical extent `[origin, origin + cells*dx]`,
+/// keeping only the regions that genuinely overlap (more than ~half a coarse cell on every axis, so
+/// region_to_domain rounds to >= 1 cell). a TILE-LOCAL patch survives in exactly one tile; a patch
+/// SPANNING a cut is split into the abutting tiles, each clipped to its own slab (the per-tile
+/// hierarchies then share the cut on the fine level, exchanged by `evolve_hierarchy_decomposed`).
+fn clip_regions_to_tile<const D: usize>(
+    regions: &[RefinementRegion<D>],
+    origin: [f64; D],
+    cells: [usize; D],
+    dx: [f64; D],
+) -> Vec<RefinementRegion<D>> {
+    let hi: [f64; D] = std::array::from_fn(|a| origin[a] + cells[a] as f64 * dx[a]);
+    let mut out = Vec::new();
+    for r in regions {
+        let lo: [f64; D] = std::array::from_fn(|a| r.x_lo[a].max(origin[a]));
+        let up: [f64; D] = std::array::from_fn(|a| r.x_hi[a].min(hi[a]));
+        if (0..D).all(|a| up[a] - lo[a] > 0.5 * dx[a]) {
+            out.push(RefinementRegion { x_lo: lo, x_hi: up });
+        }
+    }
+    out
+}
+
 /// the effective slope-limiter theta passed to the substrate. PLM uses the
-/// config `plm_theta` (default 1.5, theta-MC limiter); PCM — i.e. first-order /
+/// config `plm_theta` (default 1.5, theta-MC limiter); PCM — i.e., first-order /
 /// `order=1` — maps to theta = 0, which collapses minmod3 to a zero slope, so
 /// the reconstruction degenerates to piecewise-constant. the substrate has no
 /// separate PCM kernel; this IS how first-order space is selected.
@@ -1084,11 +1229,23 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
     const ACCRETION: u64 = 2;
     let mut coll = BodyCollection::new();
     for (idx, b) in params.iter().enumerate() {
-        let pos = Tensor::new(std::array::from_fn(|ax| b.position.get(ax).copied().unwrap_or(0.0)));
-        let vel = Tensor::new(std::array::from_fn(|ax| b.velocity.get(ax).copied().unwrap_or(0.0)));
+        let pos = Tensor::new(std::array::from_fn(|ax| {
+            b.position.get(ax).copied().unwrap_or(0.0)
+        }));
+        let vel = Tensor::new(std::array::from_fn(|ax| {
+            b.velocity.get(ax).copied().unwrap_or(0.0)
+        }));
         let body = if b.capability & ACCRETION != 0 {
             Body::black_hole(
-                idx, pos, vel, b.mass, b.radius, b.softening, b.sink_rate, 1.0, b.accretion_radius,
+                idx,
+                pos,
+                vel,
+                b.mass,
+                b.radius,
+                b.softening,
+                b.sink_rate,
+                1.0,
+                b.accretion_radius,
             )
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
@@ -1112,7 +1269,10 @@ fn append_diagnostics<const D: usize>(
 ) -> std::io::Result<()> {
     use std::io::Write;
     let fresh = !std::path::Path::new(path).exists();
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
     if fresh {
         writeln!(
             f,
@@ -1123,18 +1283,24 @@ fn append_diagnostics<const D: usize>(
     for bb in 0..bodies.len() {
         let b = bodies.get(bb);
         let (accreted, rate) = match b.kind {
-            BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
-                (total_accreted_mass, accretion_rate)
-            }
+            BodyKind::BlackHole {
+                total_accreted_mass,
+                accretion_rate,
+                ..
+            } => (total_accreted_mass, accretion_rate),
             _ => (0.0, 0.0),
         };
         writeln!(
             f,
             "{time:.8e} {bb} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {accreted:.8e} {rate:.8e}",
-            comp(&b.position, 0), comp(&b.position, 1),
-            comp(&b.velocity, 0), comp(&b.velocity, 1),
-            comp(&b.force, 0), comp(&b.force, 1),
-            b.torque[2], b.mass,
+            comp(&b.position, 0),
+            comp(&b.position, 1),
+            comp(&b.velocity, 0),
+            comp(&b.velocity, 1),
+            comp(&b.force, 0),
+            comp(&b.force, 1),
+            b.torque[2],
+            b.mass,
         )?;
     }
     Ok(())
@@ -1212,10 +1378,21 @@ macro_rules! build_and_run_hydro {
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
 
+        // gpus>1 -> the decomposed multi-gpu path (validated separately above by
+        // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
+        if cfg.n_gpus > 1 {
+            return build_and_run_hydro_decomposed!(
+                $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
+            );
+        }
+
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -1255,7 +1432,10 @@ macro_rules! build_and_run_hydro {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
         };
         let theta = build_theta(cfg);
-        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
         // attach a user source expression (force/cooling/relax/raw) when present.
         // lowered against THIS regime's spec via the source front door — the bridge
@@ -1264,21 +1444,578 @@ macro_rules! build_and_run_hydro {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <$regime_ty as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
         };
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
+            .substrate()
+            .theta(theta)
+            .with_solver(solver)
+            .expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
+    }};
+}
+
+/// the REGIME-AGNOSTIC decomposed run loop (docs/design/37 M4): evolve N pre-built tiles in
+/// lockstep with the UNIVERSAL `PeerCopy` transport (real peer where a link exists, staged over
+/// managed memory otherwise -- so the SAME code runs on one card with `--gpus 2` and on a node
+/// with `--gpus 8`, no machine-specific branch), gathering into `global` for output through the
+/// existing single-grid checkpoint writer. every regime's decomposed build feeds this one loop;
+/// adding a regime is just a tile-build, not a new loop. v1 cadence is linear `checkpoint_interval`.
+fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    cfg: &Config,
+    mut tiles: Vec<(SimStateGeneric<R, D, DOF, M, E, S, Mem>, K)>,
+    global: SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    counts: [usize; D],
+) -> Result<(), String>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    use symbi::sim::decomp::{
+        enable_peer_mesh, evolve_decomposed, gather_faces, gather_interiors,
+    };
+
+    let ntiles = tiles.len();
+    let devices: Vec<i32> = (0..ntiles as i32).collect();
+    // open peer links once (no-op for pairs that can't peer; those stage).
+    enable_peer_mesh(&devices);
+
+    // the UNIVERSAL transport: adaptive peer/staged. single-device builds compile the host arm
+    // but never reach this fn (gpus>1 needs a gpu feature; validate_gpu_request enforces it).
+    #[cfg(feature = "gpu")]
+    let transport = symbi::sim::decomp::PeerCopy;
+    #[cfg(not(feature = "gpu"))]
+    let transport = symbi::sim::decomp::LocalCopy;
+
+    let cp_dt = if cfg.checkpoint_interval > 0.0 {
+        cfg.checkpoint_interval * cfg.time_unit
+    } else {
+        f64::INFINITY
+    };
+    let cp_width = checkpoint_time_width(cfg);
+
+    // body diagnostics: a separate user-defined cadence (natural units), only when the run has
+    // bodies + a positive interval -- mirrors the single-grid run. the body state is identical on
+    // every tile (`step_bodies_decomposed` applies the cross-tile-summed feedback to all tiles), so
+    // any tile's bodies ARE the global diagnostic. one `<dir>diagnostics.dat` for the whole run.
+    let diag_path = if cfg.diagnostic_interval > 0.0 && !cfg.bodies.is_empty() {
+        Some(format!("{}diagnostics.dat", cfg.data_dir))
+    } else {
+        None
+    };
+    let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
+    let mut next_diag = diag_interval;
+
+    // t=start initial condition. a SHARED reborrow of the tiles for the gather (evolve_decomposed
+    // takes them by `&mut` below, so the gather views are scoped reborrows on either side).
+    if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+        let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+        gather_interiors(&global, &sh, counts);
+        gather_faces(&global, &sh, counts);
+        let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+        let _ = write_hierarchy_checkpoint(
+            &[&global],
+            &checkpoint_name(cfg, &tag),
+            &checkpoint_metadata(cfg, cfg.checkpoint_index),
+        );
+        if let Some(dp) = &diag_path {
+            if let Some(im) = sh[0].immersed.as_ref() {
+                let _ = append_diagnostics(dp, cfg.start_time, &im.bodies);
+            }
+        }
+    }
+
+    let mut next_cp = cfg.start_time + cp_dt;
+    let mut cp_index = cfg.checkpoint_index + 1;
+    {
+        // the decomposed loop owns the tiles by `&mut` (the per-step immersed-body bookkeeping
+        // mutates the bodies). build the `&mut` store handles + the `&` kernels from the SAME tiles
+        // (disjoint tuple fields). the checkpoint callback receives the shared tile slice it needs
+        // for the gather (it can no longer capture `stores` while the loop holds them mutably).
+        let mut stores = Vec::with_capacity(ntiles);
+        let mut kernels = Vec::with_capacity(ntiles);
+        for (s, k) in tiles.iter_mut() {
+            stores.push(&mut **s);
+            kernels.push(&*k);
+        }
+        evolve_decomposed(
+            &mut stores,
+            &kernels,
+            counts,
+            &devices,
+            cfg.timestepping,
+            cfg.start_time,
+            cfg.t_final,
+            1,
+            &transport,
+            |_iter, time, sh| {
+                if time + f64::EPSILON >= next_cp {
+                    gather_interiors(&global, sh, counts);
+                    gather_faces(&global, sh, counts);
+                    let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                    let _ = write_hierarchy_checkpoint(
+                        &[&global],
+                        &checkpoint_name(cfg, &tag),
+                        &checkpoint_metadata(cfg, cp_index),
+                    );
+                    while next_cp <= time {
+                        next_cp += cp_dt;
+                    }
+                    cp_index += 1;
+                }
+                // body diagnostics at their own cadence: any tile's bodies carry the global
+                // (cross-tile-summed) force/torque/accreted-mass after step_bodies_decomposed.
+                if let Some(dp) = &diag_path {
+                    if time + f64::EPSILON >= next_diag {
+                        if let Some(im) = sh[0].immersed.as_ref() {
+                            let _ = append_diagnostics(dp, time, &im.bodies);
+                        }
+                        while next_diag <= time {
+                            next_diag += diag_interval;
+                        }
+                    }
+                }
+                std::ops::ControlFlow::Continue(())
+            },
+        );
+    }
+
+    // canonical final snapshot, mirroring the single-grid run (shared reborrow again).
+    {
+        let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+        gather_interiors(&global, &sh, counts);
+        gather_faces(&global, &sh, counts);
+    }
+    let _ = write_hierarchy_checkpoint(
+        &[&global],
+        &format!("{}final.h5", cfg.data_dir),
+        &checkpoint_metadata(cfg, cp_index),
+    );
+    Ok(())
+}
+
+/// the multi-gpu (gpus>1) REFINED path: decompose a 2-level static-refinement hierarchy. each tile
+/// is a per-tile `Hierarchy` (its root slab + the global refinement region CLIPPED to that slab, or
+/// single-level where the region misses it); `evolve_hierarchy_decomposed` drives them in lockstep
+/// (root + first-fine-level halo exchange, oracle-proven by decomp_refine_equivalence +
+/// decomp_refine_p3_equivalence). for OUTPUT, gather each level into the global hierarchy -- the
+/// root over `counts`, the fine over the `fine_subgrid` sub-grid (a decomposition of the global
+/// fine level) -- and write all its levels through the existing multi-level checkpoint writer.
+/// v1: a SINGLE refined region (the lib driver decomposes the root + first fine level).
+fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
+    cfg: &Config,
+    mut tiles: Vec<Hierarchy<R, D, DOF, M, E, S, Mem, K>>,
+    global: Hierarchy<R, D, DOF, M, E, S, Mem, K>,
+    counts: [usize; D],
+) -> Result<(), String>
+where
+    R: Regime<f64, D> + Copy,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Copy + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+    K: KernelSet<D, DOF, Mem, f64>,
+{
+    use symbi::sim::decomp::{enable_peer_mesh, gather_interiors};
+    use symbi::sim::refinement::{evolve_hierarchy_decomposed, fine_subgrid};
+
+    let ntiles = tiles.len();
+    let devices: Vec<i32> = (0..ntiles as i32).collect();
+    enable_peer_mesh(&devices);
+
+    #[cfg(feature = "gpu")]
+    let transport = symbi::sim::decomp::PeerCopy;
+    #[cfg(not(feature = "gpu"))]
+    let transport = symbi::sim::decomp::LocalCopy;
+
+    let cp_dt = if cfg.checkpoint_interval > 0.0 {
+        cfg.checkpoint_interval * cfg.time_unit
+    } else {
+        f64::INFINITY
+    };
+    let cp_width = checkpoint_time_width(cfg);
+
+    // the fine sub-grid (which tiles carry a fine level + their order/counts) for the fine gather.
+    let fg = fine_subgrid(&tiles, counts, &devices);
+
+    // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
+    // over the fine sub-grid), then write all the global levels through the multi-level writer.
+    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
+        let roots: Vec<_> = tiles.iter().map(|h| &*h.levels[0].state).collect();
+        gather_interiors(&*global.levels[0].state, &roots, counts);
+        if let Some(fg) = &fg {
+            let fines: Vec<_> = fg.order.iter().map(|&i| &*tiles[i].levels[1].state).collect();
+            gather_interiors(&*global.levels[1].state, &fines, fg.counts);
+        }
+        let states: Vec<_> = global.levels.iter().map(|l| &l.state).collect();
+        let _ = write_hierarchy_checkpoint(&states, path, &checkpoint_metadata(cfg, cp_index));
+    };
+
+    // t=start initial condition.
+    if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
+        let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
+        write_cp(&tiles, &checkpoint_name(cfg, &tag), cfg.checkpoint_index);
+    }
+
+    let mut next_cp = cfg.start_time + cp_dt;
+    let mut cp_index = cfg.checkpoint_index + 1;
+    evolve_hierarchy_decomposed(
+        &mut tiles,
+        counts,
+        &devices,
+        &transport,
+        cfg.timestepping,
+        cfg.start_time,
+        cfg.t_final,
+        1,
+        |_iter, time, tiles| {
+            if time + f64::EPSILON >= next_cp {
+                let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
+                write_cp(tiles, &checkpoint_name(cfg, &tag), cp_index);
+                while next_cp <= time {
+                    next_cp += cp_dt;
+                }
+                cp_index += 1;
+            }
+            std::ops::ControlFlow::Continue(())
+        },
+    );
+
+    // canonical final snapshot.
+    write_cp(&tiles, &format!("{}final.h5", cfg.data_dir), cp_index);
+    Ok(())
+}
+
+/// the multi-gpu (gpus>1) REFINED hydro path: per-tile static-refinement hierarchies driven by the
+/// oracle-proven `evolve_hierarchy_decomposed` (root + first-fine-level halo exchange; phases 1-3).
+/// each tile builds its root slab + the global refinement region CLIPPED to that slab (single-level
+/// where the region misses it); a patch that spans a cut is split into the abutting tiles and the
+/// fine halos are exchanged at the cut. output gathers each level into the global hierarchy (root
+/// over `counts`, fine over the fine sub-grid) and writes the multi-level checkpoint. v1: PLAIN
+/// hydro + a single refined region (bodies / sources / motion with refinement-decomp are refused).
+macro_rules! build_and_run_hydro_decomposed_refined {
+    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
+        // the per-tile / global hierarchy type. DOF = D for hydro; the kernel set is the substrate's
+        // associated type (matches what `sim.substrate()` yields).
+        type Hier = Hierarchy<
+            $regime_ty,
+            $d,
+            $d,
+            $geom_ty,
+            IdealGas<f64>,
+            DefaultSpace,
+            DefaultMemory,
+            <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet,
+        >;
+
+        // refined decomposition v1 = plain hydro. these combinations each need their own cross-level
+        // multi-tile handling; refuse rather than silently ignore.
+        if !cfg.bodies.is_empty() {
+            return Err("gpus>1 + refinement does not yet support immersed bodies; set gpus=1".to_string());
+        }
+        if cfg.source_json.is_some() {
+            return Err("gpus>1 + refinement does not yet support user sources; set gpus=1".to_string());
+        }
+        if cfg.mesh_motion {
+            return Err("gpus>1 + refinement does not yet support mesh motion; set gpus=1".to_string());
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let dx: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let solver = cfg.solver;
+        let prolong = prolong_order_for(&cfg.reconstruction_name);
+        let regions = refinement_regions_nd::<$d>(&cfg.refinement_regions)?;
+
+        // build N per-tile hierarchies (root slab + the clipped region, or single-level).
+        let mut tiles: Vec<Hier> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let phys = boundaries_nd::<$d>(&cfg.boundaries);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let tile_regions = clip_regions_to_tile::<$d>(&regions, origin, m, dx);
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<Hier, String> {
+                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(dx)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            lin += (tc[ax] * m[ax] + idx[ax] as usize) * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        Prim {
+                            rho: row[0],
+                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                            pre: row[1 + $d],
+                        }
+                    })
+                    .build();
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                let make = |s: &Sim| {
+                    s.substrate().theta(theta).with_solver(solver).expect("fine kernel set")
+                };
+                let mut h = if tile_regions.is_empty() {
+                    Hierarchy::single(sim, sub)
+                } else {
+                    let h = Hierarchy::with_refinement(sim, sub, &tile_regions, prolong, make)
+                        .map_err(|e| format!("tile {flat} refinement build: {e:?}"))?;
+                    h.seed_fine_from_coarse()
+                        .map_err(|e| format!("tile {flat} fine seed: {e:?}"))?;
+                    h
+                };
+                h.prime();
+                Ok(h)
+            })?;
+            tiles.push(built);
+        }
+
+        // the full-size OUTPUT hierarchy (root + the full region): gather scatters each level's tile
+        // interiors into it. lives on device 0 (touched only at output).
+        let global = symbi::symbi_xpu::with_device(0, || -> Result<Hier, String> {
+            let groot = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                .cells(n)
+                .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+                .spacing(dx)
+                .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
+                .cfl(cfg.cfl)
+                .timestepping(cfg.timestepping)
+                .cyl_plane(cfg.cyl_plane)
+                .allocate()
+                .map_err(|e| format!("global output allocate: {e:?}"))?
+                .set_initial_indexed(|idx, _x| {
+                    let mut lin = 0usize;
+                    let mut stride = 1usize;
+                    for ax in 0..$d {
+                        lin += idx[ax] as usize * stride;
+                        stride *= n[ax];
+                    }
+                    let row = &prims[lin];
+                    Prim {
+                        rho: row[0],
+                        vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                        pre: row[1 + $d],
+                    }
+                })
+                .build();
+            let gsub = groot
+                .substrate()
+                .theta(theta)
+                .with_solver(solver)
+                .map_err(|e| format!("global substrate/solver: {e:?}"))?;
+            let make = |s: &Sim| {
+                s.substrate().theta(theta).with_solver(solver).expect("fine kernel set")
+            };
+            let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, make)
+                .map_err(|e| format!("global refinement build: {e:?}"))?;
+            gh.seed_fine_from_coarse()
+                .map_err(|e| format!("global fine seed: {e:?}"))?;
+            Ok(gh)
+        })?;
+
+        run_refined_decomposed_loop(cfg, tiles, global, counts)
+    }};
+}
+
+/// the multi-gpu (gpus>1) hydro path (docs/design/37 M4, design/38). decompose the domain into
+/// `cfg.n_gpus` tiles, bind each tile to a device, evolve them in lockstep with halo exchange
+/// (the oracle-proven `decomp::evolve_decomposed`), and for output gather the tiles into one
+/// full-size sim written by the EXISTING single-grid checkpoint path. v1 is single-level hydro:
+/// refinement uses the decomposed-hierarchy path above; immersed bodies / user sources are wired.
+/// checkpoint cadence is the LINEAR `checkpoint_interval`; the log cadence + live display are
+/// single-grid only for now. correctness is the same oracle contract (decomposed == monolithic).
+macro_rules! build_and_run_hydro_decomposed {
+    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
+
+        // refinement + gpus>1 takes the decomposed-HIERARCHY path (per-tile hierarchies + the
+        // root/fine halo exchange); plain single-level continues below.
+        if cfg.refinement_enabled {
+            return build_and_run_hydro_decomposed_refined!(
+                $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
+            );
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        // choose the tile grid (product == n_gpus), validate even divisibility.
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let solver = cfg.solver;
+        // the physical (domain-external) boundaries; internal faces become CoarseFine cuts.
+        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+
+        // build N tiles, each allocated + substrate-built in its own device context.
+        let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
+                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        // local cell -> global cell -> global lin (axis-0-fastest, matches the
+                        // python generators and the single-grid build).
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            let g = tc[ax] * m[ax] + idx[ax] as usize;
+                            lin += g * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        Prim {
+                            rho: row[0],
+                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                            pre: row[1 + $d],
+                        }
+                    })
+                    .build();
+                // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
+                // bodies at their GLOBAL positions; each applies the source to its own cells. the
+                // decomposed loop sums the backward feedback across tiles + advances the prescribed
+                // binary orbit identically (oracle: decomp_body_equivalence).
+
+                let sim = if cfg.bodies.is_empty() {
+                    sim
+                } else {
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                };
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                // attach the user source per tile (two-pass via attach_runtime_source). each tile
+                // evaluates S at its OWN global coords (the per-tile origin above), so a
+                // position-dependent force is correct across cuts -- proven decomposed==monolithic
+                // to round-off by `decomp_source_equivalence`. the global output sim carries no
+                // source (it is touched only at gather/output).
+                let sub = match &cfg.source_json {
+                    Some(json) => {
+                        let scfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("source expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_user_source(
+                            &scfg,
+                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("source expression lower: {e}"))?;
+                        sub.attach_runtime_source(built, scfg.params.clone())?
+                    }
+                    None => sub,
+                };
+                Ok((sim, sub))
+            })?;
+            tiles.push(built);
+        }
+
+        // one full-size sim as the OUTPUT view: the gather scatters tile interiors into it and
+        // the existing writer serializes it. lives on device 0 (it is only touched at output).
+        let global = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+            .cells(n)
+            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .boundaries(phys)
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .cyl_plane(cfg.cyl_plane)
+            .allocate()
+            .map_err(|e| format!("global output sim allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                // seed the full IC (gather overwrites the interior each checkpoint); local idx
+                // is the global cell for the full-size grid.
+                let mut lin = 0usize;
+                let mut stride = 1usize;
+                for ax in 0..$d {
+                    lin += idx[ax] as usize * stride;
+                    stride *= n[ax];
+                }
+                let row = &prims[lin];
+                Prim {
+                    rho: row[0],
+                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                    pre: row[1 + $d],
+                }
+            })
+            .build();
+
+        // hand the built tiles + output sim to the regime-agnostic decomposed loop (evolve +
+        // gather + checkpoint, universal transport). every regime shares this loop.
+        run_decomposed_loop(cfg, tiles, global, counts)
     }};
 }
 
@@ -1287,15 +2024,51 @@ macro_rules! build_and_run_hydro {
 macro_rules! hydro_dispatch {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Spherical, Spherical),
-            (1, "cylindrical") => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Cylindrical, Cylindrical),
-            (2, "cylindrical") => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Cylindrical, Cylindrical),
-            (3, "cylindrical") => build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cylindrical, Cylindrical),
+            (1, "cartesian") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Cartesian, Cartesian)
+            }
+            (2, "cartesian") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Cartesian, Cartesian)
+            }
+            (3, "cartesian") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cartesian, Cartesian)
+            }
+            (1, "spherical") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Spherical, Spherical)
+            }
+            (2, "spherical") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Spherical, Spherical)
+            }
+            (3, "spherical") => {
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Spherical, Spherical)
+            }
+            (1, "cylindrical") => build_and_run_hydro!(
+                $cfg,
+                $prims,
+                $regime,
+                $regime_ty,
+                1,
+                Cylindrical,
+                Cylindrical
+            ),
+            (2, "cylindrical") => build_and_run_hydro!(
+                $cfg,
+                $prims,
+                $regime,
+                $regime_ty,
+                2,
+                Cylindrical,
+                Cylindrical
+            ),
+            (3, "cylindrical") => build_and_run_hydro!(
+                $cfg,
+                $prims,
+                $regime,
+                $regime_ty,
+                3,
+                Cylindrical,
+                Cylindrical
+            ),
             (d, g) => Err(format!("no dispatch arm for (dims={d}, coord={g}) yet")),
         }
     };
@@ -1315,6 +2088,45 @@ macro_rules! lin_index {
     }};
 }
 
+/// slice a GLOBAL per-axis staggered face buffer into the face buffer for one tile, in the
+/// axis-0-fastest order `seed_faces_indexed` consumes. `global` is the python `staggered_bfields`
+/// generator for axis `d`: axis-0-fastest over the global interior face domain (cell dims `n`
+/// extended +1 on `d`). the tile owns `m` cells per axis at tile coord `tc`; its axis-`d` face
+/// domain is `m` extended +1 on `d`. the shared internal face (a tile's hi-`d` face == its
+/// neighbor's lo-`d` face) maps to the same global index in both tiles, so both seed it
+/// identically -- the CT normal-face consistency the decomposition requires, by construction.
+fn tile_face_buffer<const D: usize>(
+    global: &[f64],
+    n: [usize; D],
+    m: [usize; D],
+    tc: [usize; D],
+    d: usize,
+) -> Vec<f64> {
+    let gdim: [usize; D] = std::array::from_fn(|ax| n[ax] + usize::from(ax == d));
+    let ldim: [usize; D] = std::array::from_fn(|ax| m[ax] + usize::from(ax == d));
+    let vol: usize = ldim.iter().product();
+    let mut out = Vec::with_capacity(vol);
+    let mut lc = [0usize; D];
+    for _ in 0..vol {
+        // local face coord -> global face coord -> global flat (axis-0-fastest).
+        let mut gi = 0usize;
+        let mut stride = 1usize;
+        for ax in 0..D {
+            gi += (tc[ax] * m[ax] + lc[ax]) * stride;
+            stride *= gdim[ax];
+        }
+        out.push(global[gi]);
+        for ax in 0..D {
+            lc[ax] += 1;
+            if lc[ax] < ldim[ax] {
+                break;
+            }
+            lc[ax] = 0;
+        }
+    }
+    out
+}
+
 /// build one monomorphized ADIABATIC MHD sim (Rmhd or NewtonianMhd; both are
 /// MhdPrim + IdealGas, DOF=3) and drive it. cell state comes from `prim_gen`
 /// (rho, vx, vy, vz, p — NO cell B); the staggered face B from `staggered_bfields`:
@@ -1327,13 +2139,27 @@ macro_rules! build_and_run_mhd {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, IdealGas<f64>>;
 
+        // gpus>1 -> the decomposed multi-gpu path (validated separately above by
+        // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
+        if cfg.n_gpus > 1 {
+            return build_and_run_mhd_decomposed!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, $d, $geom, $geom_ty
+            );
+        }
+
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         if bufs.len() < 3 {
-            return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            return Err(format!(
+                "mhd needs 3 staggered b-field generators, got {}",
+                bufs.len()
+            ));
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -1351,9 +2177,14 @@ macro_rules! build_and_run_mhd {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] = std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                let mag_arr: [f64; 3] =
+                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
                 MhdPrim {
-                    hydro: Prim { rho: row[0], vel: Tensor::new([row[1], row[2], row[3]]), pre: row[4] },
+                    hydro: Prim {
+                        rho: row[0],
+                        vel: Tensor::new([row[1], row[2], row[3]]),
+                        pre: row[4],
+                    },
                     mag: Tensor::new(mag_arr),
                 }
             })
@@ -1368,7 +2199,10 @@ macro_rules! build_and_run_mhd {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
         };
         let theta = build_theta(cfg);
-        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .ct_method(cfg.ct_method);
         // attach a user source expression to the MHD hydro slots (den/mom/nrg).
@@ -1377,13 +2211,18 @@ macro_rules! build_and_run_mhd {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <$regime_ty as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
@@ -1399,13 +2238,18 @@ macro_rules! build_and_run_mhd {
             let bcfg = symbi_hydro::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
             let built = symbi_hydro::expr_bridge::build_boundary_dag(
-                &bcfg, <$regime_ty as Regime<f64, $d>>::SPEC,
-            ).map_err(|e| format!("boundary expression lower: {e}"))?;
+                &bcfg,
+                <$regime_ty as Regime<f64, $d>>::SPEC,
+            )
+            .map_err(|e| format!("boundary expression lower: {e}"))?;
             sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
         }
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
+            .substrate()
+            .theta(theta)
+            .with_solver(solver)
+            .expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -1420,13 +2264,25 @@ macro_rules! build_and_run_imhd {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, $geom_ty, Isothermal<f64>>;
 
+        // gpus>1 -> the decomposed multi-gpu path (validated separately above by
+        // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
+        if cfg.n_gpus > 1 {
+            return build_and_run_imhd_decomposed!($cfg, $prims, $bufs, $d, $geom, $geom_ty);
+        }
+
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         if bufs.len() < 3 {
-            return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
+            return Err(format!(
+                "imhd needs 3 staggered b-field generators, got {}",
+                bufs.len()
+            ));
         }
         let origin: [f64; $d] = std::array::from_fn(|ax| cfg.x_lo[ax]);
         let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
@@ -1444,9 +2300,14 @@ macro_rules! build_and_run_imhd {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] = std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                let mag_arr: [f64; 3] =
+                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
                 MhdPrimG::<f64, 3, IsoModel> {
-                    hydro: PrimG { rho: row[0], vel: Tensor::new([row[1], row[2], row[3]]), pre: Default::default() },
+                    hydro: PrimG {
+                        rho: row[0],
+                        vel: Tensor::new([row[1], row[2], row[3]]),
+                        pre: Default::default(),
+                    },
                     mag: Tensor::new(mag_arr),
                 }
             })
@@ -1461,7 +2322,10 @@ macro_rules! build_and_run_imhd {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
         };
         let theta = build_theta(cfg);
-        let sub = sim.substrate().theta(theta).with_solver(cfg.solver)
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .ct_method(cfg.ct_method);
         // attach a user source. iso MHD has no energy -> momentum-only force/relax,
@@ -1469,21 +2333,347 @@ macro_rules! build_and_run_imhd {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <IsothermalMhd as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
         };
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d,
-            |s| s.substrate().theta(theta).with_solver(solver).expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
+            .substrate()
+            .theta(theta)
+            .with_solver(solver)
+            .expect("fine-level kernel set"));
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
+    }};
+}
+
+/// the multi-gpu (gpus>1) ADIABATIC MHD path: the MHD analog of `build_and_run_hydro_decomposed`.
+/// decompose the domain into `cfg.n_gpus` tiles, bind each to a device, and evolve them in lockstep
+/// with the staggered-CT halo exchange (the oracle-proven `decomp::evolve_decomposed`, verified
+/// `decomposed == monolithic` to round-off with div(B) exact). cell state seeds `MhdPrim` from the
+/// global prim rows; the staggered face B seeds each tile from its slice of the global
+/// `staggered_bfields` (`tile_face_buffer`), so the shared internal face is identical in both
+/// neighbors by construction. output gathers cell fields + cell B (`gather_interiors`) AND the
+/// staggered faces (`gather_faces`) into one global sim written by the existing checkpoint path.
+/// single-level only: refinement / bodies / user sources with gpus>1 are refused.
+macro_rules! build_and_run_mhd_decomposed {
+    ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        let bufs: &[Vec<f64>] = $bufs;
+        type Sim = SimDefaultGeneric<$regime_ty, $d, 3, $geom_ty, IdealGas<f64>>;
+
+        // v1 multi-gpu = single-level. these interactions are deferred; refuse rather than silently
+        // ignore (each needs its own multi-tile handling).
+        if cfg.refinement_enabled {
+            return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
+        }
+        if !cfg.driven_exprs.is_empty() {
+            return Err("gpus>1 does not yet support driven boundaries; set gpus=1".to_string());
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        if bufs.len() < 3 {
+            return Err(format!("mhd needs 3 staggered b-field generators, got {}", bufs.len()));
+        }
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let solver = cfg.solver;
+        let ct = cfg.ct_method;
+        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+
+        let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
+                // per-tile slice of each global face buffer (axis-0-fastest over the tile face
+                // domain); the shared internal face reads the same global value in both neighbors.
+                let tile_faces: Vec<Vec<f64>> =
+                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tc, d)).collect();
+                let sim = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        // local cell -> global cell -> global lin (axis-0-fastest, matching the
+                        // python generators and the single-grid build); cell B reads the transverse
+                        // axes of the global buffers at the same lin.
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            lin += (tc[ax] * m[ax] + idx[ax] as usize) * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        let mag_arr: [f64; 3] =
+                            std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                        MhdPrim {
+                            hydro: Prim {
+                                rho: row[0],
+                                vel: Tensor::new([row[1], row[2], row[3]]),
+                                pre: row[4],
+                            },
+                            mag: Tensor::new(mag_arr),
+                        }
+                    })
+                    .seed_faces_indexed(&tile_faces)
+                    .build();
+                // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
+                // bodies at their GLOBAL positions; each applies the source to its own cells. the
+                // decomposed loop sums the backward feedback across tiles + advances the prescribed
+                // binary orbit identically (oracle: decomp_body_equivalence).
+
+                let sim = if cfg.bodies.is_empty() {
+                    sim
+                } else {
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                };
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .ct_method(ct);
+                // attach the user source per tile (two-pass). targets the mhd hydro slots
+                // (den/mom/nrg); B is CT-evolved, not a cell source. each tile evaluates S at its
+                // own global coords. rmhd is relativistic -> raw only (enforced in build_user_source).
+                let sub = match &cfg.source_json {
+                    Some(json) => {
+                        let scfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("source expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_user_source(
+                            &scfg,
+                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("source expression lower: {e}"))?;
+                        sub.attach_runtime_source(built, scfg.params.clone())?
+                    }
+                    None => sub,
+                };
+                Ok((sim, sub))
+            })?;
+            tiles.push(built);
+        }
+
+        // the full-size OUTPUT view: gather scatters tile interiors (cells + cell B) and faces into
+        // it each checkpoint; seed the faces so `bface_initialized` is set (the gather overwrites
+        // the interior). lives on device 0 (touched only at output).
+        let global = Sim::build($regime, IdealGas { gamma: cfg.gamma }, $geom)
+            .cells(n)
+            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .boundaries(phys)
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .cyl_plane(cfg.cyl_plane)
+            .allocate()
+            .map_err(|e| format!("global output sim allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                let mut lin = 0usize;
+                let mut stride = 1usize;
+                for ax in 0..$d {
+                    lin += idx[ax] as usize * stride;
+                    stride *= n[ax];
+                }
+                let row = &prims[lin];
+                let mag_arr: [f64; 3] =
+                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                MhdPrim {
+                    hydro: Prim {
+                        rho: row[0],
+                        vel: Tensor::new([row[1], row[2], row[3]]),
+                        pre: row[4],
+                    },
+                    mag: Tensor::new(mag_arr),
+                }
+            })
+            .seed_faces_indexed(&bufs[0..$d])
+            .build();
+
+        run_decomposed_loop(cfg, tiles, global, counts)
+    }};
+}
+
+/// the multi-gpu (gpus>1) ISOTHERMAL MHD path: identical tiling/face-seeding/gather to the
+/// adiabatic decomposed macro, but the iso primitive has NO pressure slot (`IsoModel` ZST) and the
+/// eos closure is `p = cs^2 rho`. single-level only.
+macro_rules! build_and_run_imhd_decomposed {
+    ($cfg:expr, $prims:expr, $bufs:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        let bufs: &[Vec<f64>] = $bufs;
+        type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, $geom_ty, Isothermal<f64>>;
+
+        if cfg.refinement_enabled {
+            return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        if bufs.len() < 3 {
+            return Err(format!("imhd needs 3 staggered b-field generators, got {}", bufs.len()));
+        }
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let solver = cfg.solver;
+        let ct = cfg.ct_method;
+        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+
+        let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
+                let tile_faces: Vec<Vec<f64>> =
+                    (0..$d).map(|d| tile_face_buffer::<$d>(&bufs[d], n, m, tc, d)).collect();
+                let sim = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            lin += (tc[ax] * m[ax] + idx[ax] as usize) * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        let mag_arr: [f64; 3] =
+                            std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                        MhdPrimG::<f64, 3, IsoModel> {
+                            hydro: PrimG {
+                                rho: row[0],
+                                vel: Tensor::new([row[1], row[2], row[3]]),
+                                pre: Default::default(),
+                            },
+                            mag: Tensor::new(mag_arr),
+                        }
+                    })
+                    .seed_faces_indexed(&tile_faces)
+                    .build();
+                // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
+                // bodies at their GLOBAL positions; each applies the source to its own cells. the
+                // decomposed loop sums the backward feedback across tiles + advances the prescribed
+                // binary orbit identically (oracle: decomp_body_equivalence).
+
+                let sim = if cfg.bodies.is_empty() {
+                    sim
+                } else {
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                };
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .ct_method(ct);
+                // attach the user source per tile (two-pass). iso mhd has no energy -> momentum-only
+                // force/relax, raw den/mom; B is CT-evolved. each tile evaluates S at its own coords.
+                let sub = match &cfg.source_json {
+                    Some(json) => {
+                        let scfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("source expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_user_source(
+                            &scfg,
+                            <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("source expression lower: {e}"))?;
+                        sub.attach_runtime_source(built, scfg.params.clone())?
+                    }
+                    None => sub,
+                };
+                Ok((sim, sub))
+            })?;
+            tiles.push(built);
+        }
+
+        let global = Sim::build(IsothermalMhd, Isothermal { cs: cfg.cs }, $geom)
+            .cells(n)
+            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .boundaries(phys)
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .cyl_plane(cfg.cyl_plane)
+            .allocate()
+            .map_err(|e| format!("global output sim allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                let mut lin = 0usize;
+                let mut stride = 1usize;
+                for ax in 0..$d {
+                    lin += idx[ax] as usize * stride;
+                    stride *= n[ax];
+                }
+                let row = &prims[lin];
+                let mag_arr: [f64; 3] =
+                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                MhdPrimG::<f64, 3, IsoModel> {
+                    hydro: PrimG {
+                        rho: row[0],
+                        vel: Tensor::new([row[1], row[2], row[3]]),
+                        pre: Default::default(),
+                    },
+                    mag: Tensor::new(mag_arr),
+                }
+            })
+            .seed_faces_indexed(&bufs[0..$d])
+            .build();
+
+        run_decomposed_loop(cfg, tiles, global, counts)
     }};
 }
 
@@ -1493,15 +2683,54 @@ macro_rules! build_and_run_imhd {
 macro_rules! mhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 3, Spherical, Spherical),
-            (1, "cylindrical") => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 1, Cylindrical, Cylindrical),
-            (2, "cylindrical") => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 2, Cylindrical, Cylindrical),
-            (3, "cylindrical") => build_and_run_mhd!($cfg, $prims, $bufs, $regime, $regime_ty, 3, Cylindrical, Cylindrical),
+            (1, "cartesian") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian
+            ),
+            (2, "cartesian") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2, Cartesian, Cartesian
+            ),
+            (3, "cartesian") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 3, Cartesian, Cartesian
+            ),
+            (1, "spherical") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 1, Spherical, Spherical
+            ),
+            (2, "spherical") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2, Spherical, Spherical
+            ),
+            (3, "spherical") => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 3, Spherical, Spherical
+            ),
+            (1, "cylindrical") => build_and_run_mhd!(
+                $cfg,
+                $prims,
+                $bufs,
+                $regime,
+                $regime_ty,
+                1,
+                Cylindrical,
+                Cylindrical
+            ),
+            (2, "cylindrical") => build_and_run_mhd!(
+                $cfg,
+                $prims,
+                $bufs,
+                $regime,
+                $regime_ty,
+                2,
+                Cylindrical,
+                Cylindrical
+            ),
+            (3, "cylindrical") => build_and_run_mhd!(
+                $cfg,
+                $prims,
+                $bufs,
+                $regime,
+                $regime_ty,
+                3,
+                Cylindrical,
+                Cylindrical
+            ),
             (d, g) => Err(format!("no mhd dispatch arm for (dims={d}, coord={g}) yet")),
         }
     };
@@ -1512,18 +2741,155 @@ macro_rules! mhd_dispatch {
 macro_rules! imhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_imhd!($cfg, $prims, $bufs, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_imhd!($cfg, $prims, $bufs, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_imhd!($cfg, $prims, $bufs, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_imhd!($cfg, $prims, $bufs, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_imhd!($cfg, $prims, $bufs, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_imhd!($cfg, $prims, $bufs, 3, Spherical, Spherical),
-            (1, "cylindrical") => build_and_run_imhd!($cfg, $prims, $bufs, 1, Cylindrical, Cylindrical),
-            (2, "cylindrical") => build_and_run_imhd!($cfg, $prims, $bufs, 2, Cylindrical, Cylindrical),
-            (3, "cylindrical") => build_and_run_imhd!($cfg, $prims, $bufs, 3, Cylindrical, Cylindrical),
-            (d, g) => Err(format!("no imhd dispatch arm for (dims={d}, coord={g}) yet")),
+            (1, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 1, Cartesian, Cartesian),
+            (2, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 2, Cartesian, Cartesian),
+            (3, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 3, Cartesian, Cartesian),
+            (1, "spherical") => build_and_run_imhd!($cfg, $prims, $bufs, 1, Spherical, Spherical),
+            (2, "spherical") => build_and_run_imhd!($cfg, $prims, $bufs, 2, Spherical, Spherical),
+            (3, "spherical") => build_and_run_imhd!($cfg, $prims, $bufs, 3, Spherical, Spherical),
+            (1, "cylindrical") => {
+                build_and_run_imhd!($cfg, $prims, $bufs, 1, Cylindrical, Cylindrical)
+            }
+            (2, "cylindrical") => {
+                build_and_run_imhd!($cfg, $prims, $bufs, 2, Cylindrical, Cylindrical)
+            }
+            (3, "cylindrical") => {
+                build_and_run_imhd!($cfg, $prims, $bufs, 3, Cylindrical, Cylindrical)
+            }
+            (d, g) => Err(format!(
+                "no imhd dispatch arm for (dims={d}, coord={g}) yet"
+            )),
         }
     };
+}
+
+/// the multi-gpu (gpus>1) ISOTHERMAL path: the iso sibling of `build_and_run_hydro_decomposed!`.
+/// builds N iso tiles + a global output sim and hands them to the shared `run_decomposed_loop`
+/// (universal transport). v1 is GLOBALLY isothermal (uniform cs); locally-isothermal cs(x) needs
+/// per-tile cs^2 setup and is deferred (guarded). same non-AMR / no-bodies / no-source scope.
+macro_rules! build_and_run_iso_decomposed {
+    ($cfg:expr, $prims:expr, $d:literal, $geom:expr, $geom_ty:ty) => {{
+        use symbi::sim::decomp::{decompose_grid, unflatten};
+        let cfg: &Config = $cfg;
+        let prims: &[Vec<f64>] = $prims;
+        type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
+
+        if cfg.refinement_enabled {
+            return Err("gpus>1 does not yet support mesh refinement; set gpus=1".to_string());
+        }
+        if cfg.locally_isothermal {
+            return Err("gpus>1 does not yet support locally-isothermal cs(x); set gpus=1 or use globally isothermal".to_string());
+        }
+
+        let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
+        let total: usize = n.iter().product();
+        if prims.len() != total {
+            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+        }
+        let counts = decompose_grid(n, cfg.n_gpus)?;
+        let m: [usize; $d] = std::array::from_fn(|ax| n[ax] / counts[ax]);
+        let ntiles: usize = counts.iter().product();
+        let theta = build_theta(cfg);
+        let phys = boundaries_nd::<$d>(&cfg.boundaries);
+
+        let mut tiles: Vec<(Sim, _)> = Vec::with_capacity(ntiles);
+        for flat in 0..ntiles {
+            let tc = unflatten(flat, counts);
+            let origin: [f64; $d] =
+                std::array::from_fn(|ax| cfg.x_lo[ax] + (tc[ax] * m[ax]) as f64 * cfg.dx[ax]);
+            let spacing: [f64; $d] = std::array::from_fn(|ax| cfg.dx[ax]);
+            let bnd = Boundaries(std::array::from_fn(|ax| {
+                let lo = if tc[ax] == 0 { phys.0[ax][0] } else { BoundaryType::CoarseFine };
+                let hi = if tc[ax] == counts[ax] - 1 { phys.0[ax][1] } else { BoundaryType::CoarseFine };
+                [lo, hi]
+            }));
+            let dev = flat as i32;
+            let built = symbi::symbi_xpu::with_device(dev, || -> Result<(Sim, _), String> {
+                let sim = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
+                    .cells(m)
+                    .origin(origin)
+                    .spacing(spacing)
+                    .boundaries(bnd)
+                    .cfl(cfg.cfl)
+                    .timestepping(cfg.timestepping)
+                    .cyl_plane(cfg.cyl_plane)
+                    .allocate()
+                    .map_err(|e| format!("tile {flat} allocate: {e:?}"))?
+                    .set_initial_indexed(|idx, _x| {
+                        let mut lin = 0usize;
+                        let mut stride = 1usize;
+                        for ax in 0..$d {
+                            let g = tc[ax] * m[ax] + idx[ax] as usize;
+                            lin += g * stride;
+                            stride *= n[ax];
+                        }
+                        let row = &prims[lin];
+                        PrimG::<f64, $d, IsoModel> {
+                            rho: row[0],
+                            vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                            pre: Default::default(),
+                        }
+                    })
+                    .build();
+                // attach the immersed bodies per tile (gravity + accretion sink). all tiles share the
+                // bodies at their GLOBAL positions; each applies the source to its own cells. the
+                // decomposed loop sums the backward feedback across tiles + advances the prescribed
+                // binary orbit identically (oracle: decomp_body_equivalence).
+
+                let sim = if cfg.bodies.is_empty() {
+                    sim
+                } else {
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                };
+                let sub = sim.substrate().theta(theta);
+                // attach the user source per tile (two-pass). iso has no energy -> momentum-only
+                // force/relax, raw den/mom. each tile evaluates S at its own global coords.
+                let sub = match &cfg.source_json {
+                    Some(json) => {
+                        let scfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("source expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_user_source(
+                            &scfg,
+                            <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("source expression lower: {e}"))?;
+                        sub.attach_runtime_source(built, scfg.params.clone())?
+                    }
+                    None => sub,
+                };
+                Ok((sim, sub))
+            })?;
+            tiles.push(built);
+        }
+
+        let global = Sim::build(IsoNewtonian, Isothermal { cs: cfg.cs }, $geom)
+            .cells(n)
+            .origin(std::array::from_fn(|ax| cfg.x_lo[ax]))
+            .spacing(std::array::from_fn(|ax| cfg.dx[ax]))
+            .boundaries(phys)
+            .cfl(cfg.cfl)
+            .timestepping(cfg.timestepping)
+            .cyl_plane(cfg.cyl_plane)
+            .allocate()
+            .map_err(|e| format!("global output sim allocate: {e:?}"))?
+            .set_initial_indexed(|idx, _x| {
+                let mut lin = 0usize;
+                let mut stride = 1usize;
+                for ax in 0..$d {
+                    lin += idx[ax] as usize * stride;
+                    stride *= n[ax];
+                }
+                let row = &prims[lin];
+                PrimG::<f64, $d, IsoModel> {
+                    rho: row[0],
+                    vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
+                    pre: Default::default(),
+                }
+            })
+            .build();
+
+        run_decomposed_loop(cfg, tiles, global, counts)
+    }};
 }
 
 /// build one monomorphized ISOTHERMAL HYDRO sim (IsoNewtonian + Isothermal eos,
@@ -1542,18 +2908,36 @@ macro_rules! build_and_run_iso {
         let prims: &[Vec<f64>] = $prims;
         type Sim = SimDefault<IsoNewtonian, $d, $geom_ty, Isothermal<f64>>;
 
+        // gpus>1 -> the decomposed iso path; gpus<=1 -> the single-device path below.
+        if cfg.n_gpus > 1 {
+            return build_and_run_iso_decomposed!($cfg, $prims, $d, $geom, $geom_ty);
+        }
+
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
-            return Err(format!("prim_gen yielded {} cells, expected {total}", prims.len()));
+            return Err(format!(
+                "prim_gen yielded {} cells, expected {total}",
+                prims.len()
+            ));
         }
         // locally isothermal carries an extra per-cell pressure component.
-        let want = if cfg.locally_isothermal { $d + 2 } else { $d + 1 };
+        let want = if cfg.locally_isothermal {
+            $d + 2
+        } else {
+            $d + 1
+        };
         if let Some(row) = prims.first() {
             if row.len() < want {
                 return Err(format!(
                     "isothermal prim row has {} components, expected {want} (rho, v1..v{}{})",
-                    row.len(), $d, if cfg.locally_isothermal { ", p_local" } else { "" },
+                    row.len(),
+                    $d,
+                    if cfg.locally_isothermal {
+                        ", p_local"
+                    } else {
+                        ""
+                    },
                 ));
             }
         }
@@ -1596,13 +2980,18 @@ macro_rules! build_and_run_iso {
         let sub = match &cfg.source_json {
             Some(json) => {
                 if cfg.refinement_enabled {
-                    return Err("user source expressions are not yet supported with mesh refinement".to_string());
+                    return Err(
+                        "user source expressions are not yet supported with mesh refinement"
+                            .to_string(),
+                    );
                 }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
-                    &scfg, <IsoNewtonian as Regime<f64, $d>>::SPEC,
-                ).map_err(|e| format!("source expression lower: {e}"))?;
+                    &scfg,
+                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
             None => sub,
@@ -1618,7 +3007,9 @@ macro_rules! build_and_run_iso {
                 pre_ic.view_mut().set(coord, prims[lin][1 + $d]);
                 for ax in 0..$d {
                     coord[ax] += 1;
-                    if coord[ax] < interior.spaces[ax].hi { break; }
+                    if coord[ax] < interior.spaces[ax].hi {
+                        break;
+                    }
                     coord[ax] = interior.spaces[ax].lo;
                 }
             }
@@ -1638,8 +3029,14 @@ macro_rules! build_and_run_iso {
                 let region = hi[0].state.geom.interior.clone();
                 let zero = Field::zeros(&lo[ll - 1].state.geom.allocated)
                     .map_err(|e| format!("cs2 prolong alloc: {e:?}"))?;
-                prolong_field(&lo[ll - 1].kernels.cs2, &zero, &hi[0].kernels.cs2,
-                              &region, order, 0.0);
+                prolong_field(
+                    &lo[ll - 1].kernels.cs2,
+                    &zero,
+                    &hi[0].kernels.cs2,
+                    &region,
+                    order,
+                    0.0,
+                );
             }
         }
 
@@ -1652,16 +3049,18 @@ macro_rules! build_and_run_iso {
 macro_rules! iso_dispatch {
     ($cfg:expr, $prims:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
-            (1, "cartesian")   => build_and_run_iso!($cfg, $prims, 1, Cartesian, Cartesian),
-            (2, "cartesian")   => build_and_run_iso!($cfg, $prims, 2, Cartesian, Cartesian),
-            (3, "cartesian")   => build_and_run_iso!($cfg, $prims, 3, Cartesian, Cartesian),
-            (1, "spherical")   => build_and_run_iso!($cfg, $prims, 1, Spherical, Spherical),
-            (2, "spherical")   => build_and_run_iso!($cfg, $prims, 2, Spherical, Spherical),
-            (3, "spherical")   => build_and_run_iso!($cfg, $prims, 3, Spherical, Spherical),
+            (1, "cartesian") => build_and_run_iso!($cfg, $prims, 1, Cartesian, Cartesian),
+            (2, "cartesian") => build_and_run_iso!($cfg, $prims, 2, Cartesian, Cartesian),
+            (3, "cartesian") => build_and_run_iso!($cfg, $prims, 3, Cartesian, Cartesian),
+            (1, "spherical") => build_and_run_iso!($cfg, $prims, 1, Spherical, Spherical),
+            (2, "spherical") => build_and_run_iso!($cfg, $prims, 2, Spherical, Spherical),
+            (3, "spherical") => build_and_run_iso!($cfg, $prims, 3, Spherical, Spherical),
             (1, "cylindrical") => build_and_run_iso!($cfg, $prims, 1, Cylindrical, Cylindrical),
             (2, "cylindrical") => build_and_run_iso!($cfg, $prims, 2, Cylindrical, Cylindrical),
             (3, "cylindrical") => build_and_run_iso!($cfg, $prims, 3, Cylindrical, Cylindrical),
-            (d, g) => Err(format!("no isothermal dispatch arm for (dims={d}, coord={g}) yet")),
+            (d, g) => Err(format!(
+                "no isothermal dispatch arm for (dims={d}, coord={g}) yet"
+            )),
         }
     };
 }
@@ -1677,7 +3076,8 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         && !(cfg.dims == 3 && cfg.coord_system == "cartesian")
     {
         return Err("mhd refinement requires a 3d cartesian grid (the CT \
-                    reflux assumes 1/dx curl coefficients)".to_string());
+                    reflux assumes 1/dx curl coefficients)"
+            .to_string());
     }
     // mesh motion is single-grid uniform-spacing hydro only in this pass.
     if cfg.mesh_motion {
@@ -1685,23 +3085,49 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             return Err("mesh motion is single-grid only (not wired with refinement)".to_string());
         }
         if cfg.regime.contains("mhd") {
-            return Err("mesh motion is not wired for MHD (comoving-field convention pending)".to_string());
+            return Err(
+                "mesh motion is not wired for MHD (comoving-field convention pending)".to_string(),
+            );
         }
     }
     // immersed bodies attach to level 0; the AMR body sync (finest-owns-bodies)
     // is not wired through the binding yet, so refined body runs are rejected.
     if !cfg.bodies.is_empty() && cfg.refinement_enabled {
         return Err("immersed bodies are single-grid only in the binding \
-                    (AMR body sync not wired yet)".to_string());
+                    (AMR body sync not wired yet)"
+            .to_string());
+    }
+    // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/srhd/isothermal) and
+    // single-level MHD (srmhd/nmhd/imhd, the oracle-proven staggered-CT halo exchange + face
+    // gather, docs/design/37 M4). reject every other case HERE so a multi-gpu request never
+    // silently runs on one device.
+    if cfg.n_gpus > 1 {
+        if !matches!(
+            cfg.regime.as_str(),
+            "newtonian" | "srhd" | "isothermal" | "srmhd" | "nmhd" | "imhd"
+        ) {
+            return Err(format!(
+                "gpus>1 is wired for hydro (newtonian, srhd, isothermal) and mhd (srmhd, nmhd, \
+                 imhd); regime '{}' runs single-gpu for now (set gpus=1)",
+                cfg.regime
+            ));
+        }
+        if cfg.mesh_motion {
+            return Err("gpus>1 does not yet support mesh motion (moving mesh); set gpus=1".to_string());
+        }
+        // immersed bodies (incl. moving binaries) and their force/accreted-mass diagnostics are
+        // wired for gpus>1: the decomposed loop applies the body source per tile, sums the backward
+        // feedback across tiles, and advances the prescribed orbit identically (oracle-proven by
+        // decomp_body_equivalence). no refusal needed here.
     }
     match cfg.regime.as_str() {
-        "newtonian"  => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
-        "srhd"       => hydro_dispatch!(cfg, prims, Srhd, Srhd),
+        "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
+        "srhd" => hydro_dispatch!(cfg, prims, Srhd, Srhd),
         "isothermal" => iso_dispatch!(cfg, prims),
-        "srmhd"      => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
-        "nmhd"       => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),
-        "imhd"       => imhd_dispatch!(cfg, prims, bfields),
-        other        => Err(format!("regime '{other}' not wired yet")),
+        "srmhd" => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
+        "nmhd" => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),
+        "imhd" => imhd_dispatch!(cfg, prims, bfields),
+        other => Err(format!("regime '{other}' not wired yet")),
     }
 }
 
@@ -1728,7 +3154,7 @@ fn checkpoint_metadata(cfg: &Config, checkpoint_index: u64) -> Metadata {
 
 /// the integer-digit width for the time portion of a checkpoint name, sized
 /// from `t_final / time_unit` so every file in a run shares the same width and
-/// a directory listing sorts chronologically. minimum 3 (the c++ default).
+/// a directory listing sorts chronologically. minimum 3 (the default).
 fn checkpoint_time_width(cfg: &Config) -> usize {
     let t_units = (cfg.t_final / cfg.time_unit).max(1.0);
     let digits = t_units.log10().floor() as usize + 1;
@@ -1775,7 +3201,11 @@ fn format_sim_time(value: f64, int_width: usize) -> String {
 /// (`00042`) instead, because the fixed-decimal time collides at small times. either way the
 /// exact physical time is preserved in metadata/time (the source of truth for all readers).
 fn checkpoint_tag(
-    cfg: &Config, idx_width: usize, time_width: usize, time: f64, index: u64,
+    cfg: &Config,
+    idx_width: usize,
+    time_width: usize,
+    time: f64,
+    index: u64,
 ) -> String {
     if idx_width > 0 {
         format!("{index:0idx_width$}")
@@ -1787,7 +3217,7 @@ fn checkpoint_tag(
 /// the full checkpoint path: `<dir><zones>.chkpt.<tnow>[.<unit>].h5`. `tnow` is
 /// either a formatted time or a status word (interrupted / crashed). the unit
 /// segment is appended only for a non-default time unit, so ordinary runs keep
-/// the terse `<zones>.chkpt.<time>.h5` form (e.g. `262144.chkpt.000_500.h5`).
+/// the terse `<zones>.chkpt.<time>.h5` form (e.g., `262144.chkpt.000_500.h5`).
 fn checkpoint_name(cfg: &Config, tnow: &str) -> String {
     let label = sanitize_unit_label(&cfg.time_unit_label);
     let unit = if label.is_empty() || label == "t" {
@@ -1795,12 +3225,16 @@ fn checkpoint_name(cfg: &Config, tnow: &str) -> String {
     } else {
         format!(".{label}")
     };
-    format!("{}{}.chkpt.{tnow}{unit}.h5", cfg.data_dir, resolution_tag(cfg))
+    format!(
+        "{}{}.chkpt.{tnow}{unit}.h5",
+        cfg.data_dir,
+        resolution_tag(cfg)
+    )
 }
 
 /// the per-axis resolution tag for a checkpoint name: the interior cell counts
 /// joined by `x` (the standard resolution notation, distinct from the `_`
-/// decimal in the time). e.g. 1d 100 -> "100", 2d 256x256 -> "256x256",
+/// decimal in the time). e.g., 1d 100 -> "100", 2d 256x256 -> "256x256",
 /// 3d 64x64x64 -> "64x64x64".
 fn resolution_tag(cfg: &Config) -> String {
     (0..cfg.dims)
@@ -1814,7 +3248,10 @@ fn resolution_tag(cfg: &Config) -> String {
 /// all become valid path components). the RAW label is still used verbatim in
 /// the live display, messages, and checkpoint metadata.
 fn sanitize_unit_label(label: &str) -> String {
-    label.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect()
+    label
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect()
 }
 
 /// the natural-unit time string for a checkpoint message: "t = 1.0000" in code
@@ -1831,6 +3268,51 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 // the pybind11-compatible entry point
 // =============================================================================
 
+// validate a multi-gpu request (`Config.n_gpus`) before any heavy work. phase A (docs/design/
+// 37, 38): gpus==1 is the only wired path; gpus>1 is validated and rejected with the PRECISE
+// reason -- a cpu build, too few visible devices, or the decomposed run loop (M4) not yet
+// wired -- so the user gets an actionable message instead of a silent single-device run.
+fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
+    if n_gpus <= 1 {
+        return Ok(());
+    }
+    #[cfg(not(feature = "gpu"))]
+    {
+        Err(format!(
+            "gpus={n_gpus} requested, but this is a cpu build. multi-gpu needs a gpu build: \
+             `./dev.py install --gpu` (nvidia) or `--hip` (amd)."
+        ))
+    }
+    #[cfg(feature = "gpu")]
+    {
+        let avail = symbi::symbi_xpu::device_count().unwrap_or(0) as usize;
+        if n_gpus > avail {
+            // OVERSUBSCRIBE escape hatch (docs/design/37 M2): fold N logical devices onto the
+            // available physical ones (distinct contexts via the modulo map in cuda.rs/hip.rs).
+            // no real parallelism, but it lets the WHOLE decomposed path (build + scatter +
+            // evolve + gather + checkpoint) be validated on a single card -- run the same problem
+            // at gpus=1 and gpus=2 and diff the checkpoints. opt-in so a genuine "too few gpus"
+            // misconfiguration on a cluster still errors loudly.
+            if std::env::var("SYMBI_GPU_OVERSUBSCRIBE").is_err() {
+                return Err(format!(
+                    "gpus={n_gpus} requested, but only {avail} gpu(s) are visible. select/limit \
+                     with CUDA_VISIBLE_DEVICES or ROCR_VISIBLE_DEVICES, lower gpus, or set \
+                     SYMBI_GPU_OVERSUBSCRIBE=1 to fold the logical devices onto the {avail} \
+                     physical one(s) for a correctness test."
+                ));
+            }
+            eprintln!(
+                "warning: gpus={n_gpus} > {avail} visible; oversubscribing onto {avail} physical \
+                 device(s) (SYMBI_GPU_OVERSUBSCRIBE) -- correctness check only, no speedup."
+            );
+        }
+        // the decomposed run loop is wired for hydro (docs/design/37 M4); per-regime support is
+        // enforced in `dispatch_and_run` so non-hydro regimes error instead of silently falling
+        // back to one device.
+        Ok(())
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (prim_gen, staggered_bfields, sim_info, a, adot))]
 fn run_simulation(
@@ -1842,6 +3324,8 @@ fn run_simulation(
     adot: &Bound<'_, PyAny>,
 ) -> PyResult<()> {
     let mut cfg = parse_config(sim_info)?;
+    // fail fast on an unsupported multi-gpu request, before draining generators or allocating.
+    validate_gpu_request(cfg.n_gpus).map_err(PyRuntimeError::new_err)?;
     // evaluate the scale-factor callables at the start time (GIL held). the rust
     // mesh-motion model integrates `a` from the constant rate `a_dot` (linear /
     // free homologous expansion, a_ddot = 0), so a single sample at t0 suffices.
@@ -1870,16 +3354,16 @@ fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 // cpu build -> `simbi.libs.cpu_ext`.
-#[cfg(not(feature = "cuda"))]
+#[cfg(not(feature = "gpu"))]
 #[pymodule]
 fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)
 }
 
-// cuda build -> `simbi.libs.gpu_ext`. dev.py overrides maturin's module-name to
-// match (`--config tool.maturin.module-name="simbi.libs.gpu_ext"`), so the two
+// gpu build (cuda or hip) -> `simbi.libs.gpu_ext`. dev.py overrides maturin's module-name to
+// match (`--config tool.maturin.module-name="simbi.libs.gpu_ext"`), so the cpu and gpu
 // backends coexist instead of overwriting the same `cpu_ext` dylib.
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 #[pymodule]
 fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)

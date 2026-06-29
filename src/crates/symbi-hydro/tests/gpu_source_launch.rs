@@ -12,14 +12,14 @@
 // it numerically: spec data → CPU eval ≡ spec data → GPU launch (modulo
 // nvcc/NVRTC FMA fusion drift, which is ULP-bounded).
 //
-// run (in the cuda-enabled environment, e.g. symbi-cuda distrobox):
+// run (in the cuda-enabled environment, e.g., symbi-cuda distrobox):
 //   cargo test -p symbi-hydro --features cuda --test gpu_source_launch
 //
 // the test is gated behind `--features cuda`; without the feature this
 // file compiles to nothing.
 // =============================================================================
 
-#![cfg(feature = "cuda")]
+#![cfg(feature = "gpu")]
 
 use symbi_hydro::regime_spec::{law_params, NEWTONIAN_SPEC};
 use symbi_hydro::source_spec::{gravity_params, point_mass_gravity_sources, source_params};
@@ -28,7 +28,7 @@ use symbi_hydro::{
 };
 
 /// helper: build a small grid of per-cell field values for one named
-/// parameter (e.g. "rho", "vel_0", "xm_0", "gm"). uniform-across-cells
+/// parameter (e.g., "rho", "vel_0", "xm_0", "gm"). uniform-across-cells
 /// for scalars (gm, xm_*); per-cell for position (x_*) etc.
 fn build_input_buffers(
     params: &[String],

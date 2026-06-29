@@ -37,6 +37,18 @@ pub mod cuda;
 #[cfg(feature = "cuda")]
 pub mod nvrtc;
 
+// the amd backend (docs/design/38). sibling to cuda behind the same traits.
+#[cfg(feature = "hip")]
+pub mod hip;
+
+#[cfg(feature = "hip")]
+pub mod hiprtc;
+
+// exactly one concrete gpu backend at a time. the `gpu` umbrella feature (implied by both)
+// gates backend-agnostic device code; `cuda` / `hip` select the concrete backend.
+#[cfg(all(feature = "cuda", feature = "hip"))]
+compile_error!("features `cuda` and `hip` are mutually exclusive: enable exactly one gpu backend");
+
 // traits
 pub use space::ExecutionSpace;
 pub use memory::{MemorySpace, MemoryBlock, HostMemory};
@@ -49,21 +61,56 @@ pub use args::{KernelArgs, with_pooled_args};
 pub use config::{LaunchConfig, block_dims, block_for, extent_aware_block};
 pub use error::{XpuError, Result};
 
-// conditional re-exports
+// the active gpu backend module, aliased neutrally so the crate's neutral surface binds to it
+// without naming cuda/hip. cuda wins if both are somehow set (the hip arm is `not(cuda)`).
+#[cfg(feature = "cuda")]
+use cuda as gpu_backend;
+#[cfg(all(feature = "hip", not(feature = "cuda")))]
+use hip as gpu_backend;
+
+// neutral device api (gpu = cuda || hip): downstream calls `symbi_xpu::ctx_sync`,
+// `symbi_xpu::memcpy_peer`, etc. instead of naming a backend module (docs/design/38).
+#[cfg(feature = "gpu")]
+pub use gpu_backend::{
+    can_access_peer, ctx_sync, current_device, device_count, device_info, enable_peer_access,
+    memcpy_peer, DeviceInfo, MAX_GPUS,
+};
+
+// neutral device space/memory aliases. the concrete `CudaSpace`/`UnifiedMemory` (and the hip
+// names) stay exported for backend-specific tests; downstream code names `DeviceSpace`/
+// `DeviceMemory`, which resolve to whichever backend is compiled in.
 #[cfg(feature = "cuda")]
 pub use cuda::{CudaSpace, UnifiedMemory};
-
-// default space selection
 #[cfg(feature = "cuda")]
-pub type DefaultSpace = CudaSpace;
+pub use cuda::{CudaSpace as DeviceSpace, UnifiedMemory as DeviceMemory};
+#[cfg(all(feature = "hip", not(feature = "cuda")))]
+pub use hip::{HipManaged, HipSpace};
+#[cfg(all(feature = "hip", not(feature = "cuda")))]
+pub use hip::{HipManaged as DeviceMemory, HipSpace as DeviceSpace};
 
-#[cfg(not(feature = "cuda"))]
+/// run `f` with gpu device `ord` bound on this thread, restoring the previous device after. on
+/// a host (no-gpu) build this is just `f()` -- device binding is a no-op there, so callers can
+/// wrap a tile's work uniformly regardless of backend (docs/design/37).
+#[cfg(feature = "gpu")]
+pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
+    gpu_backend::with_device(ord, f)
+}
+#[cfg(not(feature = "gpu"))]
+pub fn with_device<R>(_ord: i32, f: impl FnOnce() -> R) -> R {
+    f()
+}
+
+// default space selection: any gpu backend -> the device space/memory; else cpu/host.
+#[cfg(feature = "gpu")]
+pub type DefaultSpace = DeviceSpace;
+
+#[cfg(not(feature = "gpu"))]
 pub type DefaultSpace = CpuSpace;
 
-#[cfg(feature = "cuda")]
-pub type DefaultMemory = UnifiedMemory;
+#[cfg(feature = "gpu")]
+pub type DefaultMemory = DeviceMemory;
 
-#[cfg(not(feature = "cuda"))]
+#[cfg(not(feature = "gpu"))]
 pub type DefaultMemory = HostMemory;
 
 /// cpu execution space. always available.

@@ -17,27 +17,31 @@
 
 use symbi_algebra::Tensor;
 use symbi_algebra::algebra::Numeric;
-use symbi_ir::algebra::Scalar;
-use symbi_ir::{FieldBind, FieldRef};
-use symbi_hydro::eos::{IdealGas, Isothermal};
-use symbi_hydro::mhd_state::{MhdCons, MhdPrim, IsoMhdCons, IsoMhdPrim};
-use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::newtonian_mhd::{nmhd_recover, NewtonianMhd};
-use symbi_hydro::isothermal_mhd::{imhd_recover, IsothermalMhd};
-use symbi_hydro::regime::Regime;
-use symbi_hydro::riemann::{hlle, hlle_with_speeds, hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_rmhd_states, HlldStates, hlld_newtonian, hlld_newtonian_coeffs, hlld_isothermal, hlld_isothermal_coeffs};
 use symbi_hydro::ShockwaveLimiter;
-use symbi_hydro::rmhd::{rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities, Rmhd};
-use symbi_hydro::srhd::{srhd_recover, Srhd};
-use symbi_hydro::state::{Cons, Prim, ConsG, PrimG};
 use symbi_hydro::energy::Zero;
+use symbi_hydro::eos::{IdealGas, Isothermal};
+use symbi_hydro::isothermal_mhd::{IsothermalMhd, imhd_recover};
+use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
+use symbi_hydro::newtonian::Newtonian;
+use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
+use symbi_hydro::regime::Regime;
+use symbi_hydro::riemann::{
+    HlldStates, hllc, hllc_newtonian, hllc_rmhd, hllc_srhd, hlld_isothermal,
+    hlld_isothermal_coeffs, hlld_newtonian, hlld_newtonian_coeffs, hlld_rmhd, hlld_rmhd_states,
+    hlle, hlle_with_speeds,
+};
+use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities};
+use symbi_hydro::srhd::{Srhd, srhd_recover};
+use symbi_hydro::state::{Cons, ConsG, Prim, PrimG};
 use symbi_ir::Symbol;
+use symbi_ir::algebra::Scalar;
 use symbi_ir::graph::{ConstValue, ElementWiseOp, NodeId};
+use symbi_ir::{FieldBind, FieldRef};
 
 // the carrier + trace live alongside Op + Graph in symbi-ir (consolidated 2026-05-30;
 // symbi-core was folded in). the builders below instantiate carrier-generic
 // symbi-hydro physics at S = Gv and trace it into the IR.
-use symbi_ir::{begin_trace, end_trace, with_trace, Gv, GvKernel, MeshScalar, TileSpec};
+use symbi_ir::{Gv, GvKernel, MeshScalar, TileSpec, begin_trace, end_trace, with_trace};
 
 use super::coords::{Coords, Spacing};
 
@@ -45,22 +49,22 @@ use super::coords::{Coords, Spacing};
 // the byte-identical public path `gv::NAME` for every builder lib.rs + downstream crates reach
 // (the split is purely organizational — no api change).
 mod c2p;
-mod flux;
-mod wavespeed;
-mod geometry;
-mod sources;
-mod ghost;
 mod ct_emf;
+mod flux;
+mod geometry;
+mod ghost;
 mod godunov;
+mod sources;
+mod wavespeed;
 
 pub use c2p::*;
-pub use flux::*;
-pub use wavespeed::*;
-pub use geometry::*;
-pub use sources::*;
-pub use ghost::*;
 pub use ct_emf::*;
+pub use flux::*;
+pub use geometry::*;
+pub use ghost::*;
 pub use godunov::*;
+pub use sources::*;
+pub use wavespeed::*;
 
 // shared low-level helpers used across 2+ category submodules (or with no single category home)
 // — kept here so every submodule sees them through `use super::*`.
@@ -76,7 +80,6 @@ fn minmod3<S: Scalar>(x: S, y: S, z: S) -> S {
     S::select(all_pos, mn, S::select(all_neg, mx, S::ZERO))
 }
 
-
 /// van Leer harmonic slope limiter: `2 dl dr/(dl+dr)` for same-sign slopes, `0` otherwise. SMOOTH
 /// (C^1, no kink at the origin — unlike minmod), so the reconstructed staggered field stays clean.
 /// the MHD-friendly limiter: keeps the L/R jumps small enough that the HLLD EMF's intermediate-field
@@ -90,14 +93,19 @@ fn van_leer<S: Scalar>(dl: S, dr: S) -> S {
     S::select(pos, two * prod / denom, S::ZERO)
 }
 
-
 /// PLM reconstruct with a runtime-selectable limiter, keyed on the SIGN of the `theta` scalar param:
 ///   theta >= 0 -> theta-MC minmod: `minmod3((vc-vl)*theta, (vr-vl)*0.5, (vr-vc)*theta)`, theta in
 ///                 [1,2] tuning compression (1 == plain minmod, 0 == pcm/first-order).
 ///   theta <  0 -> van Leer (the smooth, MHD-friendly limiter; the magnitude is unused).
 /// overloading theta's sign avoids a second ABI scalar — switch limiters at runtime via `--plm-theta`
-/// (>=0 minmod-MC, e.g. -1 for van Leer). both branches are traced; `select` keeps it NaN-safe.
-fn plm_theta_gv(key: &str, runtime: impl Into<FieldBind>, ndim: u8, dir: u8, theta: Gv) -> (Gv, Gv) {
+/// (>=0 minmod-MC, e.g., -1 for van Leer). both branches are traced; `select` keeps it NaN-safe.
+fn plm_theta_gv(
+    key: &str,
+    runtime: impl Into<FieldBind>,
+    ndim: u8,
+    dir: u8,
+    theta: Gv,
+) -> (Gv, Gv) {
     let runtime = runtime.into();
     let qm2 = Gv::field_shifted(key, runtime.clone(), ndim, dir, -2);
     let qm1 = Gv::field_shifted(key, runtime.clone(), ndim, dir, -1);
@@ -115,7 +123,6 @@ fn plm_theta_gv(key: &str, runtime: impl Into<FieldBind>, ndim: u8, dir: u8, the
     let right = q0 - half * slope(qm1, q0, qp1);
     (left, right)
 }
-
 
 // =============================================================================
 // the lattice-map GHOST FILL in Gv (docs/design/11) — the boundary pullback: read the
@@ -136,10 +143,12 @@ fn gv_lattice_source(ndim: usize) -> Vec<NodeId> {
         // register coords, then ALL map_type, then ALL arg (grouped — matching the positional
         // rmhd ghost-fill dispatch ints [map_type_0..D, arg_0..D]).
         let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let map_type: Vec<NodeId> =
-            (0..ndim).map(|ax| t.scalar_int(&format!("map_type_{ax}"))).collect();
-        let arg: Vec<NodeId> =
-            (0..ndim).map(|ax| t.scalar_int(&format!("arg_{ax}"))).collect();
+        let map_type: Vec<NodeId> = (0..ndim)
+            .map(|ax| t.scalar_int(&format!("map_type_{ax}")))
+            .collect();
+        let arg: Vec<NodeId> = (0..ndim)
+            .map(|ax| t.scalar_int(&format!("arg_{ax}")))
+            .collect();
         (0..ndim)
             .map(|ax| {
                 let (c, mt, ag) = (coords[ax], map_type[ax], arg[ax]);
@@ -160,7 +169,6 @@ fn gv_lattice_source(ndim: usize) -> Vec<NodeId> {
     })
 }
 
-
 /// load field `key` at the integer source coord vector `src` (deduped manifest registration) —
 /// the gv multi-axis `load_at`, the pullback read. returns the loaded value as a `Gv`.
 /// pub(crate): the amr transfer builders (gv_refinement.rs) share this pullback read.
@@ -171,7 +179,6 @@ pub(crate) fn gv_load_at(key: &str, runtime: impl Into<FieldBind>, src: &[NodeId
         t.graph().load_at(Symbol::intern(key), src.to_vec(), None)
     }))
 }
-
 
 // =============================================================================
 // the RMHD CONSTRAINED-TRANSPORT stack in Gv — the staggered curl / edge-EMF / face->cell B /
@@ -188,7 +195,6 @@ fn gv_register_field(key: &str, runtime: &str) {
     with_trace(|t| t.register_field(key, runtime));
 }
 
-
 /// load field `key` at `coord + offsets` (per-axis integer offset; all-zero = the cell coord) —
 /// the gv multi-axis OFFSET stencil (the CT staggered gather). registers the field (deduped),
 /// builds the integer coord arithmetic + `load_at`. like `field_shifted` but a full offset vector.
@@ -202,14 +208,14 @@ fn gv_field_at(key: &str, runtime: &str, ndim: usize, offsets: &[i32]) -> Gv {
                     c
                 } else {
                     let off = t.graph().add_const(ConstValue::I32(offsets[ax]), None);
-                    t.graph().element_wise(ElementWiseOp::Add, vec![c, off], None)
+                    t.graph()
+                        .element_wise(ElementWiseOp::Add, vec![c, off], None)
                 }
             })
             .collect();
         t.graph().load_at(Symbol::intern(key), comps, None)
     }))
 }
-
 
 /// smooth sign (for the HLLC/HLLD denominator guards): f/(|f|+eps), in [-1,1], 0 at f=0.
 fn sign_gv(f: Gv) -> Gv {
@@ -228,14 +234,27 @@ mod tests {
         // (halo on the reconstruction axis `dir`, 0 transverse). a POINTWISE
         // kernel (same-cell reads only) declares no spec -> infers None.
         let (flux, _) = rmhd_flux_gv(1, 0, 0);
-        assert!(!flux.coord_components.is_empty(), "flux must be a stencil kernel");
+        assert!(
+            !flux.coord_components.is_empty(),
+            "flux must be a stencil kernel"
+        );
         let ts = flux.infer_tile_spec().expect("rmhd flux -> Some(TileSpec)");
-        assert_eq!(ts.halo, vec![2], "PLM reconstruction radius on the single (dir=0) axis");
+        assert_eq!(
+            ts.halo,
+            vec![2],
+            "PLM reconstruction radius on the single (dir=0) axis"
+        );
         assert!(!ts.tiled_field_keys.is_empty(), "tiled fields populated");
 
         let (c2p, _) = rmhd_c2p_gv(100);
-        assert!(c2p.coord_components.is_empty(), "c2p must be pointwise (same-cell)");
-        assert!(c2p.infer_tile_spec().is_none(), "pointwise c2p -> no smem tile");
+        assert!(
+            c2p.coord_components.is_empty(),
+            "c2p must be pointwise (same-cell)"
+        );
+        assert!(
+            c2p.infer_tile_spec().is_none(),
+            "pointwise c2p -> no smem tile"
+        );
     }
 
     #[test]
@@ -244,7 +263,10 @@ mod tests {
         // kernel — the right ABI manifest + the right writes — with NO hand-written builder.
         let (k, writes) = adiabatic_c2p_gv::<1>();
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
                 ("cons_mom_0".to_string(), "cons.mom_0".to_string()),
@@ -254,7 +276,11 @@ mod tests {
         assert_eq!(k.scalar_params, vec!["gamma".to_string()]);
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
         assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
     }
 
     #[test]
@@ -266,24 +292,44 @@ mod tests {
         let mk = |v: f64| {
             let mut g = Graph::new();
             let c = g.add_const(ConstValue::F64(v), None);
-            symbi_hydro::source_spec::BuiltSource { graph: g, params: vec![], outputs: vec![c] }
+            symbi_hydro::source_spec::BuiltSource {
+                graph: g,
+                params: vec![],
+                outputs: vec![c],
+            }
         };
         let (rho, vel, pre) = (mk(2.0), mk(0.5), mk(1.0));
         let sources = [("den", &rho), ("mom", &vel), ("nrg", &pre)];
         let (k, writes) = boundary_fill_from_built_gv(
-            Coords::Cartesian, &[Spacing::Uniform], &[0], 1, 1, true, &sources,
+            Coords::Cartesian,
+            &[Spacing::Uniform],
+            &[0],
+            1,
+            1,
+            true,
+            &sources,
         );
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
         // Assign writes the PRIM state (not cons), one DAG per slot.
         let paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
         assert_eq!(paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
         // Assign has NO `dt` weight (it is a prescription, not an RHS).
-        assert!(!k.scalar_params.contains(&"dt".to_string()), "Assign carries no dt weight");
+        assert!(
+            !k.scalar_params.contains(&"dt".to_string()),
+            "Assign carries no dt weight"
+        );
         // Coord binds NO state -> the kernel reads no `u_stage.*` / `cons.*` inputs (a pure
         // coordinate prescription). the const prims read nothing at all here.
         assert!(
-            !k.field_inputs.iter().any(|(_, p)| p.name().starts_with("u_stage") || p.name().starts_with("cons")),
-            "Coord/Assign reads no interior state, got inputs {:?}", k.field_inputs,
+            !k.field_inputs
+                .iter()
+                .any(|(_, p)| p.name().starts_with("u_stage") || p.name().starts_with("cons")),
+            "Coord/Assign reads no interior state, got inputs {:?}",
+            k.field_inputs,
         );
     }
 
@@ -295,26 +341,52 @@ mod tests {
         use symbi_ir::graph::ConstValue;
         let mk = |vals: &[f64]| {
             let mut g = Graph::new();
-            let outs = vals.iter().map(|&v| g.add_const(ConstValue::F64(v), None)).collect();
-            symbi_hydro::source_spec::BuiltSource { graph: g, params: vec![], outputs: outs }
+            let outs = vals
+                .iter()
+                .map(|&v| g.add_const(ConstValue::F64(v), None))
+                .collect();
+            symbi_hydro::source_spec::BuiltSource {
+                graph: g,
+                params: vec![],
+                outputs: outs,
+            }
         };
         let den = mk(&[1.0]);
         let mom = mk(&[0.1, 0.0, 0.0]);
         let nrg = mk(&[1.0]);
         let bcell = mk(&[0.0, 0.0, 0.5]); // B_r=0, B_theta=0, B_phi=0.5 (purely toroidal)
-        let sources = [("den", &den), ("mom", &mom), ("nrg", &nrg), ("bcell", &bcell)];
+        let sources = [
+            ("den", &den),
+            ("mom", &mom),
+            ("nrg", &nrg),
+            ("bcell", &bcell),
+        ];
         let (k, writes) = boundary_fill_from_built_gv(
-            Coords::Spherical, &[Spacing::Log, Spacing::Uniform], &[0, 1], 2, 3, true, &sources,
+            Coords::Spherical,
+            &[Spacing::Log, Spacing::Uniform],
+            &[0, 1],
+            2,
+            3,
+            true,
+            &sources,
         );
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
         let paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
         assert_eq!(
             paths,
             vec![
                 "prim.rho",
-                "prim.vel[0]", "prim.vel[1]", "prim.vel[2]",
+                "prim.vel[0]",
+                "prim.vel[1]",
+                "prim.vel[2]",
                 "prim.pre",
-                "prim.mag[0]", "prim.mag[1]", "prim.mag[2]",
+                "prim.mag[0]",
+                "prim.mag[1]",
+                "prim.mag[2]",
             ],
         );
     }
@@ -332,7 +404,10 @@ mod tests {
         match &g.node(root).op {
             Op::ElementWise(ElementWiseOp::Add, ins) => {
                 assert_eq!(ins.len(), 2);
-                assert!(matches!(&g.node(ins[0]).op, Op::ElementWise(ElementWiseOp::Mul, _)));
+                assert!(matches!(
+                    &g.node(ins[0]).op,
+                    Op::ElementWise(ElementWiseOp::Mul, _)
+                ));
             }
             other => panic!("expected Add, got {other:?}"),
         }
@@ -348,9 +423,9 @@ mod tests {
         let g = end_trace().graph;
         match &g.node(root).op {
             Op::ElementWise(ElementWiseOp::Mul, ins) => {
-                let has_two = ins.iter().any(|&i| {
-                    matches!(&g.node(i).op, Op::Const(ConstValue::F64(v)) if *v == 2.0)
-                });
+                let has_two = ins
+                    .iter()
+                    .any(|&i| matches!(&g.node(i).op, Op::Const(ConstValue::F64(v)) if *v == 2.0));
                 assert!(has_two, "the 2.0 literal should be a Const(F64(2.0)) node");
             }
             other => panic!("expected Mul, got {other:?}"),
@@ -370,7 +445,10 @@ mod tests {
         let _reread = Gv::field("cons_den", FieldRef::cons_den()); // a re-read dedups
         let k = end_trace();
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
                 ("cons_mom_0".to_string(), "cons.mom_0".to_string()),
@@ -388,23 +466,42 @@ mod tests {
         // the run able to be locally isothermal (cs varies per cell). global = uniform cs2.
         let (k, writes) = iso_c2p_gv::<1>();
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
                 ("cons_mom_0".to_string(), "cons.mom_0".to_string()),
                 ("cs2".to_string(), "cs2".to_string()),
             ]
         );
-        assert!(k.scalar_params.is_empty(), "cs2 is a field, not a scalar: {:?}", k.scalar_params);
+        assert!(
+            k.scalar_params.is_empty(),
+            "cs2 is a field, not a scalar: {:?}",
+            k.scalar_params
+        );
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
         assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
 
         // pre = recover_pressure = cs2 * rho (the per-cell sound-speed-squared times density).
-        let pre_id = writes.iter().find(|(_, rt, _)| rt.name() == "prim.pre").unwrap().2;
+        let pre_id = writes
+            .iter()
+            .find(|(_, rt, _)| rt.name() == "prim.pre")
+            .unwrap()
+            .2;
         assert!(
-            matches!(&k.graph.node(pre_id).op, Op::ElementWise(ElementWiseOp::Mul, _)),
-            "expected pre = Mul(cs2, rho), got {:?}", k.graph.node(pre_id).op
+            matches!(
+                &k.graph.node(pre_id).op,
+                Op::ElementWise(ElementWiseOp::Mul, _)
+            ),
+            "expected pre = Mul(cs2, rho), got {:?}",
+            k.graph.node(pre_id).op
         );
     }
 
@@ -416,7 +513,10 @@ mod tests {
         // exponential tree. the manifest + writes match the retired `srhd_c2p` Expr builder.
         let (k, writes) = srhd_c2p_gv::<1>(20);
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
                 ("cons_mom_0".to_string(), "cons.mom_0".to_string()),
@@ -426,12 +526,23 @@ mod tests {
         assert_eq!(k.scalar_params, vec!["gamma".to_string()]);
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
         assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.pre"]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
 
         // the recovered pressure is a fixed-count inline Newton loop.
-        let pre_id = writes.iter().find(|(_, rt, _)| rt.name() == "prim.pre").unwrap().2;
+        let pre_id = writes
+            .iter()
+            .find(|(_, rt, _)| rt.name() == "prim.pre")
+            .unwrap()
+            .2;
         assert!(
-            matches!(&k.graph.node(pre_id).op, Op::IterateInline { count: 20, .. }),
+            matches!(
+                &k.graph.node(pre_id).op,
+                Op::IterateInline { count: 20, .. }
+            ),
             "expected prim.pre = IterateInline(count=20), got {:?}",
             k.graph.node(pre_id).op
         );
@@ -445,7 +556,10 @@ mod tests {
         // 6-state bracket). proves iterate_vec carries the carrier-generic RMHD c2p.
         let (k, writes) = rmhd_c2p_gv(100);
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("cons_den".to_string(), FieldRef::cons_den().name()),
                 ("cons_mom_0".to_string(), "cons.mom_0".to_string()),
@@ -459,15 +573,31 @@ mod tests {
         );
         assert_eq!(k.scalar_params, vec!["gamma".to_string()]);
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
-        assert_eq!(write_paths, vec!["prim.rho", "prim.vel[0]", "prim.vel[1]", "prim.vel[2]", "prim.pre"]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert_eq!(
+            write_paths,
+            vec![
+                "prim.rho",
+                "prim.vel[0]",
+                "prim.vel[1]",
+                "prim.vel[2]",
+                "prim.pre"
+            ]
+        );
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
 
         // the false-position is a 6-accumulator IterateInline (count=100).
         let has_multi_iter = (0..k.graph.len()).any(|i| {
             matches!(&k.graph.node(NodeId(i as u32)).op,
                 Op::IterateInline { accs, count: 100, .. } if accs.len() == 6)
         });
-        assert!(has_multi_iter, "expected a 6-accumulator IterateInline(count=100) for the false-position");
+        assert!(
+            has_multi_iter,
+            "expected a 6-accumulator IterateInline(count=100) for the false-position"
+        );
     }
 
     #[test]
@@ -478,7 +608,10 @@ mod tests {
         // hand-written per-component U/F. manifest + writes match the substrate hlle_flux.
         let (k, writes) = adiabatic_flux_gv::<1>(0);
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("prim_rho".to_string(), FieldRef::PrimRho.name()),
                 ("prim_v0".to_string(), "prim.vel[0]".to_string()),
@@ -499,13 +632,20 @@ mod tests {
         assert_eq!(k.coord_components, vec![0]);
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
         assert_eq!(write_paths, vec!["flux.den", "flux.mom_0", "flux.nrg"]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
 
-        let has_load_at =
-            (0..k.graph.len()).any(|i| matches!(&k.graph.node(NodeId(i as u32)).op, Op::LoadAt(..)));
-        let has_select =
-            (0..k.graph.len()).any(|i| matches!(&k.graph.node(NodeId(i as u32)).op, Op::Select(..)));
-        assert!(has_load_at, "reconstruction should emit LoadAt stencil nodes");
+        let has_load_at = (0..k.graph.len())
+            .any(|i| matches!(&k.graph.node(NodeId(i as u32)).op, Op::LoadAt(..)));
+        let has_select = (0..k.graph.len())
+            .any(|i| matches!(&k.graph.node(NodeId(i as u32)).op, Op::Select(..)));
+        assert!(
+            has_load_at,
+            "reconstruction should emit LoadAt stencil nodes"
+        );
         assert!(has_select, "HLLE should emit Select branches");
     }
 
@@ -515,7 +655,10 @@ mod tests {
         // the only change from adiabatic is the regime — one HLLE source, two physics.
         let (k, writes) = srhd_flux_gv::<1>(0);
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("prim_rho".to_string(), FieldRef::PrimRho.name()),
                 ("prim_v0".to_string(), "prim.vel[0]".to_string()),
@@ -535,7 +678,11 @@ mod tests {
         );
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
         assert_eq!(write_paths, vec!["flux.den", "flux.mom_0", "flux.nrg"]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
     }
 
     #[test]
@@ -547,7 +694,10 @@ mod tests {
         // the PLM limiter `theta`.
         let (k, writes) = iso_flux_gv::<1>(0);
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![
                 ("prim_rho".to_string(), FieldRef::PrimRho.name()),
                 ("prim_v0".to_string(), "prim.vel[0]".to_string()),
@@ -565,8 +715,16 @@ mod tests {
             ]
         );
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
-        assert_eq!(write_paths, vec!["flux.den", "flux.mom_0"], "iso has no energy flux");
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert_eq!(
+            write_paths,
+            vec!["flux.den", "flux.mom_0"],
+            "iso has no energy flux"
+        );
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
     }
 
     #[test]
@@ -576,28 +734,54 @@ mod tests {
         // are NO LONGER computed here — the flux READS the per-cell wave_speed_l/r (ws_l/ws_r,
         // bound after the 8 prim) and forms the Davis fan. 8 conserved fluxes (D, S_k, tau, B_k).
         let (k, writes) = rmhd_flux_gv(1, 0, 0);
-        assert_eq!(k.scalar_params, vec!["gamma".to_string(), "theta".to_string()]);
         assert_eq!(
-            k.field_inputs.iter().map(|(key, _)| key.as_str()).collect::<Vec<_>>(),
+            k.scalar_params,
+            vec!["gamma".to_string(), "theta".to_string()]
+        );
+        assert_eq!(
+            k.field_inputs
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>(),
             vec![
-                "prim_rho", "prim_v0", "prim_v1", "prim_v2", "prim_pre", "prim_b0", "prim_b1", "prim_b2",
+                "prim_rho", "prim_v0", "prim_v1", "prim_v2", "prim_pre", "prim_b0", "prim_b1",
+                "prim_b2",
                 "bface_n", // <- the staggered normal-B face field (Gardiner-Stone CT coupling)
                 "ws_l", "ws_r", // <- the materialized per-cell wave speeds, read for the fan
             ]
         );
         let write_paths: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
-        assert_eq!(write_paths, vec![
-            "flux.den", "flux.mom_0", "flux.mom_1", "flux.mom_2", "flux.nrg",
-            "flux.mag_0", "flux.mag_1", "flux.mag_2",
-        ]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert_eq!(
+            write_paths,
+            vec![
+                "flux.den",
+                "flux.mom_0",
+                "flux.mom_1",
+                "flux.mom_2",
+                "flux.nrg",
+                "flux.mag_0",
+                "flux.mag_1",
+                "flux.mag_2",
+            ]
+        );
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
         // THE WIN: the quartic's resolvent-cubic transcendentals are GONE from the flux —
         // they live only in rmhd_wave_speeds_cell_gv now (computed once per cell, not per face).
         use symbi_ir::graph::ElementWiseOp as E;
-        let has_transcendental = (0..k.graph.len()).any(|i| matches!(
-            &k.graph.node(NodeId(i as u32)).op,
-            Op::ElementWise(E::Asinh | E::Acosh | E::Cosh | E::Cos | E::Sin | E::Pow, _)));
-        assert!(!has_transcendental, "flux must NOT carry the quartic's transcendentals anymore");
+        let has_transcendental = (0..k.graph.len()).any(|i| {
+            matches!(
+                &k.graph.node(NodeId(i as u32)).op,
+                Op::ElementWise(E::Asinh | E::Acosh | E::Cosh | E::Cos | E::Sin | E::Pow, _)
+            )
+        });
+        assert!(
+            !has_transcendental,
+            "flux must NOT carry the quartic's transcendentals anymore"
+        );
     }
 
     #[test]
@@ -616,7 +800,10 @@ mod tests {
             k.graph.node(qm1_id).op
         );
         assert_eq!(
-            k.field_inputs.iter().map(|(k, b)| (k.clone(), b.name())).collect::<Vec<_>>(),
+            k.field_inputs
+                .iter()
+                .map(|(k, b)| (k.clone(), b.name()))
+                .collect::<Vec<_>>(),
             vec![("prim_rho".to_string(), FieldRef::PrimRho.name())],
         );
         assert_eq!(k.coord_components, vec![0], "axis 0's _coord recorded once");
@@ -634,7 +821,10 @@ mod tests {
             |[lo, _], [lo_n, _]| (lo_n - lo).abs().cmp_lt(1e-15),
             0,
         );
-        assert!((r - 1.0).abs() < 1e-12, "lo should climb toward hi=1.0, got {r}");
+        assert!(
+            (r - 1.0).abs() < 1e-12,
+            "lo should climb toward hi=1.0, got {r}"
+        );
     }
 
     #[test]
@@ -647,14 +837,21 @@ mod tests {
         let r = Gv::iterate_vec(
             [a0, b0],
             7,
-            |[a, b]| [b, a + b],            // fibonacci-style coupling
+            |[a, b]| [b, a + b],              // fibonacci-style coupling
             |_, _| Gv::ZERO.cmp_lt(Gv::ZERO), // never converge (false mask, fixed count)
             0,
         );
         let root = r.node();
         let g = end_trace().graph;
         match &g.node(root).op {
-            Op::IterateInline { accs, inits, steps, count, result, .. } => {
+            Op::IterateInline {
+                accs,
+                inits,
+                steps,
+                count,
+                result,
+                ..
+            } => {
                 assert_eq!(*count, 7);
                 assert_eq!(*result, 0);
                 assert_eq!(accs.len(), 2, "two accumulators");
@@ -673,11 +870,21 @@ mod tests {
         // scalar iterate lowers to a single-accumulator IterateInline whose step is a
         // Select(converged, OLD, NEW) — the keep-OLD freeze (carrier equivalence with the
         // host early-break).
-        let r = x0.iterate(3, |x| x * Gv::from_f64(0.5), |prev, cur| (cur - prev).cmp_lt(Gv::from_f64(1e-9)));
+        let r = x0.iterate(
+            3,
+            |x| x * Gv::from_f64(0.5),
+            |prev, cur| (cur - prev).cmp_lt(Gv::from_f64(1e-9)),
+        );
         let root = r.node();
         let g = end_trace().graph;
         match &g.node(root).op {
-            Op::IterateInline { accs, steps, count, result, .. } => {
+            Op::IterateInline {
+                accs,
+                steps,
+                count,
+                result,
+                ..
+            } => {
                 assert_eq!(*count, 3, "fixed bound preserved");
                 assert_eq!(accs.len(), 1, "single value accumulator");
                 assert_eq!(*result, 0, "result is the value component");
@@ -699,7 +906,7 @@ mod tests {
         // they agree ONLY if the traced loop freezes — before the fix this returned the
         // run-to-count value, the latent CPU-correct/GPU-wrong bug.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::{emit_kernel_cpu, Cpu, CpuField, CpuFieldMut, KernelEmitInputs};
+        use symbi_ir::{Cpu, CpuField, CpuFieldMut, KernelEmitInputs, emit_kernel_cpu};
 
         fn ramp<S: Scalar>(start: S, count: usize, threshold: f64) -> S {
             start.iterate(
@@ -716,11 +923,19 @@ mod tests {
             let root = ramp::<Gv>(s, count, threshold).node();
             let writes = vec![("out".to_string(), "out".into(), root)];
             let k = end_trace();
-            assert!(!k.graph.has_errors(), "ramp graph errors: {:?}", k.graph.errors());
+            assert!(
+                !k.graph.has_errors(),
+                "ramp graph errors: {:?}",
+                k.graph.errors()
+            );
             let spec = KernelEmitInputs {
                 kernel_name: "ramp",
-                coalesce_layout: false,                ndim: 1,
-                target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+                coalesce_layout: false,
+                ndim: 1,
+                target: TargetConfig {
+                    target: Target::Cuda,
+                    precision: Precision::F64,
+                },
                 field_inputs: &k.field_inputs,
                 scalar_params: &k.scalar_params,
                 field_writes: &writes,
@@ -732,37 +947,65 @@ mod tests {
             let _ = emit_kernel_cpu(&k.graph, &spec);
             let (lo, extent) = ([0i32], [1u32]);
             let start_data = [start];
-            let inputs = [CpuField { data: &start_data, lo: &lo, extent: &extent }];
+            let inputs = [CpuField {
+                data: &start_data,
+                lo: &lo,
+                extent: &extent,
+            }];
             let mut out_data = [0.0f64];
-            let mut outputs = [CpuFieldMut { data: &mut out_data, lo: &lo, extent: &extent }];
-            Cpu.run_kernel(&k.graph, &spec, &inputs, &mut outputs, &[], &[1u32], &[0i32]);
+            let mut outputs = [CpuFieldMut {
+                data: &mut out_data,
+                lo: &lo,
+                extent: &extent,
+            }];
+            Cpu.run_kernel(
+                &k.graph,
+                &spec,
+                &inputs,
+                &mut outputs,
+                &[],
+                &[1u32],
+                &[0i32],
+            );
             out_data[0]
         }
 
         // converges within the count: keep-OLD freezes at the last pre-threshold value
         // (4: at prev=4, cur=5 trips `cur >= 5`, so the OLD 4 is kept). the traced loop
-        // must freeze there, NOT run to count=20 (the pre-fix value).
+        // must freeze there, NOT run to count=20.
         let host = ramp::<f64>(0.0, 20, 5.0);
         let gv = run_gv(20, 5.0, 0.0);
-        assert_eq!(host, 4.0, "host keep-OLD freeze returns the last pre-convergence value");
-        assert!((gv - host).abs() < 1e-12, "carrier divergence: host={host}, gv={gv}");
-        assert!((gv - 20.0).abs() > 0.5, "no freeze: traced loop ran to count ({gv})");
+        assert_eq!(
+            host, 4.0,
+            "host keep-OLD freeze returns the last pre-convergence value"
+        );
+        assert!(
+            (gv - host).abs() < 1e-12,
+            "carrier divergence: host={host}, gv={gv}"
+        );
+        assert!(
+            (gv - 20.0).abs() > 0.5,
+            "no freeze: traced loop ran to count ({gv})"
+        );
 
         // never converges within the count: both carriers run the full bound and agree.
         let host_nc = ramp::<f64>(0.0, 3, 5.0);
         let gv_nc = run_gv(3, 5.0, 0.0);
         assert_eq!(host_nc, 3.0);
-        assert!((gv_nc - host_nc).abs() < 1e-12, "non-converged divergence: host={host_nc}, gv={gv_nc}");
+        assert!(
+            (gv_nc - host_nc).abs() < 1e-12,
+            "non-converged divergence: host={host_nc}, gv={gv_nc}"
+        );
     }
 
     #[test]
     fn cond_is_a_lazy_branch_carrier_equivalent_and_renders_if_else() {
         // the DUAL of iterate: `S::cond` is a real data-dependent branch. the
         // untaken arm computes acosh(x) (NaN for x < 1); with `cond` it traces
-        // INTO the `if` block and runs ONLY when x > 1 — the carrier-portable
-        // C++ early-`if`, not compute-all-paths.
+        // INTO the `if` block and runs ONLY when x > 1 — a carrier-portable
+        // early-`if`, not compute-all-paths.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::{emit_kernel_from_lowering, Cpu, CpuField, CpuFieldMut, KernelEmitInputs};
+        use symbi_ir::{Cpu, CpuField, CpuFieldMut, KernelEmitInputs, emit_kernel_from_lowering};
 
         fn pick<S: Scalar>(x: S) -> S {
             S::cond(x.cmp_gt(S::ONE), || x.acosh(), || x * x)
@@ -774,7 +1017,11 @@ mod tests {
         let root = pick::<Gv>(xp).node();
         let g = end_trace().graph;
         match &g.node(root).op {
-            Op::IfElse { then_results, else_results, .. } => {
+            Op::IfElse {
+                then_results,
+                else_results,
+                ..
+            } => {
                 assert_eq!(then_results.len(), 1, "scalar cond → 1 then-result");
                 assert_eq!(else_results.len(), 1, "scalar cond → 1 else-result");
             }
@@ -789,11 +1036,19 @@ mod tests {
             let root = pick::<Gv>(xf).node();
             let writes = vec![("out".to_string(), "out".into(), root)];
             let k = end_trace();
-            assert!(!k.graph.has_errors(), "pick graph errors: {:?}", k.graph.errors());
+            assert!(
+                !k.graph.has_errors(),
+                "pick graph errors: {:?}",
+                k.graph.errors()
+            );
             let spec = KernelEmitInputs {
                 kernel_name: "pick",
-                coalesce_layout: false,                ndim: 1,
-                target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+                coalesce_layout: false,
+                ndim: 1,
+                target: TargetConfig {
+                    target: Target::Cuda,
+                    precision: Precision::F64,
+                },
                 field_inputs: &k.field_inputs,
                 scalar_params: &k.scalar_params,
                 field_writes: &writes,
@@ -804,10 +1059,26 @@ mod tests {
             let src = emit_kernel_from_lowering(&k.graph, &spec).source;
             let (lo, extent) = ([0i32], [1u32]);
             let xdata = [x];
-            let inputs = [CpuField { data: &xdata, lo: &lo, extent: &extent }];
+            let inputs = [CpuField {
+                data: &xdata,
+                lo: &lo,
+                extent: &extent,
+            }];
             let mut out = [0.0f64];
-            let mut outputs = [CpuFieldMut { data: &mut out, lo: &lo, extent: &extent }];
-            Cpu.run_kernel(&k.graph, &spec, &inputs, &mut outputs, &[], &[1u32], &[0i32]);
+            let mut outputs = [CpuFieldMut {
+                data: &mut out,
+                lo: &lo,
+                extent: &extent,
+            }];
+            Cpu.run_kernel(
+                &k.graph,
+                &spec,
+                &inputs,
+                &mut outputs,
+                &[],
+                &[1u32],
+                &[0i32],
+            );
             (out[0], src)
         }
 
@@ -826,9 +1097,18 @@ mod tests {
         //    expensive `acosh` INSIDE the branch (after `if (`), and NO
         //    higher-order placeholder — the structural laziness proof.
         let (_, src) = run_gv(2.0);
-        assert!(src.contains("if ("), "no real branch in emitted source:\n{src}");
-        assert!(src.contains("} else {"), "no else arm in emitted source:\n{src}");
-        assert!(!src.contains("HIGHER_ORDER"), "IfElse not intercepted by emit:\n{src}");
+        assert!(
+            src.contains("if ("),
+            "no real branch in emitted source:\n{src}"
+        );
+        assert!(
+            src.contains("} else {"),
+            "no else arm in emitted source:\n{src}"
+        );
+        assert!(
+            !src.contains("HIGHER_ORDER"),
+            "IfElse not intercepted by emit:\n{src}"
+        );
         let if_pos = src.find("if (").expect("if");
         let acosh_pos = src.find("acosh").expect("acosh in then-arm");
         assert!(
@@ -844,13 +1124,16 @@ mod tests {
         // both outputs — proving the arm runs once and both outputs project
         // from it: the (sl, sr) wave-speed fast-path shape.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::{emit_kernel_from_lowering, Cpu, CpuField, CpuFieldMut, KernelEmitInputs};
+        use symbi_ir::{Cpu, CpuField, CpuFieldMut, KernelEmitInputs, emit_kernel_from_lowering};
 
         fn pick2<S: Scalar>(x: S) -> [S; 2] {
             // x > 1 -> (acosh(x), 2*acosh(x)) sharing acosh; else -> (x, -x).
             S::cond_vec(
                 x.cmp_gt(S::ONE),
-                || { let a = x.acosh(); [a, a + a] },
+                || {
+                    let a = x.acosh();
+                    [a, a + a]
+                },
                 || [x, S::ZERO - x],
             )
         }
@@ -865,7 +1148,11 @@ mod tests {
                 Op::Proj { source, index } => {
                     assert_eq!(*index as usize, j, "proj index");
                     match &g.node(*source).op {
-                        Op::IfElse { then_results, else_results, .. } => {
+                        Op::IfElse {
+                            then_results,
+                            else_results,
+                            ..
+                        } => {
                             assert_eq!(then_results.len(), 2, "2 then-results");
                             assert_eq!(else_results.len(), 2, "2 else-results");
                         }
@@ -888,11 +1175,19 @@ mod tests {
                 ("o1".to_string(), "o1".into(), out[1].node()),
             ];
             let k = end_trace();
-            assert!(!k.graph.has_errors(), "pick2 graph errors: {:?}", k.graph.errors());
+            assert!(
+                !k.graph.has_errors(),
+                "pick2 graph errors: {:?}",
+                k.graph.errors()
+            );
             let spec = KernelEmitInputs {
                 kernel_name: "pick2",
-                coalesce_layout: false,                ndim: 1,
-                target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+                coalesce_layout: false,
+                ndim: 1,
+                target: TargetConfig {
+                    target: Target::Cuda,
+                    precision: Precision::F64,
+                },
                 field_inputs: &k.field_inputs,
                 scalar_params: &k.scalar_params,
                 field_writes: &writes,
@@ -901,18 +1196,45 @@ mod tests {
                 tile_spec: None,
             };
             let src = emit_kernel_from_lowering(&k.graph, &spec).source;
-            assert!(!src.contains("HIGHER_ORDER"), "IfElse/Proj not intercepted:\n{src}");
-            assert_eq!(src.matches("acosh").count(), 1, "acosh must be SHARED (computed once):\n{src}");
+            assert!(
+                !src.contains("HIGHER_ORDER"),
+                "IfElse/Proj not intercepted:\n{src}"
+            );
+            assert_eq!(
+                src.matches("acosh").count(),
+                1,
+                "acosh must be SHARED (computed once):\n{src}"
+            );
             let (lo, extent) = ([0i32], [1u32]);
             let xdata = [x];
-            let inputs = [CpuField { data: &xdata, lo: &lo, extent: &extent }];
+            let inputs = [CpuField {
+                data: &xdata,
+                lo: &lo,
+                extent: &extent,
+            }];
             let mut o0 = [0.0f64];
             let mut o1 = [0.0f64];
             let mut outputs = [
-                CpuFieldMut { data: &mut o0, lo: &lo, extent: &extent },
-                CpuFieldMut { data: &mut o1, lo: &lo, extent: &extent },
+                CpuFieldMut {
+                    data: &mut o0,
+                    lo: &lo,
+                    extent: &extent,
+                },
+                CpuFieldMut {
+                    data: &mut o1,
+                    lo: &lo,
+                    extent: &extent,
+                },
             ];
-            Cpu.run_kernel(&k.graph, &spec, &inputs, &mut outputs, &[], &[1u32], &[0i32]);
+            Cpu.run_kernel(
+                &k.graph,
+                &spec,
+                &inputs,
+                &mut outputs,
+                &[],
+                &[1u32],
+                &[0i32],
+            );
             [o0[0], o1[0]]
         }
 
@@ -922,7 +1244,9 @@ mod tests {
             for j in 0..2 {
                 assert!(
                     gv[j].to_bits() == host[j].to_bits() || (gv[j].is_nan() && host[j].is_nan()),
-                    "carrier divergence at x={x} out{j}: host={} gv={}", host[j], gv[j],
+                    "carrier divergence at x={x} out{j}: host={} gv={}",
+                    host[j],
+                    gv[j],
                 );
             }
         }
@@ -934,7 +1258,8 @@ mod tests {
         // folded with the in-kernel cartesian-uniform widths into ONE timestep kernel — the SAME
         // physics the SRHD flux's HLLE uses. cartesian 2D: reads rho + the GRIDDED normal
         // velocities (v0, v1) + pre — the dead v2 is left ZERO and never enters the graph.
-        let (k, writes) = srhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 2], &[0, 1], 2);
+        let (k, writes) =
+            srhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 2], &[0, 1], 2);
         assert_eq!(writes.len(), 1, "one scratch lambda write");
         assert_eq!(writes[0].1.name(), "scratch");
         assert_eq!(
@@ -959,7 +1284,11 @@ mod tests {
             vec!["prim_rho", "prim_v0", "prim_v1", "prim_pre"],
             "SRHD CFL reads rho + the gridded normal velocities + pre (no dead v2)"
         );
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
     }
 
     #[test]
@@ -973,7 +1302,11 @@ mod tests {
         assert_eq!(k.coord_components, vec![0], "axis 0's _coord recorded once");
         assert!(k.scalar_params.contains(&"dx_0".to_string()));
         assert!(k.scalar_params.contains(&"x_lo_0".to_string()));
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
     }
 
     #[test]
@@ -982,20 +1315,48 @@ mod tests {
         // carries h = r*sin(theta) -> a Sin node. proves the geometry traces in Gv from the
         // cell index, the foundation the curvilinear CFL / divergence / sources will use.
         begin_trace();
-        let inv = cell_inv_phys_widths_gv(Coords::Cartesian, &[Spacing::Uniform, Spacing::Uniform], &[0, 1], 2);
+        let inv = cell_inv_phys_widths_gv(
+            Coords::Cartesian,
+            &[Spacing::Uniform, Spacing::Uniform],
+            &[0, 1],
+            2,
+        );
         let _r: Vec<NodeId> = inv.iter().map(|g| g.node()).collect();
         let kc = end_trace();
         assert_eq!(inv.len(), 2);
-        assert!(!kc.graph.has_errors(), "graph errors: {:?}", kc.graph.errors());
-        let has_sin = |g: &Graph| (0..g.len()).any(|i| matches!(&g.node(NodeId(i as u32)).op, Op::ElementWise(ElementWiseOp::Sin, _)));
+        assert!(
+            !kc.graph.has_errors(),
+            "graph errors: {:?}",
+            kc.graph.errors()
+        );
+        let has_sin = |g: &Graph| {
+            (0..g.len()).any(|i| {
+                matches!(
+                    &g.node(NodeId(i as u32)).op,
+                    Op::ElementWise(ElementWiseOp::Sin, _)
+                )
+            })
+        };
         assert!(!has_sin(&kc.graph), "cartesian has no angular scale factor");
 
         begin_trace();
-        let inv = cell_inv_phys_widths_gv(Coords::Spherical, &[Spacing::Uniform, Spacing::Uniform, Spacing::Uniform], &[0, 1, 2], 3);
+        let inv = cell_inv_phys_widths_gv(
+            Coords::Spherical,
+            &[Spacing::Uniform, Spacing::Uniform, Spacing::Uniform],
+            &[0, 1, 2],
+            3,
+        );
         let _r: Vec<NodeId> = inv.iter().map(|g| g.node()).collect();
         let ks = end_trace();
-        assert!(!ks.graph.has_errors(), "graph errors: {:?}", ks.graph.errors());
-        assert!(has_sin(&ks.graph), "spherical phi axis needs h = r*sin(theta)");
+        assert!(
+            !ks.graph.has_errors(),
+            "graph errors: {:?}",
+            ks.graph.errors()
+        );
+        assert!(
+            has_sin(&ks.graph),
+            "spherical phi axis needs h = r*sin(theta)"
+        );
     }
 
     #[test]
@@ -1005,30 +1366,64 @@ mod tests {
         // 3-vector prim + gamma (vsq/bsq), same ABI as before, but is ~25x cheaper than the
         // quartic. proves the CFL no longer pays the Mignone & Del Zanna quartic's resolvent
         // cubic (asinh/acosh/cos/cosh) — those stay on the Riemann/flux path only.
-        let (k, writes) = rmhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3);
+        let (k, writes) =
+            rmhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3);
         assert_eq!(writes.len(), 1);
         assert_eq!(
             k.scalar_params,
-            vec!["gamma".to_string(), "inv_dx_0".into(), "inv_dx_1".into(), "inv_dx_2".into()]
+            vec![
+                "gamma".to_string(),
+                "inv_dx_0".into(),
+                "inv_dx_1".into(),
+                "inv_dx_2".into()
+            ]
         );
         let keys: Vec<&str> = k.field_inputs.iter().map(|(key, _)| key.as_str()).collect();
         assert_eq!(
             keys,
-            vec!["prim_rho", "prim_v0", "prim_v1", "prim_v2", "prim_pre", "prim_b0", "prim_b1", "prim_b2"]
+            vec![
+                "prim_rho", "prim_v0", "prim_v1", "prim_v2", "prim_pre", "prim_b0", "prim_b1",
+                "prim_b2"
+            ]
         );
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
         // the magnetosonic bound has NO resolvent-cubic transcendentals — that is the win.
         use symbi_ir::graph::ElementWiseOp as E;
-        let expensive = [E::Sin, E::Cos, E::Acos, E::Sinh, E::Cosh, E::Asinh, E::Acosh, E::Pow];
+        let expensive = [
+            E::Sin,
+            E::Cos,
+            E::Acos,
+            E::Sinh,
+            E::Cosh,
+            E::Asinh,
+            E::Acosh,
+            E::Pow,
+        ];
         let has_transcendental = (0..k.graph.len()).any(|i| {
             matches!(&k.graph.node(NodeId(i as u32)).op,
                 Op::ElementWise(op, _) if expensive.contains(op))
         });
-        assert!(!has_transcendental, "CFL bound must not emit the quartic's transcendentals");
+        assert!(
+            !has_transcendental,
+            "CFL bound must not emit the quartic's transcendentals"
+        );
         // it still computes ONE sqrt (the relativistic-addition discriminant).
-        let n_sqrt = (0..k.graph.len()).filter(|&i|
-            matches!(&k.graph.node(NodeId(i as u32)).op, Op::ElementWise(E::Sqrt, _))).count();
-        assert!(n_sqrt >= 1, "magnetosonic bound needs the discriminant sqrt");
+        let n_sqrt = (0..k.graph.len())
+            .filter(|&i| {
+                matches!(
+                    &k.graph.node(NodeId(i as u32)).op,
+                    Op::ElementWise(E::Sqrt, _)
+                )
+            })
+            .count();
+        assert!(
+            n_sqrt >= 1,
+            "magnetosonic bound needs the discriminant sqrt"
+        );
     }
 
     #[test]
@@ -1040,23 +1435,44 @@ mod tests {
         let (k, writes) = rmhd_wave_speeds_cell_gv(3);
         assert_eq!(writes.len(), 6, "lambda_min/max per 3 directions");
         let out_paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
-        assert_eq!(out_paths, vec![
-            "wave_speed_l[0]", "wave_speed_r[0]",
-            "wave_speed_l[1]", "wave_speed_r[1]",
-            "wave_speed_l[2]", "wave_speed_r[2]",
-        ]);
+        assert_eq!(
+            out_paths,
+            vec![
+                "wave_speed_l[0]",
+                "wave_speed_r[0]",
+                "wave_speed_l[1]",
+                "wave_speed_r[1]",
+                "wave_speed_l[2]",
+                "wave_speed_r[2]",
+            ]
+        );
         assert_eq!(k.scalar_params, vec!["gamma".to_string()]);
         let keys: Vec<&str> = k.field_inputs.iter().map(|(key, _)| key.as_str()).collect();
-        assert_eq!(keys, vec![
-            "prim_rho", "prim_v0", "prim_v1", "prim_v2", "prim_pre", "prim_b0", "prim_b1", "prim_b2"
-        ]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert_eq!(
+            keys,
+            vec![
+                "prim_rho", "prim_v0", "prim_v1", "prim_v2", "prim_pre", "prim_b0", "prim_b1",
+                "prim_b2"
+            ]
+        );
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
         // it IS the exact quartic -> the resolvent cubic's transcendentals ARE present here
         // (the whole point: this kernel pays them ONCE per cell, the flux pays none).
         use symbi_ir::graph::ElementWiseOp as E;
-        let has_resolvent = (0..k.graph.len()).any(|i|
-            matches!(&k.graph.node(NodeId(i as u32)).op, Op::ElementWise(E::Acosh, _)));
-        assert!(has_resolvent, "per-cell kernel must carry the exact quartic (resolvent cubic)");
+        let has_resolvent = (0..k.graph.len()).any(|i| {
+            matches!(
+                &k.graph.node(NodeId(i as u32)).op,
+                Op::ElementWise(E::Acosh, _)
+            )
+        });
+        assert!(
+            has_resolvent,
+            "per-cell kernel must carry the exact quartic (resolvent cubic)"
+        );
     }
 
     #[test]
@@ -1065,12 +1481,22 @@ mod tests {
         // geometry-free. ncomp=2 + energy -> cons den/mom_0/mom_1/nrg -> u_n.*.
         let (k, writes) = snapshot_gv(2, true);
         assert!(k.scalar_params.is_empty(), "snapshot takes no scalars");
-        assert!(k.coord_components.is_empty(), "snapshot is pointwise (no stencil)");
+        assert!(
+            k.coord_components.is_empty(),
+            "snapshot is pointwise (no stencil)"
+        );
         let in_rt: Vec<String> = k.field_inputs.iter().map(|(_, rt)| rt.name()).collect();
-        assert_eq!(in_rt, vec!["cons.den", "cons.mom_0", "cons.mom_1", "cons.nrg"]);
+        assert_eq!(
+            in_rt,
+            vec!["cons.den", "cons.mom_0", "cons.mom_1", "cons.nrg"]
+        );
         let out_rt: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
         assert_eq!(out_rt, vec!["u_n.den", "u_n.mom_0", "u_n.mom_1", "u_n.nrg"]);
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
     }
 
     #[test]
@@ -1080,26 +1506,62 @@ mod tests {
         // the snapshot `u_n` + the conserved fields + the per-direction fluxes (a +e_i stencil, so
         // coord axes recorded); writes the conserved set in place.
         let (k, writes) = godunov_stage_gv(
-            Coords::Cartesian, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true,
+            Coords::Cartesian,
+            &[Spacing::Uniform; 2],
+            &[0, 1],
+            2,
+            2,
+            true,
             GeoSource::Hydro { inertial: false },
         );
         assert_eq!(
             k.scalar_params,
-            vec!["dt".to_string(), "a0".into(), "ac".into(), "mesh_hdil".into(), "dx_0".into(), "dx_1".into()],
+            vec![
+                "dt".to_string(),
+                "a0".into(),
+                "ac".into(),
+                "mesh_hdil".into(),
+                "dx_0".into(),
+                "dx_1".into()
+            ],
         );
-        assert_eq!(k.coord_components, vec![0, 1], "the +e_i divergence stencil records both axes");
+        assert_eq!(
+            k.coord_components,
+            vec![0, 1],
+            "the +e_i divergence stencil records both axes"
+        );
         let out_rt: Vec<String> = writes.iter().map(|(_, rt, _)| rt.name()).collect();
-        assert_eq!(out_rt, vec!["cons.den", "cons.mom_0", "cons.mom_1", "cons.nrg"], "in place");
+        assert_eq!(
+            out_rt,
+            vec!["cons.den", "cons.mom_0", "cons.mom_1", "cons.nrg"],
+            "in place"
+        );
         let in_rt: Vec<String> = k.field_inputs.iter().map(|(_, rt)| rt.name()).collect();
         // the snapshot reads the SSP `a0*u_n` term needs (held by `snapshot_gv`).
         for rt in ["u_n.den", "u_n.mom_0", "u_n.mom_1", "u_n.nrg"] {
-            assert!(in_rt.iter().any(|x| x == rt), "missing snapshot input {rt}; got {in_rt:?}");
+            assert!(
+                in_rt.iter().any(|x| x == rt),
+                "missing snapshot input {rt}; got {in_rt:?}"
+            );
         }
         // the flux components the divergence reads (mass + per-momentum + energy, both axes).
-        for rt in ["mass_flux[0]", "mass_flux[1]", "mom_flux_0[0]", "mom_flux_1[1]", "nrg_flux[0]"] {
-            assert!(in_rt.iter().any(|x| x == rt), "missing flux input {rt}; got {in_rt:?}");
+        for rt in [
+            "mass_flux[0]",
+            "mass_flux[1]",
+            "mom_flux_0[0]",
+            "mom_flux_1[1]",
+            "nrg_flux[0]",
+        ] {
+            assert!(
+                in_rt.iter().any(|x| x == rt),
+                "missing flux input {rt}; got {in_rt:?}"
+            );
         }
-        assert!(!k.graph.has_errors(), "graph errors: {:?}", k.graph.errors());
+        assert!(
+            !k.graph.has_errors(),
+            "graph errors: {:?}",
+            k.graph.errors()
+        );
     }
 
     #[test]
@@ -1111,7 +1573,7 @@ mod tests {
         // no drift. a position- AND energy-dependent family (mom + nrg) exercises the centroid
         // `x_k` binding and the energy overlay, the parts most likely to diverge under a bad split.
         use symbi_ir::emit::{Precision, Target, TargetConfig};
-        use symbi_ir::{emit_kernel_from_lowering, KernelEmitInputs};
+        use symbi_ir::{KernelEmitInputs, emit_kernel_from_lowering};
 
         let specs = symbi_hydro::source_spec::point_mass_gravity_sources(2, true);
         let spec_refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
@@ -1120,22 +1582,34 @@ mod tests {
 
         // the compile-time spec path.
         let (k_spec, w_spec) = godunov_stage_gv_with_fused_sources(
-            coords, &spacing, &axes, 2, 2, true, geo, &spec_refs, false);
+            coords, &spacing, &axes, 2, 2, true, geo, &spec_refs, false,
+        );
 
         // the runtime BuiltSource-value path (what `RuntimeSource` feeds).
-        let builts: Vec<(&str, symbi_hydro::source_spec::BuiltSource)> = specs.iter()
+        let builts: Vec<(&str, symbi_hydro::source_spec::BuiltSource)> = specs
+            .iter()
             .map(|s| (s.target_field, (s.build_source)(2)))
             .collect();
         let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
             builts.iter().map(|(t, b)| (*t, b)).collect();
         let (k_built, w_built) = godunov_stage_gv_with_fused_built(
-            coords, &spacing, &axes, 2, 2, true, geo, &src_refs, false);
+            coords, &spacing, &axes, 2, 2, true, geo, &src_refs, false,
+        );
 
         // the ABI manifest + writes are identical (NodeIds match because both trace the SAME op
         // sequence — building the BuiltSource values outside the trace allocates no trace nodes).
-        assert_eq!(k_spec.field_inputs, k_built.field_inputs, "field_inputs drift");
-        assert_eq!(k_spec.scalar_params, k_built.scalar_params, "scalar_params drift");
-        assert_eq!(k_spec.coord_components, k_built.coord_components, "coord_components drift");
+        assert_eq!(
+            k_spec.field_inputs, k_built.field_inputs,
+            "field_inputs drift"
+        );
+        assert_eq!(
+            k_spec.scalar_params, k_built.scalar_params,
+            "scalar_params drift"
+        );
+        assert_eq!(
+            k_spec.coord_components, k_built.coord_components,
+            "coord_components drift"
+        );
         assert_eq!(w_spec, w_built, "writes drift");
 
         // the lowered source is byte-identical — the strongest structural equality available
@@ -1143,8 +1617,12 @@ mod tests {
         let emit = |k: &GvKernel, w: &[(String, FieldBind, NodeId)]| {
             let spec = KernelEmitInputs {
                 kernel_name: "fused_eq",
-                coalesce_layout: false,                ndim: 2,
-                target: TargetConfig { target: Target::Cuda, precision: Precision::F64 },
+                coalesce_layout: false,
+                ndim: 2,
+                target: TargetConfig {
+                    target: Target::Cuda,
+                    precision: Precision::F64,
+                },
                 field_inputs: &k.field_inputs,
                 scalar_params: &k.scalar_params,
                 field_writes: w,
@@ -1154,7 +1632,10 @@ mod tests {
             };
             emit_kernel_from_lowering(&k.graph, &spec).source
         };
-        assert_eq!(emit(&k_spec, &w_spec), emit(&k_built, &w_built), "lowered source drift");
+        assert_eq!(
+            emit(&k_spec, &w_spec),
+            emit(&k_built, &w_built),
+            "lowered source drift"
+        );
     }
 }
-

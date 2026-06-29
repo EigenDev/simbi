@@ -4,8 +4,7 @@
 // compressible hydrodynamics for the symbi framework. provides equation of state,
 // conservative/primitive state types, the physics regimes, and the riemann solvers
 // — the carrier-generic (S: Scalar) single source the substrate traces at S=Gv. pure
-// math, no runtime dependency on symbi. (the legacy CPU godunov integrator —
-// godunov/reconstruct/ghost/ct — was retired; the substrate is the production path.)
+// math, no runtime dependency on symbi. the substrate is the production path.
 //
 // usage:
 //   use symbi_hydro::{IdealGas, Prim, Cons, Newtonian, hlle};
@@ -25,7 +24,7 @@ pub mod motion_law;
 pub mod simulation_laws;
 pub mod source_evaluator;
 pub mod gpu_source_kernel;
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub mod gpu_launcher;
 pub mod newtonian;
 pub mod newtonian_mhd;
@@ -64,7 +63,7 @@ pub use source_evaluator::SourceEvaluator;
 // expr_bridge::build_user_source) is one import surface.
 pub use symbi_expr::SourceConfig;
 pub use gpu_source_kernel::GpuSourceKernel;
-#[cfg(feature = "cuda")]
+#[cfg(feature = "gpu")]
 pub use gpu_launcher::launch_source_kernel;
 pub use newtonian::Newtonian;
 pub use newtonian_mhd::NewtonianMhd;

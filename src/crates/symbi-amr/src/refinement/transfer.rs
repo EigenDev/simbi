@@ -94,9 +94,9 @@ pub fn cf_ghost_slabs<const D: usize>(
     //
     // GEOMETRY: `guillotine_difference` (symbi-algebra) returns that set as the
     // minimal disjoint cover — `2*D` boxes, no overlap. this is union-equivalent
-    // to the old per-face slabs (identical cell set; prolongation is a pure
-    // function of (coarse state, fine coord), so the old 2-3x edge/corner
-    // double-writes were redundant, not wrong) but writes each cell ONCE: the
+    // to overlapping per-face slabs (identical cell set; prolongation is a pure
+    // function of (coarse state, fine coord), so the 2-3x edge/corner
+    // double-writes of an overlapping cover are redundant, not wrong) but writes each cell ONCE: the
     // ~19% cell reduction on binary_disk, in the same `2*D` dispatches (not the
     // `3^D-1` of a maximal split, whose tiny corner boxes drown in launch cost).
     // the disjointness also makes the cover safe to fan out in one parallel pass.
@@ -450,7 +450,7 @@ mod tests {
     #[test]
     fn cf_slabs_fully_embedded_is_the_disjoint_shell_and_strictly_smaller() {
         // every face coarse-fine: the shell is exactly allocated\interior,
-        // tiled by 3^D-1 disjoint boxes, and STRICTLY fewer cells than the old
+        // tiled by 3^D-1 disjoint boxes, and STRICTLY fewer cells than an
         // overlapping construction (the measured ~19% win on binary_disk).
         let ng = 3isize;
         let n = 24isize;

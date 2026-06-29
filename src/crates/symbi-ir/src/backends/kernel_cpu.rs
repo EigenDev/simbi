@@ -59,10 +59,13 @@ fn cpu_tile_size() -> usize {
     // debug-emit-knobs gates the SYMBI_TILE_CPU a/b knob; feature off (default) = canonical env-unset shape (CPU_TILE, tiled).
     #[cfg(feature = "debug-emit-knobs")]
     {
-        match std::env::var("SYMBI_TILE_CPU").ok().and_then(|s| s.parse::<usize>().ok()) {
-            Some(0) | Some(1) => 0,        // explicit flat override
-            Some(t) => t,                  // explicit tile edge
-            None => CPU_TILE,              // default: tiled
+        match std::env::var("SYMBI_TILE_CPU")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+        {
+            Some(0) | Some(1) => 0, // explicit flat override
+            Some(t) => t,           // explicit tile edge
+            None => CPU_TILE,       // default: tiled
         }
     }
     #[cfg(not(feature = "debug-emit-knobs"))]
@@ -81,7 +84,10 @@ fn cpu_tile_size() -> usize {
 /// in the simd spike. UNSAFE if an index is ever wrong — gate on the test suite.
 fn unchecked_loads() -> bool {
     // vec mode needs the bounds-check branches gone to vectorize, so it implies unchecked.
-    std::env::var("SYMBI_UNCHECKED_LOADS").map(|v| v == "1").unwrap_or(false) || vec_loop()
+    std::env::var("SYMBI_UNCHECKED_LOADS")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+        || vec_loop()
 }
 
 /// SYMBI_VEC_LOOP=1 (ndim>=2): emit the ROW-PARALLEL loop — parallelize over the
@@ -93,7 +99,9 @@ fn vec_loop() -> bool {
     // debug-emit-knobs gates the SYMBI_VEC_LOOP a/b knob; feature off (default) = canonical env-unset shape (false).
     #[cfg(feature = "debug-emit-knobs")]
     {
-        std::env::var("SYMBI_VEC_LOOP").map(|v| v == "1").unwrap_or(false)
+        std::env::var("SYMBI_VEC_LOOP")
+            .map(|v| v == "1")
+            .unwrap_or(false)
     }
     #[cfg(not(feature = "debug-emit-knobs"))]
     {
@@ -103,11 +111,11 @@ fn vec_loop() -> bool {
 
 use crate::backends::cpu::{emit_expr, emit_stmt, rust_type_name};
 use crate::backends::kernel::KernelEmitInputs;
-use crate::backends::render::{emit_kernel_render, KernelRenderer, COORD_VARS};
+use crate::backends::render::{COORD_VARS, KernelRenderer, emit_kernel_render};
+use crate::emit::KernelDescriptor;
 use crate::graph::ConstValue;
 use crate::passes::scalarize::{BinaryKind, ScalarExpr, ScalarStmt, UnaryKind};
 use crate::{ElementTy, Graph};
-use crate::emit::KernelDescriptor;
 
 /// the Rust (CPU) backend: the per-language spelling for the shared kernel driver
 /// (`emit_render`). produces a compilable generic `pub fn k<S: Scalar>` over `&[S]`
@@ -143,14 +151,22 @@ pub struct RustRenderer {
 
 impl RustRenderer {
     pub fn new() -> Self {
-        Self { mut_buf_indices: std::cell::RefCell::new(Vec::new()), serial: false }
+        Self {
+            mut_buf_indices: std::cell::RefCell::new(Vec::new()),
+            serial: false,
+        }
     }
     pub fn serial() -> Self {
-        Self { mut_buf_indices: std::cell::RefCell::new(Vec::new()), serial: true }
+        Self {
+            mut_buf_indices: std::cell::RefCell::new(Vec::new()),
+            serial: true,
+        }
     }
 }
 impl Default for RustRenderer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl KernelRenderer for RustRenderer {
@@ -161,9 +177,9 @@ impl KernelRenderer for RustRenderer {
         "#[allow(unused_parens)]\n".to_string()
     }
     fn buffer_param(&self, idx: u32, is_output: bool) -> String {
-        // Phase 1B-4: per-buffer arg is ONE view-struct reference. all of `lo`,
-        // `extent`, and pre-multiplied `strides` ride along inside the struct.
-        // the OLD scattered `buf_lo_X_a` / `buf_extent_X_a` scalar args are gone
+        // per-buffer arg is ONE view-struct reference. all of `lo`,
+        // `extent`, and pre-multiplied `strides` ride along inside the struct;
+        // there are no scattered `buf_lo_X_a` / `buf_extent_X_a` scalar args
         // (see `skip_scattered_buffer_layout_args` below).
         if is_output {
             self.mut_buf_indices.borrow_mut().push(idx);
@@ -198,7 +214,9 @@ impl KernelRenderer for RustRenderer {
         // `unused_unsafe`: with SYMBI_UNCHECKED_LOADS the per-access `unsafe`
         // blocks nest (a stencil load inlined into a store's unsafe rhs) — the
         // inner ones are redundant but correct; this is machine-generated code.
-        format!("#[doc(hidden)]\n#[allow(non_snake_case, unused_variables, unused_unsafe)]\npub fn {name}__raw<S: Scalar + OrderedNumeric + Send + Sync>(\n")
+        format!(
+            "#[doc(hidden)]\n#[allow(non_snake_case, unused_variables, unused_unsafe)]\npub fn {name}__raw<S: Scalar + OrderedNumeric + Send + Sync>(\n"
+        )
     }
     fn params_close(&self) -> &'static str {
         ",\n) {\n" // Rust allows the trailing comma
@@ -221,7 +239,10 @@ impl KernelRenderer for RustRenderer {
         if self.serial {
             for aa in 0..ndim {
                 v.push(format!("    for _i{aa} in 0..(grid_size_{aa} as i32) {{"));
-                v.push(format!("    let {}: i32 = _i{aa} + dom_lo_{aa};", COORD_VARS[aa]));
+                v.push(format!(
+                    "    let {}: i32 = _i{aa} + dom_lo_{aa};",
+                    COORD_VARS[aa]
+                ));
             }
             return v;
         }
@@ -233,7 +254,9 @@ impl KernelRenderer for RustRenderer {
         // `__MutBufPtr`. inside the closure we rebuild the CpuFieldMut.
         for &bi in mut_buf.iter() {
             v.push(format!("    let __field{bi}_lo: [i32; 4] = field{bi}.lo;"));
-            v.push(format!("    let __field{bi}_strides: [i32; 4] = field{bi}.strides;"));
+            v.push(format!(
+                "    let __field{bi}_strides: [i32; 4] = field{bi}.strides;"
+            ));
         }
 
         // --- B11 rayon-parallel outer loop scaffold ---
@@ -296,22 +319,32 @@ impl KernelRenderer for RustRenderer {
             } else {
                 v.push("        let mut _orem: usize = _orow;".to_string());
                 for aa in (1..last).rev() {
-                    v.push(format!("        let _i{aa}: i32 = (_orem % (grid_size_{aa} as usize)) as i32;"));
+                    v.push(format!(
+                        "        let _i{aa}: i32 = (_orem % (grid_size_{aa} as usize)) as i32;"
+                    ));
                     v.push(format!("        _orem /= grid_size_{aa} as usize;"));
                 }
                 v.push("        let _i0: i32 = _orem as i32;".to_string());
             }
             for aa in 0..last {
-                v.push(format!("        let {}: i32 = _i{aa} + dom_lo_{aa};", COORD_VARS[aa]));
+                v.push(format!(
+                    "        let {}: i32 = _i{aa} + dom_lo_{aa};",
+                    COORD_VARS[aa]
+                ));
             }
             // unit-stride precondition (row-major); debug-only, carrier oracle gates correctness.
             v.push(format!(
                 "        debug_assert!(field0.strides[{last}] == 1, \"SYMBI_VEC_LOOP needs a contiguous last axis\");"
             ));
             // countable inner loop over the contiguous axis (the vectorized dim).
-            v.push(format!("        for _ic in 0..(grid_size_{last} as usize) {{"));
+            v.push(format!(
+                "        for _ic in 0..(grid_size_{last} as usize) {{"
+            ));
             v.push(format!("        let _i{last}: i32 = _ic as i32;"));
-            v.push(format!("        let {}: i32 = _i{last} + dom_lo_{last};", COORD_VARS[last]));
+            v.push(format!(
+                "        let {}: i32 = _i{last} + dom_lo_{last};",
+                COORD_VARS[last]
+            ));
         } else if cpu_tile_size() == 0 {
             // FLAT (default): parallelize over the flattened interior (every
             // cell), NOT just the outer axis — exposes all cells so the grid
@@ -321,7 +354,9 @@ impl KernelRenderer for RustRenderer {
                 .collect::<Vec<_>>()
                 .join(" * ");
             v.push(format!("    let _ptotal: usize = {total_expr};"));
-            v.push("    (0.._ptotal).into_par_iter().with_min_len(16).for_each(|_flat| {".to_string());
+            v.push(
+                "    (0.._ptotal).into_par_iter().with_min_len(16).for_each(|_flat| {".to_string(),
+            );
             push_rebind(&mut v);
             // unflatten row-major (axis 0 outermost, axis ndim-1 contiguous).
             if ndim == 1 {
@@ -329,13 +364,18 @@ impl KernelRenderer for RustRenderer {
             } else {
                 v.push("        let mut _rem: usize = _flat;".to_string());
                 for aa in (1..ndim).rev() {
-                    v.push(format!("        let _i{aa}: i32 = (_rem % (grid_size_{aa} as usize)) as i32;"));
+                    v.push(format!(
+                        "        let _i{aa}: i32 = (_rem % (grid_size_{aa} as usize)) as i32;"
+                    ));
                     v.push(format!("        _rem /= grid_size_{aa} as usize;"));
                 }
                 v.push("        let _i0: i32 = _rem as i32;".to_string());
             }
             for aa in 0..ndim {
-                v.push(format!("    let {}: i32 = _i{aa} + dom_lo_{aa};", COORD_VARS[aa]));
+                v.push(format!(
+                    "    let {}: i32 = _i{aa} + dom_lo_{aa};",
+                    COORD_VARS[aa]
+                ));
             }
         } else {
             // TILED (SYMBI_TILE_CPU=N): parallelize over N^ndim cache blocks;
@@ -346,9 +386,14 @@ impl KernelRenderer for RustRenderer {
             let tile = cpu_tile_size();
             v.push(format!("    let _ts: usize = {tile};"));
             for aa in 0..ndim {
-                v.push(format!("    let _nt_{aa}: usize = ((grid_size_{aa} as usize) + _ts - 1) / _ts;"));
+                v.push(format!(
+                    "    let _nt_{aa}: usize = ((grid_size_{aa} as usize) + _ts - 1) / _ts;"
+                ));
             }
-            let ntiles_expr = (0..ndim).map(|aa| format!("_nt_{aa}")).collect::<Vec<_>>().join(" * ");
+            let ntiles_expr = (0..ndim)
+                .map(|aa| format!("_nt_{aa}"))
+                .collect::<Vec<_>>()
+                .join(" * ");
             v.push(format!("    let _ntiles: usize = {ntiles_expr};"));
             v.push("    (0.._ntiles).into_par_iter().for_each(|_tile| {".to_string());
             push_rebind(&mut v);
@@ -368,10 +413,17 @@ impl KernelRenderer for RustRenderer {
             // (`_c{aa}` is monotonic in `_d{aa}`). close() emits ndim matching `}`.
             for aa in 0..ndim {
                 v.push(format!("        for _d{aa} in 0.._ts {{"));
-                v.push(format!("        let _c{aa}: usize = _tc{aa} * _ts + _d{aa};"));
-                v.push(format!("        if _c{aa} >= grid_size_{aa} as usize {{ break; }}"));
+                v.push(format!(
+                    "        let _c{aa}: usize = _tc{aa} * _ts + _d{aa};"
+                ));
+                v.push(format!(
+                    "        if _c{aa} >= grid_size_{aa} as usize {{ break; }}"
+                ));
                 v.push(format!("        let _i{aa}: i32 = _c{aa} as i32;"));
-                v.push(format!("        let {}: i32 = _i{aa} + dom_lo_{aa};", COORD_VARS[aa]));
+                v.push(format!(
+                    "        let {}: i32 = _i{aa} + dom_lo_{aa};",
+                    COORD_VARS[aa]
+                ));
             }
         }
         v
@@ -379,10 +431,17 @@ impl KernelRenderer for RustRenderer {
     fn coord_decl(&self, axis: u8, _element: ElementTy) -> String {
         // the cell index is always i32; physical-space reals come from promoting
         // `index * dx` (the graph's usual arithmetic conversions), not a float coord.
-        format!("    let _coord_{axis}: i32 = {};", COORD_VARS[axis as usize])
+        format!(
+            "    let _coord_{axis}: i32 = {};",
+            COORD_VARS[axis as usize]
+        )
     }
-    fn index_lang(&self) -> crate::emit::IndexLang { crate::emit::IndexLang::Rust }
-    fn skip_scattered_buffer_layout_args(&self) -> bool { true }
+    fn index_lang(&self) -> crate::emit::IndexLang {
+        crate::emit::IndexLang::Rust
+    }
+    fn skip_scattered_buffer_layout_args(&self) -> bool {
+        true
+    }
     fn flat_index(&self, ndim: u8, buf: u32, comps: &[String]) -> String {
         rust_flat_index(ndim, buf, comps)
     }
@@ -401,7 +460,7 @@ impl KernelRenderer for RustRenderer {
     }
     fn load_at_expr(&self, buf: u32, flat: &str) -> String {
         // every stencil load goes through the same view-struct: `field{N}.data`.
-        // mirrors the C++ `view_t::operator()` — one method, every emitter.
+        // one indexing method, every emitter.
         if unchecked_loads() {
             format!("(unsafe {{ *field{buf}.data.get_unchecked({flat}) }})")
         } else {
@@ -586,7 +645,6 @@ fn descriptor_wrapper(
     s
 }
 
-
 // the Rust flat index: `(comp - buf_lo) . strides) as usize`. all i64 arithmetic
 // (comps, buf_lo, ny/nz are all i64); the single `as usize` is the slice-index
 // boundary. `comps` are integer expression strings (see `render_index_expr`).
@@ -607,7 +665,9 @@ fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
     match e {
         Var(name) => match name.strip_prefix("_coord_") {
             Some(axis) => {
-                let a: usize = axis.parse().unwrap_or_else(|_| panic!("bad coord var '{name}'"));
+                let a: usize = axis
+                    .parse()
+                    .unwrap_or_else(|_| panic!("bad coord var '{name}'"));
                 coord_vars
                     .get(a)
                     .unwrap_or_else(|| panic!("coord axis {a} out of range for index"))
@@ -616,17 +676,23 @@ fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
             None => name.clone(),
         },
         Const(ConstValue::F64(v)) => {
-            assert!(v.fract() == 0.0, "non-integer constant {v} in an index expression");
+            assert!(
+                v.fract() == 0.0,
+                "non-integer constant {v} in an index expression"
+            );
             format!("{}", *v as i64)
         }
         Const(ConstValue::F32(v)) => {
-            assert!(v.fract() == 0.0, "non-integer constant {v} in an index expression");
+            assert!(
+                v.fract() == 0.0,
+                "non-integer constant {v} in an index expression"
+            );
             format!("{}", *v as i64)
         }
         Const(ConstValue::I32(v)) => format!("{}", *v as i64),
         Const(ConstValue::U32(v)) => format!("{}", *v as i64),
         // integer arithmetic, and integer comparisons (the condition of a
-        // data-INDEPENDENT index branch — e.g. a lattice-map `map_type == 1`).
+        // data-INDEPENDENT index branch — e.g., a lattice-map `map_type == 1`).
         // Div is excluded: division in an index is float, not integer.
         BinOp(kind, a, b) if !matches!(kind, BinaryKind::Div) => {
             format!(
@@ -662,12 +728,15 @@ fn render_index_expr(e: &ScalarExpr, coord_vars: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::emit::{Precision, Target, TargetConfig};
     use crate::ElementTy;
+    use crate::emit::{Precision, Target, TargetConfig};
     use crate::{ConstValue, ElementWiseOp, NodeId, Symbol, TensorTy};
 
     fn cfg() -> TargetConfig {
-        TargetConfig { target: Target::Cuda, precision: Precision::F64 }
+        TargetConfig {
+            target: Target::Cuda,
+            precision: Precision::F64,
+        }
     }
     fn scalar_param(g: &mut Graph, name: &str) -> NodeId {
         g.add_param(Symbol::intern(name), TensorTy::scalar(ElementTy::F64), None)
@@ -677,24 +746,43 @@ mod tests {
     fn passthrough_1d_emits_rust_fn_with_integer_indices() {
         let mut g = Graph::new();
         let cons_den = scalar_param(&mut g, "cons_den");
-        let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
-            kernel_name:      "pass_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           cfg(),
-            field_inputs:     &[("cons_den".into(), "cons.den".into())],
-            scalar_params:    &[],
-            field_writes:     &[("prim_den".into(), "prim.den".into(), cons_den)],
-            coord_components: &[],
-            device_preamble:  &[],
-            tile_spec: None,
-        });
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "pass_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[("cons_den".into(), "cons.den".into())],
+                scalar_params: &[],
+                field_writes: &[("prim_den".into(), "prim.den".into(), cons_den)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert_eq!(desc.field_bindings.len(), 2);
         assert!(!desc.field_bindings[0].is_output);
         assert!(desc.field_bindings[1].is_output);
         // the unused_parens preamble + the raw kernel and its descriptor wrapper.
-        assert!(desc.source.contains("#[allow(unused_parens)]"), "src:\n{}", desc.source);
-        assert!(desc.source.contains("pub fn pass_1d__raw<S: Scalar + OrderedNumeric + Send + Sync>("), "src:\n{}", desc.source);
-        assert!(desc.source.contains("pub fn pass_1d<S: Scalar + OrderedNumeric + Send + Sync>(inputs: &[CpuField<S>]"), "src:\n{}", desc.source);
+        assert!(
+            desc.source.contains("#[allow(unused_parens)]"),
+            "src:\n{}",
+            desc.source
+        );
+        assert!(
+            desc.source
+                .contains("pub fn pass_1d__raw<S: Scalar + OrderedNumeric + Send + Sync>("),
+            "src:\n{}",
+            desc.source
+        );
+        assert!(
+            desc.source.contains(
+                "pub fn pass_1d<S: Scalar + OrderedNumeric + Send + Sync>(inputs: &[CpuField<S>]"
+            ),
+            "src:\n{}",
+            desc.source
+        );
         assert!(desc.source.contains("field0: &CpuField<S>"));
         assert!(desc.source.contains("field1: &mut CpuFieldMut<S>"));
         // integer params, integer coord, integer index with one slice-boundary as usize.
@@ -708,10 +796,18 @@ mod tests {
         assert!(desc.source.contains("let _i0: i32 = _c0 as i32;"));
         assert!(desc.source.contains("let ii: i32 = _i0 + dom_lo_0;"));
         assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"));
-        assert!(desc.source.contains("field1.data[(__idx_cell_buf1 + ((ii) - ii) * field1.strides[0]) as usize] = cons_den;"));
+        assert!(desc.source.contains(
+            "field1.data[(__idx_cell_buf1 + ((ii) - ii) * field1.strides[0]) as usize] = cons_den;"
+        ));
         // no float-routed indices.
-        assert!(!desc.source.contains("as f64 + dom_lo"), "index must not route through f64");
-        assert!(!desc.source.contains("as i64"), "indices are i32; no i64 in the kernel");
+        assert!(
+            !desc.source.contains("as f64 + dom_lo"),
+            "index must not route through f64"
+        );
+        assert!(
+            !desc.source.contains("as i64"),
+            "indices are i32; no i64 in the kernel"
+        );
     }
 
     #[test]
@@ -723,26 +819,32 @@ mod tests {
         let two = g.add_const(ConstValue::F64(2.0), None);
         let scaled = g.element_wise(ElementWiseOp::Mul, vec![cons_den, two], None);
         let summed = g.element_wise(ElementWiseOp::Add, vec![scaled, cons_nrg], None);
-        let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
-            kernel_name:      "compute_pre_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           cfg(),
-            field_inputs:     &[
-                ("cons_den".into(), "cons.den".into()),
-                ("cons_nrg".into(), "cons.nrg".into()),
-            ],
-            scalar_params:    &[],
-            field_writes:     &[("prim_pre".into(), "prim.pre".into(), summed)],
-            coord_components: &[],
-            device_preamble:  &[],
-            tile_spec: None,
-        });
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "compute_pre_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[
+                    ("cons_den".into(), "cons.den".into()),
+                    ("cons_nrg".into(), "cons.nrg".into()),
+                ],
+                scalar_params: &[],
+                field_writes: &[("prim_pre".into(), "prim.pre".into(), summed)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert_eq!(desc.field_bindings.len(), 3);
         assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"));
         // the f64-built ConstValue(2.0) renders scalar-parametric via Scalar::from_f64.
         assert!(
-            desc.source.contains("] = ((cons_den * S::from_f64(2.0)) + cons_nrg);"),
-            "src:\n{}", desc.source,
+            desc.source
+                .contains("] = ((cons_den * S::from_f64(2.0)) + cons_nrg);"),
+            "src:\n{}",
+            desc.source,
         );
     }
 
@@ -759,53 +861,99 @@ mod tests {
         let two = g.add_const(ConstValue::F64(2.0), None);
         let scaled = g.element_wise(ElementWiseOp::Mul, vec![cons_den, two], None);
         let summed = g.element_wise(ElementWiseOp::Add, vec![scaled, cons_nrg], None);
-        let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
-            kernel_name:      "compute_pre_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           cfg(),
-            field_inputs:     &[
-                ("cons_den".into(), "cons.den".into()),
-                ("cons_nrg".into(), "cons.nrg".into()),
-            ],
-            scalar_params:    &[],
-            field_writes:     &[("prim_pre".into(), "prim.pre".into(), summed)],
-            coord_components: &[],
-            device_preamble:  &[],
-            tile_spec: None,
-        });
-        assert!(desc.source.contains("pub fn compute_pre_1d__raw<S: Scalar + OrderedNumeric + Send + Sync>("), "src:\n{}", desc.source);
-        assert!(desc.source.contains("field0: &CpuField<S>"), "src:\n{}", desc.source);
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "compute_pre_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[
+                    ("cons_den".into(), "cons.den".into()),
+                    ("cons_nrg".into(), "cons.nrg".into()),
+                ],
+                scalar_params: &[],
+                field_writes: &[("prim_pre".into(), "prim.pre".into(), summed)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
+        assert!(
+            desc.source
+                .contains("pub fn compute_pre_1d__raw<S: Scalar + OrderedNumeric + Send + Sync>("),
+            "src:\n{}",
+            desc.source
+        );
+        assert!(
+            desc.source.contains("field0: &CpuField<S>"),
+            "src:\n{}",
+            desc.source
+        );
         assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"));
-        assert!(desc.source.contains("] = ((cons_den * S::from_f64(2.0)) + cons_nrg);"), "src:\n{}", desc.source);
+        assert!(
+            desc.source
+                .contains("] = ((cons_den * S::from_f64(2.0)) + cons_nrg);"),
+            "src:\n{}",
+            desc.source
+        );
         assert!(desc.source.contains("pub fn compute_pre_1d<S: Scalar + OrderedNumeric + Send + Sync>(inputs: &[CpuField<S>]"), "src:\n{}", desc.source);
         assert!(desc.source.contains("outputs: &mut [CpuFieldMut<S>]"));
         // float spelling is fully S; integer index arithmetic stays i32 (never S). no
         // concrete float TYPE leaks — `: f64` annotations / `[f64]` slices. (the bare
         // `f64` inside `Scalar::from_f64` is the constructor name, not a type.)
-        assert!(!desc.source.contains(": f64"), "no f64 type annotation:\n{}", desc.source);
-        assert!(!desc.source.contains("[f64]"), "no f64 slice:\n{}", desc.source);
-        assert!(!desc.source.contains("f32"), "no f32 should appear in a generic kernel:\n{}", desc.source);
-        assert!(desc.source.contains("field0.lo[0]"), "indices stay i32:\n{}", desc.source);
+        assert!(
+            !desc.source.contains(": f64"),
+            "no f64 type annotation:\n{}",
+            desc.source
+        );
+        assert!(
+            !desc.source.contains("[f64]"),
+            "no f64 slice:\n{}",
+            desc.source
+        );
+        assert!(
+            !desc.source.contains("f32"),
+            "no f32 should appear in a generic kernel:\n{}",
+            desc.source
+        );
+        assert!(
+            desc.source.contains("field0.lo[0]"),
+            "indices stay i32:\n{}",
+            desc.source
+        );
     }
 
     #[test]
     fn in_place_buffer_is_a_single_mut_slice() {
         let mut g = Graph::new();
         let rho = scalar_param(&mut g, "rho");
-        let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
-            kernel_name:      "inplace_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           cfg(),
-            field_inputs:     &[("rho".into(), "cons.den".into())],
-            scalar_params:    &[],
-            field_writes:     &[("rho".into(), "cons.den".into(), rho)],
-            coord_components: &[],
-            device_preamble:  &[],
-            tile_spec: None,
-        });
-        assert_eq!(desc.field_bindings.len(), 1, "in-place must dedup to one buffer");
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "inplace_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[("rho".into(), "cons.den".into())],
+                scalar_params: &[],
+                field_writes: &[("rho".into(), "cons.den".into(), rho)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
+        assert_eq!(
+            desc.field_bindings.len(),
+            1,
+            "in-place must dedup to one buffer"
+        );
         assert!(desc.field_bindings[0].is_output);
-        assert!(desc.source.contains("buf0: &mut [S]"), "src:\n{}", desc.source);
+        assert!(
+            desc.source.contains("buf0: &mut [S]"),
+            "src:\n{}",
+            desc.source
+        );
     }
 
     #[test]
@@ -816,32 +964,47 @@ mod tests {
         use crate::morphism::MorphismKind;
         let mut g = Graph::new();
         let flux = scalar_param(&mut g, "flux"); // base local, the `lo` term
-        let c0 = g.add_param(Symbol::intern("_coord_0"), TensorTy::scalar(ElementTy::F64), None);
+        let c0 = g.add_param(
+            Symbol::intern("_coord_0"),
+            TensorTy::scalar(ElementTy::F64),
+            None,
+        );
         let one = g.add_const(ConstValue::F64(1.0), None);
         let c0_hi = g.element_wise(ElementWiseOp::Add, vec![c0, one], None);
         let hi = g.load_at(Symbol::intern("flux"), vec![c0_hi], None);
         let diff = g.morphism(MorphismKind::Diff { axis: 0 }, vec![flux, hi], None); // hi - flux
 
-        let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
-            kernel_name:      "diff_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           cfg(),
-            field_inputs:     &[("flux".into(), "flux".into())],
-            scalar_params:    &[],
-            field_writes:     &[("out".into(), "out".into(), diff)],
-            coord_components: &[0],
-            device_preamble:  &[],
-            tile_spec: None,
-        });
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "diff_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[("flux".into(), "flux".into())],
+                scalar_params: &[],
+                field_writes: &[("out".into(), "out".into(), diff)],
+                coord_components: &[0],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         assert!(desc.source.contains("let flux: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"),
             "src:\n{}", desc.source);
         // the shifted load is a PURE INTEGER index; no f64 anywhere in it.
         // hoisted-base form: base + literal delta.
         assert!(
-            desc.source.contains("field0.data[(__idx_cell_buf0 + (((ii + 1)) - ii) * field0.strides[0]) as usize]"),
-            "shifted load not a pure integer index:\n{}", desc.source,
+            desc.source.contains(
+                "field0.data[(__idx_cell_buf0 + (((ii + 1)) - ii) * field0.strides[0]) as usize]"
+            ),
+            "shifted load not a pure integer index:\n{}",
+            desc.source,
         );
-        assert!(!desc.source.contains("as i64"), "indices are i32; no i64 cast:\n{}", desc.source);
+        assert!(
+            !desc.source.contains("as i64"),
+            "indices are i32; no i64 cast:\n{}",
+            desc.source
+        );
         assert!(desc.source.contains("- flux);"));
     }
 
@@ -852,19 +1015,31 @@ mod tests {
         // so index arithmetic on it stays integer.
         let mut g = Graph::new();
         let rho = scalar_param(&mut g, "rho");
-        g.add_param(Symbol::intern("shift"), TensorTy::scalar(ElementTy::I32), None);
-        let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
-            kernel_name:      "shifted_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           cfg(),
-            field_inputs:     &[("rho".into(), "prim.rho".into())],
-            scalar_params:    &["shift".into()],
-            field_writes:     &[("out".into(), "out".into(), rho)],
-            coord_components: &[],
-            device_preamble:  &[],
-            tile_spec: None,
-        });
-        assert!(desc.source.contains("shift: i32"), "shift must be i32:\n{}", desc.source);
+        g.add_param(
+            Symbol::intern("shift"),
+            TensorTy::scalar(ElementTy::I32),
+            None,
+        );
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "shifted_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[("rho".into(), "prim.rho".into())],
+                scalar_params: &["shift".into()],
+                field_writes: &[("out".into(), "out".into(), rho)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
+        assert!(
+            desc.source.contains("shift: i32"),
+            "shift must be i32:\n{}",
+            desc.source
+        );
         assert!(!desc.source.contains("shift: f64"));
     }
 
@@ -892,24 +1067,31 @@ mod tests {
             )),
         };
         let s = render_index_expr(&e, &["ii", "jj", "kk"]);
-        assert_eq!(s, "(if (map_type == 1) { (ii + shift) } else { (pivot2 - ii) })");
+        assert_eq!(
+            s,
+            "(if (map_type == 1) { (ii + shift) } else { (pivot2 - ii) })"
+        );
     }
 
     #[test]
     fn two_d_declares_integer_stride_locals_and_flat_parallel() {
         let mut g = Graph::new();
         let cons_den = scalar_param(&mut g, "cons_den");
-        let desc = emit_kernel_cpu(&g, &KernelEmitInputs {
-            kernel_name:      "pass_2d",
-            coalesce_layout: false,            ndim:             2,
-            target:           cfg(),
-            field_inputs:     &[("cons_den".into(), "cons.den".into())],
-            scalar_params:    &[],
-            field_writes:     &[("prim_den".into(), "prim.den".into(), cons_den)],
-            coord_components: &[],
-            device_preamble:  &[],
-            tile_spec: None,
-        });
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "pass_2d",
+                coalesce_layout: false,
+                ndim: 2,
+                target: cfg(),
+                field_inputs: &[("cons_den".into(), "cons.den".into())],
+                scalar_params: &[],
+                field_writes: &[("prim_den".into(), "prim.den".into(), cons_den)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
         // Phase 1B-4: field0 is the input — it's a `&CpuField<S>` kernel arg.
         // body indexes via `field0.lo[..]` / `field0.strides[..]` / `field0.data`.
         assert!(desc.source.contains("field0: &CpuField<S>"));

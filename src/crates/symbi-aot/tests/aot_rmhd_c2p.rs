@@ -6,7 +6,7 @@
 // kkc_fmu44, find_mu_plus + Illinois half-damp, 100-step bound baked at codegen,
 // lowered + emitted to compiled Rust via the DAG-preserving lowering). this is the
 // proof the COMPILED kernel produces correct numbers, not just compilable code
-// (the IR graph itself was validated against the C++ to_primitive in
+// (the IR graph itself is validated against the reference c2p in
 // symbi-discretize/tests/rmhd_c2p.rs).
 //
 // ROUND-TRIP: pick analytic primitives (rho, 3-velocity v, p, lab B), forward-map

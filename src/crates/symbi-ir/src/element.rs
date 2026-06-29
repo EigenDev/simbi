@@ -2,8 +2,8 @@
 // element.rs
 //
 // element type of a tensor: the scalar primitive at every component.
-// matches the existing scalar IR's supported types (F64, F32, I32, U32,
-// Bool). promotions and casts are out of scope for V1 — mismatched
+// the supported types are F64, F32, I32, U32, Bool. promotions and casts
+// are out of scope for V1 — mismatched
 // elements at op-construction time are an IR build error.
 //
 // V2 will extend with BF16, F16, Complex64, Complex32; the enum's

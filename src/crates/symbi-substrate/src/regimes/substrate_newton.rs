@@ -145,7 +145,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
 
     /// pick the Riemann solver. default is HLLE (unsuffixed kernels); HLLC
     /// routes to the `adiabatic_face_flux_hllc_*` AOT variants. fluent builder.
-    /// rejects a solver that is invalid for the Newtonian regime (e.g. HLLD).
+    /// rejects a solver that is invalid for the Newtonian regime (e.g., HLLD).
     pub fn with_solver(mut self, solver: Solver) -> Result<Self, symbi_sim::state::ConfigError> {
         let regime = crate::regimes::substrate_kernels::RegimeKind::of::<Sc, D, symbi_hydro::newtonian::Newtonian>();
         if !solver.valid_for(regime) {

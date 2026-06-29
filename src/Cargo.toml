@@ -31,7 +31,7 @@ edition = "2024"
 
 # warnings are errors across every workspace crate (each crate opts in via
 # `[lints] workspace = true`). `deny` (not `forbid`) so a deliberate, documented
-# `#[allow(...)]` at a specific site can still override it — e.g. the emitted
+# `#[allow(...)]` at a specific site can still override it — e.g., the emitted
 # kernels' allow attrs, or a kept-but-orphaned reference fn. dependencies are
 # unaffected (workspace lints apply only to our own crates).
 [workspace.lints.rust]

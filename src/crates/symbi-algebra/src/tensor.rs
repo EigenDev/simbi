@@ -83,10 +83,8 @@ impl<S: crate::algebra::Numeric, const N: usize> Tensor<S, N> {
     }
 }
 
-// (legacy `Selectable for Tensor` impl deleted 2026-05-30 with the legacy Scalar
-// trait; the production `Selectable<S> for Tensor<S, N>` lives in `symbi_ir` so
-// it can refer to the new `symbi_ir::algebra::Selectable` while keeping
-// `Tensor` here.)
+// the production `Selectable<S> for Tensor<S, N>` lives in `symbi_ir` so it can
+// refer to `symbi_ir::algebra::Selectable` while keeping `Tensor` here.
 
 // ============================================================
 // indexing

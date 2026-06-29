@@ -11,8 +11,8 @@
 //   1. ROUND-TRIP: pick analytic primitives (rho, v, p), forward-map to the
 //      conserved (D, S, tau) via the standard SRHD relations, run c2p, and assert
 //      it recovers the originals. this is the physical ground truth.
-//   2. REFERENCE: an independent Rust `srhd_to_primitive` (the do-while Newton of
-//      cpp_src/.../conversion.hpp, run to convergence) on the same conserved
+//   2. REFERENCE: an independent Rust `srhd_to_primitive` (a do-while Newton
+//      iteration run to convergence) on the same conserved
 //      states; the compiled 20-step masked unroll must match it.
 //
 // generated signature (OUT_DIR/srhd_c2p_generated.rs):

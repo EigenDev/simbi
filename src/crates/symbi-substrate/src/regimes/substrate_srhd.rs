@@ -17,29 +17,29 @@
 //
 // the wave-speed map is D-generic: it folds the per-axis relativistic Davis speed
 // (vn = vel[d], shared cs) over all D axes with a per-axis inv_dx, so the CFL is the
-// anisotropic-correct `cfl_from_lambda` — matching the iso/Newton convention and the
-// C++ per-axis `srhd::wave_speeds(prim, e_d)` projection.
+// anisotropic-correct `cfl_from_lambda` — matching the iso/Newton convention via a
+// per-axis wave-speed projection.
 //
 // the SRHD scheme is validated by the Marti & Mueller relativistic Sod through
 // the real evolve() loop in tests/substrate_srhd_sod.rs.
 // =============================================================================
 
 use symbi_algebra::{Domain, OrderedNumeric};
-use symbi_ir::algebra::Scalar;
-use symbi_ir::ScalarRef;
 use symbi_grid::Field;
+use symbi_ir::ScalarRef;
+use symbi_ir::algebra::Scalar;
 use symbi_xpu::MemorySpace;
 
 use std::sync::Arc;
 
-use crate::kernels::support::{to_bc_array, GhostFillDriver};
+use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_godunov, dispatch_runtime_source,
-    resolve_params, scalars_for, RuntimeSource, ScalarBind, Solver,
+    RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_fields, dispatch_flux,
+    dispatch_godunov, dispatch_runtime_source, resolve_params, scalars_for,
 };
 use symbi_hydro::source_spec::BuiltSource;
-use symbi_sim::substrate_seam::KernelSet;
 use symbi_sim::state::FieldStore;
+use symbi_sim::substrate_seam::KernelSet;
 
 /// a D-generic SRHD `KernelSet`, every method substrate-generated.
 pub struct SrhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
@@ -59,17 +59,30 @@ pub struct SrhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric,
     pub runtime_source: Option<Arc<RuntimeSource>>,
 }
 
-impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> SrhdSubstrateKernelSet<Mem, Sc, D> {
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    SrhdSubstrateKernelSet<Mem, Sc, D>
+{
     pub fn new(gamma: f64, cfl_number: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate SRHD CFL scratch field");
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, solver: Solver::Hlle, runtime_source: None }
+        Self {
+            gamma,
+            cfl_number,
+            theta: 1.0,
+            cfl_scratch,
+            solver: Solver::Hlle,
+            runtime_source: None,
+        }
     }
 
     /// attach a runtime user source from already-lowered `(target, BuiltSource)`
     /// pairs (the `build_user_source` output of a `kind="raw"` SRHD `SourceConfig`).
     /// applied two-pass in `source_apply` (plain godunov + `dispatch_runtime_source`).
-    pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
+    pub fn with_runtime_source(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Self {
         // has_energy = true (SRHD carries tau); validation happened at
         // `build_user_source(cfg, &SRHD_SPEC)`.
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
@@ -78,9 +91,10 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> SrhdSubstrat
 
     /// pick the Riemann solver. default is HLLE; HLLC routes to the
     /// `srhd_face_flux_hllc_*` AOT variants. fluent builder.
-    /// rejects a solver that is invalid for the SRHD regime (e.g. HLLD).
+    /// rejects a solver that is invalid for the SRHD regime (e.g., HLLD).
     pub fn with_solver(mut self, solver: Solver) -> Result<Self, symbi_sim::state::ConfigError> {
-        let regime = crate::regimes::substrate_kernels::RegimeKind::of::<Sc, D, symbi_hydro::srhd::Srhd>();
+        let regime =
+            crate::regimes::substrate_kernels::RegimeKind::of::<Sc, D, symbi_hydro::srhd::Srhd>();
         if !solver.valid_for(regime) {
             return Err(symbi_sim::state::ConfigError::SolverRegimeMismatch { solver, regime });
         }
@@ -125,7 +139,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             o => panic!("srhd c2p: unexpected scalar {o:?}"),
         });
         dispatch_fields::<Sc, Mem, D>(
-            &name, &sim.geom.allocated, &sim.geom.interior, &inputs, &outputs, &[], &scalars,
+            &name,
+            &sim.geom.allocated,
+            &sim.geom.interior,
+            &inputs,
+            &outputs,
+            &[],
+            &scalars,
         );
     }
 
@@ -152,7 +172,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
         // SRHD's only contribution is the "srhd" map (its relativistic wave speed).
         let pre = sim.fields.prim.pre_field().expect("Srhd requires prim.pre");
-        cfl_wave_speed(sim, pre, &self.cfl_scratch, "srhd", self.gamma, self.cfl_number)
+        cfl_wave_speed(
+            sim,
+            pre,
+            &self.cfl_scratch,
+            "srhd",
+            self.gamma,
+            self.cfl_number,
+        )
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -162,32 +189,42 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         let pre = sim.fields.prim.pre_field().expect("Srhd requires prim.pre");
         let name = format!("iso_ghost_fill_{D}d");
 
-        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(|region, p| {
-            let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-            for k in 0..D {
-                outputs.push(&sim.fields.prim.vel[k]);
-            }
-            outputs.push(pre);
-            // ints: map_type_0..{D-1}, arg_0..{D-1}. scalars: vel_sign_0..{D-1}.
-            // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
-            // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int ⊔ float
-            // coproduct).
-            let (ints, scalars) = resolve_params(
-                &name,
-                |bind| match bind {
-                    ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
-                    ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
-                    o => panic!("ghost_fill: unexpected int param {o:?}"),
-                },
-                |bind| match bind {
-                    ScalarBind::Ref(ScalarRef::VelSign(ax)) => Sc::from_f64(p.vel_sign[*ax as usize]),
-                    o => panic!("ghost_fill: unexpected scalar {o:?}"),
-                },
-            );
-            dispatch_fields::<Sc, Mem, D>(
-                &name, &sim.geom.allocated, &region.domain, &[], &outputs, &ints, &scalars,
-            );
-        });
+        GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
+            |region, p| {
+                let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
+                for k in 0..D {
+                    outputs.push(&sim.fields.prim.vel[k]);
+                }
+                outputs.push(pre);
+                // ints: map_type_0..{D-1}, arg_0..{D-1}. scalars: vel_sign_0..{D-1}.
+                // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
+                // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int ⊔ float
+                // coproduct).
+                let (ints, scalars) = resolve_params(
+                    &name,
+                    |bind| match bind {
+                        ScalarBind::Ref(ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
+                        ScalarBind::Ref(ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                        o => panic!("ghost_fill: unexpected int param {o:?}"),
+                    },
+                    |bind| match bind {
+                        ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
+                            Sc::from_f64(p.vel_sign[*ax as usize])
+                        }
+                        o => panic!("ghost_fill: unexpected scalar {o:?}"),
+                    },
+                );
+                dispatch_fields::<Sc, Mem, D>(
+                    &name,
+                    &sim.geom.allocated,
+                    &region.domain,
+                    &[],
+                    &outputs,
+                    &ints,
+                    &scalars,
+                );
+            },
+        );
     }
 
     fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -208,7 +245,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 
         let name = format!("srhd_snapshot_{D}d");
         dispatch_fields::<Sc, Mem, D>(
-            &name, &sim.geom.allocated, &sim.geom.allocated, &inputs, &outputs, &[], &[],
+            &name,
+            &sim.geom.allocated,
+            &sim.geom.allocated,
+            &inputs,
+            &outputs,
+            &[],
+            &[],
         );
     }
 }

@@ -9,7 +9,7 @@
 //
 // a `Cell` is the geometry-neutral unit: a Cartesian position + Cartesian three-velocity +
 // thermodynamics + proper volume + lab emission time. `Cell::from_coords` builds one from a
-// hydro cell in its native coordinates via `coords` (which mirrors the hydro's own transforms).
+// hydro cell in its native coordinates via `coords` (which matches the hydro's own transforms).
 // `generate_events_from_cells` emits packets, beaming about each cell's velocity vector — so a
 // laterally-spreading sector images correctly and the observer-direction doppler is exact.
 //

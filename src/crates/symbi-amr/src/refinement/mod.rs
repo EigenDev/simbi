@@ -27,5 +27,7 @@ pub mod transfer;
 
 pub use emf_register::EmfRegister;
 pub use flux_register::FluxRegister;
-pub use hierarchy::{Hierarchy, LevelData, RefinementRegion};
+pub use hierarchy::{
+    evolve_hierarchy_decomposed, fine_subgrid, FineSubgrid, Hierarchy, LevelData, RefinementRegion,
+};
 pub use transfer::ProlongOrder;

@@ -405,8 +405,8 @@ pub fn run_policy<const D: usize>(
 /// this is the 3D throughput lever. a stencil kernel re-reads each cell's neighbours
 /// across adjacent output cells; if the block is large the reuse distance exceeds
 /// cache and every read hits RAM (the memory wall — why 3D MZCS *falls* as the grid
-/// grows). a small transverse tile keeps the reuse in cache. the old policy sized
-/// blocks for LOAD BALANCE (~4*threads big blocks), which is exactly wrong here.
+/// grows). a small transverse tile keeps the reuse in cache. sizing
+/// blocks for LOAD BALANCE (~4*threads big blocks) is exactly wrong here.
 ///
 /// measured on M4 (sedov3d 128^3, ~8 fields f64): edge 8 (8^3 ~ 32 KB ~ L1) is the
 /// sweet spot — 22 (old auto) / 20 (off) -> 33 MZCS, near AthenaK's 35. edges 16/32

@@ -14,14 +14,14 @@
 //   cargo test -p symbi --features cuda --test substrate_gpu_dispatch
 // =============================================================================
 
-#![cfg(feature = "cuda")]
+#![cfg(feature = "gpu")]
 
 use symbi::regimes::substrate_gpu::dispatch;
 use symbi_aot::{
     iso_c2p_1d, Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar,
     ISO_C2P_1D_IR,
 };
-use symbi_xpu::cuda::UnifiedMemory;
+use symbi_xpu::DeviceMemory;
 use symbi_xpu::MemoryBlock;
 
 // dispatch iso_c2p over unified `S` buffers and assert the device prim matches the
@@ -57,8 +57,8 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
 
     // 6 unified buffers (den, mom, cs2 inputs; rho, vel, pre outputs) — host- and
     // device-addressable, so they go straight into the invocation handles.
-    let mut blocks: Vec<MemoryBlock<UnifiedMemory>> =
-        (0..6).map(|_| MemoryBlock::<UnifiedMemory>::for_elements::<S>(n).unwrap()).collect();
+    let mut blocks: Vec<MemoryBlock<DeviceMemory>> =
+        (0..6).map(|_| MemoryBlock::<DeviceMemory>::for_elements::<S>(n).unwrap()).collect();
     let ptrs: Vec<*mut S> = blocks.iter_mut().map(|b| b.as_mut_ptr::<S>()).collect();
     for (i, data) in [&den, &mom, &cs2].iter().enumerate() {
         for (j, &x) in data.iter().enumerate() {
@@ -86,12 +86,12 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
         scalars: &[],
     };
 
-    // UnifiedMemory is device-accessible -> dispatch routes to run_gpu (render at
+    // DeviceMemory is device-accessible -> dispatch routes to run_gpu (render at
     // S's precision + NVRTC). the cpu fn is the (unused here) host fallback.
-    dispatch::<S, UnifiedMemory, _>(inv, ISO_C2P_1D_IR, "iso_c2p_1d", iso_c2p_1d);
+    dispatch::<S, DeviceMemory, _>(inv, ISO_C2P_1D_IR, "iso_c2p_1d", iso_c2p_1d);
     // launches are asynchronous: drain the device queue before the host reads
     // the unified buffers (the B12 host-read barrier).
-    symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
+    symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
 
     let read = |p: *mut S| (0..n).map(|j| unsafe { (*p.add(j)).to_f64() }).collect::<Vec<f64>>();
     let (rg, vg, pg) = (read(ptrs[3]), read(ptrs[4]), read(ptrs[5]));
