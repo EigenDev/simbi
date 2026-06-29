@@ -133,12 +133,15 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec
     } else {
         // dB_z/dt = -(1/r_c) d_r(r E_phi) : the cylindrical metric on the radial derivative.
         // r at the cell's two r-faces (= the corner radii bounding this z-face), cell-center r_c.
+        // minus because (curl E)_z = +(1/r) d_r(r E_phi) and dB/dt = -curl(E) — OPPOSITE sign to
+        // the spherical-poloidal B_theta update (curl_theta carries its own minus). the plus form
+        // leaks div(B) secularly (d/dt div(B) != 0); the rotor div(B) blows to O(1) in one step.
         let inv_dr = Gv::ONE / (gv_axis_face_at(0, spacing[0], 1) - gv_axis_face_at(0, spacing[0], 0));
         let r_lo = gv_axis_face_at(0, spacing[0], 0);
         let r_hi = gv_axis_face_at(0, spacing[0], 1);
         let r_c = (r_lo + r_hi) * Gv::from_f64(0.5);
         let ez_rp = gv_field_at("ez", "ez", 2, &[1, 0]);
-        b + dt * (Gv::ONE / r_c) * inv_dr * (r_hi * ez_rp - r_lo * ez)
+        b - dt * (Gv::ONE / r_c) * inv_dr * (r_hi * ez_rp - r_lo * ez)
     };
     (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
 }

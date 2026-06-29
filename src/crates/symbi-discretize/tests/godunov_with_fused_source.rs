@@ -399,9 +399,9 @@ fn ssp_combine_applies_runtime_coefficients() {
 #[test]
 fn unsupported_target_field_panics_loudly() {
     // **discipline**: target_field that godunov doesn't know how to route
-    // (e.g., a typo, or a future field like "bcell" the substrate doesn't
-    // wire yet) is a programmer bug — surface a panic with the offending
-    // value, not a silent drop.
+    // (a typo, or a field name the substrate doesn't wire) is a programmer
+    // bug — surface a panic with the offending value, not a silent drop.
+    // (the godunov vocabulary is den/mom/nrg/bcell; use a bogus name here.)
     const D: usize = 1;
     let coords = Coords::Cartesian;
     let spacing = vec![Spacing::Uniform; D];
@@ -423,7 +423,7 @@ fn unsupported_target_field_panics_loudly() {
     }
     let bad_spec = symbi_hydro::source_spec::SourceSpec {
         kind: symbi_hydro::source_spec::SourceKind::UserDefined,
-        target_field: "bcell", // not in the godunov vocabulary
+        target_field: "bogus_target", // not in the godunov vocabulary (den/mom/nrg/bcell)
         build_source: empty_builder,
     };
     let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = vec![&bad_spec];
