@@ -480,7 +480,8 @@ fn gen_godunov_stage(
         None         => &no_sources,
     };
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
-        geom.coords, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
+        // B3.1: enumerate spacetimes in the bake loop (Geom.spacetime); flat (Minkowski) for now.
+        geom.coords, symbi_discretize::Spacetime::Minkowski, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
         geo_source(prefix), sources, /* mag_from_bcell = */ false, // unfused: geo source reads prim.mag
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -499,7 +500,7 @@ fn gen_godunov_with_body_source(out_dir: &str, ndim: u8, prefix: &str, has_energ
     let refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
         built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
-        geom.coords, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
+        geom.coords, symbi_discretize::Spacetime::Minkowski, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
         geo_source(prefix), &refs, /* mag_from_bcell = */ false,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -971,7 +972,7 @@ fn gen_mhd_godunov_and_bcell(out_dir: &str, prefix: &str, geom: Geom, variant: &
         other => panic!("gen_mhd_godunov_and_bcell: unknown variant `{other}`"),
     };
     let (mut k_god, w_god) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
-        geom.coords, &geom.spacing, &geom.axes, 3, 3, true,
+        geom.coords, symbi_discretize::Spacetime::Minkowski, &geom.spacing, &geom.axes, 3, 3, true,
         geo_source(prefix), &[], /* mag_from_bcell = */ true, // FUSED: read cell-B via bc_k so try_fuse dedups it
     );
     let (mut k_bcell, w_bcell) = bcell_kw;

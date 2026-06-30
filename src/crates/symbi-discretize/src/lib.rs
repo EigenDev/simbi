@@ -28,7 +28,7 @@ pub mod gv_refinement;
 pub mod gv_immersed;
 pub mod lattice;
 
-pub use coords::{Coords, Spacing};
+pub use coords::{Coords, Spacing, Spacetime};
 // facade: the carrier types live in symbi-ir alongside Op + Graph (consolidated
 // 2026-05-30; symbi-core was folded in). re-export them so the builder return
 // types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).

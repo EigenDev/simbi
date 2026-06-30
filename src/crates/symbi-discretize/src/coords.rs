@@ -31,3 +31,18 @@ pub enum Coords {
     Spherical,
     Cylindrical,
 }
+
+/// the spacetime background — selects the GR lapse / sqrt(gamma) densitization in the gv stage
+/// (`gv_lapse_weight`). ORTHOGONAL to `Coords` (spatial) and to the physics regime: GR is a
+/// spacetime, not a regime, so any SR regime composes with any spacetime. defaults to `Minkowski`
+/// (flat: the densitization is a no-op -> bit-identical), so existing kernels need no annotation.
+/// the codegen-time mirror of `symbi_geometry::Spacetime` (like `Coords` mirrors `Geometry`).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum Spacetime {
+    #[default]
+    Minkowski,
+    /// static spherically-symmetric vacuum: lapse alpha = sqrt(1 - 2M/r), shift = 0. the codegen
+    /// TAG (M-agnostic — M rides as a kernel value, like `dx`). mirrors `symbi_geometry::Spacetime`.
+    Schwarzschild,
+    // Kerr lands here at B5.
+}

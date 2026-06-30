@@ -298,7 +298,8 @@ fn build_fused_cpu_kernel<const D: usize>(
 ) -> Option<FusedCpuKernel> {
     let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
-        coords, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false,
+        // B3.1: thread the real spacetime here for runtime GR sources; flat (Minkowski) for now.
+        coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false,
     );
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). NOT
     // an error: the gate is "compile when we can, else interpret", never miscompile.

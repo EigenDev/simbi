@@ -639,6 +639,11 @@ pub struct PartitionGeometry<const D: usize> {
     /// kernel selection (`_sph` / `_cyl` suffix) and the geometric source terms.
     pub coords: symbi_geometry::Geometry,
 
+    /// the spacetime background (from the metric `M::spacetime()`) — ORTHOGONAL to `coords`:
+    /// `Minkowski` for every flat run, a curved variant (Schwarzschild, ...) for GR. drives the
+    /// lapse / sqrt(gamma) densitization selector in the kernel (B3); flat -> no-op.
+    pub spacetime: symbi_geometry::Spacetime,
+
     /// grid axis -> coordinate index map. identity for cartesian / spherical / 3D, so grid
     /// axis d IS coordinate d. the AMBIGUOUS case is the cylindrical 2D plane, where MHD
     /// carries a 3-vector B on a 2-axis grid (DOF > ndim) and the two physical planes are
@@ -1578,6 +1583,7 @@ where
 
         let geom = PartitionGeometry {
             dx, x_lo, allocated: allocated.clone(), interior, ng, coords: metric.geometry(),
+            spacetime: metric.spacetime(),
             axes: default_grid_axes::<D>(metric.geometry()), maps: None,
         };
         let has_energy = regime.has_energy();

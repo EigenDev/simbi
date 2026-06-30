@@ -61,6 +61,29 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
 }
 
 
+/// the GR LAPSE WEIGHT `alpha(x)` for the spatial-RHS densitization (Valencia 3+1). the conserved
+/// update `d_t(sqrt(gamma) U) + d_i(sqrt(-g) F) = sqrt(-g) S` reduces, on a STATIC DIAGONAL
+/// background, to weighting the flux divergence + the geometric momentum source by the lapse
+/// (`sqrt(-g) = alpha sqrt(gamma)`; the Schwarzschild coordinate gift `sqrt(-g) = sqrt(gamma_flat)`
+/// leaves the face areas flat and folds `1/sqrt(gamma) = alpha/sqrt(gamma_flat)` into a single
+/// `alpha` on the RHS). flat spacetimes (EVERY realized metric today) have `alpha = 1` -> `None`,
+/// so the RHS is untouched and BIT-IDENTICAL — the de-risk seam. a GR metric (Schwarzschild, B3.1)
+/// returns `Some(alpha)` dispatched `Coords -> concrete Metric -> metric.lapse(centroid)` as a
+/// traced Gv expression in the cell coordinate (the established B1 source-dispatch pattern).
+pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime) -> Option<Gv> {
+    let _ = coords; // the spatial coords select the concrete `Metric` impl in the GR arms (B3.1).
+    match spacetime {
+        // flat (Minkowski) lapse alpha = 1: no densitization -> bit-identical.
+        Spacetime::Minkowski => None,
+        // B3.1 step B (the LIVE wiring): dispatch `(coords, Schwarzschild)` -> `Schwarzschild` Metric
+        // -> `Some(metric.lapse(centroid))` as a traced Gv expr, with M a `Gv::scalar`. needs the
+        // centroid threaded into this fn + the mass-scalar host binding. UNREACHABLE today (no sim
+        // selects the `Schwarzschild` metric yet) -> stubbed `None` so the selector stays inert.
+        Spacetime::Schwarzschild => None,
+    }
+}
+
+
 /// `true` iff the flat unweighted `(F_hi-F_lo)/dx` divergence applies (no in-kernel metric).
 pub(crate) fn is_cartesian_uniform(coords: Coords, spacing: &[Spacing]) -> bool {
     coords == Coords::Cartesian && spacing.iter().all(|&s| s == Spacing::Uniform)

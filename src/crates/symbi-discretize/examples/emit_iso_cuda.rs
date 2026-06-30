@@ -18,7 +18,7 @@ use symbi_discretize::GvKernel;
 use symbi_discretize::{
     adiabatic_c2p_gv, adiabatic_flux_gv, godunov_mass_gv, godunov_stage_gv,
     iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv, snapshot_gv, srhd_c2p_gv,
-    srhd_flux_gv, Coords, GeoSource, Spacing,
+    srhd_flux_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
@@ -93,9 +93,9 @@ fn main() {
     let (mk, mw) = godunov_mass_gv(cart.0, &cart.1, &cart.2, 1);
     emit_gv(&out, "godunov_mass_1d", 1, mk, mw);
     // one godunov-stage kernel per regime (runtime (a0, ac) SSP coefficients serve euler/rk2/rk3).
-    let (iek, iew) = godunov_stage_gv(cart.0, &cart.1, &cart.2, 1, 1, false, src);
+    let (iek, iew) = godunov_stage_gv(cart.0, Spacetime::Minkowski, &cart.1, &cart.2, 1, 1, false, src);
     emit_gv(&out, "iso_godunov_stage_1d", 1, iek, iew);
-    let (aek, aew) = godunov_stage_gv(cart.0, &cart.1, &cart.2, 1, 1, true, src);
+    let (aek, aew) = godunov_stage_gv(cart.0, Spacetime::Minkowski, &cart.1, &cart.2, 1, 1, true, src);
     emit_gv(&out, "adiabatic_godunov_stage_1d", 1, aek, aew);
     let (isk, isw) = snapshot_gv(1, false);
     emit_gv(&out, "iso_snapshot_1d", 1, isk, isw);

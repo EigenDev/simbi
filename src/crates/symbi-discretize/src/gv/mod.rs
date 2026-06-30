@@ -43,7 +43,7 @@ use symbi_ir::{FieldBind, FieldRef};
 // symbi-hydro physics at S = Gv and trace it into the IR.
 use symbi_ir::{Gv, GvKernel, MeshScalar, TileSpec, begin_trace, end_trace, with_trace};
 
-use super::coords::{Coords, Spacing};
+use super::coords::{Coords, Spacing, Spacetime};
 
 // submodule declarations: each category is its own file; the glob re-exports below preserve
 // the byte-identical public path `gv::NAME` for every builder lib.rs + downstream crates reach
@@ -1507,6 +1507,7 @@ mod tests {
         // coord axes recorded); writes the conserved set in place.
         let (k, writes) = godunov_stage_gv(
             Coords::Cartesian,
+            Spacetime::Minkowski,
             &[Spacing::Uniform; 2],
             &[0, 1],
             2,
@@ -1582,7 +1583,7 @@ mod tests {
 
         // the compile-time spec path.
         let (k_spec, w_spec) = godunov_stage_gv_with_fused_sources(
-            coords, &spacing, &axes, 2, 2, true, geo, &spec_refs, false,
+            coords, Spacetime::Minkowski, &spacing, &axes, 2, 2, true, geo, &spec_refs, false,
         );
 
         // the runtime BuiltSource-value path (what `RuntimeSource` feeds).
@@ -1593,7 +1594,7 @@ mod tests {
         let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
             builts.iter().map(|(t, b)| (*t, b)).collect();
         let (k_built, w_built) = godunov_stage_gv_with_fused_built(
-            coords, &spacing, &axes, 2, 2, true, geo, &src_refs, false,
+            coords, Spacetime::Minkowski, &spacing, &axes, 2, 2, true, geo, &src_refs, false,
         );
 
         // the ABI manifest + writes are identical (NodeIds match because both trace the SAME op

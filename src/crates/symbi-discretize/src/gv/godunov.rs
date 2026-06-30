@@ -67,6 +67,7 @@ pub fn godunov_mass_gv(
 /// entry point for the common no-source case.
 pub fn godunov_stage_gv(
     coords: Coords,
+    spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
     ndim: u8,
@@ -74,7 +75,7 @@ pub fn godunov_stage_gv(
     has_energy: bool,
     source: GeoSource,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    godunov_stage_gv_with_fused_sources(coords, spacing, axes, ndim, ncomp, has_energy, source, &[], false)
+    godunov_stage_gv_with_fused_sources(coords, spacetime, spacing, axes, ndim, ncomp, has_energy, source, &[], false)
 }
 
 
@@ -244,6 +245,7 @@ fn splice_fused_sources_to_contribs(
 /// godunov+source trace lives ONCE, in the core.
 pub fn godunov_stage_gv_with_fused_sources(
     coords: Coords,
+    spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
     ndim: u8,
@@ -262,7 +264,7 @@ pub fn godunov_stage_gv_with_fused_sources(
     let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
         builts.iter().map(|(t, b)| (*t, b)).collect();
     godunov_stage_gv_with_fused_built(
-        coords, spacing, axes, ndim, ncomp, has_energy, source, &src_refs, mag_from_bcell,
+        coords, spacetime, spacing, axes, ndim, ncomp, has_energy, source, &src_refs, mag_from_bcell,
     )
 }
 
@@ -275,6 +277,7 @@ pub fn godunov_stage_gv_with_fused_sources(
 #[allow(clippy::too_many_arguments)]
 pub fn godunov_stage_gv_with_fused_built(
     coords: Coords,
+    spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
     ndim: u8,
@@ -314,9 +317,16 @@ pub fn godunov_stage_gv_with_fused_built(
     // `mesh_hdil = ndim * a_dot / a`, the comoving volume-growth rate) rides every
     // conserved law; the static binding mesh_hdil = 0 subtracts an exact zero.
     let h_dil = Gv::scalar("mesh_hdil");
+    // GR densitization (Valencia 3+1, static diagonal background): the spatial RHS — the flux
+    // divergence + the geometric momentum source — is weighted by the lapse `alpha(x)`. NOT the
+    // `u` snapshot or the mesh-dilution term (those are the time / comoving parts, not the
+    // densitized flux). flat spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
+    let lapse = gv_lapse_weight(coords, spacetime);
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
+        let div = match lapse { Some(a) => a * div, None => div };
         let mut r = u - dt * div - dt * (h_dil * u);
         if let Some(s) = geo_src {
+            let s = match lapse { Some(a) => a * s, None => s };
             r = r + dt * s;
         }
         r

@@ -88,7 +88,7 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
       B_theta). copied the poloidal form without flipping. div(B) blew to O(1) in ONE step. fixed;
       rotor + full discretize CT suite green. *this is exactly what a SYMBOLIC proof of the (r,z)
       curl would have caught — the 2D curls (rz/rphi/sph-poloidal) have only NUMERICAL guards.*
-- [~] **B2. thread the metric as a carrier-generic value into physics.** replace
+- [x] **B2. thread the metric as a carrier-generic value into physics.** replace
       `vel.dot(&vel)` / `mom.dot(&mom)` with `g_{ij} v^i v^j` / `gamma^{ij} S_i S_j`. SR->GR pivot.
       threading mechanism: a `Matrix<S,D>` (the spatial metric / its inverse) passed on the `eos`
       rails; `Matrix::quadratic`/`contract`/`identity` already exist; flat/orthonormal = identity =
@@ -122,16 +122,87 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
           solver entry, threaded through vdiff/converge. all 3 levels green: 273 hydro f64 + 27 interp oracle
           (+ AOT gate to stamp). B2.P2 COMPLETE (con2prim + full flux path metric-aware).
         dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch (~22-47s).
-      - [ ] **B2.P3** — structural Tier-2 (design decisions, NOT mechanical): wave speeds
-        (alpha/beta/gamma^nn, Banyuls-Font), the GV face normal (`Tensor::unit` is not the GR normal).
-        C1 (variance type-safety) folds in here for the contravariant/covariant correctness.
-- [ ] **B3. densitize the conserved state** (`sqrt(gamma) D, sqrt(gamma) S_i, sqrt(gamma)
-      tau`) and add α/β^i transport to the update (`godunov.rs:317`) + CT (`ct_emf.rs:233`).
-      activates the dead `lapse`/`shift`/`sqrt_det_gamma` surface.
+      - [x] **B2.P3 — RESCOPED (the structural Tier-2 was mis-framed, now dissolved/redirected).**
+        the original scope (Banyuls-Font wave speeds `alpha/beta/gamma^nn` + a "GR" face normal) ASSUMED
+        the Valencia coordinate-basis formulation. but the geometry layer already DECIDED the formulation
+        via the `DiagonalMetric` type-gate (`metric.rs:55-64`): diagonal metrics (flat, curvilinear,
+        Schwarzschild, FLRW) use the existing ORTHONORMAL / physical-component convention (`V_â = h_a v^a`,
+        spatial metric = identity in physical components); non-diagonal (Kerr) impls `Metric` but NOT
+        `DiagonalMetric`, so the genuine-`gamma_ij` path is COMPILE-GATED off until written. consequences:
+        - face normal `Tensor::unit(coord_n)` is ALREADY CORRECT in an orthonormal frame (no `gamma^nn`
+          normalization for diagonal metrics) -> the `project_transverse` gamma^nn caveat was a Valencia
+          worry. NO-OP for the realized (diagonal) physics.
+        - wave-speed EIGENVALUES (the MUB09 quartic) stay SR-verbatim in the local orthonormal frame;
+          alpha/beta enter at the DIVERGENCE (B3), not in the eigenvalue formula. the raw `.dot()`s left in
+          `rmhd/wave_speeds.rs` are Tier-1 leftovers (identity under the orthonormal convention) -> OPTIONAL
+          cosmetic tidy (thread `SpatialMetric` for carrier-story uniformity), NOT structural. [ ] if desired.
+        - C1 (variance) is VALIDATED, not deferred: in an orthonormal frame `S_â n^â` is genuinely
+          metric-free, so the Tier-1 decision to leave the momentum-class as `.dot()` is CORRECT (a typed
+          covariant `Tensor` is still worth it for safety, but it is not a correctness gap here).
+        - the `SpatialMetric` carrier's genuine NON-identity job is the Kerr frontier (B5) -> YAGNI until a
+          Kerr metric exists. the real GR structure for diagonal targets is alpha/beta/sqrt(gamma) -> B3.
+        B2 COMPLETE: every contravariant contraction routes through the carrier; the SR->GR seam is closed
+        at Tier-1, and the type system (not a comment) marks where Tier-2 genuinely begins.
+- [~] **B3. densitize the conserved state + 3+1 transport** (`sqrt(gamma) D, sqrt(gamma) S_i,
+      sqrt(gamma) tau`) and add alpha-scaling + beta^i advection to the update (`godunov.rs:317`)
+      + CT (`ct_emf.rs:233`). activates the dead `lapse`/`shift`/`sqrt_det_gamma` surface (all SR-default
+      no-ops, so invisible to existing runs). PLUMBING DESIGN (user-confirmed): **(C) Metric-trait-generic**
+      — dispatch `Coords -> concrete Metric -> metric.lapse(x)` as a traced Gv expression (the B1
+      source-dispatch pattern), NOT a codegen `Spacetime` enum (A) nor runtime metric fields (B). keeps
+      geometry single-sourced from the trait; alpha is a traced expr, not a stored field; flat -> ONE ->
+      bit-identical. (B) is the escape hatch if the trait churn through AOT proves invasive.
+      KEY PHYSICS (Schwarzschild coordinate gift): `sqrt(-g) = alpha sqrt(gamma) = r^2 sin(theta)` =
+      FLAT spherical area -> flux face areas UNCHANGED; `1/sqrt(gamma) = alpha/sqrt(gamma_flat)` -> the
+      whole spatial RHS (flux div + geometric source) collapses to a single `x alpha(r)` weight. beta = 0.
+      - [x] **B3.0 — the lapse seam (inert, de-risk)**: `gv_lapse_weight(coords) -> Option<Gv>`
+        (geometry.rs) returns `None` for every flat metric today; threaded into the `fe` combine
+        (godunov.rs) weighting `div` + the geometric `src` (NOT the `u` / mesh-dilution terms). flat ->
+        `None` -> DAG UNTOUCHED -> bit-identical (no `xONE` node — `Gv::binop` does not fold). proves the
+        seam threads through the fused stage + AOT WITHOUT perturbing. verified: full symbi-discretize
+        suite green (carrier oracle 27 + all godunov/flux). NO public-signature churn (derived internally
+        from `coords`). only the PRIMARY gas update (`godunov_stage_gv_with_fused_built`, mass+mom+nrg);
+        the mass-demo (`godunov_mass_gv`), bcell euler, and CT (`ct_emf.rs`) are B3.1 follow-ups.
+      - [~] **B3.1 — Schwarzschild goes live**:
+        - [x] **the `Spacetime` SELECTOR skeleton (inert, flat-identical)**: a `Spacetime` enum
+          ORTHOGONAL to `Coords` AND to the regime (GR is a spacetime, NOT a regime — there is NO Grhd
+          regime and there shouldn't be; Srhd/Rmhd compose with any spacetime). added in BOTH layers
+          (`symbi_geometry::Spacetime` + `Metric::spacetime()` default Minkowski, mirroring
+          `Geometry`/`geometry()`; `symbi_discretize::Spacetime` codegen mirror, like `Coords`). threaded
+          `spacetime` through the 3 stage builders (`godunov_stage_gv{,_with_fused_sources,_with_fused_built}`)
+          + ALL callers (gv/mod.rs, runtime_source.rs runtime path, build.rs AOT bake x3, emit_iso_cuda
+          example); `gv_lapse_weight(coords, spacetime)` dispatches on it. carried in `PartitionGeometry`
+          beside `coords` (`spacetime: metric.spacetime()`). every realized run -> `Minkowski` -> `None` ->
+          DAG UNTOUCHED. verified flat-identical: geometry+discretize+substrate+sim all build clean,
+          carrier oracle 27 + discretize suite + 273 hydro f64 green. (AOT bake = the only heavy rebuild.)
+        - [x] **the `Schwarzschild: Metric` impl (geometry + lapse), unit-tested**: `Schwarzschild { mass }`
+          in symbi-geometry — DIAGONAL (impls `DiagonalMetric`), `f(r) = 1-2M/r`, lapse = sqrt(f),
+          gamma = diag(1/f, r^2, r^2 sin^2), sqrt(gamma) = r^2 sin/sqrt(f), for D=1/2/3 (mirrors Spherical
+          + the radial stretch). geometry() = Spherical, spacetime() = Schwarzschild. `Spacetime::Schwarzschild`
+          tag added to BOTH enums (geometry `=1`, discretize mirror). 4 unit tests green (analytic lapse/gamma,
+          gamma*gamma^-1=I, the sqrt(-g)=r^2 sin GIFT, M=0 -> Spherical exactly, 1D radial) + 99 existing
+          geometry green. gravity (the geodesic momentum source) left at the trait default (zero) -> B4.
+          `gv_lapse_weight` Schwarzschild arm STUBBED `None` (exhaustive match; unreachable — no sim selects
+          it yet); discretize oracle 27 still flat-identical.
+        - [ ] **step B — make Schwarzschild FLOW through the kernel** (the live wiring): (1) refactor the
+          struct to `Schwarzschild<S> { mass: S }` so M can be a `Gv::scalar` at codegen (host-filled),
+          keeping `metric.lapse` the single source (vs baking a literal M); (2) thread the cell centroid
+          into `gv_lapse_weight` + the `(Spherical, Schwarzschild) -> run::<Schwarzschild<Gv>,D>` dispatch
+          returning `Some(metric.lapse(centroid))`; (3) the mass-scalar HOST BINDING (substrate manifest +
+          driver fills `schwarzschild_mass`); (4) bake-loop spacetime enumeration + slug tag + runtime
+          kernel-select keys on `PartitionGeometry.spacetime` (+ the geometry->discretize Spacetime bridge);
+          (5) PIN the exact sqrt(-g)-on-faces vs sqrt(gamma)-on-volume factor placement AGAINST a known
+          solution. then the gravity source (B4) for actual infall; extend the seam to CT + bcell + mass-demo.
+      CONCRETE DRIVER: **Schwarzschild (standard coords) — DIAGONAL, beta = 0.** SR Riemann/c2p VERBATIM
+      + alpha-scaling + sqrt(gamma)-densitization + the B1 Christoffel gravity source. first genuine GR run.
 - [ ] **B4. `Christoffel`/covariant-derivative as first-class `Metric` methods**, derived
       from g(x), replacing the diagonal-only hand-rolled source. slots in after B1-B3.
-- [ ] **B5. non-diagonal `Schwarzschild: Metric`** (NOT `DiagonalMetric`) to exercise and
-      prove the general-metric path. the type gate already exists (`metric.rs:250`).
+- [ ] **B5. non-diagonal `Kerr: Metric`** (NOT `DiagonalMetric`) — the genuine non-diagonal exerciser
+      (off-diagonal gamma + frame-dragging shift beta != 0). this is where the `SpatialMetric` carrier
+      earns its keep (real gamma_ij contractions) AND where the one genuine open fork lives: do the
+      SR-orthonormal solvers get a tetrad transform at the face, or a coordinate-basis (Valencia) solver?
+      PREMATURE to decide now (no Kerr metric exists). the type gate already exists (`metric.rs:55-64`).
+      (NOTE: standard Schwarzschild is DIAGONAL -> it is the B3 driver, not this. a non-diagonal exerciser
+      needs Kerr, or Schwarzschild in Kerr-Schild/Eddington form with a shift.)
 
 ## workstream C — type-level invariants (cash the categorical checks)
 
@@ -228,7 +299,7 @@ NOW (parallel, additive, low-risk):
   D2 HSE well-balanced gate ──┘
 
 THEN (the GR seam, regression-safe because gates are in place):
-  B1 wire geometry  ->  B2 metric-contract  ->  B3 densitize  ->  B4 Christoffel  ->  B5 Schwarzschild
+  B1 wire geometry  ->  B2 metric-contract  ->  B3 densitize (+Schwarzschild, diagonal)  ->  B4 Christoffel  ->  B5 Kerr (non-diagonal)
   C1 variance fix runs alongside B (needed for B4 to be sane)
   A2/A3/A4 provability checks land as each physics piece stabilizes
 
