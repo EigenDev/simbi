@@ -97,10 +97,16 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
         `s_mag = sqrt(gamma^{ij} S_i S_j)` site, identity at all 4 callers. VERIFIED bit-identical
         at all 3 levels: f64 (38), interpreter oracle, and the COMPILED-kernel gate
         (`aot_carrier_equivalence::srhd_c2p_kernel_equals_host` green). de-risks the whole arc.
-      - [ ] **B2.P2** — fan out the remaining Tier-1 `.dot()` sites (the ~30 from the agent maps):
-        srhd v^2 (needs gamma not gamma_inv), rmhd/cons rescale invariants (r_sq/bee_sq/rdb/rp_sq),
-        rmhd/algebra norms, the gamma-orthogonal transverse projector `B - n(B.n)` (recurs ~15x).
-        dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch.
+      - [~] **B2.P2** — fan out the remaining Tier-1 `.dot()` sites. introduced `SpatialMetric<S,D>`
+        carrier (symbi-hydro/src/spatial_metric.rs: gamma + gamma_inv + `flat()` + variance-NAMED
+        norm helpers `norm_sq_cov`/`norm_sq_contra` — encodes the contra/cov trap). done:
+        - [x] SRHD c2p complete: s_mag (norm_sq_cov, S covariant) + v^2 (norm_sq_contra, v contra).
+          all callers pass `SpatialMetric::flat()`. fast-verified (f64 + interpreter oracle).
+        - [ ] RMHD c2p (`rmhd_recover`): r_sq -> norm_sq_cov (r covariant), bee_sq -> norm_sq_contra
+          (B contra). NOTE: rdb = r_i B^i is a cov*contra pairing -> METRIC-FREE, stays `.dot()`.
+          rperp.dot mixes variance (KKC is SR-flat) -> bit-identical for flat, GR reformulation deferred.
+        - [ ] rmhd/algebra norms; the gamma-orthogonal transverse projector `B - n(B.n)` (recurs ~15x).
+        dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch (47s).
       - [ ] **B2.P3** — structural Tier-2 (design decisions, NOT mechanical): wave speeds
         (alpha/beta/gamma^nn, Banyuls-Font), the GV face normal (`Tensor::unit` is not the GR normal).
         C1 (variance type-safety) folds in here for the contravariant/covariant correctness.

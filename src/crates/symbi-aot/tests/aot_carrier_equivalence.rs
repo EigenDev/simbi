@@ -117,7 +117,8 @@ fn srhd_wave_speed_map_1d(
         .scalar("mesh_adot_0", 0.0).scalar("mesh_vtrans_0", 0.0).scalar("x_lo_0", 0.0).scalar("dx_0", 1.0)
         .run();
 }
-use symbi_algebra::{Matrix, Tensor};
+use symbi_algebra::Tensor;
+use symbi_hydro::spatial_metric::SpatialMetric;
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::mhd_state::MhdCons;
 use symbi_hydro::newtonian::Newtonian;
@@ -179,7 +180,7 @@ fn srhd_c2p_kernel_equals_host_at_baked_count() {
         let (d, s, tau) = srhd_prim_to_cons(rho, v, p);
 
         // host: the SAME srhd_recover source at S = f64, at the kernel's baked count.
-        let host = srhd_recover::<f64, 1>(&eos, &Cons { den: d, mom: Tensor::new([s]), nrg: tau }, &Matrix::identity(), SRHD_ITERS);
+        let host = srhd_recover::<f64, 1>(&eos, &Cons { den: d, mom: Tensor::new([s]), nrg: tau }, &SpatialMetric::flat(), SRHD_ITERS);
 
         // kernel: srhd_recover traced at S = Gv, compiled (bakes SRHD_ITERS).
         let (mut kr, mut kv, mut kp) = (vec![0.0_f64], vec![0.0_f64], vec![0.0_f64]);

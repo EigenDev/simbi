@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_algebra::Matrix;
+use symbi_hydro::spatial_metric::SpatialMetric;
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
@@ -102,9 +102,9 @@ pub fn srhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, 
     // the SINGLE-SOURCE physics, instantiated at the tracing carrier.
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
     let cons = Cons::<Gv, D> { den, mom: Tensor::new(mom_arr), nrg };
-    // flat-frame inverse spatial metric = identity (constant-folds to the euclidean norm, so the
+    // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
     // traced/compiled kernel is bit-identical). the GR metric threads in here at B3.
-    let prim = srhd_recover(&IdealGas { gamma }, &cons, &Matrix::identity(), max_iters);
+    let prim = srhd_recover(&IdealGas { gamma }, &cons, &SpatialMetric::flat(), max_iters);
 
     let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
     for k in 0..D {

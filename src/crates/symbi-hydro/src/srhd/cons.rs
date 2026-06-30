@@ -7,7 +7,8 @@
 // host wrapper (`srhd_to_primitive`) that adds the C2pResult diagnostics post-hoc.
 // =============================================================================
 
-use symbi_algebra::{Matrix, Tensor, OrderedNumeric};
+use symbi_algebra::{Tensor, OrderedNumeric};
+use crate::spatial_metric::SpatialMetric;
 use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::state::{Prim, Cons};
@@ -31,17 +32,16 @@ const MAX_ITER: usize = 100;
 pub fn srhd_recover<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     cons: &Cons<S, D>,
-    gamma_inv: &Matrix<S, D>,
+    metric: &SpatialMetric<S, D>,
     max_iter: usize,
 ) -> Prim<S, D> {
     let dd = cons.den;
     let tau = cons.nrg;
-    // the conserved-momentum norm |S|^2 = gamma^{ij} S_i S_j, where `gamma_inv` is the inverse
-    // SPATIAL metric. for the flat / orthonormal-frame convention gamma_inv = identity and this
-    // is bit-identical to the euclidean `S.dot(S)`; a general (GR) metric makes it the curved
-    // norm. THIS is the SR->GR seam (B2): the metric is now a carrier-generic value the physics
-    // contracts with, transported by the homomorphism exactly like `eos`.
-    let s_mag = gamma_inv.quadratic(&cons.mom).sqrt();
+    // the conserved-momentum norm |S|^2 = gamma^{ij} S_i S_j (S_i is COVARIANT -> contract with
+    // the inverse spatial metric). flat/orthonormal -> identity -> bit-identical to euclidean S.S.
+    // THIS is the SR->GR seam (B2): the metric is a carrier-generic value the physics contracts
+    // with, transported by the homomorphism like `eos`.
+    let s_mag = metric.norm_sq_cov(&cons.mom).sqrt();
 
     // initial pressure guess: |S - D - tau|
     let p_init = (s_mag - dd - tau).abs();
@@ -73,7 +73,8 @@ pub fn srhd_recover<S: Scalar, const D: usize>(
     // recover primitive variables: 3-velocity v = S/(tau+D+p), W = 1/sqrt(1-v.v), rho = D/W.
     let et = tau + dd + p_eq;
     let vel = cons.mom.map(|s| s / et);
-    let ww = lorentz_factor(vel.dot(&vel));
+    // |v|^2 = gamma_{ij} v^i v^j (v^i CONTRAVARIANT). flat -> identity -> euclidean v.v (bit-identical).
+    let ww = lorentz_factor(metric.norm_sq_contra(&vel));
     let rho = dd / ww;
     Prim { rho, vel, pre: p_eq }
 }
@@ -101,10 +102,9 @@ pub(crate) fn srhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
         return C2pResult::err(floored, code);
     }
 
-    // flat/orthonormal frame -> the inverse spatial metric is the identity (bit-identical to
-    // the euclidean norm). a curvilinear-but-flat run is still identity in the physical frame;
+    // flat/orthonormal frame -> the spatial metric is identity (bit-identical to euclidean norms);
     // a genuine GR metric is threaded here once B3 densitizes the conserved state.
-    let prim = srhd_recover(eos, cons, &Matrix::identity(), MAX_ITER);
+    let prim = srhd_recover(eos, cons, &SpatialMetric::flat(), MAX_ITER);
 
     // post-hoc diagnostics on the raw recovered state (shared SRHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
@@ -233,7 +233,7 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         // s_mag = 10 >> d + tau = 1.1, so the very first Newton iterate has v_sq > 1.
         let cons: Cons<f64, 1> = Cons { den: 1.0, mom: Tensor::new([10.0]), nrg: 0.1 };
-        let prim = srhd_recover(&eos, &cons, &Matrix::identity(), MAX_ITER);
+        let prim = srhd_recover(&eos, &cons, &SpatialMetric::flat(), MAX_ITER);
         let finite = prim.rho.is_finite() && prim.pre.is_finite() && prim.vel[0].is_finite();
         assert!(
             !finite,

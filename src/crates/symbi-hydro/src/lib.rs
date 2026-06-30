@@ -14,6 +14,7 @@ pub mod c2p_result;
 pub mod energy;
 pub mod eos;
 pub mod state;
+pub mod spatial_metric;
 pub mod mhd_state;
 pub mod regime;
 pub mod regime_spec;
