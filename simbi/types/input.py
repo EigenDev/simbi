@@ -36,6 +36,14 @@ class CoordSystem(str, ExtendedEnum):
     AXIS_CYLINDRICAL = "axis_cylindrical"
 
 
+class Spacetime(str, ExtendedEnum):
+    # the background spacetime, orthogonal to the spatial coord_system and the regime.
+    # minkowski is flat (every existing run); schwarzschild selects the GR metric
+    # (lapse / densitization / GR-wavespeed kernels) on a spherical grid.
+    MINKOWSKI = "minkowski"
+    SCHWARZSCHILD = "schwarzschild"
+
+
 class Regime(str, ExtendedEnum):
     NEWTONIAN = "newtonian"
     SRHD = "srhd"

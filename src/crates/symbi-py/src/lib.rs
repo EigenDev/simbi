@@ -31,6 +31,7 @@ use symbi::symbi_grid::Field;
 use symbi_algebra::Tensor;
 use symbi_display::{ScreenGuard, SignalGuard, Table};
 use symbi_geometry::MotionState;
+use symbi_geometry::Schwarzschild;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -52,6 +53,11 @@ struct Config {
     name: String,
     regime: String,
     coord_system: String,
+    // the spacetime background ("minkowski" default, "schwarzschild" for GR). ORTHOGONAL to
+    // coord_system; selects the Schwarzschild metric (lapse/densitization/GR-wavespeed kernels).
+    spacetime: String,
+    // the Schwarzschild geometric mass M (G = c = 1); only meaningful when spacetime = schwarzschild.
+    schwarzschild_mass: f64,
     cyl_plane: CylPlane,
     dims: usize,
     n_cells: [usize; 3],
@@ -426,6 +432,15 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_default(),
         regime: enum_str(dict, "regime")?,
         coord_system,
+        // the spacetime background; flat ("minkowski") unless the config opts into GR.
+        spacetime: dict
+            .get_item("spacetime")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<String>().ok())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_else(|| "minkowski".to_string()),
+        schwarzschild_mass: get_f64_or(dict, "schwarzschild_mass", 0.0),
         cyl_plane,
         dims,
         n_cells,
@@ -2033,6 +2048,17 @@ macro_rules! hydro_dispatch {
             (3, "cartesian") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cartesian, Cartesian)
             }
+            // GR (Schwarzschild) spherical: select the Schwarzschild metric (lapse-densitized +
+            // GR-wavespeed `_schw` kernels). baked for 1D/2D (the Michel accretion targets); 3D
+            // falls through to flat Spherical for now. ORTHOGONAL to the regime.
+            (1, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 1,
+                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+            ),
+            (2, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 2,
+                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+            ),
             (1, "spherical") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Spherical, Spherical)
             }

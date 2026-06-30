@@ -36,6 +36,7 @@ from simbi.types.input import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
+    Spacetime,
     CtMethod,
     Limiter,
     Reconstruction,
@@ -152,6 +153,23 @@ class SimbiProblem(BaseModel):
     ]
     coord_system: Annotated[
         CoordSystem, ProblemParam(..., description="coordinate system")
+    ]
+    spacetime: Annotated[
+        Spacetime,
+        ProblemParam(
+            Spacetime.MINKOWSKI,
+            cli=True,
+            description="background spacetime (flat minkowski, or schwarzschild for GR)",
+        ),
+    ]
+    schwarzschild_mass: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            description="schwarzschild geometric mass M (G=c=1); only used when "
+            "spacetime is schwarzschild",
+        ),
     ]
     regime: Annotated[Regime, ProblemParam(..., description="physics regime")]
     bounds: Annotated[
@@ -732,6 +750,7 @@ class SimbiProblem(BaseModel):
             "solver": Solver,
             "ct_method": CtMethod,
             "coord_system": CoordSystem,
+            "spacetime": Spacetime,
             "regime": Regime,
             "reconstruction": Reconstruction,
             "timestepping": TimeStepping,

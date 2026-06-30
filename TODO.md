@@ -224,6 +224,18 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
               ~25 godunov/wavespeed callers in tests/examples unfixed — only `carrier_oracle` had been run.
               full discretize suite now 34 binaries green.)
             - [ ] **VERIFY against Michel** — the sonic-point radius is the razor test of these speeds (B.6).
+        - [x] **CONFIG -> SPACETIME PLUMBING (the runtime-selection proof, end-to-end)**: a Python config
+          now selects Schwarzschild + M and the `_schw` kernels actually FIRE.
+          - `simbi.types.Spacetime` enum (MINKOWSKI/SCHWARZSCHILD, mirrors `CoordSystem`); `SimbiProblem`
+            base gains `spacetime` + `schwarzschild_mass` fields (cli) -> `model_dump` -> the exec dict;
+            `enum_fields` converts the string.
+          - the binding `Config` parses `spacetime`/`schwarzschild_mass`; `hydro_dispatch` spherical arms
+            guard on `spacetime == "schwarzschild"` -> `Schwarzschild { mass } : Schwarzschild<f64>` (1D/2D,
+            the baked dims) instead of `Spherical`. symbi-py compiles; `dev.py build` (release) green.
+          - NEW config `schwarzschild_atmosphere.py` (1D radial SRHD, r > 2M). RUNS end-to-end: the GR
+            path is genuinely active (Schwarzschild 4 steps vs flat 5 — the lapse-damped wave speeds give a
+            larger dt), `--spacetime minkowski` override works. the `_schw` godunov + wavespeed kernels
+            select + bind the mass at runtime. (gas does not yet accrete -> needs B4 gravity.)
           - [ ] **B.6 PIN factor placement** (sqrt(-g)-faces vs sqrt(gamma)-volume vs wave-speed alpha)
             AGAINST the Michel profile. needs the GRAVITY source (B4) for infall; then CT + bcell + mass-demo.
       CONCRETE DRIVER: **Schwarzschild (standard coords) — DIAGONAL, beta = 0.** SR Riemann/c2p VERBATIM
