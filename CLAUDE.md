@@ -184,6 +184,26 @@
 
 * **Numbering:** Do NOT number comments (e.g., `// 1. step one` is forbidden).
 
+* **Self-Contained (MANDATORY):** A comment must be fully intelligible to a reader six months
+  later who has NO memory of the conversation, task, ticket, or pull request that produced it. It
+  documents the code in terms of the **system and the domain** — the physics, the data, the
+  algorithm, the invariant — and nothing else. State the actual fact: `// lapse alpha = sqrt(1 -
+  2M/r); zero shift on a static metric`, not `// the GR lapse we wired in`.
+
+* **No Fourth Wall (FORBIDDEN):** a comment is documentation of the code, NOT a message to a
+  person and NOT a journal of the work. The following are banned outright:
+  * task / workstream / phase / step identifiers: `B4`, `B.6`, `step 2`, `phase 1`, `P3`.
+  * planning or process narrative: "de-risk", "the seam", "wired in here", "for now", "to be
+    confirmed by", "first cut", "the oracle", "iterate against", "follow-up", "next push".
+  * the conversation, the author, the reader, or time-relative state: "we", "you", "I", "as
+    discussed", "above", "earlier", "today", "currently" (when it means "at the moment I wrote
+    this"). describe what IS, not what changed or when.
+  * verification narrative naming a test by its project nickname instead of the property it
+    checks. Write `// equals the flat curvilinear value when M = 0`, not `// verified by the
+    michel oracle`.
+  A comment that would stop making sense once this conversation is forgotten is broken. Delete it
+  or rewrite it as a domain statement.
+
 ### 5.3 Documentation Headers
 
 * Every header file must have a block comment describing its purpose, inputs, and usage.

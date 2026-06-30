@@ -449,13 +449,19 @@ where
         // the interior origin), so the reader rebuilds cell centers correctly.
         let start = snap.x_lo_phys[ax] + sim.geom.interior.spaces[ax].lo as f64 * snap.dx_phys[ax];
         let end = start + snap.dx_phys[ax] * snap.resolution[ax] as f64;
+        // the per-axis spacing the reader reconstructs cell centers from: "linear" -> uniform faces
+        // start + i*dx, "log" -> geometric faces start*10^(i*slope). taken from the grid's coordinate
+        // maps (uniform when unset). start/end are the axis domain bounds [r_lo, r_hi]; logspace over
+        // them recovers the geometric grid.
+        let spacing_label = match &sim.geom.maps {
+            Some(maps) if !maps[ax].is_uniform() => "log",
+            _ => "linear",
+        };
         geometry.push_group(
             Tree::new(format!("dim_{slot}"))
                 .with_attr("start", start)
                 .with_attr("end", end)
-                // uniform computational spacing; the physical spacing label
-                // (linear/log) rides in /metadata for the reader's plot axis.
-                .with_attr("type", "linear"),
+                .with_attr("type", spacing_label),
         );
     }
     let mesh = Tree::new("mesh")

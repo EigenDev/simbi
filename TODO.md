@@ -223,7 +223,41 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
               test. (also cleaned PRE-EXISTING breakage: the skeleton's builder-signature change had left
               ~25 godunov/wavespeed callers in tests/examples unfixed — only `carrier_oracle` had been run.
               full discretize suite now 34 binaries green.)
-            - [ ] **VERIFY against Michel** — the sonic-point radius is the razor test of these speeds (B.6).
+            - [~] **VERIFY against Michel (B.6)** — the sonic-point radius is the razor test.
+              - [x] **the Michel ORACLE (analytic, verified)**: `bondi.py` — relativistic transonic
+                accretion (Michel 1972): mass flux `r^2 rho u`, relativistic Bernoulli `h sqrt(1-2M/r+u^2)`,
+                `h = (g-1)/(g-1-a^2)`, sonic point `u_c^2 = M/2r_c`, `a_c^2 = u_c^2/(1-3u_c^2)`, physical
+                `V = u/sqrt(f+u^2)`. per-radius bisection root-find of the conserved constants, branch by
+                sign(r-r_c). SELF-VERIFIED: both invariants constant to 6 digits along r (massflux 16.000000,
+                bernoulli 1.171804); transonic V/a crosses 1 at r_c=8 (V=-0.276 = a_c=0.277). config runs
+                end-to-end (initializes the profile + evolves). this is the test the gravity source must pass.
+              - [~] run bondi WITH the gravity source -> the profile must stay STEADY.
+- [~] **B4. the Schwarzschild geodesic gravity source.** PHYSICS VERIFIED, end-to-end run NOT yet steady.
+      - source on the radial momentum: `S_r = -M (rho h W^2)(1 + v^2) / (r^2 (1 - 2M/r))`,
+        `rho h W^2 = D + tau + p` (srhd). added to the radial geometric source in the godunov stage
+        (godunov.rs), gated on the Schwarzschild spacetime; weighted by the lapse like the rest of the
+        spatial RHS. flat backgrounds untouched (carrier oracle bit-identical).
+      - VERIFIED CORRECT analytically: the continuous steady-momentum balance `div(F_r) = S_r + 2p/r`
+        holds on the analytic michel profile to 0.01% (ratio 1.0000-1.0005 across the flow); `rho h W^2
+        = D + tau + p` exact to 2e-16. the formula is right.
+      - GRAVITY CONFIRMED LIVE: from a UNIFORM gas at rest (`gr_bondi.py`), the source drives an inflow —
+        v goes negative and grows inward (v(r=5) = -0.026 at t=0.5 -> -0.235 at t=5), density drops as gas
+        flows in. accretion DEVELOPS. (the earlier "drift" runs were a FALSE diagnosis: the gravity kernel
+        was not even running -- see below.)
+      - ROOT CAUSE of the earlier "no accretion": BUILD-CACHE POLLUTION. raw `cargo build` invocations
+        (forbidden -- always `dev.py build`) left FOUR `symbi-aot` build dirs, two with the `_schw` godunov
+        and two without; the linked cpu_ext used a stale dir whose godunov lacked the gravity, so the lookup
+        silently ran flat (`m1` stayed 0). a clean `dev.py clean --all` + `dev.py build` made gravity act.
+      - REMAINING (stability, not the source): the inflow goes NaN at the INNER boundary over time as the
+        relativistic flow accelerates (V -> 1, W -> inf, c2p fails) -- fastest near the horizon (NaN at
+        r~3.2 by t=5 with inner=3; at r~15 by t=400 with inner=10). this is the relativistic inner-boundary
+        problem.
+      - [ ] robust near-horizon c2p / floors so the high-W inner cells survive; hold the inner boundary
+        in the SUPERSONIC region (outflow is causally correct there).
+      - [ ] horizon-penetrating coordinates (Kerr-Schild / Eddington) for THROUGH-horizon accretion --
+        schwarzschild coords are singular at 2M (V -> 1, W -> inf), cannot resolve the crossing.
+      - [ ] emit the `_schw` godunov + wavespeed kernels for LOG spacing (currently uniform-only); spherical
+        radial grids want log zones, and a log-spaced run silently falls back to flat.
         - [x] **CONFIG -> SPACETIME PLUMBING (the runtime-selection proof, end-to-end)**: a Python config
           now selects Schwarzschild + M and the `_schw` kernels actually FIRE.
           - `simbi.types.Spacetime` enum (MINKOWSKI/SCHWARZSCHILD, mirrors `CoordSystem`); `SimbiProblem`

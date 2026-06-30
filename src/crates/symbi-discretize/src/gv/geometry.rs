@@ -62,6 +62,53 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
     }
 }
 
+/// the area-weighted curvilinear divergence with the RADIAL face fluxes weighted by the lapse at
+/// the face. Font (2008) Eq (34): for a static background the conserved mass/energy flux is the
+/// CONTRAVARIANT-velocity flux `F^i = U (v^i - beta^i/alpha)`, which on a diagonal metric carries
+/// `v^r = alpha * V_rhat` — i.e. one factor of the LAPSE per radial face vs the orthonormal flat
+/// flux the riemann solver produces. angular faces sit at the cell radius (constant lapse) and need
+/// no per-face weight; the single cell lapse the godunov already applies covers them. `face_lapse =
+/// (alpha_lo, alpha_hi)` are the lapses at the cell's lower/upper RADIAL faces (grid axis 0).
+fn gv_divergence_radial_lapse_weighted(
+    base: &str,
+    ndim: u8,
+    geo: &CellGeometryGv,
+    face_lapse: (Gv, Gv),
+) -> Gv {
+    let mut acc: Option<Gv> = None;
+    for ii in 0..ndim {
+        let key = format!("{base}_{ii}");
+        let rt = format!("{base}[{ii}]");
+        let f_lo = Gv::field_shifted(&key, &rt, ndim, ii, 0);
+        let f_hi = Gv::field_shifted(&key, &rt, ndim, ii, 1);
+        let d = ii as usize;
+        // grid axis 0 is the radial axis for the curvilinear (spherical) instances; weight its two
+        // faces by the lapse there. the other (angular) faces are at constant radius -> unit weight.
+        let (w_lo, w_hi) = if ii == 0 { (face_lapse.0, face_lapse.1) } else { (Gv::ONE, Gv::ONE) };
+        let diff = w_hi * f_hi * geo.area_hi[d] - w_lo * f_lo * geo.area_lo[d];
+        acc = Some(match acc {
+            None => diff,
+            Some(a) => a + diff,
+        });
+    }
+    acc.expect("godunov divergence needs ndim >= 1") * geo.inv_volume
+}
+
+/// the inverse divergence for the mass / energy conserved scalars on a static GR background: the
+/// area-weighted divergence with the radial faces lapse-weighted (Font Eq 34 contravariant flux).
+/// `face_lapse = None` (flat spacetime) reduces to the plain `gv_divergence` -> bit-identical.
+pub(crate) fn gv_divergence_lapse(
+    base: &str,
+    ndim: u8,
+    geo: &Option<CellGeometryGv>,
+    face_lapse: Option<(Gv, Gv)>,
+) -> Gv {
+    match (geo, face_lapse) {
+        (Some(g), Some(fl)) => gv_divergence_radial_lapse_weighted(base, ndim, g, fl),
+        _ => gv_divergence(base, ndim, geo),
+    }
+}
+
 
 /// the GR LAPSE WEIGHT `alpha(x)` for the spatial-RHS densitization (Valencia 3+1). the conserved
 /// update `d_t(sqrt(gamma) U) + d_i(sqrt(-g) F) = sqrt(-g) S` reduces, on a STATIC DIAGONAL
@@ -85,6 +132,26 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
             let mass = Gv::scalar("schwarzschild_mass");
             let r = coord_centroid[0];
             Some(Schwarzschild { mass }.lapse(Tensor::new([r])))
+        }
+    }
+}
+
+/// the static-background lapse at the cell's lower/upper RADIAL faces (grid axis 0), for the
+/// Font (2008) Eq (34) mass/energy flux weighting: the conserved scalar flux transports with the
+/// CONTRAVARIANT `v^r = alpha V_rhat`, so each radial face flux carries the lapse there (vs the
+/// orthonormal flat flux the riemann solver returns). dispatched through the same `Metric::lapse`
+/// as `gv_lapse_weight`; flat spacetime -> None.
+pub(crate) fn gv_radial_face_lapse(spacetime: Spacetime, spacing: &[Spacing]) -> Option<(Gv, Gv)> {
+    match spacetime {
+        Spacetime::Minkowski => None,
+        Spacetime::Schwarzschild => {
+            let lapse_at = |r: Gv| {
+                Schwarzschild { mass: Gv::scalar("schwarzschild_mass") }.lapse(Tensor::new([r]))
+            };
+            Some((
+                lapse_at(gv_axis_face_at(0, spacing[0], 0)),
+                lapse_at(gv_axis_face_at(0, spacing[0], 1)),
+            ))
         }
     }
 }

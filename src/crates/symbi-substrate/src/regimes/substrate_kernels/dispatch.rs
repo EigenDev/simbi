@@ -25,7 +25,7 @@ use super::binding::{bind_manifest, kernel_bindings, resolve_path};
 use super::exec::dispatch_fields;
 use super::layout::geom_suffix;
 use super::params::{
-    ScalarBind, body_scalar, geom_scalar, motion_scalar, physical_geom, resolve_body_scalars,
+    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom, resolve_body_scalars, spacing_suffix,
     scalars_for,
 };
 use super::types::Solver;
@@ -57,13 +57,16 @@ where
         symbi_geometry::Spacetime::Minkowski => "",
         symbi_geometry::Spacetime::Schwarzschild => "_schw",
     };
-    let name = format!("{prefix}_wave_speed_map{sfx}{st_sfx}_{D}d");
+    // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
+    // geometric-mean curvilinear wave-speed map; uniform -> "". ORTHOGONAL to sfx and st_sfx.
+    let sp_sfx = spacing_suffix(&geom.maps);
+    let name = format!("{prefix}_wave_speed_map{sfx}{sp_sfx}{st_sfx}_{D}d");
     // scalars BY NAME: gamma + the per-axis CFL widths. the kernel's declared set drives it
     // (cartesian declares `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`) — no geometry branch here.
     // mesh motion: PHYSICAL geometry scalars (widths AND centroids — exact
     // identities at a = 1; expanding axes only) pair with the per-axis
     // hubble/translation rates for the in-kernel relative speed `|s - v_g|`.
-    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
     let scalars = scalars_for(&name, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("cfl_wave_speed: unexpected spec scalar {bind:?}");
@@ -460,7 +463,10 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         symbi_geometry::Spacetime::Minkowski => "",
         symbi_geometry::Spacetime::Schwarzschild => "_schw",
     };
-    let name = format!("{prefix}_godunov_stage{sfx}{st_sfx}_{D}d");
+    // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
+    // geometric-mean curvilinear godunov stage; uniform -> "". ORTHOGONAL to sfx and st_sfx.
+    let sp_sfx = spacing_suffix(&geom.maps);
+    let name = format!("{prefix}_godunov_stage{sfx}{sp_sfx}{st_sfx}_{D}d");
     // scalars BY NAME: dt + the SSP Shu-Osher convex coefficients (a0, ac) + the per-axis grid
     // scalars. the single stage kernel `cons = a0*u_n + ac*fe` serves every explicit SSP scheme
     // — the driver feeds the per-stage (a0, ac); forward-Euler is (0, 1). the kernel's declared
@@ -471,7 +477,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // mesh motion: the divergence + the curvilinear geometric source run over
     // PHYSICAL geometry (expanding axes scaled by a), and mesh_hdil carries
     // the physical volume-growth rate; all exact identities on a static mesh.
-    let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, sim.geom.coords, sim.motion.a);
+    let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
     let scalars = scalars_for(&name, |bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("dispatch_godunov: unexpected spec scalar {bind:?}");

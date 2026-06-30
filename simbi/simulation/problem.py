@@ -854,6 +854,28 @@ class SimbiProblem(BaseModel):
         if not self.refinement_enabled:
             return
 
+        # mesh refinement is cartesian + uniform-spacing only: the coarse-fine prolong/restrict
+        # transfer is geometry-agnostic (equal index-based sub-cells), correct solely for
+        # uniform-volume cells. a curvilinear grid (variable r^2 / r cell volumes) or a non-linear
+        # axis (unequal sub-cells) would get silently-wrong transfers.
+        if self.coord_system != CoordSystem.CARTESIAN:
+            raise ValueError(
+                "mesh refinement is cartesian-only (the coarse-fine transfer ignores curvilinear "
+                f"cell volumes); got coord_system={self.coord_system.value}"
+            )
+        nonlinear = [
+            f"x{ax}"
+            for ax, sp in enumerate(
+                (self.x1_spacing, self.x2_spacing, self.x3_spacing), start=1
+            )
+            if sp != CellSpacing.LINEAR
+        ]
+        if nonlinear:
+            raise ValueError(
+                "mesh refinement requires uniform (linear) cell spacing (the coarse-fine transfer "
+                f"assumes equal sub-cells); non-linear axes: {', '.join(nonlinear)}"
+            )
+
         if self.refinement_regions is None:
             raise ValueError(
                 "refinement_regions required when refinement_enabled=True"

@@ -859,6 +859,29 @@ where
             return std::ops::ControlFlow::Break(());
         }
 
+        // fatal cfl crash (set by the evolve loop when the wave speed went NaN / collapsed — an
+        // unphysical c2p, e.g. V -> 1 at the inner boundary): snapshot the LAST computed state as a
+        // `.crashed` checkpoint (+ final.h5) so it can be inspected, then stop. mirrors the interrupt
+        // path; the post-loop renders it as a crash, not a success.
+        if let Some(c) = h.crash {
+            table.set_dynamic(false);
+            let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
+            let crashed = checkpoint_name(cfg, "crashed");
+            let _ =
+                write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cp_index));
+            let _ = write_hierarchy_checkpoint(
+                &states,
+                &format!("{data_dir}final.h5"),
+                &checkpoint_metadata(cfg, cp_index),
+            );
+            table.post_error(&format!(
+                "crashed at {} (step {}) — state checkpoint {crashed}",
+                fmt_time_msg(cfg, c.time),
+                c.iter,
+            ));
+            return std::ops::ControlFlow::Break(());
+        }
+
         // MESSAGE BOARD cadence: checkpoints fire on the time schedule. a single
         // large dt can cross MULTIPLE interval boundaries (e.g., a cold-medium CFL
         // step, or a coarse cadence); write EXACTLY ONE checkpoint for the current
@@ -944,8 +967,21 @@ where
         table.set_dynamic(false);
         let root = &hier.levels[0].state;
         table.post_warning(&format!(
-            "run halted at t = {:.4} after {} steps",
-            root.time, root.iteration,
+            "interrupted — {} steps, t = {:.4}",
+            root.iteration, root.time,
+        ));
+        table.refresh();
+        return Ok(());
+    }
+
+    // crashed: the observer already snapshotted the `.crashed` + final.h5 state. surface the halt as
+    // ONE static crash frame (a red message line that fits the board), not a success.
+    if let Some(c) = hier.crash {
+        screen.leave();
+        table.set_dynamic(false);
+        table.post_error(&format!(
+            "crashed — {} steps, t = {:.4} — wave speed collapsed (unphysical c2p near a boundary)",
+            c.iter, c.time,
         ));
         table.refresh();
         return Ok(());
@@ -967,7 +1003,7 @@ where
     screen.leave();
     table.set_dynamic(false);
     table.post_success(&format!(
-        "done — {} steps to t = {:.4} in {:.2}s (avg {} zone-cyc/s); final checkpoint {final_path}",
+        "complete — {} steps, t = {:.4}, {:.2}s, {}/s",
         root.iteration,
         root.time,
         wall,
@@ -1345,6 +1381,28 @@ fn motion_state(cfg: &Config) -> MotionState<f64> {
     }
 }
 
+/// per-axis coordinate maps for a non-uniform grid. only the radial (x1) axis carries a
+/// configurable spacing; angular axes stay uniform. a uniform radial grid returns `None` (the
+/// builder keeps the bit-identical `x_lo + i*dx` path). a log-spaced radial axis maps to
+/// `face(i) = start * 10^(i * slope)`, the slope set so the last face reaches `r_hi = start + dx*n`
+/// (dx being the linear width the binding derived from the bounds). requires `start > 0`.
+fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D]> {
+    use symbi_geometry::AxisMap;
+    if !cfg.x1_spacing.eq_ignore_ascii_case("log") {
+        return None;
+    }
+    Some(std::array::from_fn(|ax| {
+        let start = cfg.x_lo[ax];
+        let n = cfg.n_cells[ax] as f64;
+        if ax == 0 && start > 0.0 && n > 0.0 {
+            let r_hi = start + cfg.dx[ax] * n;
+            AxisMap::Log { start, log_slope: (r_hi / start).log10() / n }
+        } else {
+            AxisMap::Uniform { start, dx: cfg.dx[ax] }
+        }
+    }))
+}
+
 /// wrap a built sim + its kernel-set into a `Hierarchy`: a single grid (1 level),
 /// or — when refinement is requested — a refined hierarchy whose fine interiors
 /// are seeded from the coarse level (conservative prolongation at reconstruction
@@ -1416,6 +1474,7 @@ macro_rules! build_and_run_hydro {
             .cells(n)
             .origin(origin)
             .spacing(spacing)
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
             .cfl(cfg.cfl)
             .timestepping(cfg.timestepping)
@@ -2194,6 +2253,7 @@ macro_rules! build_and_run_mhd {
             .cells(n)
             .origin(origin)
             .spacing(spacing)
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
             .cfl(cfg.cfl)
             .timestepping(cfg.timestepping)
@@ -2317,6 +2377,7 @@ macro_rules! build_and_run_imhd {
             .cells(n)
             .origin(origin)
             .spacing(spacing)
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
             .cfl(cfg.cfl)
             .timestepping(cfg.timestepping)
@@ -2974,6 +3035,7 @@ macro_rules! build_and_run_iso {
             .cells(n)
             .origin(origin)
             .spacing(spacing)
+            .coord_maps(axis_maps::<$d>(cfg))
             .boundaries(boundaries_nd::<$d>(&cfg.boundaries))
             .cfl(cfg.cfl)
             .timestepping(cfg.timestepping)
@@ -3352,6 +3414,36 @@ fn run_simulation(
     let mut cfg = parse_config(sim_info)?;
     // fail fast on an unsupported multi-gpu request, before draining generators or allocating.
     validate_gpu_request(cfg.n_gpus).map_err(PyRuntimeError::new_err)?;
+    // mesh refinement is cartesian + uniform-spacing ONLY: the coarse-fine prolongation/restriction
+    // transfer kernels are geometry-agnostic (equal index-based sub-cells), correct solely for
+    // uniform-volume cells. a curvilinear grid (variable r^2 / r cell volumes) or a non-linear axis
+    // (unequal sub-cells) would get silently-wrong transfers, so reject it loudly instead.
+    if cfg.refinement_enabled {
+        if cfg.coord_system != "cartesian" {
+            return Err(PyValueError::new_err(format!(
+                "mesh refinement is cartesian-only (the coarse-fine transfer ignores curvilinear \
+                 cell volumes); got coord_system = '{}'",
+                cfg.coord_system
+            )));
+        }
+        if !cfg.x1_spacing.eq_ignore_ascii_case("linear") {
+            return Err(PyValueError::new_err(format!(
+                "mesh refinement requires uniform (linear) cell spacing (the coarse-fine transfer \
+                 assumes equal sub-cells); got x1_spacing = '{}'",
+                cfg.x1_spacing
+            )));
+        }
+    }
+    // multi-gpu domain decomposition splits the SAME grid across tiles; a log axis needs each
+    // tile's local origin offset to the global log position (start*10^(global_lo*slope)), which is
+    // not yet wired. reject rather than evolve tiles on a mismatched uniform geometry.
+    if cfg.n_gpus > 1 && !cfg.x1_spacing.eq_ignore_ascii_case("linear") {
+        return Err(PyValueError::new_err(format!(
+            "multi-gpu decomposition does not yet support non-linear ('{}') cell spacing (the \
+             per-tile log origin offset is unwired); run single-gpu for log-spaced grids",
+            cfg.x1_spacing
+        )));
+    }
     // evaluate the scale-factor callables at the start time (GIL held). the rust
     // mesh-motion model integrates `a` from the constant rate `a_dot` (linear /
     // free homologous expansion, a_ddot = 0), so a single sample at t0 suffices.

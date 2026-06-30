@@ -709,6 +709,9 @@ where
     timestepping: Timestepping,
     device_id: i64,
     cyl_plane: Option<CylPlane>,
+    /// per-axis non-uniform coordinate maps (e.g. log-radial spacing). `None` -> the uniform
+    /// `x_lo + i*dx` grid (bit-identical to the prior behavior).
+    coord_maps: Option<[symbi_geometry::AxisMap; D]>,
     /// the partially-built sim, present once `allocate` has run (states `NeedsCells` / `Ready`).
     /// `None` in the `NeedsGrid` config phase.
     sim: Option<SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>>,
@@ -747,6 +750,13 @@ where
     pub fn spacing(mut self, dx: [f64; D]) -> Self {
         self.dx = Some(dx);
         self.bounds_hi = None;
+        self
+    }
+    /// per-axis coordinate maps for a non-uniform grid (log-radial spacing). `None` keeps the
+    /// uniform grid. when set, the curvilinear kernel selects its `_logr` variant and reads the
+    /// log decade-slope as the per-axis dx parameter (the host geometry honors the maps directly).
+    pub fn coord_maps(mut self, maps: Option<[symbi_geometry::AxisMap; D]>) -> Self {
+        self.coord_maps = maps;
         self
     }
     /// the physical box `[lo, hi]` per axis — `dx` is derived as `(hi - lo) / cells` at `finish`
@@ -849,6 +859,10 @@ where
             Some(p) => sim.with_cyl_plane(p),
             None => sim,
         };
+        let sim = match self.coord_maps {
+            Some(maps) => sim.with_maps(maps),
+            None => sim,
+        };
         Ok(SimBuilder {
             regime: self.regime,
             eos: self.eos,
@@ -863,6 +877,7 @@ where
             timestepping: self.timestepping,
             device_id: self.device_id,
             cyl_plane: self.cyl_plane,
+            coord_maps: self.coord_maps,
             sim: Some(sim),
             _marker: std::marker::PhantomData,
         })
@@ -923,6 +938,7 @@ where
             timestepping: self.timestepping,
             device_id: self.device_id,
             cyl_plane: self.cyl_plane,
+            coord_maps: self.coord_maps,
             sim: self.sim,
             _marker: std::marker::PhantomData,
         }
@@ -1661,6 +1677,14 @@ where
         self
     }
 
+    /// attach per-axis non-uniform coordinate maps (log-radial spacing). the host geometry
+    /// (centroids/faces/widths) honors the maps directly, and the curvilinear kernel dispatch
+    /// reads them to select the `_logr` variant and pass the log decade-slope as the dx parameter.
+    pub fn with_maps(mut self, maps: [symbi_geometry::AxisMap; D]) -> Self {
+        self.geom.set_maps(maps);
+        self
+    }
+
     /// seed a staggered FACE-normal B component `bface[d]` from a closure over the face's
     /// physical position, and mark the staggered field initialized. dissolves the per-IC loop
     /// `for c in bface[d].domain() { set(c, f(face_coord)); } + bface_initialized.store(...)`.
@@ -1720,6 +1744,7 @@ where
             timestepping: Timestepping::Rk2,
             device_id: 0,
             cyl_plane: None,
+            coord_maps: None,
             sim: None,
             _marker: std::marker::PhantomData,
         }

@@ -114,6 +114,42 @@ pub(crate) fn physical_geom<const D: usize>(
     )
 }
 
+/// the spacing slug tag, matching the bake-side `Geom::spacing_suffix`: a log-spaced radial axis
+/// (grid index 0) selects the `_logr` curvilinear kernel variant; all-uniform -> "". angular axes
+/// stay uniform. without per-axis coordinate maps the grid is uniform and the tag is empty.
+pub(crate) fn spacing_suffix<const D: usize>(maps: &Option<[symbi_geometry::AxisMap; D]>) -> &'static str {
+    match maps {
+        Some(m) if !m[0].is_uniform() => "_logr",
+        _ => "",
+    }
+}
+
+/// the per-axis (x_lo, dx) the CURVILINEAR kernel reads as its `x_lo_{ax}` / `dx_{ax}` geom scalars.
+/// uniform axes pass the face-0 position + the linear cell width; log axes pass the face-0 position
+/// + the log decade-slope, since the kernel's face map is `face(i) = start * 10^(i * dx_{ax})` (the
+/// `gv_axis_face_at` Log branch) — the slope IS the per-axis `dx` parameter, not a width. homologous
+/// mesh motion scales the radial face-0 start by a (the slope/width are comoving). without maps the
+/// grid is uniform and this is bit-identical to `physical_geom`.
+pub(crate) fn kernel_geom<const D: usize>(
+    x_lo: &[f64; D],
+    dx: &[f64; D],
+    maps: &Option<[symbi_geometry::AxisMap; D]>,
+    coords: symbi_geometry::Geometry,
+    a: f64,
+) -> ([f64; D], [f64; D]) {
+    let Some(m) = maps else {
+        return physical_geom(x_lo, dx, coords, a);
+    };
+    let scale = |ax: usize| if axis_expands(coords, ax) { a } else { 1.0 };
+    (
+        std::array::from_fn(|ax| m[ax].face(0) * scale(ax)),
+        std::array::from_fn(|ax| match m[ax] {
+            symbi_geometry::AxisMap::Uniform { dx, .. } => dx * scale(ax),
+            symbi_geometry::AxisMap::Log { log_slope, .. } => log_slope,
+        }),
+    )
+}
+
 /// the moving-mesh scalar bindings shared by the flux / wave-speed / godunov
 /// dispatches. geometry scalars bind PHYSICAL when motion is active
 /// (`x_lo * a`, `dx * a` — see the call sites), so the homologous rate is the

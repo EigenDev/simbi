@@ -334,6 +334,49 @@ pub fn godunov_stage_gv_with_fused_built(
         None => Vec::new(),
     };
     let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
+    // the schwarzschild geodesic source on the radial momentum, S_r = -M (rho h W^2)(1 + v^2) /
+    // (r^2 (1 - 2M/r)). for the relativistic energy variables rho h W^2 = D + tau + p (the conserved
+    // rest-mass density, energy, and pressure). v^2 is the sum of the gridded physical velocity
+    // components. zero on a flat (minkowski) background; carried only by the radial coordinate axis.
+    let radial_gravity: Option<Gv> = match spacetime {
+        Spacetime::Minkowski => None,
+        Spacetime::Schwarzschild => {
+            let m = Gv::scalar("schwarzschild_mass");
+            let r = coord_centroid[0];
+            let f = Gv::ONE - Gv::from_f64(2.0) * m / r;
+            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+            let pre = Gv::field("pre", FieldRef::PrimPre);
+            let rho_h_w2 = rho + nrg + pre; // D + tau + p
+            let mut v_sq = Gv::ZERO;
+            for d in 0..(ndim as usize) {
+                let vd = Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8));
+                v_sq = v_sq + vd * vd;
+            }
+            Some(Gv::ZERO - m * rho_h_w2 * (Gv::ONE + v_sq) / (r * r * f))
+        }
+    };
+    // Font (2008) Eq (34): on a static background the conserved mass + energy fluxes transport with
+    // the CONTRAVARIANT v^r = alpha V_rhat (one lapse factor per radial face vs the orthonormal flat
+    // flux). the radial momentum flux S_r v^r + p is INVARIANT (the covariant S_r ~ 1/alpha cancels
+    // v^r ~ alpha), so only mass/energy are lapse-weighted at the faces. flat -> None -> plain div.
+    let face_lapse = gv_radial_face_lapse(spacetime, spacing);
+    // the schwarzschild geodesic ENERGY source S_tau = -alpha T^{0r} M/(r^2 f) with T^{0r} =
+    // (D+tau+p) V_rhat — gravity's rate of work on the infalling gas (Newtonian limit rho v.g). the
+    // missing companion to the radial momentum source; zero on a flat background.
+    let nrg_gravity: Option<Gv> = match spacetime {
+        Spacetime::Minkowski => None,
+        Spacetime::Schwarzschild => {
+            let m = Gv::scalar("schwarzschild_mass");
+            let r = coord_centroid[0];
+            let f = Gv::ONE - Gv::from_f64(2.0) * m / r;
+            let alpha = f.sqrt();
+            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+            let pre = Gv::field("pre", FieldRef::PrimPre);
+            let rho_h_w2 = rho + nrg + pre; // D + tau + p
+            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // physical radial velocity V_rhat
+            Some(Gv::ZERO - alpha * rho_h_w2 * v_r * m / (r * r * f))
+        }
+    };
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
         let div = match lapse { Some(a) => a * div, None => div };
         let mut r = u - dt * div - dt * (h_dil * u);
@@ -358,15 +401,25 @@ pub fn godunov_stage_gv_with_fused_built(
 
     let u_n_rho = Gv::field("u_n_rho", FieldRef::un_den());
     let rho_new = with_sources(
-        combine(u_n_rho, fe(rho, gv_divergence("mass_flux", ndim, &geo), None)),
+        combine(u_n_rho, fe(rho, gv_divergence_lapse("mass_flux", ndim, &geo, face_lapse), None)),
         &contribs.den,
     );
     let mut writes = vec![("rho".to_string(), FieldRef::cons_den().into(), rho_new.node())];
     for k in 0..ncomp {
         let u_n_mom = Gv::field(&format!("u_n_mom_{k}"), FieldRef::un_mom(k as u8));
         let div = gv_divergence(&format!("mom_flux_{k}"), ndim, &geo);
+        // the radial momentum (coordinate axis 0) carries the gravitational source in addition to
+        // the geometric pressure/inertial source; the angular momenta carry only the latter.
+        let geo_src = src.as_ref().map(|s| s[k]);
+        // the radial momentum is the gridded component mapping to coordinate 0; suppressed
+        // out-of-plane components (DOF > ndim) are never radial.
+        let is_radial = axes.get(k) == Some(&0);
+        let mom_src = match (is_radial, radial_gravity) {
+            (true, Some(g)) => Some(geo_src.map_or(g, |s| s + g)),
+            _ => geo_src,
+        };
         let mom_new = with_sources(
-            combine(u_n_mom, fe(mom[k], div, src.as_ref().map(|s| s[k]))),
+            combine(u_n_mom, fe(mom[k], div, mom_src)),
             &contribs.mom[k],
         );
         writes.push((format!("mom_{k}"), FieldRef::cons_mom(k as u8).into(), mom_new.node()));
@@ -375,7 +428,7 @@ pub fn godunov_stage_gv_with_fused_built(
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
         let u_n_nrg = Gv::field("u_n_nrg", FieldRef::un_nrg());
         let nrg_new = with_sources(
-            combine(u_n_nrg, fe(nrg, gv_divergence("nrg_flux", ndim, &geo), None)),
+            combine(u_n_nrg, fe(nrg, gv_divergence_lapse("nrg_flux", ndim, &geo, face_lapse), nrg_gravity)),
             &contribs.nrg,
         );
         writes.push(("nrg".to_string(), FieldRef::cons_nrg().into(), nrg_new.node()));

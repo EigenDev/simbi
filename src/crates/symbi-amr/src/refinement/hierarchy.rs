@@ -111,6 +111,18 @@ where
 // =============================================================================
 
 /// static-refinement hierarchy: levels[0] = coarsest, levels[n-1] = finest.
+/// a fatal CFL crash: the wave speed went NaN or collapsed (an unphysical c2p — e.g. V -> 1 near a
+/// boundary), so the next dt is NaN / non-positive / blown up. the evolve loop stops at the LAST
+/// computed state (no further advance) and the driver snapshots a `.crashed` checkpoint + reports
+/// it, instead of masking the crash by clamping dt to t_final and "finishing" on garbage.
+#[derive(Clone, Copy, Debug)]
+pub struct CrashReport {
+    pub iter: u64,
+    pub time: f64,
+    pub dt_cfl: f64,
+    pub dt_prev: f64,
+}
+
 pub struct Hierarchy<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
 where
     R: Regime<f64, NDIM>,
@@ -128,6 +140,10 @@ where
     /// emf_registers[ll] corrects the coarse bface at the same interface (mhd
     /// pairs only; None for pure hydro).
     pub emf_registers: Vec<Option<EmfRegister<NDIM, Mem>>>,
+    /// set by `step_root` when the cfl dt is fatal (NaN / non-positive / a sudden blowup from a
+    /// collapsed wave speed). `Some` halts the march at the last computed state; the driver writes a
+    /// `.crashed` checkpoint and reports it instead of advancing past t_final on garbage.
+    pub crash: Option<CrashReport>,
 }
 
 impl<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K>
@@ -213,6 +229,7 @@ where
             prolong_order: ProlongOrder::Plm,
             flux_registers: Vec::new(),
             emf_registers: Vec::new(),
+            crash: None,
         }
     }
 
@@ -341,6 +358,7 @@ where
             prolong_order,
             flux_registers,
             emf_registers,
+            crash: None,
         })
     }
 
@@ -426,6 +444,14 @@ where
         let mut last_cb = self.levels[0].state.iteration;
         while self.levels[0].state.time < t_final {
             self.step_root(t_final);
+            // a crashed step recorded the crash WITHOUT advancing the clock: let the observer
+            // snapshot the `.crashed` checkpoint + report it, then stop the march (don't spin on the
+            // frozen time, and don't clamp dt to t_final on garbage).
+            if self.crash.is_some() {
+                symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
+                let _ = callback(self);
+                return Ok(());
+            }
             if self.levels[0].state.iteration.saturating_sub(last_cb) >= interval {
                 last_cb = self.levels[0].state.iteration;
                 symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
@@ -537,6 +563,28 @@ where
         for (ll, lvl) in self.levels.iter().enumerate() {
             let scale = RATIO.pow(ll as u32) as f64;
             dt_cfl = dt_cfl.min(lvl.kernels.cfl(&lvl.state) * scale);
+        }
+        // a crashed state must HALT the run, not get masked by the `t_final` clamp below. the clamp
+        // `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the remaining time (f64::min
+        // returns the non-NaN operand) AND clamps a collapsed-wave-speed BLOWUP (an unphysical c2p
+        // cell — e.g. V->1 at the inner boundary — drives the cfl speed -> 0, so dt -> huge) down to
+        // the remaining time; either way the run would "finish" at t_final on garbage. a physical
+        // flow grows dt SMOOTHLY (cfl-limited), so detect a crash as: NaN / non-positive, or a sudden
+        // >1000x one-step jump in the RAW cfl dt. a genuinely static state (dt_cfl = +inf) only
+        // arises from the rest state at step 0 (dt_prev = 0, skipped) -> the clamp takes the run end.
+        let (iter, time, dt_prev) = {
+            let r = &self.levels[0].state;
+            (r.iteration, r.time, r.dt) // dt_prev = 0.0 before the first step
+        };
+        let crashed = dt_cfl.is_nan()
+            || dt_cfl <= 0.0
+            || (dt_prev > 0.0 && dt_cfl > 1.0e3 * dt_prev);
+        if crashed {
+            // record the crash + STOP without advancing: the evolve loop reports it and the driver
+            // snapshots `.crashed.h5` from this (last computed) state, instead of panicking or
+            // marching past t_final on garbage.
+            self.crash = Some(CrashReport { iter, time, dt_cfl, dt_prev });
+            return;
         }
         let root = &mut self.levels[0];
         let dt = dt_cfl.min(t_final - root.state.time);

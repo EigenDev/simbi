@@ -372,6 +372,17 @@ impl Geom {
             Spacetime::Schwarzschild => "_schw",
         }
     }
+
+    // the spacing slug tag appended to the kernel name (after the spatial geom suffix). the radial
+    // grid axis (index 0) carries the log-spaced zones (geometric-mean cell centers); angular axes
+    // stay uniform. all-uniform -> "" (existing kernels unchanged), log radial -> "_logr". the
+    // runtime dispatch appends the same tag from the grid's per-axis spacing, so name matches select.
+    fn spacing_suffix(&self) -> &'static str {
+        match self.spacing.first() {
+            Some(Spacing::Log) => "_logr",
+            _ => "",
+        }
+    }
     fn cart(ndim: u8) -> Self {
         Self::make(Coords::Cartesian, ndim, (0..ndim as usize).collect())
     }
@@ -412,6 +423,14 @@ impl Geom {
     // override the default all-uniform spacing (e.g., a log-radial spherical grid).
     fn with_spacing(mut self, spacing: Vec<Spacing>) -> Self {
         self.spacing = spacing;
+        self
+    }
+    // log-spaced radial zones on grid axis 0 (angular axes stay uniform): the curvilinear log
+    // variant of a uniform spherical/cylindrical grid.
+    fn log_radial(mut self) -> Self {
+        if let Some(s) = self.spacing.first_mut() {
+            *s = Spacing::Log;
+        }
         self
     }
     // the cylindrical 2D plane is keyed on the AXIS SET (matching the runtime mhd_geom_suffix):
@@ -492,7 +511,7 @@ fn gen_godunov_stage(
     fused: Option<(&str, &[&symbi_hydro::source_spec::SourceSpec])>,
 ) {
     let suffix_with = fused.map(|(slug, _)| format!("_with_{slug}")).unwrap_or_default();
-    let name = format!("{prefix}_godunov_stage{suffix_with}{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
+    let name = format!("{prefix}_godunov_stage{suffix_with}{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
     let no_sources: [&symbi_hydro::source_spec::SourceSpec; 0] = [];
     let sources: &[&symbi_hydro::source_spec::SourceSpec] = match fused {
         Some((_, s)) => s,
@@ -610,7 +629,7 @@ fn gen_iso_c2p(out_dir: &str, ndim: u8) {
 // curvilinear coords it folds per-cell PHYSICAL widths (cell_inv_phys_widths) instead of
 // a uniform inv_dx; the iso map is shared by the adiabatic/Newton CFL too.
 fn gen_iso_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("iso_wave_speed_map{}_{ndim}d", geom.suffix());
+    let name = format!("iso_wave_speed_map{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix());
     let (k, writes) =
         iso_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1091,7 +1110,7 @@ fn gen_rmhd_average_efield(out_dir: &str, ndim: u8) {
 // relativistic 1D characteristic speeds. like the iso map but the relativistic
 // closed form (no inv_dx baked); the host folds max + cfl_from_smax(s_max,cfl,dx).
 fn gen_srhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("srhd_wave_speed_map{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
+    let name = format!("srhd_wave_speed_map{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
     let (k, writes) =
         srhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1229,8 +1248,12 @@ fn main() {
     // builders as Cartesian with set_geometry(Spherical): area-weighted divergence +
     // geometric pressure source (+ inertial for ndim>=2) + per-cell CFL widths. the
     // adiabatic CFL shares the iso wave-speed map.
+    // both the uniform and the log-radial spherical grid: the log variant bakes the geometric-mean
+    // cell geometry (gv_axis_face_at's Log branch) into the same godunov + wave-speed stages, tagged
+    // `_logr`. the runtime selects between them from the grid's radial spacing.
     for ndim in 1u8..=3 {
         gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim));
+        gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim).log_radial());
     }
     // GR (Schwarzschild) SRHD godunov stage — the lapse-densitized relativistic gas update on a
     // spherically-symmetric BH background (`srhd_godunov_stage_sph_schw_{1,2}d`). only the
@@ -1242,6 +1265,12 @@ fn main() {
         // the GR CFL wave-speed map: the Banyuls-Font coordinate signal speed (the lapse + radial
         // proper-width correction) -> the correct dt near the horizon.
         gen_srhd_wave_speed_map(&out_dir, ndim, bh);
+        // the log-radial Schwarzschild grid (the bondi accretion zones span many decades in r):
+        // same lapse-densitized stage + GR wave speeds on geometric-mean cell geometry, tagged
+        // `_sph_logr_schw`.
+        let bh_log = Geom::sph(ndim).schwarzschild().log_radial();
+        gen_godunov_stage(&out_dir, ndim, "srhd", true, bh_log.clone(), None);
+        gen_srhd_wave_speed_map(&out_dir, ndim, bh_log);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.
