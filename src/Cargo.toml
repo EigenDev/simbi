@@ -51,17 +51,20 @@ codegen-units = 1
 # dropping the heavy type/local-variable DWARF that explodes per monomorphization; deps carry no
 # debuginfo at all (we never step into serde/rayon/hdf5); split-debuginfo keeps DWARF out of the
 # linked binaries. lose only debugger LOCAL-variable inspection, which this CFD work rarely uses.
+# DEBUGINFO OFF WORKSPACE-WIDE. the recursive dwarf emitter (llvm createAndAddScopeChildren)
+# overflows the compiler stack -> SIGBUS on heavily-monomorphized crates EVEN at line-tables-only.
+# it hit symbi-substrate then symbi-aot; the threshold is depth-of-inlined-lexical-scope, so any
+# crate can cross it as the codebase grows (B2's metric contractions add monomorphization). rather
+# than whack-a-mole per crate, drop debuginfo everywhere: no DWARF scope tree -> no overflow, and
+# faster debug builds (less to emit).
+# the crash dies cleanly (~20s + backtrace) interactively but HANGS indefinitely under sandboxed /
+# agent shells (signal handling differs), masquerading as an endless compile — the insidious part.
+# COST: panic file:line in DEBUG builds (the panic MESSAGE still prints; `release` already carries
+# no debuginfo, so the canonical path is unaffected). need a source line for one crate while
+# debugging? temporarily add `[profile.dev.package.<crate>] debug = "line-tables-only"`.
 [profile.dev]
-debug = "line-tables-only"
+debug = false
 split-debuginfo = "unpacked"
 
 [profile.dev.package."*"]
-debug = false
-
-# symbi-substrate's heavily-monomorphized + inlined kernels produce a lexical-scope tree deep
-# enough that llvm's recursive dwarf emitter (createAndAddScopeChildren) overflows the compiler
-# stack -> SIGBUS, even at line-tables-only. dropping its debuginfo dodges the recursion while
-# keeping the fast unoptimized codegen, so `cargo test` (debug) works on the full symbi stack.
-# the cost is panic file:line in this one crate only; all other crates keep line-tables-only.
-[profile.dev.package.symbi-substrate]
 debug = false

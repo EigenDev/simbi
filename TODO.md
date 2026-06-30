@@ -22,16 +22,28 @@ the traced IR DAG lowers every CT curl / flux to reads `gv_field_at(key, offset)
 known integer stencil offsets. invariants become static polynomial-cancellation checks at
 graph-build time — no evolve loop, no FP tolerance, all geometries at once.
 
-- [ ] **A1. symbolic `div(curl B) = 0` checker.** compose the face-update DAGs for one
-      cell, assert the edge-EMF coefficients cancel to the zero polynomial. proves div(B)=0
-      for ANY input field. converts `rmhd_divb_under_evolve.rs:147` (empirical 1e-12) into a
-      theorem. *prototype first on one geometry, then generalize.*
-- [ ] **A2. conservation telescoping checker.** assert each shared face flux enters the two
-      neighbor updates with equal-and-opposite signed coefficient. proves global conservation
-      symbolically, replacing the 1e-9 sod integral as the primary guard.
-- [ ] **A3. EMF upwind-pairing structural assert.** on the `uct_master_emf` DAG, assert the
-      advective term pairs `a^L` with the UPWIND face (`ct_emf.rs:577`). this is the only
-      guard for the supersonic-EMF regression that currently has NO rust test.
+- [x] **A1. symbolic `div(curl B) = 0` checker.** DONE for ALL geometries + EMF upwind (see
+      the CAPSTONE entry in follow-ups). every CT curl is a graph-build-time theorem now.
+- [x] **A2. conservation telescoping checker (cartesian).** DONE: the godunov mass update's
+      flux part IS a sum of per-direction DISCRETE DIVERGENCES `G_d[+e_d]-G_d`
+      (`G_d=(-dt/dx_d)F_d`), which telescope globally -> conserves for ANY flux field.
+      `godunov_mass_conservation_symbolic.rs`; negative control + bug-injection verified
+      (breaking `f_hi-f_lo` -> `f_hi+f_lo` makes it FAIL "NOT a discrete divergence").
+      CURVILINEAR follow-up: reduces to shared-face area consistency `area_hi(c)==area_lo(c+e)`,
+      but the angular measure carries cos/pi factors the integer-poly/sin ring can't represent —
+      needs a cos + non-integer-constant ring extension (the analog of A1-sph(b)'s sin extension).
+- [x] **A2-curvilinear DONE.** CYLINDRICAL + SPHERICAL mass conservation proven symbolically via
+      the shared-face area consistency `area_hi_0(c) == area_lo_0(c+e_r)` (single-valued shared
+      face -> volume-weighted flux div telescopes -> conserves). machinery added: `Op::Cos` as an
+      opaque symbol (mirrors sin; keyed identically so the same theta-edge -> same symbol),
+      `Poly::cos_sym`, pub `extract_scalar` (field-free geometry node -> RatFun), pub
+      `RatFun::equals`/`shift_coords`. cylindrical is transcendental-free (r-face = r*dx_1*dx_2);
+      spherical's solid-angle Omega = (cos th_lo - cos th_hi)*dphi is c_0-independent + a common
+      factor -> cancels structurally under the r-shift (no pi for 3D). `godunov_mass_conservation_
+      {cyl,sph}_symbolic.rs` + negative controls. independently verified: my own low-face
+      perturbations (cyl rl->rh, sph r^2->r) make each FAIL; reverted clean.
+- [x] **A3. EMF upwind-pairing structural assert.** DONE (`nmhd_uct_emf_upwind_symbolic.rs`,
+      see follow-ups). covers all 5 uct kernels; flipping ct_emf.rs:577 makes it FAIL.
 - [ ] **A4. weighted-curl invariance.** once A1 lands, assert the α/√(-g)-weighted curl
       (GR step B3) still telescopes — makes the GR weighting a checkable transformation.
 
@@ -42,7 +54,7 @@ root cause: the carrier traces SR-Minkowski algebra (`vel.dot(&vel)` is flat `v^
 have ZERO real callers and `symbi-discretize` re-derives Christoffels by hand. they don't
 talk to each other.
 
-- [~] **B1. wire `symbi-geometry` into `symbi-discretize`; delete hand-rolled
+- [x] **B1. wire `symbi-geometry` into `symbi-discretize`; delete hand-rolled
       `Coords`/Christoffel** in `symbi-discretize/src/gv/sources.rs`. NOT pure dedup — the
       inertial Christoffel dedups against `Metric`, but the well-balanced discrete pressure
       source STAYS (D2). progress:
@@ -76,10 +88,22 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
       B_theta). copied the poloidal form without flipping. div(B) blew to O(1) in ONE step. fixed;
       rotor + full discretize CT suite green. *this is exactly what a SYMBOLIC proof of the (r,z)
       curl would have caught — the 2D curls (rz/rphi/sph-poloidal) have only NUMERICAL guards.*
-- [ ] **B2. thread the metric as a carrier-generic value into physics.** replace
-      `vel.dot(&vel)` / `mom.dot(&mom)` with `g_{ij} v^i v^j` / `gamma^{ij} S_i S_j` in
-      `srhd/cons.rs`, `srhd/algebra.rs`, `riemann/`. for a diagonal-flat metric this must
-      compile BIT-IDENTICALLY to today (regression-safe). this is the SR->GR pivot.
+- [~] **B2. thread the metric as a carrier-generic value into physics.** replace
+      `vel.dot(&vel)` / `mom.dot(&mom)` with `g_{ij} v^i v^j` / `gamma^{ij} S_i S_j`. SR->GR pivot.
+      threading mechanism: a `Matrix<S,D>` (the spatial metric / its inverse) passed on the `eos`
+      rails; `Matrix::quadratic`/`contract`/`identity` already exist; flat/orthonormal = identity =
+      bit-identical (optimizer folds it). Regime trait NOT touched (host wrapper absorbs it).
+      - [x] **B2.P1** — proof of concept: threaded `gamma_inv` into `srhd_recover`, converted the
+        `s_mag = sqrt(gamma^{ij} S_i S_j)` site, identity at all 4 callers. VERIFIED bit-identical
+        at all 3 levels: f64 (38), interpreter oracle, and the COMPILED-kernel gate
+        (`aot_carrier_equivalence::srhd_c2p_kernel_equals_host` green). de-risks the whole arc.
+      - [ ] **B2.P2** — fan out the remaining Tier-1 `.dot()` sites (the ~30 from the agent maps):
+        srhd v^2 (needs gamma not gamma_inv), rmhd/cons rescale invariants (r_sq/bee_sq/rdb/rp_sq),
+        rmhd/algebra norms, the gamma-orthogonal transverse projector `B - n(B.n)` (recurs ~15x).
+        dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch.
+      - [ ] **B2.P3** — structural Tier-2 (design decisions, NOT mechanical): wave speeds
+        (alpha/beta/gamma^nn, Banyuls-Font), the GV face normal (`Tensor::unit` is not the GR normal).
+        C1 (variance type-safety) folds in here for the contravariant/covariant correctness.
 - [ ] **B3. densitize the conserved state** (`sqrt(gamma) D, sqrt(gamma) S_i, sqrt(gamma)
       tau`) and add α/β^i transport to the update (`godunov.rs:317`) + CT (`ct_emf.rs:233`).
       activates the dead `lapse`/`shift`/`sqrt_det_gamma` surface.
@@ -144,6 +168,33 @@ on the fused flux+metric kernel.
       most expensive per-face block (`riemann/hllc.rs:225-241`).
 - [ ] **E3. free wins:** `policy.rs:211` per-block `Vec<Buf>` -> `SmallVec`; drop the
       release-active aliasing `HashSet` at `policy.rs:159-167`. hottest scheduler path.
+
+## workstream F — build / dev-speed (structural — HURTS development NOW)
+
+- [x] **F0. the AOT "slow compile" was the DWARF SIGBUS HANG, not volume.** root cause: the
+      createAndAddScopeChildren stack-overflow SIGBUS crashed symbi-aot's test crate; in a sandboxed
+      agent shell the crash HANGS (masquerading as an endless compile), in an interactive shell it
+      dies in ~20s. FIXED: workspace-wide `[profile.dev] debug = false` (was line-tables-only) — no
+      DWARF scope tree -> no overflow. measured REAL aot compile = 47s (tolerable per-batch gate).
+      [[debug-build-dwarf-sigbus]]. LESSON: an agent reporting a multi-minute "compile hang" on a
+      heavy crate is probably THIS crash — have the user run it for the fast crash/backtrace.
+- [~] **F1. (downgraded) AOT codegen recompile VOLUME.** `symbi-aot/build.rs` emits ~820K
+      lines (~69MB) of fully-scalarized kernel Rust into OUT_DIR (one straight-line `pub fn` per
+      regime x geometry x dim x solver; the `rmhd_face_flux_cyl_rz_hlld_2d` kernel alone is 1168
+      lines), ALL `include!`d into ONE crate. ANY `symbi-hydro` change (e.g. every B2 `.dot()`
+      site) invalidates build.rs -> rustc recompiles the ENTIRE pile. observed: `cargo test -p
+      symbi-aot --test aot_carrier_equivalence` was STILL compiling at 7 min when killed — actual
+      duration UNKNOWN (could be far worse). 7+ min for one test crate smells PATHOLOGICAL, not
+      merely "big": suspect a single huge codegen unit OR rustc/LLVM choking on one massive
+      monomorphized fn (the 1168-line scalarized kernel is the prime suspect).
+      - INVESTIGATE FIRST: `cargo build -p symbi-aot --timings` (or `-Z time-passes`) to find WHICH
+        unit/fn is the time sink, and whether it's rustc front-end, LLVM, or codegen-units serialization.
+      - quick mitigations (do not fix the disease): the dev loop is `cargo test -p symbi-discretize`
+        (interpreter oracle — NEVER compiles the generated kernels, ~2s) + `-p symbi-hydro` f64;
+        `SYMBI_GEN_SERIAL=off --features debug-emit-knobs` drops the serial twins (~1.5x leaner gate).
+      - structural fix: split generated kernels so a physics change invalidates ONLY the affected
+        ones — per-kernel compilation units / finer `cargo:rerun-if-changed` scoping, or raise
+        codegen-units / break the giant kernels. makes the AOT gate INCREMENTAL instead of all-or-nothing.
 
 ---
 

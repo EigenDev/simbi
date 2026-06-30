@@ -7,7 +7,7 @@
 // host wrapper (`srhd_to_primitive`) that adds the C2pResult diagnostics post-hoc.
 // =============================================================================
 
-use symbi_algebra::{Tensor, OrderedNumeric};
+use symbi_algebra::{Matrix, Tensor, OrderedNumeric};
 use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::state::{Prim, Cons};
@@ -31,11 +31,17 @@ const MAX_ITER: usize = 100;
 pub fn srhd_recover<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     cons: &Cons<S, D>,
+    gamma_inv: &Matrix<S, D>,
     max_iter: usize,
 ) -> Prim<S, D> {
     let dd = cons.den;
     let tau = cons.nrg;
-    let s_mag = cons.mom.dot(&cons.mom).sqrt();
+    // the conserved-momentum norm |S|^2 = gamma^{ij} S_i S_j, where `gamma_inv` is the inverse
+    // SPATIAL metric. for the flat / orthonormal-frame convention gamma_inv = identity and this
+    // is bit-identical to the euclidean `S.dot(S)`; a general (GR) metric makes it the curved
+    // norm. THIS is the SR->GR seam (B2): the metric is now a carrier-generic value the physics
+    // contracts with, transported by the homomorphism exactly like `eos`.
+    let s_mag = gamma_inv.quadratic(&cons.mom).sqrt();
 
     // initial pressure guess: |S - D - tau|
     let p_init = (s_mag - dd - tau).abs();
@@ -95,7 +101,10 @@ pub(crate) fn srhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
         return C2pResult::err(floored, code);
     }
 
-    let prim = srhd_recover(eos, cons, MAX_ITER);
+    // flat/orthonormal frame -> the inverse spatial metric is the identity (bit-identical to
+    // the euclidean norm). a curvilinear-but-flat run is still identity in the physical frame;
+    // a genuine GR metric is threaded here once B3 densitizes the conserved state.
+    let prim = srhd_recover(eos, cons, &Matrix::identity(), MAX_ITER);
 
     // post-hoc diagnostics on the raw recovered state (shared SRHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
@@ -224,7 +233,7 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         // s_mag = 10 >> d + tau = 1.1, so the very first Newton iterate has v_sq > 1.
         let cons: Cons<f64, 1> = Cons { den: 1.0, mom: Tensor::new([10.0]), nrg: 0.1 };
-        let prim = srhd_recover(&eos, &cons, MAX_ITER);
+        let prim = srhd_recover(&eos, &cons, &Matrix::identity(), MAX_ITER);
         let finite = prim.rho.is_finite() && prim.pre.is_finite() && prim.vel[0].is_finite();
         assert!(
             !finite,
