@@ -204,8 +204,19 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
             flat -> empty), carried on `PartitionGeometry.spacetime_scalars` (via `Sc::to_f64`); the
             `dispatch_godunov` resolver fills it from there. mirrors how the EOS feeds `gamma`. substrate
             + sim compile clean.
-          - [ ] **B.5 wave-speed alpha/beta** (CFL + Riemann coord speeds `lambda = alpha v - beta^n`) —
-            the under-scoped piece; NOT a free post-multiply (it scales the HLL dissipation).
+          - [~] **B.5 wave-speed alpha/beta** (CFL coordinate speeds). NOT a post-multiply: the inverse
+            metric `gamma^{nn}` threads INTO the discriminant, alpha scales the result (Banyuls-Font 1997).
+            - [x] **the GR wave-speed FUNCTION** (`srhd_speeds_from_vn_gr`, symbi-hydro): `disc = (1-vn^2)
+              (gamma_nn(1-vn^2 cs^2) - vn^2(1-cs^2))`, `lambda_pm = alpha[vn(1-cs^2) +/- cs sqrt(disc)]/
+              (1-vn^2 cs^2)`. VERIFIED: reduces EXACTLY (1e-12) to the SR `srhd_speeds_from_vn` at
+              (gamma_nn=1, alpha=1) -> flat untouched; Schwarzschild (f=0.8) damps to the hand-computed
+              lambda+ 0.5468 / lambda- -0.1097. (derivation: the existing SR `ss/qf/fac` path collapses to
+              `[vn(1-cs^2) +/- cs(1-vn^2)]/(1-vn^2 cs^2)`, the gamma_nn=1 limit of the BF disc.)
+            - [ ] **wire into the CFL wave-speed MAP kernel**: thread the spacetime + the metric
+              `gamma^{nn}`(spatial_metric_inv) / `alpha`(lapse) into `srhd_wave_speed_map_gv`; bake +
+              select the `_schw` variant (same infra as the godunov B.4). the Riemann stays SR-LOCAL
+              (the lapse-densitized divergence handles its coordinate scaling — to be confirmed by Michel).
+            - [ ] **VERIFY against Michel** — the sonic-point radius is the razor test of these speeds.
           - [ ] **B.6 PIN factor placement** (sqrt(-g)-faces vs sqrt(gamma)-volume vs wave-speed alpha)
             AGAINST the Michel profile. needs the GRAVITY source (B4) for infall; then CT + bcell + mass-demo.
       CONCRETE DRIVER: **Schwarzschild (standard coords) — DIAGONAL, beta = 0.** SR Riemann/c2p VERBATIM
