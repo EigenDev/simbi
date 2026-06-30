@@ -18,6 +18,7 @@ use crate::energy::Zero;
 use crate::regime::Regime;
 use crate::mhd_state::{MhdPrim, MhdCons, IsoMhdPrim, IsoMhdCons};
 use crate::rmhd::Rmhd;
+use crate::spatial_metric::SpatialMetric;
 use crate::newtonian_mhd::NewtonianMhd;
 use crate::isothermal_mhd::IsothermalMhd;
 use crate::riemann::hlle;
@@ -70,6 +71,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     lam: [S; 2],
     bn: S,
     nhat: &Tensor<S, D>,
+    metric: &SpatialMetric<S, D>,
 ) -> VdiffOut<S, D> {
     let eps = S::from_f64(DIVZERO_GUARD);
     let one = S::ONE;
@@ -90,16 +92,17 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     for ii in 0..2 {
         let a_s = lam[ii];
         let rs = r[ii];
+        // rmn / rmtrans are momentum-class (covariant S_i . n^i) -> metric-free (C1/Tier-2).
         let rmn = rs.mom.dot(nhat);
         let rmtrans = rs.mom - nhat.scale(rmn);
-        let rbtrans = rs.mag - nhat.scale(rs.mag.dot(nhat));
+        let rbtrans = metric.project_transverse(&rs.mag, nhat); // transverse magnetic part (contravariant B)
         let ret = rs.nrg + rs.den;
 
         // Eqs (26)-(30): coefficients of the linear system for the side state.
         let a = rmn - a_s * ret + p * (one - a_s * a_s);
-        let g = rbtrans.dot(&rbtrans);
+        let g = metric.norm_sq_contra(&rbtrans); // |rbtrans|^2 (contravariant)
         let ag = a + g;
-        let c = rbtrans.dot(&rmtrans);
+        let c = rbtrans.dot(&rmtrans); // B(contra) . momentum(cov) -> metric-free pairing
         let q = -ag + bn * bn * (one - a_s * a_s);
         let x = bn * (a * a_s * bn + c) - ag * (a_s * p + ret);
 
@@ -130,7 +133,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
         eta[ii] = sign * sgn_bn * wt.abs().sqrt();
         let eta_s = eta[ii];
         let var2 = one / (a_s * p + ret + bn * eta_s + eps);
-        let kn = (rmn + p + rs.mag.dot(nhat) * eta_s) * var2;
+        let kn = (rmn + p + metric.contract_contra(&rs.mag, nhat) * eta_s) * var2; // B.n (contravariant)
         let ktrans = (rmtrans + rbtrans.scale(eta_s)).scale(var2);
 
         bv[ii] = nhat.scale(bn) + btrans;
@@ -138,11 +141,12 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
         kv[ii] = nhat.scale(kn) + ktrans;
     }
 
-    let alf_l = kv[0].dot(nhat);
-    let alf_r = kv[1].dot(nhat);
+    // K-vector + velocity are contravariant -> metric contractions.
+    let alf_l = metric.contract_contra(&kv[0], nhat);
+    let alf_r = metric.contract_contra(&kv[1], nhat);
     let alf = [alf_l, alf_r];
-    let vn_l = vv[0].dot(nhat);
-    let vn_r = vv[1].dot(nhat);
+    let vn_l = metric.contract_contra(&vv[0], nhat);
+    let vn_r = metric.contract_contra(&vv[1], nhat);
 
     // Eq (45): contact B-field.
     let dkn = alf_r - alf_l + eps;
@@ -151,12 +155,12 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
             - (bv[0].scale(alf_l - vn_l) + vv[0].scale(bn))).scale(inv_dkn);
 
     // Eq (47): contact velocity.
-    let ksq_l = kv[0].dot(&kv[0]);
-    let kdb_l = kv[0].dot(&bc);
+    let ksq_l = metric.norm_sq_contra(&kv[0]);
+    let kdb_l = metric.contract_contra(&kv[0], &bc);
     let vc_l = kv[0] - bc.scale((one - ksq_l) / (eta[0] - kdb_l + eps));
 
-    let ksq_r = kv[1].dot(&kv[1]);
-    let kdb_r = kv[1].dot(&bc);
+    let ksq_r = metric.norm_sq_contra(&kv[1]);
+    let kdb_r = metric.contract_contra(&kv[1], &bc);
     let vc_r = kv[1] - bc.scale((one - ksq_r) / (eta[1] - kdb_r + eps));
 
     // Eq (49) — denominator pre-clamped to avoid divide-by-zero in Gv.
@@ -212,6 +216,7 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
     lam: [S; 2],
     bn: S,
     nhat: &Tensor<S, D>,
+    metric: &SpatialMetric<S, D>,
 ) -> HlldConverged<S, D> {
     let one = S::ONE;
     let zero = S::ZERO;
@@ -220,14 +225,14 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
     let div_guard = S::from_f64(DIVERGENCE_GUARD);
 
     let p_perturbed = p_init * (one + S::from_f64(SECANT_PERTURBATION));
-    let f_init = hlld_vdiff(p_init, r_pair, lam, bn, nhat).f;
+    let f_init = hlld_vdiff(p_init, r_pair, lam, bn, nhat, metric).f;
 
     let result_acc = S::iterate_vec::<4>(
         [p_init, f_init, p_perturbed, zero],
         SECANT_STEPS,
         |[p_prev, f_prev, p_cur, freeze]| {
             let frozen = freeze.cmp_gt(S::from_f64(0.5));
-            let v = hlld_vdiff(p_cur, r_pair, lam, bn, nhat);
+            let v = hlld_vdiff(p_cur, r_pair, lam, bn, nhat, metric);
             let f_cur = v.f;
             let f_too_big = f_cur.abs().cmp_gt(div_guard);
             let slope_dead = (f_cur - f_prev).abs().cmp_lt(eps);
@@ -247,7 +252,7 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
         2,
     );
 
-    let v = hlld_vdiff(result_acc, r_pair, lam, bn, nhat);
+    let v = hlld_vdiff(result_acc, r_pair, lam, bn, nhat, metric);
     let ok = v.f.abs().cmp_lt(div_guard) & v.f.abs().cmp_lt(feps * S::from_f64(1e6));
     let success = S::select(ok, one, zero);
     HlldConverged { p_final: result_acc, v, success }
@@ -270,6 +275,9 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let half = S::from_f64(0.5);
     let eps = S::from_f64(DIVZERO_GUARD);
     let p_floor_val = S::from_f64(CONVERGENCE_TOL); // small positive floor
+    // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
+    // metric threads in here once the flux path carries it (B3).
+    let metric = SpatialMetric::flat();
 
     // eagerly compute HLLE — fallback if HLLD reports divergence at the end.
     let hlle_flux = hlle(regime, eos, prim_l, prim_r, nhat, vface);
@@ -290,7 +298,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let inv_dwave = one / (a_r - a_l + eps);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux  = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
-    let bn = hll_state.mag.dot(nhat);
+    let bn = metric.contract_contra(&hll_state.mag, nhat); // B.n (contravariant)
 
     // r-vectors for prim_l and prim_r (Eq. 12).
     let r_l = u_l * a_l - f_l;
@@ -305,7 +313,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     // strictly positive, monotonic in inputs, and the secant converges fine
     // from it — the only cost is a few more iterations on extreme shocks.
     let p_total = |prim: &MhdPrim<S, D>| -> S {
-        prim.hydro.pre + half * prim.mag.dot(&prim.mag)
+        prim.hydro.pre + half * metric.norm_sq_contra(&prim.mag) // |B|^2 (contravariant)
     };
     let p_hll_raw = (p_total(prim_l) + p_total(prim_r)) * half;
     let p_hll = S::select(p_hll_raw.cmp_le(zero), p_floor_val, p_hll_raw);
@@ -329,7 +337,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
 
     // secant pressure iteration -> converged intermediate state (shared with the UCT-HLLD edge-EMF
     // star-state extraction). `success` is a 0/1 scalar; the flux falls back to HLLE when it is 0.
-    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat);
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, &metric);
     let p_final = conv.p_final;
     let v = conv.v;
     let vc = v.vc;
@@ -340,7 +348,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let success = conv.success.cmp_gt(half);
 
     // pick fast-wave side via the contact-vs-vface test, branchless.
-    let vnc = vc.dot(nhat);
+    let vnc = metric.contract_contra(&vc, nhat); // v_c.n (contravariant)
     let on_left = vface.cmp_lt(vnc);
 
     // ---- fast-wave intermediate state (Section 3.1) ----
@@ -352,8 +360,8 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
                      ba:     Tensor<S, D>|
         -> (MhdCons<S, D>, MhdCons<S, D>)
     {
-        let vdba = va.dot(&ba);
-        let vna = va.dot(nhat);
+        let vdba = metric.contract_contra(&va, &ba); // v.B (contravariant)
+        let vna = metric.contract_contra(&va, nhat); // v.n (contravariant)
         let inv_lc_vna = one / (lc - vna + eps);
         let da = r_side.den * inv_lc_vna;
         let ea = (r_side.nrg + r_side.den + p_final * vna - vdba * bn) * inv_lc_vna;
@@ -382,8 +390,10 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let at_contact = S::Mask::select_mask(on_left, at_contact_l, at_contact_r);
 
     // ---- contact-wave state (Section 3.3) ----
-    let vdbc = vc.dot(&bc);
-    let vna_used = S::select(on_left, vv_iso[0].dot(nhat), vv_iso[1].dot(nhat));
+    let vdbc = metric.contract_contra(&vc, &bc); // v_c.B_c (contravariant)
+    let vna_used = S::select(on_left,
+        metric.contract_contra(&vv_iso[0], nhat),
+        metric.contract_contra(&vv_iso[1], nhat));
     let inv_la_vnc = one / (la - vnc + eps);
     let dc = ua.den * (la - vna_used) * inv_la_vnc;
     let man = ua.mom.dot(nhat);
@@ -439,6 +449,8 @@ pub fn hlld_rmhd_states<S: Scalar, const D: usize>(
     let half = S::from_f64(0.5);
     let eps = S::from_f64(DIVZERO_GUARD);
     let p_floor_val = S::from_f64(CONVERGENCE_TOL);
+    // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); GR face metric -> B3.
+    let metric = SpatialMetric::flat();
 
     let u_l = regime.to_conserved(eos, prim_l);
     let u_r = regime.to_conserved(eos, prim_r);
@@ -448,13 +460,13 @@ pub fn hlld_rmhd_states<S: Scalar, const D: usize>(
     let inv_dwave = one / (a_r - a_l + eps);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
-    let bn = hll_state.mag.dot(nhat);
+    let bn = metric.contract_contra(&hll_state.mag, nhat); // B.n (contravariant)
     let r_l = u_l * a_l - f_l;
     let r_r = u_r * a_r - f_r;
     let r_pair = [&r_l, &r_r];
     let lam = [a_l, a_r];
 
-    let p_total = |prim: &MhdPrim<S, D>| -> S { prim.hydro.pre + half * prim.mag.dot(&prim.mag) };
+    let p_total = |prim: &MhdPrim<S, D>| -> S { prim.hydro.pre + half * metric.norm_sq_contra(&prim.mag) };
     let p_hll_raw = (p_total(prim_l) + p_total(prim_r)) * half;
     let p_hll = S::select(p_hll_raw.cmp_le(zero), p_floor_val, p_hll_raw);
     let lowb_thresh = S::from_f64(LOW_B_PRESSURE_RATIO);
@@ -470,12 +482,12 @@ pub fn hlld_rmhd_states<S: Scalar, const D: usize>(
     let p_lowb = S::select(p_lowb_raw.cmp_le(zero), p_floor_val, p_lowb_raw);
     let p_init = S::select(lowb_mask, p_lowb, p_hll);
 
-    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat);
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, &metric);
     let v = conv.v;
     HlldStates {
         lam: [a_l, a_r],
         alf: v.alf,
-        lstar: v.vc.dot(nhat),
+        lstar: metric.contract_contra(&v.vc, nhat), // v_c.n (contravariant)
         bstar: v.bv,
         bc: v.bc,
         vc: v.vc,

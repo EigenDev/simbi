@@ -97,7 +97,7 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
         `s_mag = sqrt(gamma^{ij} S_i S_j)` site, identity at all 4 callers. VERIFIED bit-identical
         at all 3 levels: f64 (38), interpreter oracle, and the COMPILED-kernel gate
         (`aot_carrier_equivalence::srhd_c2p_kernel_equals_host` green). de-risks the whole arc.
-      - [~] **B2.P2** — fan out the remaining Tier-1 `.dot()` sites. introduced `SpatialMetric<S,D>`
+      - [x] **B2.P2** — fan out the remaining Tier-1 `.dot()` sites. introduced `SpatialMetric<S,D>`
         carrier (symbi-hydro/src/spatial_metric.rs: gamma + gamma_inv + `flat()` + variance-NAMED
         norm helpers `norm_sq_cov`/`norm_sq_contra` — encodes the contra/cov trap). done:
         - [x] SRHD c2p complete: s_mag (norm_sq_cov, S covariant) + v^2 (norm_sq_contra, v contra).
@@ -112,12 +112,15 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
           (construct flat() at the boundary) + the Gv source builder (sources.rs:196). `cons.mom.dot(nhat)`
           left metric-free (ambiguous conserved-momentum variance, settled by C1). added `project_transverse`
           helper for the riemann. all 3 levels green (28 hydro + 27 oracle + 3 immersed, f64+interp).
-        - [ ] **flux-path batch part 2 — the Riemann solvers (densest)**: 82 `.dot` sites (hllc 27,
-          hlld 55; hlle metric-clean). NOT blind-mechanical — triage each: genuine projector/norm ->
-          `project_transverse`/`norm_sq_contra` (the `B - n(B.n)` form recurs ~15x); metric-free cov·contra
-          pairing -> stays `.dot()`; scalar wave-speed algebra -> stays `.dot()`. the Newtonian/iso variants
-          (~half the sites) are orthonormal-by-domain (NOT the GR frontier) -> leave Euclidean; convert only
-          the relativistic bodies (hllc_srhd, hllc_rmhd, hlld relativistic). thread flat() at each solver entry.
+        - [x] **flux-path batch part 2 — the Riemann solvers**: triaged the relativistic bodies ONLY
+          (hllc_srhd/hllc_rmhd + hlld_vdiff/hlld_rmhd_converge/hlld_rmhd/hlld_rmhd_states). converted the
+          contravariant velocity/B contractions (v.n, B.n, |v|^2, |B|^2, v.B, the K-vector |K|^2 / K.B / K.n,
+          the transverse-B projector `B - n(B.n)` -> `project_transverse`); LEFT the momentum-class
+          (conserved S_i / flux-of-momentum / r-vector `.mom` . n^i, and the mixed B(contra).mom(cov)
+          pairings c, rdv) as metric-free `.dot()` pending C1. the Newtonian/iso solvers (hlld_newtonian,
+          *_coeffs, hlld_isothermal) are orthonormal-by-domain -> left Euclidean. metric = flat() at each
+          solver entry, threaded through vdiff/converge. all 3 levels green: 273 hydro f64 + 27 interp oracle
+          (+ AOT gate to stamp). B2.P2 COMPLETE (con2prim + full flux path metric-aware).
         dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch (~22-47s).
       - [ ] **B2.P3** — structural Tier-2 (design decisions, NOT mechanical): wave speeds
         (alpha/beta/gamma^nn, Banyuls-Font), the GV face normal (`Tensor::unit` is not the GR normal).

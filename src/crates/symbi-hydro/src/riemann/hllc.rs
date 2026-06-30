@@ -25,6 +25,7 @@ use crate::newtonian::Newtonian;
 use crate::newtonian_mhd::NewtonianMhd;
 use crate::mhd_state::{MhdPrim, MhdCons};
 use crate::rmhd::Rmhd;
+use crate::spatial_metric::SpatialMetric;
 use crate::dissipation::{adaptive_phi, quirk_strong_shock, ShockwaveLimiter};
 use super::hlle::hlle;
 
@@ -318,8 +319,9 @@ fn srhd_star_state<S: Scalar, const D: usize>(
     a_star: S,
     p_star: S,
     nhat: &Tensor<S, D>,
+    metric: &SpatialMetric<S, D>,
 ) -> Cons<S, D> {
-    let vn = prim.vel.dot(nhat);
+    let vn = metric.contract_contra(&prim.vel, nhat); // v.n = gamma_{ij} v^i n^j (contravariant)
     let ee = cons.nrg + cons.den;
     let fac = S::ONE / (a - a_star);
     let ds = fac * (a - vn) * cons.den;
@@ -368,6 +370,9 @@ fn hllc_srhd_body<S: Scalar, const D: usize>(
     vface: S,
 ) -> Cons<S, D> {
     let regime = crate::srhd::Srhd;
+    // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
+    // metric threads in here once the flux path carries it (B3).
+    let metric = SpatialMetric::flat();
     let u_l = regime.to_conserved(eos, prim_l);
     let u_r = regime.to_conserved(eos, prim_r);
     let f_l = regime.to_flux(prim_l, nhat, eos);
@@ -382,11 +387,11 @@ fn hllc_srhd_body<S: Scalar, const D: usize>(
                 let (a_star, p_star) = srhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
                 S::branch(a_star.cmp_ge(vface),
                     || {
-                        let us = srhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat);
+                        let us = srhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
                         f_l + (us - u_l) * a_l - us * vface
                     },
                     || {
-                        let us = srhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat);
+                        let us = srhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
                         f_r + (us - u_r) * a_r - us * vface
                     },
                 )
@@ -438,6 +443,9 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
     nhat: &Tensor<S, D>,
     vface: S,
 ) -> MhdCons<S, D> {
+    // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
+    // metric threads in here once the flux path carries it (B3).
+    let metric = SpatialMetric::flat();
     let u_l = regime.to_conserved(eos, prim_l);
     let u_r = regime.to_conserved(eos, prim_r);
     let f_l = regime.to_flux(prim_l, nhat, eos);
@@ -455,24 +463,24 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                 let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv;
                 let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv;
 
-                // normal B from HLL state (continuous across the interface).
-                let bn = hll_state.mag.dot(nhat);
-                let bt_hll = hll_state.mag - nhat.scale(bn);
+                // normal B from HLL state (continuous across the interface). B is contravariant B^i.
+                let bn = metric.contract_contra(&hll_state.mag, nhat);
+                let bt_hll = metric.project_transverse(&hll_state.mag, nhat);
 
                 let uhlld = hll_state.den;
-                let uhllm = hll_state.mom.dot(nhat);
+                let uhllm = hll_state.mom.dot(nhat); // conserved-momentum (covariant S_i . n^i) -> metric-free
                 let uhlle = hll_state.nrg + uhlld;
 
-                let fhllm = hll_flux.mom.dot(nhat);
+                let fhllm = hll_flux.mom.dot(nhat); // momentum-flux . n -> metric-free (variance settled by C1)
                 let fhlle = hll_flux.nrg + hll_flux.den;
-                let ft_hll = hll_flux.mag - nhat.scale(hll_flux.mag.dot(nhat));
+                let ft_hll = metric.project_transverse(&hll_flux.mag, nhat); // transverse magnetic flux (contravariant)
 
                 // contact-wave quadratic: compute null-B AND non-null-B
                 // coefficients in parallel, select via mask.
                 let null_cond = bn.abs().cmp_lt(S::from_f64(NULL_FIELD_THRESHOLD));
-                let fdb = ft_hll.dot(&bt_hll);
-                let bpsq = bt_hll.dot(&bt_hll);
-                let fbpsq = ft_hll.dot(&ft_hll);
+                let fdb = metric.contract_contra(&ft_hll, &bt_hll);
+                let bpsq = metric.norm_sq_contra(&bt_hll);
+                let fbpsq = metric.norm_sq_contra(&ft_hll);
                 let a_coeff = S::select(null_cond, fhlle, fhlle - fdb);
                 let b_coeff = S::select(null_cond,
                     -(fhllm + uhlle),
@@ -499,13 +507,14 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                                  ws: S|
                     -> MhdCons<S, D>
                 {
+                    // momentum-class (conserved S_i / flux-of-momentum . n^i) -> metric-free (C1/Tier-2).
                     let mn = u.mom.dot(nhat);
                     let umtrans = u.mom - nhat.scale(mn);
                     let fmtrans = f.mom - nhat.scale(f.mom.dot(nhat));
                     let etot = u.nrg + u.den;
                     let cfac = S::ONE / (ws - a_star);
 
-                    let vn = prim_side.vel.dot(nhat);
+                    let vn = metric.contract_contra(&prim_side.vel, nhat);
                     let vs = (ws - vn) / (ws - a_star);
                     let ds = vs * u.den;
 
@@ -513,7 +522,7 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
                     let p_null = -a_star * fhlle + fhllm;
                     let es_null = cfac * (ws * etot - mn + p_null * a_star);
                     let mn_null = (es_null + p_null) * a_star;
-                    let btrans_side = prim_side.mag - nhat.scale(prim_side.mag.dot(nhat));
+                    let btrans_side = metric.project_transverse(&prim_side.mag, nhat);
                     let us_null = MhdCons {
                         hydro: Cons {
                             den: ds,
@@ -525,8 +534,8 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
 
                     // non-null-B star state (safe_bn guards division).
                     let vtrans = (bt_hll.scale(a_star) - ft_hll).scale(S::ONE / safe_bn);
-                    let invg2 = S::ONE - (a_star * a_star + vtrans.dot(&vtrans));
-                    let vsdb = a_star * safe_bn + bt_hll.dot(&vtrans);
+                    let invg2 = S::ONE - (a_star * a_star + metric.norm_sq_contra(&vtrans));
+                    let vsdb = a_star * safe_bn + metric.contract_contra(&bt_hll, &vtrans);
                     let p_nn = -a_star * (fhlle - safe_bn * vsdb) + fhllm
                         + safe_bn * safe_bn * invg2;
                     let es_nn = cfac * (ws * etot - mn + p_nn * a_star - vsdb * safe_bn);
