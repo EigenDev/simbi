@@ -10,6 +10,7 @@
 // =============================================================================
 
 use symbi_algebra::{Tensor, OrderedNumeric};
+use crate::spatial_metric::SpatialMetric;
 use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::state::Prim;
@@ -96,6 +97,7 @@ fn find_mu_plus<S: Scalar>(_bee_sq: S, _rdb_sq: S, _r: S) -> S {
 pub fn rmhd_recover<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     cons: &MhdCons<S, D>,
+    metric: &SpatialMetric<S, D>,
     max_iter: usize,
 ) -> MhdPrim<S, D> {
     let dd = cons.den;
@@ -110,14 +112,19 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let isqrtd = inv_d.sqrt();
     let qq = tau * inv_d;
     let rvec = cons.mom.scale(inv_d);
-    let r_sq = rvec.dot(&rvec);
+    // r is COVARIANT (rescaled conserved momentum) -> raise: |r|^2 = gamma^{ij} r_i r_j. flat = euclidean.
+    let r_sq = metric.norm_sq_cov(&rvec);
     let r_mag = r_sq.sqrt();
     let hvec = bfield.scale(isqrtd);
-    let bee_sq = hvec.dot(&hvec) + eps; // + epsilon: divzero guard when B = 0
+    // h is CONTRAVARIANT (rescaled B^i) -> lower: |h|^2 = gamma_{ij} h^i h^j. + epsilon: divzero guard when B=0.
+    let bee_sq = metric.norm_sq_contra(&hvec) + eps;
+    // r.h = r_i h^i is a COVARIANT*CONTRAVARIANT pairing -> METRIC-FREE (no gamma factor); stays `.dot()`.
     let rdb = rvec.dot(&hvec);
     let rdb_sq = rdb * rdb;
     let rparr = hvec.scale(rdb / bee_sq);
     let rperp = rvec - rparr;
+    // rperp mixes variance (covariant rvec - contravariant rparr) — a KKC SR-flat artifact; flat ->
+    // euclidean rp_sq (bit-identical). a GR-correct perp decomposition is deferred (Tier-2).
     let rp_sq = rperp.dot(&rperp);
 
     // the master residual at a given mu (the 8 invariants are fixed).
@@ -205,7 +212,7 @@ pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
         return C2pResult::err(floored, code);
     }
 
-    let prim = rmhd_recover(eos, cons, RMHD_MAX_ITER);
+    let prim = rmhd_recover(eos, cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
 
     // post-hoc diagnostics on the raw recovered state (shared SRHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
@@ -569,7 +576,7 @@ mod tests {
                  (rho={rho}, v={v}, pre={pre}, b={b}): f_lo0={f_lo0}, f_hi0={f_hi0}"
             );
 
-            let got = rmhd_recover(&eos, &cons, RMHD_MAX_ITER);
+            let got = rmhd_recover(&eos, &cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
             assert!(
                 got.hydro.rho.is_finite() && got.hydro.pre.is_finite()
                     && got.hydro.vel.dot(&got.hydro.vel).is_finite(),

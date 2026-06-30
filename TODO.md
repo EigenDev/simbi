@@ -102,11 +102,16 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
         norm helpers `norm_sq_cov`/`norm_sq_contra` — encodes the contra/cov trap). done:
         - [x] SRHD c2p complete: s_mag (norm_sq_cov, S covariant) + v^2 (norm_sq_contra, v contra).
           all callers pass `SpatialMetric::flat()`. fast-verified (f64 + interpreter oracle).
-        - [ ] RMHD c2p (`rmhd_recover`): r_sq -> norm_sq_cov (r covariant), bee_sq -> norm_sq_contra
-          (B contra). NOTE: rdb = r_i B^i is a cov*contra pairing -> METRIC-FREE, stays `.dot()`.
-          rperp.dot mixes variance (KKC is SR-flat) -> bit-identical for flat, GR reformulation deferred.
-        - [ ] rmhd/algebra norms; the gamma-orthogonal transverse projector `B - n(B.n)` (recurs ~15x).
-        dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch (47s).
+        - [x] RMHD c2p (`rmhd_recover`): r_sq -> norm_sq_cov (r covariant), bee_sq -> norm_sq_contra
+          (B contra). rdb = r_i B^i is a cov*contra pairing -> METRIC-FREE, stays `.dot()`. rperp.dot
+          mixes variance (KKC is SR-flat) -> bit-identical for flat, GR reformulation deferred. all 3
+          levels green incl compiled-kernel (`rmhd_c2p_kernel_equals_host`). CON2PRIM BATCH DONE.
+        - [ ] **flux-path batch (the bigger half)**: rmhd/algebra norms (magnetic_pressure /
+          four_vector / source_quantities — bsq/vsq -> norm_sq_contra, vdb=gamma_{ij}v^i B^j needs a
+          `contract_contra` helper) -> cascades into rmhd.rs to_flux/to_conserved (construct flat() at
+          the boundary, like the c2p host wrapper) -> the Riemann solvers (densest: the gamma-orthogonal
+          transverse projector `B - n(B.n)` recurs ~15x, hlld.rs ~12 sites).
+        dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch (~22-47s).
       - [ ] **B2.P3** — structural Tier-2 (design decisions, NOT mechanical): wave speeds
         (alpha/beta/gamma^nn, Banyuls-Font), the GV face normal (`Tensor::unit` is not the GR normal).
         C1 (variance type-safety) folds in here for the contravariant/covariant correctness.

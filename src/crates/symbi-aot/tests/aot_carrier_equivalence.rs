@@ -228,7 +228,7 @@ fn rmhd_c2p_kernel_equals_host_at_baked_count() {
             hydro: Cons { den: d, mom: Tensor::new(s), nrg: tau },
             mag: Tensor::new(bb),
         };
-        let host = rmhd_recover::<f64, 3>(&eos, &cons, RMHD_ITERS);
+        let host = rmhd_recover::<f64, 3>(&eos, &cons, &SpatialMetric::flat(), RMHD_ITERS);
 
         // kernel: rmhd_recover traced at S = Gv, compiled (bakes RMHD_ITERS).
         let (mut kr, mut kp) = (vec![0.0_f64], vec![0.0_f64]);

@@ -142,7 +142,7 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
         hydro: Cons { den, mom: Tensor::new(mom), nrg },
         mag: Tensor::new(mag),
     };
-    let prim = rmhd_recover(&IdealGas { gamma }, &cons, max_iters);
+    let prim = rmhd_recover(&IdealGas { gamma }, &cons, &SpatialMetric::flat(), max_iters);
 
     let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
     for k in 0..3 {
