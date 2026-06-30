@@ -181,17 +181,27 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
           tag added to BOTH enums (geometry `=1`, discretize mirror). 4 unit tests green (analytic lapse/gamma,
           gamma*gamma^-1=I, the sqrt(-g)=r^2 sin GIFT, M=0 -> Spherical exactly, 1D radial) + 99 existing
           geometry green. gravity (the geodesic momentum source) left at the trait default (zero) -> B4.
-          `gv_lapse_weight` Schwarzschild arm STUBBED `None` (exhaustive match; unreachable — no sim selects
-          it yet); discretize oracle 27 still flat-identical.
-        - [ ] **step B — make Schwarzschild FLOW through the kernel** (the live wiring): (1) refactor the
-          struct to `Schwarzschild<S> { mass: S }` so M can be a `Gv::scalar` at codegen (host-filled),
-          keeping `metric.lapse` the single source (vs baking a literal M); (2) thread the cell centroid
-          into `gv_lapse_weight` + the `(Spherical, Schwarzschild) -> run::<Schwarzschild<Gv>,D>` dispatch
-          returning `Some(metric.lapse(centroid))`; (3) the mass-scalar HOST BINDING (substrate manifest +
-          driver fills `schwarzschild_mass`); (4) bake-loop spacetime enumeration + slug tag + runtime
-          kernel-select keys on `PartitionGeometry.spacetime` (+ the geometry->discretize Spacetime bridge);
-          (5) PIN the exact sqrt(-g)-on-faces vs sqrt(gamma)-on-volume factor placement AGAINST a known
-          solution. then the gravity source (B4) for actual infall; extend the seam to CT + bcell + mass-demo.
+          discretize oracle 27 still flat-identical.
+        - [~] **step B — make Schwarzschild FLOW through the kernel** (the live wiring). NORTH STAR:
+          1D radial relativistic Bondi/Michel accretion (analytic oracle), then 2D axisymmetric.
+          - [x] **B.1 generic struct** `Schwarzschild<S> { mass: S }` — M an `f64` at host, a `Gv::scalar`
+            in the trace, so `metric.lapse` stays the single source (no baked-literal M). 4 metric + 99
+            geometry tests green after the refactor.
+          - [x] **B.2 live `gv_lapse_weight` arm**: `(coords, spacetime, coord_centroid)` -> the
+            `Schwarzschild => Some(Schwarzschild { mass: Gv::scalar("schwarzschild_mass") }.lapse([r]))`
+            arm (lapse radial-only -> D=1 eval suffices any D); centroid threaded from `geo` in the stage.
+            NEW test `schwarzschild_stage_wires_the_lapse_mass_scalar`: the Schwarzschild stage carries
+            `schwarzschild_mass` in its DAG manifest, the flat stage does NOT. Minkowski oracle 27 still
+            green. arm LIVE but unreachable until the bake/select build one.
+          - [ ] **B.3 mass-scalar HOST BINDING**: substrate manifest carries `schwarzschild_mass`; the
+            driver fills it from the metric's `mass` (else a Schwarzschild kernel errors at launch).
+          - [ ] **B.4 bake + select enumeration**: the AOT bake enumerates spacetimes (`Geom.spacetime`)
+            + the slug gains the spacetime tag; runtime kernel-select keys on `PartitionGeometry.spacetime`
+            (+ the geometry->discretize `Spacetime` bridge).
+          - [ ] **B.5 wave-speed alpha/beta** (CFL + Riemann coord speeds `lambda = alpha v - beta^n`) —
+            the under-scoped piece; NOT a free post-multiply (it scales the HLL dissipation).
+          - [ ] **B.6 PIN factor placement** (sqrt(-g)-faces vs sqrt(gamma)-volume vs wave-speed alpha)
+            AGAINST the Michel profile. needs the GRAVITY source (B4) for infall; then CT + bcell + mass-demo.
       CONCRETE DRIVER: **Schwarzschild (standard coords) — DIAGONAL, beta = 0.** SR Riemann/c2p VERBATIM
       + alpha-scaling + sqrt(gamma)-densitization + the B1 Christoffel gravity source. first genuine GR run.
 - [ ] **B4. `Christoffel`/covariant-derivative as first-class `Metric` methods**, derived

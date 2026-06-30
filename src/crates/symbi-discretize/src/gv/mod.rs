@@ -1500,6 +1500,34 @@ mod tests {
     }
 
     #[test]
+    fn schwarzschild_stage_wires_the_lapse_mass_scalar() {
+        // the GR lapse wiring (B3.1 step B): a Schwarzschild-spacetime stage threads the lapse
+        // alpha = sqrt(1 - 2M/r) into the DAG, so the host scalar `schwarzschild_mass` appears in
+        // the kernel manifest. the flat (Minkowski) stage on the SAME spherical grid does NOT — it
+        // stays bit-identical to pre-B3. proves the (Spherical, Schwarzschild) -> metric.lapse path.
+        let (k_gr, _) = godunov_stage_gv(
+            Coords::Spherical, Spacetime::Schwarzschild,
+            &[Spacing::Uniform], &[0], 1, 1, true,
+            GeoSource::Hydro { inertial: false },
+        );
+        assert!(
+            k_gr.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
+            "Schwarzschild stage must carry the lapse mass scalar; got {:?}",
+            k_gr.scalar_params,
+        );
+
+        let (k_flat, _) = godunov_stage_gv(
+            Coords::Spherical, Spacetime::Minkowski,
+            &[Spacing::Uniform], &[0], 1, 1, true,
+            GeoSource::Hydro { inertial: false },
+        );
+        assert!(
+            !k_flat.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
+            "flat stage must NOT carry the lapse mass scalar (densitization is a no-op)",
+        );
+    }
+
+    #[test]
     fn godunov_stage_gv_traces_the_ssp_combine() {
         // in-place `cons = a0*u_n + ac*(u - dt*div(F))`: cartesian-uniform 2D, ncomp=2 + energy
         // (no geometric source). declares dt + the SSP coefficients a0/ac + the per-axis dx; reads

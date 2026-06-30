@@ -648,21 +648,24 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 /// is the geometric mass M (G = c = 1). a DIAGONAL metric (impls [`DiagonalMetric`]); the curvature
 /// is the radial stretch f(r) = 1 - 2M/r and the lapse sqrt(f).
 #[derive(Debug, Clone, Copy)]
-pub struct Schwarzschild {
-    /// the geometric mass M (units G = c = 1). the horizon is at r = 2M.
-    pub mass: f64,
+pub struct Schwarzschild<S> {
+    /// the geometric mass M (units G = c = 1). the horizon is at r = 2M. CARRIER-GENERIC over `S`:
+    /// an `f64` at the host, a `Gv::scalar` in the trace (host-filled) so the kernel stays M-agnostic
+    /// (one Schwarzschild kernel serves every mass), and `metric.lapse` remains the single source of
+    /// the alpha = sqrt(1 - 2M/r) expression.
+    pub mass: S,
 }
 
-impl Schwarzschild {
+impl<S: Scalar> Schwarzschild<S> {
     /// f(r) = 1 - 2M/r — the lapse-squared `alpha^2` AND the inverse radial metric coefficient
     /// `gamma^{rr}` (so `gamma_{rr} = 1/f`). positive outside the horizon (r > 2M).
     #[inline]
-    fn f<S: Scalar>(&self, r: S) -> S {
-        S::ONE - S::from_f64(2.0 * self.mass) / r
+    fn f(&self, r: S) -> S {
+        S::ONE - S::from_f64(2.0) * self.mass / r
     }
 }
 
-impl<S: Scalar> Metric<S, 1> for Schwarzschild {
+impl<S: Scalar> Metric<S, 1> for Schwarzschild<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
 
@@ -689,7 +692,7 @@ impl<S: Scalar> Metric<S, 1> for Schwarzschild {
     }
 }
 
-impl<S: Scalar> Metric<S, 2> for Schwarzschild {
+impl<S: Scalar> Metric<S, 2> for Schwarzschild<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
 
@@ -739,7 +742,7 @@ impl<S: Scalar> Metric<S, 2> for Schwarzschild {
     }
 }
 
-impl<S: Scalar> Metric<S, 3> for Schwarzschild {
+impl<S: Scalar> Metric<S, 3> for Schwarzschild<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
 
@@ -796,9 +799,9 @@ impl<S: Scalar> Metric<S, 3> for Schwarzschild {
     }
 }
 
-impl<S: Scalar> DiagonalMetric<S, 1> for Schwarzschild {}
-impl<S: Scalar> DiagonalMetric<S, 2> for Schwarzschild {}
-impl<S: Scalar> DiagonalMetric<S, 3> for Schwarzschild {}
+impl<S: Scalar> DiagonalMetric<S, 1> for Schwarzschild<S> {}
+impl<S: Scalar> DiagonalMetric<S, 2> for Schwarzschild<S> {}
+impl<S: Scalar> DiagonalMetric<S, 3> for Schwarzschild<S> {}
 
 // ============================================================
 // cylindrical metric: x = (r, phi, z)
@@ -1815,7 +1818,7 @@ mod tests {
     #[test]
     fn test_schwarzschild_lapse_and_metric_3d() {
         // M = 1, r = 5 -> f = 1 - 2/5 = 0.6 (outside the horizon r = 2M = 2).
-        let bh = Schwarzschild { mass: 1.0 };
+        let bh = Schwarzschild { mass: 1.0_f64 };
         let (r, theta) = (5.0_f64, FRAC_PI_4);
         let f = 1.0 - 2.0 / r; // 0.6
         let st = theta.sin();
@@ -1842,7 +1845,7 @@ mod tests {
         // the B3 densitization GIFT: sqrt(-g) = alpha * sqrt(gamma) = r^2 sin(theta), the FLAT
         // spherical area element — so GR flux face areas are unchanged; only the time-volume
         // (1/sqrt(f)) and the source pick up the lapse.
-        let bh = Schwarzschild { mass: 0.7 };
+        let bh = Schwarzschild { mass: 0.7_f64 };
         let (r, theta) = (6.0, FRAC_PI_4);
         let x = Tensor::new([r, theta, 0.0]);
         assert!(approx(bh.lapse(x) * bh.volume_factor(x), r * r * theta.sin()));
@@ -1851,7 +1854,7 @@ mod tests {
     #[test]
     fn test_schwarzschild_zero_mass_equals_spherical() {
         // M = 0 -> f = 1 -> the flat spherical metric exactly (lapse 1, gamma = spherical gamma).
-        let bh = Schwarzschild { mass: 0.0 };
+        let bh = Schwarzschild { mass: 0.0_f64 };
         let x = Tensor::new([4.0, FRAC_PI_4, 1.1]);
         assert!(approx(bh.lapse(x), 1.0));
         let (g, gs) = (bh.spatial_metric(x), Spherical.spatial_metric(x));
@@ -1860,14 +1863,14 @@ mod tests {
         }
         assert!(approx(bh.sqrt_det_gamma(x), Spherical.sqrt_det_gamma(x)));
         // the orthogonal axes: spatial geometry is spherical, spacetime is the curved tag.
-        assert_eq!(<Schwarzschild as Metric<f64, 3>>::geometry(&bh), Geometry::Spherical);
-        assert_eq!(<Schwarzschild as Metric<f64, 3>>::spacetime(&bh), Spacetime::Schwarzschild);
+        assert_eq!(<Schwarzschild<f64> as Metric<f64, 3>>::geometry(&bh), Geometry::Spherical);
+        assert_eq!(<Schwarzschild<f64> as Metric<f64, 3>>::spacetime(&bh), Spacetime::Schwarzschild);
     }
 
     #[test]
     fn test_schwarzschild_1d_radial() {
         // the radial reduction (the first GR target): M = 1, r = 10 -> f = 0.8.
-        let bh = Schwarzschild { mass: 1.0 };
+        let bh = Schwarzschild { mass: 1.0_f64 };
         let x = Tensor::new([10.0_f64]);
         let f = 0.8_f64;
         assert!(approx(bh.lapse(x), f.sqrt()));

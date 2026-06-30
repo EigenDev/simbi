@@ -321,7 +321,19 @@ pub fn godunov_stage_gv_with_fused_built(
     // divergence + the geometric momentum source — is weighted by the lapse `alpha(x)`. NOT the
     // `u` snapshot or the mesh-dilution term (those are the time / comoving parts, not the
     // densitized flux). flat spacetime -> `None` -> untouched, bit-identical (see `gv_lapse_weight`).
-    let lapse = gv_lapse_weight(coords, spacetime);
+    // the coordinate-indexed cell centroid (r at slot 0) for the lapse alpha(x); only the
+    // curvilinear path carries one (cartesian-uniform geo = None is always Minkowski -> unused).
+    let coord_centroid: Vec<Gv> = match &geo {
+        Some(g) => {
+            let mut c = vec![Gv::ZERO; 3];
+            for d in 0..(ndim as usize) {
+                c[axes[d]] = g.centroid[d];
+            }
+            c
+        }
+        None => Vec::new(),
+    };
+    let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
         let div = match lapse { Some(a) => a * div, None => div };
         let mut r = u - dt * div - dt * (h_dil * u);

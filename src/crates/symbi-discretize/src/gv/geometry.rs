@@ -5,6 +5,8 @@
 // =============================================================================
 
 use super::*;
+use symbi_geometry::{Metric, Schwarzschild};
+use symbi_algebra::Tensor;
 
 
 /// one cartesian-uniform finite-volume divergence sum over the gridded axes:
@@ -70,16 +72,20 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
 /// so the RHS is untouched and BIT-IDENTICAL — the de-risk seam. a GR metric (Schwarzschild, B3.1)
 /// returns `Some(alpha)` dispatched `Coords -> concrete Metric -> metric.lapse(centroid)` as a
 /// traced Gv expression in the cell coordinate (the established B1 source-dispatch pattern).
-pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime) -> Option<Gv> {
-    let _ = coords; // the spatial coords select the concrete `Metric` impl in the GR arms (B3.1).
+pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centroid: &[Gv]) -> Option<Gv> {
+    let _ = coords; // the spatial coords select the concrete `Metric` impl in the GR arms.
     match spacetime {
         // flat (Minkowski) lapse alpha = 1: no densitization -> bit-identical.
         Spacetime::Minkowski => None,
-        // B3.1 step B (the LIVE wiring): dispatch `(coords, Schwarzschild)` -> `Schwarzschild` Metric
-        // -> `Some(metric.lapse(centroid))` as a traced Gv expr, with M a `Gv::scalar`. needs the
-        // centroid threaded into this fn + the mass-scalar host binding. UNREACHABLE today (no sim
-        // selects the `Schwarzschild` metric yet) -> stubbed `None` so the selector stays inert.
-        Spacetime::Schwarzschild => None,
+        // alpha = sqrt(1 - 2M/r) from the `Schwarzschild` Metric (the SINGLE source), with M a
+        // host-filled scalar `schwarzschild_mass` so the kernel stays M-agnostic; r = the radial
+        // centroid (coordinate slot 0). the lapse is radial-only, so the D=1 evaluation gives the
+        // correct alpha for any sim dimension.
+        Spacetime::Schwarzschild => {
+            let mass = Gv::scalar("schwarzschild_mass");
+            let r = coord_centroid[0];
+            Some(Schwarzschild { mass }.lapse(Tensor::new([r])))
+        }
     }
 }
 
