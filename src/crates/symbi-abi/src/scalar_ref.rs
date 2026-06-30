@@ -95,6 +95,9 @@ pub enum ScalarRef {
     Cs,
     /// theta-MC limiter free parameter `theta`.
     Theta,
+    /// the Schwarzschild geometric mass `M` (the lapse `alpha = sqrt(1 - 2M/r)` parameter). a
+    /// SPACETIME dispatch scalar, resolved from the metric at the call site (like `gamma`).
+    SchwarzschildMass,
     /// the time step `dt` (the godunov/source stage weight feeds through this name).
     Dt,
     /// the SSP convex coefficient on the prior state `a0`.
@@ -131,6 +134,7 @@ impl ScalarRef {
             ScalarRef::Gamma => "gamma".to_string(),
             ScalarRef::Cs => "cs".to_string(),
             ScalarRef::Theta => "theta".to_string(),
+            ScalarRef::SchwarzschildMass => "schwarzschild_mass".to_string(),
             ScalarRef::Dt => "dt".to_string(),
             ScalarRef::A0 => "a0".to_string(),
             ScalarRef::Ac => "ac".to_string(),
@@ -156,6 +160,7 @@ impl ScalarRef {
             "gamma" => return Some(ScalarRef::Gamma),
             "cs" => return Some(ScalarRef::Cs),
             "theta" => return Some(ScalarRef::Theta),
+            "schwarzschild_mass" => return Some(ScalarRef::SchwarzschildMass),
             "dt" => return Some(ScalarRef::Dt),
             "a0" => return Some(ScalarRef::A0),
             "ac" => return Some(ScalarRef::Ac),

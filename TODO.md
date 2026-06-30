@@ -193,11 +193,17 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
             NEW test `schwarzschild_stage_wires_the_lapse_mass_scalar`: the Schwarzschild stage carries
             `schwarzschild_mass` in its DAG manifest, the flat stage does NOT. Minkowski oracle 27 still
             green. arm LIVE but unreachable until the bake/select build one.
-          - [ ] **B.3 mass-scalar HOST BINDING**: substrate manifest carries `schwarzschild_mass`; the
-            driver fills it from the metric's `mass` (else a Schwarzschild kernel errors at launch).
-          - [ ] **B.4 bake + select enumeration**: the AOT bake enumerates spacetimes (`Geom.spacetime`)
-            + the slug gains the spacetime tag; runtime kernel-select keys on `PartitionGeometry.spacetime`
-            (+ the geometry->discretize `Spacetime` bridge).
+          - [x] **B.4 bake + select** (the kernel goes end-to-end): build.rs `Geom { spacetime }` +
+            `.schwarzschild()` + `spacetime_suffix()` -> bakes `srhd_godunov_stage_sph_schw_{1,2}d` (AOT
+            built 27.7s, kernel emitted + declares `schwarzschild_mass`); only the RELATIVISTIC regime
+            (srhd) baked on the BH (no adiabatic/iso). runtime `dispatch_godunov` appends the SAME `_schw`
+            tag (`geom.spacetime` -> bake-name == select-name). flat -> `""` -> existing kernels untouched
+            (AOT gate 4 + oracle 27 still bit-identical).
+          - [x] **B.3 mass-scalar bind**: typed `ScalarRef::SchwarzschildMass` (`scalar_ref.rs` name/parse);
+            `Metric::spacetime_scalars() -> Vec<(&str,S)>` (Schwarzschild -> `[("schwarzschild_mass", M)]`,
+            flat -> empty), carried on `PartitionGeometry.spacetime_scalars` (via `Sc::to_f64`); the
+            `dispatch_godunov` resolver fills it from there. mirrors how the EOS feeds `gamma`. substrate
+            + sim compile clean.
           - [ ] **B.5 wave-speed alpha/beta** (CFL + Riemann coord speeds `lambda = alpha v - beta^n`) —
             the under-scoped piece; NOT a free post-multiply (it scales the HLL dissipation).
           - [ ] **B.6 PIN factor placement** (sqrt(-g)-faces vs sqrt(gamma)-volume vs wave-speed alpha)

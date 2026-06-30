@@ -442,7 +442,13 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
-    let name = format!("{prefix}_godunov_stage{sfx}_{D}d");
+    // the spacetime tag (matches the bake `Geom::spacetime_suffix`): flat -> "", Schwarzschild ->
+    // "_schw" (the lapse-densitized GR kernel). ORTHOGONAL to the spatial `sfx`.
+    let st_sfx = match geom.spacetime {
+        symbi_geometry::Spacetime::Minkowski => "",
+        symbi_geometry::Spacetime::Schwarzschild => "_schw",
+    };
+    let name = format!("{prefix}_godunov_stage{sfx}{st_sfx}_{D}d");
     // scalars BY NAME: dt + the SSP Shu-Osher convex coefficients (a0, ac) + the per-axis grid
     // scalars. the single stage kernel `cons = a0*u_n + ac*fe` serves every explicit SSP scheme
     // — the driver feeds the per-stage (a0, ac); forward-Euler is (0, 1). the kernel's declared
@@ -462,6 +468,14 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarRef::Dt => Sc::from_f64(dt),
             ScalarRef::A0 => Sc::from_f64(a0),
             ScalarRef::Ac => Sc::from_f64(ac),
+            // the GR lapse mass M (alpha = sqrt(1-2M/r)), carried on `geom.spacetime_scalars` from
+            // the metric. only a `_schw` kernel declares it; flat kernels never reach this arm.
+            ScalarRef::SchwarzschildMass => Sc::from_f64(
+                geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("dispatch_godunov: kernel needs schwarzschild_mass but the metric supplied none"),
+            ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
                     .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))

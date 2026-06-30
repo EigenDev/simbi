@@ -644,6 +644,11 @@ pub struct PartitionGeometry<const D: usize> {
     /// lapse / sqrt(gamma) densitization selector in the kernel (B3); flat -> no-op.
     pub spacetime: symbi_geometry::Spacetime,
 
+    /// the curved-spacetime runtime scalar params (from `M::spacetime_scalars()`), `(wire-name,
+    /// value)` — e.g. `[("schwarzschild_mass", M)]`. EMPTY for flat. the godunov dispatch resolves
+    /// the kernel's spacetime scalars (the lapse `schwarzschild_mass`) against this by name.
+    pub spacetime_scalars: Vec<(String, f64)>,
+
     /// grid axis -> coordinate index map. identity for cartesian / spherical / 3D, so grid
     /// axis d IS coordinate d. the AMBIGUOUS case is the cylindrical 2D plane, where MHD
     /// carries a 3-vector B on a 2-axis grid (DOF > ndim) and the two physical planes are
@@ -1584,6 +1589,7 @@ where
         let geom = PartitionGeometry {
             dx, x_lo, allocated: allocated.clone(), interior, ng, coords: metric.geometry(),
             spacetime: metric.spacetime(),
+            spacetime_scalars: metric.spacetime_scalars().into_iter().map(|(n, v)| (n.to_string(), v.to_f64())).collect(),
             axes: default_grid_axes::<D>(metric.geometry()), maps: None,
         };
         let has_energy = regime.has_energy();

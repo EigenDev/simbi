@@ -95,6 +95,11 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// densitization path in the kernel (B3); flat -> the densitization is a no-op.
     fn spacetime(&self) -> Spacetime { Spacetime::Minkowski }
 
+    /// the spacetime's runtime scalar PARAMETERS as `(wire-name, value)` pairs — the kernel-dispatch
+    /// scalars a curved metric needs filled (e.g. `("schwarzschild_mass", M)`). flat -> empty. the
+    /// substrate resolves these by name at the godunov dispatch, exactly like the EOS feeds `gamma`.
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { Vec::new() }
+
     /// lapse function \alpha. determines time dilation.
     /// flat spacetime: \alpha = 1.
     fn lapse(&self, x: Tensor<S, D>) -> S {
@@ -668,6 +673,7 @@ impl<S: Scalar> Schwarzschild<S> {
 impl<S: Scalar> Metric<S, 1> for Schwarzschild<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
 
     fn lapse(&self, x: Tensor<S, 1>) -> S { self.f(x[0]).sqrt() }
 
@@ -695,6 +701,7 @@ impl<S: Scalar> Metric<S, 1> for Schwarzschild<S> {
 impl<S: Scalar> Metric<S, 2> for Schwarzschild<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
 
     fn lapse(&self, x: Tensor<S, 2>) -> S { self.f(x[0]).sqrt() }
 
@@ -745,6 +752,7 @@ impl<S: Scalar> Metric<S, 2> for Schwarzschild<S> {
 impl<S: Scalar> Metric<S, 3> for Schwarzschild<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Schwarzschild }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
 
     fn lapse(&self, x: Tensor<S, 3>) -> S { self.f(x[0]).sqrt() }
 

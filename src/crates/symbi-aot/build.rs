@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing,
+    snapshot_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -345,13 +345,32 @@ struct Geom {
     // per-grid-axis spacing (len == naxes == ndim). defaults to all-uniform;
     // override with `with_spacing` for the log-radial spherical instances.
     spacing: Vec<Spacing>,
+    // the spacetime background. defaults to Minkowski (flat); `.schwarzschild()` selects the curved
+    // variant -> the densitization/lapse kernel branch + a `_schw` slug tag.
+    spacetime: Spacetime,
 }
 
 impl Geom {
-    // the common shape: identity-or-decoupled axes with all-uniform spacing.
+    // the common shape: identity-or-decoupled axes with all-uniform spacing, flat spacetime.
     fn make(coords: Coords, ncomp: u8, axes: Vec<usize>) -> Self {
         let spacing = vec![Spacing::Uniform; axes.len()];
-        Self { coords, ncomp, axes, spacing }
+        Self { coords, ncomp, axes, spacing, spacetime: Spacetime::Minkowski }
+    }
+
+    // select the Schwarzschild spacetime (lapse alpha = sqrt(1-2M/r)); the spatial `coords` stay
+    // Spherical. only the relativistic regimes (srhd/rmhd) compose with it physically.
+    fn schwarzschild(mut self) -> Self {
+        self.spacetime = Spacetime::Schwarzschild;
+        self
+    }
+
+    // the spacetime slug tag appended to the kernel name (after the spatial geom suffix), so the
+    // bake name matches the runtime select. flat -> "" (existing kernels unchanged).
+    fn spacetime_suffix(&self) -> &'static str {
+        match self.spacetime {
+            Spacetime::Minkowski => "",
+            Spacetime::Schwarzschild => "_schw",
+        }
     }
     fn cart(ndim: u8) -> Self {
         Self::make(Coords::Cartesian, ndim, (0..ndim as usize).collect())
@@ -473,15 +492,14 @@ fn gen_godunov_stage(
     fused: Option<(&str, &[&symbi_hydro::source_spec::SourceSpec])>,
 ) {
     let suffix_with = fused.map(|(slug, _)| format!("_with_{slug}")).unwrap_or_default();
-    let name = format!("{prefix}_godunov_stage{suffix_with}{}_{ndim}d", geom.suffix());
+    let name = format!("{prefix}_godunov_stage{suffix_with}{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
     let no_sources: [&symbi_hydro::source_spec::SourceSpec; 0] = [];
     let sources: &[&symbi_hydro::source_spec::SourceSpec] = match fused {
         Some((_, s)) => s,
         None         => &no_sources,
     };
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
-        // B3.1: enumerate spacetimes in the bake loop (Geom.spacetime); flat (Minkowski) for now.
-        geom.coords, symbi_discretize::Spacetime::Minkowski, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
+        geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
         geo_source(prefix), sources, /* mag_from_bcell = */ false, // unfused: geo source reads prim.mag
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1213,6 +1231,13 @@ fn main() {
     // adiabatic CFL shares the iso wave-speed map.
     for ndim in 1u8..=3 {
         gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim));
+    }
+    // GR (Schwarzschild) SRHD godunov stage — the lapse-densitized relativistic gas update on a
+    // spherically-symmetric BH background (`srhd_godunov_stage_sph_schw_{1,2}d`). only the
+    // RELATIVISTIC regime composes physically (no adiabatic/iso on a horizon). 1D radial (the
+    // Michel accretion oracle) + 2D axisymmetric.
+    for ndim in 1u8..=2 {
+        gen_godunov_stage(&out_dir, ndim, "srhd", true, Geom::sph(ndim).schwarzschild(), None);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.
