@@ -53,4 +53,18 @@ impl<S: Scalar, const D: usize> SpatialMetric<S, D> {
     pub fn norm_sq_contra(&self, v: &Tensor<S, D>) -> S {
         self.gamma.quadratic(v)
     }
+
+    /// the inner product of two CONTRAVARIANT vectors v^i, w^i: `gamma_{ij} v^i w^j` (lower one,
+    /// contract). e.g. `v.B` in the magnetic four-vector, or `B.n` on a flux interface.
+    pub fn contract_contra(&self, v: &Tensor<S, D>, w: &Tensor<S, D>) -> S {
+        self.gamma.contract(v, w)
+    }
+
+    /// project a CONTRAVARIANT vector v^i transverse to a (unit, contravariant) normal n^i:
+    /// `v - n (gamma_{ij} v^i n^j)`. flat / orthonormal -> the euclidean `v - n (v.n)`. (the fully
+    /// general GR projector carries a gamma^{nn} factor; for the orthonormal unit normal this form
+    /// is exact — the SR / curvilinear-flat case. GR refinement deferred to Tier-2.)
+    pub fn project_transverse(&self, v: &Tensor<S, D>, nhat: &Tensor<S, D>) -> Tensor<S, D> {
+        *v - nhat.scale(self.contract_contra(v, nhat))
+    }
 }

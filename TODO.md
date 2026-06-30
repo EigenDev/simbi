@@ -106,11 +106,18 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
           (B contra). rdb = r_i B^i is a cov*contra pairing -> METRIC-FREE, stays `.dot()`. rperp.dot
           mixes variance (KKC is SR-flat) -> bit-identical for flat, GR reformulation deferred. all 3
           levels green incl compiled-kernel (`rmhd_c2p_kernel_equals_host`). CON2PRIM BATCH DONE.
-        - [ ] **flux-path batch (the bigger half)**: rmhd/algebra norms (magnetic_pressure /
-          four_vector / source_quantities — bsq/vsq -> norm_sq_contra, vdb=gamma_{ij}v^i B^j needs a
-          `contract_contra` helper) -> cascades into rmhd.rs to_flux/to_conserved (construct flat() at
-          the boundary, like the c2p host wrapper) -> the Riemann solvers (densest: the gamma-orthogonal
-          transverse projector `B - n(B.n)` recurs ~15x, hlld.rs ~12 sites).
+        - [x] **flux-path batch part 1 — rmhd algebra + flux**: rmhd/algebra (magnetic_pressure /
+          total_pressure / four_vector / source_quantities) all take `metric`; bsq/vsq -> norm_sq_contra,
+          vdb=gamma_{ij}v^i B^j -> `contract_contra` (added). cascaded into rmhd.rs to_conserved/to_flux
+          (construct flat() at the boundary) + the Gv source builder (sources.rs:196). `cons.mom.dot(nhat)`
+          left metric-free (ambiguous conserved-momentum variance, settled by C1). added `project_transverse`
+          helper for the riemann. all 3 levels green (28 hydro + 27 oracle + 3 immersed, f64+interp).
+        - [ ] **flux-path batch part 2 — the Riemann solvers (densest)**: 82 `.dot` sites (hllc 27,
+          hlld 55; hlle metric-clean). NOT blind-mechanical — triage each: genuine projector/norm ->
+          `project_transverse`/`norm_sq_contra` (the `B - n(B.n)` form recurs ~15x); metric-free cov·contra
+          pairing -> stays `.dot()`; scalar wave-speed algebra -> stays `.dot()`. the Newtonian/iso variants
+          (~half the sites) are orthonormal-by-domain (NOT the GR frontier) -> leave Euclidean; convert only
+          the relativistic bodies (hllc_srhd, hllc_rmhd, hlld relativistic). thread flat() at each solver entry.
         dev loop = `cargo test -p symbi-discretize --test carrier_oracle` (~2s); AOT gate per batch (~22-47s).
       - [ ] **B2.P3** — structural Tier-2 (design decisions, NOT mechanical): wave speeds
         (alpha/beta/gamma^nn, Banyuls-Font), the GV face normal (`Tensor::unit` is not the GR normal).

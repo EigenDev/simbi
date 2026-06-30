@@ -6,6 +6,7 @@
 
 use super::*;
 use symbi_geometry::{Cylindrical, CylindricalRPhi, Metric, Spherical};
+use symbi_hydro::spatial_metric::SpatialMetric;
 
 
 // =============================================================================
@@ -193,7 +194,8 @@ pub(crate) fn gv_geometric_source(
                 hydro: Prim { rho, vel: Tensor::new(vel), pre },
                 mag: Tensor::new(mag),
             };
-            let (wgam2, bmu, ptot) = rmhd_source_quantities(&eos, &prim);
+            // flat-frame metric = identity (constant-folds to euclidean norms; traced kernel bit-identical).
+            let (wgam2, bmu, ptot) = rmhd_source_quantities(&eos, &prim, &SpatialMetric::flat());
             // the inertial + magnetic geometric sources need ALL `ncomp` (DOF) components, not
             // just the `ndim` gridded ones: a 2.5D spherical (r,theta) grid has DOF=3 and the
             // out-of-plane phi momentum (mom[2]) drives the S_theta cot term + the S_phi source.

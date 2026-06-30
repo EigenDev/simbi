@@ -25,6 +25,7 @@ use crate::mhd_state::{MhdPrim, MhdCons};
 use crate::regime::Regime;
 use crate::c2p_result::C2pResult;
 use crate::srhd;
+use crate::spatial_metric::SpatialMetric;
 
 mod algebra;
 mod cons;
@@ -50,13 +51,16 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
 
     #[inline]
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
-        let vsq = prim.vel.dot(&prim.vel);
+        // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR
+        // metric threads in here once the flux path carries it (B3).
+        let metric = SpatialMetric::flat();
+        let vsq = metric.norm_sq_contra(&prim.vel);
         let ww = srhd::lorentz_factor(vsq);
         let w_sq = srhd::lorentz_factor_sq(vsq);
         let hh = srhd::enthalpy(eos, prim.rho, prim.pre);
 
-        let bsq = prim.mag.dot(&prim.mag);
-        let vdb = prim.vel.dot(&prim.mag);
+        let bsq = metric.norm_sq_contra(&prim.mag);
+        let vdb = metric.contract_contra(&prim.vel, &prim.mag);
 
         // magnetic four-vector components
         let _b0 = ww * vdb;
@@ -88,14 +92,15 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     #[inline]
     fn to_flux(&self, prim: &Self::Prim, nhat: &Tensor<S, D>, eos: &impl Eos<S>) -> Self::Cons {
         let cons = self.to_conserved(eos, prim);
-        let vn = prim.vel.dot(nhat);
-        let bn = prim.mag.dot(nhat);
-        let ww = srhd::lorentz_factor(prim.vel.dot(&prim.vel));
+        let metric = SpatialMetric::flat();
+        let vn = metric.contract_contra(&prim.vel, nhat);
+        let bn = metric.contract_contra(&prim.mag, nhat);
+        let ww = srhd::lorentz_factor(metric.norm_sq_contra(&prim.vel));
 
         // spatial magnetic four-vector (the SINGLE source, shared with the geometric tension).
-        let b_mu = magnetic_four_vector_spatial(prim);
+        let b_mu = magnetic_four_vector_spatial(prim, &metric);
 
-        let p_tot = total_pressure(prim);
+        let p_tot = total_pressure(prim, &metric);
 
         // induction flux: E = -v x B, F(B) = nhat x E = vn*B - bn*v
         let induction = prim.mag.scale(vn) - prim.vel.scale(bn);
