@@ -1259,7 +1259,7 @@ mod tests {
         // physics the SRHD flux's HLLE uses. cartesian 2D: reads rho + the GRIDDED normal
         // velocities (v0, v1) + pre — the dead v2 is left ZERO and never enters the graph.
         let (k, writes) =
-            srhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform; 2], &[0, 1], 2);
+            srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2);
         assert_eq!(writes.len(), 1, "one scratch lambda write");
         assert_eq!(writes[0].1.name(), "scratch");
         assert_eq!(
@@ -1496,6 +1496,24 @@ mod tests {
             !k.graph.has_errors(),
             "graph errors: {:?}",
             k.graph.errors()
+        );
+    }
+
+    #[test]
+    fn schwarzschild_wave_speed_map_wires_the_lapse_mass_scalar() {
+        // the GR CFL map (B.5): the Schwarzschild wave-speed map threads the Banyuls-Font coordinate
+        // correction (lapse + radial proper-width -> the `schwarzschild_mass` scalar) into the DAG;
+        // the flat spherical map does NOT (bit-identical to pre-B.5).
+        let (k_gr, _) = srhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Schwarzschild, &[Spacing::Uniform], &[0], 1);
+        assert!(
+            k_gr.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
+            "Schwarzschild wave-speed map must carry the lapse mass scalar; got {:?}",
+            k_gr.scalar_params,
+        );
+        let (k_flat, _) = srhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1);
+        assert!(
+            !k_flat.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
+            "flat spherical wave-speed map must NOT carry the lapse mass scalar",
         );
     }
 

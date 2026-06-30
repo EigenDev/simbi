@@ -29,7 +29,7 @@ use symbi_discretize::{
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
     rmhd_bcell_godunov_rk2_gv, rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv,
     rmhd_edge_emf_gv, rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, snapshot_gv,
-    srhd_c2p_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing,
+    srhd_c2p_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 
 // MAX_BODIES is owned by the runtime (symbi_ib::collection::MAX_BODIES = 2); mirrored
@@ -111,11 +111,12 @@ fn wave_speed_kernels_lower() {
     .grid([8, 8, 8])
     .assert_lowers();
     // srhd: cartesian 1D + spherical 3D.
-    KernelRun::new(srhd_wave_speed_map_gv(Coords::Cartesian, &[Spacing::Uniform], &[0], 1))
+    KernelRun::new(srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1))
         .grid([8])
         .assert_lowers();
     KernelRun::new(srhd_wave_speed_map_gv(
         Coords::Spherical,
+        Spacetime::Minkowski,
         &[Spacing::Uniform; 3],
         &[0, 1, 2],
         3,
@@ -151,7 +152,7 @@ fn godunov_kernels_lower() {
     // runtime (a0, ac) coefficients, so one lowering check per geometry replaces the euler+rk2 pair.
     for (prefix, has_energy) in [("iso", false), ("adiabatic", true), ("srhd", true)] {
         KernelRun::new(godunov_stage_gv(
-            Coords::Cartesian, &[Spacing::Uniform], &[0], 1, 1, has_energy, geo_source(prefix),
+            Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1, 1, has_energy, geo_source(prefix),
         ))
         .grid([8])
         .assert_lowers();
@@ -160,14 +161,14 @@ fn godunov_kernels_lower() {
 
     // spherical curvilinear hydro (adiabatic, energy) at 2D — area-weighted + inertial source.
     KernelRun::new(godunov_stage_gv(
-        Coords::Spherical, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true, geo_source("adiabatic"),
+        Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true, geo_source("adiabatic"),
     ))
     .grid([8, 8])
     .assert_lowers();
 
     // cylindrical r-z axisymmetric adiabatic (ncomp=3 swirl on a 2-axis (r,z) grid).
     KernelRun::new(godunov_stage_gv(
-        Coords::Cylindrical, &[Spacing::Uniform; 2], &[0, 2], 2, 3, true, geo_source("adiabatic"),
+        Coords::Cylindrical, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 2], 2, 3, true, geo_source("adiabatic"),
     ))
     .grid([8, 8])
     .assert_lowers();
@@ -175,19 +176,19 @@ fn godunov_kernels_lower() {
 
     // cylindrical r-phi disk (ncomp == ndim == 2, natural plane).
     KernelRun::new(godunov_stage_gv(
-        Coords::Cylindrical, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true, geo_source("adiabatic"),
+        Coords::Cylindrical, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true, geo_source("adiabatic"),
     ))
     .grid([8, 8])
     .assert_lowers();
 
     // rmhd hydro godunov-stage (D/S/tau), 3D cartesian + spherical.
     KernelRun::new(godunov_stage_gv(
-        Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, geo_source("rmhd"),
+        Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, geo_source("rmhd"),
     ))
     .grid([8, 8, 8])
     .assert_lowers();
     KernelRun::new(godunov_stage_gv(
-        Coords::Spherical, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, geo_source("rmhd"),
+        Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, geo_source("rmhd"),
     ))
     .grid([8, 8, 8])
     .assert_lowers();

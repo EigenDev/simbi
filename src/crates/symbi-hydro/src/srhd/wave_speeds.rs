@@ -35,6 +35,13 @@ pub(crate) fn srhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
 /// limit — so Minkowski is unchanged. the curved `gamma_nn`/`alpha` come from the spacetime metric
 /// (Schwarzschild: `gamma_nn = f = 1-2M/r`, `alpha = sqrt(f)`). drives the GR CFL wave-speed map;
 /// `gamma_nn` inside the radical (NOT a post-multiply by alpha) is what pins the sonic point.
+///
+/// the CFL wave-speed map uses the algebraically-EQUIVALENT factored form (the Schwarzschild
+/// `gamma^{rr}=alpha^2` identity collapses this to `alpha^2 * lambda_SR` radial / `alpha` angular,
+/// so the map reuses the SR speed + a per-axis correction). this canonical BF form is kept as the
+/// verified reference (its unit test pins the reduction + the Schwarzschild values) and is the
+/// general-metric path for the B.6 Riemann coordinate speeds.
+#[allow(dead_code)]
 #[inline]
 pub(crate) fn srhd_speeds_from_vn_gr<S: Scalar>(cs_sq: S, vn: S, gamma_nn: S, alpha: S) -> (S, S) {
     let vn_sq = vn * vn;

@@ -18,7 +18,7 @@
 // =============================================================================
 
 use symbi_algebra::{domain, Domain, Space};
-use symbi_discretize::coords::{Coords, Spacing};
+use symbi_discretize::coords::{Coords, Spacing, Spacetime};
 use symbi_discretize::gv::{godunov_stage_gv, rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv, GeoSource};
 use symbi_ir::gv::{try_fuse, FusionError, LaunchGrade};
 
@@ -39,6 +39,7 @@ fn godunov_plus_bcell_euler_fuses() {
     // substrate's `god_stage` issues for mhd evolution.
     let (mut k_god, w_god) = godunov_stage_gv(
         Coords::Cartesian,
+        Spacetime::Minkowski,
         &[Spacing::Uniform; 3],
         &[0, 1, 2],
         3,
@@ -112,6 +113,7 @@ fn godunov_plus_bcell_rk2_fuses() {
     // same cons update.
     let (mut k_god, w_god) = godunov_stage_gv(
         Coords::Cartesian,
+        Spacetime::Minkowski,
         &[Spacing::Uniform; 3],
         &[0, 1, 2],
         3,
@@ -140,7 +142,7 @@ fn untagged_pair_is_rejected() {
     // output), the algebra MUST refuse to fuse — opt-in is the only way to
     // promise the kernel will be dispatched over a known grade.
     let (k_god, w_god) = godunov_stage_gv(
-        Coords::Cartesian, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, GeoSource::Rmhd,
+        Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 3], &[0, 1, 2], 3, 3, true, GeoSource::Rmhd,
     );
     let (k_bcell, w_bcell) = rmhd_bcell_godunov_euler_gv(
         Coords::Cartesian,

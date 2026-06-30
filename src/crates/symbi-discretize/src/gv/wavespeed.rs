@@ -121,6 +121,7 @@ fn wave_speed_map_writes(root: NodeId) -> Vec<(String, FieldBind, NodeId)> {
 pub fn euler_wave_speed_map_gv<R>(
     regime: &R,
     coords: Coords,
+    spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
@@ -149,6 +150,21 @@ where
     // otherwise — the static binding makes v_g exactly zero, and `s - 0` /
     // `|s|` are bit-identical).
     let half = Gv::from_f64(0.5);
+    // GR (Schwarzschild) CFL correction: the COORDINATE signal speed = the SR local speed scaled
+    // by the lapse alpha (all axes, from dtau = alpha dt) AND the radial proper-width stretch — so
+    // the radial axis (coord 0) picks up f = alpha^2 = 1-2M/r, the angular axes pick up alpha. this
+    // is the Banyuls-Font coordinate eigenvalue, factored via the Schwarzschild gamma^{rr}=alpha^2
+    // identity (verified equal to `srhd_speeds_from_vn_gr` x coordinate width). flat -> no correction.
+    let gr_corr: Option<(Gv, Gv)> = match spacetime {
+        Spacetime::Minkowski => None,
+        Spacetime::Schwarzschild => {
+            let d_r = axes.iter().position(|&c| c == 0).expect("schwarzschild map needs a radial axis");
+            let r = Gv::scalar(&format!("x_lo_{d_r}"))
+                + (Gv::coord(d_r as u8) + half) * Gv::scalar(&format!("dx_{d_r}"));
+            let f = Gv::ONE - Gv::from_f64(2.0) * Gv::scalar("schwarzschild_mass") / r;
+            Some((f, f.sqrt())) // (radial correction = f, angular correction = alpha = sqrt(f))
+        }
+    };
     let mut lambda = Gv::ZERO;
     for d in 0..ndim {
         let (sl, sr) = regime.wave_speeds_axis(&eos, &prim, axes[d]);
@@ -156,7 +172,12 @@ where
             + (Gv::coord(d as u8) + half) * Gv::scalar(&format!("dx_{d}"));
         let vg = Gv::scalar(&MeshScalar::Adot(d as u8).name()) * xc
             + Gv::scalar(&MeshScalar::Vtrans(d as u8).name());
-        lambda = lambda.max((sl - vg).abs().max((sr - vg).abs()) * inv_w[d]);
+        let base = (sl - vg).abs().max((sr - vg).abs()) * inv_w[d];
+        let contrib = match &gr_corr {
+            None => base,
+            Some((f, alpha)) => base * if axes[d] == 0 { *f } else { *alpha },
+        };
+        lambda = lambda.max(contrib);
     }
     let writes = wave_speed_map_writes(lambda.node());
     (end_trace(), writes)
@@ -171,7 +192,8 @@ pub fn iso_wave_speed_map_gv(
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_wave_speed_map_gv(&Newtonian, coords, spacing, axes, ndim)
+    // newtonian / isothermal are non-relativistic -> always flat spacetime.
+    euler_wave_speed_map_gv(&Newtonian, coords, Spacetime::Minkowski, spacing, axes, ndim)
 }
 
 
@@ -179,11 +201,12 @@ pub fn iso_wave_speed_map_gv(
 /// wave_speeds_axis`, the SAME core the SRHD flux's HLLE consumes) traced to the timestep kernel.
 pub fn srhd_wave_speed_map_gv(
     coords: Coords,
+    spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_wave_speed_map_gv(&Srhd, coords, spacing, axes, ndim)
+    euler_wave_speed_map_gv(&Srhd, coords, spacetime, spacing, axes, ndim)
 }
 
 

@@ -13,7 +13,7 @@
 use symbi_discretize::{
     iso_flux_gv, iso_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv,
     rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv, srhd_flux_gv, srhd_wave_speed_map_gv, Coords,
-    GvKernel, Spacing,
+    GvKernel, Spacing, Spacetime,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
@@ -100,7 +100,7 @@ fn main() {
     let (k, w) = iso_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
     census("iso  (Newtonian) 1D", &render_rust("iso_ws", 1, k, w));
 
-    let (k, w) = srhd_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
+    let (k, w) = srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &cart1, &ax1, 1);
     census("srhd 1D", &render_rust("srhd_ws", 1, k, w));
 
     let (k, w) = rmhd_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);

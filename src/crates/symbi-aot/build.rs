@@ -1091,9 +1091,9 @@ fn gen_rmhd_average_efield(out_dir: &str, ndim: u8) {
 // relativistic 1D characteristic speeds. like the iso map but the relativistic
 // closed form (no inv_dx baked); the host folds max + cfl_from_smax(s_max,cfl,dx).
 fn gen_srhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("srhd_wave_speed_map{}_{ndim}d", geom.suffix());
+    let name = format!("srhd_wave_speed_map{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
     let (k, writes) =
-        srhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
+        srhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1237,7 +1237,11 @@ fn main() {
     // RELATIVISTIC regime composes physically (no adiabatic/iso on a horizon). 1D radial (the
     // Michel accretion oracle) + 2D axisymmetric.
     for ndim in 1u8..=2 {
-        gen_godunov_stage(&out_dir, ndim, "srhd", true, Geom::sph(ndim).schwarzschild(), None);
+        let bh = Geom::sph(ndim).schwarzschild();
+        gen_godunov_stage(&out_dir, ndim, "srhd", true, bh.clone(), None);
+        // the GR CFL wave-speed map: the Banyuls-Font coordinate signal speed (the lapse + radial
+        // proper-width correction) -> the correct dt near the horizon.
+        gen_srhd_wave_speed_map(&out_dir, ndim, bh);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.

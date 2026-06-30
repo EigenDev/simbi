@@ -212,11 +212,18 @@ the committed sprints only ran targeted gate tests, never `cargo test -p symbi-d
               (gamma_nn=1, alpha=1) -> flat untouched; Schwarzschild (f=0.8) damps to the hand-computed
               lambda+ 0.5468 / lambda- -0.1097. (derivation: the existing SR `ss/qf/fac` path collapses to
               `[vn(1-cs^2) +/- cs(1-vn^2)]/(1-vn^2 cs^2)`, the gamma_nn=1 limit of the BF disc.)
-            - [ ] **wire into the CFL wave-speed MAP kernel**: thread the spacetime + the metric
-              `gamma^{nn}`(spatial_metric_inv) / `alpha`(lapse) into `srhd_wave_speed_map_gv`; bake +
-              select the `_schw` variant (same infra as the godunov B.4). the Riemann stays SR-LOCAL
-              (the lapse-densitized divergence handles its coordinate scaling — to be confirmed by Michel).
-            - [ ] **VERIFY against Michel** — the sonic-point radius is the razor test of these speeds.
+            - [x] **wired into the CFL wave-speed MAP kernel (end-to-end)**: `euler_wave_speed_map_gv`
+              takes `spacetime`; the Schwarzschild arm applies the per-axis GR correction on the existing
+              SR map — RADIAL axis x f = 1-2M/r, ANGULAR axes x alpha = sqrt(f) (the factored BF form, via
+              the `gamma^{rr}=alpha^2` identity: verified `lambda^r_coord = alpha^2 lambda_SR` for v!=0 too,
+              so it reuses the SR speed + a per-axis factor, no velocity-basis conversion). baked
+              `srhd_wave_speed_map_sph_schw_{1,2}d` (declares `schwarzschild_mass`); `cfl_wave_speed`
+              dispatch appends `_schw` + binds the mass (mirrors the godunov B.4). flat untouched: oracle 27
+              + AOT gate 4 bit-identical; new `schwarzschild_wave_speed_map_wires_the_lapse_mass_scalar`
+              test. (also cleaned PRE-EXISTING breakage: the skeleton's builder-signature change had left
+              ~25 godunov/wavespeed callers in tests/examples unfixed — only `carrier_oracle` had been run.
+              full discretize suite now 34 binaries green.)
+            - [ ] **VERIFY against Michel** — the sonic-point radius is the razor test of these speeds (B.6).
           - [ ] **B.6 PIN factor placement** (sqrt(-g)-faces vs sqrt(gamma)-volume vs wave-speed alpha)
             AGAINST the Michel profile. needs the GRAVITY source (B4) for infall; then CT + bcell + mass-demo.
       CONCRETE DRIVER: **Schwarzschild (standard coords) — DIAGONAL, beta = 0.** SR Riemann/c2p VERBATIM

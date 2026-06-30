@@ -22,7 +22,7 @@ use symbi_discretize::{
     imhd_hlld_flux_gv, imhd_wave_speed_map_gv, iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv,
     nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv, nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv,
     rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv, rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv,
-    srhd_c2p_gv, srhd_flux_gv, srhd_hllc_flux_gv, srhd_wave_speed_map_gv, Coords, GvKernel, Spacing,
+    srhd_c2p_gv, srhd_flux_gv, srhd_hllc_flux_gv, srhd_wave_speed_map_gv, Coords, GvKernel, Spacing, Spacetime,
 };
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::energy::Zero;
@@ -554,7 +554,7 @@ fn srhd_wave_speed_map_matches_native_physics() {
     let want = sl.abs().max(sr.abs());
     // static mesh: zero grid velocity (see iso_wave_speed_map test above).
     let (adot0, vtrans0) = (MeshScalar::Adot(0).name(), MeshScalar::Vtrans(0).name());
-    let out = KernelRun::new(srhd_wave_speed_map_gv(Coords::Cartesian, &CART_1D, &AXES_1D, 1))
+    let out = KernelRun::new(srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &CART_1D, &AXES_1D, 1))
         .grid([N])
         .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
         .scalars(&[("gamma", SRHD_GAMMA), ("inv_dx_0", 1.0),

@@ -25,7 +25,7 @@
 mod harness;
 
 use harness::KernelRun;
-use symbi_discretize::coords::{Coords, Spacing};
+use symbi_discretize::coords::{Coords, Spacing, Spacetime};
 use symbi_discretize::gv::{
     godunov_stage_gv, godunov_stage_gv_with_fused_sources, source_apply_gv, GeoSource,
 };
@@ -58,10 +58,10 @@ fn user_source_none_matches_writes_of_plain_godunov() {
     let spacing = vec![Spacing::Uniform; 3];
     let axes = vec![0, 1, 2];
     let (_k_plain, w_plain) = godunov_stage_gv(
-        coords, &spacing, &axes, 3, 3, true, GeoSource::Hydro { inertial: false },
+        coords, Spacetime::Minkowski, &spacing, &axes, 3, 3, true, GeoSource::Hydro { inertial: false },
     );
     let (_k_fused, w_fused) = godunov_stage_gv_with_fused_sources(
-        coords, &spacing, &axes, 3, 3, true, GeoSource::Hydro { inertial: false }, &[], false
+        coords, Spacetime::Minkowski, &spacing, &axes, 3, 3, true, GeoSource::Hydro { inertial: false }, &[], false
     );
     let names_plain: Vec<&str> = w_plain.iter().map(|(n, _, _)| n.as_str()).collect();
     let names_fused: Vec<&str> = w_fused.iter().map(|(n, _, _)| n.as_str()).collect();
@@ -100,7 +100,7 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
 
     // build the fused-source kernel: Newtonian 3D + user momentum overlay.
     let kernel = godunov_stage_gv_with_fused_sources(
-        coords, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &[user_source], false
+        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &[user_source], false
     );
 
     // a UNIFORM 3x3x3 state: rho/mom/nrg all constant, all flux fields too.
@@ -185,7 +185,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
     let user_source = &specs[0];
 
     let (kernel, _writes) = godunov_stage_gv_with_fused_sources(
-        coords, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &[user_source], false
+        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &[user_source], false
     );
 
     // sanity: the kernel's underlying graph contains a Param leaf named
@@ -208,7 +208,7 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
 
     // and the plain godunov, for comparison, does NOT declare g_ext_0:
     let (k_plain, _) = godunov_stage_gv(
-        coords, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false },
+        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false },
     );
     let mut plain_has_g_ext = false;
     for (_id, node, _ty) in k_plain.graph.iter() {
@@ -253,7 +253,7 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
     let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
 
     let kernel = godunov_stage_gv_with_fused_sources(
-        coords, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
+        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
     );
 
     let rho_v = 1.5_f64;
@@ -328,7 +328,7 @@ fn mom_and_nrg_overlays_share_one_g_ext_scalar_leaf() {
     let specs = uniform_acceleration_sources(D, true);
     let refs: Vec<&symbi_hydro::source_spec::SourceSpec> = specs.iter().collect();
     let (kernel, _writes) = godunov_stage_gv_with_fused_sources(
-        coords, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
+        coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
     );
 
     // every Param("g_ext_k") in the graph must occur EXACTLY ONCE — one
@@ -361,7 +361,7 @@ fn ssp_combine_applies_runtime_coefficients() {
     // energy (mass + one momentum law).
     let coords = Coords::Cartesian;
     let kernel = godunov_stage_gv(
-        coords, &[Spacing::Uniform], &[0], 1, 1, false, GeoSource::Hydro { inertial: false },
+        coords, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1, 1, false, GeoSource::Hydro { inertial: false },
     );
 
     // distinct snapshot (u_n) and current (cons) states; zero fluxes => div == 0.
@@ -430,7 +430,7 @@ fn unsupported_target_field_panics_loudly() {
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = godunov_stage_gv_with_fused_sources(
-            coords, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
+            coords, Spacetime::Minkowski, &spacing, &axes, D as u8, D, true, GeoSource::Hydro { inertial: false }, &refs, false
         );
     }));
     assert!(result.is_err(), "unsupported target_field MUST panic");
@@ -500,8 +500,8 @@ fn fused_stage_equals_plain_plus_additive_pass() {
     let axes = [0usize, 1, 2];
     let geo = GeoSource::Hydro { inertial: false };
 
-    let fused = godunov_stage_gv_with_fused_sources(coords, &sp, &axes, D as u8, D, true, geo, &refs, false);
-    let plain = godunov_stage_gv(coords, &sp, &axes, D as u8, D, true, geo);
+    let fused = godunov_stage_gv_with_fused_sources(coords, Spacetime::Minkowski, &sp, &axes, D as u8, D, true, geo, &refs, false);
+    let plain = godunov_stage_gv(coords, Spacetime::Minkowski, &sp, &axes, D as u8, D, true, geo);
     let pass = source_apply_gv(coords, &sp, &axes, D as u8, D, true, &refs);
 
     let (rho, mom, nrg) = (1.5_f64, [0.3_f64, -0.2, 0.4], 5.0_f64);

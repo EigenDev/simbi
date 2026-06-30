@@ -52,7 +52,12 @@ where
 {
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
-    let name = format!("{prefix}_wave_speed_map{sfx}_{D}d");
+    // the spacetime tag (matches the bake): Schwarzschild -> "_schw" (the GR coordinate-speed map).
+    let st_sfx = match geom.spacetime {
+        symbi_geometry::Spacetime::Minkowski => "",
+        symbi_geometry::Spacetime::Schwarzschild => "_schw",
+    };
+    let name = format!("{prefix}_wave_speed_map{sfx}{st_sfx}_{D}d");
     // scalars BY NAME: gamma + the per-axis CFL widths. the kernel's declared set drives it
     // (cartesian declares `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`) — no geometry branch here.
     // mesh motion: PHYSICAL geometry scalars (widths AND centroids — exact
@@ -65,6 +70,13 @@ where
         };
         match *sref {
             ScalarRef::Gamma => Sc::from_f64(gamma),
+            // the GR lapse mass M (the Banyuls-Font coordinate-speed parameter), from the metric.
+            ScalarRef::SchwarzschildMass => Sc::from_f64(
+                geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("cfl_wave_speed: kernel needs schwarzschild_mass but the metric supplied none"),
+            ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
                     .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
