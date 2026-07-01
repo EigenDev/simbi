@@ -303,6 +303,37 @@ pub fn srhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBin
 }
 
 
+/// the KERR-SCHILD shift-advection added to the RADIAL face flux (dir 0), IN PLACE. Font (2008)
+/// eq (34): the transport velocity `tilde v^r = v^r - beta^r/alpha` carries every conserved scalar
+/// inward at the known single-signed speed `b = 2M/r`, so each radial face flux gains `- b U`. as a
+/// FLUX-FIELD term this is LOCAL: at the face this thread owns (a face-domain kernel, thread coord =
+/// face index) the inward drag upwinds from the OUTER cell, which IS this cell (offset 0) — no
+/// stencil, no cons-neighbour read (so no godunov in-place aliasing). the godunov then densitizes the
+/// combined flux: `alpha_face` on mass/energy, `alpha^2` on the radial momentum — so the shift term
+/// inherits the SAME densitization as the flat flux, exactly reproducing `F^r = alpha(flatF - b U)`
+/// (mass/energy) and `flatF_Srhat - b S_rhat` at `alpha^2` (momentum). `r_face = 2M/r` uses the
+/// radial face position (offset 0 on the face domain); baked ONLY for the KerrSchild spacetime.
+pub fn srhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let m = Gv::scalar("schwarzschild_mass");
+    let r_face = gv_axis_face_at(0, spacing[0], 0); // this thread's radial face position
+    let b = Gv::from_f64(2.0) * m / r_face; // the shift-advection coefficient 2M/r_face
+    // add -b * U to each conserved face flux (upwind = outer cell = this face's own cell, offset 0).
+    let fd = Gv::field("flux_den", FieldRef::flux_den());
+    let cd = Gv::field("cons_den", FieldRef::cons_den());
+    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), (fd - b * cd).node())];
+    for k in 0..D {
+        let fm = Gv::field(&format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8));
+        let cm = Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8));
+        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), (fm - b * cm).node()));
+    }
+    let fe = Gv::field("flux_nrg", FieldRef::flux_nrg());
+    let ce = Gv::field("cons_nrg", FieldRef::cons_nrg());
+    writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), (fe - b * ce).node()));
+    (end_trace(), writes)
+}
+
+
 /// the isothermal face flux — ISO-NATIVE through the gv path. traces the iso physics
 /// DIRECTLY (no `Regime` trait, no `IdealGas{gamma}` EOS, no energy U/F): U/F have
 /// `(den, mom_k)` only, wave speeds use `cs = sqrt(pre / rho)` with prim.pre carrying

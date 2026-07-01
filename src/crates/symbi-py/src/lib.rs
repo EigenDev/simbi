@@ -34,6 +34,7 @@ use symbi_display::{
 };
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
+use symbi_geometry::SchwarzschildKS;
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -2291,6 +2292,13 @@ macro_rules! hydro_dispatch {
             (2, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 2,
                 Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+            ),
+            // GR (ingoing Kerr-Schild) spherical: the HORIZON-PENETRATING chart (regular across
+            // r = 2M) — the `_ks` shift-advection-flux + KS-densitized/wavespeed kernels. reuses the
+            // `schwarzschild_mass` scalar. 1D (the accretion target); others fall through to flat.
+            (1, "spherical") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 1,
+                SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
             (1, "spherical") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Spherical, Spherical)

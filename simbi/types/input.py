@@ -42,6 +42,9 @@ class Spacetime(str, ExtendedEnum):
     # (lapse / densitization / GR-wavespeed kernels) on a spherical grid.
     MINKOWSKI = "minkowski"
     SCHWARZSCHILD = "schwarzschild"
+    # ingoing kerr-schild: the same physical schwarzschild vacuum in a HORIZON-PENETRATING chart
+    # (regular across r = 2M) — the shift-advection-flux + KS densitization/wavespeed kernels.
+    KERR_SCHILD = "kerr_schild"
 
 
 class Regime(str, ExtendedEnum):

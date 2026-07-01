@@ -721,6 +721,10 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         kernels[i].wave_speeds(sh[i]);
                         for dd in 0..D {
                             kernels[i].flux(sh[i], dd);
+                            // GRHD ingoing-Kerr-Schild: fold the shift-advection `- (2M/r) U` into
+                            // the radial face flux before the godunov densitizes it (no-op unless the
+                            // background is KerrSchild and dd is the radial axis).
+                            kernels[i].ks_shift(sh[i], dd);
                         }
                         kernels[i].efield(sh[i]);
                         kernels[i].godunov_stage(sh[i], dt, a0, ac);

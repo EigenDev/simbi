@@ -69,6 +69,12 @@ where
     /// electric field computation (MHD). default: no-op.
     fn efield(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
+    /// the ingoing-Kerr-Schild shift-advection flux term (GRHD): add `- (2M/r_face) U` to each
+    /// conserved radial face flux, IN PLACE, between the flat flux and the godunov. runs per sweep
+    /// `dir`; the impl no-ops unless the background is KerrSchild and `dir` is the radial axis
+    /// (beta^theta = beta^phi = 0). default: no-op — flat + Schwarzschild have zero shift.
+    fn ks_shift(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dir: usize) {}
+
     /// materialize per-cell wave speeds BEFORE the flux reads them (RMHD: the exact quartic
     /// into wave_speed_l/r, so the flux does a cheap Davis fan instead of re-solving the
     /// quartic per face). runs each stage after the prim is current (post c2p+ghost). default:

@@ -34,7 +34,7 @@ use std::sync::Arc;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_fields, dispatch_flux,
+    RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_srhd_ks_shift_flux,
     dispatch_godunov, dispatch_runtime_source, resolve_params, scalars_for,
 };
 use symbi_hydro::source_spec::BuiltSource;
@@ -115,6 +115,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     fn flux(&self, sim: &FieldStore<D, D, Mem, Sc>, dir: usize) {
         let pre = sim.fields.prim.pre_field().expect("Srhd requires prim.pre");
         dispatch_flux(sim, pre, "srhd", dir, self.gamma, self.theta, self.solver);
+    }
+
+    fn ks_shift(&self, sim: &FieldStore<D, D, Mem, Sc>, dir: usize) {
+        // ingoing-Kerr-Schild shift-advection added to the radial face flux; no-op unless the
+        // background is KerrSchild and dir == 0 (the dispatch gates both).
+        let pre = sim.fields.prim.pre_field().expect("Srhd requires prim.pre");
+        dispatch_srhd_ks_shift_flux(sim, pre, dir);
     }
 
     fn c2p(&self, sim: &FieldStore<D, D, Mem, Sc>) {

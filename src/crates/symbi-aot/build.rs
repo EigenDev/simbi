@@ -364,6 +364,15 @@ impl Geom {
         self
     }
 
+    // select the ingoing Kerr-Schild spacetime (horizon-penetrating: lapse 1/sqrt(1+2M/r), radial
+    // shift beta^r = 2M/(r+2M), gamma_rr = 1+2M/r); the spatial `coords` stay Spherical. selects the
+    // shift-advection-flux + KS densitization/wavespeed kernel branch + a `_ks` slug tag. relativistic
+    // regimes only.
+    fn kerr_schild(mut self) -> Self {
+        self.spacetime = Spacetime::KerrSchild;
+        self
+    }
+
     // the spacetime slug tag appended to the kernel name (after the spatial geom suffix), so the
     // bake name matches the runtime select. flat -> "" (existing kernels unchanged).
     fn spacetime_suffix(&self) -> &'static str {
@@ -722,6 +731,23 @@ fn gen_srhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
         2 => symbi_discretize::gv::srhd_flux_gv::<2>(dir),
         3 => symbi_discretize::gv::srhd_flux_gv::<3>(dir),
         _ => panic!("srhd_flux_gv: unsupported ndim {ndim}"),
+    };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the SRHD ingoing-Kerr-Schild shift kernel: a FACE-domain in-place add of the shift-advection
+// `- (2M/r_face) U` to each conserved face flux (den/mom_k/nrg), run between the flat flux and the
+// godunov for the radial direction. depends on the radial SPACING (the face position `2M/r_face`
+// uses `gv_axis_face_at`), so it carries the spacing suffix (like the godunov/wavespeed); baked only
+// for KerrSchild + dir 0. `_ks` is in the name, so the spacetime tag is implicit (no `_schw`/`_ks`
+// suffix needed). geom (coords) suffix omitted — the shift reads only the radial axis (DOF == D).
+fn gen_srhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
+    let name = format!("srhd_ks_shift_flux{}_{ndim}d_{dir}", geom.spacing_suffix());
+    let (k, writes) = match ndim {
+        1 => symbi_discretize::gv::srhd_ks_shift_flux_gv::<1>(&geom.spacing),
+        2 => symbi_discretize::gv::srhd_ks_shift_flux_gv::<2>(&geom.spacing),
+        3 => symbi_discretize::gv::srhd_ks_shift_flux_gv::<3>(&geom.spacing),
+        _ => panic!("srhd_ks_shift_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1272,6 +1298,20 @@ fn main() {
         let bh_log = Geom::sph(ndim).schwarzschild().log_radial();
         gen_godunov_stage(&out_dir, ndim, "srhd", true, bh_log.clone(), None);
         gen_srhd_wave_speed_map(&out_dir, ndim, bh_log);
+    }
+    // GR (ingoing Kerr-Schild) SRHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
+    // densitized godunov + KS coordinate wave speeds + the shift-advection flux kernel. 1D radial
+    // (the through-horizon accretion target); the inner boundary can sit BELOW 2M where the flow is
+    // unconditionally ingoing. uniform + log-radial grids, tagged `_sph[_logr]_ks`.
+    for ndim in 1u8..=1 {
+        let ks = Geom::sph(ndim).kerr_schild();
+        gen_godunov_stage(&out_dir, ndim, "srhd", true, ks.clone(), None);
+        gen_srhd_wave_speed_map(&out_dir, ndim, ks.clone());
+        gen_srhd_ks_shift_flux(&out_dir, ndim, 0, ks);
+        let ks_log = Geom::sph(ndim).kerr_schild().log_radial();
+        gen_godunov_stage(&out_dir, ndim, "srhd", true, ks_log.clone(), None);
+        gen_srhd_wave_speed_map(&out_dir, ndim, ks_log.clone());
+        gen_srhd_ks_shift_flux(&out_dir, ndim, 0, ks_log);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.

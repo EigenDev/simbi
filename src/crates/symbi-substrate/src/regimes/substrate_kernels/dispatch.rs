@@ -437,6 +437,50 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_named(sim, pre, None, dir, &name, &face, &[], &scalars);
 }
 
+/// the SRHD ingoing-Kerr-Schild SHIFT dispatch: run the `srhd_ks_shift_flux{sp}_{D}d_{dir}` face
+/// kernel that adds the shift-advection `- (2M/r_face) U` to each conserved face flux, IN PLACE,
+/// between the flat flux and the godunov. no-op unless the background is KerrSchild AND `dir` is the
+/// radial axis (0) — the shift is radial (beta^theta = beta^phi = 0). the face-position `2M/r_face`
+/// uses the LOG-aware kernel geometry (like the godunov/wavespeed), and the mass M rides on the
+/// metric's `schwarzschild_mass` scalar. the godunov then densitizes the combined flux.
+pub fn dispatch_srhd_ks_shift_flux<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    dir: usize,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    if !matches!(sim.geom.spacetime, symbi_geometry::Spacetime::KerrSchild) || dir != 0 {
+        return;
+    }
+    let geom = &sim.geom;
+    let sp_sfx = spacing_suffix(&geom.maps);
+    let name = format!("srhd_ks_shift_flux{sp_sfx}_{D}d_{dir}");
+    let face = geom.interior.face_domain(dir);
+    // the shift reads `x_lo_0`/`dx_0` through gv_axis_face_at -> the LOG-aware kernel scalars (dx is
+    // the log slope on a log axis), NOT the physical spacing. mirrors the godunov binding.
+    let (x_lo, dx) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
+    let scalars = scalars_for(&name, |bind| {
+        let ScalarBind::Ref(sref) = bind else {
+            panic!("dispatch_srhd_ks_shift_flux: unexpected spec scalar {bind:?}");
+        };
+        match *sref {
+            ScalarRef::SchwarzschildMass => Sc::from_f64(
+                geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("dispatch_srhd_ks_shift_flux: KS kernel needs schwarzschild_mass"),
+            ),
+            other => Sc::from_f64(
+                geom_scalar(&x_lo, &dx, other)
+                    .unwrap_or_else(|| panic!("dispatch_srhd_ks_shift_flux: unexpected scalar {other:?}")),
+            ),
+        }
+    });
+    dispatch_named(sim, pre, None, dir, &name, &face, &[], &scalars);
+}
+
 /// the ONE godunov-update dispatch every hydro regime shares (the EOS-generic builder is
 /// already unified; this unifies the field-gathering + the curvilinear binding order + the
 /// scalar tail so no regime re-derives them). `rk2=false` is the forward-Euler step (inputs
