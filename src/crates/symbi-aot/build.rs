@@ -370,6 +370,7 @@ impl Geom {
         match self.spacetime {
             Spacetime::Minkowski => "",
             Spacetime::Schwarzschild => "_schw",
+            Spacetime::KerrSchild => "_ks",
         }
     }
 

@@ -150,19 +150,22 @@ where
     // otherwise — the static binding makes v_g exactly zero, and `s - 0` /
     // `|s|` are bit-identical).
     let half = Gv::from_f64(0.5);
-    // GR (Schwarzschild) CFL correction: the COORDINATE signal speed = the SR local speed scaled
-    // by the lapse alpha (all axes, from dtau = alpha dt) AND the radial proper-width stretch — so
-    // the radial axis (coord 0) picks up f = alpha^2 = 1-2M/r, the angular axes pick up alpha. this
-    // is the Banyuls-Font coordinate eigenvalue, factored via the Schwarzschild gamma^{rr}=alpha^2
-    // identity (verified equal to `srhd_speeds_from_vn_gr` x coordinate width). flat -> no correction.
-    let gr_corr: Option<(Gv, Gv)> = match spacetime {
+    // GR coordinate CFL: the Banyuls-Font coordinate signal speed
+    //   lambda_coord^c = alpha sqrt(gamma^{cc}) lambda^{SR} - beta^c.
+    // for the det-g-flat family (Schwarzschild, Kerr-Schild) the RADIAL factor alpha sqrt(gamma^{rr})
+    // = alpha^2 (Schwarzschild f = 1-2M/r; kerr-schild 1/(1+2M/r)), the ANGULAR factor = alpha. a
+    // ZERO-shift background keeps the multiplicative form `base * factor` (bit-identical to the
+    // pre-genericization kernel); a SHIFTED background (kerr-schild beta^r != 0) subtracts beta^r per
+    // characteristic root BEFORE the max|.|, which the multiplicative form cannot express. the lapse /
+    // shift are radial-only, evaluated at the uniform-centroid cell radius (coord slot 0); flat ->
+    // None -> the SR CFL untouched (bit-identical). the factors come from the `Metric` trait (the
+    // single ADM seam), not per-spacetime formulas inlined here.
+    let gr_radius: Option<Gv> = match spacetime {
         Spacetime::Minkowski => None,
-        Spacetime::Schwarzschild => {
-            let d_r = axes.iter().position(|&c| c == 0).expect("schwarzschild map needs a radial axis");
-            let r = Gv::scalar(&format!("x_lo_{d_r}"))
-                + (Gv::coord(d_r as u8) + half) * Gv::scalar(&format!("dx_{d_r}"));
-            let f = Gv::ONE - Gv::from_f64(2.0) * Gv::scalar("schwarzschild_mass") / r;
-            Some((f, f.sqrt())) // (radial correction = f, angular correction = alpha = sqrt(f))
+        _ => {
+            let d_r = axes.iter().position(|&c| c == 0).expect("GR wave-speed map needs a radial axis");
+            Some(Gv::scalar(&format!("x_lo_{d_r}"))
+                + (Gv::coord(d_r as u8) + half) * Gv::scalar(&format!("dx_{d_r}")))
         }
     };
     let mut lambda = Gv::ZERO;
@@ -173,9 +176,31 @@ where
         let vg = Gv::scalar(&MeshScalar::Adot(d as u8).name()) * xc
             + Gv::scalar(&MeshScalar::Vtrans(d as u8).name());
         let base = (sl - vg).abs().max((sr - vg).abs()) * inv_w[d];
-        let contrib = match &gr_corr {
+        let contrib = match gr_radius {
+            // flat: the SR CFL |s - vg| * inv_phys_width, untouched -> bit-identical.
             None => base,
-            Some((f, alpha)) => base * if axes[d] == 0 { *f } else { *alpha },
+            Some(r) => {
+                let is_radial = axes[d] == 0;
+                // radial factor = alpha^2 = alpha sqrt(gamma^{rr}); angular factor = alpha.
+                let factor = if is_radial {
+                    gv_metric_lapse_sq_at(spacetime, r)
+                } else {
+                    gv_metric_lapse_at(spacetime, r)
+                };
+                // the radial shift beta^r (kerr-schild only); zero-shift backgrounds -> None.
+                match if is_radial { gv_metric_shift_r_at(spacetime, r) } else { None } {
+                    // zero shift (Schwarzschild + every angular axis): `base * factor` -> bit-identical.
+                    None => base * factor,
+                    // shifted (kerr-schild radial): lambda_coord = factor*(s - vg) - beta^r, carried
+                    // per characteristic root through the abs/max (the shift breaks the multiplicative
+                    // factoring). both roots < 0 at r <= 2M -> domain of dependence entirely interior.
+                    Some(beta) => {
+                        let ll = factor * (sl - vg) - beta;
+                        let lr = factor * (sr - vg) - beta;
+                        ll.abs().max(lr.abs()) * inv_w[d]
+                    }
+                }
+            }
         };
         lambda = lambda.max(contrib);
     }

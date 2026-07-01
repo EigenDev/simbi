@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{Metric, Schwarzschild};
+use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
 use symbi_algebra::Tensor;
 
 
@@ -122,37 +122,74 @@ pub(crate) fn gv_divergence_lapse(
 pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centroid: &[Gv]) -> Option<Gv> {
     let _ = coords; // the spatial coords select the concrete `Metric` impl in the GR arms.
     match spacetime {
-        // flat (Minkowski) lapse alpha = 1: no densitization -> bit-identical.
+        // flat (Minkowski) lapse alpha = 1: no densitization -> the weight is ELIDED from the graph
+        // (no unity multiply) -> bit-identical.
         Spacetime::Minkowski => None,
-        // alpha = sqrt(1 - 2M/r) from the `Schwarzschild` Metric (the SINGLE source), with M a
-        // host-filled scalar `schwarzschild_mass` so the kernel stays M-agnostic; r = the radial
-        // centroid (coordinate slot 0). the lapse is radial-only, so the D=1 evaluation gives the
-        // correct alpha for any sim dimension.
-        Spacetime::Schwarzschild => {
+        // r = the radial centroid (coordinate slot 0); the lapse is radial-only, so the D=1
+        // evaluation gives the correct alpha for any sim dimension.
+        _ => Some(gv_metric_lapse_at(spacetime, coord_centroid[0])),
+    }
+}
+
+/// the analytic lapse alpha(r) as a traced Gv, dispatched `Spacetime -> concrete Metric ->
+/// Metric::lapse` — the SINGLE codegen seam for the GR lapse. every densitization consumer (the cell
+/// weight `gv_lapse_weight`, the radial face weight `gv_radial_face_lapse`) reads the lapse HERE, so a
+/// new analytic background is a new `Metric` impl + one arm, not a lapse formula re-inlined per
+/// consumer. `M` rides as the host-filled scalar `schwarzschild_mass` so the kernel stays M-agnostic.
+/// flat spacetime never reaches this (its weight is elided by the caller); calling it is a bug.
+pub(crate) fn gv_metric_lapse_at(spacetime: Spacetime, r: Gv) -> Gv {
+    let mass = Gv::scalar("schwarzschild_mass");
+    match spacetime {
+        // alpha = sqrt(1 - 2M/r) (schwarzschild coords) / alpha = 1/sqrt(1 + 2M/r) (kerr-schild),
+        // each from its `Metric` impl (the SINGLE source of the lapse expression).
+        Spacetime::Schwarzschild => Schwarzschild { mass }.lapse(Tensor::new([r])),
+        Spacetime::KerrSchild => SchwarzschildKS { mass }.lapse(Tensor::new([r])),
+        Spacetime::Minkowski => unreachable!("flat lapse is elided by the densitization caller"),
+    }
+}
+
+/// the analytic lapse SQUARE alpha^2(r) from `Metric::lapse_sq` — the CFL radial coordinate-speed
+/// factor alpha sqrt(gamma^{rr}) = alpha^2 for the det-g-flat family (schwarzschild alpha^2 = f;
+/// kerr-schild alpha^2 = 1/(1 + 2M/r)). the closed form (NOT `lapse().powi(2)`) so the genericized
+/// wave-speed map reproduces the pre-refactor `f` node bitwise. flat never reaches this.
+pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv) -> Gv {
+    let mass = Gv::scalar("schwarzschild_mass");
+    match spacetime {
+        Spacetime::Schwarzschild => Schwarzschild { mass }.lapse_sq(Tensor::new([r])),
+        Spacetime::KerrSchild => SchwarzschildKS { mass }.lapse_sq(Tensor::new([r])),
+        Spacetime::Minkowski => unreachable!("flat lapse-square is elided by the CFL caller"),
+    }
+}
+
+/// the analytic radial shift beta^r(r) from `Metric::shift` — nonzero ONLY for a shifted background
+/// (kerr-schild beta^r = 2M/(r + 2M)); the static diagonal cases (Minkowski, Schwarzschild) have
+/// beta = 0 -> None so the caller elides the shift term (bit-identical, no `- 0`).
+pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv) -> Option<Gv> {
+    match spacetime {
+        Spacetime::Minkowski | Spacetime::Schwarzschild => None,
+        Spacetime::KerrSchild => {
             let mass = Gv::scalar("schwarzschild_mass");
-            let r = coord_centroid[0];
-            Some(Schwarzschild { mass }.lapse(Tensor::new([r])))
+            Some(SchwarzschildKS { mass }.shift(Tensor::new([r]))[0])
         }
     }
 }
 
 /// the static-background lapse at the cell's lower/upper RADIAL faces (grid axis 0), for the
-/// Font (2008) Eq (34) mass/energy flux weighting: the conserved scalar flux transports with the
-/// CONTRAVARIANT `v^r = alpha V_rhat`, so each radial face flux carries the lapse there (vs the
-/// orthonormal flat flux the riemann solver returns). dispatched through the same `Metric::lapse`
-/// as `gv_lapse_weight`; flat spacetime -> None.
+/// Font (2008) Eq (34) mass/energy flux weighting: on a ZERO-SHIFT background the conserved scalar
+/// flux transports with the CONTRAVARIANT `v^r = alpha V_rhat`, so each radial face flux carries the
+/// lapse there (vs the orthonormal flat flux the riemann solver returns). shares the `gv_metric_lapse_at`
+/// seam with `gv_lapse_weight`; flat spacetime -> None.
 pub(crate) fn gv_radial_face_lapse(spacetime: Spacetime, spacing: &[Spacing]) -> Option<(Gv, Gv)> {
     match spacetime {
         Spacetime::Minkowski => None,
-        Spacetime::Schwarzschild => {
-            let lapse_at = |r: Gv| {
-                Schwarzschild { mass: Gv::scalar("schwarzschild_mass") }.lapse(Tensor::new([r]))
-            };
-            Some((
-                lapse_at(gv_axis_face_at(0, spacing[0], 0)),
-                lapse_at(gv_axis_face_at(0, spacing[0], 1)),
-            ))
-        }
+        Spacetime::Schwarzschild => Some((
+            gv_metric_lapse_at(spacetime, gv_axis_face_at(0, spacing[0], 0)),
+            gv_metric_lapse_at(spacetime, gv_axis_face_at(0, spacing[0], 1)),
+        )),
+        // kerr-schild transports mass/energy with tilde v^r = v^r - beta^r/alpha; the shift piece is
+        // an upwind advection of the conserved scalar, NOT a face multiply, so it is carried in the
+        // godunov shift-flux path rather than here.
+        Spacetime::KerrSchild => todo!("kerr-schild shift-advection face transport not yet wired"),
     }
 }
 

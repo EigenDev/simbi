@@ -56,6 +56,7 @@ where
     let st_sfx = match geom.spacetime {
         symbi_geometry::Spacetime::Minkowski => "",
         symbi_geometry::Spacetime::Schwarzschild => "_schw",
+        symbi_geometry::Spacetime::KerrSchild => "_ks",
     };
     // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
     // geometric-mean curvilinear wave-speed map; uniform -> "". ORTHOGONAL to sfx and st_sfx.
@@ -462,6 +463,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     let st_sfx = match geom.spacetime {
         symbi_geometry::Spacetime::Minkowski => "",
         symbi_geometry::Spacetime::Schwarzschild => "_schw",
+        symbi_geometry::Spacetime::KerrSchild => "_ks",
     };
     // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
     // geometric-mean curvilinear godunov stage; uniform -> "". ORTHOGONAL to sfx and st_sfx.

@@ -354,6 +354,10 @@ pub fn godunov_stage_gv_with_fused_built(
             }
             Some(Gv::ZERO - m * rho_h_w2 * (Gv::ONE + v_sq) / (r * r * f))
         }
+        // kerr-schild radial momentum source S_{S_r} = (1/2) T^{mu nu} d_r g_{mu nu} with the KS
+        // metric derivatives (g_tr != 0, gamma_rr = 1 + 2M/r) — distinct christoffels from the
+        // schwarzschild-coordinate form; derived + validated against a KS michel oracle before wiring.
+        Spacetime::KerrSchild => todo!("kerr-schild radial momentum source not yet wired"),
     };
     // Font (2008) Eq (34): on a static background the conserved mass + energy fluxes transport with
     // the CONTRAVARIANT v^r = alpha V_rhat (one lapse factor per radial face vs the orthonormal flat
@@ -376,6 +380,9 @@ pub fn godunov_stage_gv_with_fused_built(
             let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // physical radial velocity V_rhat
             Some(Gv::ZERO - alpha * rho_h_w2 * v_r * m / (r * r * f))
         }
+        // kerr-schild energy source S_tau from the KS metric; derived independently (the KS lapse
+        // gradient + christoffels differ from the schwarzschild-coordinate form) before wiring.
+        Spacetime::KerrSchild => todo!("kerr-schild energy source not yet wired"),
     };
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
         let div = match lapse { Some(a) => a * div, None => div };

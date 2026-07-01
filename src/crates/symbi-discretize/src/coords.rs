@@ -44,5 +44,9 @@ pub enum Spacetime {
     /// static spherically-symmetric vacuum: lapse alpha = sqrt(1 - 2M/r), shift = 0. the codegen
     /// TAG (M-agnostic — M rides as a kernel value, like `dx`). mirrors `symbi_geometry::Spacetime`.
     Schwarzschild,
-    // Kerr lands here at B5.
+    /// schwarzschild in ingoing kerr-schild coords: lapse alpha = 1/sqrt(1 + 2M/r), radial shift
+    /// beta^r = 2M/(r + 2M), gamma_rr = 1 + 2M/r. horizon-penetrating codegen TAG selecting the
+    /// shift-advection flux + KS densitization path. mirrors `symbi_geometry::Spacetime::KerrSchild`.
+    KerrSchild,
+    // spinning Kerr (non-diagonal gamma) lands as its own tag.
 }

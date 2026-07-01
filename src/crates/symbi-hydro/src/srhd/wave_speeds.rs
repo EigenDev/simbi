@@ -107,6 +107,31 @@ mod tests {
     }
 
     #[test]
+    fn kerr_schild_coordinate_speed_is_ingoing_at_and_inside_horizon() {
+        // the horizon-penetrating CFL guarantee. the kerr-schild coordinate wave speed is the
+        // factored form the CFL map uses, lambda_coord = alpha^2 * lambda^SR - beta^r, with
+        // alpha^2 = 1/(1 + 2M/r) and beta^r = 2M/(r + 2M) (M = 1). BOTH characteristic roots are
+        // strictly < 0 at and inside the horizon r <= 2M for EVERY physical fluid state, so the
+        // numerical domain of dependence is entirely interior-directed and the inner outflow
+        // boundary is causal. |lambda^SR| < 1 subluminal => alpha^2 |lambda^SR| < alpha^2 = beta^r
+        // at the horizon, so lambda_coord < 0.
+        let eos = IdealGas { gamma: 4.0 / 3.0 };
+        for &r in &[2.0_f64, 1.7, 1.2, 1.0] {
+            let alpha_sq = 1.0 / (1.0 + 2.0 / r);
+            let beta_r = 2.0 / (r + 2.0);
+            for &v in &[-0.99_f64, -0.5, 0.0, 0.5, 0.99] {
+                for &pre in &[0.01, 1.0, 100.0] {
+                    let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre };
+                    let (sl, sr) = Srhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+                    let (ll, lr) = (alpha_sq * sl - beta_r, alpha_sq * sr - beta_r);
+                    assert!(ll < 0.0 && lr < 0.0,
+                        "coord speed not ingoing at r={r}, v={v}, p={pre}: ll={ll}, lr={lr}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn davis_matches_mb_at_zero_v() {
         // at v=0, davis and mignone-bodo should give same result
         let eos = IdealGas { gamma: 5.0 / 3.0 };

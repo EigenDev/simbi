@@ -19,6 +19,6 @@ pub mod motion;
 pub mod block;
 
 pub use coord_map::{CellInterval, CoordMap, UniformMap, LogMap};
-pub use metric::{DiagonalMetric, Metric, Geometry, Spacetime, Cartesian, Spherical, Cylindrical, CylindricalRPhi, Schwarzschild};
+pub use metric::{DiagonalMetric, Metric, Geometry, Spacetime, Cartesian, Spherical, Cylindrical, CylindricalRPhi, Schwarzschild, SchwarzschildKS};
 pub use motion::MotionState;
 pub use block::{BlockGeometry, AxisMap};
