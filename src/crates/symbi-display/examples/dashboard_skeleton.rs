@@ -53,6 +53,7 @@ fn push_cap(q: &mut VecDeque<f64>, v: f64, cap: usize) {
 /// pause are now render-thread state (owned by the LiveDashboard), not here.
 struct App {
     frame: u64,
+    field_kind: usize,
     rng: Rng,
     start: Instant,
     step: u64,
@@ -75,6 +76,7 @@ impl App {
     fn new() -> Self {
         let mut app = App {
             frame: 0,
+            field_kind: 0,
             rng: Rng(0x9e3779b97f4a7c15),
             start: Instant::now(),
             step: 24_000,
@@ -144,30 +146,61 @@ impl App {
         }
     }
 
-    /// a synthetic animated field — a scrolling kelvin-helmholtz-ish shear layer —
-    /// to exercise the half-block heatmap look with dummy data.
+    /// a synthetic animated field, varied by `field_kind` to exercise the `f`-key
+    /// cycle: 0 = density (2D heatmap), 1 = pressure (2D heatmap), 2 = a 1D line
+    /// profile. the label is just the field name — the render thread appends the
+    /// active colormap.
     fn field_slice(&self) -> FieldSlice {
-        let (w, h) = (192usize, 108usize);
         let t = self.frame as f64 * 0.05;
-        let mut data = Vec::with_capacity(w * h);
-        for j in 0..h {
-            for i in 0..w {
-                let x = i as f64 / w as f64 * 8.0;
-                let y = j as f64 / h as f64 * 6.0 - 3.0;
-                // a sheared interface (tanh) with a growing billow perturbation.
-                let shear = (y * 2.5).tanh();
-                let billow = 0.5 * (x * 2.0 + t).sin() * (-y * y).exp();
-                let ripple = 0.25 * ((x + y) * 3.0 - t * 1.3).sin();
-                data.push((shear + billow + ripple) as f32);
+        let (label, width, height, data) = match self.field_kind {
+            1 => {
+                let (w, h) = (192usize, 108usize);
+                let mut d = Vec::with_capacity(w * h);
+                for j in 0..h {
+                    for i in 0..w {
+                        let x = i as f64 / w as f64 * 8.0;
+                        let y = j as f64 / h as f64 * 6.0 - 3.0;
+                        let v = 1.0 + 0.6 * (x * 1.5 - t).sin() * (y * 1.2 + t * 0.7).cos();
+                        d.push(v as f32);
+                    }
+                }
+                ("pressure", w, h, d)
             }
-        }
+            2 => {
+                // a 1D line-out (height = 1): a moving shock-like profile.
+                let n = 220usize;
+                let mut d = Vec::with_capacity(n);
+                for i in 0..n {
+                    let x = i as f64 / n as f64 * 10.0;
+                    let v = 1.0 + 2.2 * (-(x - 3.0 - t * 0.25).powi(2)).exp()
+                        + 0.25 * (x * 1.6 - t).sin();
+                    d.push(v as f32);
+                }
+                ("density (line-out)", n, 1, d)
+            }
+            _ => {
+                let (w, h) = (192usize, 108usize);
+                let mut d = Vec::with_capacity(w * h);
+                for j in 0..h {
+                    for i in 0..w {
+                        let x = i as f64 / w as f64 * 8.0;
+                        let y = j as f64 / h as f64 * 6.0 - 3.0;
+                        let shear = (y * 2.5).tanh();
+                        let billow = 0.5 * (x * 2.0 + t).sin() * (-y * y).exp();
+                        let ripple = 0.25 * ((x + y) * 3.0 - t * 1.3).sin();
+                        d.push((shear + billow + ripple) as f32);
+                    }
+                }
+                ("density", w, h, d)
+            }
+        };
         let (mn, mx) = data.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &v| {
             (a.min(v), b.max(v))
         });
         FieldSlice {
-            label: "density · inferno · slice z=0".into(),
-            width: w,
-            height: h,
+            label: label.into(),
+            width,
+            height,
             data,
             vmin: mn as f64,
             vmax: mx as f64,
@@ -211,6 +244,8 @@ impl App {
                 ("output".into(), "data/kh_config/".into()),
             ],
             field: Some(self.field_slice()),
+            field_count: 3, // density / pressure / line-out (dummy)
+            host: Some(symbi_display::hostinfo::HostStats::sample()),
         }
     }
 }
@@ -264,6 +299,7 @@ fn main() -> io::Result<()> {
         }
 
         app.tick();
+        app.field_kind = c.field_kind(); // the `f`-key selection (dummy: 0/1/2)
         if c.take_checkpoint() {
             app.push_log("manual checkpoint (dummy)".to_string());
         }

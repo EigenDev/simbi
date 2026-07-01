@@ -290,6 +290,7 @@ def run(
     problem: SimbiProblem,
     compute_mode: str = "cpu",
     validate: bool = False,
+    live_monitor: bool = False,
 ) -> None:
     """
     run a simulation with the given problem configuration.
@@ -298,6 +299,8 @@ def run(
         problem: the problem configuration
         compute_mode: "cpu", "omp", or "gpu"
         validate: if True, validate generator output before running
+        live_monitor: if True, write a read-only snapshot each cadence so
+            `simbi attach <data_directory>` can monitor a headless run
 
     example:
         >>> from simbi.simulation import SimbiProblem, ProblemParam, run
@@ -333,6 +336,7 @@ def run(
 
     # convert to execution dict
     exec_dict = to_execution_dict(problem)
+    exec_dict["live_monitor"] = live_monitor
 
     # configure gpu if needed
     gpu_blocks = None

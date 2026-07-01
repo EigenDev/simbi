@@ -70,6 +70,10 @@ struct Config {
     gamma: f64,
     cs: f64,
     locally_isothermal: bool,
+    // write a read-only live snapshot to `<data_dir>/.simbi-live/snapshot.bin`
+    // each diagnostic cadence, so `simbi attach <data_dir>` can monitor a headless
+    // (batch/cluster) run over a shared filesystem.
+    live_monitor: bool,
     refinement_enabled: bool,
     // each region is a flat [lo_0, hi_0, lo_1, hi_1, ..] bound list (2 per axis).
     refinement_regions: Vec<Vec<f64>>,
@@ -463,6 +467,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .flatten()
             .and_then(|v| v.extract::<bool>().ok())
             .unwrap_or(false),
+        live_monitor: dict
+            .get_item("live_monitor")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<bool>().ok())
+            .unwrap_or(false),
         refinement_enabled: dict
             .get_item("refinement_enabled")
             .ok()
@@ -746,6 +756,8 @@ where
     // live tabbed-dashboard statics: the regime badge and the cfl gauge cap.
     table.set_regime(&cfg.regime.to_uppercase());
     table.set_cfl(cfg.cfl, 1.0);
+    // number of fields the `f`-key can cycle (density + pressure / W / |B|).
+    table.set_field_count(hier.levels[0].state.field_count());
     table.set_problem_setup(&setup_ref);
     table.set_header(&["Iteration", "Time", "dt", "zone-cyc/s"]);
     if let Some(p) = log_path(cfg) {
@@ -1038,25 +1050,60 @@ where
             if let Some(cd) = st.conservation_diag() {
                 table.push_conservation(cd.mass, cd.energy, cd.div_b, cd.max_w);
             }
+            // machine card: this (compute) node's hostname / cores and the run's
+            // resident memory vs the node's physical ram. rss grows, so re-sample
+            // each cadence; an attach client reads the compute node, not its own.
+            table.set_host(Some(symbi_display::hostinfo::HostStats::sample()));
             // live field heatmap: a screen-sized decimated density slice (2D/3D-mid;
             // None for 1D or device runs), compositing the nested refinement levels
             // so the refined region shows its fine detail. cost bounded by the
             // ~200-cell cap, not the grid size.
-            if let Some(fd) = h.field_slice_composite(200) {
-                let label = if cfg.dims >= 3 {
-                    "density · inferno · z-slice"
-                } else {
-                    "density · inferno"
-                };
-                table.set_field(Some(FieldSlice {
-                    label: label.to_string(),
-                    width: fd.width,
-                    height: fd.height,
-                    data: fd.data,
-                    vmin: fd.vmin,
-                    vmax: fd.vmax,
-                    cmap: Colormap::Inferno,
-                }));
+            // the `f`-key selects which field to decimate (density / pressure / W /
+            // |B|); composite for amr, single-grid fallback for 1D. the render thread
+            // owns the colormap, so Inferno here is just a default it overrides.
+            let idx = dash.as_ref().map(|d| d.controls().field_kind()).unwrap_or(0);
+            // decimate field `kk` (composite over refinement levels, single-grid
+            // fallback for 1D) into a display FieldSlice; the render thread owns the
+            // colormap, so Inferno here is just a default it overrides.
+            let make_slice = |kk: usize| {
+                h.field_slice_composite(200, kk)
+                    .or_else(|| h.levels[0].state.field_slice(200, kk))
+                    .map(|fd| {
+                        let label = if cfg.dims >= 3 {
+                            format!("{} · z-slice", fd.name)
+                        } else {
+                            fd.name
+                        };
+                        FieldSlice {
+                            label,
+                            width: fd.width,
+                            height: fd.height,
+                            data: fd.data,
+                            vmin: fd.vmin,
+                            vmax: fd.vmax,
+                            cmap: Colormap::Inferno,
+                        }
+                    })
+            };
+            if cfg.live_monitor {
+                // build the full field bundle so `simbi attach` can switch fields
+                // client-side; the local TUI shows the f-key-selected one. write the
+                // read-only snapshot atomically (best-effort — a write failure must
+                // never halt the run).
+                let bundle: Vec<FieldSlice> =
+                    (0..h.levels[0].state.field_count()).filter_map(make_slice).collect();
+                if let Some(sel) = bundle.get(idx.min(bundle.len().saturating_sub(1))) {
+                    table.set_field(Some(sel.clone()));
+                }
+                let mut view = table.diagnostic_view();
+                view.field_count = bundle.len();
+                let _ = symbi_display::snapshot::Snapshot {
+                    view,
+                    fields: bundle,
+                }
+                .write_atomic(std::path::Path::new(&cfg.data_dir));
+            } else if let Some(sel) = make_slice(idx) {
+                table.set_field(Some(sel));
             }
             dirty = true;
         }
@@ -1071,6 +1118,12 @@ where
     // sole terminal ownership for leaving the alt screen + printing the exit frame.
     if let Some(d) = dash.as_mut() {
         d.shutdown();
+    }
+
+    // the run has ended (any exit path below): drop the live-monitor snapshot so it
+    // does not outlive the run. a still-attached client keeps its last frame.
+    if cfg.live_monitor {
+        let _ = symbi_display::snapshot::cleanup(std::path::Path::new(&cfg.data_dir));
     }
 
     // interrupted (a caught signal or a user 'q'): the restart checkpoint is
@@ -3582,12 +3635,24 @@ fn run_simulation(
         .map_err(PyRuntimeError::new_err)
 }
 
+/// read-only live monitor: poll `<rundir>/.simbi-live/snapshot.bin` (written by a
+/// run started with `live_monitor = true`) and render the dashboard until the user
+/// quits or Ctrl-C. blocks on a dedicated terminal — release the gil so the
+/// signal + render threads run and python stays interruptible.
+#[pyfunction]
+#[pyo3(signature = (rundir, poll_ms = 250))]
+fn attach_dashboard(py: Python<'_>, rundir: String, poll_ms: u64) -> PyResult<()> {
+    py.allow_threads(|| symbi_display::run_attach(std::path::Path::new(&rundir), poll_ms))
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
 // shared module body. the pyo3 entry-point name below decides the `PyInit_*`
 // symbol and the imported module name: `cpu_ext` for the default build,
 // `gpu_ext` for the cuda build. both compile the SAME source — cuda only adds
 // the NVRTC device path — so the registration is identical and lives here.
 fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_simulation, m)?)?;
+    m.add_function(wrap_pyfunction!(attach_dashboard, m)?)?;
     afterglow::register(m)?;
     Ok(())
 }

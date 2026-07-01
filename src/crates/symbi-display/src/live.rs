@@ -15,6 +15,9 @@
 // =============================================================================
 
 use ratatui::Frame;
+use serde::{Deserialize, Serialize};
+
+use crate::hostinfo::HostStats;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols::Marker;
@@ -54,6 +57,7 @@ const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"
 /// everything the tabbed dashboard renders for one frame. per-physics fields are
 /// `Option`, so the overview draws only the cards whose data exists (a newtonian
 /// run has no div·B or max W).
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DiagnosticView {
     // header
     pub app_title: String, // "hydroflux — kelvin_helmholtz.toml"
@@ -87,10 +91,16 @@ pub struct DiagnosticView {
     // a decimated 2D field slice for the overview hero heatmap; None -> the hero
     // falls back to the throughput chart.
     pub field: Option<FieldSlice>,
+    /// number of selectable fields for this run (density, + pressure / W / |B| when
+    /// present); bounds the `f`-key cycle. 0 or 1 -> nothing to cycle.
+    pub field_count: usize,
+    /// compute-host + process resource sample (hostname, cores, rss vs total ram);
+    /// None until sampled. drives the machine card.
+    pub host: Option<HostStats>,
 }
 
 /// perceptually-uniform colormaps for the field heatmap.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Colormap {
     Viridis,
     Inferno,
@@ -101,7 +111,7 @@ pub enum Colormap {
 /// row-major `width * height`; the renderer samples it to the panel's pixel grid
 /// and colormaps `[vmin, vmax]`. keeping this small (screen-sized, not grid-sized)
 /// is the whole point — a 4096^2 grid and a 256^2 grid cost the same to draw.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct FieldSlice {
     pub label: String, // "density · inferno · slice z=0"
     pub width: usize,
@@ -244,6 +254,8 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         ("space", "pause"),
         ("s", "step"),
         ("tab", "switch"),
+        ("f", "field"),
+        ("c", "cmap"),
         ("w", "checkpoint"),
         ("q", "quit"),
     ];
@@ -386,15 +398,33 @@ fn sample(field: &FieldSlice, px: u16, py: u16, out_w: u16, out_h: u16) -> f64 {
 /// upper-half glyph `▀` whose fg is the top pixel and bg is the bottom pixel, so
 /// one cell shows two stacked field samples (double vertical resolution). a thin
 /// colorbar with min/max labels sits on the right.
+/// display name of a colormap, for the hero title.
+fn cmap_name(c: Colormap) -> &'static str {
+    match c {
+        Colormap::Viridis => "viridis",
+        Colormap::Inferno => "inferno",
+        Colormap::Magma => "magma",
+    }
+}
+
 fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
     let block = Block::new()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(fg(BORDER_HERO))
-        .title(Span::styled(format!(" {} ", field.label), fgb(GOLD)));
+        .title(Span::styled(
+            format!(" {} · {} ", field.label, cmap_name(field.cmap)),
+            fgb(GOLD),
+        ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    if inner.width < 6 || inner.height < 2 || field.data.is_empty() {
+    if inner.width < 6 || inner.height < 1 || field.data.is_empty() {
+        return;
+    }
+
+    // a 1-row slice (1D run, or a 3D line-out) is a line profile, not a heatmap.
+    if field.height <= 1 {
+        render_field_line(frame, inner, field);
         return;
     }
 
@@ -432,6 +462,38 @@ fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
     buf.set_string(bar_x + 2, inner.y + heat_h - 1, humanize(field.vmin), fg(DIM));
 }
 
+/// a 1D field as a line profile (value vs position). the trace takes a bright stop
+/// of the active colormap, so the `c`-key recolors it too.
+fn render_field_line(frame: &mut Frame, area: Rect, field: &FieldSlice) {
+    if field.data.len() < 2 {
+        return;
+    }
+    let points: Vec<(f64, f64)> = field
+        .data
+        .iter()
+        .enumerate()
+        .map(|(i, &v)| (i as f64, v as f64))
+        .collect();
+    let x_max = (field.data.len() - 1) as f64;
+    let dataset = Dataset::default()
+        .marker(Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(Style::default().fg(colormap(0.72, field.cmap)))
+        .data(&points);
+    let chart = Chart::new(vec![dataset])
+        .x_axis(Axis::default().style(fg(BORDER)).bounds([0.0, x_max]))
+        .y_axis(
+            Axis::default()
+                .style(fg(BORDER))
+                .bounds([field.vmin, field.vmax])
+                .labels([
+                    Span::styled(format!("{:.3}", field.vmin), fg(DIM)),
+                    Span::styled(format!("{:.3}", field.vmax), fg(DIM)),
+                ]),
+        );
+    frame.render_widget(chart, area);
+}
+
 fn render_cards(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let n_drift = view.mass_drift.is_some() as u16
         + view.energy_drift.is_some() as u16
@@ -450,6 +512,10 @@ fn render_cards(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
         spec.push(Constraint::Length(view.blocks_per_level.len() as u16 + 2));
     }
     spec.push(Constraint::Length(3)); // cfl
+    let has_host = view.host.is_some();
+    if has_host {
+        spec.push(Constraint::Length(5)); // machine card
+    }
     spec.push(Constraint::Min(0));
     let r = Layout::vertical(spec).split(area);
 
@@ -465,6 +531,85 @@ fn render_cards(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
         i += 1;
     }
     render_cfl(frame, r[i], view);
+    i += 1;
+    if has_host {
+        render_machine(frame, r[i], view);
+    }
+}
+
+/// bytes as a compact binary-prefixed size (`3.2G`, `512M`, `48K`), matching how
+/// ram + rss are read on a node.
+fn fmt_bytes(b: u64) -> String {
+    const G: f64 = 1_073_741_824.0;
+    const M: f64 = 1_048_576.0;
+    const K: f64 = 1024.0;
+    let x = b as f64;
+    if x >= G {
+        format!("{:.1}G", x / G)
+    } else if x >= M {
+        format!("{:.0}M", x / M)
+    } else if x >= K {
+        format!("{:.0}K", x / K)
+    } else {
+        format!("{b}B")
+    }
+}
+
+/// the machine card: compute-host name, core/thread count, and a gauge of this
+/// run's resident memory against the node's physical ram (the oom watch). shown
+/// only once host stats are sampled.
+fn render_machine(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
+    let block = card("machine");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let Some(h) = &view.host else {
+        return;
+    };
+    if inner.height == 0 {
+        return;
+    }
+    let rows = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(h.hostname.clone(), fgb(VALUE)))),
+        rows[0],
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("{} cores · {} threads", h.cpu_count, h.threads),
+            fg(DIM),
+        ))),
+        rows[1],
+    );
+
+    // memory gauge: rss / total, amber past 90% (near-oom).
+    let ratio = if h.mem_total > 0 {
+        (h.mem_rss as f64 / h.mem_total as f64).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let cols =
+        Layout::horizontal([Constraint::Min(6), Constraint::Length(14)]).split(rows[2]);
+    let color = if ratio >= 0.9 { AMBER } else { LAV };
+    let gauge = LineGauge::default()
+        .ratio(ratio)
+        .filled_style(fg(color))
+        .unfilled_style(fg(BORDER))
+        .label(Span::styled("mem", fg(DIM)));
+    frame.render_widget(gauge, cols[0]);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("{}/{}", fmt_bytes(h.mem_rss), fmt_bytes(h.mem_total)),
+            fgb(VALUE),
+        )))
+        .right_aligned(),
+        cols[1],
+    );
 }
 
 fn render_conservation(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
@@ -700,6 +845,8 @@ mod tests {
                 ("resolution".into(), "256 x 256  (65536 zones)".into()),
             ],
             field: None,
+            field_count: 1,
+            host: None,
         }
     }
 

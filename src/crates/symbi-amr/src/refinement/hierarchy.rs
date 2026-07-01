@@ -51,8 +51,8 @@ use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::decomp::{drain_devices, exchange_grid, flatten, unflatten, HaloTransport};
 use symbi_sim::state::{
-    Boundaries, BoundaryType, FieldDecimation, FieldStore, PrimFieldsGeneric, SimStateGeneric,
-    Timestepping, array_field_zeros, axis_name,
+    Boundaries, BoundaryType, FieldDecimation, FieldKind, FieldStore, PrimFieldsGeneric,
+    SimStateGeneric, Timestepping, array_field_zeros, axis_name,
 };
 use symbi_sim::substrate_seam::KernelSet;
 use std::ops::ControlFlow;
@@ -161,14 +161,15 @@ where
     /// `coverage` box contains it (SMR = single nested box per level, ratio 2), so
     /// the refined region shows its fine detail and the rest shows the coarse grid.
     /// a single-level hierarchy is just the root decimation. cost is screen-bounded.
-    pub fn field_slice_composite(&self, max_dim: usize) -> Option<FieldDecimation> {
+    pub fn field_slice_composite(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
         // single grid: no coverage to descend, reuse the plain per-state decimation.
         if self.levels.len() <= 1 {
-            return self.levels[0].state.field_slice(max_dim);
+            return self.levels[0].state.field_slice(max_dim, index);
         }
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
+        let (kind, name) = self.levels[0].state.nth_field(index);
         let interior = &self.levels[0].state.geom.interior;
         let sp0 = &interior.spaces[0];
         let sp1 = interior.spaces.get(1)?; // None on a 1D grid
@@ -200,7 +201,7 @@ where
                 while ry < y1 {
                     let mut rx = x0;
                     while rx < x1 {
-                        sum += self.sample_finest(rx, ry);
+                        sum += self.sample_finest(rx, ry, kind);
                         cnt += 1;
                         rx += 1;
                     }
@@ -218,13 +219,14 @@ where
             data,
             vmin,
             vmax,
+            name: name.into(),
         })
     }
 
     /// resolve density at a ROOT cell (rx, ry) by descending the nested refinement
     /// boxes: a parent cell inside `coverage` maps to the finer level at ratio 2.
     /// axes >= 2 are pinned to the mid-plane (the 3D z-slice) and descend with it.
-    fn sample_finest(&self, rx: isize, ry: isize) -> f64 {
+    fn sample_finest(&self, rx: isize, ry: isize, kind: FieldKind) -> f64 {
         let root = &self.levels[0].state.geom.interior;
         let mut idx: [isize; NDIM] = std::array::from_fn(|ax| {
             let s = &root.spaces[ax];
@@ -246,7 +248,7 @@ where
             });
             lvl += 1;
         }
-        *self.levels[lvl].state.fields.prim.rho.view().at(idx) as f64
+        self.levels[lvl].state.field_value(idx, kind)
     }
 
     /// seed every fine level's interior from its parent by CONSERVATIVE

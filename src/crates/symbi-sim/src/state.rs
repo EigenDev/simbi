@@ -1883,48 +1883,136 @@ where
         })
     }
 
-    /// decimate the primitive density to a screen-sized 2D slice for the live
-    /// heatmap: strided-sample the interior (mid-plane in every axis >= 2 for 3D)
-    /// down to at most `max_dim` cells per axis, so the transfer + draw cost is
-    /// bounded by the screen, NOT the grid (a 4096^2 run costs the same as 256^2).
-    /// `None` for a 1D grid (no 2D image) or non-host memory (device run).
-    pub fn field_slice(&self, max_dim: usize) -> Option<FieldDecimation> {
+    /// how many fields the live heatmap can cycle through (density + pressure /
+    /// Lorentz W / |B| when the regime carries them). bounds the `f`-key cycle.
+    pub fn field_count(&self) -> usize {
+        self.available_kinds().len()
+    }
+
+    /// the selectable fields, in cycle order (density always first).
+    fn available_kinds(&self) -> Vec<(FieldKind, &'static str)> {
+        let mut v = vec![(FieldKind::Density, "density")];
+        if self.fields.prim.pre.is_some() {
+            v.push((FieldKind::Pressure, "pressure"));
+        }
+        if <R as Regime<f64, D>>::SPEC.is_relativistic {
+            v.push((FieldKind::LorentzW, "lorentz W"));
+        }
+        if self.fields.mhd.is_some() {
+            v.push((FieldKind::MagField, "|B|"));
+        }
+        v
+    }
+
+    /// map a cycle index to the field it selects (wraps).
+    pub fn nth_field(&self, index: usize) -> (FieldKind, &'static str) {
+        let k = self.available_kinds();
+        k[index % k.len()]
+    }
+
+    /// the selected scalar field at a cell (host access assumed by the caller).
+    pub fn field_value(&self, c: [isize; D], kind: FieldKind) -> f64 {
+        match kind {
+            FieldKind::Density => *self.fields.prim.rho.view().at(c) as f64,
+            FieldKind::Pressure => self
+                .fields
+                .prim
+                .pre
+                .as_ref()
+                .map(|p| *p.view().at(c) as f64)
+                .unwrap_or(0.0),
+            FieldKind::LorentzW => {
+                let mut v2 = 0.0_f64;
+                for k in 0..DOF {
+                    let vk = *self.fields.prim.vel[k].view().at(c) as f64;
+                    v2 += vk * vk;
+                }
+                if v2 < 1.0 { 1.0 / (1.0 - v2).sqrt() } else { 1.0 }
+            }
+            FieldKind::MagField => match self.fields.mhd.as_ref() {
+                Some(mhd) => {
+                    let mut b2 = 0.0_f64;
+                    for k in 0..DOF {
+                        let bk = *mhd.bcell[k].view().at(c) as f64;
+                        b2 += bk * bk;
+                    }
+                    b2.sqrt()
+                }
+                None => 0.0,
+            },
+        }
+    }
+
+    /// decimate the selected field (by cycle `index`) to a screen-sized slice for
+    /// the live heatmap: block-average the interior (mid-plane in axes >= 2 for the
+    /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the SCREEN, not
+    /// the grid. a 1D grid yields a 1-row line profile. `None` off host memory.
+    pub fn field_slice(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
+        let (kind, name) = self.nth_field(index);
         let interior = &self.geom.interior;
         let sp0 = &interior.spaces[0];
-        let sp1 = interior.spaces.get(1)?; // None on a 1D grid
-        let (nx, ny) = (sp0.size(), sp1.size());
-        if nx == 0 || ny == 0 {
+        let nx = sp0.size();
+        if nx == 0 {
             return None;
         }
         let m = max_dim.max(1);
         let sx = ((nx + m - 1) / m).max(1);
-        let sy = ((ny + m - 1) / m).max(1);
         let out_w = (nx + sx - 1) / sx;
-        let out_h = (ny + sy - 1) / sy;
-
-        let rho = self.fields.prim.rho.view();
-        let mut data = Vec::with_capacity(out_w * out_h);
-        let mut vmin = f64::INFINITY;
-        let mut vmax = f64::NEG_INFINITY;
-        // base coord: mid-plane on every axis >= 2 (the 3D z-slice); axes 0/1 vary.
-        // `get_mut(1)` keeps this D-safe (compiles for D = 1, unreached there).
+        // base coord: mid-plane on every axis; axes 0/1 are overwritten below.
         let mut c: [isize; D] = std::array::from_fn(|ax| {
             let s = &interior.spaces[ax];
             s.lo + (s.size() / 2) as isize
         });
+        let mut vmin = f64::INFINITY;
+        let mut vmax = f64::NEG_INFINITY;
+
+        // 1D grid: a line profile (height = 1), block-averaged along axis 0.
+        let Some(sp1) = interior.spaces.get(1) else {
+            let mut data = Vec::with_capacity(out_w);
+            for i in 0..out_w {
+                let x0 = sp0.lo + (i * sx) as isize;
+                let x1 = (x0 + sx as isize).min(sp0.hi);
+                let (mut sum, mut cnt) = (0.0_f64, 0u32);
+                let mut xx = x0;
+                while xx < x1 {
+                    c[0] = xx;
+                    sum += self.field_value(c, kind);
+                    cnt += 1;
+                    xx += 1;
+                }
+                let v = sum / cnt.max(1) as f64;
+                vmin = vmin.min(v);
+                vmax = vmax.max(v);
+                data.push(v as f32);
+            }
+            return Some(FieldDecimation {
+                width: out_w,
+                height: 1,
+                data,
+                vmin,
+                vmax,
+                name: name.into(),
+            });
+        };
+
+        // 2D (or 3D mid-slice): block-average each sx x sy footprint.
+        let ny = sp1.size();
+        if ny == 0 {
+            return None;
+        }
+        let sy = ((ny + m - 1) / m).max(1);
+        let out_h = (ny + sy - 1) / sy;
+        let mut data = Vec::with_capacity(out_w * out_h);
         for j in 0..out_h {
             let y0 = sp1.lo + (j * sy) as isize;
             let y1 = (y0 + sy as isize).min(sp1.hi);
             for i in 0..out_w {
                 let x0 = sp0.lo + (i * sx) as isize;
                 let x1 = (x0 + sx as isize).min(sp0.hi);
-                // block-average the sx x sy cell block (clamped at the interior edge)
-                // — anti-aliases thin features vs a single nearest sample.
-                let mut sum = 0.0_f64;
-                let mut cnt = 0u32;
+                let (mut sum, mut cnt) = (0.0_f64, 0u32);
                 let mut yy = y0;
                 while yy < y1 {
                     if let Some(slot) = c.get_mut(1) {
@@ -1933,7 +2021,7 @@ where
                     let mut xx = x0;
                     while xx < x1 {
                         c[0] = xx;
-                        sum += *rho.at(c) as f64;
+                        sum += self.field_value(c, kind);
                         cnt += 1;
                         xx += 1;
                     }
@@ -1951,18 +2039,30 @@ where
             data,
             vmin,
             vmax,
+            name: name.into(),
         })
     }
 }
 
-/// a screen-sized decimated 2D field for the live heatmap. row-major
-/// `width * height`; the display crate wraps this with a label + colormap.
+/// the scalar fields the live heatmap can display.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldKind {
+    Density,
+    Pressure,
+    LorentzW,
+    MagField,
+}
+
+/// a screen-sized decimated field for the live heatmap. row-major `width * height`
+/// (`height == 1` is a 1D line profile); the display crate wraps this with a
+/// colormap. `name` is the field label (e.g. "density", "|B|").
 pub struct FieldDecimation {
     pub width: usize,
     pub height: usize,
     pub data: Vec<f32>,
     pub vmin: f64,
     pub vmax: f64,
+    pub name: String,
 }
 
 // =============================================================================

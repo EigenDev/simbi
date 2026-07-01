@@ -9,6 +9,11 @@ libc = "0.2"
 # host-only live dashboard renderer (crossterm backend). never compiled into
 # device kernels; the crate is a tty affordance for the driver process.
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+# read-only attach snapshot: a compact binary blob written each cadence and
+# polled by `simbi attach`. postcard over json keeps the float-heavy field
+# bundle (~350 kb) small on shared cluster filesystems.
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
 
 [lints]
 workspace = true

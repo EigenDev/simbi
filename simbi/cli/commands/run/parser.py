@@ -103,6 +103,17 @@ def setup_parser(subparsers) -> None:
         nargs="+",
     )
 
+    # monitoring
+    monitor_group = run_parser.add_argument_group("monitoring")
+    monitor_group.add_argument(
+        "--live",
+        dest="live_monitor",
+        help="write a read-only snapshot each cadence so `simbi attach <data_dir>` "
+        "can monitor a headless (batch/cluster) run",
+        default=False,
+        action="store_true",
+    )
+
     # utilities
     util_group = run_parser.add_argument_group("utilities")
     # -h/--help/--peek/--info all show the config's flags: with a <config> given they

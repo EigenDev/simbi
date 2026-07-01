@@ -151,7 +151,11 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
 
         # run the simulation. no preamble: the live dashboard is a self-contained
         # full-screen tool that owns the terminal for the duration of the run.
-        run(problem, compute_mode=args.compute_mode)
+        run(
+            problem,
+            compute_mode=args.compute_mode,
+            live_monitor=getattr(args, "live_monitor", False),
+        )
 
 
 def _configure_environment(args: Namespace) -> None:

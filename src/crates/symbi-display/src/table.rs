@@ -101,6 +101,10 @@ pub struct Table {
     /// smoothed (vmin, vmax) for the field colormap, so it doesn't flicker as the
     /// per-frame extrema jitter.
     field_range: Option<(f64, f64)>,
+    /// number of selectable fields (for the `f`-key cycle).
+    field_count: usize,
+    /// compute-host + process resource sample (machine card); None until sampled.
+    host: Option<crate::hostinfo::HostStats>,
 }
 
 /// throughput-history ring-buffer cap, sized to the chart's pixel width.
@@ -173,7 +177,21 @@ impl Table {
             max_w: None,
             field: None,
             field_range: None,
+            field_count: 1,
+            host: None,
         }
+    }
+
+    /// how many fields the `f`-key can cycle through (density + any of pressure /
+    /// Lorentz W / |B| the regime carries).
+    pub fn set_field_count(&mut self, n: usize) {
+        self.field_count = n.max(1);
+    }
+
+    /// set (or clear) the compute-host + process resource sample for the machine
+    /// card. sampled by the solver each cadence so `mem_rss` tracks the footprint.
+    pub fn set_host(&mut self, host: Option<crate::hostinfo::HostStats>) {
+        self.host = host;
     }
 
     /// set (or clear) the live field-heatmap slice for the overview hero. cheap:
@@ -413,6 +431,8 @@ impl Table {
                 .map(|r| (r[1].clone(), r[2].clone()))
                 .collect(),
             field: self.field.clone(),
+            field_count: self.field_count,
+            host: self.host.clone(),
         }
     }
 
