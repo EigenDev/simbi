@@ -182,14 +182,15 @@ pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv) -> Option<Gv> {
 pub(crate) fn gv_radial_face_lapse(spacetime: Spacetime, spacing: &[Spacing]) -> Option<(Gv, Gv)> {
     match spacetime {
         Spacetime::Minkowski => None,
-        Spacetime::Schwarzschild => Some((
+        // both static-diagonal (Schwarzschild) and kerr-schild carry the SAME contravariant face
+        // weight alpha_face on the flat mass/energy flux (v^r = alpha V_rhat on the flux the riemann
+        // solver returns). the KS shift piece `- b U` is a SEPARATE additive flux-field term (it reads
+        // the conserved U, so it is folded into the flux fields, not applied as a face multiply here);
+        // once in the flux field it inherits this same alpha_face weight.
+        Spacetime::Schwarzschild | Spacetime::KerrSchild => Some((
             gv_metric_lapse_at(spacetime, gv_axis_face_at(0, spacing[0], 0)),
             gv_metric_lapse_at(spacetime, gv_axis_face_at(0, spacing[0], 1)),
         )),
-        // kerr-schild transports mass/energy with tilde v^r = v^r - beta^r/alpha; the shift piece is
-        // an upwind advection of the conserved scalar, NOT a face multiply, so it is carried in the
-        // godunov shift-flux path rather than here.
-        Spacetime::KerrSchild => todo!("kerr-schild shift-advection face transport not yet wired"),
     }
 }
 

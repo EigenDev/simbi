@@ -354,10 +354,21 @@ pub fn godunov_stage_gv_with_fused_built(
             }
             Some(Gv::ZERO - m * rho_h_w2 * (Gv::ONE + v_sq) / (r * r * f))
         }
-        // kerr-schild radial momentum source S_{S_r} = (1/2) T^{mu nu} d_r g_{mu nu} with the KS
-        // metric derivatives (g_tr != 0, gamma_rr = 1 + 2M/r) — distinct christoffels from the
-        // schwarzschild-coordinate form; derived + validated against a KS michel oracle before wiring.
-        Spacetime::KerrSchild => todo!("kerr-schild radial momentum source not yet wired"),
+        // kerr-schild radial momentum gravity source S_{S_r} = -M (rho eta W^2)(1 + V)^2 / (r^2 h),
+        // h = 1 + 2M/r, V the orthonormal radial velocity (radial flow). the (2p/r) geometric term
+        // rides gv_geometric_source; the alpha^2 densitization rides the radial-momentum arm below.
+        // validated bit-for-bit against numerical (1/2) T^{mn} d_r g on the KS metric.
+        Spacetime::KerrSchild => {
+            let m = Gv::scalar("schwarzschild_mass");
+            let r = coord_centroid[0];
+            let h = Gv::ONE + Gv::from_f64(2.0) * m / r; // 1 + 2M/r
+            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+            let pre = Gv::field("pre", FieldRef::PrimPre);
+            let rho_h_w2 = rho + nrg + pre; // D + tau + p = rho eta W^2
+            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // orthonormal radial velocity V
+            let one_plus_v = Gv::ONE + v_r;
+            Some(Gv::ZERO - m * rho_h_w2 * one_plus_v * one_plus_v / (r * r * h))
+        }
     };
     // Font (2008) Eq (34): on a static background the conserved mass + energy fluxes transport with
     // the CONTRAVARIANT v^r = alpha V_rhat (one lapse factor per radial face vs the orthonormal flat
@@ -380,9 +391,25 @@ pub fn godunov_stage_gv_with_fused_built(
             let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // physical radial velocity V_rhat
             Some(Gv::ZERO - alpha * rho_h_w2 * v_r * m / (r * r * f))
         }
-        // kerr-schild energy source S_tau from the KS metric; derived independently (the KS lapse
-        // gradient + christoffels differ from the schwarzschild-coordinate form) before wiring.
-        Spacetime::KerrSchild => todo!("kerr-schild energy source not yet wired"),
+        // kerr-schild energy source S_tau = -M/(r^2 h^{3/2}) [E V(1 + (2+b)V) - p(2 + 3b)], with
+        // b = 2M/r, h = 1 + 2M/r, E = D + tau + p, V the orthonormal radial velocity. UNLIKE
+        // schwarzschild the pressure term does not cancel (a genuine KS shift effect). validated
+        // bit-for-bit against numerical alpha(T^{m0} d_m ln alpha - T^{mn} Gamma^0) on the KS metric.
+        Spacetime::KerrSchild => {
+            let m = Gv::scalar("schwarzschild_mass");
+            let r = coord_centroid[0];
+            let two = Gv::from_f64(2.0);
+            let b = two * m / r; // 2M/r
+            let h = Gv::ONE + b; // 1 + 2M/r
+            let h_15 = h * h.sqrt(); // h^{3/2}
+            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+            let pre = Gv::field("pre", FieldRef::PrimPre);
+            let rho_h_w2 = rho + nrg + pre; // E = D + tau + p
+            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // orthonormal radial velocity V
+            let e_term = rho_h_w2 * v_r * (Gv::ONE + (two + b) * v_r);
+            let p_term = pre * (two + Gv::from_f64(3.0) * b);
+            Some(Gv::ZERO - m * (e_term - p_term) / (r * r * h_15))
+        }
     };
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
         let div = match lapse { Some(a) => a * div, None => div };
