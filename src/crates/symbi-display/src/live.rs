@@ -84,6 +84,32 @@ pub struct DiagnosticView {
     // panels
     pub log: Vec<(String, String)>,    // (timestamp, text)
     pub config: Vec<(String, String)>, // config-tab rows
+    // a decimated 2D field slice for the overview hero heatmap; None -> the hero
+    // falls back to the throughput chart.
+    pub field: Option<FieldSlice>,
+}
+
+/// perceptually-uniform colormaps for the field heatmap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Colormap {
+    Viridis,
+    Inferno,
+    Magma,
+}
+
+/// a 2D field slice, already decimated toward display resolution. `data` is
+/// row-major `width * height`; the renderer samples it to the panel's pixel grid
+/// and colormaps `[vmin, vmax]`. keeping this small (screen-sized, not grid-sized)
+/// is the whole point — a 4096^2 grid and a 256^2 grid cost the same to draw.
+#[derive(Clone)]
+pub struct FieldSlice {
+    pub label: String, // "density · inferno · slice z=0"
+    pub width: usize,
+    pub height: usize,
+    pub data: Vec<f32>,
+    pub vmin: f64,
+    pub vmax: f64,
+    pub cmap: Colormap,
 }
 
 fn fg(c: Color) -> Style {
@@ -238,9 +264,18 @@ fn render_overview(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let rows = Layout::vertical([Constraint::Min(0), Constraint::Length(4)]).split(area);
     let cols =
         Layout::horizontal([Constraint::Percentage(62), Constraint::Percentage(38)]).split(rows[0]);
-    render_throughput_hero(frame, cols[0], view);
+    render_hero(frame, cols[0], view);
     render_cards(frame, cols[1], view);
     render_log(frame, rows[1], view);
+}
+
+/// the hero panel: a live field heatmap when a slice is present, otherwise the
+/// throughput trace (the reserved-slot fallback).
+fn render_hero(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
+    match &view.field {
+        Some(f) => render_field(frame, area, f),
+        None => render_throughput_hero(frame, area, view),
+    }
 }
 
 /// the hero panel — reserved for the live field view (tier 2); for now it holds
@@ -284,6 +319,117 @@ fn render_throughput_hero(frame: &mut Frame, area: Rect, view: &DiagnosticView) 
                 .labels([Span::styled("0", fg(DIM)), Span::styled(humanize(y_max), fg(DIM))]),
         );
     frame.render_widget(chart, inner);
+}
+
+// perceptually-uniform colormap control points (9 stops each), lerped per pixel.
+const VIRIDIS: [(u8, u8, u8); 9] = [
+    (68, 1, 84),
+    (72, 40, 120),
+    (62, 74, 137),
+    (49, 104, 142),
+    (38, 130, 142),
+    (31, 158, 137),
+    (53, 183, 121),
+    (110, 206, 88),
+    (253, 231, 37),
+];
+const INFERNO: [(u8, u8, u8); 9] = [
+    (0, 0, 4),
+    (20, 11, 52),
+    (66, 10, 104),
+    (120, 28, 109),
+    (175, 55, 84),
+    (220, 93, 60),
+    (247, 148, 32),
+    (252, 209, 86),
+    (252, 255, 164),
+];
+const MAGMA: [(u8, u8, u8); 9] = [
+    (0, 0, 4),
+    (28, 16, 68),
+    (79, 18, 123),
+    (129, 37, 129),
+    (181, 54, 122),
+    (229, 80, 100),
+    (251, 135, 97),
+    (254, 194, 135),
+    (252, 253, 191),
+];
+
+/// map a normalized value [0,1] to a truecolor via a lerped colormap LUT.
+fn colormap(t: f64, cmap: Colormap) -> Color {
+    let stops: &[(u8, u8, u8); 9] = match cmap {
+        Colormap::Viridis => &VIRIDIS,
+        Colormap::Inferno => &INFERNO,
+        Colormap::Magma => &MAGMA,
+    };
+    let t = t.clamp(0.0, 1.0);
+    let n = stops.len() - 1;
+    let f = t * n as f64;
+    let i = (f.floor() as usize).min(n - 1);
+    let frac = f - i as f64;
+    let lerp = |a: u8, b: u8| (a as f64 + (b as f64 - a as f64) * frac).round() as u8;
+    let (r0, g0, b0) = stops[i];
+    let (r1, g1, b1) = stops[i + 1];
+    Color::Rgb(lerp(r0, r1), lerp(g0, g1), lerp(b0, b1))
+}
+
+/// nearest-sample the field at output pixel (px, py) in an out_w x out_h grid.
+fn sample(field: &FieldSlice, px: u16, py: u16, out_w: u16, out_h: u16) -> f64 {
+    let fx = (px as usize * field.width / (out_w.max(1) as usize)).min(field.width.saturating_sub(1));
+    let fy =
+        (py as usize * field.height / (out_h.max(1) as usize)).min(field.height.saturating_sub(1));
+    field.data.get(fy * field.width + fx).copied().unwrap_or(0.0) as f64
+}
+
+/// render the field as a truecolor half-block heatmap: each terminal cell is the
+/// upper-half glyph `▀` whose fg is the top pixel and bg is the bottom pixel, so
+/// one cell shows two stacked field samples (double vertical resolution). a thin
+/// colorbar with min/max labels sits on the right.
+fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(fg(BORDER_HERO))
+        .title(Span::styled(format!(" {} ", field.label), fgb(GOLD)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width < 6 || inner.height < 2 || field.data.is_empty() {
+        return;
+    }
+
+    let bar_w: u16 = 7.min(inner.width / 4);
+    let heat_w = inner.width - bar_w;
+    let heat_h = inner.height;
+    let range = (field.vmax - field.vmin).max(1e-30);
+    let norm = |v: f64| (v - field.vmin) / range;
+
+    let buf = frame.buffer_mut();
+    for cy in 0..heat_h {
+        for cx in 0..heat_w {
+            let top = sample(field, cx, 2 * cy, heat_w, heat_h * 2);
+            let bot = sample(field, cx, 2 * cy + 1, heat_w, heat_h * 2);
+            if let Some(cell) = buf.cell_mut((inner.x + cx, inner.y + cy)) {
+                cell.set_symbol("\u{2580}") // upper half block
+                    .set_fg(colormap(norm(top), field.cmap))
+                    .set_bg(colormap(norm(bot), field.cmap));
+            }
+        }
+    }
+
+    // colorbar: a one-column vertical gradient (high at top) + min/max labels.
+    let bar_x = inner.x + heat_w + 1;
+    for cy in 0..heat_h {
+        let t_top = 1.0 - (2 * cy) as f64 / (2 * heat_h) as f64;
+        let t_bot = 1.0 - (2 * cy + 1) as f64 / (2 * heat_h) as f64;
+        if let Some(cell) = buf.cell_mut((bar_x, inner.y + cy)) {
+            cell.set_symbol("\u{2580}")
+                .set_fg(colormap(t_top, field.cmap))
+                .set_bg(colormap(t_bot, field.cmap));
+        }
+    }
+    buf.set_string(bar_x + 2, inner.y, humanize(field.vmax), fg(DIM));
+    buf.set_string(bar_x + 2, inner.y + heat_h - 1, humanize(field.vmin), fg(DIM));
 }
 
 fn render_cards(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
@@ -553,6 +699,7 @@ mod tests {
                 ("regime".into(), "srhd".into()),
                 ("resolution".into(), "256 x 256  (65536 zones)".into()),
             ],
+            field: None,
         }
     }
 
@@ -601,6 +748,43 @@ mod tests {
             v.tab = tab;
             let _ = dump(&v);
         }
+    }
+
+    /// the overview hero renders a field heatmap without panicking when a slice is
+    /// present, and carries the field label in the panel title.
+    #[test]
+    fn field_heatmap_renders() {
+        let backend = TestBackend::new(140, 40);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut v = sample();
+        let (w, h) = (32usize, 24usize);
+        let data: Vec<f32> = (0..w * h).map(|k| (k % 7) as f32).collect();
+        v.field = Some(FieldSlice {
+            label: "density · inferno · slice z=0".into(),
+            width: w,
+            height: h,
+            data,
+            vmin: 0.0,
+            vmax: 6.0,
+            cmap: Colormap::Inferno,
+        });
+        terminal.draw(|frame| render(frame, &v)).unwrap();
+        let dump: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(dump.contains("density"));
+        assert!(dump.contains('\u{2580}')); // half-block heatmap glyphs drawn
+    }
+
+    #[test]
+    fn colormap_endpoints_and_clamp() {
+        // clamps out-of-range and hits the LUT endpoints.
+        assert_eq!(colormap(-1.0, Colormap::Viridis), Color::Rgb(68, 1, 84));
+        assert_eq!(colormap(2.0, Colormap::Inferno), Color::Rgb(252, 255, 164));
     }
 
     /// a uniform-grid run (one level) drops the amr-only grid tab.

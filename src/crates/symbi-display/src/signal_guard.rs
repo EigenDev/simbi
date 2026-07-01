@@ -110,6 +110,13 @@ const TRAPPED: [i32; 6] = [
 static STOP: AtomicBool = AtomicBool::new(false);
 static GOT: AtomicI32 = AtomicI32::new(0);
 
+/// whether a stop has been requested (a caught signal), readable without holding
+/// the `SignalGuard` — the render thread polls this to stop drawing the moment the
+/// async-signal-safe handler has restored the terminal.
+pub fn stop_requested() -> bool {
+    STOP.load(Ordering::SeqCst)
+}
+
 /// SAFETY: installed only by `install()`. the body does ONLY async-signal-safe
 /// work — a `libc::write` of a fixed const buffer to fd 2, atomic integer
 /// stores, and `libc::signal` to re-arm the default disposition. it never

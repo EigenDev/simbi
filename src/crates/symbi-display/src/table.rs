@@ -97,6 +97,10 @@ pub struct Table {
     energy_drift: VecDeque<f64>,
     div_b: VecDeque<f64>,
     max_w: Option<f64>,
+    field: Option<crate::live::FieldSlice>,
+    /// smoothed (vmin, vmax) for the field colormap, so it doesn't flicker as the
+    /// per-frame extrema jitter.
+    field_range: Option<(f64, f64)>,
 }
 
 /// throughput-history ring-buffer cap, sized to the chart's pixel width.
@@ -167,7 +171,27 @@ impl Table {
             energy_drift: VecDeque::with_capacity(THROUGHPUT_CAPACITY),
             div_b: VecDeque::with_capacity(THROUGHPUT_CAPACITY),
             max_w: None,
+            field: None,
+            field_range: None,
         }
+    }
+
+    /// set (or clear) the live field-heatmap slice for the overview hero. cheap:
+    /// the slice is already decimated to screen resolution by the caller. the
+    /// colormap range is slow-followed (EMA) across frames so it doesn't flicker
+    /// when the per-frame extrema jitter; values outside it clip to the endpoints.
+    pub fn set_field(&mut self, field: Option<crate::live::FieldSlice>) {
+        self.field = field.map(|mut f| {
+            const A: f64 = 0.15;
+            let (mn, mx) = match self.field_range {
+                Some((mn, mx)) => (mn + A * (f.vmin - mn), mx + A * (f.vmax - mx)),
+                None => (f.vmin, f.vmax),
+            };
+            self.field_range = Some((mn, mx));
+            f.vmin = mn;
+            f.vmax = mx;
+            f
+        });
     }
 
     /// record one conservation-reduction sample. mass/energy are tracked as drift
@@ -353,10 +377,10 @@ impl Table {
         Ok(())
     }
 
-    /// build an owned snapshot for the live tabbed render. owning the data lets the
-    /// draw closure run without borrowing `self` (which also owns the terminal it
-    /// draws into). throughput is converted from zone-cyc/s to Mzcups for display.
-    fn diagnostic_view(&self) -> DiagnosticView {
+    /// build an owned snapshot for the live tabbed render. owning the data lets it
+    /// cross the channel to the render thread (tier 2a). throughput is converted
+    /// from zone-cyc/s to Mzcups for display.
+    pub fn diagnostic_view(&self) -> DiagnosticView {
         DiagnosticView {
             app_title: self.title.clone(),
             regime: self.regime.clone(),
@@ -388,6 +412,7 @@ impl Table {
                 .iter()
                 .map(|r| (r[1].clone(), r[2].clone()))
                 .collect(),
+            field: self.field.clone(),
         }
     }
 

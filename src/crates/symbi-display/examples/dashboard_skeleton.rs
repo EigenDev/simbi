@@ -20,10 +20,8 @@ use std::collections::VecDeque;
 use std::io;
 use std::time::{Duration, Instant};
 
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
-use symbi_display::live::{self, DiagnosticView, fmt_wall, tab_names};
-use symbi_display::{Key, ScreenGuard, SignalGuard, poll_key_timeout};
+use symbi_display::live::{Colormap, DiagnosticView, FieldSlice, fmt_wall};
+use symbi_display::{LiveDashboard, ScreenGuard, SignalGuard, signal_guard};
 
 const LEVELS: usize = 3;
 
@@ -51,11 +49,9 @@ fn push_cap(q: &mut VecDeque<f64>, v: f64, cap: usize) {
     q.push_back(v);
 }
 
-/// the dummy run state — a stand-in for the per-cadence DiagnosticSnapshot plus
-/// ui state (active tab, pause).
+/// the dummy run state — a stand-in for the per-cadence DiagnosticSnapshot. tab +
+/// pause are now render-thread state (owned by the LiveDashboard), not here.
 struct App {
-    tab: usize,
-    paused: bool,
     frame: u64,
     rng: Rng,
     start: Instant,
@@ -78,8 +74,6 @@ struct App {
 impl App {
     fn new() -> Self {
         let mut app = App {
-            tab: 0,
-            paused: false,
             frame: 0,
             rng: Rng(0x9e3779b97f4a7c15),
             start: Instant::now(),
@@ -150,13 +144,35 @@ impl App {
         }
     }
 
-    fn next_tab(&mut self) {
-        let n = tab_names(true).len();
-        self.tab = (self.tab + 1) % n;
-    }
-    fn prev_tab(&mut self) {
-        let n = tab_names(true).len();
-        self.tab = (self.tab + n - 1) % n;
+    /// a synthetic animated field — a scrolling kelvin-helmholtz-ish shear layer —
+    /// to exercise the half-block heatmap look with dummy data.
+    fn field_slice(&self) -> FieldSlice {
+        let (w, h) = (192usize, 108usize);
+        let t = self.frame as f64 * 0.05;
+        let mut data = Vec::with_capacity(w * h);
+        for j in 0..h {
+            for i in 0..w {
+                let x = i as f64 / w as f64 * 8.0;
+                let y = j as f64 / h as f64 * 6.0 - 3.0;
+                // a sheared interface (tanh) with a growing billow perturbation.
+                let shear = (y * 2.5).tanh();
+                let billow = 0.5 * (x * 2.0 + t).sin() * (-y * y).exp();
+                let ripple = 0.25 * ((x + y) * 3.0 - t * 1.3).sin();
+                data.push((shear + billow + ripple) as f32);
+            }
+        }
+        let (mn, mx) = data.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(a, b), &v| {
+            (a.min(v), b.max(v))
+        });
+        FieldSlice {
+            label: "density · inferno · slice z=0".into(),
+            width: w,
+            height: h,
+            data,
+            vmin: mn as f64,
+            vmax: mx as f64,
+            cmap: Colormap::Inferno,
+        }
     }
 
     /// project the dummy state into the render snapshot.
@@ -165,14 +181,15 @@ impl App {
             app_title: "hydroflux — kelvin_helmholtz.toml".into(),
             regime: "SRHD".into(),
             attached: "attached · rank 0 / 1".into(),
-            paused: self.paused,
+            // tab / paused / frame are overridden by the render thread's ui state.
+            paused: false,
             frame: self.frame,
             t: self.t,
             step: self.step,
             dt: self.dt,
             wall_secs: self.start.elapsed().as_secs_f64(),
             throughput_mzcups: self.throughput.back().copied().unwrap_or(0.0),
-            tab: self.tab,
+            tab: 0,
             throughput_hist: self.throughput.iter().copied().collect(),
             dt_hist: self.dt_hist.iter().copied().collect(),
             mass_drift: Some(self.mass_drift.iter().copied().collect()),
@@ -193,6 +210,7 @@ impl App {
                 ("t_final".into(), "20.0000".into()),
                 ("output".into(), "data/kh_config/".into()),
             ],
+            field: Some(self.field_slice()),
         }
     }
 }
@@ -202,60 +220,64 @@ fn main() -> io::Result<()> {
         eprintln!("dashboard_skeleton needs an interactive terminal.");
         return Ok(());
     }
-    // the production seam under test: SignalGuard owns the graceful-interrupt flag
-    // (Ctrl-C -> SIGINT, never a keystroke), ScreenGuard owns the alt screen +
-    // termios (ICANON/ECHO off, ISIG on), and poll_key reads the remaining keys
-    // over that mode. no crossterm raw mode is enabled anywhere.
-    let sig = SignalGuard::install();
+    // tier-2a architecture under test: SignalGuard owns the graceful-interrupt flag,
+    // ScreenGuard owns the alt screen + termios, and a dedicated RENDER THREAD
+    // (LiveDashboard) owns the terminal + input, drawing at ~30 fps. this main thread
+    // is the (dummy) SOLVER: it steps, publishes a snapshot, and reads the render
+    // thread's control flags — it never touches the terminal.
+    let _sig = SignalGuard::install();
     let mut screen = ScreenGuard::enter();
-    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    let mut dash = match LiveDashboard::spawn() {
+        Some(d) => d,
+        None => {
+            screen.leave();
+            return Ok(());
+        }
+    };
 
-    let result = run(&mut terminal, &sig);
+    let mut app = App::new();
+    // a deliberately SLOW dummy step (200ms) so the responsiveness win is obvious:
+    // tab / pause stay instant (30 fps render thread) while the "solver" crawls.
+    let step_time = Duration::from_millis(200);
 
+    let interrupted = loop {
+        if signal_guard::stop_requested() {
+            break true;
+        }
+        let c = dash.controls();
+        if c.quit() {
+            break false;
+        }
+
+        // pause: park (the render thread keeps drawing + accepting input).
+        while c.paused() && !c.quit() && !signal_guard::stop_requested() {
+            if c.take_step() {
+                break; // single step while paused
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if c.quit() {
+            break false;
+        }
+        if signal_guard::stop_requested() {
+            break true;
+        }
+
+        app.tick();
+        if c.take_checkpoint() {
+            app.push_log("manual checkpoint (dummy)".to_string());
+        }
+        dash.publish(app.view());
+
+        std::thread::sleep(step_time); // simulate a heavy step
+    };
+
+    dash.shutdown();
     screen.leave();
-    let interrupted = result?;
     if interrupted {
         println!("interrupted — a real run would write a restart checkpoint here.");
     } else {
         println!("quit.");
     }
     Ok(())
-}
-
-fn run(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    sig: &SignalGuard,
-) -> io::Result<bool> {
-    let mut app = App::new();
-    let mut last = Instant::now();
-    let tick = Duration::from_millis(60); // dummy diagnostic cadence
-
-    loop {
-        if sig.stop_requested() {
-            return Ok(true);
-        }
-        terminal.draw(|frame| live::render(frame, &app.view()))?;
-        if sig.stop_requested() {
-            return Ok(true);
-        }
-        // block up to 33ms for a key (frame pacing + prompt response); a signal
-        // interrupts the poll and is caught by the stop_requested check above.
-        match poll_key_timeout(33) {
-            Some(Key::Char('q')) | Some(Key::Esc) => return Ok(false),
-            Some(Key::Char(' ')) => app.paused = !app.paused,
-            Some(Key::Char('s')) => app.tick(),
-            Some(Key::Tab) | Some(Key::Right) => app.next_tab(),
-            Some(Key::BackTab) | Some(Key::Left) => app.prev_tab(),
-            _ => {}
-        }
-
-        if last.elapsed() >= tick {
-            if app.paused {
-                app.frame = app.frame.wrapping_add(1);
-            } else {
-                app.tick();
-            }
-            last = Instant::now();
-        }
-    }
 }

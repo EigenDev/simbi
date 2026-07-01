@@ -21,6 +21,7 @@ pub mod renderer;
 pub mod exit;
 pub mod input;
 pub mod live;
+pub mod livethread;
 pub mod table;
 pub mod meta_table;
 pub mod term_guard;
@@ -28,7 +29,8 @@ pub mod signal_guard;
 
 pub use exit::ExitKind;
 pub use input::{Key, poll_key, poll_key_timeout};
-pub use live::DiagnosticView;
+pub use live::{Colormap, DiagnosticView, FieldSlice};
+pub use livethread::{Controls, LiveDashboard};
 pub use renderer::{Alignment, Renderer, align_text, truncate};
 pub use table::{MessageType, Table};
 pub use meta_table::{render_metadata, render_tree_buf};

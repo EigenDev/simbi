@@ -1882,6 +1882,87 @@ where
             max_w,
         })
     }
+
+    /// decimate the primitive density to a screen-sized 2D slice for the live
+    /// heatmap: strided-sample the interior (mid-plane in every axis >= 2 for 3D)
+    /// down to at most `max_dim` cells per axis, so the transfer + draw cost is
+    /// bounded by the screen, NOT the grid (a 4096^2 run costs the same as 256^2).
+    /// `None` for a 1D grid (no 2D image) or non-host memory (device run).
+    pub fn field_slice(&self, max_dim: usize) -> Option<FieldDecimation> {
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return None;
+        }
+        let interior = &self.geom.interior;
+        let sp0 = &interior.spaces[0];
+        let sp1 = interior.spaces.get(1)?; // None on a 1D grid
+        let (nx, ny) = (sp0.size(), sp1.size());
+        if nx == 0 || ny == 0 {
+            return None;
+        }
+        let m = max_dim.max(1);
+        let sx = ((nx + m - 1) / m).max(1);
+        let sy = ((ny + m - 1) / m).max(1);
+        let out_w = (nx + sx - 1) / sx;
+        let out_h = (ny + sy - 1) / sy;
+
+        let rho = self.fields.prim.rho.view();
+        let mut data = Vec::with_capacity(out_w * out_h);
+        let mut vmin = f64::INFINITY;
+        let mut vmax = f64::NEG_INFINITY;
+        // base coord: mid-plane on every axis >= 2 (the 3D z-slice); axes 0/1 vary.
+        // `get_mut(1)` keeps this D-safe (compiles for D = 1, unreached there).
+        let mut c: [isize; D] = std::array::from_fn(|ax| {
+            let s = &interior.spaces[ax];
+            s.lo + (s.size() / 2) as isize
+        });
+        for j in 0..out_h {
+            let y0 = sp1.lo + (j * sy) as isize;
+            let y1 = (y0 + sy as isize).min(sp1.hi);
+            for i in 0..out_w {
+                let x0 = sp0.lo + (i * sx) as isize;
+                let x1 = (x0 + sx as isize).min(sp0.hi);
+                // block-average the sx x sy cell block (clamped at the interior edge)
+                // — anti-aliases thin features vs a single nearest sample.
+                let mut sum = 0.0_f64;
+                let mut cnt = 0u32;
+                let mut yy = y0;
+                while yy < y1 {
+                    if let Some(slot) = c.get_mut(1) {
+                        *slot = yy;
+                    }
+                    let mut xx = x0;
+                    while xx < x1 {
+                        c[0] = xx;
+                        sum += *rho.at(c) as f64;
+                        cnt += 1;
+                        xx += 1;
+                    }
+                    yy += 1;
+                }
+                let v = sum / cnt.max(1) as f64;
+                vmin = vmin.min(v);
+                vmax = vmax.max(v);
+                data.push(v as f32);
+            }
+        }
+        Some(FieldDecimation {
+            width: out_w,
+            height: out_h,
+            data,
+            vmin,
+            vmax,
+        })
+    }
+}
+
+/// a screen-sized decimated 2D field for the live heatmap. row-major
+/// `width * height`; the display crate wraps this with a label + colormap.
+pub struct FieldDecimation {
+    pub width: usize,
+    pub height: usize,
+    pub data: Vec<f32>,
+    pub vmin: f64,
+    pub vmax: f64,
 }
 
 // =============================================================================

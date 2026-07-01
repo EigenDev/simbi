@@ -51,8 +51,8 @@ use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage
 use symbi_sim::hydro_ops::scan_c2p_errors;
 use symbi_sim::decomp::{drain_devices, exchange_grid, flatten, unflatten, HaloTransport};
 use symbi_sim::state::{
-    Boundaries, BoundaryType, FieldStore, PrimFieldsGeneric, SimStateGeneric, Timestepping,
-    array_field_zeros, axis_name,
+    Boundaries, BoundaryType, FieldDecimation, FieldStore, PrimFieldsGeneric, SimStateGeneric,
+    Timestepping, array_field_zeros, axis_name,
 };
 use symbi_sim::substrate_seam::KernelSet;
 use std::ops::ControlFlow;
@@ -156,6 +156,99 @@ where
     Mem: MemorySpace + Sync,
     K: KernelSet<NDIM, DOF, Mem, f64>,
 {
+    /// decimate the hierarchy to a screen-sized density heatmap, compositing the
+    /// nested refinement levels: each root cell descends to the FINEST level whose
+    /// `coverage` box contains it (SMR = single nested box per level, ratio 2), so
+    /// the refined region shows its fine detail and the rest shows the coarse grid.
+    /// a single-level hierarchy is just the root decimation. cost is screen-bounded.
+    pub fn field_slice_composite(&self, max_dim: usize) -> Option<FieldDecimation> {
+        // single grid: no coverage to descend, reuse the plain per-state decimation.
+        if self.levels.len() <= 1 {
+            return self.levels[0].state.field_slice(max_dim);
+        }
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return None;
+        }
+        let interior = &self.levels[0].state.geom.interior;
+        let sp0 = &interior.spaces[0];
+        let sp1 = interior.spaces.get(1)?; // None on a 1D grid
+        let (nx, ny) = (sp0.size(), sp1.size());
+        if nx == 0 || ny == 0 {
+            return None;
+        }
+        let m = max_dim.max(1);
+        let sx = ((nx + m - 1) / m).max(1);
+        let sy = ((ny + m - 1) / m).max(1);
+        let out_w = (nx + sx - 1) / sx;
+        let out_h = (ny + sy - 1) / sy;
+        let (lo0, hi0, lo1, hi1) = (sp0.lo, sp0.hi, sp1.lo, sp1.hi);
+
+        let mut data = Vec::with_capacity(out_w * out_h);
+        let mut vmin = f64::INFINITY;
+        let mut vmax = f64::NEG_INFINITY;
+        for j in 0..out_h {
+            let y0 = lo1 + (j * sy) as isize;
+            let y1 = (y0 + sy as isize).min(hi1);
+            for i in 0..out_w {
+                let x0 = lo0 + (i * sx) as isize;
+                let x1 = (x0 + sx as isize).min(hi0);
+                // block-average the root-cell footprint, each root cell resolved to
+                // the finest level covering it.
+                let mut sum = 0.0_f64;
+                let mut cnt = 0u32;
+                let mut ry = y0;
+                while ry < y1 {
+                    let mut rx = x0;
+                    while rx < x1 {
+                        sum += self.sample_finest(rx, ry);
+                        cnt += 1;
+                        rx += 1;
+                    }
+                    ry += 1;
+                }
+                let v = sum / cnt.max(1) as f64;
+                vmin = vmin.min(v);
+                vmax = vmax.max(v);
+                data.push(v as f32);
+            }
+        }
+        Some(FieldDecimation {
+            width: out_w,
+            height: out_h,
+            data,
+            vmin,
+            vmax,
+        })
+    }
+
+    /// resolve density at a ROOT cell (rx, ry) by descending the nested refinement
+    /// boxes: a parent cell inside `coverage` maps to the finer level at ratio 2.
+    /// axes >= 2 are pinned to the mid-plane (the 3D z-slice) and descend with it.
+    fn sample_finest(&self, rx: isize, ry: isize) -> f64 {
+        let root = &self.levels[0].state.geom.interior;
+        let mut idx: [isize; NDIM] = std::array::from_fn(|ax| {
+            let s = &root.spaces[ax];
+            s.lo + (s.size() / 2) as isize
+        });
+        idx[0] = rx;
+        if let Some(slot) = idx.get_mut(1) {
+            *slot = ry;
+        }
+        let mut lvl = 0usize;
+        while lvl + 1 < self.levels.len() {
+            let cov = match &self.levels[lvl].coverage {
+                Some(c) if domain_contains(c, &idx) => c,
+                _ => break,
+            };
+            let finer = &self.levels[lvl + 1].state.geom.interior;
+            idx = std::array::from_fn(|ax| {
+                finer.spaces[ax].lo + (idx[ax] - cov.spaces[ax].lo) * 2
+            });
+            lvl += 1;
+        }
+        *self.levels[lvl].state.fields.prim.rho.view().at(idx) as f64
+    }
+
     /// seed every fine level's interior from its parent by CONSERVATIVE
     /// prolongation at the hierarchy's `prolong_order` (= interior reconstruction
     /// order + 1, the same order the coarse-fine ghost prolongation uses). the IC
@@ -1086,6 +1179,11 @@ fn gravity_only<const D: usize>(
         }
     });
     coll
+}
+
+/// whether an absolute index is inside a domain (per-axis half-open [lo, hi)).
+fn domain_contains<const D: usize>(dom: &Domain<D>, idx: &[isize; D]) -> bool {
+    (0..D).all(|ax| idx[ax] >= dom.spaces[ax].lo && idx[ax] < dom.spaces[ax].hi)
 }
 
 /// the coverage extended by one cell per axis, clamped to the interior — the

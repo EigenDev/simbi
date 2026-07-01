@@ -29,7 +29,9 @@ use symbi::sim::refinement::transfer::prolong_field;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::symbi_grid::Field;
 use symbi_algebra::Tensor;
-use symbi_display::{ExitKind, Key, ScreenGuard, SignalGuard, Table, poll_key};
+use symbi_display::{
+    Colormap, ExitKind, FieldSlice, LiveDashboard, ScreenGuard, SignalGuard, Table,
+};
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
 use symbi_hydro::energy::IsoModel;
@@ -791,6 +793,11 @@ where
     // leaves no scrollback trail; on exit we restore the primary buffer and
     // re-render one static final frame so the result persists.
     let mut screen = ScreenGuard::enter();
+    // tier 2a: a render thread owns the terminal + input and draws at ~30 fps, so
+    // tab / pause respond instantly regardless of step rate. `None` off a tty (the
+    // static string path renders headless). the solver publishes snapshots + reads
+    // its control flags rather than polling keys inline.
+    let mut dash = LiveDashboard::spawn();
 
     // prime the IC: derive primitives (c2p) + cell-centered B (bcell-from-bface)
     // from the seeded conserved/face state BEFORE snapshotting, so the t=0
@@ -835,13 +842,12 @@ where
             }
         }
         set_row(&mut table, i0, t0, d0, t_final, 0.0);
-        table.refresh();
+        publish_or_refresh(dash.as_ref(), &mut table);
     }
 
     // live-dashboard control flags, toggled by keypresses inside the callback.
     // `paused` parks the integrator (no step) while keeping the ui live; `user_quit`
     // requests a graceful stop, handled exactly like a caught signal.
-    let mut paused = false;
     let mut user_quit = false;
 
     hier.evolve_with_callback(cfg.t_final, 1, |h| {
@@ -849,34 +855,33 @@ where
         let (iter, time, dt) = (st.iteration, st.time, st.dt);
         let mut dirty = false;
 
-        // live-dashboard keys: tab (switch panel), space (pause), s (single step
-        // while paused), w (force checkpoint), q (graceful quit). Ctrl-C never
-        // arrives here — ISIG turns it into SIGINT for the guard.
+        // live-dashboard input (tier 2a): the render thread owns the keys + sets
+        // control flags; the solver only READS them. space parks the integrator
+        // here (the render thread keeps drawing); q -> graceful quit; s -> single
+        // step; w -> force checkpoint. Ctrl-C is still a SIGINT to the guard.
         let mut want_cp = false;
-        loop {
-            let mut step_now = false;
-            while let Some(key) = poll_key() {
-                match key {
-                    Key::Char('q') => user_quit = true,
-                    Key::Char(' ') => paused = !paused,
-                    Key::Char('s') => step_now = true,
-                    Key::Char('w') => want_cp = true,
-                    other => {
-                        if table.handle_key(other) {
-                            dirty = true;
-                        }
-                    }
+        if let Some(d) = dash.as_ref() {
+            let c = d.controls();
+            if c.quit() {
+                user_quit = true;
+            }
+            if c.take_checkpoint() {
+                want_cp = true;
+            }
+            // park while paused (no step); the render thread keeps the ui alive.
+            while c.paused() && !user_quit && !guard.stop_requested() {
+                if c.quit() {
+                    user_quit = true;
+                    break;
                 }
+                if c.take_step() {
+                    break;
+                }
+                if c.take_checkpoint() {
+                    want_cp = true;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
             }
-            table.set_paused(paused);
-            // parked while paused: redraw at ~30fps but take no step, until
-            // unpaused, single-stepped, quit, or interrupted by a signal.
-            if paused && !user_quit && !step_now && !guard.stop_requested() {
-                table.refresh();
-                std::thread::sleep(std::time::Duration::from_millis(30));
-                continue;
-            }
-            break;
         }
 
         // manual checkpoint (w): write the current state immediately, off-schedule.
@@ -1033,14 +1038,40 @@ where
             if let Some(cd) = st.conservation_diag() {
                 table.push_conservation(cd.mass, cd.energy, cd.div_b, cd.max_w);
             }
+            // live field heatmap: a screen-sized decimated density slice (2D/3D-mid;
+            // None for 1D or device runs), compositing the nested refinement levels
+            // so the refined region shows its fine detail. cost bounded by the
+            // ~200-cell cap, not the grid size.
+            if let Some(fd) = h.field_slice_composite(200) {
+                let label = if cfg.dims >= 3 {
+                    "density · inferno · z-slice"
+                } else {
+                    "density · inferno"
+                };
+                table.set_field(Some(FieldSlice {
+                    label: label.to_string(),
+                    width: fd.width,
+                    height: fd.height,
+                    data: fd.data,
+                    vmin: fd.vmin,
+                    vmax: fd.vmax,
+                    cmap: Colormap::Inferno,
+                }));
+            }
             dirty = true;
         }
 
         if dirty {
-            table.refresh();
+            publish_or_refresh(dash.as_ref(), &mut table);
         }
         std::ops::ControlFlow::Continue(())
     })?;
+
+    // the run loop is done: stop + join the render thread so the main thread has
+    // sole terminal ownership for leaving the alt screen + printing the exit frame.
+    if let Some(d) = dash.as_mut() {
+        d.shutdown();
+    }
 
     // interrupted (a caught signal or a user 'q'): the restart checkpoint is
     // already written. surface the halt as the amber interrupt exit frame on the
@@ -1112,6 +1143,15 @@ fn set_row(table: &mut Table, iteration: u64, time: f64, dt: f64, t_final: f64, 
         &humanize_rate(rate_zcps),
     ]);
     table.set_progress((frac * 100.0) as usize);
+}
+
+/// draw one frame: publish a snapshot to the render thread (live tty, tier 2a) or
+/// render the static string frame (headless, no render thread).
+fn publish_or_refresh(dash: Option<&LiveDashboard>, table: &mut Table) {
+    match dash {
+        Some(d) => d.publish(table.diagnostic_view()),
+        None => table.refresh(),
+    }
 }
 
 /// si-suffix a zone-cycle rate (k/M/G) for compact display. zero/undefined
