@@ -67,4 +67,19 @@ impl<S: Scalar, const D: usize> SpatialMetric<S, D> {
     pub fn project_transverse(&self, v: &Tensor<S, D>, nhat: &Tensor<S, D>) -> Tensor<S, D> {
         *v - nhat.scale(self.contract_contra(v, nhat))
     }
+
+    /// RAISE a COVARIANT vector w_i to its CONTRAVARIANT form `w^i = gamma^{ij} w_j`. flat /
+    /// orthonormal -> identity -> `w` bit-identically (the optimizer folds the identity mul). the
+    /// Valencia c2p recovers the CONTRAVARIANT velocity `v^i = gamma^{ij} S_j / (D + tau + p)` from
+    /// the covariant conserved momentum `S_j` this way.
+    pub fn raise(&self, w: &Tensor<S, D>) -> Tensor<S, D> {
+        self.gamma_inv.mul_vec(w)
+    }
+
+    /// LOWER a CONTRAVARIANT vector v^i to its COVARIANT form `v_i = gamma_{ij} v^j`. flat ->
+    /// identity -> `v` bit-identically. the Valencia conserved momentum is the LOWERED velocity:
+    /// `S_i = rho h W^2 v_i = rho h W^2 gamma_{ij} v^j`.
+    pub fn lower(&self, v: &Tensor<S, D>) -> Tensor<S, D> {
+        self.gamma.mul_vec(v)
+    }
 }

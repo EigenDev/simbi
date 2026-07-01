@@ -70,10 +70,13 @@ pub fn srhd_recover<S: Scalar, const D: usize>(
         (cur - prev).abs().cmp_lt(tol)
     });
 
-    // recover primitive variables: 3-velocity v = S/(tau+D+p), W = 1/sqrt(1-v.v), rho = D/W.
+    // recover primitives: the CONTRAVARIANT 3-velocity v^i = gamma^{ij} S_j / (tau+D+p) (RAISE the
+    // covariant conserved momentum), W = 1/sqrt(1 - v.v), rho = D/W. flat/orthonormal -> gamma^{ij} =
+    // identity -> v^i = S_i/et bit-identically; a real (GR) gamma raises the index (the Valencia
+    // recovery) so `norm_sq_contra(v)` = gamma_ij v^i v^j = |S|^2/et^2 is consistent with the Newton's
+    // norm_sq_cov (without the raise, S_i/et is the COVARIANT velocity — wrong for non-identity gamma).
     let et = tau + dd + p_eq;
-    let vel = cons.mom.map(|s| s / et);
-    // |v|^2 = gamma_{ij} v^i v^j (v^i CONTRAVARIANT). flat -> identity -> euclidean v.v (bit-identical).
+    let vel = metric.raise(&cons.mom).map(|s| s / et);
     let ww = lorentz_factor(metric.norm_sq_contra(&vel));
     let rho = dd / ww;
     Prim { rho, vel, pre: p_eq }
