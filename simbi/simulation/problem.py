@@ -501,7 +501,7 @@ class SimbiProblem(BaseModel):
     @property
     def is_relativistic(self) -> bool:
         """check if simulation is relativistic."""
-        return self.regime in [Regime.SRHD, Regime.SRMHD]
+        return self.regime in [Regime.RHD, Regime.SRMHD]
 
     @computed_field
     @property

@@ -326,7 +326,7 @@ fn regime_name<R: Regime<f64, D>, const D: usize>(r: &R) -> &'static str {
             "imhd"
         }
     } else if r.is_relativistic() {
-        "srhd"
+        "rhd"
     } else if r.has_energy() {
         "newtonian"
     } else {

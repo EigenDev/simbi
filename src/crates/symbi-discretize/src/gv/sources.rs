@@ -25,8 +25,8 @@ use symbi_hydro::spatial_metric::SpatialMetric;
 /// expression differs (the "one operator, regime supplies its physics" rule). cartesian = none.
 #[derive(Clone, Copy)]
 pub enum GeoSource {
-    /// hydro / SRHD: well-balanced pressure + (ndim>=2) velocity-quadratic centrifugal/coriolis,
-    /// regime-agnostic via the CONSERVED momentum (Newtonian `mom=rho v`, SRHD `mom=rho h W^2 v`).
+    /// hydro / RHD: well-balanced pressure + (ndim>=2) velocity-quadratic centrifugal/coriolis,
+    /// regime-agnostic via the CONSERVED momentum (Newtonian `mom=rho v`, RHD `mom=rho h W^2 v`).
     Hydro { inertial: bool },
     /// RMHD: pressure + inertial + magnetic tension, from `rmhd_source_quantities` (cons.mom
     /// carries B-momentum so it can't serve the source).
@@ -139,7 +139,7 @@ fn geometric_momentum_sources_gv(
 
 
 /// trace the regime's geometric momentum source quantities + form the per-component source.
-/// HYDRO/SRHD: total pressure = `prim.pre`, gas momentum density * v = the CONSERVED momentum
+/// HYDRO/RHD: total pressure = `prim.pre`, gas momentum density * v = the CONSERVED momentum
 /// (cons.mom IS rho v / rho h W^2 v), no magnetic term. RMHD: the gas + magnetic quantities
 /// from symbi-hydro's `rmhd_source_quantities` (the SAME carrier-generic source the RMHD flux
 /// uses), gas_mom = wgam2*v, bmu = the spatial four-vector. `cons_mom` is the already-read

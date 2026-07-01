@@ -1,10 +1,10 @@
 // =============================================================================
-// srhd/cons.rs
+// rhd/cons.rs
 //
-// the SRHD cons->prim recovery — a carrier-generic Newton-Raphson on the pressure
+// the RHD cons->prim recovery — a carrier-generic Newton-Raphson on the pressure
 // root (`Scalar::iterate`), then the algebraic velocity/Lorentz/density recovery.
-// branch-free core (`srhd_recover`, what the substrate c2p kernel computes) + the
-// host wrapper (`srhd_to_primitive`) that adds the C2pResult diagnostics post-hoc.
+// branch-free core (`rhd_recover`, what the substrate c2p kernel computes) + the
+// host wrapper (`rhd_to_primitive`) that adds the C2pResult diagnostics post-hoc.
 // =============================================================================
 
 use symbi_algebra::{Tensor, OrderedNumeric};
@@ -13,23 +13,23 @@ use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::state::{Prim, Cons};
 use crate::c2p_result::C2pResult;
-use crate::srhd::lorentz_factor;
+use crate::rhd::lorentz_factor;
 
-/// maximum newton-raphson iterations for SRHD cons2prim on the HOST (early-break).
+/// maximum newton-raphson iterations for RHD cons2prim on the HOST (early-break).
 /// the substrate kernel bakes its own fixed count (build.rs passes 20 to the gv
-/// builder) — both share the `srhd_recover` body; the count is a knob, not physics.
+/// builder) — both share the `rhd_recover` body; the count is a knob, not physics.
 const MAX_ITER: usize = 100;
 
-/// the branch-free SRHD cons->prim recovery — THE single-source physics: the pressure
+/// the branch-free RHD cons->prim recovery — THE single-source physics: the pressure
 /// is the root of a 1D equation found by a carrier-generic Newton (`Scalar::iterate`),
 /// then velocity/Lorentz/density follow algebraically. NO floors, NO guards — exactly
-/// what the substrate c2p kernel computes (the `srhd_to_primitive` wrapper adds the
+/// what the substrate c2p kernel computes (the `rhd_to_primitive` wrapper adds the
 /// host C2pResult diagnostics post-hoc, matching `Newtonian::to_primitive`).
 ///
 /// EOS-generic: uses `eos.pressure()` / `eos.sound_speed_sq()`, not gamma. traced at
-/// `S = Gv` (`symbi_discretize::srhd_c2p_gv`) it lowers to the IterateInline c2p kernel;
+/// `S = Gv` (`symbi_discretize::rhd_c2p_gv`) it lowers to the IterateInline c2p kernel;
 /// at `S = f64/f32` it runs as a plain early-breaking loop. `max_iter` caps the Newton.
-pub fn srhd_recover<S: Scalar, const D: usize>(
+pub fn rhd_recover<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     cons: &Cons<S, D>,
     metric: &SpatialMetric<S, D>,
@@ -82,14 +82,14 @@ pub fn srhd_recover<S: Scalar, const D: usize>(
     Prim { rho, vel, pre: p_eq }
 }
 
-/// the host SRHD cons->prim: the branch-free `srhd_recover` plus post-hoc C2pResult
+/// the host RHD cons->prim: the branch-free `rhd_recover` plus post-hoc C2pResult
 /// diagnostics. no silent floor — the value is the raw recovered state, the ErrorCode
 /// is the explicit signal (matches `Newtonian::to_primitive`; feedback_no_silent_floors).
 ///
 /// **host-only** (Tier 1.7): `S: OrderedNumeric` because the diagnostic check uses
-/// native `<` / `<=` / `==` on a host scalar. the kernel path is `srhd_recover` above
+/// native `<` / `<=` / `==` on a host scalar. the kernel path is `rhd_recover` above
 /// (carrier-generic over `S: Scalar`), not this wrapper.
-pub(crate) fn srhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
+pub(crate) fn rhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     eos: &impl Eos<S>,
     cons: &Cons<S, D>,
 ) -> C2pResult<Prim<S, D>> {
@@ -107,9 +107,9 @@ pub(crate) fn srhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
 
     // flat/orthonormal frame -> the spatial metric is identity (bit-identical to euclidean norms);
     // a genuine GR metric is threaded here once B3 densitizes the conserved state.
-    let prim = srhd_recover(eos, cons, &SpatialMetric::flat(), MAX_ITER);
+    let prim = rhd_recover(eos, cons, &SpatialMetric::flat(), MAX_ITER);
 
-    // post-hoc diagnostics on the raw recovered state (shared SRHD/RMHD contract; tier-1 #5).
+    // post-hoc diagnostics on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
     let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
     if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }
@@ -118,7 +118,7 @@ pub(crate) fn srhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::srhd::Srhd;
+    use crate::rhd::Rhd;
     use crate::regime::Regime;
     use crate::eos::IdealGas;
 
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn roundtrip_stationary() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn roundtrip_mildly_relativistic() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.5]), pre: 1.0 };
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
@@ -153,7 +153,7 @@ mod tests {
     #[test]
     fn roundtrip_ultra_relativistic() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.99]), pre: 10.0 };
         let cons = regime.to_conserved(&eos, &prim);
         let prim2 = regime.to_primitive(&eos, &cons).unwrap();
@@ -165,7 +165,7 @@ mod tests {
     #[test]
     fn roundtrip_3d() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim {
             rho: 2.0,
             vel: Tensor::new([0.3, -0.2, 0.1]),
@@ -184,7 +184,7 @@ mod tests {
     fn roundtrip_high_density_ratio() {
         // density contrast like a relativistic sod problem
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         for &(rho, pre) in &[(10.0, 13.33), (1.0, 1e-6), (1e-2, 1e-4)] {
             let prim = Prim { rho, vel: Tensor::new([0.0]), pre };
             let cons = regime.to_conserved(&eos, &prim);
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn negative_density_detected() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let cons = Cons { den: -1.0, mom: Tensor::new([0.0]), nrg: 1.0 };
         let result = regime.to_primitive(&eos, &cons);
         assert!(result.error.contains(crate::c2p_result::ErrorCode::NEGATIVE_DENSITY));
@@ -215,14 +215,14 @@ mod tests {
     #[test]
     fn unphysical_cons_returns_error() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         // huge momentum, tiny density+energy -> superluminal or negative pressure
         let cons = Cons { den: 1e-14, mom: Tensor::new([100.0]), nrg: 1e-14 };
         let result = regime.to_primitive(&eos, &cons);
         assert!(result.error.is_err());
     }
 
-    // DELIBERATE no-clamp pin: the branch-free kernel body (`srhd_recover`, what the
+    // DELIBERATE no-clamp pin: the branch-free kernel body (`rhd_recover`, what the
     // substrate c2p kernel computes) must return a NON-FINITE prim for unphysical cons
     // (s_mag > d + tau => v_sq >= 1 => 1/sqrt(1-v_sq) blows up). the newton_fg step is
     // unguarded and the outer loop detects !isfinite; this is
@@ -236,7 +236,7 @@ mod tests {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         // s_mag = 10 >> d + tau = 1.1, so the very first Newton iterate has v_sq > 1.
         let cons: Cons<f64, 1> = Cons { den: 1.0, mom: Tensor::new([10.0]), nrg: 0.1 };
-        let prim = srhd_recover(&eos, &cons, &SpatialMetric::flat(), MAX_ITER);
+        let prim = rhd_recover(&eos, &cons, &SpatialMetric::flat(), MAX_ITER);
         let finite = prim.rho.is_finite() && prim.pre.is_finite() && prim.vel[0].is_finite();
         assert!(
             !finite,
@@ -247,9 +247,9 @@ mod tests {
     }
 
     #[test]
-    fn valid_srhd_state_is_ok() {
+    fn valid_rhd_state_is_ok() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.3]), pre: 1.0 };
         let cons = regime.to_conserved(&eos, &prim);
         let result = regime.to_primitive(&eos, &cons);

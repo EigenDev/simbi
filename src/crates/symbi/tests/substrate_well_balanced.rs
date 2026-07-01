@@ -22,7 +22,7 @@
 
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -30,7 +30,7 @@ use symbi_geometry::{Cylindrical, Spherical};
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -83,15 +83,15 @@ fn seed_uniform_iso<M, const D: usize>(
     }
 }
 
-fn seed_uniform_srhd<M, const D: usize>(
-    sim: &mut SimState<Srhd, D, M, IdealGas<f64>, CpuSpace, HostMemory>,
+fn seed_uniform_rhd<M, const D: usize>(
+    sim: &mut SimState<Rhd, D, M, IdealGas<f64>, CpuSpace, HostMemory>,
     rho: f64,
     pre: f64,
 ) where
     M: symbi_geometry::Metric<f64, D> + Copy,
 {
     // v=0 => W=1: D=rho, S=0, tau=p/(gamma-1).
-    let cnrg = sim.fields.cons.nrg_field().expect("Srhd cons.nrg");
+    let cnrg = sim.fields.cons.nrg_field().expect("Rhd cons.nrg");
     for c in sim.geom.interior.iter() {
         sim.fields.cons.den.view_mut().set(c, rho);
         for k in 0..D {
@@ -198,11 +198,11 @@ fn well_balanced_spherical_1d_iso() {
 }
 
 #[test]
-fn well_balanced_spherical_1d_srhd() {
-    // srhd at v=0 (W=1): tau = p/(gamma-1), S=0. the curvilinear source reads prim.pre; the
+fn well_balanced_spherical_1d_rhd() {
+    // rhd at v=0 (W=1): tau = p/(gamma-1), S=0. the curvilinear source reads prim.pre; the
     // relativistic momentum density (cons.mom = rho h W^2 v = 0) makes the inertial vanish.
-    let mut sph = SimState::<Srhd, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>::build(
-        Srhd,
+    let mut sph = SimState::<Rhd, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>::build(
+        Rhd,
         IdealGas { gamma: GAMMA },
         Spherical,
     )
@@ -211,23 +211,23 @@ fn well_balanced_spherical_1d_srhd() {
     .spacing([DR])
     .boundaries(Boundaries::uniform(BoundaryType::Reflect))
     .allocate()
-    .expect("srhd spherical sim")
+    .expect("rhd spherical sim")
     .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
     .build();
-    seed_uniform_srhd(&mut sph, 1.0, 1.0);
+    seed_uniform_rhd(&mut sph, 1.0, 1.0);
 
-    let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
-    evolve(&mut sph, &sub, T_FINAL).expect("srhd spherical well-balanced evolution failed");
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
+    evolve(&mut sph, &sub, T_FINAL).expect("rhd spherical well-balanced evolution failed");
 
     for c in sph.geom.interior.iter() {
         let rho = *sph.fields.prim.rho.view().at(c);
         let p = *sph.fields.prim.pre_field().expect("prim.pre").view().at(c);
-        assert!(rho.is_finite() && rho > 0.0, "srhd: bad density {rho} at {c:?}");
-        assert!(p.is_finite() && p > 0.0, "srhd: bad pressure {p} at {c:?}");
+        assert!(rho.is_finite() && rho > 0.0, "rhd: bad density {rho} at {c:?}");
+        assert!(p.is_finite() && p > 0.0, "rhd: bad pressure {p} at {c:?}");
     }
     let mv = max_radial_vel(&sph);
-    assert!(mv < EPS, "srhd spherical NOT well-balanced: max |v_r| = {mv:e} over {} steps", sph.iteration);
-    println!("WELL-BALANCED SPHERICAL SRHD: {} steps, max |v_r| {:e}", sph.iteration, mv);
+    assert!(mv < EPS, "rhd spherical NOT well-balanced: max |v_r| = {mv:e} over {} steps", sph.iteration);
+    println!("WELL-BALANCED SPHERICAL RHD: {} steps, max |v_r| {:e}", sph.iteration, mv);
 }
 
 // =============================================================================

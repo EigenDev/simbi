@@ -2,23 +2,23 @@
 // cylindrical_regime_coverage.rs
 //
 // fills the cylindrical hydro matrix: 1D (radial), 2D (r-phi disk), 3D (r,phi,z) for
-// ALL THREE EOS regimes (iso / newton-adiabatic / srhd) — the natural DOF == NDIM
+// ALL THREE EOS regimes (iso / newton-adiabatic / rhd) — the natural DOF == NDIM
 // plane, dispatched through geom_suffix to the "_cyl" godunov + wave-speed (the
 // c2p/flux/snapshot/ghost reuse the cartesian ncomp==NDIM instances). the geometric
 // source falls out of the Geom and is SHARED across the three regimes
 // (`GeoSource::Hydro`), so two newton physics checks prove the cyl 1D + 3D source is
-// active + correctly signed, and the iso/srhd cells are NaN-free-smoke validated
+// active + correctly signed, and the iso/rhd cells are NaN-free-smoke validated
 // (their flux/c2p closures are already validated in cartesian/spherical).
 //
 //   newton: cyl-1D uniform radial OUTFLOW rarefies as rho_dot = -rho*v_r/r (the 1/r
 //           area-weighted divergence); cyl-3D uniform SWIRL drives v_r*r ~ v0^2*t
 //           (the centrifugal source, with z gridded but inert).
-//   iso/srhd: each runs NaN-free + positive over a short evolve on cyl 1D/2D/3D.
+//   iso/rhd: each runs NaN-free + positive over a short evolve on cyl 1D/2D/3D.
 // =============================================================================
 
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -27,7 +27,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -142,7 +142,7 @@ fn cyl_3d_swirl_centrifugal_outflow() {
         "3D centrifugal magnitude off: v_r*r mean={mean:.4e}, expected ~v0^2*t={expected:.4e}");
 }
 
-// ----- iso + srhd: NaN-free smokes across cyl 1D/2D/3D ----------------------------
+// ----- iso + rhd: NaN-free smokes across cyl 1D/2D/3D ----------------------------
 
 #[test]
 fn cyl_iso_runs_all_dims() {
@@ -215,67 +215,67 @@ fn cyl_iso_runs_all_dims() {
 }
 
 #[test]
-fn cyl_srhd_runs_all_dims() {
-    // rest-frame srhd state with a mild density bump (v=0 -> W=1, D=rho, S=0,
+fn cyl_rhd_runs_all_dims() {
+    // rest-frame rhd state with a mild density bump (v=0 -> W=1, D=rho, S=0,
     // tau=p/(gamma-1)); evolve a few steps NaN-free on cyl 1D/2D/3D.
     // 1D
     {
-        type Sim = SimStateGeneric<Srhd, 1, 1, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+        type Sim = SimStateGeneric<Rhd, 1, 1, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
         let (nr, r_lo, dr) = (48usize, 1.0_f64, 1.0 / 48.0);
         // rest-frame (v=0, W=1): the prim -> cons map yields D=rho, S=0, tau=p/(gamma-1).
-        let mut sim = Sim::build(Srhd, IdealGas { gamma: GAMMA }, Cylindrical)
+        let mut sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cylindrical)
             .cells([nr]).origin([r_lo]).spacing([dr])
             .boundaries(cyl_bc()).cfl(0.3)
             .allocate()
-            .expect("srhd cyl 1D ctor")
+            .expect("rhd cyl 1D ctor")
             .set_initial(|[r]| {
                 let rho = 1.0 + 0.3 * (-((r - 1.5) / 0.2).powi(2)).exp();
                 Prim { rho, vel: Tensor::new([0.0]), pre: 1.0 }
             })
             .build();
-        let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &sim.geom.allocated);
-        evolve(&mut sim, &sub, 0.03).expect("srhd cyl 1D evolve");
-        assert_positive_finite_rho(&sim.fields.prim.rho, &sim.geom.interior, "srhd cyl 1D");
+        let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &sim.geom.allocated);
+        evolve(&mut sim, &sub, 0.03).expect("rhd cyl 1D evolve");
+        assert_positive_finite_rho(&sim.fields.prim.rho, &sim.geom.interior, "rhd cyl 1D");
     }
     // 2D r-phi
     {
-        type Sim = SimStateGeneric<Srhd, 2, 2, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+        type Sim = SimStateGeneric<Rhd, 2, 2, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
         let (nr, nphi, r_lo, dr) = (24usize, 24usize, 0.6_f64, 0.8 / 24.0);
         let dphi = TWO_PI / nphi as f64;
         // rest frame: p=1 (cnrg=p/(gamma-1)=1/(gamma-1)), v=0.
-        let mut sim = Sim::build(Srhd, IdealGas { gamma: GAMMA }, Cylindrical)
+        let mut sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cylindrical)
             .cells([nr, nphi]).origin([r_lo, 0.0]).spacing([dr, dphi])
             .boundaries(cyl_bc()).cfl(0.3)
             .allocate()
-            .expect("srhd cyl 2D ctor")
+            .expect("rhd cyl 2D ctor")
             .set_initial(|[r, _phi]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.0) / 0.2).powi(2)).exp();
                 Prim { rho, vel: Tensor::new([0.0, 0.0]), pre: 1.0 }
             })
             .build();
-        let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &sim.geom.allocated);
-        evolve(&mut sim, &sub, 0.03).expect("srhd cyl 2D evolve");
-        assert_positive_finite_rho(&sim.fields.prim.rho, &sim.geom.interior, "srhd cyl 2D");
+        let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.3, &sim.geom.allocated);
+        evolve(&mut sim, &sub, 0.03).expect("rhd cyl 2D evolve");
+        assert_positive_finite_rho(&sim.fields.prim.rho, &sim.geom.interior, "rhd cyl 2D");
     }
     // 3D
     {
-        type Sim = SimStateGeneric<Srhd, 3, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+        type Sim = SimStateGeneric<Rhd, 3, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
         let (nr, nphi, nz, r_lo, dr) = (16usize, 12usize, 4usize, 1.0_f64, 1.0 / 16.0);
         let (dphi, dz) = (TWO_PI / nphi as f64, 0.5 / nz as f64);
         // rest frame: p=1 (cnrg=1/(gamma-1)), v=0.
-        let mut sim = Sim::build(Srhd, IdealGas { gamma: GAMMA }, Cylindrical)
+        let mut sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cylindrical)
             .cells([nr, nphi, nz]).origin([r_lo, 0.0, 0.0]).spacing([dr, dphi, dz])
             .boundaries(cyl_bc()).cfl(0.3)
             .allocate()
-            .expect("srhd cyl 3D ctor")
+            .expect("rhd cyl 3D ctor")
             .set_initial(|[r, _phi, _z]| {
                 let rho = 1.0 + 0.2 * (-((r - 1.5) / 0.3).powi(2)).exp();
                 Prim { rho, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 }
             })
             .build();
-        let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &sim.geom.allocated);
-        evolve(&mut sim, &sub, 0.02).expect("srhd cyl 3D evolve");
-        assert_positive_finite_rho(&sim.fields.prim.rho, &sim.geom.interior, "srhd cyl 3D");
+        let sub = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &sim.geom.allocated);
+        evolve(&mut sim, &sub, 0.02).expect("rhd cyl 3D evolve");
+        assert_positive_finite_rho(&sim.fields.prim.rho, &sim.geom.interior, "rhd cyl 3D");
     }
 }
 

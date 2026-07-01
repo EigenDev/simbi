@@ -25,7 +25,7 @@
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
 use symbi::regimes::substrate_kernels::Solver;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -34,7 +34,7 @@ use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::regime::Regime;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -208,17 +208,17 @@ fn iso_free_expansion_stays_self_similar() {
     assert!(worst_vel < 1e-3, "iso velocity left the homologous profile: {worst_vel:.3e}");
 }
 
-/// srhd free expansion: relativistic coasting is the same exact solution —
+/// rhd free expansion: relativistic coasting is the same exact solution —
 /// every parcel moves at constant velocity, so the comoving profile is static
 /// and the rest-frame density per comoving cell dilutes as a^-3 (W(x) is
 /// time-independent). v_edge = adot/2 = 0.125c keeps the run honest but
 /// subluminal everywhere.
 #[test]
-fn srhd_free_expansion_stays_self_similar() {
-    type SrhdSim = SimState<Srhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+fn rhd_free_expansion_stays_self_similar() {
+    type RhdSim = SimState<Rhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let (rho0, p0, adot, t_final) = (1.0, 1e-3, 0.25, 2.0);
     let dx = 1.0 / N as f64;
-    let mut sim = SrhdSim::build(Srhd, IdealGas { gamma: GAMMA }, Cartesian)
+    let mut sim = RhdSim::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N; 3])
         .origin([-0.5; 3])
         .spacing([dx; 3])
@@ -243,7 +243,7 @@ fn srhd_free_expansion_stays_self_similar() {
             cnrg.view_mut().set(c, cons.nrg);
         }
     }
-    let k = SrhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, &sim.geom.allocated);
+    let k = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, &sim.geom.allocated);
     evolve(&mut sim, &k, t_final).unwrap();
 
     let a = sim.motion.a;
@@ -266,12 +266,12 @@ fn srhd_free_expansion_stays_self_similar() {
         }
     }
     eprintln!(
-        "[mesh-motion] srhd: a = {a:.3}  |d(rho a^3)| {worst_rho:.2e}  \
+        "[mesh-motion] rhd: a = {a:.3}  |d(rho a^3)| {worst_rho:.2e}  \
          |d(p a^(3g))| {worst_pre:.2e}  |dv|/v {worst_vel:.2e}"
     );
-    assert!(worst_rho < 2e-2, "srhd density broke self-similarity: {worst_rho:.3e}");
-    assert!(worst_pre < 8e-2, "srhd pressure broke self-similarity: {worst_pre:.3e}");
-    assert!(worst_vel < 1e-2, "srhd velocity left the homologous profile: {worst_vel:.3e}");
+    assert!(worst_rho < 2e-2, "rhd density broke self-similarity: {worst_rho:.3e}");
+    assert!(worst_pre < 8e-2, "rhd pressure broke self-similarity: {worst_pre:.3e}");
+    assert!(worst_vel < 1e-2, "rhd velocity left the homologous profile: {worst_vel:.3e}");
 }
 
 /// uniform translation, the strongest possible moving-mesh demonstration: a

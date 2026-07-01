@@ -144,7 +144,7 @@ impl Solver {
         match self {
             Solver::Hlle => true,
             // HLLC resolves the gas contact in the normal flux. valid for every regime with a
-            // contact-resolving HLLC flux kernel: all hydro/SRHD, plus the energy-carrying MHD
+            // contact-resolving HLLC flux kernel: all hydro/RHD, plus the energy-carrying MHD
             // regimes NMHD and RMHD (the UCT edge EMF reduces to the HLL EMF for B_x != 0 — the
             // contact carries no transverse field, M&DZ p.11 — so HLLC-MHD = HLLC flux + HLL EMF).
             // EXCLUDED: isothermal MHD (no thermal contact, no HLLC flux kernel built).
@@ -166,7 +166,7 @@ impl Solver {
 pub enum RegimeKind {
     Newtonian,
     IsoNewtonian,
-    Srhd,
+    Rhd,
     Rmhd,
     NewtonianMhd,
     IsoMhd,
@@ -178,7 +178,7 @@ impl RegimeKind {
         match R::SPEC.name {
             "newtonian" => RegimeKind::Newtonian,
             "iso_newtonian" => RegimeKind::IsoNewtonian,
-            "srhd" => RegimeKind::Srhd,
+            "rhd" => RegimeKind::Rhd,
             "rmhd" => RegimeKind::Rmhd,
             "newtonian_mhd" => RegimeKind::NewtonianMhd,
             "iso_mhd" => RegimeKind::IsoMhd,
@@ -199,13 +199,13 @@ mod solver_matrix_tests {
     use super::{RegimeKind, Solver};
 
     // the (solver, regime) validity matrix MUST mirror the dispatch_flux runtime assert:
-    // hydro/SRHD => HLLE + HLLC valid, HLLD invalid; MHD => HLLE + HLLD valid, HLLC invalid.
+    // hydro/RHD => HLLE + HLLC valid, HLLD invalid; MHD => HLLE + HLLD valid, HLLC invalid.
     #[test]
     fn valid_for_matrix() {
         let hydro = [
             RegimeKind::Newtonian,
             RegimeKind::IsoNewtonian,
-            RegimeKind::Srhd,
+            RegimeKind::Rhd,
         ];
         let mhd = [
             RegimeKind::Rmhd,

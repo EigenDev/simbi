@@ -24,7 +24,7 @@
 //  let lc = compute_lightcurve_from_events(&events, obs_hat, &nus, z, d_l, &tbins);
 // =============================================================================
 
-/// one lab-frame photon packet. polarization is zero for SRHD (no field geometry);
+/// one lab-frame photon packet. polarization is zero for RHD (no field geometry);
 /// SRMHD runs populate the stokes parameters from the magnetic-field geometry.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PhotonEvent {

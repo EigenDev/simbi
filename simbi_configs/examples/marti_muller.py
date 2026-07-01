@@ -32,7 +32,7 @@ class MartiMuller(SimbiProblem):
         ProblemParam(CoordSystem.CARTESIAN, description="coordinate system"),
     ]
     regime: Annotated[
-        Regime, ProblemParam(Regime.SRHD, description="physics regime")
+        Regime, ProblemParam(Regime.RHD, description="physics regime")
     ]
     x1_spacing: Annotated[
         CellSpacing,

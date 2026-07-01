@@ -1,7 +1,7 @@
 // =============================================================================
 // c2p.rs
 //
-// cons->prim recovery kernel builders (adiabatic / iso / srhd / rmhd / nmhd / imhd).
+// cons->prim recovery kernel builders (adiabatic / iso / rhd / rmhd / nmhd / imhd).
 // =============================================================================
 
 use super::*;
@@ -79,17 +79,17 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId
 }
 
 
-/// trace the REAL SRHD c2p — symbi-hydro's branch-free `srhd_recover` (the iterative
+/// trace the REAL RHD c2p — symbi-hydro's branch-free `rhd_recover` (the iterative
 /// relativistic cons->prim: a carrier-generic Newton on the pressure root, then the
 /// algebraic velocity/Lorentz/density recovery) at `S = Gv`. the Newton lowers to one
 /// `Op::IterateInline` (body traced once); `max_iters` bakes the fixed loop count. this
-/// is the FIRST iterative gv kernel — replaces the hand-written `srhd_c2p` Expr builder.
+/// is the FIRST iterative gv kernel — replaces the hand-written `rhd_c2p` Expr builder.
 ///
 /// numerically equivalent within ULP, NOT bit-identical (the builder hand-cancels rho in
 /// `c2`/`h`; the EOS-generic form keeps `eos.pressure`/`sound_speed_sq`/explicit `h`).
 /// the host wrapper's input guard + post-hoc diagnostics are host-only — the kernel
 /// computes the raw recovery, exactly as the substrate already does.
-pub fn srhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // input binding: the conserved fields + the eos scalar, as Gv leaves.
     let den = Gv::field("cons_den", FieldRef::cons_den());
@@ -104,7 +104,7 @@ pub fn srhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, 
     let cons = Cons::<Gv, D> { den, mom: Tensor::new(mom_arr), nrg };
     // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
     // traced/compiled kernel is bit-identical). the GR metric threads in here at B3.
-    let prim = srhd_recover(&IdealGas { gamma }, &cons, &SpatialMetric::flat(), max_iters);
+    let prim = rhd_recover(&IdealGas { gamma }, &cons, &SpatialMetric::flat(), max_iters);
 
     let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
     for k in 0..D {

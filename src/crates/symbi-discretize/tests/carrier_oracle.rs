@@ -22,7 +22,7 @@ use symbi_discretize::{
     imhd_hlld_flux_gv, imhd_wave_speed_map_gv, iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv,
     nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv, nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv,
     rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv, rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv,
-    srhd_c2p_gv, srhd_flux_gv, srhd_hllc_flux_gv, srhd_wave_speed_map_gv, Coords, GvKernel, Spacing, Spacetime,
+    rhd_c2p_gv, rhd_flux_gv, rhd_hllc_flux_gv, rhd_wave_speed_map_gv, Coords, GvKernel, Spacing, Spacetime,
 };
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::energy::Zero;
@@ -30,11 +30,11 @@ use symbi_hydro::mhd_state::{IsoMhdCons, IsoMhdPrim, MhdCons, MhdPrim};
 use symbi_hydro::isothermal_mhd::IsothermalMhd;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::regime::Regime;
-use symbi_hydro::riemann::{hllc, hllc_rmhd, hllc_srhd, hlld_rmhd, hlle};
+use symbi_hydro::riemann::{hllc, hllc_rmhd, hllc_rhd, hlld_rmhd, hlle};
 use symbi_hydro::dissipation::ShockwaveLimiter;
 use symbi_hydro::state::PrimG;
 use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds};
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Cons, Prim};
 use symbi_ir::graph::NodeId;
 use symbi_ir::MeshScalar;
@@ -218,20 +218,20 @@ fn iso_c2p_matches_native_carrier() {
 }
 
 // =============================================================================
-// srhd c2p — the ITERATIVE relativistic recovery (`srhd_recover` = a carrier-generic Newton
+// rhd c2p — the ITERATIVE relativistic recovery (`rhd_recover` = a carrier-generic Newton
 // on the pressure root). round-trip ONLY (it guarantees admissibility): a KNOWN admissible
-// prim (subluminal velocity, positive pressure) -> cons via `Srhd::to_conserved::<f64>` ->
+// prim (subluminal velocity, positive pressure) -> cons via `Rhd::to_conserved::<f64>` ->
 // the Gv kernel (IterateInline, count=20 == build.rs) -> the input prim. tolerance ~1e-9
 // (iterative, not ULP-exact). the native reference is the INPUT prim — the round-trip
-// closes through the SAME `srhd_recover` the builder traces at S=Gv.
+// closes through the SAME `rhd_recover` the builder traces at S=Gv.
 // =============================================================================
 
-const SRHD_GAMMA: f64 = 5.0 / 3.0;
-const SRHD_EOS: IdealGas<f64> = IdealGas { gamma: SRHD_GAMMA };
-const SRHD_ITERS: usize = 20; // matches build.rs's baked Newton count
+const RHD_GAMMA: f64 = 5.0 / 3.0;
+const RHD_EOS: IdealGas<f64> = IdealGas { gamma: RHD_GAMMA };
+const RHD_ITERS: usize = 20; // matches build.rs's baked Newton count
 
 // a smooth family of admissible (subluminal, positive-pressure) relativistic primitives.
-fn srhd_prim_at(i: usize) -> Prim<f64, 3> {
+fn rhd_prim_at(i: usize) -> Prim<f64, 3> {
     let x = i as f64;
     let mut vel = Tensor::zeros();
     vel[0] = 0.2 + 0.05 * x; // |v| stays well below 1 across the grid
@@ -240,24 +240,24 @@ fn srhd_prim_at(i: usize) -> Prim<f64, 3> {
     Prim { rho: 1.0 + 0.1 * x, vel, pre: 0.5 + 0.15 * x }
 }
 
-fn srhd_cons_at(i: usize) -> Cons<f64, 3> {
-    Srhd.to_conserved(&SRHD_EOS, &srhd_prim_at(i)) // native f64 p2c — the single source
+fn rhd_cons_at(i: usize) -> Cons<f64, 3> {
+    Rhd.to_conserved(&RHD_EOS, &rhd_prim_at(i)) // native f64 p2c — the single source
 }
 
 #[test]
-fn srhd_c2p_round_trips_against_native_physics() {
-    let out = KernelRun::new(srhd_c2p_gv::<3>(SRHD_ITERS))
+fn rhd_c2p_round_trips_against_native_physics() {
+    let out = KernelRun::new(rhd_c2p_gv::<3>(RHD_ITERS))
         .grid([N])
-        .field_with("cons_den", |c| srhd_cons_at(c[0]).den)
-        .field_with("cons_mom_0", |c| srhd_cons_at(c[0]).mom[0])
-        .field_with("cons_mom_1", |c| srhd_cons_at(c[0]).mom[1])
-        .field_with("cons_mom_2", |c| srhd_cons_at(c[0]).mom[2])
-        .field_with("cons_nrg", |c| srhd_cons_at(c[0]).nrg)
-        .scalars(&[("gamma", SRHD_GAMMA)])
+        .field_with("cons_den", |c| rhd_cons_at(c[0]).den)
+        .field_with("cons_mom_0", |c| rhd_cons_at(c[0]).mom[0])
+        .field_with("cons_mom_1", |c| rhd_cons_at(c[0]).mom[1])
+        .field_with("cons_mom_2", |c| rhd_cons_at(c[0]).mom[2])
+        .field_with("cons_nrg", |c| rhd_cons_at(c[0]).nrg)
+        .scalars(&[("gamma", RHD_GAMMA)])
         .run();
 
     for i in 0..N {
-        let p = srhd_prim_at(i);
+        let p = rhd_prim_at(i);
         out.expect(
             [i],
             &[
@@ -341,7 +341,7 @@ fn rmhd_c2p_round_trips_against_native_physics() {
 // i>=2), reference = the native flux. theta=1 == plain minmod (the hydro default).
 // =============================================================================
 
-// the cartesian euler flux `adiabatic_flux_gv::<D>` / `srhd_flux_gv::<D>` is an `ndim == D`
+// the cartesian euler flux `adiabatic_flux_gv::<D>` / `rhd_flux_gv::<D>` is an `ndim == D`
 // stencil kernel swept along axis `dir`. recon reads i-2..i+1 along `dir`, so the buffer needs
 // >= 4 cells on `dir` and we compute the SINGLE interior cell at `dir == 2` (indices 0..3
 // uniform -> HLLE returns the physical flux). the non-swept axes are length 1.
@@ -439,13 +439,13 @@ fn iso_flux_matches_native_physics() {
 }
 
 #[test]
-fn srhd_flux_matches_native_physics() {
-    // reference = `Srhd::to_flux::<f64>(prim, unit(0), IdealGas)`. the SRHD to_flux is algebraic
+fn rhd_flux_matches_native_physics() {
+    // reference = `Rhd::to_flux::<f64>(prim, unit(0), IdealGas)`. the RHD to_flux is algebraic
     // (no iteration) given a prim, so the uniform-state HLLE reproduces it to ~1e-12.
     let prim = Prim::<f64, 2> { rho: 1.0, vel: Tensor::new([0.3, -0.1]), pre: 1.0 };
-    let eos = IdealGas { gamma: SRHD_GAMMA };
-    let f = Srhd.to_flux(&prim, &Tensor::unit(0), &eos);
-    let out = run_uniform_euler_flux::<2>(srhd_flux_gv::<2>(0), &prim, SRHD_GAMMA, 0);
+    let eos = IdealGas { gamma: RHD_GAMMA };
+    let f = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
+    let out = run_uniform_euler_flux::<2>(rhd_flux_gv::<2>(0), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
@@ -544,20 +544,20 @@ fn iso_wave_speed_map_matches_native_physics() {
 }
 
 #[test]
-fn srhd_wave_speed_map_matches_native_physics() {
-    // the relativistic Mignone-Bodo per-axis speed (`Srhd::wave_speeds_axis`); dx=1 -> the map
-    // IS `max(|sl|,|sr|)`. the SAME core the SRHD flux's HLLE consumes.
+fn rhd_wave_speed_map_matches_native_physics() {
+    // the relativistic Mignone-Bodo per-axis speed (`Rhd::wave_speeds_axis`); dx=1 -> the map
+    // IS `max(|sl|,|sr|)`. the SAME core the RHD flux's HLLE consumes.
     let (rho, v0, pre) = (1.0_f64, 0.3_f64, 1.0_f64);
-    let eos = IdealGas { gamma: SRHD_GAMMA };
+    let eos = IdealGas { gamma: RHD_GAMMA };
     let prim = Prim::<f64, 3> { rho, vel: Tensor::new([v0, 0.0, 0.0]), pre };
-    let (sl, sr) = Srhd.wave_speeds_axis(&eos, &prim, 0);
+    let (sl, sr) = Rhd.wave_speeds_axis(&eos, &prim, 0);
     let want = sl.abs().max(sr.abs());
     // static mesh: zero grid velocity (see iso_wave_speed_map test above).
     let (adot0, vtrans0) = (MeshScalar::Adot(0).name(), MeshScalar::Vtrans(0).name());
-    let out = KernelRun::new(srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &CART_1D, &AXES_1D, 1))
+    let out = KernelRun::new(rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &CART_1D, &AXES_1D, 1))
         .grid([N])
         .fields(&[("prim_rho", rho), ("prim_v0", v0), ("prim_pre", pre)])
-        .scalars(&[("gamma", SRHD_GAMMA), ("inv_dx_0", 1.0),
+        .scalars(&[("gamma", RHD_GAMMA), ("inv_dx_0", 1.0),
             (adot0.as_str(), 0.0), (vtrans0.as_str(), 0.0), ("x_lo_0", 0.0), ("dx_0", 1.0)])
         .run();
     out.expect([2], &[("lambda", want)], 1e-12);
@@ -895,7 +895,7 @@ fn imhd_builders_render_to_cpu_and_cuda() {
 
 // =============================================================================
 // HLLC / HLLD carrier oracle — the highest-risk kernels (most select-heavy /
-// NaN-prone): the contact-resolving HLLC family (adiabatic / srhd / rmhd) and the
+// NaN-prone): the contact-resolving HLLC family (adiabatic / rhd / rmhd) and the
 // 5-wave rmhd HLLD. the review flagged these as having NO f64 == Gv oracle. the
 // reference is the SAME riemann function run NATIVELY at S = f64 (never re-derived
 // algebra) on the SAME reconstructed L/R the kernel sees. uniform state -> the
@@ -920,13 +920,13 @@ fn adiabatic_hllc_flux_matches_native_physics_on_uniform_state() {
 }
 
 #[test]
-fn srhd_hllc_flux_matches_native_physics_on_uniform_state() {
+fn rhd_hllc_flux_matches_native_physics_on_uniform_state() {
     // a grazing v^2 -> 1 state stresses the relativistic Lorentz factor + Mignone-Bodo
     // contact quadratic (the select-heavy region) at both carriers.
     let prim = Prim::<f64, 2> { rho: 1.0, vel: Tensor::new([0.9, -0.2]), pre: 1.0 };
-    let eos = IdealGas { gamma: SRHD_GAMMA };
-    let f = hllc_srhd(&eos, &prim, &prim, &Tensor::unit(0), 0.0, ShockwaveLimiter::Standard);
-    let out = run_uniform_euler_flux::<2>(srhd_hllc_flux_gv::<2>(0), &prim, SRHD_GAMMA, 0);
+    let eos = IdealGas { gamma: RHD_GAMMA };
+    let f = hllc_rhd(&eos, &prim, &prim, &Tensor::unit(0), 0.0, ShockwaveLimiter::Standard);
+    let out = run_uniform_euler_flux::<2>(rhd_hllc_flux_gv::<2>(0), &prim, RHD_GAMMA, 0);
     out.expect(
         flux_cell::<2>(0),
         &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
@@ -1007,7 +1007,7 @@ fn hllc_hlld_builders_render_to_cpu_and_cuda() {
     // the lowerability half of the carrier gate (CLAUDE.md 4.3): every HLLC/HLLD builder
     // must emit non-empty CPU (rust) AND CUDA source. an unlowerable op panics here.
     KernelRun::new(adiabatic_hllc_flux_gv::<2>(0)).grid([1, NSWEEP]).assert_lowers();
-    KernelRun::new(srhd_hllc_flux_gv::<2>(0)).grid([1, NSWEEP]).assert_lowers();
+    KernelRun::new(rhd_hllc_flux_gv::<2>(0)).grid([1, NSWEEP]).assert_lowers();
     KernelRun::new(rmhd_hllc_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
     KernelRun::new(rmhd_hlld_flux_gv(1, 0, 0)).grid([NSWEEP]).assert_lowers();
 }

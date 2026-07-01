@@ -20,7 +20,7 @@ mod harness;
 use harness::KernelRun;
 
 use symbi_discretize::gv::{
-    adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rmhd_flux_gv, srhd_flux_gv,
+    adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, iso_flux_gv, rmhd_flux_gv, rhd_flux_gv,
 };
 use symbi_discretize::{
     adiabatic_c2p_gv, body_feedback_gv, body_source_gv, geometric_momentum_source_probe_gv,
@@ -29,7 +29,7 @@ use symbi_discretize::{
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
     rmhd_bcell_godunov_rk2_gv, rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv,
     rmhd_edge_emf_gv, rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, snapshot_gv,
-    srhd_c2p_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    rhd_c2p_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 
 // MAX_BODIES is owned by the runtime (symbi_ib::collection::MAX_BODIES = 2); mirrored
@@ -39,17 +39,17 @@ const MAX_BODIES: usize = 2;
 
 // the curvilinear momentum source the godunov binds, by regime prefix — mirrors
 // build.rs::geo_source. rmhd uses the magnetic-tension source; the hydro regimes
-// (iso/adiabatic/srhd) the inertial pressure+centrifugal source.
+// (iso/adiabatic/rhd) the inertial pressure+centrifugal source.
 fn geo_source(prefix: &str) -> GeoSource {
     match prefix {
         "rmhd" => GeoSource::Rmhd,
-        _ => GeoSource::Hydro { inertial: matches!(prefix, "iso" | "adiabatic" | "srhd") },
+        _ => GeoSource::Hydro { inertial: matches!(prefix, "iso" | "adiabatic" | "rhd") },
     }
 }
 
 // -----------------------------------------------------------------------------
 // c2p (cons -> prim): pointwise, geometry-independent. iso/adiabatic closed-form,
-// srhd/rmhd iterative. any ndim works (build.rs emits 1..=3); one per regime here.
+// rhd/rmhd iterative. any ndim works (build.rs emits 1..=3); one per regime here.
 // -----------------------------------------------------------------------------
 #[test]
 fn c2p_kernels_lower_to_every_backend() {
@@ -57,14 +57,14 @@ fn c2p_kernels_lower_to_every_backend() {
     KernelRun::new(adiabatic_c2p_gv::<1>()).grid([8]).assert_lowers();
     // cyl r-z adiabatic c2p folds a 3-component velocity on a 2-axis grid (ncomp=3).
     KernelRun::new(adiabatic_c2p_gv::<3>()).grid([8]).assert_lowers();
-    KernelRun::new(srhd_c2p_gv::<1>(20)).grid([8]).assert_lowers();
+    KernelRun::new(rhd_c2p_gv::<1>(20)).grid([8]).assert_lowers();
     KernelRun::new(rmhd_c2p_gv(100)).grid([8]).assert_lowers();
 }
 
 // -----------------------------------------------------------------------------
 // face flux: PLM reconstruction + the canonical HLLE per regime. the sweep dir is
 // baked per kernel instance, so the grid ndim == the builder's D and dir < ndim.
-// cartesian iso/adiabatic/srhd at 1D dir-0; cyl-rz adiabatic (3-comp on 2D grid);
+// cartesian iso/adiabatic/rhd at 1D dir-0; cyl-rz adiabatic (3-comp on 2D grid);
 // rmhd 1D + per-dir 3D.
 // -----------------------------------------------------------------------------
 #[test]
@@ -72,11 +72,11 @@ fn flux_kernels_lower() {
     // cartesian, dir 0, ndim 1 (build.rs emits all (ndim,dir); one of each family here).
     KernelRun::new(iso_flux_gv::<1>(0)).grid([8]).assert_lowers();
     KernelRun::new(adiabatic_flux_gv::<1>(0)).grid([8]).assert_lowers();
-    KernelRun::new(srhd_flux_gv::<1>(0)).grid([8]).assert_lowers();
+    KernelRun::new(rhd_flux_gv::<1>(0)).grid([8]).assert_lowers();
     // a 2D cartesian instance per family to exercise the transverse stencil axis.
     KernelRun::new(iso_flux_gv::<2>(1)).grid([8, 8]).assert_lowers();
     KernelRun::new(adiabatic_flux_gv::<2>(1)).grid([8, 8]).assert_lowers();
-    KernelRun::new(srhd_flux_gv::<2>(1)).grid([8, 8]).assert_lowers();
+    KernelRun::new(rhd_flux_gv::<2>(1)).grid([8, 8]).assert_lowers();
     // cyl r-z adiabatic flux: 3-component swirl on a 2-axis (r,z) grid, both sweep dirs.
     KernelRun::new(adiabatic_flux_cyl_rz_gv(0)).grid([8, 8]).assert_lowers();
     KernelRun::new(adiabatic_flux_cyl_rz_gv(1)).grid([8, 8]).assert_lowers();
@@ -88,7 +88,7 @@ fn flux_kernels_lower() {
 }
 
 // -----------------------------------------------------------------------------
-// wave-speed maps (per-cell CFL lambda): iso (shared by adiabatic), srhd, rmhd.
+// wave-speed maps (per-cell CFL lambda): iso (shared by adiabatic), rhd, rmhd.
 // cartesian + a curvilinear instance each. curvilinear folds per-cell physical
 // widths (log-radial spherical), so its grid ndim must match the axes.
 // -----------------------------------------------------------------------------
@@ -110,11 +110,11 @@ fn wave_speed_kernels_lower() {
     ))
     .grid([8, 8, 8])
     .assert_lowers();
-    // srhd: cartesian 1D + spherical 3D.
-    KernelRun::new(srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1))
+    // rhd: cartesian 1D + spherical 3D.
+    KernelRun::new(rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1))
         .grid([8])
         .assert_lowers();
-    KernelRun::new(srhd_wave_speed_map_gv(
+    KernelRun::new(rhd_wave_speed_map_gv(
         Coords::Spherical,
         Spacetime::Minkowski,
         &[Spacing::Uniform; 3],
@@ -147,10 +147,10 @@ fn godunov_kernels_lower() {
         .grid([8])
         .assert_lowers();
 
-    // cartesian godunov-stage/snapshot for each EOS regime, 1D (iso no-energy, adiabatic/srhd
+    // cartesian godunov-stage/snapshot for each EOS regime, 1D (iso no-energy, adiabatic/rhd
     // energy). the one `godunov_stage_gv` kernel serves every SSP scheme (euler/rk2/rk3) via the
     // runtime (a0, ac) coefficients, so one lowering check per geometry replaces the euler+rk2 pair.
-    for (prefix, has_energy) in [("iso", false), ("adiabatic", true), ("srhd", true)] {
+    for (prefix, has_energy) in [("iso", false), ("adiabatic", true), ("rhd", true)] {
         KernelRun::new(godunov_stage_gv(
             Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1, 1, has_energy, geo_source(prefix),
         ))

@@ -1,10 +1,10 @@
 // =============================================================================
-// srhd_c2p.rs
+// rhd_c2p.rs
 //
-// the SRHD iterative cons->prim scheme LOWERS + EMITS valid CPU code. this is a
+// the RHD iterative cons->prim scheme LOWERS + EMITS valid CPU code. this is a
 // BUILD + EMIT test only — it does NOT run the kernel, because the masked Newton
 // unroll is exponential in the #4 interpreter (see feedback). the numerical
-// validation (vs srhd_to_primitive) runs through the COMPILED path in the AOT
+// validation (vs rhd_to_primitive) runs through the COMPILED path in the AOT
 // crate, where the unroll CSE-collapses to linear.
 //
 // what this checks: the scheme builds without graph errors; the emitted Rust has
@@ -15,16 +15,16 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{srhd_c2p_gv, srhd_flux_gv};
+use symbi_discretize::{rhd_c2p_gv, rhd_flux_gv};
 use symbi_ir::graph::NodeId;
 
-// emit the gv-built SRHD c2p (`srhd_c2p_gv` = symbi-hydro's `srhd_recover` at S=Gv) as
+// emit the gv-built RHD c2p (`rhd_c2p_gv` = symbi-hydro's `rhd_recover` at S=Gv) as
 // CPU source. the const-generic <D> instance is selected by ndim (build.rs does the same).
 fn emit(ndim: u8, max_iters: usize) -> (String, Vec<(String, String)>, Vec<String>) {
     let built = match ndim {
-        1 => srhd_c2p_gv::<1>(max_iters),
-        2 => srhd_c2p_gv::<2>(max_iters),
-        3 => srhd_c2p_gv::<3>(max_iters),
+        1 => rhd_c2p_gv::<1>(max_iters),
+        2 => rhd_c2p_gv::<2>(max_iters),
+        3 => rhd_c2p_gv::<3>(max_iters),
         _ => panic!("unsupported ndim {ndim}"),
     };
     let e = KernelRun::new(built)
@@ -34,7 +34,7 @@ fn emit(ndim: u8, max_iters: usize) -> (String, Vec<(String, String)>, Vec<Strin
 }
 
 #[test]
-fn srhd_c2p_1d_lowers_and_emits() {
+fn rhd_c2p_1d_lowers_and_emits() {
     let (src, field_inputs, scalar_params) = emit(1, 8);
 
     // conserved inputs + gamma.
@@ -53,7 +53,7 @@ fn srhd_c2p_1d_lowers_and_emits() {
     assert_eq!(
         scalar_params,
         vec!["gamma"],
-        "the SRHD c2p takes one scalar: gamma"
+        "the RHD c2p takes one scalar: gamma"
     );
     assert!(
         src.contains("gamma: S"),
@@ -82,7 +82,7 @@ fn srhd_c2p_1d_lowers_and_emits() {
 }
 
 #[test]
-fn srhd_c2p_is_dimension_generic() {
+fn rhd_c2p_is_dimension_generic() {
     // the SAME gv builder yields D velocity components — 1D: 1, 2D: 2, 3D: 3.
     let n_vel = |writes: &[(String, symbi_ir::FieldBind, NodeId)]| {
         writes
@@ -90,13 +90,13 @@ fn srhd_c2p_is_dimension_generic() {
             .filter(|(_, rt, _)| rt.name().starts_with("prim.vel["))
             .count()
     };
-    let (k1, w1) = srhd_c2p_gv::<1>(4);
-    let (k2, w2) = srhd_c2p_gv::<2>(4);
-    let (k3, w3) = srhd_c2p_gv::<3>(4);
+    let (k1, w1) = rhd_c2p_gv::<1>(4);
+    let (k2, w2) = rhd_c2p_gv::<2>(4);
+    let (k3, w3) = rhd_c2p_gv::<3>(4);
     for (k, w, want) in [(&k1, &w1, 1usize), (&k2, &w2, 2), (&k3, &w3, 3)] {
         assert!(
             !k.graph.has_errors(),
-            "srhd_c2p errors: {:?}",
+            "rhd_c2p errors: {:?}",
             k.graph.errors()
         );
         assert_eq!(n_vel(w), want, "expected {want} velocity components");
@@ -104,11 +104,11 @@ fn srhd_c2p_is_dimension_generic() {
 }
 
 #[test]
-fn srhd_face_flux_1d_lowers_and_emits() {
-    // the gv SRHD flux (PLM stencil + riemann::hlle at the Srhd regime) emits valid CPU
+fn rhd_face_flux_1d_lowers_and_emits() {
+    // the gv RHD flux (PLM stencil + riemann::hlle at the Rhd regime) emits valid CPU
     // code: the conserved reads + gamma, the sqrt (Lorentz / relativistic wave speeds),
     // the stencil reads/writes, integer-only indices.
-    let e = KernelRun::new(srhd_flux_gv::<1>(0))
+    let e = KernelRun::new(rhd_flux_gv::<1>(0))
         .grid([1usize])
         .emit_cpu();
     let src = e.source;
@@ -135,7 +135,7 @@ fn srhd_face_flux_1d_lowers_and_emits() {
             "dx_0",
             "mesh_vtrans_0"
         ],
-        "the SRHD flux takes gamma + the theta-MC limiter + the per-axis mesh-motion/geometry scalars",
+        "the RHD flux takes gamma + the theta-MC limiter + the per-axis mesh-motion/geometry scalars",
     );
     assert!(
         src.contains(".sqrt()"),

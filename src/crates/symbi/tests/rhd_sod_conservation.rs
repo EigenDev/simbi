@@ -1,8 +1,8 @@
 // =============================================================================
-// srhd_sod_conservation.rs
+// rhd_sod_conservation.rs
 //
-// the SRHD multi-step CONSERVATION + CFL + POSITIVITY gate (T2). complements
-// substrate_srhd_sod (single end-state subluminal check) by sampling invariants
+// the RHD multi-step CONSERVATION + CFL + POSITIVITY gate (T2). complements
+// substrate_rhd_sod (single end-state subluminal check) by sampling invariants
 // every SAMPLE_EVERY steps under the post-phase-A/D emit path — a regression on
 // consolidated IR, identity folding, or view-struct buffer ABIs will surface here
 // as drift in a conserved global.
@@ -24,17 +24,17 @@
 //   ρ > 0, p > 0, |v| < 1 at every interior cell every checkpoint
 // =============================================================================
 
-use symbi::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::{evolve_with_callback, KernelSet};
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::Prim;
 use symbi_xpu::{CpuSpace, HostMemory};
 
-type Sim = SimState<Srhd, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+type Sim = SimState<Rhd, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 
 const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.4;
@@ -44,7 +44,7 @@ const SAMPLE_EVERY: u64 = 25;
 // distance from x=0.5 to either wall is 0.5) and yields ~200 CFL-bounded steps.
 const T_FINAL: f64 = 0.4;
 
-// the SRHD 1D wave-speed bound used by the kernel cfl: davis estimate on the
+// the RHD 1D wave-speed bound used by the kernel cfl: davis estimate on the
 // principal axis. cs² = γ p / (ρ h) with h = 1 + γ p / (ρ (γ-1)) (ideal gas).
 // |λ|_max = (|v| + cs) / (1 + |v| cs) on v, cs ∈ [0,1).
 fn max_wavespeed_estimate(rho: f64, p: f64, v: f64) -> f64 {
@@ -56,28 +56,28 @@ fn max_wavespeed_estimate(rho: f64, p: f64, v: f64) -> f64 {
 }
 
 #[test]
-fn srhd_sod_conserves_mass_energy_and_respects_cfl() {
+fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
     let dx = 1.0 / N as f64;
     // Marti-Mueller sharp Sod IC, v = 0 => W = 1 => D = rho, S = 0, tau = p/(gamma-1).
     // cfl == CFL == 0.4 (builder default, omitted).
-    let mut sim = Sim::build(Srhd, IdealGas { gamma: GAMMA }, Cartesian)
+    let mut sim = Sim::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])
         .spacing([dx])
         .boundaries(Boundaries::uniform(BoundaryType::Reflect))
         .allocate()
-        .expect("srhd sim construction failed")
+        .expect("rhd sim construction failed")
         .set_initial(|x| {
             let (rho, pre) = if x[0] < 0.5 { (1.0, 1.0) } else { (0.125, 0.1) };
             Prim { rho, vel: Tensor::new([0.0]), pre }
         })
         .build();
 
-    let cnrg = sim.fields.cons.nrg_field().expect("Srhd cons.nrg");
+    let cnrg = sim.fields.cons.nrg_field().expect("Rhd cons.nrg");
     let cells: Vec<[isize; 1]> = sim.geom.interior.iter().collect();
     let mass0: f64 = cells.iter().map(|c| *sim.fields.cons.den.view().at(*c)).sum::<f64>() * dx;
     let energy0: f64 = cells.iter().map(|c| *cnrg.view().at(*c)).sum::<f64>() * dx;
 
-    let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, CFL, &sim.geom.allocated);
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, CFL, &sim.geom.allocated);
 
     // walk the production evolve loop; every SAMPLE_EVERY steps the callback
     // exercises mass / energy / cfl / positivity in lock-step with the kernel.
@@ -147,19 +147,19 @@ fn srhd_sod_conserves_mass_energy_and_respects_cfl() {
             );
 
             eprintln!(
-                "[srhd_sod_cons] iter {:>3} t={:.4e}  mass_rel={:.2e}  E_rel={:.2e}  \
+                "[rhd_sod_cons] iter {:>3} t={:.4e}  mass_rel={:.2e}  E_rel={:.2e}  \
                  dt_next={:.2e}  courant={:.3}",
                 s.iteration, s.time, mass_rel, energy_rel, dt_next, courant,
             );
             samples += 1;
         },
-    ).expect("srhd evolve failed");
+    ).expect("rhd evolve failed");
 
     // require at least one mid-run sample fired — otherwise the loop ended
     // before any gate could run.
     assert!(samples > 0, "no mid-run conservation sample fired (samples={samples})");
     eprintln!(
-        "[srhd_sod_cons] DONE iter={} t={:.4e} samples={} (mass0={:.6} energy0={:.6})",
+        "[rhd_sod_cons] DONE iter={} t={:.4e} samples={} (mass0={:.6} energy0={:.6})",
         sim.iteration, sim.time, samples, mass0, energy0,
     );
 }

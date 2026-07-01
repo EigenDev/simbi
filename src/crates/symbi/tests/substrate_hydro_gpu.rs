@@ -1,7 +1,7 @@
 // =============================================================================
 // substrate_hydro_gpu.rs
 //
-// the D-generic hydro analog of substrate_rmhd_gpu.rs: every iso / Newton / SRHD
+// the D-generic hydro analog of substrate_rmhd_gpu.rs: every iso / Newton / RHD
 // SubstrateKernelSet method runs on the GPU through the production dispatch path, at
 // 1D, 2D AND 3D. build TWO identical sims — host (CpuSpace/HostMemory) and unified
 // (CudaSpace/UnifiedMemory) — and drive the SAME `<Mem,f64,const D>` kernelset on
@@ -23,7 +23,7 @@
 
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::kernels::support::FaceDomain;
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
@@ -34,7 +34,7 @@ use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
@@ -42,7 +42,7 @@ use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 const N: usize = 8;
 const CFL: f64 = 0.4;
 const GAMMA: f64 = 1.4; // Newton
-const GAMMA_SRHD: f64 = 5.0 / 3.0;
+const GAMMA_RHD: f64 = 5.0 / 3.0;
 const CS: f64 = 1.0; // isothermal sound speed
 
 // GPU vs CPU agree modulo nvcc FMA fusion: ULP-bounded drift, per single kernel.
@@ -246,17 +246,17 @@ where
 #[test] fn iso_gpu_2d() { check_iso::<2>(); }
 #[test] fn iso_gpu_3d() { check_iso::<3>(); }
 
-// ---- SRHD (special-relativistic Euler, iterative c2p + per-axis wave speeds) -
+// ---- RHD (special-relativistic Euler, iterative c2p + per-axis wave speeds) -
 
-fn build_srhd<S: ExecutionSpace, Mem: MemorySpace, const D: usize>(
-) -> SimState<Srhd, D, Cartesian, IdealGas<f64>, S, Mem>
+fn build_rhd<S: ExecutionSpace, Mem: MemorySpace, const D: usize>(
+) -> SimState<Rhd, D, Cartesian, IdealGas<f64>, S, Mem>
 where
     Cartesian: Metric<f64, D>,
 {
     let dx = 1.0 / N as f64;
-    SimState::<Srhd, D, Cartesian, IdealGas<f64>, S, Mem>::build(
-        Srhd,
-        IdealGas { gamma: GAMMA_SRHD },
+    SimState::<Rhd, D, Cartesian, IdealGas<f64>, S, Mem>::build(
+        Rhd,
+        IdealGas { gamma: GAMMA_RHD },
         Cartesian,
     )
     .cells([N; D])
@@ -264,9 +264,9 @@ where
     .cfl(CFL)
     .boundaries(Boundaries::uniform(BoundaryType::Periodic))
     .allocate()
-    .expect("SRHD sim construction failed")
+    .expect("RHD sim construction failed")
     // mildly relativistic: v = 0 => W = 1, D = rho, S = 0, tau = rho*h - p - rho. the at-rest prim
-    // (rho, v=0, pre) traces to exactly these conserved values via the SRHD prim->cons.
+    // (rho, v=0, pre) traces to exactly these conserved values via the RHD prim->cons.
     .set_initial(|x| {
         let r2: f64 = (0..D).map(|k| (x[k] - 0.5).powi(2)).sum();
         let rho = 1.0 + 0.3 * (-r2 / 0.05).exp();
@@ -276,14 +276,14 @@ where
     .build()
 }
 
-fn check_srhd<const D: usize>()
+fn check_rhd<const D: usize>()
 where
     Cartesian: Metric<f64, D>,
 {
-    let host = build_srhd::<CpuSpace, HostMemory, D>();
-    let dev = build_srhd::<CudaSpace, UnifiedMemory, D>();
-    let hset = SrhdSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA_SRHD, CFL, &host.geom.allocated);
-    let dset = SrhdSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA_SRHD, CFL, &dev.geom.allocated);
+    let host = build_rhd::<CpuSpace, HostMemory, D>();
+    let dev = build_rhd::<CudaSpace, UnifiedMemory, D>();
+    let hset = RhdSubstrateKernelSet::<HostMemory, f64, D>::new(GAMMA_RHD, CFL, &host.geom.allocated);
+    let dset = RhdSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA_RHD, CFL, &dev.geom.allocated);
     let alloc = &host.geom.allocated;
     let interior = &host.geom.interior;
     let (hnrg, dnrg) = (host.fields.cons.nrg_field().unwrap(), dev.fields.cons.nrg_field().unwrap());
@@ -327,6 +327,6 @@ where
     cmp(interior, hnrg, dnrg, "cons.nrg (euler)");
 }
 
-#[test] fn srhd_gpu_1d() { check_srhd::<1>(); }
-#[test] fn srhd_gpu_2d() { check_srhd::<2>(); }
-#[test] fn srhd_gpu_3d() { check_srhd::<3>(); }
+#[test] fn rhd_gpu_1d() { check_rhd::<1>(); }
+#[test] fn rhd_gpu_2d() { check_rhd::<2>(); }
+#[test] fn rhd_gpu_3d() { check_rhd::<3>(); }

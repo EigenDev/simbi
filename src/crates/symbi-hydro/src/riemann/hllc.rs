@@ -8,7 +8,7 @@
 // relativistic regimes ignore it.
 //
 //   newtonian  `hllc`       — toro eq 10.37-10.39 star state, +/- fleischmann LM.
-//   srhd       `hllc_srhd`  — mignone & bodo (2005) star state.
+//   rhd       `hllc_rhd`  — mignone & bodo (2005) star state.
 //   rmhd       `hllc_rmhd`  — mignone & bodo (2006), null/non-null-B branch.
 //
 // every solver is GPU-traceable (`S::branch` / `S::select` on the
@@ -266,13 +266,13 @@ fn hllc_newtonian_body<S: Scalar, const D: usize>(
 }
 
 // =============================================================================
-// SRHD HLLC (mignone-bodo 2005) — relativistic; no Fleischmann LM correction.
+// RHD HLLC (mignone-bodo 2005) — relativistic; no Fleischmann LM correction.
 // =============================================================================
 
-/// contact properties for SRHD: solve quadratic on HLL intermediate state.
+/// contact properties for RHD: solve quadratic on HLL intermediate state.
 /// returns `(a_star, p_star)` — contact wave speed and pressure.
 #[inline]
-fn srhd_contact_props<S: Scalar, const D: usize>(
+fn rhd_contact_props<S: Scalar, const D: usize>(
     u_l: &Cons<S, D>,
     u_r: &Cons<S, D>,
     f_l: &Cons<S, D>,
@@ -285,7 +285,7 @@ fn srhd_contact_props<S: Scalar, const D: usize>(
     let hll_den = (*u_r * a_r - *u_l * a_l - *f_r + *f_l) * inv;
     let hll_flux = (*f_l * a_r - *f_r * a_l + (*u_r - *u_l) * (a_r * a_l)) * inv;
 
-    // srhd total energy: e = tau + D (nrg + den).
+    // rhd total energy: e = tau + D (nrg + den).
     let ee = hll_den.nrg + hll_den.den;
     let s_norm = hll_den.mom.dot(nhat);
     let fe = hll_flux.nrg + hll_flux.den;
@@ -309,10 +309,10 @@ fn srhd_contact_props<S: Scalar, const D: usize>(
     (a_star, p_star)
 }
 
-/// SRHD star state: intermediate state between contact and signal wave.
+/// RHD star state: intermediate state between contact and signal wave.
 /// uses `(a, a_star, p_star)` from mignone-bodo (2005).
 #[inline]
-fn srhd_star_state<S: Scalar, const D: usize>(
+fn rhd_star_state<S: Scalar, const D: usize>(
     prim: &Prim<S, D>,
     cons: &Cons<S, D>,
     a: S,
@@ -327,7 +327,7 @@ fn srhd_star_state<S: Scalar, const D: usize>(
     let ds = fac * (a - vn) * cons.den;
     let ms = cons.mom.scale(a - vn).scale(fac) + nhat.scale((p_star - prim.pre) * fac);
     let es = fac * (ee * (a - vn) + p_star * a_star - prim.pre * vn);
-    // srhd convention: nrg = tau = e - D.
+    // rhd convention: nrg = tau = e - D.
     Cons { den: ds, mom: ms, nrg: es - ds }
 }
 
@@ -336,7 +336,7 @@ fn srhd_star_state<S: Scalar, const D: usize>(
 /// in `D > 1`; the Fleischmann
 /// LM correction does NOT apply to relativistic regimes (treated as
 /// Standard if requested).
-pub fn hllc_srhd<S: Scalar, const D: usize>(
+pub fn hllc_rhd<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
@@ -344,7 +344,7 @@ pub fn hllc_srhd<S: Scalar, const D: usize>(
     vface: S,
     shock_smoother: ShockwaveLimiter,
 ) -> Cons<S, D> {
-    let regime = crate::srhd::Srhd;
+    let regime = crate::rhd::Rhd;
 
     // Quirk fallback — same shape as the newtonian gate. the carrier-
     // generic mask routes per cell at S = Gv; at S = f64 it's a bool short-circuit.
@@ -352,24 +352,24 @@ pub fn hllc_srhd<S: Scalar, const D: usize>(
         let mask = quirk_strong_shock(prim_l.pre, prim_r.pre);
         return S::branch(mask,
             || hlle(&regime, eos, prim_l, prim_r, nhat, vface),
-            || hllc_srhd_body(eos, prim_l, prim_r, nhat, vface),
+            || hllc_rhd_body(eos, prim_l, prim_r, nhat, vface),
         );
     }
 
-    hllc_srhd_body(eos, prim_l, prim_r, nhat, vface)
+    hllc_rhd_body(eos, prim_l, prim_r, nhat, vface)
 }
 
-/// the SRHD HLLC body (no Quirk gate). split out so the outer function can
+/// the RHD HLLC body (no Quirk gate). split out so the outer function can
 /// route Quirk + strong-shock cells to HLLE without re-emitting the body.
 #[inline]
-fn hllc_srhd_body<S: Scalar, const D: usize>(
+fn hllc_rhd_body<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &Prim<S, D>,
     prim_r: &Prim<S, D>,
     nhat: &Tensor<S, D>,
     vface: S,
 ) -> Cons<S, D> {
-    let regime = crate::srhd::Srhd;
+    let regime = crate::rhd::Rhd;
     // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
     // metric threads in here once the flux path carries it (B3).
     let metric = SpatialMetric::flat();
@@ -384,14 +384,14 @@ fn hllc_srhd_body<S: Scalar, const D: usize>(
         || S::branch(a_r.cmp_le(vface),
             || f_r - u_r * vface,
             || {
-                let (a_star, p_star) = srhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
+                let (a_star, p_star) = rhd_contact_props(&u_l, &u_r, &f_l, &f_r, nhat, a_l, a_r);
                 S::branch(a_star.cmp_ge(vface),
                     || {
-                        let us = srhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
+                        let us = rhd_star_state(prim_l, &u_l, a_l, a_star, p_star, nhat, &metric);
                         f_l + (us - u_l) * a_l - us * vface
                     },
                     || {
-                        let us = srhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
+                        let us = rhd_star_state(prim_r, &u_r, a_r, a_star, p_star, nhat, &metric);
                         f_r + (us - u_r) * a_r - us * vface
                     },
                 )
@@ -827,12 +827,12 @@ mod tests {
     }
 
     #[test]
-    fn hllc_srhd_uniform_state() {
+    fn hllc_rhd_uniform_state() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = crate::srhd::Srhd;
+        let regime = crate::rhd::Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.3]), pre: 1.0 };
         let nhat = Tensor::unit(0);
-        let flux = hllc_srhd(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
+        let flux = hllc_rhd(&eos, &prim, &prim, &nhat, 0.0, ShockwaveLimiter::Standard);
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den));
         assert!(approx(flux.mom[0], exact.mom[0]));

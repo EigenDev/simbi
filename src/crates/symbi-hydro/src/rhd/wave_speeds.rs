@@ -1,8 +1,8 @@
 // =============================================================================
-// srhd/wave_speeds.rs
+// rhd/wave_speeds.rs
 //
-// the SRHD relativistic acoustic wave speeds (Mignone & Bodo 2005). the core
-// `srhd_speeds_from_vn` is a pure function of (cs^2, normal velocity) — the SINGLE
+// the RHD relativistic acoustic wave speeds (Mignone & Bodo 2005). the core
+// `rhd_speeds_from_vn` is a pure function of (cs^2, normal velocity) — the SINGLE
 // source both the nhat Riemann projection and the CFL axis projection call.
 // =============================================================================
 
@@ -10,14 +10,14 @@ use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::state::Prim;
-use crate::srhd::sound_speed_sq;
+use crate::rhd::sound_speed_sq;
 
 /// the Mignone & Bodo (2005) relativistic acoustic wave speeds (eqs. 21-23) as a function of
 /// the sound speed squared and the NORMAL velocity `vn` — the single core both projections
 /// call: the nhat Riemann form (`vn = vel . nhat`) and the CFL axis form (`vn = vel[axis]`).
 /// accounts for the relativistic dispersion relation; tighter than davis.
 #[inline]
-pub(crate) fn srhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
+pub(crate) fn rhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
     let vn_sq = vn * vn;
     let w_sq = S::ONE / (S::ONE - vn_sq); // W^2
     let ss = cs_sq / (w_sq * (S::ONE - cs_sq));
@@ -27,11 +27,11 @@ pub(crate) fn srhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
 }
 
 /// the Banyuls-Font (1997) COORDINATE-frame acoustic speeds on a STATIC DIAGONAL metric (shift
-/// beta = 0): the SRHD dispersion relation with the inverse-metric normal component `gamma_nn`
+/// beta = 0): the RHD dispersion relation with the inverse-metric normal component `gamma_nn`
 /// threaded INTO the discriminant and the lapse `alpha` scaling the result:
 ///   `disc = (1 - vn^2)( gamma_nn(1 - vn^2 cs^2) - vn^2(1 - cs^2) )`
 ///   `lambda_pm = alpha [ vn(1 - cs^2) +/- cs sqrt(disc) ] / (1 - vn^2 cs^2)`.
-/// at `gamma_nn = 1, alpha = 1` it reduces EXACTLY (in value) to `srhd_speeds_from_vn` — the flat
+/// at `gamma_nn = 1, alpha = 1` it reduces EXACTLY (in value) to `rhd_speeds_from_vn` — the flat
 /// limit — so Minkowski is unchanged. the curved `gamma_nn`/`alpha` come from the spacetime metric
 /// (Schwarzschild: `gamma_nn = f = 1-2M/r`, `alpha = sqrt(f)`). drives the GR CFL wave-speed map;
 /// `gamma_nn` inside the radical (NOT a post-multiply by alpha) is what pins the sonic point.
@@ -43,7 +43,7 @@ pub(crate) fn srhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
 /// general-metric path for the B.6 Riemann coordinate speeds.
 #[allow(dead_code)]
 #[inline]
-pub(crate) fn srhd_speeds_from_vn_gr<S: Scalar>(cs_sq: S, vn: S, gamma_nn: S, alpha: S) -> (S, S) {
+pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(cs_sq: S, vn: S, gamma_nn: S, alpha: S) -> (S, S) {
     let vn_sq = vn * vn;
     let one_m_v2cs2 = S::ONE - vn_sq * cs_sq;
     let disc = (S::ONE - vn_sq) * (gamma_nn * one_m_v2cs2 - vn_sq * (S::ONE - cs_sq));
@@ -53,7 +53,7 @@ pub(crate) fn srhd_speeds_from_vn_gr<S: Scalar>(cs_sq: S, vn: S, gamma_nn: S, al
     ((term - rad) * inv, (term + rad) * inv)
 }
 
-/// davis wave speed estimates for SRHD (simpler, less tight bounds).
+/// davis wave speed estimates for RHD (simpler, less tight bounds).
 /// kept as a reference but not used — the Regime impl uses the Mignone-Bodo speeds.
 #[inline]
 #[allow(dead_code)]
@@ -72,7 +72,7 @@ fn davis_wave_speeds_reference<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::srhd::Srhd;
+    use crate::rhd::Rhd;
     use crate::regime::Regime;
     use crate::eos::IdealGas;
 
@@ -85,7 +85,7 @@ mod tests {
         // v=0: symmetric wave speeds
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
-        let (sl, sr) = Srhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+        let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
         assert!(approx(sl, -sr));
         assert!(sr > 0.0);
         assert!(sr < 1.0); // subluminal
@@ -98,7 +98,7 @@ mod tests {
         for &v in &[0.0, 0.3, 0.5, 0.9, 0.99] {
             for &pre in &[0.01, 1.0, 100.0] {
                 let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre };
-                let (sl, sr) = Srhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+                let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
                 assert!(sl > -1.0, "sl={} at v={}, p={}", sl, v, pre);
                 assert!(sr < 1.0, "sr={} at v={}, p={}", sr, v, pre);
                 assert!(sl < sr, "sl={} >= sr={} at v={}, p={}", sl, sr, v, pre);
@@ -122,7 +122,7 @@ mod tests {
             for &v in &[-0.99_f64, -0.5, 0.0, 0.5, 0.99] {
                 for &pre in &[0.01, 1.0, 100.0] {
                     let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre };
-                    let (sl, sr) = Srhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+                    let (sl, sr) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
                     let (ll, lr) = (alpha_sq * sl - beta_r, alpha_sq * sr - beta_r);
                     assert!(ll < 0.0 && lr < 0.0,
                         "coord speed not ingoing at r={r}, v={v}, p={pre}: ll={ll}, lr={lr}");
@@ -136,7 +136,7 @@ mod tests {
         // at v=0, davis and mignone-bodo should give same result
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
-        let (sl_mb, sr_mb) = Srhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
+        let (sl_mb, sr_mb) = Rhd.wave_speeds(&eos, &prim, &Tensor::unit(0));
         // davis formula gives same result at v=0
         let cs_sq: f64 = sound_speed_sq(&eos, 1.0, 1.0);
         let cs = cs_sq.sqrt();
@@ -149,9 +149,9 @@ mod tests {
 
     #[test]
     fn extremal_speeds_bracket_zero() {
-        // Srhd::extremal_speeds always has s_l <= 0 and s_r >= 0
+        // Rhd::extremal_speeds always has s_l <= 0 and s_r >= 0
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let left = Prim { rho: 1.0, vel: Tensor::new([0.9]), pre: 1.0 };
         let right = Prim { rho: 1.0, vel: Tensor::new([0.9]), pre: 1.0 };
         let (sl, sr) = regime.extremal_speeds(&eos, &left, &right, &Tensor::unit(0));
@@ -162,7 +162,7 @@ mod tests {
     #[test]
     fn max_wave_speed_3d() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim {
             rho: 1.0,
             vel: Tensor::new([0.5, -0.3, 0.1]),
@@ -179,8 +179,8 @@ mod tests {
         // form across the state space -> Minkowski wave speeds are unchanged.
         for &cs_sq in &[0.05_f64, 0.2, 0.33] {
             for &vn in &[-0.8_f64, -0.3, 0.0, 0.3, 0.8] {
-                let (sl, sr) = srhd_speeds_from_vn(cs_sq, vn);
-                let (gl, gr) = srhd_speeds_from_vn_gr(cs_sq, vn, 1.0, 1.0);
+                let (sl, sr) = rhd_speeds_from_vn(cs_sq, vn);
+                let (gl, gr) = rhd_speeds_from_vn_gr(cs_sq, vn, 1.0, 1.0);
                 assert!(approx(sl, gl) && approx(sr, gr), "flat reduction ({sl},{sr}) vs ({gl},{gr})");
             }
         }
@@ -192,8 +192,8 @@ mod tests {
         // in-radical gamma_nn DAMP the COORDINATE speeds below the flat ones (gravity slows
         // coordinate-time propagation). hand-computed lambda+ ~ 0.54684, lambda- ~ -0.10965.
         let (cs_sq, vn, f) = (0.2_f64, 0.3_f64, 0.8_f64);
-        let (sl_flat, sr_flat) = srhd_speeds_from_vn(cs_sq, vn);
-        let (sl_gr, sr_gr) = srhd_speeds_from_vn_gr(cs_sq, vn, f, f.sqrt());
+        let (sl_flat, sr_flat) = rhd_speeds_from_vn(cs_sq, vn);
+        let (sl_gr, sr_gr) = rhd_speeds_from_vn_gr(cs_sq, vn, f, f.sqrt());
         assert!(sr_gr.abs() < sr_flat.abs(), "right speed must damp: {sr_gr} vs {sr_flat}");
         assert!(sl_gr.abs() < sl_flat.abs(), "left speed must damp: {sl_gr} vs {sl_flat}");
         assert!((sr_gr - 0.54684).abs() < 1e-4, "lambda+ = {sr_gr}");

@@ -1,5 +1,5 @@
 // =============================================================================
-// srhd/algebra.rs
+// rhd/algebra.rs
 //
 // the relativistic-hydrodynamic elementals — pure pointwise functions: lorentz
 // factor, relativistic enthalpy, relativistic sound speed, the inertial density

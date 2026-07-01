@@ -318,7 +318,7 @@ pub(crate) fn emit_packets(
 /// split into `photons_per_cell` equal-weight packets (or `max(10, max_events / n_cells)` if
 /// 0). each packet is emitted isotropically in the fluid frame, aberrated into the lab frame,
 /// and assigned a comoving frequency drawn from the cell's broken-power-law spectrum. `seed`
-/// makes the catalog reproducible; `max_events` caps total packets. SRHD emission is
+/// makes the catalog reproducible; `max_events` caps total packets. RHD emission is
 /// unpolarized (stokes = [1,0,0,0]); SRMHD polarization is a later increment.
 pub fn generate_photon_events(
     cond: &SimConditions,

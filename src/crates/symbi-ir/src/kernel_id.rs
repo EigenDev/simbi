@@ -47,7 +47,7 @@ pub enum KernelId {
     RefineProlong { order: ProlongTag, ndim: u8 },
     /// MULTI-FIELD cell prolongation: one launch over `ncomp` co-located fields
     /// (the prim batch), sharing the per-cell stencil geometry. generated for the
-    /// 3D hot path only (ncomp 4 = isothermal, 5 = adiabatic/srhd).
+    /// 3D hot path only (ncomp 4 = isothermal, 5 = adiabatic/rhd).
     RefineProlongMulti { order: ProlongTag, ncomp: u8, ndim: u8 },
     /// staggered face restriction on the `axis`-normal faces.
     RefineRestrictFace { axis: u8, ndim: u8 },

@@ -8,7 +8,7 @@
 // mesh).
 //
 //   hlle  (hlle.rs)  regime-generic 2-wave solver, any Regime. GPU-traceable.
-//   hllc  (hllc.rs)  3-wave (contact-resolving): newtonian / srhd / rmhd, one
+//   hllc  (hllc.rs)  3-wave (contact-resolving): newtonian / rhd / rmhd, one
 //                    function per regime; newtonian takes a `ShockwaveLimiter`
 //                    (Standard / Fleischmann LM / Quirk-fallback).
 //   hlld  (hlld.rs)  5-wave RMHD (fast/alfven/contact), host-only secant iter.
@@ -23,7 +23,7 @@ mod hllc;
 mod hlld;
 
 pub use hlle::{hlle, hlle_with_speeds};
-pub use hllc::{hllc, hllc_rmhd, hllc_srhd, hllc_newtonian};
+pub use hllc::{hllc, hllc_rmhd, hllc_rhd, hllc_newtonian};
 pub use hlld::{hlld_rmhd, hlld_rmhd_states, hlld_newtonian, hlld_newtonian_coeffs, hlld_isothermal, hlld_isothermal_coeffs, HlldStates};
 
 // shared solver tolerances (visible to the submodules via `super::`).

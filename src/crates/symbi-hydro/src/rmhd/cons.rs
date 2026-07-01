@@ -202,7 +202,7 @@ pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     let dd = cons.den;
 
     // input guard: clearly-invalid conserved density (host-only early-out, NOT in the
-    // kernel path). B passes through. shared SRHD/RMHD guard (now NaN-checked too; tier-1 #5).
+    // kernel path). B passes through. shared RHD/RMHD guard (now NaN-checked too; tier-1 #5).
     if let Some(code) = crate::c2p_result::relativistic_density_guard(dd) {
         let floored = MhdPrim {
             hydro: Prim { rho: S::from_f64(crate::c2p_result::C2P_FAILURE_FLOOR), vel: Tensor::zeros(),
@@ -214,7 +214,7 @@ pub(crate) fn rmhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
 
     let prim = rmhd_recover(eos, cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
 
-    // post-hoc diagnostics on the raw recovered state (shared SRHD/RMHD contract; tier-1 #5).
+    // post-hoc diagnostics on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).
     let v_sq = prim.vel.dot(&prim.vel);
     let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);
     if code.is_ok() { C2pResult::ok(prim) } else { C2pResult::err(prim, code) }

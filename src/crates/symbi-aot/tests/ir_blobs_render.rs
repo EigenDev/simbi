@@ -15,8 +15,8 @@
 // =============================================================================
 
 use symbi_aot::{
-    ISO_C2P_1D_IR, RMHD_C2P_3D_IR, RMHD_FACE_FLUX_3D_0_IR, RMHD_GHOST_FILL_3D_IR, SRHD_C2P_1D_IR,
-    SRHD_C2P_2D_IR, SRHD_FACE_FLUX_2D_0_IR, SRHD_GODUNOV_STAGE_2D_IR,
+    ISO_C2P_1D_IR, RMHD_C2P_3D_IR, RMHD_FACE_FLUX_3D_0_IR, RMHD_GHOST_FILL_3D_IR, RHD_C2P_1D_IR,
+    RHD_C2P_2D_IR, RHD_FACE_FLUX_2D_0_IR, RHD_GODUNOV_STAGE_2D_IR,
 };
 use symbi_ir::emit::{Precision, Target};
 use symbi_ir::render_from_ir;
@@ -35,7 +35,7 @@ fn aot_ir_blobs_deserialize_and_render_to_cuda() {
     // a shallow pointwise kernel, an iterative one, and the three deepest RMHD
     // kernels (the 100-iter c2p, the quartic-wave-speed flux, the ghost fill).
     renders(ISO_C2P_1D_IR, "iso_c2p_1d");
-    renders(SRHD_C2P_1D_IR, "srhd_c2p_1d");
+    renders(RHD_C2P_1D_IR, "rhd_c2p_1d");
     renders(RMHD_C2P_3D_IR, "rmhd_c2p_3d");
     renders(RMHD_FACE_FLUX_3D_0_IR, "rmhd_face_flux_3d_0");
     renders(RMHD_GHOST_FILL_3D_IR, "rmhd_ghost_fill_3d");
@@ -46,8 +46,8 @@ fn aot_ir_blobs_deserialize_and_render_to_cuda() {
 // and the godunov update (divergence over 2 sweep axes). once build.rs derives the
 // generated filename from kernel_name, going from 1D to 2D is just another instance.
 #[test]
-fn aot_dim_generic_srhd_2d_blobs_render() {
-    renders(SRHD_C2P_2D_IR, "srhd_c2p_2d");
-    renders(SRHD_FACE_FLUX_2D_0_IR, "srhd_face_flux_2d_0");
-    renders(SRHD_GODUNOV_STAGE_2D_IR, "srhd_godunov_stage_2d");
+fn aot_dim_generic_rhd_2d_blobs_render() {
+    renders(RHD_C2P_2D_IR, "rhd_c2p_2d");
+    renders(RHD_FACE_FLUX_2D_0_IR, "rhd_face_flux_2d_0");
+    renders(RHD_GODUNOV_STAGE_2D_IR, "rhd_godunov_stage_2d");
 }

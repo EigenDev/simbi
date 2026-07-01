@@ -30,7 +30,7 @@ pub mod gpu_launcher;
 pub mod newtonian;
 pub mod newtonian_mhd;
 pub mod isothermal_mhd;
-pub mod srhd;
+pub mod rhd;
 pub mod rmhd;
 pub mod dissipation;
 pub mod riemann;
@@ -45,7 +45,7 @@ pub use state::{Prim, Cons, PrimG, ConsG, Magnetic, NonMagnetic};
 pub use regime::Regime;
 pub use regime_spec::{
     RegimeSpec, FieldSpec, FieldKind, EosKind, C2pKind,
-    NEWTONIAN_SPEC, ISO_NEWTONIAN_SPEC, SRHD_SPEC, RMHD_SPEC, NEWTONIAN_MHD_SPEC, ISO_MHD_SPEC,
+    NEWTONIAN_SPEC, ISO_NEWTONIAN_SPEC, RHD_SPEC, RMHD_SPEC, NEWTONIAN_MHD_SPEC, ISO_MHD_SPEC,
 };
 pub use source_spec::{
     SourceSpec, BuiltSource, SourceKind,
@@ -69,9 +69,9 @@ pub use gpu_launcher::launch_source_kernel;
 pub use newtonian::Newtonian;
 pub use newtonian_mhd::NewtonianMhd;
 pub use isothermal_mhd::{IsothermalMhd, imhd_recover};
-pub use srhd::Srhd;
+pub use rhd::Rhd;
 pub use rmhd::Rmhd;
 pub use isothermal::{IsoNewtonian, IsoPrim, IsoCons};
 pub use mhd_state::{MhdPrim, MhdCons, MhdPrimG, MhdConsG, IsoMhdPrim, IsoMhdCons};
-pub use riemann::{hllc, hllc_srhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_newtonian, hlld_isothermal, hlle};
+pub use riemann::{hllc, hllc_rhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_newtonian, hlld_isothermal, hlle};
 pub use dissipation::{adaptive_phi, ShockwaveLimiter};

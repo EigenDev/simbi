@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from simbi.types.bodies import BodyCapability
+from simbi.types.input import normalize_regime
 
 from ..functional.result import Result
 from ..types import (
@@ -381,7 +382,7 @@ def parse_metadata_v2(attrs: dict[str, Any]) -> Metadata:
         dt=float(attrs.get("dt", 0.0)),
         iteration=int(attrs.get("iteration", 0)),
         dimensions=int(attrs.get("dimensions", 1)),
-        regime=str(attrs.get("regime", "newtonian")),
+        regime=normalize_regime(str(attrs.get("regime", "newtonian"))),
         adiabatic_index=float(attrs.get("gamma", 1.4)),
         is_mhd=bool(attrs.get("is_mhd", False)),
         coord_system=str(attrs.get("coord_system", "cartesian")),
@@ -424,7 +425,7 @@ def parse_data(
                 dt=float(attrs["dt"]),
                 iteration=int(attrs["iteration"]),
                 dimensions=int(attrs["dimensions"]),
-                regime=str(attrs["regime"]),
+                regime=normalize_regime(str(attrs["regime"])),
                 adiabatic_index=float(attrs["adiabatic_index"]),
                 is_mhd="mhd" in str(attrs["regime"]),
                 coord_system=str(attrs["coord_system"]),

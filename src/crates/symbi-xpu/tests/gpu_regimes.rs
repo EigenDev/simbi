@@ -1,7 +1,7 @@
 // =============================================================================
 // gpu_regimes.rs
 //
-// GPU<->CPU runtime validation for the iso / adiabatic / SRHD c2p + flux + snapshot
+// GPU<->CPU runtime validation for the iso / adiabatic / RHD c2p + flux + snapshot
 // + wave-speed + mass + ghost-fill kernels: the SAME substrate IR graph emitted to
 // two backends — the CPU Rust fn (`symbi_aot::*_1d__raw`) and the neutral IR blob
 // (`symbi_aot::*_IR`), rendered to CUDA source at test time via `render_from_ir`
@@ -34,9 +34,9 @@ use symbi_aot::{
     godunov_mass_1d__raw as godunov_mass_1d, iso_c2p_1d__raw as iso_c2p_1d,
     iso_face_flux_1d_0__raw as iso_face_flux_1d, iso_ghost_fill_1d__raw as iso_ghost_fill_1d,
     iso_snapshot_1d__raw as iso_snapshot_1d, iso_wave_speed_map_1d__raw as iso_wave_speed_map_1d,
-    srhd_face_flux_1d_0__raw as srhd_face_flux_1d, CpuField, CpuFieldMut, ADIABATIC_C2P_1D_IR,
+    rhd_face_flux_1d_0__raw as rhd_face_flux_1d, CpuField, CpuFieldMut, ADIABATIC_C2P_1D_IR,
     ADIABATIC_FACE_FLUX_1D_0_IR, GODUNOV_MASS_1D_IR, ISO_C2P_1D_IR, ISO_FACE_FLUX_1D_0_IR,
-    ISO_GHOST_FILL_1D_IR, ISO_SNAPSHOT_1D_IR, ISO_WAVE_SPEED_MAP_1D_IR, SRHD_FACE_FLUX_1D_0_IR,
+    ISO_GHOST_FILL_1D_IR, ISO_SNAPSHOT_1D_IR, ISO_WAVE_SPEED_MAP_1D_IR, RHD_FACE_FLUX_1D_0_IR,
 };
 use symbi_ir::emit::{Precision, Target};
 use symbi_ir::render_from_ir;
@@ -292,7 +292,7 @@ fn adiabatic_face_flux_gpu_matches_cpu() {
 }
 
 #[test]
-fn srhd_face_flux_gpu_matches_cpu() {
+fn rhd_face_flux_gpu_matches_cpu() {
     let n = 8usize;
     let (rho, v, p) = varying_prims(n); // |v| <= 0.2 here — safely sub-luminal
     let gamma = 5.0 / 3.0;
@@ -300,13 +300,13 @@ fn srhd_face_flux_gpu_matches_cpu() {
     let dx = 1.0_f64;
     let scal = [gamma, theta, MESH_ADOT, X_LO, dx, MESH_VTRANS];
     let (mut fd, mut fm, mut fn_) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
-    srhd_face_flux_1d(&cf(&rho), &cf(&v), &cf(&p), &mut cfm(&mut fd), &mut cfm(&mut fm), &mut cfm(&mut fn_),
+    rhd_face_flux_1d(&cf(&rho), &cf(&v), &cf(&p), &mut cfm(&mut fd), &mut cfm(&mut fm), &mut cfm(&mut fn_),
         4, 2, scal[0], scal[1], scal[2], scal[3], scal[4], scal[5]);
 
-    let g = launch_1d(&cuda_src(SRHD_FACE_FLUX_1D_0_IR), "srhd_face_flux_1d_0", &[&rho, &v, &p], 3, &scal, 4, 2);
-    assert_close(&g[0], &fd, 2, 6, "srhd flux_den");
-    assert_close(&g[1], &fm, 2, 6, "srhd flux_mom");
-    assert_close(&g[2], &fn_, 2, 6, "srhd flux_nrg");
+    let g = launch_1d(&cuda_src(RHD_FACE_FLUX_1D_0_IR), "rhd_face_flux_1d_0", &[&rho, &v, &p], 3, &scal, 4, 2);
+    assert_close(&g[0], &fd, 2, 6, "rhd flux_den");
+    assert_close(&g[1], &fm, 2, 6, "rhd flux_mom");
+    assert_close(&g[2], &fn_, 2, 6, "rhd flux_nrg");
 }
 
 #[test]

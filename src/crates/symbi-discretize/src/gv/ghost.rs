@@ -11,7 +11,7 @@ use super::*;
 /// write IN PLACE; the velocity component whose coordinate is a GRID axis picks up that axis's
 /// wall-normal `vel_sign` (an ungridded swirl coordinate has no wall map -> unflipped). rho/pre
 /// are grade-0 copies. `ncomp` velocity components, `ndim` gridded axes; `axes[d]` = the coord
-/// of grid axis d. the EOS-generic 3-field pullback the iso/newton/srhd ghost fill share.
+/// of grid axis d. the EOS-generic 3-field pullback the iso/newton/rhd ghost fill share.
 pub fn iso_ghost_fill_gv(
     ndim: usize,
     ncomp: usize,

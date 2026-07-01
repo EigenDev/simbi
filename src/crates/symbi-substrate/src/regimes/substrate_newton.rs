@@ -7,7 +7,7 @@
 // ndim, dir) via the generated `kernel_by_name` registry. one struct serves 1D/2D/3D
 // (the kepler/blast gap).
 //
-// it shares the EOS-generic substrate kernels with the SRHD set — the godunov /
+// it shares the EOS-generic substrate kernels with the RHD set — the godunov /
 // snapshot / rk2 are the SAME `{prefix}_*` builders — and adds the genuinely
 // regime-specific pieces: the closed-form adiabatic c2p (`p` from the energy) and
 // the adiabatic face flux. the CFL wave-speed map is the iso one

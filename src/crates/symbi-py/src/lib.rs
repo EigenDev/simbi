@@ -218,7 +218,7 @@ fn get_source_json(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<Strin
 
 /// uniform runtime-source attach across the substrate kernel sets the hydro
 /// dispatch macro instantiates. the macro body monomorphizes for EVERY regime it
-/// covers (newtonian/adiabatic AND srhd), but `with_runtime_source` is inherent
+/// covers (newtonian/adiabatic AND rhd), but `with_runtime_source` is inherent
 /// only on the substrates that carry a source slot — so the call must go through
 /// a trait that ALL of them implement. the relativistic set has no slot yet and
 /// reports a clear error rather than failing to compile.
@@ -243,7 +243,7 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
 }
 
 impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize>
-    AttachRuntimeSource for SrhdSubstrateKernelSet<Mem, Sc, D>
+    AttachRuntimeSource for RhdSubstrateKernelSet<Mem, Sc, D>
 {
     fn attach_runtime_source(
         self,
@@ -3336,7 +3336,7 @@ macro_rules! iso_dispatch {
 }
 
 /// runtime dispatch on the config tags → a monomorphized sim. hydro regimes
-/// (newtonian/srhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
+/// (newtonian/rhd/isothermal) x cartesian (+ curvilinear for adiabatic) x 1/2/3d;
 /// the mhd regimes (srmhd/nmhd/imhd) x cartesian x 1/2/3d.
 fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> Result<(), String> {
     // static mesh refinement is wired for hydro (incl. globally-isothermal). the
@@ -3367,17 +3367,17 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                     (AMR body sync not wired yet)"
             .to_string());
     }
-    // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/srhd/isothermal) and
+    // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and
     // single-level MHD (srmhd/nmhd/imhd, the oracle-proven staggered-CT halo exchange + face
     // gather, docs/design/37 M4). reject every other case HERE so a multi-gpu request never
     // silently runs on one device.
     if cfg.n_gpus > 1 {
         if !matches!(
             cfg.regime.as_str(),
-            "newtonian" | "srhd" | "isothermal" | "srmhd" | "nmhd" | "imhd"
+            "newtonian" | "rhd" | "isothermal" | "srmhd" | "nmhd" | "imhd"
         ) {
             return Err(format!(
-                "gpus>1 is wired for hydro (newtonian, srhd, isothermal) and mhd (srmhd, nmhd, \
+                "gpus>1 is wired for hydro (newtonian, rhd, isothermal) and mhd (srmhd, nmhd, \
                  imhd); regime '{}' runs single-gpu for now (set gpus=1)",
                 cfg.regime
             ));
@@ -3392,7 +3392,7 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),
-        "srhd" => hydro_dispatch!(cfg, prims, Srhd, Srhd),
+        "rhd" => hydro_dispatch!(cfg, prims, Rhd, Rhd),
         "isothermal" => iso_dispatch!(cfg, prims),
         "srmhd" => mhd_dispatch!(cfg, prims, bfields, Rmhd, Rmhd),
         "nmhd" => mhd_dispatch!(cfg, prims, bfields, NewtonianMhd, NewtonianMhd),

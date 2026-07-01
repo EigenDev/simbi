@@ -49,8 +49,8 @@ pub use gv::{
     rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_3d_dir_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv, uct_master_emf_proof_kernel, rmhd_flux_gv, rmhd_ghost_fill_gv,
     rmhd_hllc_flux_gv, rmhd_hlld_flux_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv,
     rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv, imhd_wave_speeds_cell_gv, scalar_ghost_fill_gv, snapshot_gv,
-    srhd_c2p_gv, srhd_flux_gv, srhd_ks_shift_flux_gv, srhd_hllc_flux_gv,
-    srhd_wave_speed_map_gv, GeoSource,
+    rhd_c2p_gv, rhd_flux_gv, rhd_ks_shift_flux_gv, rhd_hllc_flux_gv,
+    rhd_wave_speed_map_gv, GeoSource,
 };
 pub use gv_refinement::{
     refine_acc_edge_gv, refine_acc_face_gv, refine_prolong_face_gv, refine_prolong_gv, refine_prolong_multi_gv,
@@ -62,7 +62,7 @@ pub use lattice::LatticeMap;
 /// whether a kernel's buffers all share one allocated layout, so the cell index
 /// can be computed once and shared across reads. true for the single-layout
 /// cell-centered kernels — c2p (cons<->prim), wave-speed maps (prim -> scalar
-/// scratch), and the pure-hydro adiabatic/srhd face flux (no staggered ct efield).
+/// scratch), and the pure-hydro adiabatic/rhd face flux (no staggered ct efield).
 /// false for mhd `*face_flux*` (writes a staggered edge efield) and amr
 /// prolong/restrict (read one grid, write another). classified by kernel name HERE
 /// in the hydro layer so the IR (`KernelEmitInputs::coalesce_layout`) stays
@@ -73,5 +73,5 @@ pub fn kernel_coalesces_layout(kernel_name: &str) -> bool {
     kernel_name.contains("c2p")
         || kernel_name.contains("wave_speed_map")
         || kernel_name.contains("adiabatic_face_flux")
-        || kernel_name.contains("srhd_face_flux")
+        || kernel_name.contains("rhd_face_flux")
 }

@@ -9,7 +9,7 @@
 // this means ONE riemann solver works for ALL directions in ALL dimensions.
 // dot(vel, nhat) projects velocity onto the face normal.
 //
-// regimes: Newtonian (newtonian.rs), Srhd (srhd.rs), MHD/RMHD (future).
+// regimes: Newtonian (newtonian.rs), Rhd (rhd.rs), MHD/RMHD (future).
 // solvers (HLLE, HLLC, HLLD) are generic over regime.
 //
 // all methods are pure math — elemental, GPU-callable, no allocation.
@@ -75,7 +75,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// bound declares that diagnostic c2p is a host computation — `C2pResult`'s
     /// `ErrorCode` is bool-based and cannot be traced at `S = Gv`. the kernel
     /// emit path uses `Cons::to_primitive` (algebraic, no diagnostics) or the
-    /// carrier-generic `srhd_recover` / `rmhd_recover` directly, never this
+    /// carrier-generic `rhd_recover` / `rmhd_recover` directly, never this
     /// method. callers requesting `regime.to_primitive::<Gv>` fail to compile.
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where
@@ -88,7 +88,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
 
     /// wave speeds along nhat: (lambda_minus, lambda_plus).
     /// newtonian: vn +/- cs.
-    /// srhd: relativistic davis formula.
+    /// rhd: relativistic davis formula.
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S);
 
     /// characteristic wave speeds along grid AXIS `axis` (the CFL projection):
@@ -103,7 +103,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     }
 
     /// whether `extremal_speeds` clamps the HLL fan to include the stationary state
-    /// (`sl <= 0 <= sr`). the RELATIVISTIC regimes (srhd/rmhd) set this `true` for HLLE
+    /// (`sl <= 0 <= sr`). the RELATIVISTIC regimes (rhd/rmhd) set this `true` for HLLE
     /// stability; the newtonian/iso davis estimate leaves the fan unclamped. a compile-time
     /// const (monomorphized per regime), NOT a carrier branch — it never traces a Select.
     const CLAMP_EXTREMAL_TO_ZERO: bool = false;
@@ -144,7 +144,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     }
 
     /// effective inertial density for geometric source terms.
-    /// newtonian: rho. srhd: rho * h * W^2.
+    /// newtonian: rho. rhd: rho * h * W^2.
     /// the geometric source terms in curvilinear coordinates have the same
     /// structure for all regimes — only this effective density changes.
     fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S;
@@ -173,7 +173,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     // back silently to HLLE — a lie in code that masked "this regime does
     // not implement a three-wave star solver." HLLC is now an explicit free
     // function per regime: `crate::riemann::hllc` (newtonian),
-    // `crate::riemann::hllc_srhd`, `crate::riemann::hllc_rmhd`.
+    // `crate::riemann::hllc_rhd`, `crate::riemann::hllc_rmhd`.
     // callers that genuinely want HLLE invoke `crate::riemann::hlle`
     // directly (regime-generic; resolves shock + rarefaction, not contact).
 }

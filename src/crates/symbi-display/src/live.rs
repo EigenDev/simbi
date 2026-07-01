@@ -61,7 +61,7 @@ const SPIN: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"
 pub struct DiagnosticView {
     // header
     pub app_title: String, // "hydroflux — kelvin_helmholtz.toml"
-    pub regime: String,    // stat-strip badge, e.g. "SRHD"
+    pub regime: String,    // stat-strip badge, e.g. "RHD"
     pub attached: String,  // "attached · rank 0 / 1" (or empty)
     pub paused: bool,
     pub frame: u64, // drives the spinner animation
@@ -81,7 +81,7 @@ pub struct DiagnosticView {
     pub mass_drift: Option<Vec<f64>>,
     pub energy_drift: Option<Vec<f64>>,
     pub div_b: Option<Vec<f64>>, // mhd only
-    pub max_w: Option<f64>,      // srhd / rmhd only
+    pub max_w: Option<f64>,      // rhd / rmhd only
     pub cfl: f64,
     pub cfl_max: f64,
     pub blocks_per_level: Vec<u64>,
@@ -817,7 +817,7 @@ mod tests {
     fn sample() -> DiagnosticView {
         DiagnosticView {
             app_title: "hydroflux — kelvin_helmholtz.toml".into(),
-            regime: "SRHD".into(),
+            regime: "RHD".into(),
             attached: "attached · rank 0 / 1".into(),
             paused: false,
             frame: 3,
@@ -841,7 +841,7 @@ mod tests {
                 ("00:30".into(), "checkpoint written : chk.h5".into()),
             ],
             config: vec![
-                ("regime".into(), "srhd".into()),
+                ("regime".into(), "rhd".into()),
                 ("resolution".into(), "256 x 256  (65536 zones)".into()),
             ],
             field: None,
@@ -866,7 +866,7 @@ mod tests {
     #[test]
     fn overview_renders_shell_and_cards() {
         let d = dump(&sample());
-        assert!(d.contains("SRHD"));
+        assert!(d.contains("RHD"));
         assert!(d.contains("overview"));
         assert!(d.contains("THROUGHPUT"));
         assert!(d.contains("conservation & constraints"));
@@ -875,7 +875,7 @@ mod tests {
         assert!(d.contains("CFL"));
     }
 
-    /// a run with no mhd / srhd data omits the div·B row and shows max W as a dash.
+    /// a run with no mhd / rhd data omits the div·B row and shows max W as a dash.
     #[test]
     fn per_physics_fields_are_optional() {
         let mut v = sample();

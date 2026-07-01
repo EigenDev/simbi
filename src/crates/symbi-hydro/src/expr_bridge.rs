@@ -366,7 +366,7 @@ fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Rang
 ///
 /// VALIDATION (regime-driven via `spec`, at attach — never mid-evolve):
 /// - **regime-agnostic across hydro AND mhd.** a prim prescription sets `prim` (no conservation
-///   law), valid for SRHD too (`is_relativistic` ALLOWED). MHD additionally prescribes the CELL-B
+///   law), valid for RHD too (`is_relativistic` ALLOWED). MHD additionally prescribes the CELL-B
 ///   vector (`bcell` slot -> `prim.mag`): the OUT-OF-PLANE component (B_phi in a 2.5D axisymmetric
 ///   grid) is cell-centered + flux-evolved, so prescribing it is a plain Dirichlet, NOT the CT
 ///   tangential-EMF sub-problem (doc 33 §5) that a prescribed POLOIDAL/in-plane FACE field needs.
@@ -424,7 +424,7 @@ pub fn build_boundary_dag(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RMHD_SPEC, SRHD_SPEC};
+    use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC, RMHD_SPEC, RHD_SPEC};
     use symbi_expr::dag::Dag;
     use symbi_ir::backends::interp::{Backend, Cpu};
     use symbi_ir::passes::scalarize::scalarize;
@@ -486,12 +486,12 @@ mod tests {
 
     #[test]
     fn force_on_relativistic_is_rejected() {
-        // SRHD momentum is rho*h*W^2*v — the newtonian force law is wrong; reject.
+        // RHD momentum is rho*h*W^2*v — the newtonian force law is wrong; reject.
         let cfg = cfg_from(
             r#"{ "kind":"force", "dim":1, "outputs":[0], "params":[0.5],
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
         );
-        let err = expect_err(&cfg, &SRHD_SPEC);
+        let err = expect_err(&cfg, &RHD_SPEC);
         assert!(err.contains("relativistic"), "expected relativistic rejection, got: {err}");
     }
 
@@ -641,7 +641,7 @@ mod tests {
             r#"{ "kind":"relax", "dim":1, "outputs":[0,1], "params":[1.0, 0.0],
                  "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"PARAMETER","param_idx":1} ] }"#,
         );
-        let err = expect_err(&cfg, &SRHD_SPEC);
+        let err = expect_err(&cfg, &RHD_SPEC);
         assert!(err.contains("relativistic"), "expected relativistic rejection, got: {err}");
     }
 
@@ -693,15 +693,15 @@ mod tests {
     }
 
     #[test]
-    fn boundary_on_srhd_is_allowed() {
-        // a prim prescription is regime-agnostic across hydro -> srhd (relativistic) is FINE,
-        // unlike force/cooling (whose newtonian conservation law is wrong for srhd).
+    fn boundary_on_rhd_is_allowed() {
+        // a prim prescription is regime-agnostic across hydro -> rhd (relativistic) is FINE,
+        // unlike force/cooling (whose newtonian conservation law is wrong for rhd).
         let cfg = cfg_from(
             r#"{ "kind":"dirichlet", "dim":1, "outputs":[0,1,2], "params":[],
                  "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":0.1},
                            {"op":"CONSTANT","value":1.0} ] }"#,
         );
-        assert!(build_boundary_dag(&cfg, &SRHD_SPEC).is_ok());
+        assert!(build_boundary_dag(&cfg, &RHD_SPEC).is_ok());
     }
 
     #[test]

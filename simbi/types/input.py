@@ -49,11 +49,24 @@ class Spacetime(str, ExtendedEnum):
 
 class Regime(str, ExtendedEnum):
     NEWTONIAN = "newtonian"
-    SRHD = "srhd"
+    # relativistic hydro: the fluid regime is relativistic, agnostic to the spacetime (Minkowski ->
+    # SR, curved -> GR). named `rhd` to match `rmhd` (relativistic MHD) — "special vs general" is a
+    # property of the orthogonal `Spacetime`, not the fluid regime.
+    RHD = "rhd"
     SRMHD = "srmhd"
     NMHD = "nmhd"
     IMHD = "imhd"
     ISOTHERMAL = "isothermal"
+    # deprecated alias: the historical `srhd` name (baked "special" into the fluid regime). same value
+    # as RHD, so `Regime.SRHD is Regime.RHD` and existing configs keep working. `normalize_regime`
+    # maps the legacy checkpoint/string "srhd" -> "rhd".
+    SRHD = "rhd"
+
+
+def normalize_regime(regime: str) -> str:
+    """map a legacy regime string to the current slug (srhd -> rhd) so old checkpoints / configs
+    load. a no-op for every current name."""
+    return "rhd" if regime == "srhd" else regime
 
 
 class BoundaryCondition(str, ExtendedEnum):

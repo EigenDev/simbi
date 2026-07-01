@@ -1,22 +1,22 @@
 // =============================================================================
-// aot_srhd_c2p.rs
+// aot_rhd_c2p.rs
 //
-// numerical validation of the BUILD-TIME-GENERATED SRHD cons->prim kernel — the
+// numerical validation of the BUILD-TIME-GENERATED RHD cons->prim kernel — the
 // first ITERATIVE substrate kernel (a fixed-bound masked Newton-Raphson for the
 // relativistic pressure, `operators::iterate`, lowered + emitted to compiled Rust
 // via the DAG-preserving lowering of docs/design/13). this is the proof the deep
 // iterate produces CORRECT numbers, not just compilable code.
 //
-// two independent checks on the same compiled kernel `srhd_c2p_1d`:
+// two independent checks on the same compiled kernel `rhd_c2p_1d`:
 //   1. ROUND-TRIP: pick analytic primitives (rho, v, p), forward-map to the
-//      conserved (D, S, tau) via the standard SRHD relations, run c2p, and assert
+//      conserved (D, S, tau) via the standard RHD relations, run c2p, and assert
 //      it recovers the originals. this is the physical ground truth.
-//   2. REFERENCE: an independent Rust `srhd_to_primitive` (a do-while Newton
+//   2. REFERENCE: an independent Rust `rhd_to_primitive` (a do-while Newton
 //      iteration run to convergence) on the same conserved
 //      states; the compiled 20-step masked unroll must match it.
 //
-// generated signature (OUT_DIR/srhd_c2p_generated.rs):
-//   srhd_c2p_1d(cons_den, cons_mom_0, cons_nrg : &[f64],         // inputs
+// generated signature (OUT_DIR/rhd_c2p_generated.rs):
+//   rhd_c2p_1d(cons_den, cons_mom_0, cons_nrg : &[f64],         // inputs
 //               prim_rho, prim_vel_0, prim_pre : &mut [f64],     // outputs
 //               grid_size_0, dom_lo_0, buf_lo_0_0..buf_lo_5_0 : i32, gamma: f64)
 // =============================================================================
@@ -26,7 +26,7 @@ use symbi_aot::NamedKernel;
 // shim binding the emitted c2p BY FIELD NAME (NamedKernel) — order-independent,
 // loud + named on manifest drift. every buffer here is 1D (lo = 0).
 #[allow(non_snake_case, clippy::too_many_arguments)]
-fn srhd_c2p_1d(
+fn rhd_c2p_1d(
     cons_den: &[f64], cons_mom: &[f64], cons_nrg: &[f64],
     prim_rho: &mut [f64], prim_vel: &mut [f64], prim_pre: &mut [f64],
     grid_size_0: i32, dom_lo_0: i32,
@@ -35,7 +35,7 @@ fn srhd_c2p_1d(
 ) {
     let grid = [grid_size_0 as u32];
     let dom = [dom_lo_0];
-    NamedKernel::new("srhd_c2p_1d")
+    NamedKernel::new("rhd_c2p_1d")
         .input("cons.den", cons_den).input("cons.mom_0", cons_mom).input("cons.nrg", cons_nrg)
         .output("prim.rho", prim_rho).output("prim.vel_0", prim_vel).output("prim.pre", prim_pre)
         .grid(&grid).dom_lo(&dom)
@@ -58,11 +58,11 @@ fn prim_to_cons(rho: f64, v: f64, p: f64, gamma: f64) -> (f64, f64, f64) {
 }
 
 // independent reference: the relativistic-pressure Newton run to convergence
-// (the do-while of conversion.hpp / srhd.rs). returns (rho, v, p).
-fn srhd_to_primitive_ref(d: f64, s: f64, tau: f64, gamma: f64) -> (f64, f64, f64) {
+// (the do-while of conversion.hpp / rhd.rs). returns (rho, v, p).
+fn rhd_to_primitive_ref(d: f64, s: f64, tau: f64, gamma: f64) -> (f64, f64, f64) {
     let smag = s.abs(); // |S| in 1D
     let tol = d * 1.0e-12;
-    let mut p = (smag - d - tau).abs(); // initial guess, matching srhd_c2p
+    let mut p = (smag - d - tau).abs(); // initial guess, matching rhd_c2p
     for _ in 0..200 {
         let et = tau + d + p;
         let v2 = (smag * smag) / (et * et);
@@ -104,7 +104,7 @@ fn run_kernel(den: &[f64], mom: &[f64], nrg: &[f64]) -> (Vec<f64>, Vec<f64>, Vec
     let mut prim_rho = vec![0.0_f64; n];
     let mut prim_vel = vec![0.0_f64; n];
     let mut prim_pre = vec![0.0_f64; n];
-    srhd_c2p_1d(
+    rhd_c2p_1d(
         den, mom, nrg, &mut prim_rho, &mut prim_vel, &mut prim_pre,
         n as i32, 0, 0, 0, 0, 0, 0, 0, GAMMA,
     );
@@ -112,7 +112,7 @@ fn run_kernel(den: &[f64], mom: &[f64], nrg: &[f64]) -> (Vec<f64>, Vec<f64>, Vec
 }
 
 #[test]
-fn srhd_c2p_round_trips_prim_to_cons() {
+fn rhd_c2p_round_trips_prim_to_cons() {
     let den: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0).collect();
     let mom: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1).collect();
     let nrg: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2).collect();
@@ -128,11 +128,11 @@ fn srhd_c2p_round_trips_prim_to_cons() {
 }
 
 #[test]
-fn srhd_face_flux_uniform_state_is_consistent() {
+fn rhd_face_flux_uniform_state_is_consistent() {
     // HLLE consistency: for a UNIFORM field (PLM gives L == R), the HLLE flux
     // equals the analytic physical flux F(U) exactly — independent of the wave
     // speeds. so this RUNS the compiled relativistic flux kernel and checks its
-    // U(prim)/F(U) against the closed-form SRHD fluxes.
+    // U(prim)/F(U) against the closed-form RHD fluxes.
     let (rho, v, p) = (1.5_f64, 0.4_f64, 0.8_f64);
     let n = 8usize;
     let den = vec![rho; n];
@@ -141,7 +141,7 @@ fn srhd_face_flux_uniform_state_is_consistent() {
     let (mut fden, mut fmom, mut fnrg) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     // interior only: the stencil reads coord-2..coord+1, so iterate cells 2..6
     // (dom_lo=2, grid=4) — all reads land inside the size-8 buffers.
-    NamedKernel::new("srhd_face_flux_1d_0")
+    NamedKernel::new("rhd_face_flux_1d_0")
         .input("prim.rho", &den).input("prim.vel[0]", &v0).input("prim.pre", &pre)
         .output("flux.den", &mut fden).output("flux.mom_0", &mut fmom).output("flux.nrg", &mut fnrg)
         .grid(&[4]).dom_lo(&[2])
@@ -167,7 +167,7 @@ fn srhd_face_flux_uniform_state_is_consistent() {
 }
 
 #[test]
-fn srhd_c2p_matches_reference_newton() {
+fn rhd_c2p_matches_reference_newton() {
     let den: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0).collect();
     let mom: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1).collect();
     let nrg: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).2).collect();
@@ -175,7 +175,7 @@ fn srhd_c2p_matches_reference_newton() {
     let (rho, vel, pre) = run_kernel(&den, &mom, &nrg);
 
     for i in 0..CASES.len() {
-        let (rr, vr, pr) = srhd_to_primitive_ref(den[i], mom[i], nrg[i], GAMMA);
+        let (rr, vr, pr) = rhd_to_primitive_ref(den[i], mom[i], nrg[i], GAMMA);
         assert!((rho[i] - rr).abs() < 1e-10, "case {i}: rho {} != ref {rr}", rho[i]);
         assert!((vel[i] - vr).abs() < 1e-10, "case {i}: vel {} != ref {vr}", vel[i]);
         assert!((pre[i] - pr).abs() < 1e-10, "case {i}: pre {} != ref {pr}", pre[i]);

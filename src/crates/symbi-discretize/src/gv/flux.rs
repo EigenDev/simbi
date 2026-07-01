@@ -252,10 +252,10 @@ fn euler_flux_writes<const D: usize>(flux: &Cons<Gv, D>) -> Vec<(String, FieldBi
 /// trace an ideal-gas Euler face flux (Newtonian OR relativistic) along sweep `dir` —
 /// the gv single source: PLM-reconstruct (rho, every vel_k, pre) to the face, then the
 /// canonical `riemann::hlle(regime, IdealGas, L, R, n_hat, 0)` (symbi-hydro). replaces
-/// the hand-written `hlle_flux` / `srhd_hlle_flux` Expr builders + their per-component
-/// U/F (srhd_side). the reconstruction is a Gv stencil (codegen-only); the HLLE is
+/// the hand-written `hlle_flux` / `rhd_hlle_flux` Expr builders + their per-component
+/// U/F (rhd_side). the reconstruction is a Gv stencil (codegen-only); the HLLE is
 /// carrier-generic physics. cartesian: ncomp == ndim == D, sweep coordinate == grid `dir`.
-/// generic over the regime (both `Newtonian` and `Srhd` have `Prim<S,D>` / `Cons<S,D>`).
+/// generic over the regime (both `Newtonian` and `Rhd` have `Prim<S,D>` / `Cons<S,D>`).
 /// `D` is the velocity-component count (ncomp); `ndim` is the reconstruction grid (the
 /// stencil shifts along grid axis `dir`); `coord_n` is the sweep COORDINATE (the normal
 /// velocity is `vel[coord_n]`, pressure goes on momentum `coord_n`). cartesian: ndim == D,
@@ -295,11 +295,11 @@ pub fn adiabatic_flux_cyl_rz_gv(dir: u8) -> (GvKernel, Vec<(String, FieldBind, N
 }
 
 
-/// the SRHD (special-relativistic Euler) face flux — `euler_hlle_flux_gv` at the `Srhd`
-/// regime (relativistic U/F/wave speeds via Mignone-Bodo). replaces the `srhd_hlle_flux`
-/// Expr builder + `srhd_side`. cartesian-only (srhd has no cyl r-z), ncomp == ndim == D.
-pub fn srhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_hlle_flux_gv::<D, _>(&Srhd, D as u8, dir, dir as usize)
+/// the RHD (special-relativistic Euler) face flux — `euler_hlle_flux_gv` at the `Rhd`
+/// regime (relativistic U/F/wave speeds via Mignone-Bodo). replaces the `rhd_hlle_flux`
+/// Expr builder + `rhd_side`. cartesian-only (rhd has no cyl r-z), ncomp == ndim == D.
+pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    euler_hlle_flux_gv::<D, _>(&Rhd, D as u8, dir, dir as usize)
 }
 
 
@@ -313,7 +313,7 @@ pub fn srhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBin
 /// inherits the SAME densitization as the flat flux, exactly reproducing `F^r = alpha(flatF - b U)`
 /// (mass/energy) and `flatF_Srhat - b S_rhat` at `alpha^2` (momentum). `r_face = 2M/r` uses the
 /// radial face position (offset 0 on the face domain); baked ONLY for the KerrSchild spacetime.
-pub fn srhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn rhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let m = Gv::scalar("schwarzschild_mass");
     let r_face = gv_axis_face_at(0, spacing[0], 0); // this thread's radial face position
@@ -538,7 +538,7 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
 
 // =============================================================================
 // HLLC face flux — contact-resolving 3-wave solver, regime-specific bodies. one
-// builder per regime (Newtonian, SRHD, RMHD) mirroring the HLLE builder shape:
+// builder per regime (Newtonian, RHD, RMHD) mirroring the HLLE builder shape:
 // same PLM reconstruction, same scalar tail (gamma, theta), same write manifest.
 // the Riemann solver is the only structural difference. defaulted to the
 // Standard shock-smoother arm at trace time — Quirk/Fleischmann are host-time
@@ -574,12 +574,12 @@ pub fn adiabatic_hllc_lm_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(Str
 }
 
 
-/// SRHD HLLC face flux — Mignone-Bodo (2005) quadratic for the contact speed.
-/// mirrors `euler_hlle_flux_gv(&Srhd, ...)` but calls `riemann::hllc_srhd`.
-pub fn srhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+/// RHD HLLC face flux — Mignone-Bodo (2005) quadratic for the contact speed.
+/// mirrors `euler_hlle_flux_gv(&Rhd, ...)` but calls `riemann::hllc_rhd`.
+pub fn rhd_hllc_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
-    let flux = hllc_srhd(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Standard);
+    let flux = hllc_rhd(&eos, &left, &right, &nhat, vface, ShockwaveLimiter::Standard);
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }

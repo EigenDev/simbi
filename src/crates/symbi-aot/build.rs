@@ -32,7 +32,7 @@ use std::sync::Mutex;
 static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 
 // every kernel's CONSTRUCTION lives in symbi-discretize as a builder (iso_c2p,
-// hlle_flux, srhd_hlle_flux, godunov_euler/snapshot/rk2, ...). build.rs only
+// hlle_flux, rhd_hlle_flux, godunov_euler/snapshot/rk2, ...). build.rs only
 // drives them: build the graph via a builder, then emit (CPU Rust + CUDA source).
 use symbi_discretize::{
     body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv,
@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, srhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    snapshot_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -226,7 +226,7 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
         let (k, writes) = refine_prolong_gv(nd, 2, order);
         emit_gv(out_dir, KernelId::RefineProlong { order: tag, ndim }.name(), ndim, &k, &writes);
         // multi-field (prim batch) prolong: 3D hot path only, ncomp 4 (isothermal)
-        // and 5 (adiabatic/srhd) — one launch over the whole prim set.
+        // and 5 (adiabatic/rhd) — one launch over the whole prim set.
         if ndim == 3 {
             for ncomp in [4u8, 5u8] {
                 let (k, writes) =
@@ -273,19 +273,19 @@ fn coords_suffix(coords: Coords) -> &'static str {
 // matrix as DATA, not as copy-paste calls. the codegen loop in main() walks
 // these tables × ndim and dispatches to the one `gen_godunov_euler_unified`
 // chokepoint. adding a regime or a family is a row addition; adding a
-// geometry is a column. zero copy-paste. SRHD/RMHD + curvilinear extensions
+// geometry is a column. zero copy-paste. RHD/RMHD + curvilinear extensions
 // follow once their fused-source builders validate against the GPU.
 // =============================================================================
 
 /// one row in the regime bake table — the kernel-name prefix + whether the
 /// regime carries an energy conservation law. iso (mass + mom only) sets
-/// `has_energy = false`; adiabatic / SRHD / RMHD set `true`.
+/// `has_energy = false`; adiabatic / RHD / RMHD set `true`.
 struct RegimeBuild {
     prefix:     &'static str,
     has_energy: bool,
 }
 
-/// every regime we AOT-bake fused-source kernels for. SRHD + RMHD slot in
+/// every regime we AOT-bake fused-source kernels for. RHD + RMHD slot in
 /// as additional rows once their fused-source path validates on the GPU.
 const REGIMES: &[RegimeBuild] = &[
     RegimeBuild { prefix: "iso",       has_energy: false },
@@ -358,7 +358,7 @@ impl Geom {
     }
 
     // select the Schwarzschild spacetime (lapse alpha = sqrt(1-2M/r)); the spatial `coords` stay
-    // Spherical. only the relativistic regimes (srhd/rmhd) compose with it physically.
+    // Spherical. only the relativistic regimes (rhd/rmhd) compose with it physically.
     fn schwarzschild(mut self) -> Self {
         self.spacetime = Spacetime::Schwarzschild;
         self
@@ -501,7 +501,7 @@ fn geo_source(prefix: &str) -> GeoSource {
         "rmhd" => GeoSource::Rmhd,
         "nmhd" => GeoSource::NewtonianMhd,
         "imhd" => GeoSource::IsothermalMhd,
-        _ => GeoSource::Hydro { inertial: matches!(prefix, "iso" | "adiabatic" | "srhd") },
+        _ => GeoSource::Hydro { inertial: matches!(prefix, "iso" | "adiabatic" | "rhd") },
     }
 }
 
@@ -657,10 +657,10 @@ fn gen_snapshot(out_dir: &str, ndim: u8, prefix: &str, has_energy: bool, geom: G
 }
 
 // the GEOMETRY-DEPENDENT hydro kernels for ALL THREE EOS regimes (iso / adiabatic /
-// srhd) at one (ndim, Geom): the one godunov-stage kernel (area-weighted divergence +
+// rhd) at one (ndim, Geom): the one godunov-stage kernel (area-weighted divergence +
 // the regime-shared `GeoSource::Hydro` geometric source — pressure hoop + inertial
 // centrifugal/coriolis, all falling out of the Geom) + the CFL wave-speed maps (iso
-// shared by iso+adiabatic; srhd its own). these are the ONLY curvilinear-specific
+// shared by iso+adiabatic; rhd its own). these are the ONLY curvilinear-specific
 // kernels for a DOF == NDIM coordinate system — the c2p / flux / snapshot / ghost are
 // pointwise / geometry-independent at ncomp == NDIM, so the runtime reuses the
 // cartesian instances. ONE helper drives every (spherical, cylindrical-natural) cell.
@@ -668,8 +668,8 @@ fn gen_curvilinear_hydro(out_dir: &str, ndim: u8, geom: Geom) {
     gen_godunov_stage(out_dir, ndim, "adiabatic", true, geom.clone(), None);
     gen_godunov_stage(out_dir, ndim, "iso", false, geom.clone(), None);
     gen_iso_wave_speed_map(out_dir, ndim, geom.clone());
-    gen_godunov_stage(out_dir, ndim, "srhd", true, geom.clone(), None);
-    gen_srhd_wave_speed_map(out_dir, ndim, geom);
+    gen_godunov_stage(out_dir, ndim, "rhd", true, geom.clone(), None);
+    gen_rhd_wave_speed_map(out_dir, ndim, geom);
 }
 
 // the adiabatic (ideal-gas) cons->prim: p = (gamma-1)*(nrg - 0.5*rho*|v|^2),
@@ -693,61 +693,61 @@ fn gen_adiabatic_c2p(out_dir: &str, ndim: u8, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the SRHD (special-relativistic) cons->prim: the FIRST iterative c2p. the
+// the RHD (special-relativistic) cons->prim: the FIRST iterative c2p. the
 // relativistic pressure is a root of a 1D equation found by a fixed-bound masked
 // Newton (`operators::iterate`, `max_iters` baked at codegen); rho/vel/Lorentz
 // follow algebraically. proves the substrate emits a compilable iterative kernel
 // — the deep iterate lowers in linear time via the DAG-preserving lowering
 // (docs/design/13), where `as_op` would have exploded. pointwise, D-generic.
-fn gen_srhd_c2p(out_dir: &str, ndim: u8, max_iters: usize) {
-    let name = format!("srhd_c2p_{ndim}d");
-    // built from symbi-hydro's branch-free `srhd_recover` at S=Gv — the SINGLE-SOURCE
+fn gen_rhd_c2p(out_dir: &str, ndim: u8, max_iters: usize) {
+    let name = format!("rhd_c2p_{ndim}d");
+    // built from symbi-hydro's branch-free `rhd_recover` at S=Gv — the SINGLE-SOURCE
     // physics (the iterative relativistic c2p; the Newton lowers to one IterateInline).
-    // srhd c2p is cartesian-only + ncomp==ndim (no cyl r-z swirl srhd), so this is the
-    // ONLY srhd c2p path. max_iters bakes the fixed Newton count.
+    // rhd c2p is cartesian-only + ncomp==ndim (no cyl r-z swirl rhd), so this is the
+    // ONLY rhd c2p path. max_iters bakes the fixed Newton count.
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::srhd_c2p_gv::<1>(max_iters),
-        2 => symbi_discretize::gv::srhd_c2p_gv::<2>(max_iters),
-        3 => symbi_discretize::gv::srhd_c2p_gv::<3>(max_iters),
-        _ => panic!("srhd_c2p_gv: unsupported ndim {ndim}"),
+        1 => symbi_discretize::gv::rhd_c2p_gv::<1>(max_iters),
+        2 => symbi_discretize::gv::rhd_c2p_gv::<2>(max_iters),
+        3 => symbi_discretize::gv::rhd_c2p_gv::<3>(max_iters),
+        _ => panic!("rhd_c2p_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the SRHD face flux: reconstruction + the canonical HLLE with RELATIVISTIC
-// U(prim)/F(U)/wave speeds (symbi_discretize::srhd_hlle_flux). mass + momentum +
+// the RHD face flux: reconstruction + the canonical HLLE with RELATIVISTIC
+// U(prim)/F(U)/wave speeds (symbi_discretize::rhd_hlle_flux). mass + momentum +
 // energy (D, S_k, tau). same structure as the adiabatic flux; only the physics
 // (Lorentz factor, relativistic enthalpy + sound speed + characteristic speeds)
 // differs. dimension-generic; codegen instantiates the sweep-0 1D kernel here.
-fn gen_srhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
-    let name = format!("srhd_face_flux_{ndim}d_{dir}");
+fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
+    let name = format!("rhd_face_flux_{ndim}d_{dir}");
     // the gv single-source physics: PLM reconstruction (Gv stencil) composed with
-    // symbi-hydro's `riemann::hlle` at the `Srhd` regime (relativistic U/F/wave speeds),
-    // traced at S=Gv — replacing the `srhd_hlle_flux` Expr builder + `srhd_side`. srhd flux
-    // is cartesian-only + ncomp == ndim (no cyl r-z srhd), so this is the ONLY srhd flux
+    // symbi-hydro's `riemann::hlle` at the `Rhd` regime (relativistic U/F/wave speeds),
+    // traced at S=Gv — replacing the `rhd_hlle_flux` Expr builder + `rhd_side`. rhd flux
+    // is cartesian-only + ncomp == ndim (no cyl r-z rhd), so this is the ONLY rhd flux
     // path. numerically equivalent within ULP.
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::srhd_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::srhd_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::srhd_flux_gv::<3>(dir),
-        _ => panic!("srhd_flux_gv: unsupported ndim {ndim}"),
+        1 => symbi_discretize::gv::rhd_flux_gv::<1>(dir),
+        2 => symbi_discretize::gv::rhd_flux_gv::<2>(dir),
+        3 => symbi_discretize::gv::rhd_flux_gv::<3>(dir),
+        _ => panic!("rhd_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the SRHD ingoing-Kerr-Schild shift kernel: a FACE-domain in-place add of the shift-advection
+// the RHD ingoing-Kerr-Schild shift kernel: a FACE-domain in-place add of the shift-advection
 // `- (2M/r_face) U` to each conserved face flux (den/mom_k/nrg), run between the flat flux and the
 // godunov for the radial direction. depends on the radial SPACING (the face position `2M/r_face`
 // uses `gv_axis_face_at`), so it carries the spacing suffix (like the godunov/wavespeed); baked only
 // for KerrSchild + dir 0. `_ks` is in the name, so the spacetime tag is implicit (no `_schw`/`_ks`
 // suffix needed). geom (coords) suffix omitted — the shift reads only the radial axis (DOF == D).
-fn gen_srhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
-    let name = format!("srhd_ks_shift_flux{}_{ndim}d_{dir}", geom.spacing_suffix());
+fn gen_rhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
+    let name = format!("rhd_ks_shift_flux{}_{ndim}d_{dir}", geom.spacing_suffix());
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::srhd_ks_shift_flux_gv::<1>(&geom.spacing),
-        2 => symbi_discretize::gv::srhd_ks_shift_flux_gv::<2>(&geom.spacing),
-        3 => symbi_discretize::gv::srhd_ks_shift_flux_gv::<3>(&geom.spacing),
-        _ => panic!("srhd_ks_shift_flux_gv: unsupported ndim {ndim}"),
+        1 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<1>(&geom.spacing),
+        2 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<2>(&geom.spacing),
+        3 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<3>(&geom.spacing),
+        _ => panic!("rhd_ks_shift_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -808,13 +808,13 @@ fn gen_adiabatic_hllc_lm_face_flux(out_dir: &str, ndim: u8, dir: u8) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-fn gen_srhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
-    let name = format!("srhd_face_flux_hllc_{ndim}d_{dir}");
+fn gen_rhd_hllc_face_flux(out_dir: &str, ndim: u8, dir: u8) {
+    let name = format!("rhd_face_flux_hllc_{ndim}d_{dir}");
     let (k, writes) = match ndim {
-        1 => symbi_discretize::gv::srhd_hllc_flux_gv::<1>(dir),
-        2 => symbi_discretize::gv::srhd_hllc_flux_gv::<2>(dir),
-        3 => symbi_discretize::gv::srhd_hllc_flux_gv::<3>(dir),
-        _ => panic!("srhd_hllc_flux_gv: unsupported ndim {ndim}"),
+        1 => symbi_discretize::gv::rhd_hllc_flux_gv::<1>(dir),
+        2 => symbi_discretize::gv::rhd_hllc_flux_gv::<2>(dir),
+        3 => symbi_discretize::gv::rhd_hllc_flux_gv::<3>(dir),
+        _ => panic!("rhd_hllc_flux_gv: unsupported ndim {ndim}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1133,13 +1133,13 @@ fn gen_rmhd_average_efield(out_dir: &str, ndim: u8) {
     emit_gv(out_dir, &format!("rmhd_average_efield_{ndim}d"), ndim, &k, &writes);
 }
 
-// the SRHD CFL wave-speed map: per-cell max(|lambda_-|, |lambda_+|), the
+// the RHD CFL wave-speed map: per-cell max(|lambda_-|, |lambda_+|), the
 // relativistic 1D characteristic speeds. like the iso map but the relativistic
 // closed form (no inv_dx baked); the host folds max + cfl_from_smax(s_max,cfl,dx).
-fn gen_srhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("srhd_wave_speed_map{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
+fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
+    let name = format!("rhd_wave_speed_map{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
     let (k, writes) =
-        srhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize);
+        rhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1166,7 +1166,7 @@ fn gen_godunov_mass_sph_1d(out_dir: &str) {
 // P3b (curvilinear): the centrifugal/coriolis INERTIAL momentum source on a 2D spherical
 // grid (single theta cell -> isolates the radial centrifugal). regime-agnostic via the
 // conserved momentum: a host test sets cons.mom (= rho v Newtonian, or rho h W^2 v for
-// SRHD) + v_r, v_theta and checks s_0 = mom_theta*v_theta/r_c (centrifugal), s_1 =
+// RHD) + v_r, v_theta and checks s_0 = mom_theta*v_theta/r_c (centrifugal), s_1 =
 // -mom_r*v_theta/r_c (coriolis), r_c the volume-weighted radial centroid.
 fn gen_inertial_momentum_probe_sph_2d(out_dir: &str) {
     let (k, writes) = inertial_momentum_probe_gv(Coords::Spherical, &[Spacing::Uniform; 2], 2);
@@ -1282,36 +1282,36 @@ fn main() {
         gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim));
         gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim).log_radial());
     }
-    // GR (Schwarzschild) SRHD godunov stage — the lapse-densitized relativistic gas update on a
-    // spherically-symmetric BH background (`srhd_godunov_stage_sph_schw_{1,2}d`). only the
+    // GR (Schwarzschild) RHD godunov stage — the lapse-densitized relativistic gas update on a
+    // spherically-symmetric BH background (`rhd_godunov_stage_sph_schw_{1,2}d`). only the
     // RELATIVISTIC regime composes physically (no adiabatic/iso on a horizon). 1D radial (the
     // Michel accretion oracle) + 2D axisymmetric.
     for ndim in 1u8..=2 {
         let bh = Geom::sph(ndim).schwarzschild();
-        gen_godunov_stage(&out_dir, ndim, "srhd", true, bh.clone(), None);
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, bh.clone(), None);
         // the GR CFL wave-speed map: the Banyuls-Font coordinate signal speed (the lapse + radial
         // proper-width correction) -> the correct dt near the horizon.
-        gen_srhd_wave_speed_map(&out_dir, ndim, bh);
+        gen_rhd_wave_speed_map(&out_dir, ndim, bh);
         // the log-radial Schwarzschild grid (the bondi accretion zones span many decades in r):
         // same lapse-densitized stage + GR wave speeds on geometric-mean cell geometry, tagged
         // `_sph_logr_schw`.
         let bh_log = Geom::sph(ndim).schwarzschild().log_radial();
-        gen_godunov_stage(&out_dir, ndim, "srhd", true, bh_log.clone(), None);
-        gen_srhd_wave_speed_map(&out_dir, ndim, bh_log);
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, bh_log.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, ndim, bh_log);
     }
-    // GR (ingoing Kerr-Schild) SRHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
+    // GR (ingoing Kerr-Schild) RHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
     // densitized godunov + KS coordinate wave speeds + the shift-advection flux kernel. 1D radial
     // (the through-horizon accretion target); the inner boundary can sit BELOW 2M where the flow is
     // unconditionally ingoing. uniform + log-radial grids, tagged `_sph[_logr]_ks`.
     for ndim in 1u8..=1 {
         let ks = Geom::sph(ndim).kerr_schild();
-        gen_godunov_stage(&out_dir, ndim, "srhd", true, ks.clone(), None);
-        gen_srhd_wave_speed_map(&out_dir, ndim, ks.clone());
-        gen_srhd_ks_shift_flux(&out_dir, ndim, 0, ks);
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
+        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks);
         let ks_log = Geom::sph(ndim).kerr_schild().log_radial();
-        gen_godunov_stage(&out_dir, ndim, "srhd", true, ks_log.clone(), None);
-        gen_srhd_wave_speed_map(&out_dir, ndim, ks_log.clone());
-        gen_srhd_ks_shift_flux(&out_dir, ndim, 0, ks_log);
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, ks_log.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, ndim, ks_log.clone());
+        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks_log);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.
@@ -1326,7 +1326,7 @@ fn main() {
     // axis is baked per kernel instance). the D-generic SubstrateKernelSet<.., const D>
     // picks the instance by name (`kernel_by_name`). the godunov / snapshot / rk2
     // builders are EOS-generic — `has_energy` adds the energy conservation law
-    // (iso = false; adiabatic + srhd = true).
+    // (iso = false; adiabatic + rhd = true).
     for ndim in 1u8..=3 {
         // isothermal Euler (no energy law; the EOS closure p = cs^2*rho is in c2p).
         gen_iso_c2p(&out_dir, ndim);
@@ -1339,24 +1339,24 @@ fn main() {
         gen_adiabatic_c2p(&out_dir, ndim, Geom::cart(ndim));
         gen_godunov_stage(&out_dir, ndim, "adiabatic", true, Geom::cart(ndim), None);
         gen_snapshot(&out_dir, ndim, "adiabatic", true, Geom::cart(ndim));
-        // SRHD (special-relativistic Euler): the ITERATIVE c2p (20-step masked
+        // RHD (special-relativistic Euler): the ITERATIVE c2p (20-step masked
         // Newton, docs/design/14) + the relativistic flux/wave-speed map; the
         // godunov/snapshot are the SAME EOS-generic builders (D/S_k/tau).
-        gen_srhd_c2p(&out_dir, ndim, 20);
-        gen_srhd_wave_speed_map(&out_dir, ndim, Geom::cart(ndim));
-        gen_godunov_stage(&out_dir, ndim, "srhd", true, Geom::cart(ndim), None);
-        gen_snapshot(&out_dir, ndim, "srhd", true, Geom::cart(ndim));
+        gen_rhd_c2p(&out_dir, ndim, 20);
+        gen_rhd_wave_speed_map(&out_dir, ndim, Geom::cart(ndim));
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, Geom::cart(ndim), None);
+        gen_snapshot(&out_dir, ndim, "rhd", true, Geom::cart(ndim));
         // one face flux per sweep dir (the reconstruction axis is baked).
         for dir in 0..ndim {
             gen_iso_face_flux(&out_dir, ndim, dir);
             gen_adiabatic_face_flux(&out_dir, ndim, dir, Geom::cart(ndim));
-            gen_srhd_face_flux(&out_dir, ndim, dir);
+            gen_rhd_face_flux(&out_dir, ndim, dir);
             // HLLC variants — contact-resolving 3-wave solver, available on every
             // regime that has a contact wave. iso is HLLE-only by physics. cartesian
             // only for now (curvilinear HLLC = follow-up).
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir);
-            gen_srhd_hllc_face_flux(&out_dir, ndim, dir);
+            gen_rhd_hllc_face_flux(&out_dir, ndim, dir);
         }
     }
     // RMHD HLLC + HLLD — 1D + 3D variants matching the HLLE RMHD layout
@@ -1374,7 +1374,7 @@ fn main() {
     //   {regime}  ×  {fused family}  ×  {ndim}  ×  {integrator kind}  ×  {geometry}
     //
     // declaring it as data + a nested loop replaces the copy-paste fan-out.
-    // adding SRHD / RMHD = one row in `REGIMES`; adding accretion = one row
+    // adding RHD / RMHD = one row in `REGIMES`; adding accretion = one row
     // in `FAMILIES`; adding spherical = wrap a `for geom in GEOMS` loop
     // (deferred until the curvilinear fused path validates on GPU). this
     // is the LOAD-BEARING shape: every new fused-kernel variant is a data
@@ -1422,7 +1422,7 @@ fn main() {
         gen_adiabatic_face_flux(&out_dir, 2, dir, cyl.clone());
     }
     // the CYLINDRICAL NATURAL (DOF == NDIM) hydro family for ALL THREE regimes (iso /
-    // adiabatic / srhd), at 1D (radial), 2D (r-phi disk plane), and 3D (r,phi,z) — the
+    // adiabatic / rhd), at 1D (radial), 2D (r-phi disk plane), and 3D (r,phi,z) — the
     // SAME gen_curvilinear_hydro helper that drives the spherical cells. only the
     // geometry-dependent godunov + wave-speed are "_cyl" (area-weighted divergence +
     // centrifugal/coriolis/hoop source); the c2p/flux/snapshot/ghost reuse the cartesian

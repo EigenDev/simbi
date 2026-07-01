@@ -86,7 +86,7 @@ mod tests {
     fn sample_view() -> DiagnosticView {
         DiagnosticView {
             app_title: "test — kh.toml".into(),
-            regime: "SRHD".into(),
+            regime: "RHD".into(),
             attached: String::new(),
             paused: false,
             frame: 7,
@@ -106,7 +106,7 @@ mod tests {
             cfl_max: 0.8,
             blocks_per_level: vec![64],
             log: vec![("00:01".into(), "started".into())],
-            config: vec![("regime".into(), "srhd".into())],
+            config: vec![("regime".into(), "rhd".into())],
             field: None,
             field_count: 0,
             host: Some(crate::hostinfo::HostStats {

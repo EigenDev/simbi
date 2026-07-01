@@ -405,7 +405,7 @@ fn write_photon_events_py(
     tree.push_attr("v_scale", req_f64(qscales, "velocity")?);
     tree.push_attr("length_scale", req_f64(qscales, "length")?);
     tree.push_attr("n_events", n as u64);
-    // hydro_type: 0 = SRHD (unpolarized synchrotron); the reader reads it as an attr.
+    // hydro_type: 0 = RHD (unpolarized synchrotron); the reader reads it as an attr.
     tree.push_attr("hydro_type", 0u64);
 
     Hdf5Backend

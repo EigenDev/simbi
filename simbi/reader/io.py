@@ -27,7 +27,7 @@ from numpy.typing import NDArray
 
 from simbi.functional import Err, Ok, Result
 from simbi.types.bodies import Body
-from simbi.types.input import Metadata
+from simbi.types.input import Metadata, normalize_regime
 
 # =============================================================================
 # core types
@@ -506,7 +506,7 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 is_mhd=bool(attrs["is_mhd"]),
                 is_relativistic=bool(attrs.get("is_relativistic", False)),
                 # enums
-                regime=decode_str(attrs["regime"]),
+                regime=normalize_regime(decode_str(attrs["regime"])),
                 solver=decode_str(attrs["solver"]),
                 reconstruction=decode_str(attrs["reconstruction"]),
                 timestepping=decode_str(attrs["timestepping"]),

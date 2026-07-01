@@ -21,7 +21,7 @@ pub use symbi_hydro::newtonian::Newtonian;
 pub use symbi_hydro::newtonian_mhd::NewtonianMhd;
 pub use symbi_hydro::isothermal_mhd::IsothermalMhd;
 pub use symbi_hydro::rmhd::Rmhd;
-pub use symbi_hydro::srhd::Srhd;
+pub use symbi_hydro::rhd::Rhd;
 
 // --- equations of state ---
 pub use symbi_hydro::eos::{IdealGas, Isothermal};
@@ -62,7 +62,7 @@ pub use crate::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSe
 pub use crate::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 pub use crate::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 pub use crate::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
-pub use crate::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+pub use crate::regimes::substrate_rhd::RhdSubstrateKernelSet;
 
 // --- primitive / conserved value types (for IC closures + field read-back) ---
 pub use symbi_algebra::Tensor;

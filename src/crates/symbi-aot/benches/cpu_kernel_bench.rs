@@ -19,7 +19,7 @@ use std::time::Instant;
 // loop and poison the timing. the slice ABI is still drift-stable (the signature
 // never changes when a builder adds a field; the buffer slice just grows).
 use symbi_aot::{
-    rmhd_c2p_1d, rmhd_face_flux_1d, srhd_c2p_1d, srhd_face_flux_1d_0,
+    rmhd_c2p_1d, rmhd_face_flux_1d, rhd_c2p_1d, rhd_face_flux_1d_0,
     CpuField, CpuFieldMut,
 };
 
@@ -179,8 +179,8 @@ fn main() {
         black_box(&fden);
     });
 
-    // ---- SRHD comparison: same relativistic physics, NO magnetic field / quartic ----
-    // srhd p2c (1-velocity): D = rho*W, S = rho*h*W^2*v, tau = rho*h*W^2 - p - D.
+    // ---- RHD comparison: same relativistic physics, NO magnetic field / quartic ----
+    // rhd p2c (1-velocity): D = rho*W, S = rho*h*W^2*v, tau = rho*h*W^2 - p - D.
     let (mut sden, mut smom, mut snrg) = (vec![0.0; N], vec![0.0; N], vec![0.0; N]);
     for ii in 0..N {
         let (rho, v, p, _b) = prim_at(ii, N);
@@ -193,18 +193,18 @@ fn main() {
         snrg[ii] = rhw2 - p - rho * w;
     }
     let (mut sprho, mut spvel, mut sppre) = (vec![0.0; N], vec![0.0; N], vec![0.0; N]);
-    bench("srhd c2p", N, REPS, || {
+    bench("rhd c2p", N, REPS, || {
         let cd = CpuField::from_layout(&sden, &[0], &[N as u32]);
         let cm = CpuField::from_layout(&smom, &[0], &[N as u32]);
         let cn = CpuField::from_layout(&snrg, &[0], &[N as u32]);
         let pr = CpuFieldMut::from_layout(&mut sprho, &[0], &[N as u32]);
         let pv = CpuFieldMut::from_layout(&mut spvel, &[0], &[N as u32]);
         let pp = CpuFieldMut::from_layout(&mut sppre, &[0], &[N as u32]);
-        srhd_c2p_1d(&[cd, cm, cn], &mut [pr, pv, pp], &[N as u32], &[0], &[], &[GAMMA]);
+        rhd_c2p_1d(&[cd, cm, cn], &mut [pr, pv, pp], &[N as u32], &[0], &[], &[GAMMA]);
         black_box(&sprho);
     });
 
-    // srhd face flux (1-velocity prim -> 3 flux components, PLM stencil).
+    // rhd face flux (1-velocity prim -> 3 flux components, PLM stencil).
     let (mut srho, mut svel, mut spre) = (vec![0.0; N], vec![0.0; N], vec![0.0; N]);
     for ii in 0..N {
         let (rho, v, p, _b) = prim_at(ii, N);
@@ -213,14 +213,14 @@ fn main() {
         spre[ii] = p;
     }
     let (mut sfden, mut sfmom, mut sfnrg) = (vec![0.0; N], vec![0.0; N], vec![0.0; N]);
-    bench("srhd face flux", N - 4, REPS, || {
+    bench("rhd face flux", N - 4, REPS, || {
         let a = CpuField::from_layout(&srho, &[0], &[N as u32]);
         let b = CpuField::from_layout(&svel, &[0], &[N as u32]);
         let c = CpuField::from_layout(&spre, &[0], &[N as u32]);
         let fd = CpuFieldMut::from_layout(&mut sfden, &[0], &[N as u32]);
         let fm = CpuFieldMut::from_layout(&mut sfmom, &[0], &[N as u32]);
         let fn_ = CpuFieldMut::from_layout(&mut sfnrg, &[0], &[N as u32]);
-        srhd_face_flux_1d_0(
+        rhd_face_flux_1d_0(
             &[a, b, c], &mut [fd, fm, fn_], &[(N - 4) as u32], &[2], &[], &[GAMMA, THETA],
         );
         black_box(&sfden);

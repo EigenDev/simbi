@@ -83,7 +83,7 @@ class SystemManifest:
 
     length_scale: float  # cm per code length
     density_scale: float  # g/cm^3 per code density
-    regime: str = "srhd"
+    regime: str = "rhd"
     physics: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -139,7 +139,7 @@ class SystemManifest:
         return cls(
             length_scale=length,
             density_scale=density,
-            regime=str(data.get("regime", "srhd")),
+            regime=str(data.get("regime", "rhd")),
             physics=dict(data.get("physics", {}) or {}),
         )
 

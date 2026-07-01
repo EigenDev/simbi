@@ -104,7 +104,7 @@ def labframe_energy_density(
     W = 1.0 / np.sqrt(1.0 - vsq)
     h = _enthalpy(rho, pre, gamma, regime)
 
-    if regime == "srhd":
+    if regime == "rhd":
         return np.asarray(rho * W**2 * h - pre - rho * W)
 
     if regime == "srmhd":
@@ -193,7 +193,7 @@ def enthalpy_density(
     """compute enthalpy density."""
     if regime == "newtonian":
         return rho
-    elif regime == "srhd":
+    elif regime == "rhd":
         return rho * _enthalpy(rho, pre, adiabatic_index, regime)
     elif regime == "srmhd":
         return rho * _enthalpy(

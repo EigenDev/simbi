@@ -24,7 +24,7 @@ use crate::state::Cons;
 use crate::mhd_state::{MhdPrim, MhdCons};
 use crate::regime::Regime;
 use crate::c2p_result::C2pResult;
-use crate::srhd;
+use crate::rhd;
 use crate::spatial_metric::SpatialMetric;
 
 mod algebra;
@@ -55,9 +55,9 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         // metric threads in here once the flux path carries it (B3).
         let metric = SpatialMetric::flat();
         let vsq = metric.norm_sq_contra(&prim.vel);
-        let ww = srhd::lorentz_factor(vsq);
-        let w_sq = srhd::lorentz_factor_sq(vsq);
-        let hh = srhd::enthalpy(eos, prim.rho, prim.pre);
+        let ww = rhd::lorentz_factor(vsq);
+        let w_sq = rhd::lorentz_factor_sq(vsq);
+        let hh = rhd::enthalpy(eos, prim.rho, prim.pre);
 
         let bsq = metric.norm_sq_contra(&prim.mag);
         let vdb = metric.contract_contra(&prim.vel, &prim.mag);
@@ -95,7 +95,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         let metric = SpatialMetric::flat();
         let vn = metric.contract_contra(&prim.vel, nhat);
         let bn = metric.contract_contra(&prim.mag, nhat);
-        let ww = srhd::lorentz_factor(metric.norm_sq_contra(&prim.vel));
+        let ww = rhd::lorentz_factor(metric.norm_sq_contra(&prim.vel));
 
         // spatial magnetic four-vector (the SINGLE source, shared with the geometric tension).
         let b_mu = magnetic_four_vector_spatial(prim, &metric);
@@ -126,8 +126,8 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {
         // rho*h*W^2 + b^2 for geometric source terms
         let vsq = prim.vel.dot(&prim.vel);
-        let w_sq = srhd::lorentz_factor_sq(vsq);
-        let hh = srhd::enthalpy(eos, prim.rho, prim.pre);
+        let w_sq = rhd::lorentz_factor_sq(vsq);
+        let hh = rhd::enthalpy(eos, prim.rho, prim.pre);
         let bsq = prim.mag.dot(&prim.mag);
         prim.rho * hh * w_sq + bsq
     }
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn rmhd_to_conserved_at_rest_no_b() {
-        // zero B-field, at rest -> should match SRHD
+        // zero B-field, at rest -> should match RHD
         let regime = Rmhd;
         let eos = IdealGas { gamma: 5.0 / 3.0 };
         let prim = MhdPrim {
@@ -157,8 +157,8 @@ mod tests {
         let cons = regime.to_conserved(&eos, &prim);
         assert!(approx(cons.den, 1.0, 1e-12));
         assert!(cons.mom[0].abs() < 1e-12);
-        // tau = rho*h - p - D = 1*3.5 - 1 - 1 = 1.5 (same as SRHD)
-        let h = srhd::enthalpy(&eos, 1.0, 1.0);
+        // tau = rho*h - p - D = 1*3.5 - 1 - 1 = 1.5 (same as RHD)
+        let h = rhd::enthalpy(&eos, 1.0, 1.0);
         assert!(approx(cons.nrg, h - 1.0 - 1.0, 1e-12));
     }
 

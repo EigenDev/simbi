@@ -253,7 +253,7 @@ impl Table {
         self.throughput.push_back(rate);
     }
 
-    /// the physics-regime badge shown in the live stat strip (e.g. "SRHD").
+    /// the physics-regime badge shown in the live stat strip (e.g. "RHD").
     pub fn set_regime(&mut self, regime: &str) {
         self.regime = regime.to_string();
     }

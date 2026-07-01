@@ -112,7 +112,7 @@ fn wave_speed_map_writes(root: NodeId) -> Vec<(String, FieldBind, NodeId)> {
 
 
 /// trace the COMPLETE ideal-gas Euler CFL wave-speed map at `S = Gv` — the Newtonian regime
-/// (which also drives the isothermal CFL at gamma->1) or `Srhd`. reads rho/pre + the gridded
+/// (which also drives the isothermal CFL at gamma->1) or `Rhd`. reads rho/pre + the gridded
 /// normal velocities `vel[axes[d]]` (non-gridded slots left ZERO; `wave_speeds_axis` reads
 /// only the normal, so they stay dead) + gamma, then folds `lambda = max_d (max(|sl|,|sr|) *
 /// inv_w_d)` over the gridded axes with the in-kernel geometry widths. ONE trace: physics +
@@ -222,16 +222,16 @@ pub fn iso_wave_speed_map_gv(
 }
 
 
-/// the SRHD CFL wave-speed map — the relativistic Mignone-Bodo per-axis speed (`Srhd::
-/// wave_speeds_axis`, the SAME core the SRHD flux's HLLE consumes) traced to the timestep kernel.
-pub fn srhd_wave_speed_map_gv(
+/// the RHD CFL wave-speed map — the relativistic Mignone-Bodo per-axis speed (`Rhd::
+/// wave_speeds_axis`, the SAME core the RHD flux's HLLE consumes) traced to the timestep kernel.
+pub fn rhd_wave_speed_map_gv(
     coords: Coords,
     spacetime: Spacetime,
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    euler_wave_speed_map_gv(&Srhd, coords, spacetime, spacing, axes, ndim)
+    euler_wave_speed_map_gv(&Rhd, coords, spacetime, spacing, axes, ndim)
 }
 
 

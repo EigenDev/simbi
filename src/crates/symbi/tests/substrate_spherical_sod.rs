@@ -18,7 +18,7 @@
 
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::evolve;
 use symbi::sim::state::*;
 use symbi_algebra::Tensor;
@@ -26,7 +26,7 @@ use symbi_geometry::{Cartesian, Spherical};
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_hydro::state::{Prim, PrimG};
 use symbi_xpu::{CpuSpace, HostMemory};
 
@@ -67,16 +67,16 @@ where
     }
 }
 
-// srhd sharp Sod (rho,p) = (1,1) | (0.125,0.1), v=0: D=rho, S=0, tau=p/(gamma-1) (W=1).
+// rhd sharp Sod (rho,p) = (1,1) | (0.125,0.1), v=0: D=rho, S=0, tau=p/(gamma-1) (W=1).
 // the relativistic HLLE keeps the flow subluminal; with the CORRECT per-cell physical CFL
-// width (srhd_wave_speed_map's curvilinear dispatch — the earlier NaN was a wildly wrong
+// width (rhd_wave_speed_map's curvilinear dispatch — the earlier NaN was a wildly wrong
 // dt from misreading x_lo as inv_dx, NOT a geometric-source or c2p flaw) the spherical
 // shock tube runs clean.
-fn set_srhd_ic<M>(sim: &mut SimState<Srhd, 1, M, IdealGas<f64>, CpuSpace, HostMemory>)
+fn set_rhd_ic<M>(sim: &mut SimState<Rhd, 1, M, IdealGas<f64>, CpuSpace, HostMemory>)
 where
     M: symbi_geometry::Metric<f64, 1> + Copy,
 {
-    let cnrg = sim.fields.cons.nrg_field().expect("Srhd cons.nrg");
+    let cnrg = sim.fields.cons.nrg_field().expect("Rhd cons.nrg");
     for c in sim.geom.interior.iter() {
         let r = R_LO + (c[0] as f64 + 0.5) * DR;
         let (rho, pre) = if r < 1.0 { (1.0, 1.0) } else { (0.125, 0.1) };
@@ -212,52 +212,52 @@ fn full_substrate_spherical_iso() {
     println!("SPHERICAL ISO: {} steps, max |drho vs cartesian| {:.4}", sph.iteration, max_diff);
 }
 
-// the same M-generic SrhdSubstrateKernelSet on Spherical vs Cartesian. for v=0 the
+// the same M-generic RhdSubstrateKernelSet on Spherical vs Cartesian. for v=0 the
 // relativistic conserved tau = p/(gamma-1) (W=1); the curvilinear source uses prim.pre
 // (gas p) + the relativistic momentum density (cons.mom = rho h W^2 v) for the inertial.
 #[test]
-fn full_substrate_spherical_srhd() {
-    type SimSph = SimState<Srhd, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
-    type SimCart = SimState<Srhd, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+fn full_substrate_spherical_rhd() {
+    type SimSph = SimState<Rhd, 1, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
+    type SimCart = SimState<Rhd, 1, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
 
-    let mut sph = SimSph::build(Srhd, IdealGas { gamma: GAMMA }, Spherical)
+    let mut sph = SimSph::build(Rhd, IdealGas { gamma: GAMMA }, Spherical)
         .cells([N])
         .origin([R_LO])
         .spacing([DR])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
-        .expect("srhd spherical sim")
+        .expect("rhd spherical sim")
         .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
         .build();
-    set_srhd_ic(&mut sph);
-    let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
-    evolve(&mut sph, &sub, T_FINAL).expect("srhd spherical evolution failed");
+    set_rhd_ic(&mut sph);
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.4, &sph.geom.allocated);
+    evolve(&mut sph, &sub, T_FINAL).expect("rhd spherical evolution failed");
 
     let cells: Vec<[isize; 1]> = sph.geom.interior.iter().collect();
     let pre = sph.fields.prim.pre_field().expect("prim.pre");
     for c in &cells {
         let rho = *sph.fields.prim.rho.view().at(*c);
         let p = *pre.view().at(*c);
-        assert!(rho.is_finite() && rho > 0.0, "srhd: bad density {rho} at {c:?}");
-        assert!(p.is_finite() && p > 0.0, "srhd: bad pressure {p} at {c:?}");
+        assert!(rho.is_finite() && rho > 0.0, "rhd: bad density {rho} at {c:?}");
+        assert!(p.is_finite() && p > 0.0, "rhd: bad pressure {p} at {c:?}");
     }
-    let mut cart = SimCart::build(Srhd, IdealGas { gamma: GAMMA }, Cartesian)
+    let mut cart = SimCart::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N])
         .origin([R_LO])
         .spacing([DR])
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
-        .expect("srhd cartesian sim")
+        .expect("rhd cartesian sim")
         .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 })
         .build();
-    set_srhd_ic(&mut cart);
-    evolve(&mut cart, &sub, T_FINAL).expect("srhd cartesian evolution failed");
+    set_rhd_ic(&mut cart);
+    evolve(&mut cart, &sub, T_FINAL).expect("rhd cartesian evolution failed");
     let max_diff = cells
         .iter()
         .map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs())
         .fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-3, "srhd: spherical == cartesian (geometric source idle): {max_diff:e}");
-    println!("SPHERICAL SRHD: {} steps, max |drho vs cartesian| {:.4}", sph.iteration, max_diff);
+    assert!(max_diff > 1e-3, "rhd: spherical == cartesian (geometric source idle): {max_diff:e}");
+    println!("SPHERICAL RHD: {} steps, max |drho vs cartesian| {:.4}", sph.iteration, max_diff);
 }
 
 // D-generic radial-gradient ICs for the ndim>=2 curvilinear smokes (rho or p decreasing in
@@ -285,15 +285,15 @@ fn set_grad_newton<M, const D: usize>(
     }
 }
 
-// srhd is identical to newton at v=0 (W=1 => tau = p/(gamma-1), S = 0).
-fn set_grad_srhd<M, const D: usize>(
-    sim: &mut SimState<Srhd, D, M, IdealGas<f64>, CpuSpace, HostMemory>,
+// rhd is identical to newton at v=0 (W=1 => tau = p/(gamma-1), S = 0).
+fn set_grad_rhd<M, const D: usize>(
+    sim: &mut SimState<Rhd, D, M, IdealGas<f64>, CpuSpace, HostMemory>,
     r_lo: f64,
     dr: f64,
 ) where
     M: symbi_geometry::Metric<f64, D> + Copy,
 {
-    let cnrg = sim.fields.cons.nrg_field().expect("Srhd cons.nrg");
+    let cnrg = sim.fields.cons.nrg_field().expect("Rhd cons.nrg");
     for c in sim.geom.interior.iter() {
         let r = r_lo + (c[0] as f64 + 0.5) * dr;
         let pre = 1.0 - 0.3 * (r - r_lo);
@@ -383,7 +383,7 @@ fn full_substrate_spherical_2d_adiabatic() {
 // finite/positive/(subluminal) state + geometry ACTIVE (the radial profile differs from
 // the IDENTICAL Cartesian run; a Cartesian-vs-Cartesian run is bit-identical, diff 0). a
 // missing _sph kernel would panic in kernel_by_name, so a clean run proves dispatch too.
-// these cover the emitted-but-untested cells: adiabatic 3D, iso 2D/3D, srhd 2D/3D.
+// these cover the emitted-but-untested cells: adiabatic 3D, iso 2D/3D, rhd 2D/3D.
 
 const TR: usize = 24; // 3D wedge radial cells
 const TT: usize = 8; // theta cells
@@ -520,94 +520,94 @@ fn full_substrate_spherical_3d_iso() {
 }
 
 #[test]
-fn full_substrate_spherical_2d_srhd() {
-    type Sph = SimState<Srhd, 2, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
-    type Cart = SimState<Srhd, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+fn full_substrate_spherical_2d_rhd() {
+    type Sph = SimState<Rhd, 2, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Cart = SimState<Rhd, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let (nr, nt) = (32usize, 12usize);
     let (r_lo, dr) = (0.5_f64, 1.0 / nr as f64);
     let dims = [nr, nt];
     let xlo = [r_lo, 0.6];
     let dx = [dr, 0.4 / nt as f64];
     let bcs = Boundaries::uniform(BoundaryType::Outflow);
-    let mut sph = Sph::build(Srhd, IdealGas { gamma: GAMMA }, Spherical)
+    let mut sph = Sph::build(Rhd, IdealGas { gamma: GAMMA }, Spherical)
         .cells(dims)
         .origin(xlo)
         .spacing(dx)
         .boundaries(bcs)
         .allocate()
-        .expect("sph 2d srhd")
+        .expect("sph 2d rhd")
         .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
         .build();
-    set_grad_srhd(&mut sph, r_lo, dr);
-    let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sph.geom.allocated);
-    evolve(&mut sph, &sub, 0.03).expect("2d sph srhd evolve failed");
+    set_grad_rhd(&mut sph, r_lo, dr);
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sph.geom.allocated);
+    evolve(&mut sph, &sub, 0.03).expect("2d sph rhd evolve failed");
     let cells: Vec<[isize; 2]> = sph.geom.interior.iter().collect();
     let pre = sph.fields.prim.pre_field().expect("prim.pre");
     for c in &cells {
         let (rho, p) = (*sph.fields.prim.rho.view().at(*c), *pre.view().at(*c));
         let v = ((*sph.fields.prim.vel[0].view().at(*c)).powi(2) + (*sph.fields.prim.vel[1].view().at(*c)).powi(2)).sqrt();
-        assert!(rho.is_finite() && rho > 0.0, "2d srhd: bad density {rho} at {c:?}");
-        assert!(p.is_finite() && p > 0.0, "2d srhd: bad pressure {p} at {c:?}");
-        assert!(v < 1.0, "2d srhd: superluminal |v| = {v} at {c:?}");
+        assert!(rho.is_finite() && rho > 0.0, "2d rhd: bad density {rho} at {c:?}");
+        assert!(p.is_finite() && p > 0.0, "2d rhd: bad pressure {p} at {c:?}");
+        assert!(v < 1.0, "2d rhd: superluminal |v| = {v} at {c:?}");
     }
-    let mut cart = Cart::build(Srhd, IdealGas { gamma: GAMMA }, Cartesian)
+    let mut cart = Cart::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(dims)
         .origin(xlo)
         .spacing(dx)
         .boundaries(bcs)
         .allocate()
-        .expect("cart 2d srhd")
+        .expect("cart 2d rhd")
         .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
         .build();
-    set_grad_srhd(&mut cart, r_lo, dr);
-    evolve(&mut cart, &sub, 0.03).expect("2d cart srhd evolve failed");
+    set_grad_rhd(&mut cart, r_lo, dr);
+    evolve(&mut cart, &sub, 0.03).expect("2d cart rhd evolve failed");
     let max_diff = cells.iter().map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()).fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-6, "2d srhd: spherical == cartesian (geometry idle): {max_diff:e}");
-    println!("SPHERICAL 2D SRHD: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
+    assert!(max_diff > 1e-6, "2d rhd: spherical == cartesian (geometry idle): {max_diff:e}");
+    println!("SPHERICAL 2D RHD: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
 }
 
 #[test]
-fn full_substrate_spherical_3d_srhd() {
-    type Sph = SimState<Srhd, 3, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
-    type Cart = SimState<Srhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+fn full_substrate_spherical_3d_rhd() {
+    type Sph = SimState<Rhd, 3, Spherical, IdealGas<f64>, CpuSpace, HostMemory>;
+    type Cart = SimState<Rhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let (r_lo, dr) = (0.5_f64, 1.0 / TR as f64);
     let dims = [TR, TT, TP];
     let xlo = [r_lo, 0.6, 0.2];
     let dx = [dr, 0.4 / TT as f64, 0.5 / TP as f64];
     let bcs = Boundaries::uniform(BoundaryType::Outflow);
-    let mut sph = Sph::build(Srhd, IdealGas { gamma: GAMMA }, Spherical)
+    let mut sph = Sph::build(Rhd, IdealGas { gamma: GAMMA }, Spherical)
         .cells(dims)
         .origin(xlo)
         .spacing(dx)
         .boundaries(bcs)
         .allocate()
-        .expect("sph 3d srhd")
+        .expect("sph 3d rhd")
         .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
         .build();
-    set_grad_srhd(&mut sph, r_lo, dr);
-    let sub = SrhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sph.geom.allocated);
-    evolve(&mut sph, &sub, 0.02).expect("3d sph srhd evolve failed");
+    set_grad_rhd(&mut sph, r_lo, dr);
+    let sub = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.4, &sph.geom.allocated);
+    evolve(&mut sph, &sub, 0.02).expect("3d sph rhd evolve failed");
     let cells: Vec<[isize; 3]> = sph.geom.interior.iter().collect();
     let pre = sph.fields.prim.pre_field().expect("prim.pre");
     for c in &cells {
         let (rho, p) = (*sph.fields.prim.rho.view().at(*c), *pre.view().at(*c));
         let v = ((*sph.fields.prim.vel[0].view().at(*c)).powi(2) + (*sph.fields.prim.vel[1].view().at(*c)).powi(2) + (*sph.fields.prim.vel[2].view().at(*c)).powi(2)).sqrt();
-        assert!(rho.is_finite() && rho > 0.0, "3d srhd: bad density {rho} at {c:?}");
-        assert!(p.is_finite() && p > 0.0, "3d srhd: bad pressure {p} at {c:?}");
-        assert!(v < 1.0, "3d srhd: superluminal |v| = {v} at {c:?}");
+        assert!(rho.is_finite() && rho > 0.0, "3d rhd: bad density {rho} at {c:?}");
+        assert!(p.is_finite() && p > 0.0, "3d rhd: bad pressure {p} at {c:?}");
+        assert!(v < 1.0, "3d rhd: superluminal |v| = {v} at {c:?}");
     }
-    let mut cart = Cart::build(Srhd, IdealGas { gamma: GAMMA }, Cartesian)
+    let mut cart = Cart::build(Rhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells(dims)
         .origin(xlo)
         .spacing(dx)
         .boundaries(bcs)
         .allocate()
-        .expect("cart 3d srhd")
+        .expect("cart 3d rhd")
         .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
         .build();
-    set_grad_srhd(&mut cart, r_lo, dr);
-    evolve(&mut cart, &sub, 0.02).expect("3d cart srhd evolve failed");
+    set_grad_rhd(&mut cart, r_lo, dr);
+    evolve(&mut cart, &sub, 0.02).expect("3d cart rhd evolve failed");
     let max_diff = cells.iter().map(|c| (*sph.fields.prim.rho.view().at(*c) - *cart.fields.prim.rho.view().at(*c)).abs()).fold(0.0_f64, f64::max);
-    assert!(max_diff > 1e-6, "3d srhd: spherical == cartesian (geometry idle): {max_diff:e}");
-    println!("SPHERICAL 3D SRHD: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
+    assert!(max_diff > 1e-6, "3d rhd: spherical == cartesian (geometry idle): {max_diff:e}");
+    println!("SPHERICAL 3D RHD: {} steps, max |drho vs cart| {:.4}", sph.iteration, max_diff);
 }

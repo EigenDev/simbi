@@ -11,7 +11,7 @@
 //
 // so these tests deliberately include HARD inputs (ultra-relativistic, strong
 // contrast, near-vacuum) and compare the compiled kernel against the REAL host
-// source (`srhd_recover` / `rmhd_recover` at `S = f64`) — not a re-implemented
+// source (`rhd_recover` / `rmhd_recover` at `S = f64`) — not a re-implemented
 // reference Newton — at the kernel's baked count. design/single_source_tracing
 // §0: same source, two carriers, identical result.
 // =============================================================================
@@ -22,12 +22,12 @@ use symbi_aot::NamedKernel;
 // independent, loud + named on manifest drift. every buffer is 1D (lo = 0); the
 // silenced ignores absorb the scattered `buf_lo_*` zeros each call site passes.
 #[allow(clippy::too_many_arguments, dead_code)]
-fn srhd_c2p_1d(
+fn rhd_c2p_1d(
     cd: &[f64], cm: &[f64], cn: &[f64],
     pr: &mut [f64], pv: &mut [f64], pp: &mut [f64],
     g: i32, dl: i32, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32, gamma: f64,
 ) {
-    NamedKernel::new("srhd_c2p_1d")
+    NamedKernel::new("rhd_c2p_1d")
         .input("cons.den", cd).input("cons.mom_0", cm).input("cons.nrg", cn)
         .output("prim.rho", pr).output("prim.vel_0", pv).output("prim.pre", pp)
         .grid(&[g as u32]).dom_lo(&[dl]).scalar("gamma", gamma).run();
@@ -72,14 +72,14 @@ fn adiabatic_face_flux_1d(
 }
 
 #[allow(clippy::too_many_arguments, dead_code)]
-fn srhd_face_flux_1d(
+fn rhd_face_flux_1d(
     den: &[f64], v0: &[f64], pre: &[f64],
     fden: &mut [f64], fmom: &mut [f64], fnrg: &mut [f64],
     g: i32, dl: i32, _: i32, _: i32, _: i32, _: i32, _: i32, _: i32,
     gamma: f64, theta: f64,
 ) {
     // same moving-mesh face velocity as the adiabatic flux; static-mesh binding -> vface = 0.
-    NamedKernel::new("srhd_face_flux_1d_0")
+    NamedKernel::new("rhd_face_flux_1d_0")
         .input("prim.rho", den).input("prim.vel[0]", v0).input("prim.pre", pre)
         .output("flux.den", fden).output("flux.mom_0", fmom).output("flux.nrg", fnrg)
         .grid(&[g as u32]).dom_lo(&[dl]).scalar("gamma", gamma).scalar("theta", theta)
@@ -105,12 +105,12 @@ fn iso_wave_speed_map_1d(
 }
 
 #[allow(clippy::too_many_arguments, dead_code)]
-fn srhd_wave_speed_map_1d(
+fn rhd_wave_speed_map_1d(
     rho: &[f64], v0: &[f64], pre: &[f64], lambda: &mut [f64],
     g: i32, dl: i32, _: i32, _: i32, _: i32, _: i32, gamma: f64, inv_dx: f64,
 ) {
     // same grid-relative cfl map as the iso one; static-mesh binding -> v_g = 0.
-    NamedKernel::new("srhd_wave_speed_map_1d")
+    NamedKernel::new("rhd_wave_speed_map_1d")
         .input("prim.rho", rho).input("prim.vel[0]", v0).input("prim.pre", pre)
         .output("scratch", lambda)
         .grid(&[g as u32]).dom_lo(&[dl]).scalar("gamma", gamma).scalar("inv_dx_0", inv_dx)
@@ -125,14 +125,14 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::riemann::hlle;
 use symbi_hydro::rmhd::rmhd_recover;
-use symbi_hydro::srhd::{srhd_recover, Srhd};
+use symbi_hydro::rhd::{rhd_recover, Rhd};
 use symbi_hydro::state::{Cons, Prim};
 
 const GAMMA: f64 = 5.0 / 3.0;
 // the iteration counts build.rs bakes into each compiled c2p kernel — the host
 // must run the SAME count for the carriers to be comparable (the production host
 // MAX_ITER differs; that's a separate count-adequacy question, not equivalence).
-const SRHD_ITERS: usize = 20;
+const RHD_ITERS: usize = 20;
 const RMHD_ITERS: usize = 100;
 
 // carrier agreement: bit-equal (covers both-Inf), or both-NaN, or tightly close.
@@ -148,8 +148,8 @@ fn agree(kernel: f64, host: f64) -> bool {
     (kernel - host).abs() / host.abs().max(1.0) < 1e-10
 }
 
-// forward map (1D ideal-gas SRHD): primitives -> conserved (D, S, tau).
-fn srhd_prim_to_cons(rho: f64, v: f64, p: f64) -> (f64, f64, f64) {
+// forward map (1D ideal-gas RHD): primitives -> conserved (D, S, tau).
+fn rhd_prim_to_cons(rho: f64, v: f64, p: f64) -> (f64, f64, f64) {
     let w = 1.0 / (1.0 - v * v).sqrt();
     let eps = p / ((GAMMA - 1.0) * rho);
     let h = 1.0 + eps + p / rho;
@@ -159,7 +159,7 @@ fn srhd_prim_to_cons(rho: f64, v: f64, p: f64) -> (f64, f64, f64) {
 }
 
 #[test]
-fn srhd_c2p_kernel_equals_host_at_baked_count() {
+fn rhd_c2p_kernel_equals_host_at_baked_count() {
     // (rho, v, p). first row converges within 20 (the round-trip regime); the rest
     // are HARD — ultra-relativistic (slow Newton) + strong contrast / near-vacuum.
     // a no-freeze kernel runs all 20 steps past convergence and drifts from the
@@ -177,14 +177,14 @@ fn srhd_c2p_kernel_equals_host_at_baked_count() {
     let eos = IdealGas { gamma: GAMMA };
 
     for &(rho, v, p) in cases {
-        let (d, s, tau) = srhd_prim_to_cons(rho, v, p);
+        let (d, s, tau) = rhd_prim_to_cons(rho, v, p);
 
-        // host: the SAME srhd_recover source at S = f64, at the kernel's baked count.
-        let host = srhd_recover::<f64, 1>(&eos, &Cons { den: d, mom: Tensor::new([s]), nrg: tau }, &SpatialMetric::flat(), SRHD_ITERS);
+        // host: the SAME rhd_recover source at S = f64, at the kernel's baked count.
+        let host = rhd_recover::<f64, 1>(&eos, &Cons { den: d, mom: Tensor::new([s]), nrg: tau }, &SpatialMetric::flat(), RHD_ITERS);
 
-        // kernel: srhd_recover traced at S = Gv, compiled (bakes SRHD_ITERS).
+        // kernel: rhd_recover traced at S = Gv, compiled (bakes RHD_ITERS).
         let (mut kr, mut kv, mut kp) = (vec![0.0_f64], vec![0.0_f64], vec![0.0_f64]);
-        srhd_c2p_1d(&[d], &[s], &[tau], &mut kr, &mut kv, &mut kp, 1, 0, 0, 0, 0, 0, 0, 0, GAMMA);
+        rhd_c2p_1d(&[d], &[s], &[tau], &mut kr, &mut kv, &mut kp, 1, 0, 0, 0, 0, 0, 0, 0, GAMMA);
 
         let ctx = format!("(rho={rho}, v={v}, p={p})");
         assert!(agree(kr[0], host.rho), "{ctx} rho carrier divergence: kernel {} vs host {}", kr[0], host.rho);
@@ -282,11 +282,11 @@ fn flux_kernel_equals_host_hlle_on_uniform_field() {
             assert!(agree(fnrg[i], host.nrg), "{ctx} F_nrg: kernel {} vs host {}", fnrg[i], host.nrg);
         }
 
-        // srhd
-        let host = hlle::<f64, 1, Srhd>(&Srhd, &eos, &prim, &prim, &nhat, 0.0);
+        // rhd
+        let host = hlle::<f64, 1, Rhd>(&Rhd, &eos, &prim, &prim, &nhat, 0.0);
         let (mut fden, mut fmom, mut fnrg) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
-        srhd_face_flux_1d(&den, &v0, &pre, &mut fden, &mut fmom, &mut fnrg, 4, 2, 0, 0, 0, 0, 0, 0, GAMMA, theta);
-        let ctx = format!("srhd flux (rho={rho}, v={v}, p={p})");
+        rhd_face_flux_1d(&den, &v0, &pre, &mut fden, &mut fmom, &mut fnrg, 4, 2, 0, 0, 0, 0, 0, 0, GAMMA, theta);
+        let ctx = format!("rhd flux (rho={rho}, v={v}, p={p})");
         for i in 2..6 {
             assert!(agree(fden[i], host.den), "{ctx} F_den: kernel {} vs host {}", fden[i], host.den);
             assert!(agree(fmom[i], host.mom[0]), "{ctx} F_mom: kernel {} vs host {}", fmom[i], host.mom[0]);
@@ -299,7 +299,7 @@ fn flux_kernel_equals_host_hlle_on_uniform_field() {
 fn wave_speed_map_kernel_equals_host() {
     // the CFL wave-speed map is pointwise. 1D cartesian:
     //   lambda = max(0, max(|sl|,|sr|) * inv_dx_0),  (sl,sr) = regime.wave_speeds_axis(prim, 0).
-    // this validates the wave-speed math itself (|v|+cs for Newtonian, Mignone-Bodo for SRHD)
+    // this validates the wave-speed math itself (|v|+cs for Newtonian, Mignone-Bodo for RHD)
     // is carrier-equivalent — the surface c2p doesn't touch and the uniform flux collapses
     // (L==R makes HLLE = F(U) regardless of the wave speeds).
     let eos = IdealGas { gamma: GAMMA };
@@ -323,12 +323,12 @@ fn wave_speed_map_kernel_equals_host() {
             assert!(agree(lambda[i], host), "{ctx}: kernel {} vs host {}", lambda[i], host);
         }
 
-        // srhd map (Mignone-Bodo per-axis speed).
-        let (sl, sr) = Srhd.wave_speeds_axis(&eos, &prim, 0);
+        // rhd map (Mignone-Bodo per-axis speed).
+        let (sl, sr) = Rhd.wave_speeds_axis(&eos, &prim, 0);
         let host = 0.0_f64.max(sl.abs().max(sr.abs()) * inv_dx);
         let mut lambda = vec![0.0; n];
-        srhd_wave_speed_map_1d(&rho_b, &v0_b, &pre_b, &mut lambda, n as i32, 0, 0, 0, 0, 0, GAMMA, inv_dx);
-        let ctx = format!("SRHD wave-speed map (rho={rho}, v={v}, p={p})");
+        rhd_wave_speed_map_1d(&rho_b, &v0_b, &pre_b, &mut lambda, n as i32, 0, 0, 0, 0, 0, GAMMA, inv_dx);
+        let ctx = format!("RHD wave-speed map (rho={rho}, v={v}, p={p})");
         for i in 0..n {
             assert!(agree(lambda[i], host), "{ctx}: kernel {} vs host {}", lambda[i], host);
         }

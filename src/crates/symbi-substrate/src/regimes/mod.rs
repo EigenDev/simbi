@@ -20,4 +20,4 @@ pub mod substrate_newton;
 pub mod substrate_newtonian_mhd;
 pub mod substrate_isothermal_mhd;
 pub mod substrate_rmhd;
-pub mod substrate_srhd;
+pub mod substrate_rhd;

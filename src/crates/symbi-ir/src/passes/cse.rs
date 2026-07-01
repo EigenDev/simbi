@@ -113,7 +113,7 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
     // the scalarizer's `maybe_hoist_to_let` ALSO mints `{prefix}<n>` Lets, with a
     // counter independent of ours. when both fire (a large kernel where hoisting
     // misses some structural duplicates that the hash-based pass below catches —
-    // first hit by the SRHD iterate), our `next_id` starting at 0 would re-declare
+    // first hit by the RHD iterate), our `next_id` starting at 0 would re-declare
     // a hoisted `{prefix}0`. Rust tolerates the shadowing (the CPU kernel compiled
     // + ran), but CUDA C rejects the re-declaration — the GPU PTX gate surfaced it.
     // continue numbering ABOVE any pre-existing `{prefix}<n>` so names are unique
@@ -1100,7 +1100,7 @@ mod tests {
 
     #[test]
     fn cse_numbering_continues_above_pre_hoisted_names() {
-        // regression for the SRHD/GPU bug: the scalarizer's hoist pass already
+        // regression for the RHD/GPU bug: the scalarizer's hoist pass already
         // minted `__cse_0`; CSE must NOT re-declare it (Rust shadows, CUDA C
         // errors). simulate a body that already declares `__cse_0`, then give the
         // outputs a DISTINCT shared subexpr CSE has to hoist. fixture uses Div

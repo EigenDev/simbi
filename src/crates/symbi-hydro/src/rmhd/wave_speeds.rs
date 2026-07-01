@@ -12,7 +12,7 @@ use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 use crate::eos::Eos;
 use crate::mhd_state::MhdPrim;
-use crate::srhd;
+use crate::rhd;
 
 /// RMHD wave speeds via the full quartic dispersion relation (Mignone & Del Zanna
 /// Eq. 56), with fast paths for vsq~0 (Eq. 57) and bn~0 (Eq. 58). returns
@@ -23,10 +23,10 @@ pub(crate) fn rmhd_wave_speeds<S: Scalar, const D: usize>(
     nhat: &Tensor<S, D>,
 ) -> (S, S) {
     let rho = prim.rho;
-    let hh = srhd::enthalpy(eos, rho, prim.pre);
+    let hh = rhd::enthalpy(eos, rho, prim.pre);
     let vsq = prim.vel.dot(&prim.vel);
     let vn = prim.vel.dot(nhat);
-    let ww = srhd::lorentz_factor(vsq);
+    let ww = rhd::lorentz_factor(vsq);
     let w2 = ww * ww;
     let cssq = eos.sound_speed(rho, prim.pre) * eos.sound_speed(rho, prim.pre) / hh;
 
@@ -140,13 +140,13 @@ pub fn rmhd_magnetosonic_cfl_speeds<S: Scalar, const D: usize>(
     nhat: &Tensor<S, D>,
 ) -> (S, S) {
     let rho = prim.rho;
-    let hh = srhd::enthalpy(eos, rho, prim.pre);
+    let hh = rhd::enthalpy(eos, rho, prim.pre);
     let cs = eos.sound_speed(rho, prim.pre);
     let cssq = cs * cs / hh; // relativistic sound speed squared (matches rmhd_wave_speeds)
 
     let vsq = prim.vel.dot(&prim.vel);
     let vn = prim.vel.dot(nhat);
-    let w2 = srhd::lorentz_factor_sq(vsq);
+    let w2 = rhd::lorentz_factor_sq(vsq);
 
     let bsq = prim.mag.dot(&prim.mag);
     let vdb = prim.vel.dot(&prim.mag);

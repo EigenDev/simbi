@@ -214,7 +214,7 @@ fn log_spherical_cfl_uses_per_cell_widths() {
 // centrifugal: with cons.mom = (density factor)*v and v_r, v_theta set, the source per
 // cell is s_0 = mom_theta*v_theta/r_c (centrifugal, outward) and s_1 = -mom_r*v_theta/r_c
 // (coriolis), r_c the volume-weighted radial centroid. the density factor is rho
-// (Newtonian) or rho*h*W^2 (SRHD/relativistic) — both exercised: SRHD just feeds the
+// (Newtonian) or rho*h*W^2 (RHD/relativistic) — both exercised: RHD just feeds the
 // relativistic momentum density as cons.mom, ONE source path serves both.
 #[test]
 fn spherical_inertial_source_matches_analytic() {
@@ -242,14 +242,14 @@ fn spherical_inertial_source_matches_analytic() {
         (s0, s1)
     };
 
-    // Newtonian density factor rho, and the SRHD relativistic momentum density rho*h*W^2.
+    // Newtonian density factor rho, and the RHD relativistic momentum density rho*h*W^2.
     let rho = 1.0_f64;
     let (gamma, p) = (5.0_f64 / 3.0, 0.4_f64);
     let w2 = 1.0 / (1.0 - (vr * vr + vt * vt)); // lorentz factor squared
     let h = 1.0 + gamma / (gamma - 1.0) * p / rho; // relativistic specific enthalpy
-    let wgam2 = rho * h * w2; // rho h W^2 — the SRHD conserved-momentum density
+    let wgam2 = rho * h * w2; // rho h W^2 — the RHD conserved-momentum density
 
-    for (label, factor) in [("newtonian rho", rho), ("srhd rho h W^2", wgam2)] {
+    for (label, factor) in [("newtonian rho", rho), ("rhd rho h W^2", wgam2)] {
         let (s0, s1) = run(factor);
         for i in 0..nr {
             let r_l = x_lo_r + i as f64 * dr;

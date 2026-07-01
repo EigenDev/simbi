@@ -12,7 +12,7 @@
 
 use symbi_discretize::{
     iso_flux_gv, iso_wave_speed_map_gv, rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv,
-    rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv, srhd_flux_gv, srhd_wave_speed_map_gv, Coords,
+    rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv, rhd_flux_gv, rhd_wave_speed_map_gv, Coords,
     GvKernel, Spacing, Spacetime,
 };
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -100,8 +100,8 @@ fn main() {
     let (k, w) = iso_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
     census("iso  (Newtonian) 1D", &render_rust("iso_ws", 1, k, w));
 
-    let (k, w) = srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &cart1, &ax1, 1);
-    census("srhd 1D", &render_rust("srhd_ws", 1, k, w));
+    let (k, w) = rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &cart1, &ax1, 1);
+    census("rhd 1D", &render_rust("rhd_ws", 1, k, w));
 
     let (k, w) = rmhd_wave_speed_map_gv(Coords::Cartesian, &cart1, &ax1, 1);
     census("rmhd 1D (1 axis)", &render_rust("rmhd_ws1", 1, k, w));
@@ -114,8 +114,8 @@ fn main() {
     let (k, w) = iso_flux_gv::<1>(0);
     census("iso  flux 1D", &render_rust("iso_flux", 1, k, w));
 
-    let (k, w) = srhd_flux_gv::<1>(0);
-    census("srhd flux 1D", &render_rust("srhd_flux", 1, k, w));
+    let (k, w) = rhd_flux_gv::<1>(0);
+    census("rhd flux 1D", &render_rust("rhd_flux", 1, k, w));
 
     let (k, w) = rmhd_flux_gv(1, 0, 0);
     census("rmhd flux 1D (HLLE)", &render_rust("rmhd_hlle", 1, k, w));

@@ -212,7 +212,7 @@ impl App {
     fn view(&self) -> DiagnosticView {
         DiagnosticView {
             app_title: "hydroflux — kelvin_helmholtz.toml".into(),
-            regime: "SRHD".into(),
+            regime: "RHD".into(),
             attached: "attached · rank 0 / 1".into(),
             // tab / paused / frame are overridden by the render thread's ui state.
             paused: false,
@@ -234,7 +234,7 @@ impl App {
             blocks_per_level: self.blocks.to_vec(),
             log: self.log.iter().cloned().collect(),
             config: vec![
-                ("regime".into(), "srhd".into()),
+                ("regime".into(), "rhd".into()),
                 ("eos".into(), "ideal gas (gamma = 1.6667)".into()),
                 ("coords".into(), "cartesian · 2D".into()),
                 ("resolution".into(), "256 x 256  (65536 zones)".into()),

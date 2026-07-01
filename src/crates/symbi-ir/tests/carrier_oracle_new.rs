@@ -188,7 +188,7 @@ fn newton_sqrt<S: Scalar>(a: S, x0: S) -> S {
 // (Gv trace + interp) for iterate is covered by the symbi-discretize
 // carrier_oracle.rs harness — that harness drives
 // `scalarize_kernel` + the production interp and validates iterate via real
-// srhd/rmhd c2p round-trips.
+// rhd/rmhd c2p round-trips.
 #[test]
 #[ignore = "iterate requires scalarize_kernel; covered by Chunk 5's discretize harness migration"]
 fn newton_sqrt_iterate_matches_with_freeze() {

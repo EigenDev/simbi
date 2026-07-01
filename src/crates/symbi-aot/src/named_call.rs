@@ -206,7 +206,7 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
 mod tests {
     use super::*;
 
-    // a rest-mass SRHD state (v = 0, W = 1): D = rho, S = 0, tau = p/(gamma-1).
+    // a rest-mass RHD state (v = 0, W = 1): D = rho, S = 0, tau = p/(gamma-1).
     // the name-keyed c2p must recover (rho, 0, p) — proving the harness binds the
     // real emitted kernel correctly (order-independent, by manifest name).
     #[test]
@@ -219,7 +219,7 @@ mod tests {
         let grid = [n as u32];
         let dom = [0i32];
         // deliberately bind in a SCRAMBLED order to prove name-keying, not position.
-        NamedKernel::new("srhd_c2p_1d")
+        NamedKernel::new("rhd_c2p_1d")
             .output("prim.pre", &mut pre)
             .input("cons.nrg", &nrg)
             .output("prim.rho", &mut rho)
@@ -247,7 +247,7 @@ mod tests {
         let (mut rho, mut vel, mut pre) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
         let grid = [n as u32];
         let dom = [0i32];
-        NamedKernel::new("srhd_c2p_1d")
+        NamedKernel::new("rhd_c2p_1d")
             .input("cons.den", &den).input("cons.mom_0", &mom) // cons.nrg omitted
             .output("prim.rho", &mut rho).output("prim.vel_0", &mut vel).output("prim.pre", &mut pre)
             .grid(&grid).dom_lo(&dom)

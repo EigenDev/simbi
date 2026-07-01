@@ -2,7 +2,7 @@
 // regimes/substrate_kernels/mod.rs
 //
 // shared structured-binding-ABI plumbing for the D-generic hydro SubstrateKernelSets
-// (iso / adiabatic / srhd). each method gathers its cell-centered field refs
+// (iso / adiabatic / rhd). each method gathers its cell-centered field refs
 // (inputs-then-outputs, in the generated kernel's binding order), names the kernel
 // instance by (regime, ndim, dir), and routes ONE KernelInvocation through the
 // CPU/GPU dispatch seam (docs/design/15 §5). the kernel instance is resolved by name

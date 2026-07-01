@@ -1,7 +1,7 @@
 // =============================================================================
-// srhd.rs (module root)
+// rhd.rs (module root)
 //
-// the special-relativistic hydrodynamics regime: `impl Regime<S, D> for Srhd`. the
+// the special-relativistic hydrodynamics regime: `impl Regime<S, D> for Rhd`. the
 // trait interface lives here; the physics lives in the concern submodules it
 // delegates to (the regime supplies only its physics):
 //   algebra      lorentz factor / relativistic enthalpy / sound speed (shared w/ RMHD)
@@ -25,16 +25,16 @@ mod cons;
 mod wave_speeds;
 
 pub use algebra::{enthalpy, enthalpy_density, lorentz_factor, lorentz_factor_sq, sound_speed_sq};
-pub use cons::srhd_recover;
-use cons::srhd_to_primitive;
-use wave_speeds::srhd_speeds_from_vn;
+pub use cons::rhd_recover;
+use cons::rhd_to_primitive;
+use wave_speeds::rhd_speeds_from_vn;
 
 /// special relativistic hydrodynamics.
 #[derive(Clone, Copy, Debug)]
-pub struct Srhd;
+pub struct Rhd;
 
-impl<S: Scalar, const D: usize> Regime<S, D> for Srhd {
-    const SPEC: &'static crate::regime_spec::RegimeSpec = &crate::regime_spec::SRHD_SPEC;
+impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
+    const SPEC: &'static crate::regime_spec::RegimeSpec = &crate::regime_spec::RHD_SPEC;
     // relativistic: clamp the HLLE fan to include the stationary state.
     const CLAMP_EXTREMAL_TO_ZERO: bool = true;
     type Prim = Prim<S, D>;
@@ -57,7 +57,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Srhd {
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where S: OrderedNumeric
     {
-        srhd_to_primitive(eos, cons)
+        rhd_to_primitive(eos, cons)
     }
 
     #[inline]
@@ -68,24 +68,24 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Srhd {
         Cons {
             den: cons.den * vn,
             mom: cons.mom.scale(vn) + nhat.scale(prim.pre),
-            // srhd energy flux: S_n - D * v_n = mn - D * vn
+            // rhd energy flux: S_n - D * v_n = mn - D * vn
             nrg: mn - cons.den * vn,
         }
     }
 
     #[inline]
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
-        srhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel.dot(nhat))
+        rhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel.dot(nhat))
     }
 
     #[inline]
     fn wave_speeds_axis(&self, eos: &impl Eos<S>, prim: &Self::Prim, axis: usize) -> (S, S) {
         // the 1D characteristic estimate depends only on the normal velocity (transverse
         // velocity does not enter) -> read vel[axis] directly, no unit-vector dot.
-        srhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel[axis])
+        rhd_speeds_from_vn(sound_speed_sq(eos, prim.rho, prim.pre), prim.vel[axis])
     }
 
-    // extremal_speeds (clamped) + max_wave_speed (axis fold) are the Regime defaults; srhd
+    // extremal_speeds (clamped) + max_wave_speed (axis fold) are the Regime defaults; rhd
     // sets CLAMP_EXTREMAL_TO_ZERO = true and reuses them — no per-regime copy.
 
     // is_relativistic now derives from SPEC (B4-i).
@@ -114,7 +114,7 @@ mod tests {
     fn to_conserved_stationary() {
         // v=0: W=1, D=rho, S=0, tau = rho*h - p - rho = rho*(h-1) - p
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 1.0 };
         let cons = regime.to_conserved(&eos, &prim);
         let h = enthalpy(&eos, 1.0, 1.0);
@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn to_conserved_moving() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let v = 0.5;
         let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre: 1.0 };
         let cons = regime.to_conserved(&eos, &prim);
@@ -139,23 +139,23 @@ mod tests {
 
     #[test]
     fn to_conserved_newtonian_limit() {
-        // for v << 1, SRHD conserved should approximate newtonian conserved
+        // for v << 1, RHD conserved should approximate newtonian conserved
         let eos = IdealGas { gamma: 1.4 };
         let v = 1e-4;
         let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre: 1.0 };
-        let cons_srhd = Srhd.to_conserved(&eos, &prim);
+        let cons_rhd = Rhd.to_conserved(&eos, &prim);
         let cons_newt = Newtonian.to_conserved(&eos, &prim);
         // den: D = rho*W ~ rho*(1 + 0.5*v^2) ~ rho
-        assert!(approx_rel(cons_srhd.den, cons_newt.den, 1e-6));
+        assert!(approx_rel(cons_rhd.den, cons_newt.den, 1e-6));
         // mom: S = rho*h*W^2*v ~ rho*v for h~1, W~1
-        assert!(approx_rel(cons_srhd.mom[0], cons_newt.mom[0], 1e-2));
+        assert!(approx_rel(cons_rhd.mom[0], cons_newt.mom[0], 1e-2));
     }
 
     #[test]
     fn flux_stationary() {
         // v=0: all fluxes zero except mom[dir] = p
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.0]), pre: 2.0 };
         let ff = regime.to_flux(&prim, &Tensor::unit(0), &eos);
         assert!(approx(ff.den, 0.0));
@@ -167,7 +167,7 @@ mod tests {
     fn flux_uniform_recovery() {
         // for uniform state, hlle should return the physical flux
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        let regime = Srhd;
+        let regime = Rhd;
         let prim = Prim { rho: 1.0, vel: Tensor::new([0.3]), pre: 1.0 };
         let ff = regime.to_flux(&prim, &Tensor::unit(0), &eos);
         let flux_hlle = crate::riemann::hlle(&regime, &eos, &prim, &prim, &Tensor::unit(0), 0.0);
@@ -177,16 +177,16 @@ mod tests {
     }
 
     #[test]
-    fn srhd_flux_newtonian_limit() {
-        // for v << 1, SRHD flux should approximate newtonian euler flux
+    fn rhd_flux_newtonian_limit() {
+        // for v << 1, RHD flux should approximate newtonian euler flux
         let eos = IdealGas { gamma: 1.4 };
         let v = 1e-3;
         let prim = Prim { rho: 1.0, vel: Tensor::new([v]), pre: 1.0 };
-        let flux_srhd = Srhd.to_flux(&prim, &Tensor::unit(0), &eos);
+        let flux_rhd = Rhd.to_flux(&prim, &Tensor::unit(0), &eos);
         let flux_newt = Newtonian.to_flux(&prim, &Tensor::unit(0), &eos);
         // density flux: rho*v for both
-        assert!(approx_rel(flux_srhd.den, flux_newt.den, 1e-3));
+        assert!(approx_rel(flux_rhd.den, flux_newt.den, 1e-3));
         // momentum flux: rho*v^2 + p for both
-        assert!(approx_rel(flux_srhd.mom[0], flux_newt.mom[0], 1e-2));
+        assert!(approx_rel(flux_rhd.mom[0], flux_newt.mom[0], 1e-2));
     }
 }

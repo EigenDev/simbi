@@ -26,12 +26,12 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::{NewtonianMhd, nmhd_recover};
 use symbi_hydro::regime::Regime;
 use symbi_hydro::riemann::{
-    HlldStates, hllc, hllc_newtonian, hllc_rmhd, hllc_srhd, hlld_isothermal,
+    HlldStates, hllc, hllc_newtonian, hllc_rmhd, hllc_rhd, hlld_isothermal,
     hlld_isothermal_coeffs, hlld_newtonian, hlld_newtonian_coeffs, hlld_rmhd, hlld_rmhd_states,
     hlle, hlle_with_speeds,
 };
 use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities};
-use symbi_hydro::srhd::{Srhd, srhd_recover};
+use symbi_hydro::rhd::{Rhd, rhd_recover};
 use symbi_hydro::state::{Cons, ConsG, Prim, PrimG};
 use symbi_ir::Symbol;
 use symbi_ir::algebra::Scalar;
@@ -506,12 +506,12 @@ mod tests {
     }
 
     #[test]
-    fn srhd_c2p_traces_the_real_iterative_physics_to_a_kernel() {
-        // the iterative payoff: symbi-hydro's branch-free `srhd_recover` (a carrier-generic
+    fn rhd_c2p_traces_the_real_iterative_physics_to_a_kernel() {
+        // the iterative payoff: symbi-hydro's branch-free `rhd_recover` (a carrier-generic
         // Newton on the pressure root) run at S=Gv yields a dispatchable kernel whose pressure
         // is ONE Op::IterateInline (body traced once) — the deep Newton does NOT unfold into an
-        // exponential tree. the manifest + writes match the retired `srhd_c2p` Expr builder.
-        let (k, writes) = srhd_c2p_gv::<1>(20);
+        // exponential tree. the manifest + writes match the retired `rhd_c2p` Expr builder.
+        let (k, writes) = rhd_c2p_gv::<1>(20);
         assert_eq!(
             k.field_inputs
                 .iter()
@@ -604,7 +604,7 @@ mod tests {
     fn adiabatic_flux_traces_recon_plus_hlle_to_a_kernel() {
         // the first gv FLUX: PLM reconstruction (a stencil -> LoadAt) composed with the
         // carrier-generic riemann::hlle (-> Select branches). proves Gv::field_shifted +
-        // symbi-hydro's hlle build a dispatchable face-flux kernel — no srhd_side-style
+        // symbi-hydro's hlle build a dispatchable face-flux kernel — no rhd_side-style
         // hand-written per-component U/F. manifest + writes match the substrate hlle_flux.
         let (k, writes) = adiabatic_flux_gv::<1>(0);
         assert_eq!(
@@ -650,10 +650,10 @@ mod tests {
     }
 
     #[test]
-    fn srhd_flux_traces_the_relativistic_hlle_to_a_kernel() {
-        // same PLM + riemann::hlle pattern at the Srhd regime (relativistic U/F/wave speeds).
+    fn rhd_flux_traces_the_relativistic_hlle_to_a_kernel() {
+        // same PLM + riemann::hlle pattern at the Rhd regime (relativistic U/F/wave speeds).
         // the only change from adiabatic is the regime — one HLLE source, two physics.
-        let (k, writes) = srhd_flux_gv::<1>(0);
+        let (k, writes) = rhd_flux_gv::<1>(0);
         assert_eq!(
             k.field_inputs
                 .iter()
@@ -1253,13 +1253,13 @@ mod tests {
     }
 
     #[test]
-    fn srhd_wave_speed_map_traces_the_real_physics() {
-        // symbi-hydro's Srhd::wave_speeds_axis (Mignone-Bodo, normal velocity only) at S=Gv,
+    fn rhd_wave_speed_map_traces_the_real_physics() {
+        // symbi-hydro's Rhd::wave_speeds_axis (Mignone-Bodo, normal velocity only) at S=Gv,
         // folded with the in-kernel cartesian-uniform widths into ONE timestep kernel — the SAME
-        // physics the SRHD flux's HLLE uses. cartesian 2D: reads rho + the GRIDDED normal
+        // physics the RHD flux's HLLE uses. cartesian 2D: reads rho + the GRIDDED normal
         // velocities (v0, v1) + pre — the dead v2 is left ZERO and never enters the graph.
         let (k, writes) =
-            srhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2);
+            rhd_wave_speed_map_gv(Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2);
         assert_eq!(writes.len(), 1, "one scratch lambda write");
         assert_eq!(writes[0].1.name(), "scratch");
         assert_eq!(
@@ -1282,7 +1282,7 @@ mod tests {
         assert_eq!(
             keys,
             vec!["prim_rho", "prim_v0", "prim_v1", "prim_pre"],
-            "SRHD CFL reads rho + the gridded normal velocities + pre (no dead v2)"
+            "RHD CFL reads rho + the gridded normal velocities + pre (no dead v2)"
         );
         assert!(
             !k.graph.has_errors(),
@@ -1504,13 +1504,13 @@ mod tests {
         // the GR CFL map (B.5): the Schwarzschild wave-speed map threads the Banyuls-Font coordinate
         // correction (lapse + radial proper-width -> the `schwarzschild_mass` scalar) into the DAG;
         // the flat spherical map does NOT (bit-identical to pre-B.5).
-        let (k_gr, _) = srhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Schwarzschild, &[Spacing::Uniform], &[0], 1);
+        let (k_gr, _) = rhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Schwarzschild, &[Spacing::Uniform], &[0], 1);
         assert!(
             k_gr.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
             "Schwarzschild wave-speed map must carry the lapse mass scalar; got {:?}",
             k_gr.scalar_params,
         );
-        let (k_flat, _) = srhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1);
+        let (k_flat, _) = rhd_wave_speed_map_gv(Coords::Spherical, Spacetime::Minkowski, &[Spacing::Uniform], &[0], 1);
         assert!(
             !k_flat.scalar_params.iter().any(|s| s == "schwarzschild_mass"),
             "flat spherical wave-speed map must NOT carry the lapse mass scalar",

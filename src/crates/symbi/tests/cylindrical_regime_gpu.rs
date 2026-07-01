@@ -3,9 +3,9 @@
 //
 // GPU<->CPU validation for the NEWLY-emitted cylindrical-natural hydro cells: the
 // cyl-1D (radial) and cyl-3D (r,phi,z) "_cyl" godunov + wave-speed maps for all three
-// EOS regimes (iso / newton-adiabatic / srhd). builds host (AOT CPU) + unified (NVRTC)
+// EOS regimes (iso / newton-adiabatic / rhd). builds host (AOT CPU) + unified (NVRTC)
 // sims, runs godunov_euler + cfl on each, diffs < 1e-9. (cyl-2D r-phi is already
-// covered by cylindrical_disk_gpu for newton; iso/srhd 2D share the same IR builders.)
+// covered by cylindrical_disk_gpu for newton; iso/rhd 2D share the same IR builders.)
 // proves the matrix fill compiles to PTX + runs on device, not just CPU.
 //
 // run on the host (CUDA 13.2 + g++-15): cargo test -p symbi --features cuda \
@@ -16,7 +16,7 @@
 
 use symbi::regimes::substrate::IsoSubstrateKernelSet;
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
-use symbi::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi::sim::evolve::KernelSet;
 use symbi::sim::state::*;
 use symbi_algebra::Domain;
@@ -26,7 +26,7 @@ use symbi_hydro::eos::{Eos, IdealGas, Isothermal};
 use symbi_hydro::isothermal::IsoNewtonian;
 use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::regime::Regime;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::{CpuSpace, ExecutionSpace, HostMemory, MemorySpace};
 
@@ -103,7 +103,7 @@ fn build_cyl_1d<R: Regime<f64, 1>, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySp
         sim.fields.cons.den.view_mut().set(c, rho);
         sim.fields.cons.mom[0].view_mut().set(c, rho * 0.1 * g);
         if let Some(nrg) = cnrg {
-            // adiabatic: E = p/(g-1)+0.5 rho v^2; srhd at near-rest: tau ~ p/(g-1).
+            // adiabatic: E = p/(g-1)+0.5 rho v^2; rhd at near-rest: tau ~ p/(g-1).
             nrg.view_mut().set(c, (1.0 + 0.5 * g) / (GAMMA - 1.0) + 0.5 * rho * (0.1 * g).powi(2));
         }
     }
@@ -124,12 +124,12 @@ fn cyl_1d_all_regimes_gpu_match_cpu() {
     let hs = IsoSubstrateKernelSet::<HostMemory, f64, 1>::new(CS, 0.3, &h.geom.allocated);
     let ds = IsoSubstrateKernelSet::<UnifiedMemory, f64, 1>::new(CS, 0.3, &d.geom.allocated);
     diff_godunov_cfl(&h, &d, &hs, &ds, false, "iso cyl1d");
-    // srhd
-    let h = build_cyl_1d::<_, _, CpuSpace, HostMemory>(Srhd, IdealGas { gamma: GAMMA });
-    let d = build_cyl_1d::<_, _, CudaSpace, UnifiedMemory>(Srhd, IdealGas { gamma: GAMMA });
-    let hs = SrhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &h.geom.allocated);
-    let ds = SrhdSubstrateKernelSet::<UnifiedMemory, f64, 1>::new(GAMMA, 0.3, &d.geom.allocated);
-    diff_godunov_cfl(&h, &d, &hs, &ds, true, "srhd cyl1d");
+    // rhd
+    let h = build_cyl_1d::<_, _, CpuSpace, HostMemory>(Rhd, IdealGas { gamma: GAMMA });
+    let d = build_cyl_1d::<_, _, CudaSpace, UnifiedMemory>(Rhd, IdealGas { gamma: GAMMA });
+    let hs = RhdSubstrateKernelSet::<HostMemory, f64, 1>::new(GAMMA, 0.3, &h.geom.allocated);
+    let ds = RhdSubstrateKernelSet::<UnifiedMemory, f64, 1>::new(GAMMA, 0.3, &d.geom.allocated);
+    diff_godunov_cfl(&h, &d, &hs, &ds, true, "rhd cyl1d");
 }
 
 // ----- cyl 3D (r,phi,z) -----------------------------------------------------------
@@ -182,10 +182,10 @@ fn cyl_3d_all_regimes_gpu_match_cpu() {
     let hs = IsoSubstrateKernelSet::<HostMemory, f64, 3>::new(CS, 0.3, &h.geom.allocated);
     let ds = IsoSubstrateKernelSet::<UnifiedMemory, f64, 3>::new(CS, 0.3, &d.geom.allocated);
     diff_godunov_cfl(&h, &d, &hs, &ds, false, "iso cyl3d");
-    // srhd
-    let h = build_cyl_3d::<_, _, CpuSpace, HostMemory>(Srhd, IdealGas { gamma: GAMMA });
-    let d = build_cyl_3d::<_, _, CudaSpace, UnifiedMemory>(Srhd, IdealGas { gamma: GAMMA });
-    let hs = SrhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &h.geom.allocated);
-    let ds = SrhdSubstrateKernelSet::<UnifiedMemory, f64, 3>::new(GAMMA, 0.3, &d.geom.allocated);
-    diff_godunov_cfl(&h, &d, &hs, &ds, true, "srhd cyl3d");
+    // rhd
+    let h = build_cyl_3d::<_, _, CpuSpace, HostMemory>(Rhd, IdealGas { gamma: GAMMA });
+    let d = build_cyl_3d::<_, _, CudaSpace, UnifiedMemory>(Rhd, IdealGas { gamma: GAMMA });
+    let hs = RhdSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, 0.3, &h.geom.allocated);
+    let ds = RhdSubstrateKernelSet::<UnifiedMemory, f64, 3>::new(GAMMA, 0.3, &d.geom.allocated);
+    diff_godunov_cfl(&h, &d, &hs, &ds, true, "rhd cyl3d");
 }

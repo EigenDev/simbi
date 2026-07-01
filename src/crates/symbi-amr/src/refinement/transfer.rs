@@ -147,7 +147,7 @@ pub fn prolong_prims<const D: usize, const DOF: usize, Mem: MemorySpace>(
     // multi-field BATCH: one dispatch (one rayon launch) over the whole prim set
     // instead of `ncomp` separate launches — the per-dispatch fork-join was the
     // dominant prolong cost. generated for the 3D hot path (ncomp 4 = isothermal,
-    // 5 = adiabatic/srhd); anything else falls back to the single-field path.
+    // 5 = adiabatic/rhd); anything else falls back to the single-field path.
     if D == 3 && (ncomp == 4 || ncomp == 5) {
         let mut inputs: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(2 * ncomp);
         let mut outputs: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(ncomp);

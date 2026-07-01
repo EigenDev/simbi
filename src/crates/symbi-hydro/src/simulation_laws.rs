@@ -65,7 +65,7 @@ use crate::source_spec::{BuiltSource, SourceKind, SourceSpec};
 /// regime-specific concerns. `has_energy` is determined by the regime the
 /// family composes with (`SimulationLaws::with_fused_family` reads it off
 /// `self.regime.has_energy`), so the same `UniformAcceleration` family
-/// composes correctly with iso (mom-only) AND with adiabatic / srhd / rmhd
+/// composes correctly with iso (mom-only) AND with adiabatic / rhd / rmhd
 /// (mom + nrg) — one declaration, every regime.
 #[derive(Clone, Debug)]
 pub enum FusedSourceFamily {
@@ -126,7 +126,7 @@ impl FusedSourceFamily {
     /// dimension (each `build_source` is dimension-generic). `has_energy`
     /// comes from the parent regime, NOT the family — the same
     /// `UniformAcceleration` declaration composes with iso (mom-only) AND
-    /// adiabatic / srhd / rmhd (mom + nrg) by varying just this flag.
+    /// adiabatic / rhd / rmhd (mom + nrg) by varying just this flag.
     pub fn to_source_specs(&self, d: usize, has_energy: bool) -> Vec<SourceSpec> {
         match self {
             Self::UniformAcceleration { .. } => {

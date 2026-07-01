@@ -1,10 +1,10 @@
 // =============================================================================
-// gpu_srhd_c2p.rs
+// gpu_rhd_c2p.rs
 //
-// GPU<->CPU runtime validation of the SRHD cons->prim kernel — the final leg of
+// GPU<->CPU runtime validation of the RHD cons->prim kernel — the final leg of
 // the substrate verification gate (CPU numerics + nvcc PTX + on-device run). the
 // SAME substrate IR graph is emitted to two backends: the CPU Rust fn
-// `symbi_aot::srhd_c2p_1d` and the neutral IR blob `symbi_aot::SRHD_C2P_1D_IR`,
+// `symbi_aot::rhd_c2p_1d` and the neutral IR blob `symbi_aot::RHD_C2P_1D_IR`,
 // rendered to CUDA source at test time via `render_from_ir` (docs/design/15 §3).
 // here we nvcc-compile the CUDA to PTX, launch it on the GPU, and assert the
 // device output matches BOTH the CPU kernel AND the analytic primitives the
@@ -12,12 +12,12 @@
 // Newton, lowered to nested SELECT) computes correct physics ON THE DEVICE.
 //
 // run (in the symbi-cuda distrobox; NVCC_CCBIN points nvcc at gcc-11):
-//   NVCC_CCBIN=/usr/bin/g++ cargo test -p symbi-xpu --features cuda --test gpu_srhd_c2p
+//   NVCC_CCBIN=/usr/bin/g++ cargo test -p symbi-xpu --features cuda --test gpu_rhd_c2p
 // =============================================================================
 
 #![cfg(feature = "cuda")]
 
-use symbi_aot::{srhd_c2p_1d__raw as srhd_c2p_1d, CpuField, CpuFieldMut, SRHD_C2P_1D_IR};
+use symbi_aot::{rhd_c2p_1d__raw as rhd_c2p_1d, CpuField, CpuFieldMut, RHD_C2P_1D_IR};
 use symbi_ir::emit::{Precision, Target};
 use symbi_ir::render_from_ir;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
@@ -76,10 +76,10 @@ fn prim_to_cons(rho: f64, v: f64, p: f64, gamma: f64) -> (f64, f64, f64) {
 
 // nvcc-compile CUDA source to PTX (native arch). honors NVCC_CCBIN from the env.
 fn compile_to_ptx(src: &str) -> Vec<u8> {
-    let dir = std::env::temp_dir().join("symbi_gpu_srhd");
+    let dir = std::env::temp_dir().join("symbi_gpu_rhd");
     std::fs::create_dir_all(&dir).unwrap();
-    let cu = dir.join("srhd_c2p_1d.cu");
-    let ptx = dir.join("srhd_c2p_1d.ptx");
+    let cu = dir.join("rhd_c2p_1d.cu");
+    let ptx = dir.join("rhd_c2p_1d.ptx");
     std::fs::write(&cu, src).unwrap();
     let out = std::process::Command::new("nvcc")
         .args([
@@ -93,7 +93,7 @@ fn compile_to_ptx(src: &str) -> Vec<u8> {
 }
 
 #[test]
-fn srhd_c2p_gpu_matches_cpu_and_analytic() {
+fn rhd_c2p_gpu_matches_cpu_and_analytic() {
     let n = CASES.len();
     let den: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).0).collect();
     let mom: Vec<f64> = CASES.iter().map(|&(r, v, p)| prim_to_cons(r, v, p, GAMMA).1).collect();
@@ -113,14 +113,14 @@ fn srhd_c2p_gpu_matches_cpu_and_analytic() {
         let mut rout = CpuFieldMut::from_layout(&mut rho_cpu, &lo, &ext);
         let mut vout = CpuFieldMut::from_layout(&mut vel_cpu, &lo, &ext);
         let mut pout = CpuFieldMut::from_layout(&mut pre_cpu, &lo, &ext);
-        srhd_c2p_1d(&din, &min, &nin, &mut rout, &mut vout, &mut pout, n as i32, 0, GAMMA);
+        rhd_c2p_1d(&din, &min, &nin, &mut rout, &mut vout, &mut pout, n as i32, 0, GAMMA);
     }
 
     // ---- GPU backend (the CUDA emit of the SAME IR graph) ----
     let exec = Executor::<CudaSpace>::new(0).unwrap();
-    let ptx = compile_to_ptx(&cuda_src(SRHD_C2P_1D_IR));
+    let ptx = compile_to_ptx(&cuda_src(RHD_C2P_1D_IR));
     let module = CudaSpace::load_module(&ptx).unwrap();
-    let kernel = CudaSpace::get_function(&module, "srhd_c2p_1d").unwrap();
+    let kernel = CudaSpace::get_function(&module, "rhd_c2p_1d").unwrap();
 
     // six unified buffers: 3 conserved in, 3 primitive out.
     let mk = || MemoryBlock::<UnifiedMemory>::for_elements::<f64>(n).unwrap();

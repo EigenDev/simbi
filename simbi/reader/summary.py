@@ -162,7 +162,7 @@ class SummaryStatistics:
             narrays = (
                 3 + 3 + 2
             )  # 3 staggered B fields + 3 flux arrays + 1 conserved + 1 primitive
-        elif sim_state["regime"] == "srhd":
+        elif sim_state["regime"] == "rhd":
             narrays = 2 + 1  # 1 conserved + 1 primitive + 1 pressure_guess
         else:
             narrays = 1 + 1  # 1 conserved + 1 primitive

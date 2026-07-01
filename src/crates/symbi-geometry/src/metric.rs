@@ -42,7 +42,7 @@ impl Geometry {
 
 /// spacetime identifier — the background a regime evolves on. ORTHOGONAL to BOTH the spatial
 /// [`Geometry`] and the physics regime: GR is not a regime, it is a curved spacetime, so a single
-/// SR regime (Srhd / Rmhd) composes with any spacetime here without duplication. flat `Minkowski`
+/// SR regime (Rhd / Rmhd) composes with any spacetime here without duplication. flat `Minkowski`
 /// (lapse = 1, shift = 0, gamma = identity in physical components) is the default — every realized
 /// run today. drives the lapse / sqrt(gamma) densitization selector in the kernel (B3). integer
 /// repr matches the GPU kernel convention (mirrors `Geometry`).

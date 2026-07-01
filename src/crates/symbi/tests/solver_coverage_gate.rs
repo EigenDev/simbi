@@ -24,7 +24,7 @@ const MHD_REGIMES: &[(&str, &[Solver])] = &[
 // and is intentionally NOT asserted here.
 const HYDRO_REGIMES: &[(&str, &[Solver])] = &[
     ("adiabatic", &[Solver::Hlle, Solver::Hllc]),
-    ("srhd", &[Solver::Hlle, Solver::Hllc]),
+    ("rhd", &[Solver::Hlle, Solver::Hllc]),
     ("iso", &[Solver::Hlle]),
 ];
 

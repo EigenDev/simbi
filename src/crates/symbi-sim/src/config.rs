@@ -16,7 +16,7 @@ use crate::state::{BoundaryType, Timestepping, Reconstruction, Solver, CtMethod}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegimeType {
     Newtonian,
-    Srhd,
+    Rhd,
     Rmhd,
 }
 

@@ -108,10 +108,10 @@ impl<T: Copy> C2pResult<T> {
 
 /// floor value for the density/pressure returned when relativistic c2p rejects the input
 /// (non-positive / non-finite conserved density). a SAFE placeholder so callers never read
-/// a NaN — the ErrorCode carries the real signal. shared by SRHD + RMHD.
+/// a NaN — the ErrorCode carries the real signal. shared by RHD + RMHD.
 pub const C2P_FAILURE_FLOOR: f64 = 1e-12;
 
-// the shared relativistic c2p diagnostic contract (SRHD + RMHD). ONE source so the two
+// the shared relativistic c2p diagnostic contract (RHD + RMHD). ONE source so the two
 // regimes' threshold conventions cannot drift (tier-1 #5: the density-scaled-vs-absolute
 // pressure floor, the superluminal margin, and the input-NaN check had all diverged).
 //
@@ -136,7 +136,7 @@ pub fn relativistic_c2p_code<S: symbi_ir::algebra::Scalar + symbi_algebra::Order
 
 // shared input-density guard for relativistic c2p (a host-only early-out, NOT in the kernel
 // path). returns the failure code for a non-positive or non-finite conserved density, else
-// None. the NaN branch was present in SRHD but missing in RMHD before the unification.
+// None. the NaN branch was present in RHD but missing in RMHD before the unification.
 pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::OrderedNumeric>(
     dd: S,
 ) -> Option<ErrorCode> {

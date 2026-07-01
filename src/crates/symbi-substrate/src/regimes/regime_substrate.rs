@@ -29,14 +29,14 @@ use symbi_hydro::newtonian::Newtonian;
 use symbi_hydro::newtonian_mhd::NewtonianMhd;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::rmhd::Rmhd;
-use symbi_hydro::srhd::Srhd;
+use symbi_hydro::rhd::Rhd;
 
 use crate::regimes::substrate::IsoSubstrateKernelSet;
 use crate::regimes::substrate_isothermal_mhd::IsothermalMhdSubstrateKernelSet;
 use crate::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use crate::regimes::substrate_newtonian_mhd::NewtonianMhdSubstrateKernelSet;
 use crate::regimes::substrate_rmhd::RmhdSubstrateKernelSet;
-use crate::regimes::substrate_srhd::SrhdSubstrateKernelSet;
+use crate::regimes::substrate_rhd::RhdSubstrateKernelSet;
 use symbi_sim::state::SimStateGeneric;
 
 /// map a regime to its substrate `KernelSet`, constructed from the run scalars (EOS param, CFL,
@@ -73,11 +73,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> RegimeSubstr
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> RegimeSubstrate<Mem, Sc, D>
-    for Srhd
+    for Rhd
 {
-    type KernelSet = SrhdSubstrateKernelSet<Mem, Sc, D>;
+    type KernelSet = RhdSubstrateKernelSet<Mem, Sc, D>;
     fn make_substrate(g: f64, cfl: f64, theta: f64, alloc: &Domain<D>) -> Self::KernelSet {
-        SrhdSubstrateKernelSet::<Mem, Sc, D>::new(g, cfl, alloc).theta(theta)
+        RhdSubstrateKernelSet::<Mem, Sc, D>::new(g, cfl, alloc).theta(theta)
     }
 }
 
