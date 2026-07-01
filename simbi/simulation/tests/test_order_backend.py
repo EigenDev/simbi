@@ -8,6 +8,7 @@
 # `ValueError: unknown timestepping 'rk1'`. requires the built cpu_ext backend;
 # skipped in its absence.
 # =============================================================================
+import glob
 import os
 import tempfile
 
@@ -46,7 +47,8 @@ def test_order1_runs_through_rust_backend() -> None:
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
         runner.run(_order_problem(1, d), compute_mode="cpu")
-        assert os.path.exists(os.path.join(d, "final.h5"))
+        # final snapshot follows the <resolution>.chkpt.final[.unit].h5 convention.
+        assert glob.glob(os.path.join(d, "*.chkpt.final*.h5"))
 
 
 @needs_backend
@@ -54,4 +56,5 @@ def test_order2_runs_through_rust_backend() -> None:
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
         runner.run(_order_problem(2, d), compute_mode="cpu")
-        assert os.path.exists(os.path.join(d, "final.h5"))
+        # final snapshot follows the <resolution>.chkpt.final[.unit].h5 convention.
+        assert glob.glob(os.path.join(d, "*.chkpt.final*.h5"))

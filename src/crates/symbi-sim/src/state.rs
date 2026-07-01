@@ -1773,6 +1773,118 @@ where
 }
 
 // =============================================================================
+// per-cadence conservation + constraint reduction
+// =============================================================================
+
+/// a host-side reduction of a level's interior for the live diagnostics: total
+/// conserved mass and (when the regime carries an energy equation) total energy,
+/// plus (for mhd) the peak magnetic-monopole error max|div B|. absolute values;
+/// the display derives the relative drift against the t=0 baseline.
+pub struct ConservationDiag {
+    /// sum over interior cells of den * cell_volume (rest-mass density D, or rho).
+    pub mass: f64,
+    /// sum of nrg * cell_volume (tau or E); None for isothermal regimes.
+    pub energy: Option<f64>,
+    /// max over interior cells of |div B| from the staggered faces; None off mhd.
+    pub div_b: Option<f64>,
+    /// max Lorentz factor W = 1/sqrt(1 - v^2) over the interior; None for
+    /// non-relativistic regimes (where v is unbounded and W is undefined).
+    pub max_w: Option<f64>,
+}
+
+impl<R, const D: usize, const DOF: usize, M, E, S, Mem>
+    SimStateGeneric<R, D, DOF, M, E, S, Mem, f64>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy,
+    E: Eos<f64>,
+    S: ExecutionSpace,
+    Mem: MemorySpace,
+{
+    /// reduce total mass / energy and max|div B| over this level's interior. cell
+    /// volumes come from the block geometry so the sums are correct on curvilinear
+    /// grids (r^2 sin(theta) etc.), not just cartesian. returns `None` when the
+    /// fields are not host-accessible (a device-resident gpu run), so the caller
+    /// simply omits the diagnostics rather than reading device memory on the host.
+    pub fn conservation_diag(&self) -> Option<ConservationDiag> {
+        if !Mem::IS_HOST_ACCESSIBLE {
+            return None;
+        }
+        let bg = self.geom.block_geometry(self.physics.metric);
+        // lab-frame (physical) cell volumes: on a homologously expanding (ALE) mesh
+        // the conserved density multiplies the PHYSICAL volume = comoving * a^n (n
+        // per geometry), so total mass/energy stay constant instead of drifting with
+        // a(t). a static mesh (a = 1) leaves the comoving volume unchanged.
+        let a = self.motion.a;
+        let den = self.fields.cons.den.view();
+        let nrg = self.fields.cons.nrg.as_ref().map(|f| f.view());
+        let mut mass = 0.0_f64;
+        let mut energy = 0.0_f64;
+        for c in self.geom.interior.iter() {
+            let vol = bg.labframe_volume(c, a);
+            mass += *den.at(c) * vol;
+            if let Some(nv) = nrg.as_ref() {
+                energy += *nv.at(c) * vol;
+            }
+        }
+
+        // max|div B| from the staggered faces, area-weighted so it is the true
+        // constrained-transport divergence on curvilinear grids: div B =
+        // (1/V) sum_d (A_d^+ B_d^+ - A_d^- B_d^-). face areas + cell volume come
+        // from the block geometry; on a cartesian grid A_d = prod of the transverse
+        // widths and this reduces to the plain (B_hi - B_lo)/dx form. the +1 normal
+        // face exists on bface (allocated interior.extend(d, 0, 1)).
+        let div_b = self.fields.mhd.as_ref().map(|mhd| {
+            let mut max_div = 0.0_f64;
+            for c in self.geom.interior.iter() {
+                let vol = bg.volume(c);
+                if vol <= 0.0 {
+                    continue;
+                }
+                let mut flux = 0.0_f64;
+                for d in 0..D {
+                    let mut hi = c;
+                    hi[d] += 1;
+                    let b_lo = *mhd.bface[d].view().at(c);
+                    let b_hi = *mhd.bface[d].view().at(hi);
+                    flux += bg.face_area(hi, d) * b_hi - bg.face_area(c, d) * b_lo;
+                }
+                max_div = max_div.max((flux / vol).abs());
+            }
+            max_div
+        });
+
+        // max Lorentz factor: relativistic regimes only (v is the orthonormal
+        // 3-velocity, |v| < 1, so W = 1/sqrt(1 - sum v_k^2)). non-relativistic v is
+        // unbounded, so W is left None.
+        let max_w = if <R as Regime<f64, D>>::SPEC.is_relativistic {
+            let vel: [_; DOF] = std::array::from_fn(|k| self.fields.prim.vel[k].view());
+            let mut mw = 1.0_f64;
+            for c in self.geom.interior.iter() {
+                let mut v2 = 0.0_f64;
+                for v in vel.iter() {
+                    let vk = *v.at(c);
+                    v2 += vk * vk;
+                }
+                if v2 < 1.0 {
+                    mw = mw.max(1.0 / (1.0 - v2).sqrt());
+                }
+            }
+            Some(mw)
+        } else {
+            None
+        };
+
+        Some(ConservationDiag {
+            mass,
+            energy: nrg.map(|_| energy),
+            div_b,
+            max_w,
+        })
+    }
+}
+
+// =============================================================================
 // tests
 // =============================================================================
 

@@ -149,9 +149,8 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
         # configure environment
         _configure_environment(args)
 
-        # run the simulation
-        print(f"\nrunning {class_name}...")
-        print("=" * 60)
+        # run the simulation. no preamble: the live dashboard is a self-contained
+        # full-screen tool that owns the terminal for the duration of the run.
         run(problem, compute_mode=args.compute_mode)
 
 

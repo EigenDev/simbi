@@ -15,9 +15,16 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{self, BufWriter, Write};
+use std::io::{self, BufWriter, Stdout, Write};
 use std::path::Path;
+use std::time::Instant;
 
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+
+use crate::exit::{ExitKind, render_exit_frame};
+use crate::input::Key;
+use crate::live::{self, DiagnosticView};
 use crate::renderer::Renderer;
 use crate::terminal::{self, ansi, color};
 
@@ -40,6 +47,8 @@ struct Message {
 /// terminal display table with progress bar and message board.
 pub struct Table {
     title: String,
+    /// dim right-aligned title-bar subtitle (regime · zones); empty by default.
+    subtitle: String,
     dynamic: bool,
     headers: Vec<String>,
     data: Vec<String>,
@@ -57,6 +66,58 @@ pub struct Table {
     /// / solver / reconstruction / timestepping / cfl identification a
     /// scientific user wants on screen.
     problem_setup: Vec<[String; 3]>,
+    /// live ratatui terminal, present iff the run is dynamic on a tty. drives the
+    /// in-alt-screen dashboard; `None` routes refresh to the static string path
+    /// (headless, or the persisted final frame after `set_dynamic(false)`). it
+    /// draws cells only — `ScreenGuard` owns alt-screen + termios state.
+    terminal: Option<Terminal<CrosstermBackend<Stdout>>>,
+    /// zone-cycle throughput history (oldest first), one instantaneous sample per
+    /// benchmark-row update. a ring buffer capped at the chart width; built from a
+    /// scalar already in hand, so it costs no device sync or field copy.
+    throughput: VecDeque<f64>,
+    /// live tabbed-dashboard state (design 40). the string/headless path ignores
+    /// these; the ratatui path projects them into a `DiagnosticView`.
+    start: Instant,
+    regime: String,
+    tab: usize,
+    paused: bool,
+    frame: u64,
+    m_step: u64,
+    m_t: f64,
+    m_dt: f64,
+    m_rate: f64, // zone-cyc/s (converted to Mzcups for display)
+    dt_hist: VecDeque<f64>,
+    cfl: f64,
+    cfl_max: f64,
+    blocks_per_level: Vec<u64>,
+    /// t=0 baselines for relative conservation drift, set on the first sample.
+    mass0: Option<f64>,
+    energy0: Option<f64>,
+    mass_drift: VecDeque<f64>,
+    energy_drift: VecDeque<f64>,
+    div_b: VecDeque<f64>,
+    max_w: Option<f64>,
+}
+
+/// throughput-history ring-buffer cap, sized to the chart's pixel width.
+const THROUGHPUT_CAPACITY: usize = 240;
+
+/// push onto a capped ring buffer, evicting the oldest when full.
+fn push_ring(q: &mut VecDeque<f64>, v: f64) {
+    if q.len() == THROUGHPUT_CAPACITY {
+        q.pop_front();
+    }
+    q.push_back(v);
+}
+
+/// a history as `Some(vec)` when it holds data, else `None` (so the live view
+/// omits the card until the solver has reduced it).
+fn opt_hist(q: &VecDeque<f64>) -> Option<Vec<f64>> {
+    if q.is_empty() {
+        None
+    } else {
+        Some(q.iter().copied().collect())
+    }
 }
 
 impl Table {
@@ -64,9 +125,19 @@ impl Table {
     /// refresh clears the screen; when output is redirected to a file/pipe the
     /// table falls back to static output so no ansi escapes are embedded.
     pub fn new(title: &str, dynamic: bool) -> Self {
+        let dynamic = dynamic && terminal::is_tty();
+        // the live ratatui terminal draws into the alternate screen ScreenGuard
+        // enters later; constructing it here only wraps stdout (no escapes emitted)
+        // and never enables crossterm's raw-mode/alt-screen helpers.
+        let term = if dynamic {
+            Terminal::new(CrosstermBackend::new(io::stdout())).ok()
+        } else {
+            None
+        };
         Self {
             title: title.to_string(),
-            dynamic: dynamic && terminal::is_tty(),
+            subtitle: String::new(),
+            dynamic,
             headers: Vec::new(),
             data: Vec::new(),
             progress: 0,
@@ -75,6 +146,118 @@ impl Table {
             renderer: Renderer::new(),
             system_info: Vec::new(),
             problem_setup: Vec::new(),
+            terminal: term,
+            throughput: VecDeque::with_capacity(THROUGHPUT_CAPACITY),
+            start: Instant::now(),
+            regime: String::new(),
+            tab: 0,
+            paused: false,
+            frame: 0,
+            m_step: 0,
+            m_t: 0.0,
+            m_dt: 0.0,
+            m_rate: 0.0,
+            dt_hist: VecDeque::with_capacity(THROUGHPUT_CAPACITY),
+            cfl: 0.0,
+            cfl_max: 1.0,
+            blocks_per_level: Vec::new(),
+            mass0: None,
+            energy0: None,
+            mass_drift: VecDeque::with_capacity(THROUGHPUT_CAPACITY),
+            energy_drift: VecDeque::with_capacity(THROUGHPUT_CAPACITY),
+            div_b: VecDeque::with_capacity(THROUGHPUT_CAPACITY),
+            max_w: None,
+        }
+    }
+
+    /// record one conservation-reduction sample. mass/energy are tracked as drift
+    /// relative to the first (t=0) sample; div B is the absolute peak monopole error.
+    pub fn push_conservation(
+        &mut self,
+        mass: f64,
+        energy: Option<f64>,
+        div_b: Option<f64>,
+        max_w: Option<f64>,
+    ) {
+        self.max_w = max_w;
+        if self.mass0.is_none() {
+            self.mass0 = Some(mass);
+            self.energy0 = energy;
+        }
+        let drift = |q: f64, q0: f64| {
+            if q0.abs() > 0.0 {
+                (q - q0).abs() / q0.abs()
+            } else {
+                0.0
+            }
+        };
+        if let Some(m0) = self.mass0 {
+            push_ring(&mut self.mass_drift, drift(mass, m0));
+        }
+        if let (Some(e), Some(e0)) = (energy, self.energy0) {
+            push_ring(&mut self.energy_drift, drift(e, e0));
+        }
+        if let Some(db) = div_b {
+            push_ring(&mut self.div_b, db);
+        }
+    }
+
+    /// append one zone-cycle throughput sample (zone-cyc/s) to the chart history,
+    /// evicting the oldest once the buffer is full.
+    pub fn push_throughput(&mut self, rate: f64) {
+        if self.throughput.len() == THROUGHPUT_CAPACITY {
+            self.throughput.pop_front();
+        }
+        self.throughput.push_back(rate);
+    }
+
+    /// the physics-regime badge shown in the live stat strip (e.g. "SRHD").
+    pub fn set_regime(&mut self, regime: &str) {
+        self.regime = regime.to_string();
+    }
+
+    /// paused state for the stat-strip indicator (amber "paused" vs green
+    /// "integrating"); the driver parks the integrator, this only reflects it.
+    pub fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+    }
+
+    /// the courant number and its nominal stability ceiling, for the CFL gauge.
+    pub fn set_cfl(&mut self, cfl: f64, cfl_max: f64) {
+        self.cfl = cfl;
+        self.cfl_max = cfl_max;
+    }
+
+    /// interior cell (zone) count per amr level, for the blocks/level bars.
+    pub fn set_blocks_per_level(&mut self, blocks: &[u64]) {
+        self.blocks_per_level = blocks.to_vec();
+    }
+
+    /// record one diagnostic-cadence sample: the live scalars + a dt-history point.
+    pub fn push_metrics(&mut self, step: u64, t: f64, dt: f64, rate_zcps: f64) {
+        self.m_step = step;
+        self.m_t = t;
+        self.m_dt = dt;
+        self.m_rate = rate_zcps;
+        if self.dt_hist.len() == THROUGHPUT_CAPACITY {
+            self.dt_hist.pop_front();
+        }
+        self.dt_hist.push_back(dt);
+    }
+
+    /// apply a navigation keypress; returns true when the frame should redraw.
+    pub fn handle_key(&mut self, key: Key) -> bool {
+        let n = live::tab_names(self.blocks_per_level.len() > 1).len();
+        match key {
+            Key::Tab | Key::Right => {
+                self.tab = (self.tab + 1) % n;
+                true
+            }
+            Key::BackTab | Key::Left => {
+                self.tab = (self.tab + n - 1) % n;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -94,6 +277,11 @@ impl Table {
         self.problem_setup = rows.iter()
             .map(|r| [r[0].to_string(), r[1].to_string(), r[2].to_string()])
             .collect();
+    }
+
+    /// set the dim right-aligned title-bar subtitle (e.g. "newtonian · 65536 zones").
+    pub fn set_subtitle(&mut self, subtitle: &str) {
+        self.subtitle = subtitle.to_string();
     }
 
     /// set column headers.
@@ -117,6 +305,11 @@ impl Table {
     /// ever dynamic on a tty.
     pub fn set_dynamic(&mut self, on: bool) {
         self.dynamic = on && terminal::is_tty();
+        // dropping the live terminal routes refresh to the static string path, so
+        // the post-`leave()` final frame is rendered on the primary buffer.
+        if !self.dynamic {
+            self.terminal = None;
+        }
     }
 
     pub fn post_info(&mut self, msg: &str) {
@@ -139,6 +332,20 @@ impl Table {
         self.post_message(MessageType::Diagnostic, msg);
     }
 
+    /// render the run's final summary frame. on a tty this is a bounded, state-
+    /// colored box on the primary buffer that persists in scrollback; headless it
+    /// is a single plain line. call after the live screen has been left — it does
+    /// not touch alt-screen or termios state and issues no cursor query.
+    pub fn exit_frame(&mut self, kind: ExitKind, summary: &str) {
+        if terminal::is_tty() {
+            let frame = render_exit_frame(kind, summary, terminal::width() as u16);
+            print!("{frame}");
+            let _ = io::stdout().flush();
+        } else {
+            println!("{summary}");
+        }
+    }
+
     /// attach a log file. all posted messages are mirrored to disk.
     pub fn set_log_file(&mut self, path: &Path) -> io::Result<()> {
         let file = File::options().create(true).append(true).open(path)?;
@@ -146,8 +353,57 @@ impl Table {
         Ok(())
     }
 
-    /// render the full display to stdout.
+    /// build an owned snapshot for the live tabbed render. owning the data lets the
+    /// draw closure run without borrowing `self` (which also owns the terminal it
+    /// draws into). throughput is converted from zone-cyc/s to Mzcups for display.
+    fn diagnostic_view(&self) -> DiagnosticView {
+        DiagnosticView {
+            app_title: self.title.clone(),
+            regime: self.regime.clone(),
+            attached: String::new(),
+            paused: self.paused,
+            frame: self.frame,
+            t: self.m_t,
+            step: self.m_step,
+            dt: self.m_dt,
+            wall_secs: self.start.elapsed().as_secs_f64(),
+            throughput_mzcups: self.m_rate / 1e6,
+            tab: self.tab,
+            throughput_hist: self.throughput.iter().map(|v| v / 1e6).collect(),
+            dt_hist: self.dt_hist.iter().copied().collect(),
+            mass_drift: opt_hist(&self.mass_drift),
+            energy_drift: opt_hist(&self.energy_drift),
+            div_b: opt_hist(&self.div_b),
+            max_w: self.max_w,
+            cfl: self.cfl,
+            cfl_max: self.cfl_max,
+            blocks_per_level: self.blocks_per_level.clone(),
+            log: self
+                .messages
+                .iter()
+                .map(|m| (m.timestamp.clone(), m.text.clone()))
+                .collect(),
+            config: self
+                .problem_setup
+                .iter()
+                .map(|r| (r[1].clone(), r[2].clone()))
+                .collect(),
+        }
+    }
+
+    /// render the full display to stdout. the live (tty) frame is drawn with
+    /// ratatui; the static/headless frame uses the string renderer below.
     pub fn refresh(&mut self) {
+        // live tty path: draw the ratatui dashboard. snapshot first (immutable
+        // borrow) so the draw closure owns its data and never aliases `self`.
+        if self.terminal.is_some() {
+            self.frame = self.frame.wrapping_add(1);
+            let view = self.diagnostic_view();
+            let term = self.terminal.as_mut().unwrap();
+            let _ = term.draw(|frame| live::render(frame, &view));
+            return;
+        }
+
         let term_width = terminal::width();
         let headers_ref: Vec<&str> = self.headers.iter().map(|s| s.as_str()).collect();
         let data_ref: Vec<&str> = self.data.iter().map(|s| s.as_str()).collect();
@@ -453,6 +709,35 @@ mod tests {
         assert!(table.messages.len() <= 10);
         // most recent should be last
         assert!(table.messages.back().unwrap().text.contains("19"));
+    }
+
+    #[test]
+    fn throughput_ring_buffer_caps_and_evicts_oldest() {
+        let mut table = Table::new("Test", false);
+        for ii in 0..(THROUGHPUT_CAPACITY + 50) {
+            table.push_throughput(ii as f64);
+        }
+        assert_eq!(table.throughput.len(), THROUGHPUT_CAPACITY);
+        // the first 50 samples were evicted; the front is now sample 50.
+        assert_eq!(*table.throughput.front().unwrap(), 50.0);
+        assert_eq!(
+            *table.throughput.back().unwrap(),
+            (THROUGHPUT_CAPACITY + 49) as f64
+        );
+    }
+
+    #[test]
+    fn conservation_drift_is_relative_to_baseline() {
+        let mut table = Table::new("Test", false);
+        // first sample seeds the baseline; drift is zero, no energy row yet.
+        table.push_conservation(100.0, None, Some(1e-16), Some(4.5));
+        assert_eq!(*table.mass_drift.back().unwrap(), 0.0);
+        assert!(table.energy_drift.is_empty());
+        assert_eq!(*table.div_b.back().unwrap(), 1e-16);
+        assert_eq!(table.max_w, Some(4.5));
+        // a 1% mass change reads as 0.01 drift relative to the 100.0 baseline.
+        table.push_conservation(101.0, None, Some(2e-16), Some(4.8));
+        assert!((*table.mass_drift.back().unwrap() - 0.01).abs() < 1e-12);
     }
 
     #[test]

@@ -3,7 +3,8 @@
 //
 // terminal display crate for live simulation monitoring.
 // provides box-drawn tables, 256-color palette, gradient progress bars,
-// and a scrolling message board. zero external dependencies.
+// and a scrolling message board. the live (tty) frame is drawn with ratatui;
+// the static/headless frame uses the bundled string renderer.
 //
 // usage:
 //   use symbi_display::{Table, MessageType};
@@ -17,11 +18,17 @@
 
 pub mod terminal;
 pub mod renderer;
+pub mod exit;
+pub mod input;
+pub mod live;
 pub mod table;
 pub mod meta_table;
 pub mod term_guard;
 pub mod signal_guard;
 
+pub use exit::ExitKind;
+pub use input::{Key, poll_key, poll_key_timeout};
+pub use live::DiagnosticView;
 pub use renderer::{Alignment, Renderer, align_text, truncate};
 pub use table::{MessageType, Table};
 pub use meta_table::{render_metadata, render_tree_buf};

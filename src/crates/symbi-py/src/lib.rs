@@ -29,7 +29,7 @@ use symbi::sim::refinement::transfer::prolong_field;
 use symbi::sim::refinement::{Hierarchy, ProlongOrder, RefinementRegion};
 use symbi::symbi_grid::Field;
 use symbi_algebra::Tensor;
-use symbi_display::{ScreenGuard, SignalGuard, Table};
+use symbi_display::{ExitKind, Key, ScreenGuard, SignalGuard, Table, poll_key};
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
 use symbi_hydro::energy::IsoModel;
@@ -738,6 +738,12 @@ where
         format!("SIMBI  -  {}", cfg.name)
     };
     let mut table = Table::new(&title, true);
+    // dim title-bar subtitle: regime and the base-grid zone count.
+    let base_zones: u64 = (0..cfg.dims).map(|ax| cfg.n_cells[ax] as u64).product();
+    table.set_subtitle(&format!("{} · {} zones", cfg.regime, base_zones));
+    // live tabbed-dashboard statics: the regime badge and the cfl gauge cap.
+    table.set_regime(&cfg.regime.to_uppercase());
+    table.set_cfl(cfg.cfl, 1.0);
     table.set_problem_setup(&setup_ref);
     table.set_header(&["Iteration", "Time", "dt", "zone-cyc/s"]);
     if let Some(p) = log_path(cfg) {
@@ -832,15 +838,68 @@ where
         table.refresh();
     }
 
+    // live-dashboard control flags, toggled by keypresses inside the callback.
+    // `paused` parks the integrator (no step) while keeping the ui live; `user_quit`
+    // requests a graceful stop, handled exactly like a caught signal.
+    let mut paused = false;
+    let mut user_quit = false;
+
     hier.evolve_with_callback(cfg.t_final, 1, |h| {
         let st = &h.levels[0].state;
         let (iter, time, dt) = (st.iteration, st.time, st.dt);
+        let mut dirty = false;
 
-        // signal observed: write a numbered + canonical restart checkpoint so a
-        // cluster eviction can resume, then ask the march to stop. the handler
-        // has already left the alternate screen, so switch the table to static
-        // (no clearing redraw) before any further render of the primary buffer.
-        if guard.stop_requested() {
+        // live-dashboard keys: tab (switch panel), space (pause), s (single step
+        // while paused), w (force checkpoint), q (graceful quit). Ctrl-C never
+        // arrives here — ISIG turns it into SIGINT for the guard.
+        let mut want_cp = false;
+        loop {
+            let mut step_now = false;
+            while let Some(key) = poll_key() {
+                match key {
+                    Key::Char('q') => user_quit = true,
+                    Key::Char(' ') => paused = !paused,
+                    Key::Char('s') => step_now = true,
+                    Key::Char('w') => want_cp = true,
+                    other => {
+                        if table.handle_key(other) {
+                            dirty = true;
+                        }
+                    }
+                }
+            }
+            table.set_paused(paused);
+            // parked while paused: redraw at ~30fps but take no step, until
+            // unpaused, single-stepped, quit, or interrupted by a signal.
+            if paused && !user_quit && !step_now && !guard.stop_requested() {
+                table.refresh();
+                std::thread::sleep(std::time::Duration::from_millis(30));
+                continue;
+            }
+            break;
+        }
+
+        // manual checkpoint (w): write the current state immediately, off-schedule.
+        if want_cp {
+            let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
+            let path =
+                checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index));
+            match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
+                Ok(_) => table.post_success(&format!(
+                    "checkpoint {path}  ({}, manual)",
+                    fmt_time_msg(cfg, time)
+                )),
+                Err(e) => table.post_error(&format!("manual checkpoint failed: {e:?}")),
+            }
+            cp_index += 1;
+            dirty = true;
+        }
+
+        // interrupt: a caught signal OR a user 'q'. write a numbered + canonical
+        // restart checkpoint so a cluster eviction / quit can resume, then stop.
+        // the handler has already left the alternate screen on a signal, so switch
+        // the table to static before any further render of the primary buffer.
+        if guard.stop_requested() || user_quit {
             table.set_dynamic(false);
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let restart = checkpoint_name(cfg, "interrupted");
@@ -848,12 +907,16 @@ where
                 write_hierarchy_checkpoint(&states, &restart, &checkpoint_metadata(cfg, cp_index));
             let _ = write_hierarchy_checkpoint(
                 &states,
-                &format!("{data_dir}final.h5"),
+                &checkpoint_name(cfg, "final"),
                 &checkpoint_metadata(cfg, cp_index),
             );
+            let reason = if user_quit {
+                "quit".to_string()
+            } else {
+                guard.signal_name().to_string()
+            };
             table.post_warning(&format!(
-                "interrupted ({}) at {}, step {iter} — restart checkpoint {restart}",
-                guard.signal_name(),
+                "interrupted ({reason}) at {}, step {iter} — restart checkpoint {restart}",
                 fmt_time_msg(cfg, time),
             ));
             return std::ops::ControlFlow::Break(());
@@ -861,7 +924,7 @@ where
 
         // fatal cfl crash (set by the evolve loop when the wave speed went NaN / collapsed — an
         // unphysical c2p, e.g. V -> 1 at the inner boundary): snapshot the LAST computed state as a
-        // `.crashed` checkpoint (+ final.h5) so it can be inspected, then stop. mirrors the interrupt
+        // `.crashed` checkpoint (+ the `.final` snapshot) so it can be inspected, then stop. mirrors the interrupt
         // path; the post-loop renders it as a crash, not a success.
         if let Some(c) = h.crash {
             table.set_dynamic(false);
@@ -871,7 +934,7 @@ where
                 write_hierarchy_checkpoint(&states, &crashed, &checkpoint_metadata(cfg, cp_index));
             let _ = write_hierarchy_checkpoint(
                 &states,
-                &format!("{data_dir}final.h5"),
+                &checkpoint_name(cfg, "final"),
                 &checkpoint_metadata(cfg, cp_index),
             );
             table.post_error(&format!(
@@ -889,7 +952,6 @@ where
         // intermediate states were never computed, and the file name is keyed by
         // the current time — looping would just re-write the SAME file N times and
         // spam the board with identical entries.
-        let mut dirty = false;
         if time + 1e-12 >= next_cp && next_cp.is_finite() {
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let path = checkpoint_name(
@@ -950,6 +1012,27 @@ where
             last_inst = now;
             last_iter = iter;
             set_row(&mut table, iter, time, dt, t_final, rate);
+            // feed the live throughput chart with this window's instantaneous rate
+            // (not the opening zero or the finalize cumulative average).
+            table.push_throughput(rate);
+            // live tabbed-dashboard metrics + per-level interior cell counts (the
+            // amr hierarchy may have regridded since the last update).
+            table.push_metrics(iter, time, dt, rate);
+            let blocks: Vec<u64> = h
+                .levels
+                .iter()
+                .map(|l| {
+                    (0..cfg.dims)
+                        .map(|ax| l.state.geom.interior.spaces[ax].size() as u64)
+                        .product()
+                })
+                .collect();
+            table.set_blocks_per_level(&blocks);
+            // conservation drift + div·B: a host-side interior reduction (skipped
+            // on device-resident gpu runs). cheap once per benchmark cadence.
+            if let Some(cd) = st.conservation_diag() {
+                table.push_conservation(cd.mass, cd.energy, cd.div_b, cd.max_w);
+            }
             dirty = true;
         }
 
@@ -959,36 +1042,40 @@ where
         std::ops::ControlFlow::Continue(())
     })?;
 
-    // interrupted: the restart checkpoint is already written and the alternate
-    // screen is already torn down by the handler. surface the halt as one static
-    // frame on the primary buffer (guard Drop restores python's handlers).
-    if guard.stop_requested() {
+    // interrupted (a caught signal or a user 'q'): the restart checkpoint is
+    // already written. surface the halt as the amber interrupt exit frame on the
+    // primary buffer (guard Drop restores python's handlers).
+    if guard.stop_requested() || user_quit {
         screen.leave();
         table.set_dynamic(false);
         let root = &hier.levels[0].state;
-        table.post_warning(&format!(
-            "interrupted — {} steps, t = {:.4}",
+        let restart = checkpoint_name(cfg, "interrupted");
+        let summary = format!(
+            "interrupted — {} steps, t = {:.4} · restart {restart}",
             root.iteration, root.time,
-        ));
-        table.refresh();
+        );
+        table.post_warning(&summary);
+        table.exit_frame(ExitKind::Interrupt, &summary);
         return Ok(());
     }
 
-    // crashed: the observer already snapshotted the `.crashed` + final.h5 state. surface the halt as
-    // ONE static crash frame (a red message line that fits the board), not a success.
+    // crashed: the observer already snapshotted the `.crashed` + `.final` state. surface the halt as
+    // the red crash exit frame, not a success.
     if let Some(c) = hier.crash {
         screen.leave();
         table.set_dynamic(false);
-        table.post_error(&format!(
-            "crashed — {} steps, t = {:.4} — wave speed collapsed (unphysical c2p near a boundary)",
+        let crashed = checkpoint_name(cfg, "crashed");
+        let summary = format!(
+            "crashed — {} steps, t = {:.4} — wave speed collapsed (unphysical c2p near a boundary) · state {crashed}",
             c.iter, c.time,
-        ));
-        table.refresh();
+        );
+        table.post_error(&summary);
+        table.exit_frame(ExitKind::Crash, &summary);
         return Ok(());
     }
 
     let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
-    let final_path = format!("{data_dir}final.h5");
+    let final_path = checkpoint_name(cfg, "final");
     write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))?;
     let root = &hier.levels[0].state;
     let wall = start.elapsed().as_secs_f64();
@@ -997,19 +1084,19 @@ where
     } else {
         0.0
     };
-    // leave the alternate screen, then render ONE static final frame so the
-    // completed dashboard persists on the primary buffer. post the summary
-    // first so `draw_row`'s single refresh carries it.
+    // leave the alternate screen, then render the green success exit frame so the
+    // run's summary persists on the primary buffer.
     screen.leave();
     table.set_dynamic(false);
-    table.post_success(&format!(
-        "complete — {} steps, t = {:.4}, {:.2}s, {}/s",
+    let summary = format!(
+        "complete — {} steps, t = {:.4}, {:.2}s, {}/s · final {final_path}",
         root.iteration,
         root.time,
         wall,
         humanize_rate(avg),
-    ));
-    draw_row(&mut table, root.iteration, root.time, root.dt, t_final, avg);
+    );
+    table.post_success(&summary);
+    table.exit_frame(ExitKind::Success, &summary);
     Ok(())
 }
 
@@ -1025,12 +1112,6 @@ fn set_row(table: &mut Table, iteration: u64, time: f64, dt: f64, t_final: f64, 
         &humanize_rate(rate_zcps),
     ]);
     table.set_progress((frac * 100.0) as usize);
-}
-
-/// set the row + progress and render one frame (used at start + finalize).
-fn draw_row(table: &mut Table, iteration: u64, time: f64, dt: f64, t_final: f64, rate_zcps: f64) {
-    set_row(table, iteration, time, dt, t_final, rate_zcps);
-    table.refresh();
 }
 
 /// si-suffix a zone-cycle rate (k/M/G) for compact display. zero/undefined
@@ -1681,7 +1762,7 @@ where
     }
     let _ = write_hierarchy_checkpoint(
         &[&global],
-        &format!("{}final.h5", cfg.data_dir),
+        &checkpoint_name(cfg, "final"),
         &checkpoint_metadata(cfg, cp_index),
     );
     Ok(())
@@ -1775,7 +1856,7 @@ where
     );
 
     // canonical final snapshot.
-    write_cp(&tiles, &format!("{}final.h5", cfg.data_dir), cp_index);
+    write_cp(&tiles, &checkpoint_name(cfg, "final"), cp_index);
     Ok(())
 }
 

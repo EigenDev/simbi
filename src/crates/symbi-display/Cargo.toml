@@ -6,6 +6,9 @@ edition.workspace = true
 [dependencies]
 symbi-io = { path = "../symbi-io" }
 libc = "0.2"
+# host-only live dashboard renderer (crossterm backend). never compiled into
+# device kernels; the crate is a tty affordance for the driver process.
+ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
 
 [lints]
 workspace = true
