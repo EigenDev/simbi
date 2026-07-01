@@ -418,6 +418,19 @@ pub fn godunov_stage_gv_with_fused_built(
             (true, Some(g)) => Some(geo_src.map_or(g, |s| s + g)),
             _ => geo_src,
         };
+        // the stored radial momentum is the ORTHONORMAL S_rhat = rho h W^2 V_rhat, but the
+        // Valencia conserved momentum is the COVARIANT S_r = rho h W^2 v_r = S_rhat / alpha.
+        // substituting S_r = S_rhat/alpha into d_t S_r = -alpha div(F) + alpha S (Font 2008,
+        // static schwarzschild) gives d_t S_rhat = -alpha^2 div_flat(F_flat) + alpha^2 S: TWO
+        // lapse factors on the radial momentum flux divergence AND its geometric+gravity source.
+        // the leading `fe` lapse supplies one; this cell lapse supplies the second. scalars
+        // (mass/energy) carry their second lapse as the contravariant v^r = alpha V_rhat face
+        // weight instead; the angular momenta carry a lame factor r (not alpha) folded into the
+        // flat curvilinear geometry, so only the radial component takes the extra lapse.
+        let (div, mom_src) = match (is_radial, lapse) {
+            (true, Some(a)) => (a * div, mom_src.map(|s| a * s)),
+            _ => (div, mom_src),
+        };
         let mom_new = with_sources(
             combine(u_n_mom, fe(mom[k], div, mom_src)),
             &contribs.mom[k],
