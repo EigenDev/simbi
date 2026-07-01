@@ -25,6 +25,7 @@
 
 // codegen substrate constitution + carrier
 pub mod algebra;
+pub mod dual;
 pub mod gv;
 
 // IR data structures (the closed signature operates over these)

@@ -5,6 +5,24 @@
 // =============================================================================
 
 use super::*;
+use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::grhd_source::grhd_radial_geodesic_source;
+use symbi_algebra::Tensor;
+use symbi_ir::dual::Dual;
+
+
+/// evaluate a concrete analytic metric at `Dual<Gv>` with the radial coordinate SEEDED, returning
+/// `(alpha, beta^r, gamma_rr, d_r alpha, d_r beta^r, d_r gamma_rr)` — the ADM block AND its radial
+/// derivatives in ONE forward-mode-autodiff pass. so the geodesic-source derivatives are AUTOMATIC
+/// (no hand-derived metric derivatives / christoffels — the metric supplies only its line element,
+/// and autodiff differentiates it). the mass is a constant dual (we differentiate w.r.t. r, not M).
+fn adm_block_autodiff<M: Metric<Dual<Gv>, 1>>(g: &M, r: Gv) -> (Gv, Gv, Gv, Gv, Gv, Gv) {
+    let rd = Tensor::new([Dual::variable(r)]); // seed d/dr = 1
+    let a = g.lapse(rd);
+    let b = g.shift(rd)[0];
+    let gg = g.spatial_metric(rd)[(0, 0)];
+    (a.value, b.value, gg.value, a.tangent, b.tangent, gg.tangent)
+}
 
 
 /// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-INDEPENDENT
@@ -334,83 +352,44 @@ pub fn godunov_stage_gv_with_fused_built(
         None => Vec::new(),
     };
     let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
-    // the schwarzschild geodesic source on the radial momentum, S_r = -M (rho h W^2)(1 + v^2) /
-    // (r^2 (1 - 2M/r)). for the relativistic energy variables rho h W^2 = D + tau + p (the conserved
-    // rest-mass density, energy, and pressure). v^2 is the sum of the gridded physical velocity
-    // components. zero on a flat (minkowski) background; carried only by the radial coordinate axis.
-    let radial_gravity: Option<Gv> = match spacetime {
+    // the GR geodesic (gravity) sources on the radial momentum + energy, computed ONCE from the
+    // metric geometry via the generic contraction `grhd_radial_geodesic_source` — the perfect-fluid
+    // T^{mu nu} contracted with the metric's ADM block (alpha, beta^r, gamma_rr) + its ANALYTIC radial
+    // derivatives, giving S_{S_r} = (1/2) T^{mn} d_r g (t-r block) and S_tau. this REPLACES the
+    // per-spacetime hand-coded closed forms: the source PHYSICS is one function, the metric supplies
+    // only its geometry (the `Metric` trait + `adm_radial_derivs`). the momentum 2p/r geometric term
+    // rides gv_geometric_source; the alpha / alpha^2 densitization rides fe / the radial-momentum arm.
+    // flat -> None (no gravity). GRMHD-ready: the EM stress just changes T^{mu nu}.
+    let geodesic: Option<(Gv, Gv)> = match spacetime {
         Spacetime::Minkowski => None,
-        Spacetime::Schwarzschild => {
-            let m = Gv::scalar("schwarzschild_mass");
+        _ => {
             let r = coord_centroid[0];
-            let f = Gv::ONE - Gv::from_f64(2.0) * m / r;
-            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-            let pre = Gv::field("pre", FieldRef::PrimPre);
-            let rho_h_w2 = rho + nrg + pre; // D + tau + p
-            let mut v_sq = Gv::ZERO;
-            for d in 0..(ndim as usize) {
-                let vd = Gv::field(&format!("prim_v{d}"), FieldRef::PrimVel(d as u8));
-                v_sq = v_sq + vd * vd;
-            }
-            Some(Gv::ZERO - m * rho_h_w2 * (Gv::ONE + v_sq) / (r * r * f))
-        }
-        // kerr-schild radial momentum gravity source S_{S_r} = -M (rho eta W^2)(1 + V)^2 / (r^2 h),
-        // h = 1 + 2M/r, V the orthonormal radial velocity (radial flow). the (2p/r) geometric term
-        // rides gv_geometric_source; the alpha^2 densitization rides the radial-momentum arm below.
-        // validated bit-for-bit against numerical (1/2) T^{mn} d_r g on the KS metric.
-        Spacetime::KerrSchild => {
-            let m = Gv::scalar("schwarzschild_mass");
-            let r = coord_centroid[0];
-            let h = Gv::ONE + Gv::from_f64(2.0) * m / r; // 1 + 2M/r
-            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-            let pre = Gv::field("pre", FieldRef::PrimPre);
-            let rho_h_w2 = rho + nrg + pre; // D + tau + p = rho eta W^2
-            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // orthonormal radial velocity V
-            let one_plus_v = Gv::ONE + v_r;
-            Some(Gv::ZERO - m * rho_h_w2 * one_plus_v * one_plus_v / (r * r * h))
+            let mass = Dual::constant(Gv::scalar("schwarzschild_mass")); // constant w.r.t. r
+            let e = rho + Gv::field("nrg", FieldRef::cons_nrg()) + Gv::field("pre", FieldRef::PrimPre);
+            let big_v = Gv::field("prim_v0", FieldRef::PrimVel(0)); // orthonormal radial velocity V
+            let p = Gv::field("pre", FieldRef::PrimPre);
+            // the ADM block + its radial derivatives, both from ONE Dual<Gv> autodiff pass — the
+            // metric supplies only its line element (lapse/shift/gamma), autodiff differentiates it.
+            // beta^r = 0 for schwarzschild folds the shift terms to zero at codegen.
+            let (alpha, beta_r, gamma_rr, d_lapse, d_shift_r, d_gamma_rr) = match spacetime {
+                Spacetime::Schwarzschild => adm_block_autodiff(&Schwarzschild { mass }, r),
+                Spacetime::KerrSchild => adm_block_autodiff(&SchwarzschildKS { mass }, r),
+                Spacetime::Minkowski => unreachable!("flat handled above"),
+            };
+            Some(grhd_radial_geodesic_source(
+                r, alpha, beta_r, gamma_rr, d_lapse, d_shift_r, d_gamma_rr, e, big_v, p,
+            ))
         }
     };
+    let radial_gravity: Option<Gv> = geodesic.map(|(s_mom, _)| s_mom);
     // Font (2008) Eq (34): on a static background the conserved mass + energy fluxes transport with
     // the CONTRAVARIANT v^r = alpha V_rhat (one lapse factor per radial face vs the orthonormal flat
     // flux). the radial momentum flux S_r v^r + p is INVARIANT (the covariant S_r ~ 1/alpha cancels
     // v^r ~ alpha), so only mass/energy are lapse-weighted at the faces. flat -> None -> plain div.
     let face_lapse = gv_radial_face_lapse(spacetime, spacing);
-    // the schwarzschild geodesic ENERGY source S_tau = -alpha T^{0r} M/(r^2 f) with T^{0r} =
-    // (D+tau+p) V_rhat — gravity's rate of work on the infalling gas (Newtonian limit rho v.g). the
-    // missing companion to the radial momentum source; zero on a flat background.
-    let nrg_gravity: Option<Gv> = match spacetime {
-        Spacetime::Minkowski => None,
-        Spacetime::Schwarzschild => {
-            let m = Gv::scalar("schwarzschild_mass");
-            let r = coord_centroid[0];
-            let f = Gv::ONE - Gv::from_f64(2.0) * m / r;
-            let alpha = f.sqrt();
-            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-            let pre = Gv::field("pre", FieldRef::PrimPre);
-            let rho_h_w2 = rho + nrg + pre; // D + tau + p
-            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // physical radial velocity V_rhat
-            Some(Gv::ZERO - alpha * rho_h_w2 * v_r * m / (r * r * f))
-        }
-        // kerr-schild energy source S_tau = -M/(r^2 h^{3/2}) [E V(1 + (2+b)V) - p(2 + 3b)], with
-        // b = 2M/r, h = 1 + 2M/r, E = D + tau + p, V the orthonormal radial velocity. UNLIKE
-        // schwarzschild the pressure term does not cancel (a genuine KS shift effect). validated
-        // bit-for-bit against numerical alpha(T^{m0} d_m ln alpha - T^{mn} Gamma^0) on the KS metric.
-        Spacetime::KerrSchild => {
-            let m = Gv::scalar("schwarzschild_mass");
-            let r = coord_centroid[0];
-            let two = Gv::from_f64(2.0);
-            let b = two * m / r; // 2M/r
-            let h = Gv::ONE + b; // 1 + 2M/r
-            let h_15 = h * h.sqrt(); // h^{3/2}
-            let nrg = Gv::field("nrg", FieldRef::cons_nrg());
-            let pre = Gv::field("pre", FieldRef::PrimPre);
-            let rho_h_w2 = rho + nrg + pre; // E = D + tau + p
-            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0)); // orthonormal radial velocity V
-            let e_term = rho_h_w2 * v_r * (Gv::ONE + (two + b) * v_r);
-            let p_term = pre * (two + Gv::from_f64(3.0) * b);
-            Some(Gv::ZERO - m * (e_term - p_term) / (r * r * h_15))
-        }
-    };
+    // the GR geodesic ENERGY source S_tau — the second output of the generic contraction above
+    // (gravity's rate of work on the infalling gas). zero on a flat background.
+    let nrg_gravity: Option<Gv> = geodesic.map(|(_, s_tau)| s_tau);
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
         let div = match lapse { Some(a) => a * div, None => div };
         let mut r = u - dt * div - dt * (h_dil * u);

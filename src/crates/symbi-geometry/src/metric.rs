@@ -2159,6 +2159,37 @@ mod tests {
     }
 
     #[test]
+    fn test_metric_autodiff_radial_derivs_match_finite_difference() {
+        // the geodesic source gets its metric radial derivatives from FORWARD-MODE AUTODIFF:
+        // evaluate lapse/shift/gamma_rr at `Dual` with the radial coordinate SEEDED (d/dr = 1); the
+        // tangent IS d/dr. this is the SINGLE source of metric derivatives (the hand-written analytic
+        // forms are retired) — so it must equal a central finite difference of the metric's OWN
+        // lapse/shift/spatial_metric. checked for schwarzschild + KS, INCLUDING inside the KS horizon
+        // (r < 2M). the mass is a CONSTANT dual (we differentiate w.r.t. r, not M).
+        use symbi_ir::dual::Dual;
+        // dr balances central-diff truncation (O(dr^2)) against subtractive roundoff (O(eps/dr)):
+        // 1e-4 keeps both ~1e-8, so an FD-appropriate relative tolerance of 1e-5 is safe.
+        let dr = 1e-4;
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
+        let fd = |f: &dyn Fn(f64) -> f64, r: f64| (f(r + dr) - f(r - dr)) / (2.0 * dr);
+        let seed = |r: f64| Tensor::new([Dual::variable(r)]);
+        for &r in &[3.0_f64, 5.0, 9.0] {
+            let m = Schwarzschild { mass: Dual::constant(1.0_f64) };
+            let mf = Schwarzschild { mass: 1.0_f64 };
+            assert!(close(m.lapse(seed(r)).tangent, fd(&|x| mf.lapse(Tensor::new([x])), r)), "schw d_lapse r={r}");
+            assert!(close(m.spatial_metric(seed(r))[(0, 0)].tangent, fd(&|x| mf.spatial_metric(Tensor::new([x]))[(0, 0)], r)), "schw d_grr r={r}");
+            assert!(m.shift(seed(r))[0].tangent == 0.0, "schw d_shift r={r}");
+        }
+        for &r in &[1.2_f64, 1.8, 2.0, 4.0, 9.0] {
+            let m = SchwarzschildKS { mass: Dual::constant(1.0_f64) };
+            let mf = SchwarzschildKS { mass: 1.0_f64 };
+            assert!(close(m.lapse(seed(r)).tangent, fd(&|x| mf.lapse(Tensor::new([x])), r)), "ks d_lapse r={r}");
+            assert!(close(m.shift(seed(r))[0].tangent, fd(&|x| mf.shift(Tensor::new([x]))[0], r)), "ks d_shift r={r}");
+            assert!(close(m.spatial_metric(seed(r))[(0, 0)].tangent, fd(&|x| mf.spatial_metric(Tensor::new([x]))[(0, 0)], r)), "ks d_grr r={r}");
+        }
+    }
+
+    #[test]
     fn test_lapse_sq_is_exact_closed_form_not_sqrt_roundtrip() {
         // alpha^2 must be the EXACT closed form (schwarzschild f = 1 - 2M/r, KS 1/(1 + 2M/r)), not
         // lapse().powi(2) = sqrt(f)^2 which rounds differently. the GR CFL radial factor depends on

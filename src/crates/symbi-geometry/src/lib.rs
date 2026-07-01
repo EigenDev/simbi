@@ -15,6 +15,7 @@
 
 pub mod coord_map;
 pub mod metric;
+pub mod grhd_source;
 pub mod motion;
 pub mod block;
 
