@@ -131,6 +131,11 @@ class GrRotatingEquilibrium(SimbiProblem):
     def compute_defaults(self) -> "GrRotatingEquilibrium":
         self.resolution = (self.nr, self.npolar)
         theta_c = math.pi / 2.0
+        if self.kerr_spin != 0.0:
+            # spinning: the kerr spacetime. the domain stays OUTSIDE the horizon —
+            # a stationary constant-l azimuthal flow needs a timelike LNRF
+            # (Delta > 0), so this state has no through-horizon continuation.
+            self.spacetime = Spacetime.KERR
         self.bounds = [
             (3.0, 100.0),
             (theta_c - self.theta_halfwidth, theta_c + self.theta_halfwidth),
@@ -146,37 +151,65 @@ class GrRotatingEquilibrium(SimbiProblem):
             p_rho_ref=self.p_rho_ref,
             bounds_r=self.bounds[0],
             bounds_theta=tuple(self.bounds[1]),
+            spin=self.kerr_spin,
+            chart="ks" if self.kerr_spin != 0.0 else "bl",
         )
 
     def _boundary_prescription(self) -> dict:
         """the complete prim prescription [rho, v_r, v_theta, v_phi, pre] of the
         equilibrium as coordinate expressions over (r, theta) — the SAME analytic
-        state `RotatingEquilibrium.primitive` evaluates, lowered to the rust
-        boundary-DAG wire format. one prescription serves all four faces (the
-        equilibrium is global)."""
+        state `RotatingEquilibrium.primitive` evaluates (FM 1976 eqs. 3.3/3.6 at
+        general spin, in the configured chart), lowered to the rust boundary-DAG
+        wire format. one prescription serves all four faces (the state is global)."""
         import simbi.expression as expr
 
         eq = self.equilibrium()
         gm = self.adiabatic_index
         gm1 = gm - 1.0
+        mm = self.schwarzschild_mass
+        a = self.kerr_spin
+        l = eq.fm.ell
 
         g = expr.ExprGraph()
         r = expr.variable("r", g)
         th = expr.variable("theta", g)
-        f = 1.0 - (2.0 * self.schwarzschild_mass) / r
         st = expr.sin(th)
-        g_pp = (r * st) * (r * st)
-        chi = 1.0 + (4.0 * eq.fm.ell**2) * f / g_pp
-        sq = expr.sqrt(chi)
-        lnh = 0.5 * expr.log((1.0 + sq) / f) - 0.5 * sq - eq.cc
+        ct = expr.cos(th)
+        sigma = r * r + (a * a) * ct * ct
+        delta = r * r - (2.0 * mm) * r + a * a
+        big_a = (r * r + a * a) * (r * r + a * a) - (a * a) * delta * st * st
+        xx = (4.0 * l * l) * sigma * sigma * delta / (big_a * st * (big_a * st))
+        sq = expr.sqrt(1.0 + xx)
+        lnh = (
+            0.5 * expr.log((1.0 + sq) / (sigma * delta / big_a))
+            - 0.5 * sq
+            - (2.0 * a * mm * l) * r / big_a
+            - eq.cc
+        )
         h = expr.exp(lnh)
         rho = ((h - 1.0) * (gm1 / (gm * eq.kk))) ** (1.0 / gm1)
         pre = eq.kk * rho**gm
-        ut_sq = (1.0 + sq) / (2.0 * f)
-        vphi = eq.fm.ell / (expr.sqrt(f) * g_pp * ut_sq)
+        # eq. 3.3 in the LNRF, then the chart map. sign(l) folds into the constant.
+        u_lnrf = math.copysign(1.0, l) * expr.sqrt(0.5 * (sq - 1.0))
+        e_nu = expr.sqrt(sigma * delta / big_a)
+        e_psi = expr.sqrt(big_a / sigma) * st
+        omega = (2.0 * a * mm) * r / big_a
+        u_t = expr.sqrt(1.0 + u_lnrf * u_lnrf) / e_nu
+        u_p = omega * u_t + u_lnrf / e_psi
         zero = expr.constant(0.0, g)
+        if self.kerr_spin != 0.0:
+            # ks chart: v^r = b/sqrt(1+b) (the orbiter's drift against the infalling
+            # eulerian observers), v^phi = u^phi sqrt(1+b) / u^t.
+            b = (2.0 * mm) * r / sigma
+            sq_b = expr.sqrt(1.0 + b)
+            v_r = b / sq_b
+            vphi = u_p * sq_b / u_t
+        else:
+            # bl chart at a = 0: alpha = e^nu, zero shift.
+            v_r = zero
+            vphi = u_p / (e_nu * u_t)
 
-        compiled = g.compile([rho, zero, zero, vphi, pre])
+        compiled = g.compile([rho, v_r, zero, vphi, pre])
         return compiled.serialize_boundary(dim=3)
 
     @computed_field
@@ -214,7 +247,7 @@ class GrRotatingEquilibrium(SimbiProblem):
                     rl = rmin * q**ii
                     rh = rl * q
                     r = 0.75 * (rh**4 - rl**4) / (rh**3 - rl**3)
-                    rho, vphi, pre = eq.primitive(r, theta)
-                    yield (rho, 0.0, 0.0, vphi, pre)
+                    rho, v_r, vphi, pre = eq.primitive(r, theta)
+                    yield (rho, v_r, 0.0, vphi, pre)
 
         return gas_state

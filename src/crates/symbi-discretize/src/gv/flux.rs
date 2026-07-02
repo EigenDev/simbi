@@ -306,64 +306,6 @@ pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind
 }
 
 
-/// the KERR-SCHILD shift-advection added to the RADIAL face flux (dir 0), IN PLACE. the Valencia
-/// densitized flux is `d_i(alpha F^i - beta^i U)` (F^i = the pure spatial flux the `RhdGr` riemann
-/// kernel returns, no shift), so with the godunov applying a SINGLE uniform lapse alpha to the whole
-/// combined flux, the shift term this kernel adds must be `-(beta^r/alpha) U` — after densitization it
-/// becomes the exact `-beta^r U`. as a FLUX-FIELD term this is LOCAL: at the face this thread owns (a
-/// face-domain kernel, thread coord = face index) the inward drag upwinds from the OUTER cell, which
-/// IS this cell (offset 0) — no stencil, no cons-neighbour read (so no godunov in-place aliasing).
-/// `b = beta^r/alpha = 2M/sqrt(r(r+2M))` at the radial face; baked ONLY for the KerrSchild spacetime.
-pub fn rhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
-    let r_face = gv_axis_face_at(0, spacing[0], 0); // this thread's radial face position
-    // beta^r/alpha: the godunov's single uniform lapse then yields the densitized shift `-beta^r U`.
-    let beta_r = gv_metric_shift_r_at(Spacetime::KerrSchild, r_face, None).expect("kerr-schild has a radial shift");
-    let alpha = gv_metric_lapse_at(Spacetime::KerrSchild, r_face, None);
-    let b = beta_r / alpha;
-    rhd_shift_flux_writes::<D>(b)
-}
-
-
-/// the SPINNING-KERR shift-advection variant of [`rhd_ks_shift_flux_gv`]: the same face-local
-/// `-(beta^r/alpha) U` add, with the theta-dependent kerr coefficient beta^r/alpha =
-/// b/sqrt(1 + b), b = 2 M r_face / Sigma(r_face, theta_centroid). the shift stays purely radial
-/// (beta^theta = beta^phi = 0), so this rides dir 0 only, exactly like the a = 0 kernel.
-pub fn rhd_kerr_shift_flux_gv<const D: usize>(
-    coords: Coords,
-    spacing: &[Spacing],
-    axes: &[usize],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    begin_trace();
-    let r_face = gv_axis_face_at(0, spacing[0], 0);
-    let theta_c = cell_geometry_gv(coords, spacing, axes, axes.len()).centroid[1];
-    let beta_r = gv_metric_shift_r_at(Spacetime::Kerr, r_face, Some(theta_c))
-        .expect("kerr has a radial shift");
-    let alpha = gv_metric_lapse_at(Spacetime::Kerr, r_face, Some(theta_c));
-    let b = beta_r / alpha;
-    rhd_shift_flux_writes::<D>(b)
-}
-
-
-/// the shared conserved-flux shift add `flux_X -= b * cons_X` for every conserved component —
-/// the body of the kerr-schild / kerr shift-advection kernels (requires an active trace).
-fn rhd_shift_flux_writes<const D: usize>(b: Gv) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    // add -b * U to each conserved face flux (upwind = outer cell = this face's own cell, offset 0).
-    let fd = Gv::field("flux_den", FieldRef::flux_den());
-    let cd = Gv::field("cons_den", FieldRef::cons_den());
-    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), (fd - b * cd).node())];
-    for k in 0..D {
-        let fm = Gv::field(&format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8));
-        let cm = Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8));
-        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), (fm - b * cm).node()));
-    }
-    let fe = Gv::field("flux_nrg", FieldRef::flux_nrg());
-    let ce = Gv::field("cons_nrg", FieldRef::cons_nrg());
-    writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), (fe - b * ce).node()));
-    (end_trace(), writes)
-}
-
-
 /// the RHD face flux on a curved SPATIAL metric — the `_schw`/`_ks` GR path (Valencia covariant U/F +
 /// Banyuls-Font coordinate wave speeds). PLM-reconstruct the CONTRAVARIANT-velocity primitive, build
 /// the in-kernel `SpatialMetric` (gamma/gamma^{-1}) + lapse from the metric at the radial face, and run
@@ -484,7 +426,50 @@ where
     };
     let regime = RhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
     let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
-    let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
+    // the kerr-schild charts carry a RADIAL shift: the face flux is the hll solution of the full
+    // valencia system d_t U + (1/sqrt(gm)) d_r (sqrt(gm) [alpha F - beta^r U]). with the godunov
+    // applying the alpha sqrt(gm) measure to the kernel flux, the exact pieces are: per-side
+    // fluxes G = F - (beta^n/alpha) U, signal speeds s - beta^n (the banyuls-font s already
+    // carries alpha), and fan dissipation (s_l s_r / alpha) dU — densitization then lands the
+    // true central part sqrt(gm)(alpha F - beta U) AND the true dissipation sqrt(gm) s_l s_r dU.
+    // beta^theta = beta^phi = 0 on both charts, so the transverse sweeps keep the shift-free
+    // path; mesh motion (vface) never composes with a curved spacetime in the bake.
+    let radial_shift = matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
+        && axes[dir as usize] == 0;
+    let flux = if radial_shift {
+        let beta_n = match spacetime {
+            Spacetime::KerrSchild => SchwarzschildKS { mass }.shift(x)[0],
+            Spacetime::Kerr => {
+                KerrKS { mass, spin: Gv::scalar("kerr_spin") }.shift(x)[0]
+            }
+            _ => unreachable!("the radial shift is a kerr-schild-chart property"),
+        };
+        let u_l = regime.to_conserved(&eos, &left);
+        let u_r = regime.to_conserved(&eos, &right);
+        let f_l = regime.to_flux(&left, &nhat, &eos);
+        let f_r = regime.to_flux(&right, &nhat, &eos);
+        let w = beta_n / alpha;
+        let g_l = f_l - u_l * w;
+        let g_r = f_r - u_r * w;
+        let sh_l = s_l - beta_n;
+        let sh_r = s_r - beta_n;
+        Gv::branch(
+            sh_l.cmp_ge(Gv::ZERO),
+            || g_l,
+            || {
+                Gv::branch(
+                    sh_r.cmp_le(Gv::ZERO),
+                    || g_r,
+                    || {
+                        let inv = Gv::ONE / (sh_r - sh_l);
+                        (g_l * sh_r - g_r * sh_l + (u_r - u_l) * (sh_l * sh_r / alpha)) * inv
+                    },
+                )
+            },
+        )
+    } else {
+        hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r)
+    };
     let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }

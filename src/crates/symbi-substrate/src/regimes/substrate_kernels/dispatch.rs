@@ -482,64 +482,6 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_named(sim, pre, None, dir, &name, &face, &[], &scalars);
 }
 
-/// the RHD ingoing-Kerr-Schild SHIFT dispatch: run the `rhd_ks_shift_flux{sp}_{D}d_{dir}` face
-/// kernel that adds the shift-advection `- (2M/r_face) U` to each conserved face flux, IN PLACE,
-/// between the flat flux and the godunov. no-op unless the background is KerrSchild AND `dir` is the
-/// radial axis (0) — the shift is radial (beta^theta = beta^phi = 0). the face-position `2M/r_face`
-/// uses the LOG-aware kernel geometry (like the godunov/wavespeed), and the mass M rides on the
-/// metric's `schwarzschild_mass` scalar. the godunov then densitizes the combined flux.
-pub fn dispatch_rhd_ks_shift_flux<const D: usize, const DOF: usize, Mem, Sc>(
-    sim: &FieldStore<D, DOF, Mem, Sc>,
-    pre: &Field<Sc, D, Mem>,
-    dir: usize,
-) where
-    Mem: MemorySpace + Sync,
-    Sc: Scalar + OrderedNumeric,
-{
-    // the shift-advection add fires for BOTH kerr-schild charts (a = 0 and spinning) — the
-    // shift is purely radial in each, so dir 0 only.
-    let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
-    if !(is_kerr || matches!(sim.geom.spacetime, symbi_geometry::Spacetime::KerrSchild)) || dir != 0 {
-        return;
-    }
-    let geom = &sim.geom;
-    let sp_sfx = spacing_suffix(&geom.maps);
-    // the DOF-lift tag (spherical swirl): the shift advects EVERY conserved component, so the
-    // DOF > NDIM instance carries extra momentum-flux fields and needs its own kernel. the
-    // spacetime tag is empty for the a = 0 chart (the family namesake) and `_kerr` for the
-    // spinning variant (theta-dependent shift coefficient).
-    let geom_sfx = if DOF != D { geom_suffix(geom.coords, DOF, D) } else { "" };
-    let st_sfx = if is_kerr { "_kerr" } else { "" };
-    let name = format!("rhd_ks_shift_flux{geom_sfx}{sp_sfx}{st_sfx}_{D}d_{dir}");
-    let face = geom.interior.face_domain(dir);
-    // the shift reads `x_lo_0`/`dx_0` through gv_axis_face_at -> the LOG-aware kernel scalars (dx is
-    // the log slope on a log axis), NOT the physical spacing. mirrors the godunov binding.
-    let (x_lo, dx) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
-    let scalars = scalars_for(&name, |bind| {
-        let ScalarBind::Ref(sref) = bind else {
-            panic!("dispatch_rhd_ks_shift_flux: unexpected spec scalar {bind:?}");
-        };
-        match *sref {
-            ScalarRef::SchwarzschildMass => Sc::from_f64(
-                geom.spacetime_scalars.iter()
-                    .find(|(n, _)| n == "schwarzschild_mass")
-                    .map(|(_, v)| *v)
-                    .expect("dispatch_rhd_ks_shift_flux: KS kernel needs schwarzschild_mass"),
-            ),
-            ScalarRef::KerrSpin => Sc::from_f64(
-                geom.spacetime_scalars.iter()
-                    .find(|(n, _)| n == "kerr_spin")
-                    .map(|(_, v)| *v)
-                    .expect("dispatch_rhd_ks_shift_flux: KS kernel needs kerr_spin"),
-            ),
-            other => Sc::from_f64(
-                geom_scalar(&x_lo, &dx, other)
-                    .unwrap_or_else(|| panic!("dispatch_rhd_ks_shift_flux: unexpected scalar {other:?}")),
-            ),
-        }
-    });
-    dispatch_named(sim, pre, None, dir, &name, &face, &[], &scalars);
-}
 
 /// the ONE godunov-update dispatch every hydro regime shares (the EOS-generic builder is
 /// already unified; this unifies the field-gathering + the curvilinear binding order + the

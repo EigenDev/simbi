@@ -754,36 +754,6 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the RHD ingoing-Kerr-Schild shift kernel: a FACE-domain in-place add of the shift-advection
-// `- (beta^r/alpha) U` to each conserved face flux (den/mom_k/nrg), run between the GR flux and the
-// godunov for the radial direction — the godunov's single uniform lapse then yields the Valencia
-// densitized `-beta^r U`. depends on the radial SPACING (the face position feeds `gv_axis_face_at`),
-// so it carries the spacing suffix (like the godunov/wavespeed); baked only for KerrSchild + dir 0.
-// `_ks` is in the name, so the spacetime tag is implicit. geom (coords) suffix omitted — the shift
-// reads only the radial axis (DOF == D).
-fn gen_rhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
-    // the DOF-lift tag rides the name only when ncomp > naxes (the spherical swirl): the shift
-    // advects every conserved component, so the lifted instance carries an extra momentum flux.
-    // the spacetime tag is EMPTY for kerr-schild (the family namesake) and `_kerr` for the
-    // spinning variant (theta-dependent shift coefficient).
-    let lift = if geom.ncomp as usize > geom.axes.len() { geom.suffix() } else { "" };
-    let st = if geom.spacetime == Spacetime::Kerr { "_kerr" } else { "" };
-    let name = format!("rhd_ks_shift_flux{lift}{}{st}_{ndim}d_{dir}", geom.spacing_suffix());
-    // the const parameter is the momentum DOF (geom.ncomp).
-    let (k, writes) = if geom.spacetime == Spacetime::Kerr {
-        assert!(geom.ncomp == 3, "the kerr shift needs the swirl DOF");
-        symbi_discretize::gv::rhd_kerr_shift_flux_gv::<3>(geom.coords, &geom.spacing, &geom.axes)
-    } else {
-        match geom.ncomp {
-            1 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<1>(&geom.spacing),
-            2 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<2>(&geom.spacing),
-            3 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<3>(&geom.spacing),
-            nc => panic!("rhd_ks_shift_flux_gv: unsupported ncomp {nc}"),
-        }
-    };
-    emit_gv(out_dir, &name, ndim, &k, &writes);
-}
-
 // the RHD cons->prim on a curved SPATIAL metric — the Valencia covariant recovery (`|S|^2 =
 // gamma^{ij} S_i S_j`, contravariant `v^i = gamma^{ij} S_j/(...)`) with gamma(r) evaluated at the
 // cell centroid. baked per (spacetime, spacing) on the GR path; 1D radial (angular GR is task 9).
@@ -1388,15 +1358,13 @@ fn main() {
         }
     }
     // GR (ingoing Kerr-Schild) RHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
-    // densitized godunov + KS coordinate wave speeds + the shift-advection flux kernel. 1D radial
+    // densitized godunov + KS coordinate wave speeds (the radial shift rides the flux fan). 1D radial
     // (the through-horizon accretion target); the inner boundary can sit BELOW 2M where the flow is
     // unconditionally ingoing. uniform + log-radial grids, tagged `_sph[_logr]_ks`.
     for ndim in 1u8..=2 {
         let ks = Geom::sph(ndim).kerr_schild();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
-        // the shift-advection is radial (beta^theta = beta^phi = 0), so it rides dir 0 only in any D.
-        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks.clone());
         gen_rhd_c2p_gr(&out_dir, ndim, 20, ks.clone());
         for dir in 0..ndim {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks.clone());
@@ -1404,7 +1372,6 @@ fn main() {
         let ks_log = Geom::sph(ndim).kerr_schild().log_radial();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks_log.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, ndim, ks_log.clone());
-        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks_log.clone());
         gen_rhd_c2p_gr(&out_dir, ndim, 20, ks_log.clone());
         for dir in 0..ndim {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks_log.clone());
@@ -1415,7 +1382,7 @@ fn main() {
     // accretion). the covariant angular momentum S_phi is a conserved law with a zero
     // axisymmetric source; the covariant stress-energy contraction carries the centrifugal
     // blocks. per (spacetime, spacing): godunov + wave-speed + c2p + per-sweep flux + snapshot
-    // + ghost fill (+ the KS shift on the horizon-penetrating chart).
+    // + ghost fill.
     for base in [Geom::sph_swirl().schwarzschild(), Geom::sph_swirl().kerr_schild()] {
         for geom in [base.clone(), base.clone().log_radial()] {
             gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
@@ -1424,15 +1391,12 @@ fn main() {
             for dir in 0..2 {
                 gen_rhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
             }
-            if geom.spacetime == Spacetime::KerrSchild {
-                gen_rhd_ks_shift_flux(&out_dir, 2, 0, geom.clone());
-            }
         }
     }
     // SPINNING KERR (ingoing kerr-schild, `_kerr`): swirl-only — the frame-dragging
     // gamma_{r phi} needs the azimuthal momentum DOF. godunov (covariant Sigma-measure
     // geometry + the kerr covariant source) + the light-cone wave-speed map + the
-    // metric-aware c2p/flux + the theta-dependent shift advection.
+    // metric-aware c2p/flux (the radial shift rides the flux fan).
     for geom in [Geom::sph_swirl().kerr(), Geom::sph_swirl().kerr().log_radial()] {
         gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
@@ -1440,7 +1404,6 @@ fn main() {
         for dir in 0..2 {
             gen_rhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
         }
-        gen_rhd_ks_shift_flux(&out_dir, 2, 0, geom.clone());
     }
     // the snapshot + ghost fill are spacetime- and spacing-independent (pure copies /
     // lattice pullbacks over the lifted component set): one instance each.

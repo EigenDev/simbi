@@ -46,14 +46,17 @@ fn rmhd_2p5d_runs_with_hlld() {
     }
 }
 
-// hllc has no magnetic wave structure, so the bind-time matrix rejects it for the RMHD regime.
+// the bind-time solver matrix for rmhd: hllc is VALID (hllc-mhd = the contact-resolving hllc
+// flux + the hll edge emf — the contact carries no transverse field for B_x != 0, M&DZ p.11);
+// hllc-lm is REJECTED (the low-mach correction is a non-relativistic gas closure).
 #[test]
-fn rmhd_2p5d_rejects_hllc() {
+fn rmhd_2p5d_solver_matrix() {
     let sim = build_sim();
+    assert!(sim.substrate().with_solver(Solver::Hllc).is_ok(), "hllc is valid for rmhd");
     // the substrate kernel set is not Debug, so match the Result directly rather than expect_err.
-    match sim.substrate().with_solver(Solver::Hllc) {
+    match sim.substrate().with_solver(Solver::HllcLm) {
         Err(ConfigError::SolverRegimeMismatch { .. }) => {}
         Err(e) => panic!("expected SolverRegimeMismatch, got {e:?}"),
-        Ok(_) => panic!("hllc must be rejected for rmhd"),
+        Ok(_) => panic!("hllc-lm must be rejected for rmhd"),
     }
 }

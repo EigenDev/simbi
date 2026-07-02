@@ -169,7 +169,7 @@ def test_kerr_at_zero_spin_matches_the_ks_chart() -> None:
     ks = _run("kerr_schild", 0.0)
     # same physics, different kernels AND a different CFL map (the kerr light-cone bound vs
     # the kerr-schild banyuls-font speeds), so the dt sequences differ and the trajectories
-    # separate at the truncation floor — measured 1.6e-7 max after t = 10. a wiring error
+    # separate at the truncation floor — measured 9.3e-8 max after t = 10. a wiring error
     # (wrong metric / measure / source) sits orders above (the angular face-weight bug
     # measured 1e-2). differences normalize by the FIELD's domain scale (with the radial-flow
     # scale as the floor): v^theta is roundoff-noise-sized in this theta-symmetric flow, and
@@ -191,9 +191,9 @@ def test_frame_dragging_twists_zero_angular_momentum_infall() -> None:
     # the S_phi law is source-free (axisymmetry). the flux kernel reconstructs the
     # angular-momentum-carrying variable w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r,
     # so interior reconstruction generates NO angular momentum (dragging states have w = 0
-    # to roundoff); the residual generation is boundary-ghost truncation (an outflow copy
-    # cannot satisfy the dragging relation at the shifted ghost radius) — measured 2.2e-3
-    # at 96x16 (24x below the raw-v^phi reconstruction), converging under refinement.
+    # to roundoff; interior |S_phi| measured 6.8e-9 at 96x16); the residual generation is
+    # boundary-ghost truncation (an outflow copy cannot satisfy the dragging relation at
+    # the shifted ghost radius) — measured 1.0e-3 at 96x16, shrinking under refinement.
     assert np.abs(out["m3"]).max() < 8e-3, (
         f"S_phi beyond the boundary-truncation scale: {np.abs(out['m3']).max():.3e}"
     )
@@ -223,10 +223,10 @@ def test_frame_dragging_twists_zero_angular_momentum_infall() -> None:
     e_even = np.abs(out["rho"] - out_m["rho"]).max() / np.abs(out["rho"]).max()
     assert e_even < 1e-14, f"rho is not spin-even: {e_even:.3e}"
     # the residual S_phi is BOUNDARY-sourced (the outflow ghost copies v^phi, which cannot
-    # satisfy the dragging relation at the shifted ghost radius; the interior sits 10x lower
-    # at 2.3e-4) and advects inward, so it shrinks — but boundary-layer maxima converge
-    # slowly (measured 2.17e-3 -> 1.68e-3). copying the angular-momentum variable w in the
-    # kerr ghost fill is the identified fix that would remove this generator entirely.
+    # satisfy the dragging relation at the shifted ghost radius; the interior sits at the
+    # 6.8e-9 roundoff scale) and advects inward, so it shrinks — but boundary-layer maxima
+    # converge slowly (measured 1.0e-3 -> 9.0e-4). copying the angular-momentum variable w
+    # in the kerr ghost fill is the identified fix that would remove this generator entirely.
     hi = _run_m3_max(2 * _NR, 2 * _NPOLAR)
     lo = np.abs(out["m3"]).max()
     assert hi < lo, f"S_phi generation grows under refinement: {lo:.3e} -> {hi:.3e}"

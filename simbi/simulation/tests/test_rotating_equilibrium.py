@@ -1,20 +1,26 @@
 # =============================================================================
-# test_schwarzschild_rotating_equilibrium.py
+# test_rotating_equilibrium.py
 #
 # the rotating-balance precision gates on the surface-free constant-l equilibrium
 # (gr_fishbone_moncrief.RotatingEquilibrium) with all four boundaries DRIVEN —
 # ghost bands pinned to the analytic state (a theta-stratified equilibrium is
 # mathematically incompatible with mirror/copy ghosts: they impose dp/dtheta = 0
-# where the state requires the centrifugal-balancing gradient).
+# where the state requires the centrifugal-balancing gradient). parametrized over
+# spin: a = 0 is the schwarzschild chart (zero shift); a = 0.9 is the spinning
+# kerr ingoing kerr-schild chart, where the state carries the orbiter's radial
+# drift v^r = beta^r/alpha and the flux's radial-shift riemann fan is load-bearing.
 #
 # one-step residual: the sharpest instrument. an exact stationary state's discrete
 # time derivative is pure truncation — smooth and second-order — so every conserved
 # component's one-step residual must CONVERGE under refinement. a wrong term shows
 # up as a resolution-independent residual in its component: the covariant S_theta
 # law once carried orthonormal (arc-length) angular face weights instead of the
-# coordinate alpha sqrt(gamma) measure, leaving every theta-direction force short
-# by a factor r — invisible to every radial-flow and theta-uniform gate, and an
-# O(1e-2) non-converging m2 residual here.
+# coordinate alpha sqrt(gamma) measure (an O(1e-2) non-converging m2 residual),
+# and the kerr-schild charts once dropped the shift-advection `-beta^r U` from the
+# face flux entirely (an O(1e-1) non-converging residual in every transported
+# component; the exact stationary state has zero transport velocity
+# alpha v^r - beta^r = 0, so its den residual is analytically zero) — both
+# invisible to every kernel-vs-kernel and qualitative-infall gate.
 #
 # hold: the equilibrium is held over many dynamical times with drift shrinking
 # under refinement. requires the built cpu_ext backend; skipped otherwise.
@@ -34,26 +40,35 @@ needs_backend = pytest.mark.skipif(
     _BACKEND is None, reason="rust cpu_ext backend not built"
 )
 
-# measured one-step residual L1 (|dU/dt| / (tau + D)) at 96x32: den 2.1e-4, m1 2.9e-4,
-# m2 9.5e-5, m3 7.3e-4, nrg 1.3e-4 — tolerances carry ~3x margin. the broken angular
-# weights put m2 at 1.2e-2 with ratio 1.0.
-_RESID_TOL = {"den": 7e-4, "m1": 1e-3, "m2": 3e-4, "m3": 2.2e-3, "nrg": 4e-4}
-# measured 96->192 L1 ratios 3.9-7.1 (second order and better); 2.5 separates a
-# converging truncation residual from a wrong term (ratio 1) with margin.
+# measured one-step residual L1 (|dU/dt| / (tau + D)) at 96x32 — tolerances carry
+# ~3x margin. a = 0: den 2.1e-4, m1 2.9e-4, m2 9.5e-5, m3 7.3e-4, nrg 1.3e-4 (the
+# broken angular weights put m2 at 1.2e-2 with ratio 1.0). a = 0.9: den 4.5e-5,
+# m1 2.3e-5, m2 8.2e-5, m3 1.7e-4, nrg 1.8e-5 (the dropped shift advection put
+# den/m1/m3/nrg at 4e-3 .. 2e-1 with ratio 1.0-2.0).
+_RESID_TOL = {
+    0.0: {"den": 7e-4, "m1": 1e-3, "m2": 3e-4, "m3": 2.2e-3, "nrg": 4e-4},
+    0.9: {"den": 1.5e-4, "m1": 7e-5, "m2": 3e-4, "m3": 5e-4, "nrg": 6e-5},
+}
+# measured 96->192 L1 ratios 3.9-7.1 (a = 0) and 3.6-3.9 (a = 0.9); 2.5 separates
+# a converging truncation residual from a wrong term (ratio ~1) with margin.
 _RESID_CONV = 2.5
-# measured t=100 hold: full-domain L1 rho drift 5.4e-2 (96x32) -> 1.7e-2 (192x64),
-# ratio 3.2 (the state carries slow neutrally-stable constant-l modes; convergence
-# is the teeth, the absolute bound the sanity rail).
-_HOLD_TOL_96 = 1.5e-1
+# measured t=100 hold: full-domain L1 rho drift (96x32 -> 192x64) a = 0: 5.4e-2 ->
+# 1.7e-2 (ratio 3.2); a = 0.9: 2.5e-3 -> 7.0e-4 (ratio 3.6). the state carries slow
+# neutrally-stable constant-l modes; convergence is the teeth, the absolute bound
+# the sanity rail. tolerances carry ~3x margin on the measured drift.
+_HOLD_TOL_96 = {0.0: 1.5e-1, 0.9: 8e-3}
 _HOLD_CONV = 2.0
 _HOLD_TIME = 100.0
+_SPINS = [0.0, 0.9]
 
 
-def _run(nr: int, npolar: int, t_end: float):
+def _run(nr: int, npolar: int, t_end: float, spin: float):
     from simbi_configs.examples.gr_rotating_equilibrium import GrRotatingEquilibrium
 
     d = tempfile.mkdtemp() + "/"
-    p = GrRotatingEquilibrium.from_cli(["--nr", str(nr), "--npolar", str(npolar)])
+    p = GrRotatingEquilibrium.from_cli(
+        ["--nr", str(nr), "--npolar", str(npolar), "--kerr-spin", str(spin)]
+    )
     p.end_time = t_end
     p.data_directory = d
     p.checkpoint_interval = max(t_end, 1.0)
@@ -71,9 +86,9 @@ def _cons(fn: str) -> dict:
         return {k: c[k][:] for k in ("den", "m1", "m2", "m3", "nrg")}
 
 
-def _one_step_residual(nr: int, npolar: int) -> dict:
+def _one_step_residual(nr: int, npolar: int, spin: float) -> dict:
     dt = 1e-6
-    _, first, final = _run(nr, npolar, dt)
+    _, first, final = _run(nr, npolar, dt, spin)
     c0, c1 = _cons(first), _cons(final)
     halo = 2
     sl = (slice(halo, halo + npolar), slice(halo, halo + nr))
@@ -85,10 +100,11 @@ def _one_step_residual(nr: int, npolar: int) -> dict:
 
 
 @needs_backend
-def test_stationary_one_step_residual_is_truncation_and_converges() -> None:
-    r_lo = _one_step_residual(96, 32)
-    r_hi = _one_step_residual(192, 64)
-    for k, tol in _RESID_TOL.items():
+@pytest.mark.parametrize("spin", _SPINS)
+def test_stationary_one_step_residual_is_truncation_and_converges(spin) -> None:
+    r_lo = _one_step_residual(96, 32, spin)
+    r_hi = _one_step_residual(192, 64, spin)
+    for k, tol in _RESID_TOL[spin].items():
         assert r_lo[k] < tol, f"one-step {k} residual {r_lo[k]:.3e} exceeds {tol:.1e}"
         ratio = r_lo[k] / r_hi[k]
         assert ratio > _RESID_CONV, (
@@ -97,8 +113,8 @@ def test_stationary_one_step_residual_is_truncation_and_converges() -> None:
         )
 
 
-def _hold_drift(nr: int, npolar: int) -> float:
-    p, _, final = _run(nr, npolar, _HOLD_TIME)
+def _hold_drift(nr: int, npolar: int, spin: float) -> float:
+    p, _, final = _run(nr, npolar, _HOLD_TIME, spin)
     with h5py.File(final) as h:
         g = h["level_0/partition_0/hydro/primitives"]
         shp = g["rho"].shape
@@ -119,10 +135,11 @@ def _hold_drift(nr: int, npolar: int) -> float:
 
 
 @needs_backend
-def test_rotating_equilibrium_is_held_and_converges() -> None:
-    e_lo = _hold_drift(96, 32)
-    e_hi = _hold_drift(192, 64)
-    assert e_lo < _HOLD_TOL_96, f"96x32 hold drift {e_lo:.3e}"
+@pytest.mark.parametrize("spin", _SPINS)
+def test_rotating_equilibrium_is_held_and_converges(spin) -> None:
+    e_lo = _hold_drift(96, 32, spin)
+    e_hi = _hold_drift(192, 64, spin)
+    assert e_lo < _HOLD_TOL_96[spin], f"96x32 hold drift {e_lo:.3e}"
     assert e_lo / e_hi > _HOLD_CONV, (
         f"hold drift does not converge: {e_lo:.3e} -> {e_hi:.3e}"
     )

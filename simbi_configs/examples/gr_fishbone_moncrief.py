@@ -263,16 +263,33 @@ class RotatingEquilibrium:
         p_rho_ref: float,
         bounds_r: tuple[float, float],
         bounds_theta: tuple[float, float],
+        spin: float = 0.0,
+        chart: str = "bl",
     ) -> None:
+        # a stationary constant-l azimuthal flow needs a timelike LNRF (Delta > 0):
+        # the equilibrium exists OUTSIDE the horizon only. the wedge must not
+        # penetrate — unlike the infall problems, this state has no through-horizon
+        # continuation.
+        r_plus = mass + math.sqrt(max(mass * mass - spin * spin, 0.0))
+        if bounds_r[0] <= r_plus:
+            raise ValueError(
+                f"the rotating equilibrium requires r_lo > r_plus = {r_plus:.3f}"
+            )
         # place the potential's pressure maximum at r_max: with r_in = 0.9 r_max the
-        # required kappa is (l(r_max)/l(r_in))^2 (both on the outer branch of l(r)).
-        ell_of = lambda r: math.sqrt(mass * r**3) / (r - 3.0 * mass)
+        # required kappa is (l(r_max)/l(r_in))^2 (both on the outer branch of the
+        # eq. 3.8 circular-orbit relation at THIS spin — a probe instance supplies it).
+        probe = FishboneMoncrief(
+            mass=mass, r_in=0.9 * r_max, gamma=gamma, rho_max=1.0,
+            kappa=1.01, spin=spin, chart=chart,
+        )
         self.fm = FishboneMoncrief(
             mass=mass,
             r_in=0.9 * r_max,
             gamma=gamma,
             rho_max=1.0,
-            kappa=(ell_of(r_max) / ell_of(0.9 * r_max)) ** 2,
+            kappa=(probe._ell_of(r_max) / probe._ell_of(0.9 * r_max)) ** 2,
+            spin=spin,
+            chart=chart,
         )
         self.gamma = gamma
         # the domain minimum of the potential, by dense sampling (log in r — the
@@ -289,13 +306,14 @@ class RotatingEquilibrium:
         gm1 = gamma - 1.0
         self.kk = (h_ref - 1.0) * gm1 / (gamma * rho_ref**gm1)
 
-    def primitive(self, r: float, theta: float) -> tuple[float, float, float]:
-        """(rho, v^phi, p) of the equilibrium — defined everywhere in the domain."""
+    def primitive(self, r: float, theta: float) -> tuple[float, float, float, float]:
+        """(rho, v^r, v^phi, p) of the equilibrium — defined everywhere in the domain."""
         gm1 = self.gamma - 1.0
         h = math.exp(self.fm._lnh_raw(r, theta) - self.cc)
         rho = ((h - 1.0) * gm1 / (self.gamma * self.kk)) ** (1.0 / gm1)
         return (
             rho,
+            self.fm.radial_velocity(r, theta),
             self.fm.azimuthal_velocity(r, theta),
             self.kk * rho**self.gamma,
         )
