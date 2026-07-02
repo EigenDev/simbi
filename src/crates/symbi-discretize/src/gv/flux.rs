@@ -6,6 +6,7 @@
 
 use super::*;
 use symbi_hydro::rhd::RhdGr;
+use symbi_hydro::RmhdGr;
 use symbi_hydro::spatial_metric::SpatialMetric;
 use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
 
@@ -671,6 +672,146 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
         return (k, writes);
     }
     let mut halo = vec![0u8; ndim as usize];
+    halo[dir as usize] = 2;
+    let k = k.with_tile_spec(TileSpec { halo, tiled_field_keys: stencil_keys });
+    (k, writes)
+}
+
+
+/// the RMHD face flux on a curved SPATIAL metric — the GRMHD path (Valencia covariant U/F via
+/// `RmhdGr` + the fast-magnetosonic-bound coordinate wave speeds). PLM-reconstruct the 8 MHD
+/// primitives (the normal B from the staggered face field, Gardiner-Stone), build the in-kernel
+/// `SpatialMetric` + lapse at the swept-axis face, and run the HLL fan at the `RmhdGr` regime.
+/// wave speeds are INLINE (the bound is quartic-free), so the GR path skips the materialized
+/// per-cell quartic the flat kernel reads. on the kerr-schild chart the fan carries the radial
+/// shift exactly like the RHD GR flux — with the induction TRANSPOSE term: the true mag-row flux
+/// is `(alpha v^n - beta^n) B^i - (alpha v^i - beta^i) B^n`, so beyond the uniform
+/// `-(beta^n/alpha) U` subtraction every mag row i gains `+(beta^i/alpha) B^n` (the radial row of
+/// a transverse sweep included; B^n is the SHARED face field, so the term is side-symmetric).
+/// spinning kerr is excluded until the dragging-consistent reconstruction extends to B (design
+/// 44 phase C). the metric's ungridded polar slot takes the equatorial pi/2 (exact for the
+/// theta-symmetric 1D radial problem), the azimuthal slot zero.
+pub fn rmhd_flux_gr_gv(
+    dir: u8,
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let coord_n = axes[dir as usize];
+    let gamma_eos = Gv::scalar("gamma");
+    let theta_lim = Gv::scalar("theta");
+    let (rho_l, rho_r) = plm_theta_gv("prim_rho", "prim.rho", ndim as u8, dir, theta_lim);
+    let mut vl = Vec::with_capacity(3);
+    let mut vr = Vec::with_capacity(3);
+    for k in 0..3 {
+        let (l, r) = plm_theta_gv(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), ndim as u8, dir, theta_lim);
+        vl.push(l);
+        vr.push(r);
+    }
+    let (pre_l, pre_r) = plm_theta_gv("prim_pre", "prim.pre", ndim as u8, dir, theta_lim);
+    let mut bl = Vec::with_capacity(3);
+    let mut br = Vec::with_capacity(3);
+    for k in 0..3 {
+        let (l, r) = plm_theta_gv(&format!("prim_b{k}"), &format!("prim.mag[{k}]"), ndim as u8, dir, theta_lim);
+        bl.push(l);
+        br.push(r);
+    }
+    // normal B from the staggered FACE field (Gardiner-Stone CT coupling) — shared by both sides.
+    let bn_face = Gv::field_shifted("bface_n", "bface_n", ndim as u8, dir, 0);
+    bl[coord_n] = bn_face;
+    br[coord_n] = bn_face;
+    let eos = IdealGas { gamma: gamma_eos };
+    let mk = |rho: Gv, v: &[Gv], p: Gv, b: &[Gv]| MhdPrim::<Gv, 3> {
+        hydro: Prim { rho, vel: Tensor::new([v[0], v[1], v[2]]), pre: p },
+        mag: Tensor::new([b[0], b[1], b[2]]),
+    };
+    let left = mk(rho_l, &vl, pre_l, &bl);
+    let right = mk(rho_r, &vr, pre_r, &br);
+    let nhat = Tensor::<Gv, 3>::unit(coord_n);
+
+    // the metric at the SWEPT-axis face, transverse gridded slots at the cell centroid; the
+    // ungridded polar slot is the exact equatorial pi/2, the azimuthal slot zero.
+    let geo = (ndim > 1).then(|| cell_geometry_gv(coords, spacing, axes, ndim));
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        if c == coord_n {
+            gv_axis_face_at(dir as usize, spacing[dir as usize], 0)
+        } else {
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => geo.as_ref().expect("a transverse gridded axis implies ndim > 1").centroid[d],
+                None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
+                None => Gv::ZERO,
+            }
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gamma, gamma_inv, alpha, beta) = match spacetime {
+        Spacetime::Schwarzschild => {
+            let m = Schwarzschild { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        Spacetime::KerrSchild => {
+            let m = SchwarzschildKS { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        Spacetime::Kerr => panic!(
+            "spinning-kerr GRMHD is design-44 phase C: the dragging-consistent reconstruction \
+             does not yet extend to B"
+        ),
+        Spacetime::Minkowski => unreachable!("the GRMHD flux is baked only for a curved spacetime"),
+    };
+    let regime = RmhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
+    let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
+    let has_shift = matches!(spacetime, Spacetime::KerrSchild);
+    let flux = if has_shift {
+        // the shifted-system HLL (the RHD GR fan) with the induction transpose add per side.
+        let beta_n = beta[coord_n];
+        let w = beta_n / alpha;
+        let u_l = regime.to_conserved(&eos, &left);
+        let u_r = regime.to_conserved(&eos, &right);
+        let f_l = regime.to_flux(&left, &nhat, &eos);
+        let f_r = regime.to_flux(&right, &nhat, &eos);
+        let mut g_l = f_l - u_l * w;
+        let mut g_r = f_r - u_r * w;
+        let transpose = beta.scale(bn_face / alpha);
+        g_l.mag = g_l.mag + transpose;
+        g_r.mag = g_r.mag + transpose;
+        let sh_l = s_l - beta_n;
+        let sh_r = s_r - beta_n;
+        Gv::branch(
+            sh_l.cmp_ge(Gv::ZERO),
+            || g_l,
+            || {
+                Gv::branch(
+                    sh_r.cmp_le(Gv::ZERO),
+                    || g_r,
+                    || {
+                        let inv = Gv::ONE / (sh_r - sh_l);
+                        (g_l * sh_r - g_r * sh_l + (u_r - u_l) * (sh_l * sh_r / alpha)) * inv
+                    },
+                )
+            },
+        )
+    } else {
+        hlle_with_speeds(&regime, &eos, &left, &right, &nhat, Gv::ZERO, s_l, s_r)
+    };
+
+    let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+    for k in 0..3 {
+        writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+    }
+    writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), flux.nrg.node()));
+    for k in 0..3 {
+        writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
+    }
+    let k = end_trace();
+    let stencil_keys = k.stencil_read_field_keys();
+    if stencil_keys.is_empty() {
+        return (k, writes);
+    }
+    let mut halo = vec![0u8; ndim];
     halo[dir as usize] = 2;
     let k = k.with_tile_spec(TileSpec { halo, tiled_field_keys: stencil_keys });
     (k, writes)

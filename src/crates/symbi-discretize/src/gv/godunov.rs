@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_geometry::{KerrKS, Schwarzschild, SchwarzschildKS};
-use symbi_geometry::grhd_source::grhd_covariant_source;
+use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_algebra::Tensor;
 use symbi_ir::dual::Dual;
 
@@ -360,6 +360,11 @@ pub fn godunov_stage_gv_with_fused_built(
         }
         None => Vec::new(),
     };
+    assert!(
+        spacetime == Spacetime::Minkowski
+            || matches!(source, GeoSource::Rmhd | GeoSource::Hydro { .. }),
+        "the GR godunov source carries the perfect-fluid or ideal-MHD stress only"
+    );
     let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
     // the GR geodesic sources from the FULL covariant contraction `grhd_covariant_source`: the
     // per-coordinate momentum source S_j = (1/2) T^{mu nu} d_j g_{mu nu} and the energy source
@@ -393,18 +398,55 @@ pub fn godunov_stage_gv_with_fused_built(
                     Gv::ZERO
                 }
             }));
-            let src_at = |pp: Gv| match spacetime {
-                Spacetime::Schwarzschild => grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp),
-                Spacetime::KerrSchild => grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp),
-                Spacetime::Kerr => {
-                    let spin = Dual::constant(Gv::scalar("kerr_spin"));
-                    grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pp)
-                }
-                Spacetime::Minkowski => unreachable!("flat handled above"),
-            };
-            let (s_mom, _) = src_at(Gv::ZERO);
-            let (_, s_tau) = src_at(p);
-            Some((s_mom, s_tau))
+            if matches!(source, GeoSource::Rmhd) {
+                // GRMHD: the ideal-MHD stress in the same contraction. the source takes the
+                // METRIC-FREE rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (it builds
+                // W and b^mu from the harvested gamma internally); B reads the cell field under
+                // the same key convention as the discrete magnetic geo source. the momentum call
+                // takes p = 0 (the gas-pressure block rides the discrete well-balanced form) but
+                // keeps the FULL magnetic stress — the b^2/2 isotropic block is analytic; the
+                // one-step-residual instrument adjudicates its balance. spinning kerr is design-44
+                // phase C (the dragging-consistent reconstruction does not yet extend to B).
+                let gamma_eos = Gv::scalar("gamma");
+                let prim_rho = Gv::field("prim_rho", FieldRef::PrimRho);
+                let rho_h = prim_rho + gamma_eos / (gamma_eos - Gv::ONE) * p;
+                let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
+                    if mag_from_bcell {
+                        Gv::field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
+                    } else {
+                        Gv::field(&format!("prim_b{k}"), &format!("prim.mag[{k}]"))
+                    }
+                }));
+                let src_at = |pp: Gv| match spacetime {
+                    Spacetime::Schwarzschild => {
+                        grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pp, b)
+                    }
+                    Spacetime::KerrSchild => {
+                        grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
+                    }
+                    Spacetime::Kerr => panic!(
+                        "spinning-kerr GRMHD is design-44 phase C: the dragging-consistent \
+                         reconstruction does not yet extend to B"
+                    ),
+                    Spacetime::Minkowski => unreachable!("flat handled above"),
+                };
+                let (s_mom, _) = src_at(Gv::ZERO);
+                let (_, s_tau) = src_at(p);
+                Some((s_mom, s_tau))
+            } else {
+                let src_at = |pp: Gv| match spacetime {
+                    Spacetime::Schwarzschild => grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp),
+                    Spacetime::KerrSchild => grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp),
+                    Spacetime::Kerr => {
+                        let spin = Dual::constant(Gv::scalar("kerr_spin"));
+                        grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pp)
+                    }
+                    Spacetime::Minkowski => unreachable!("flat handled above"),
+                };
+                let (s_mom, _) = src_at(Gv::ZERO);
+                let (_, s_tau) = src_at(p);
+                Some((s_mom, s_tau))
+            }
         }
     };
     let mom_gravity: Option<Tensor<Gv, 3>> = geodesic.map(|(s_mom, _)| s_mom);

@@ -121,11 +121,12 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // r.h = r_i h^i is a COVARIANT*CONTRAVARIANT pairing -> METRIC-FREE (no gamma factor); stays `.dot()`.
     let rdb = rvec.dot(&hvec);
     let rdb_sq = rdb * rdb;
-    let rparr = hvec.scale(rdb / bee_sq);
+    // the perp invariant |r_perp|^2 = gamma^{ij} (r - r_par)_i (r - r_par)_j with the parallel
+    // projection LOWERED to match r's variance: r_par_i = (r.b / |b|^2) h_i. identity gamma ->
+    // the euclidean decomposition bit-for-bit (lower = id, norm_sq_cov = dot).
+    let rparr = metric.lower(&hvec).scale(rdb / bee_sq);
     let rperp = rvec - rparr;
-    // rperp mixes variance (covariant rvec - contravariant rparr) — a KKC SR-flat artifact; flat ->
-    // euclidean rp_sq (bit-identical). a GR-correct perp decomposition is deferred (Tier-2).
-    let rp_sq = rperp.dot(&rperp);
+    let rp_sq = metric.norm_sq_cov(&rperp);
 
     // the master residual at a given mu (the 8 invariants are fixed).
     let kkc = |mu: S| kkc_fmu44(mu, r_mag, rp_sq, bee_sq, rdb_sq, qq, dd, gamma);
@@ -183,7 +184,10 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let pre = rho_gm1 * epshat;
     let mu_x = mu * x;
     let rdb_mu = rdb * mu;
-    let vel = (rvec + hvec.scale(rdb_mu)).scale(mu_x);
+    // the CONTRAVARIANT valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the
+    // covariant momentum part raised before adding the contravariant field part. identity
+    // gamma -> the euclidean form bit-for-bit (raise = id).
+    let vel = (metric.raise(&rvec) + hvec.scale(rdb_mu)).scale(mu_x);
 
     MhdPrim { hydro: Prim { rho, vel, pre }, mag: bfield }
 }

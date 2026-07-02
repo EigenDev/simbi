@@ -144,8 +144,103 @@ pub fn grhd_covariant_source<S: Scalar, M, const D: usize>(
 where
     M: Metric<Dual<S>, D>,
 {
-    debug_assert!(D <= 3, "the padded 4-metric blocks hold at most 3 spatial axes");
+    let adm = adm_contraction_blocks(g, x);
+    // ---- the fluid stress-energy T^{mu nu} = E uhat^mu uhat^nu + p g^{mu nu} ----
+    let mut uhat = [S::ZERO; 4];
+    uhat[0] = S::ONE / adm.alpha;
+    for ii in 0..D {
+        uhat[ii + 1] = v[ii] - adm.beta[ii] / adm.alpha;
+    }
+    let mut t4 = [[S::ZERO; 4]; 4];
+    for mm in 0..=D {
+        for nn in 0..=D {
+            t4[mm][nn] = e * uhat[mm] * uhat[nn] + p * adm.gi4[mm][nn];
+        }
+    }
+    contract_stress(&adm, &t4)
+}
+
+
+/// the full GRMHD covariant valencia source — [`grhd_covariant_source`] with the ideal-MHD
+/// stress `T^{mu nu} = (rho h + b^2) u^mu u^nu + (p + b^2/2) g^{mu nu} - b^mu b^nu` in the SAME
+/// per-axis contraction (the design-43/44 promise: the EM stress only changes `T`). the caller
+/// supplies the METRIC-FREE rest enthalpy density `rho_h = rho + Gamma/(Gamma-1) p`, the
+/// contravariant valencia `v^i`, the isotropic-block pressure `p`, and the contravariant
+/// eulerian field `B^i`; the lorentz factor and the magnetic four-vector assemble in here from
+/// the harvested metric:
+///   alpha b^t = W (v.B),   b^i = B^i/W + alpha b^t uhat^i,   b^2 = B^2/W^2 + (v.B)^2,
+///   (rho h + b^2) u^mu u^nu = (rho_h + b^2) W^2 uhat^mu uhat^nu.
+/// B = 0 reduces exactly to the hydro contraction at e = rho_h W^2. axisymmetry still zeroes
+/// the suppressed-slot momentum source (the metric never reads phi), B or not —
+/// angular-momentum conservation survives magnetization.
+pub fn grmhd_covariant_source<S: Scalar, M, const D: usize>(
+    g: &M,
+    x: Tensor<S, D>,
+    rho_h: S,
+    v: Tensor<S, D>,
+    p: S,
+    bfield: Tensor<S, D>,
+) -> (Tensor<S, D>, S)
+where
+    M: Metric<Dual<S>, D>,
+{
     let half = S::from_f64(0.5);
+    let adm = adm_contraction_blocks(g, x);
+    let mut uhat = [S::ZERO; 4];
+    uhat[0] = S::ONE / adm.alpha;
+    for ii in 0..D {
+        uhat[ii + 1] = v[ii] - adm.beta[ii] / adm.alpha;
+    }
+    // frame-local magnetic invariants with the harvested gamma.
+    let v_low = Tensor::<S, D>::from_fn(|ii| adm.gam.row(ii).dot(&v));
+    let b_low = Tensor::<S, D>::from_fn(|ii| adm.gam.row(ii).dot(&bfield));
+    let v_sq = v_low.dot(&v);
+    let w_sq = S::ONE / (S::ONE - v_sq);
+    let ww = w_sq.sqrt();
+    let vdb = v_low.dot(&bfield);
+    let bsq = b_low.dot(&bfield);
+    let b_mu_sq = bsq / w_sq + vdb * vdb;
+    // the magnetic four-vector in uhat components: b^t = W (v.B)/alpha = wvb uhat^t,
+    // b^i = B^i/W + wvb uhat^i.
+    let wvb = ww * vdb;
+    let mut b4 = [S::ZERO; 4];
+    b4[0] = wvb * uhat[0];
+    for ii in 0..D {
+        b4[ii + 1] = bfield[ii] / ww + wvb * uhat[ii + 1];
+    }
+    let inertia = (rho_h + b_mu_sq) * w_sq;
+    let p_tot = p + half * b_mu_sq;
+    let mut t4 = [[S::ZERO; 4]; 4];
+    for mm in 0..=D {
+        for nn in 0..=D {
+            t4[mm][nn] = inertia * uhat[mm] * uhat[nn] + p_tot * adm.gi4[mm][nn]
+                - b4[mm] * b4[nn];
+        }
+    }
+    contract_stress(&adm, &t4)
+}
+
+
+/// the harvested ADM blocks + derivatives a covariant-source contraction consumes: the 4-metric
+/// coordinate derivatives `dg4[kk] = d_kk g_{mu nu}` (one Dual pass per axis on a STATIC
+/// background), the inverse 4-metric `gi4`, and the point values of the 3+1 split.
+struct AdmContractionBlocks<S: Scalar, const D: usize> {
+    alpha: S,
+    beta: Tensor<S, D>,
+    gam: Matrix<S, D>,
+    d_alpha: [S; D],
+    dg4: [[[S; 4]; 4]; 3],
+    gi4: [[S; 4]; 4],
+}
+
+fn adm_contraction_blocks<S: Scalar, M, const D: usize>(
+    g: &M,
+    x: Tensor<S, D>,
+) -> AdmContractionBlocks<S, D>
+where
+    M: Metric<Dual<S>, D>,
+{
+    debug_assert!(D <= 3, "the padded 4-metric blocks hold at most 3 spatial axes");
 
     // one dual pass per axis: seed x_kk, harvest the ADM block and its d_kk. the values are
     // identical across passes; take them from the first.
@@ -226,18 +321,19 @@ where
         }
     }
 
-    // ---- the fluid stress-energy T^{mu nu} = E uhat^mu uhat^nu + p g^{mu nu} ----
-    let mut uhat = [S::ZERO; 4];
-    uhat[0] = S::ONE / alpha;
-    for ii in 0..D {
-        uhat[ii + 1] = v[ii] - beta[ii] / alpha;
-    }
-    let mut t4 = [[S::ZERO; 4]; 4];
-    for mm in 0..=D {
-        for nn in 0..=D {
-            t4[mm][nn] = e * uhat[mm] * uhat[nn] + p * gi4[mm][nn];
-        }
-    }
+    AdmContractionBlocks { alpha, beta, gam, d_alpha, dg4, gi4 }
+}
+
+
+/// contract a stress tensor against the harvested metric derivatives:
+///   S_j   = (1/2) T^{mu nu} d_j g_{mu nu}                       (all blocks, per coordinate j)
+///   S_tau = alpha ( T^{t j} d_j ln(alpha) - T^{mu nu} Gamma^t_{mu nu} )
+fn contract_stress<S: Scalar, const D: usize>(
+    adm: &AdmContractionBlocks<S, D>,
+    t4: &[[S; 4]; 4],
+) -> (Tensor<S, D>, S) {
+    let half = S::from_f64(0.5);
+    let (alpha, d_alpha, dg4, gi4) = (adm.alpha, &adm.d_alpha, &adm.dg4, &adm.gi4);
 
     // ---- momentum sources: S_j = (1/2) T^{mu nu} d_j g_{mu nu} (full symmetric double sum) ----
     let s_mom = Tensor::<S, D>::from_fn(|kk| {
@@ -580,6 +676,208 @@ mod tests {
             let s_tau_cf = -m / (r * r * h.powf(1.5)) * (e * big_v * (1.0 + (2.0 + b) * big_v) - p * (2.0 + 3.0 * b));
             assert!(approx(s_mom, s_mom_cf), "S_Sr r={r}: {s_mom} != {s_mom_cf}");
             assert!(approx(s_tau, s_tau_cf), "S_tau r={r}: {s_tau} != {s_tau_cf}");
+        }
+    }
+
+    // finite-difference mirror with the FULL ideal-MHD stress: the same T^{mu nu} =
+    // (rho h + b^2) u u + (p + b^2/2) g^{-1} - b b algebra with every metric derivative
+    // numerical — validates the b^mu assembly + contraction through the non-diagonal
+    // theta-dependent kerr metric.
+    fn covariant_source_fd_mhd<M: crate::metric::Metric<f64, 3>>(
+        g: &M,
+        x: Tensor<f64, 3>,
+        rho_h: f64,
+        v: Tensor<f64, 3>,
+        p: f64,
+        bfield: Tensor<f64, 3>,
+    ) -> (Tensor<f64, 3>, f64) {
+        let eps = 1e-6;
+        let alpha = g.lapse(x);
+        let beta = g.shift(x);
+        let gm = g.spatial_metric(x);
+        let gi = g.spatial_metric_inv(x);
+        let mut uhat = [0.0; 4];
+        uhat[0] = 1.0 / alpha;
+        for ii in 0..3 {
+            uhat[ii + 1] = v[ii] - beta[ii] / alpha;
+        }
+        let dot_g = |a: &Tensor<f64, 3>, b: &Tensor<f64, 3>| -> f64 {
+            (0..3).map(|ii| (0..3).map(|jj| gm[(ii, jj)] * a[ii] * b[jj]).sum::<f64>()).sum()
+        };
+        let v_sq = dot_g(&v, &v);
+        let w_sq = 1.0 / (1.0 - v_sq);
+        let ww = w_sq.sqrt();
+        let vdb = dot_g(&v, &bfield);
+        let bsq = dot_g(&bfield, &bfield);
+        let b_mu_sq = bsq / w_sq + vdb * vdb;
+        let wvb = ww * vdb;
+        let mut b4 = [0.0; 4];
+        b4[0] = wvb / alpha;
+        for ii in 0..3 {
+            b4[ii + 1] = bfield[ii] / ww + wvb * uhat[ii + 1];
+        }
+        let ia2 = 1.0 / (alpha * alpha);
+        let mut gi4 = [[0.0; 4]; 4];
+        gi4[0][0] = -ia2;
+        for ii in 0..3 {
+            gi4[0][ii + 1] = beta[ii] * ia2;
+            gi4[ii + 1][0] = beta[ii] * ia2;
+            for jj in 0..3 {
+                gi4[ii + 1][jj + 1] = gi[(ii, jj)] - beta[ii] * beta[jj] * ia2;
+            }
+        }
+        let inertia = (rho_h + b_mu_sq) * w_sq;
+        let p_tot = p + 0.5 * b_mu_sq;
+        let mut t4 = [[0.0; 4]; 4];
+        for mm in 0..4 {
+            for nn in 0..4 {
+                t4[mm][nn] = inertia * uhat[mm] * uhat[nn] + p_tot * gi4[mm][nn] - b4[mm] * b4[nn];
+            }
+        }
+        let block = |x: Tensor<f64, 3>| -> [[f64; 4]; 4] {
+            let alpha = g.lapse(x);
+            let beta = g.shift(x);
+            let gm = g.spatial_metric(x);
+            let beta_low: [f64; 3] =
+                std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
+            let mut g4 = [[0.0; 4]; 4];
+            g4[0][0] = -alpha * alpha + (0..3).map(|ii| beta_low[ii] * beta[ii]).sum::<f64>();
+            for ii in 0..3 {
+                g4[0][ii + 1] = beta_low[ii];
+                g4[ii + 1][0] = beta_low[ii];
+                for jj in 0..3 {
+                    g4[ii + 1][jj + 1] = gm[(ii, jj)];
+                }
+            }
+            g4
+        };
+        let mut dg = [[[0.0; 4]; 4]; 3];
+        for kk in 0..2 {
+            let mut xp = x;
+            let mut xm = x;
+            xp[kk] += eps;
+            xm[kk] -= eps;
+            let (bp, bm) = (block(xp), block(xm));
+            for aa in 0..4 {
+                for bb in 0..4 {
+                    dg[kk][aa][bb] = (bp[aa][bb] - bm[aa][bb]) / (2.0 * eps);
+                }
+            }
+        }
+        let s_mom = Tensor::<f64, 3>::from_fn(|kk| {
+            let mut s = 0.0;
+            for mm in 0..4 {
+                for nn in 0..4 {
+                    s += t4[mm][nn] * dg[kk][mm][nn];
+                }
+            }
+            0.5 * s
+        });
+        let d_alpha: [f64; 3] = std::array::from_fn(|kk| {
+            if kk == 2 {
+                return 0.0;
+            }
+            let mut xp = x;
+            let mut xm = x;
+            xp[kk] += eps;
+            xm[kk] -= eps;
+            (g.lapse(xp) - g.lapse(xm)) / (2.0 * eps)
+        });
+        let dgf = |mu: usize, aa: usize, bb: usize| -> f64 {
+            if mu == 0 { 0.0 } else { dg[mu - 1][aa][bb] }
+        };
+        let mut t_gamma = 0.0;
+        for mm in 0..4 {
+            for nn in 0..4 {
+                let mut gt = 0.0;
+                for ss in 0..4 {
+                    gt += gi4[0][ss] * (dgf(mm, ss, nn) + dgf(nn, ss, mm) - dgf(ss, mm, nn));
+                }
+                t_gamma += t4[mm][nn] * 0.5 * gt;
+            }
+        }
+        let mut work = 0.0;
+        for kk in 0..3 {
+            work += t4[0][kk + 1] * d_alpha[kk] / alpha;
+        }
+        (s_mom, alpha * (work - t_gamma))
+    }
+
+    #[test]
+    fn grmhd_source_reduces_to_hydro_at_zero_field() {
+        use crate::metric::{KerrKS, SchwarzschildKS};
+        // B = 0 zeroes every magnetic invariant, so the MHD contraction must equal the
+        // hydro one to roundoff (the T4 assembly differs only by exact-zero terms).
+        let close = |x: f64, y: f64, s: f64| (x - y).abs() < 1e-12 * (1.0 + s.abs());
+        let (rho_h, p) = (2.3_f64, 0.05_f64);
+        let v = Tensor::new([-0.2_f64, 0.03, 0.02]);
+        let b0 = Tensor::new([0.0_f64, 0.0, 0.0]);
+        let ks_f = SchwarzschildKS { mass: 1.0_f64 };
+        let kerr_f = KerrKS { mass: 1.0_f64, spin: 0.7_f64 };
+        let ks = SchwarzschildKS { mass: Dual::constant(1.0_f64) };
+        let kerr = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(0.7_f64) };
+        // the hydro call takes e = rho_h W^2 (the same inertia the mhd call builds internally).
+        let w_sq = |gm: symbi_algebra::Matrix<f64, 3>| -> f64 {
+            let v_sq: f64 = (0..3).map(|ii| (0..3).map(|jj| gm[(ii, jj)] * v[ii] * v[jj]).sum::<f64>()).sum();
+            1.0 / (1.0 - v_sq)
+        };
+        for &(r, th) in &[(2.5_f64, 0.8_f64), (8.0, 1.9)] {
+            let x = Tensor::new([r, th, 0.0]);
+            let e_ks = rho_h * w_sq(crate::metric::Metric::<f64, 3>::spatial_metric(&ks_f, x));
+            let (sh, th_h) = grhd_covariant_source(&ks, x, e_ks, v, p);
+            let (sm, th_m) = grmhd_covariant_source(&ks, x, rho_h, v, p, b0);
+            for kk in 0..3 {
+                assert!(close(sh[kk], sm[kk], e_ks), "ks S[{kk}] r={r}: {} vs {}", sh[kk], sm[kk]);
+            }
+            assert!(close(th_h, th_m, e_ks), "ks S_tau r={r}");
+            let e_kerr = rho_h * w_sq(crate::metric::Metric::<f64, 3>::spatial_metric(&kerr_f, x));
+            let (sh, th_h) = grhd_covariant_source(&kerr, x, e_kerr, v, p);
+            let (sm, th_m) = grmhd_covariant_source(&kerr, x, rho_h, v, p, b0);
+            for kk in 0..3 {
+                assert!(close(sh[kk], sm[kk], e_kerr), "kerr S[{kk}] r={r}: {} vs {}", sh[kk], sm[kk]);
+            }
+            assert!(close(th_h, th_m, e_kerr), "kerr S_tau r={r}");
+        }
+    }
+
+    #[test]
+    fn grmhd_source_on_kerr_matches_finite_differences() {
+        use crate::metric::KerrKS;
+        // a rotating magnetized state with all velocity AND field components, off the
+        // equator, inside and outside the horizon — the autodiff contraction with the
+        // b^mu assembly must agree with the finite-difference mirror.
+        let fd_close = |x: f64, y: f64, s: f64| (x - y).abs() < 1e-7 * (1.0 + s.abs());
+        for &a in &[0.9_f64, -0.5] {
+            let g = KerrKS { mass: 1.0_f64, spin: a };
+            let gd = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(a) };
+            let (rho_h, p) = (2.3_f64, 0.05_f64);
+            let v = Tensor::new([-0.2_f64, 0.03, 0.02]);
+            let b = Tensor::new([0.4_f64, -0.15, 0.08]);
+            for &(r, th) in &[(1.4_f64, 1.2_f64), (2.5, 0.8), (8.0, 1.9)] {
+                let x = Tensor::new([r, th, 0.0]);
+                let (s_ad, tau_ad) = grmhd_covariant_source(&gd, x, rho_h, v, p, b);
+                let (s_fd, tau_fd) = covariant_source_fd_mhd(&g, x, rho_h, v, p, b);
+                for kk in 0..3 {
+                    assert!(fd_close(s_ad[kk], s_fd[kk], rho_h),
+                        "S_mom[{kk}] a={a} r={r}: {} vs {}", s_ad[kk], s_fd[kk]);
+                }
+                assert!(fd_close(tau_ad, tau_fd, rho_h), "S_tau a={a} r={r}: {tau_ad} vs {tau_fd}");
+            }
+        }
+    }
+
+    #[test]
+    fn grmhd_axisymmetric_azimuthal_source_vanishes_with_field() {
+        use crate::metric::KerrKS;
+        // the metric never reads phi, so the suppressed-slot momentum source is zero by
+        // construction — magnetization does not break angular-momentum conservation.
+        let gd = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(0.9_f64) };
+        let v = Tensor::new([-0.2_f64, 0.03, 0.02]);
+        let b = Tensor::new([0.4_f64, -0.15, 0.08]);
+        for &(r, th) in &[(2.5_f64, 0.8_f64), (8.0, 1.9)] {
+            let x = Tensor::new([r, th, 0.0]);
+            let (s, _) = grmhd_covariant_source(&gd, x, 2.3, v, 0.05, b);
+            assert!(s[2].abs() < 1e-14, "S_phi source with B: {}", s[2]);
         }
     }
 }

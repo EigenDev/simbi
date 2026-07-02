@@ -231,6 +231,71 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
 }
 
 
+/// the RMHD cons->prim on a curved SPATIAL metric — the metric-aware KKC recovery
+/// (`|r|^2 = gamma^{ij} r_i r_j`, `B^2 = gamma_ij h^i h^j`, contravariant `v^i` raised) with
+/// gamma at the cell's VOLUME-WEIGHTED centroid — the same point the covariant `to_conserved`
+/// stored at, so the round-trip is exact (well-balanced). the metric evaluates at its FULL
+/// three coordinates regardless of the grid dimension (RMHD vectors are always 3-component):
+/// gridded slots take the centroid, the ungridded polar slot the exact equatorial pi/2, the
+/// azimuthal slot zero. spinning kerr requires the gridded polar axis (design 44 phase C).
+pub fn rmhd_c2p_gr_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+    max_iters: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let den = Gv::field("cons_den", FieldRef::cons_den());
+    let mom: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
+    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
+    let mag: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("cons_mag_{k}"), &format!("cons.mag_{k}")));
+    let gamma_eos = Gv::scalar("gamma");
+
+    let ndim = axes.len();
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => geo.centroid[d],
+            None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
+            None => Gv::ZERO,
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gm, gm_inv) = match spacetime {
+        Spacetime::Schwarzschild => {
+            let m = Schwarzschild { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        Spacetime::KerrSchild => {
+            let m = SchwarzschildKS { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        Spacetime::Kerr => panic!(
+            "spinning-kerr GRMHD c2p is design-44 phase C (needs the gridded polar axis)"
+        ),
+        Spacetime::Minkowski => unreachable!("the GRMHD c2p is baked only for a curved spacetime"),
+    };
+    let metric = SpatialMetric { gamma: gm, gamma_inv: gm_inv };
+
+    let cons = MhdCons::<Gv, 3> {
+        hydro: Cons { den, mom: Tensor::new(mom), nrg },
+        mag: Tensor::new(mag),
+    };
+    let prim = rmhd_recover(&IdealGas { gamma: gamma_eos }, &cons, &metric, max_iters);
+
+    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];
+    for k in 0..3 {
+        writes.push((format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8).into(), prim.vel[k].node()));
+    }
+    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
+
+    (end_trace(), writes)
+}
+
+
 // =============================================================================
 // newtonian MHD — the non-relativistic ideal-MHD regime. ALGEBRAIC c2p (no
 // iteration -> no current-sheet failure mode), closed-form fast-magnetosonic

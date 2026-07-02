@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Metric};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
 
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
@@ -228,6 +228,72 @@ where
             }
         };
         lambda = lambda.max(contrib);
+    }
+    let writes = wave_speed_map_writes(lambda.node());
+    (end_trace(), writes)
+}
+
+
+/// the GENERIC curved-background CFL wave-speed map — the coordinate LIGHT-CONE bound per
+/// gridded axis, for ANY spacetime the codegen enum carries:
+/// `lambda_d = (alpha sqrt(gamma^{dd}) + |beta^d|) h_d / (h_d dx_d)` (the flat scale factor
+/// `h_d` cancels against the physical inverse width, leaving the coordinate speed over the
+/// coordinate width). every characteristic of ANY matter — magnetosonic waves included — lies
+/// inside the coordinate light cone, so the bound is unconditionally CFL-safe and
+/// state-INDEPENDENT (a pure-geometry kernel). tighter state-dependent maps (the factored
+/// banyuls-font forms) stay per-regime specializations; this is the safe generic fallback the
+/// GRMHD path uses. the metric evaluates at its full three coordinates: gridded slots at the
+/// cell center, the ungridded polar slot at the exact equatorial pi/2, the azimuthal at zero.
+pub fn gr_light_cone_wave_speed_map_gv(
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    // gridded cell-center positions (log-aware via the face map: the geometric mean of the
+    // bounding faces on a log axis, the midpoint on a uniform one).
+    let half = Gv::from_f64(0.5);
+    let center = |d: usize| -> Gv {
+        match spacing[d] {
+            Spacing::Uniform => gv_axis_face_at(d, spacing[d], 0) + half * Gv::scalar(&format!("dx_{d}")),
+            Spacing::Log => (gv_axis_face_at(d, spacing[d], 0) * gv_axis_face_at(d, spacing[d], 1)).sqrt(),
+        }
+    };
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => center(d),
+            None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
+            None => Gv::ZERO,
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (alpha, gi, beta) = match spacetime {
+        Spacetime::Schwarzschild => {
+            let g = Schwarzschild { mass };
+            (g.lapse(x), g.spatial_metric_inv(x), <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&g, x))
+        }
+        Spacetime::KerrSchild => {
+            let g = SchwarzschildKS { mass };
+            (g.lapse(x), g.spatial_metric_inv(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&g, x))
+        }
+        Spacetime::Kerr => {
+            let g = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+            (g.lapse(x), g.spatial_metric_inv(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&g, x))
+        }
+        Spacetime::Minkowski => unreachable!("the light-cone map is baked only for a curved spacetime"),
+    };
+    // per gridded axis: coordinate light-cone speed times the coordinate inverse width — the
+    // flat physical inv width times the flat scale factor h_d at the cell center.
+    let pos: Vec<Gv> = (0..3).map(|c| x[c]).collect();
+    let mut lambda = Gv::ZERO;
+    for d in 0..ndim {
+        let c = axes[d];
+        let lam_c = alpha * gi[(c, c)].sqrt() + beta[c].abs();
+        let h_flat = gv_scale_factor(coords, c, &pos);
+        lambda = lambda.max(lam_c * h_flat * inv_w[d]);
     }
     let writes = wave_speed_map_writes(lambda.node());
     (end_trace(), writes)

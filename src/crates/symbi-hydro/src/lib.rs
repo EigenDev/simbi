@@ -70,7 +70,7 @@ pub use newtonian::Newtonian;
 pub use newtonian_mhd::NewtonianMhd;
 pub use isothermal_mhd::{IsothermalMhd, imhd_recover};
 pub use rhd::{Rhd, RhdGr};
-pub use rmhd::Rmhd;
+pub use rmhd::{Rmhd, RmhdGr};
 pub use isothermal::{IsoNewtonian, IsoPrim, IsoCons};
 pub use mhd_state::{MhdPrim, MhdCons, MhdPrimG, MhdConsG, IsoMhdPrim, IsoMhdCons};
 pub use riemann::{hllc, hllc_rhd, hllc_rmhd, hllc_newtonian, hlld_rmhd, hlld_newtonian, hlld_isothermal, hlle};

@@ -939,9 +939,48 @@ fn gen_rmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2
 // the RMHD CFL wave-speed map (3D): per-cell max over axes of the quartic
 // max(|lambda_-|,|lambda_+|). host folds max + cfl_from_smax.
 fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
+    // curved spacetime: the generic coordinate light-cone bound (state-independent, safe for
+    // any matter); the name gains the spacing + spacetime slugs like every GR kernel.
+    if geom.spacetime != Spacetime::Minkowski {
+        let name = format!(
+            "rmhd_wave_speed_map{}{}{}_{ndim}d",
+            geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+        );
+        let (k, writes) = symbi_discretize::gv::gr_light_cone_wave_speed_map_gv(
+            geom.spacetime, geom.coords, &geom.spacing, &geom.axes, ndim as usize,
+        );
+        emit_gv(out_dir, &name, ndim, &k, &writes);
+        return;
+    }
     let name = format!("rmhd_wave_speed_map{}_{ndim}d", geom.suffix());
     let (k, writes) =
         rmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the GRMHD cons->prim: the metric-aware KKC recovery at the volume-weighted centroid.
+// name mirrors the rhd GR c2p (`rmhd_c2p[_logr]{_schw|_ks}_{ndim}d`).
+fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
+    let name = format!(
+        "rmhd_c2p{}{}_{ndim}d",
+        geom.spacing_suffix(), geom.spacetime_suffix()
+    );
+    let (k, writes) = symbi_discretize::gv::rmhd_c2p_gr_gv(
+        geom.coords, geom.spacetime, &geom.spacing, &geom.axes, max_iters,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the GRMHD face flux: RmhdGr valencia U/F + the fast-magnetosonic-bound fan (+ the
+// kerr-schild shifted fan with the induction transpose). HLLE-only on the GR path.
+fn gen_rmhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
+    let name = format!(
+        "rmhd_face_flux{}{}_{ndim}d_{dir}",
+        geom.spacing_suffix(), geom.spacetime_suffix()
+    );
+    let (k, writes) = symbi_discretize::gv::rmhd_flux_gr_gv(
+        dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1038,14 +1077,16 @@ fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 // reads the flux-implied B as b_old (scale_gas/add_gas include the magnetic
 // component). in-place on bcell (bc_{c} read+written).
 fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
-    let name = format!("rmhd_bcell_godunov_euler{}_{ndim}d", geom.suffix());
+    // the face positions in the divergence measure depend on the spacing map, so the log-radial
+    // instance carries the spacing slug (empty for uniform — the existing names are unchanged).
+    let name = format!("rmhd_bcell_godunov_euler{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix());
     // ncomp = 3 (B is always a 3-vector); flux-divergence over ndim spatial directions.
     let (k, writes) = rmhd_bcell_godunov_euler_gv(geom.coords, &geom.spacing, ndim as usize, 3, &geom.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
 fn gen_rmhd_bcell_godunov_rk2(out_dir: &str, geom: Geom, ndim: u8) {
-    let name = format!("rmhd_bcell_godunov_rk2{}_{ndim}d", geom.suffix());
+    let name = format!("rmhd_bcell_godunov_rk2{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix());
     let (k, writes) = rmhd_bcell_godunov_rk2_gv(geom.coords, &geom.spacing, ndim as usize, 3, &geom.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1425,6 +1466,19 @@ fn main() {
     // lattice pullbacks over the lifted component set): one instance each.
     gen_snapshot(&out_dir, 2, "rhd", true, Geom::sph_swirl());
     gen_iso_ghost_fill(&out_dir, 2, Geom::sph_swirl());
+    // GRMHD (design 44 phase A): the schwarzschild 1D radial row — the magnetized-michel
+    // monopole gate's kernel family. gas godunov (the ideal-MHD stress in the covariant
+    // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
+    // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
+    // zero — the transverse-B curved measures land with the phase-B densitized CT).
+    for geom in [Geom::sph(1).schwarzschild(), Geom::sph(1).schwarzschild().log_radial()] {
+        gen_godunov_stage(&out_dir, 1, "rmhd", true, geom.clone(), None);
+        gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
+        gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone());
+        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
+    }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.
     gen_rmhd_geometric_source(&out_dir, Geom::sph(3));

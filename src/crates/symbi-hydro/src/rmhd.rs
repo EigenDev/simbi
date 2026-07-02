@@ -29,9 +29,11 @@ use crate::spatial_metric::SpatialMetric;
 
 mod algebra;
 mod cons;
+mod gr;
 mod wave_speeds;
 
 pub use algebra::{magnetic_four_vector_spatial, magnetic_pressure, rmhd_source_quantities, total_pressure};
+pub use gr::RmhdGr;
 pub use cons::rmhd_recover;
 use cons::rmhd_to_primitive;
 pub use wave_speeds::rmhd_magnetosonic_cfl_speeds;

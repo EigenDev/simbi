@@ -27,6 +27,7 @@ mod wave_speeds;
 
 pub use algebra::{enthalpy, enthalpy_density, lorentz_factor, lorentz_factor_sq, sound_speed_sq};
 pub use gr::RhdGr;
+pub(crate) use wave_speeds::rhd_speeds_from_vn_gr;
 pub use cons::rhd_recover;
 use cons::rhd_to_primitive;
 use wave_speeds::rhd_speeds_from_vn;
