@@ -40,12 +40,14 @@ def _bondi_ks_problem(data_dir: str):
 
 
 def _read_interior(chkpt_path: str):
+    # the stored arrays carry the ghost cells; the interior is the central
+    # `_RESOLUTION` entries (owned_start/owned_fin are interior-relative and do
+    # NOT index the ghost-padded arrays).
     with h5py.File(chkpt_path, "r") as h:
-        part = h["level_0/partition_0"]
-        lo = int(part["owned_start"][0])
-        fin = int(part["owned_fin"][0])
-        prims = part["hydro/primitives"]
-        return prims["rho"][lo:fin], prims["pre"][lo:fin]
+        prims = h["level_0/partition_0/hydro/primitives"]
+        halo = (prims["rho"].shape[0] - _RESOLUTION) // 2
+        sl = slice(halo, halo + _RESOLUTION)
+        return prims["rho"][sl], prims["pre"][sl]
 
 
 @needs_backend
