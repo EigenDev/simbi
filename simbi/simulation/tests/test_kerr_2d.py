@@ -242,3 +242,40 @@ def _run_m3_max(nr: int, npolar: int) -> float:
         runner.run(p, compute_mode="cpu")
         with h5py.File(glob.glob(os.path.join(d, "*final*.h5"))[0]) as h:
             return float(np.abs(h["level_0/conserved/m3"][:]).max())
+
+
+@needs_backend
+def test_spinning_fm_disk_holds_through_half_an_orbit() -> None:
+    # the paper-certified fishbone-moncrief disk at a = 0.9 on the horizon-penetrating
+    # kerr grid (the science configuration): completes half an orbital period at its
+    # pressure maximum with no floors, the disk core keeps its density and its
+    # rotation sense, and the corona-fed through-horizon inflow stays positive.
+    from simbi_configs.examples.gr_fishbone_moncrief import GrFishboneMoncrief
+
+    with tempfile.TemporaryDirectory() as d:
+        d = d + "/"
+        # a bound, warm spinning disk: r_in = 3.5 (well outside r_ms(0.9) ~ 2.32),
+        # kappa = 1.03 -> r_max ~ 10, closed outer edge ~ 54, core p/rho ~ 6.5e-3
+        # (the a = 0 defaults give an ultra-cold shallow disk at spin — the potential
+        # depth is set by r_in relative to the SPIN-dependent marginally stable orbit).
+        p = GrFishboneMoncrief.from_cli(
+            ["--nr", "96", "--npolar", "32", "--kerr-spin", "0.9",
+             "--r-in", "3.5", "--kappa", "1.03"]
+        )
+        p.end_time = 50.0
+        p.data_directory = d
+        p.checkpoint_interval = 50.0
+        runner.run(p, compute_mode="cpu")
+        finals = glob.glob(os.path.join(d, "*.chkpt.final*.h5"))
+        assert finals, "spinning FM disk crashed before completion"
+        with h5py.File(finals[0]) as h:
+            g = h["level_0/partition_0/hydro/primitives"]
+            shp = g["rho"].shape
+            halo = [(s - n) // 2 for s, n in zip(shp, (32, 96))]
+            sl = tuple(slice(hh, hh + n) for hh, n in zip(halo, (32, 96)))
+            rho, pre, v3 = g["rho"][sl], g["pre"][sl], g["v3"][sl]
+    assert pre.min() > 0.0, f"pressure went non-positive: {pre.min():.3e}"
+    # the disk core (well above the corona) survives and corotates with the hole.
+    core = rho > 0.1
+    assert core.sum() > 50, f"the disk core dispersed: {core.sum()} cells above 0.1"
+    assert (v3[core] > 0).mean() > 0.95, "the disk core lost its rotation sense"

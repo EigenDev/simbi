@@ -36,7 +36,7 @@
 #
 # usage:
 #   torus = FishboneMoncrief(mass=1.0, r_in=6.0, gamma=4/3, rho_max=1.0, kappa=1.01)
-#   rho, vphi, pre = torus.primitive(r, theta)   (torus point; None outside)
+#   rho, v_r, vphi, pre = torus.primitive(r, theta)   (disk point; None outside)
 #   simbi run gr_fishbone_moncrief.py
 # =============================================================================
 
@@ -57,12 +57,34 @@ from simbi.types.typing import GasStateGenerator, InitialStateType
 
 
 class FishboneMoncrief:
-    """the exact fishbone-moncrief torus at zero spin (schwarzschild coordinates).
+    """the exact fishbone-moncrief disk at GENERAL spin (FM 1976, eqs. 3.3/3.6/3.8).
 
-    construction fixes the angular-momentum constant l from the pressure-maximum
-    radius and the polytropic K from the density normalization; `primitive(r, theta)`
-    returns the torus state (rho, v^phi, p) with v^phi the valencia CONTRAVARIANT
-    azimuthal velocity, or None outside the torus surface (ln h <= 0 or r < r_in).
+    boyer-lindquist quantities (G = c = 1): Delta = r^2 - 2Mr + a^2, Sigma = r^2 +
+    a^2 cos^2(theta), A = (r^2 + a^2)^2 - a^2 Delta sin^2(theta), and the locally
+    nonrotating frame (LNRF) functions e^{2 nu} = Sigma Delta / A, e^{2 psi} =
+    (A/Sigma) sin^2(theta), omega = 2 a M r / A. the constant of the motion is
+    l = u^t u_phi (angular momentum per unit inertial mass); the potential is
+
+      ln h = (1/2) ln[(1 + sqrt(1 + X)) / (Sigma Delta / A)] - (1/2) sqrt(1 + X)
+             - 2 a M r l / A  -  [the same at (r_in, pi/2)],
+      X    = 4 l^2 Sigma^2 Delta / (A sin(theta))^2,
+
+    with l = kappa^{1/2} l(r_in) from the circular-orbit relation (eq. 3.8, the
+    prograde/retrograde branch). the azimuthal 4-velocity follows from eq. 3.3:
+    u_(phi)^2 = [sqrt(1 + X) - 1]/2 in the LNRF, u^t = e^{-nu} sqrt(1 + u_(phi)^2),
+    u^phi = omega u^t + e^{-psi} u_(phi).
+
+    `chart` selects the code primitives: "bl" (a = 0 only — the schwarzschild grid)
+    gives v^r = 0; "ks" (the horizon-penetrating kerr grid) gives the orbiter's
+    drift against the infalling eulerian observers, v^r = beta^r/alpha =
+    b/sqrt(1 + b) with b = 2 M r / Sigma, and v^phi = u^phi sqrt(1 + b) / u^t.
+    a purely azimuthal flow (u^r = 0) carries IDENTICAL 4-velocity components in
+    both charts (the BL -> KS shift adds only u^r-proportional terms).
+
+    `primitive(r, theta)` returns (rho, v^r, v^phi, p) inside the disk, None
+    outside. certified against the paper's printed disks: fig. 2 schwarzschild
+    (r_in = 6, kappa = 1.01) and extreme-kerr corotating (kappa = 1.411698), and
+    fig. 3 extreme-kerr corotating (r_in = 2.78) and counterrotating (r_in = 7.75).
     """
 
     def __init__(
@@ -72,34 +94,49 @@ class FishboneMoncrief:
         gamma: float,
         rho_max: float,
         kappa: float = 1.01,
+        spin: float = 0.0,
+        prograde: bool = True,
+        chart: str = "bl",
     ) -> None:
-        if r_in <= 3.0 * mass:
-            raise ValueError(
-                "the inner edge must sit outside the photon orbit r = 3M"
-            )
+        if abs(spin) >= mass:
+            raise ValueError("kerr requires |a| < M")
+        if chart not in ("bl", "ks"):
+            raise ValueError("chart must be 'bl' or 'ks'")
+        if chart == "bl" and spin != 0.0:
+            raise ValueError("the boyer-lindquist chart is wired for a = 0 only")
         if not 1.0 < kappa < 2.0:
             raise ValueError("FM requires 1 < kappa < kappa_max < 2 (eq. 3.9)")
         self.mass = mass
+        self.spin = spin
         self.r_in = r_in
         self.gamma = gamma
         self.rho_max = rho_max
-        # the FM parametrization (eqs. 3.8-3.9): l = kappa^{1/2} l(r_in), with l(r) the
-        # a = 0 circular-orbit angular momentum per unit inertial mass sqrt(M r^3)/(r - 3M).
-        # kappa > 1 makes the pressure gradient at the inner edge point outward (a disk);
-        # the defaults (r_in = 6, kappa = 1.01) are the paper's fig. 2 schwarzschild disk:
-        # (ln h)_max = 0.0153 at r = 16, equatorial extent 6 -> 73.812, minimum polar
-        # angle 45.2 deg — the oracle reproduces all of these.
-        ell_of = lambda r: math.sqrt(mass * r**3) / (r - 3.0 * mass)
-        self.ell = math.sqrt(kappa) * ell_of(r_in)
+        self.chart = chart
+        # eq. 3.8: the circular-orbit angular momentum per unit inertial mass on the
+        # prograde (upper-sign) / retrograde (lower-sign) branch; l = kappa^{1/2} l(r_in).
+        self.prograde = prograde
+        self.ell = math.sqrt(kappa) * self._ell_of(r_in)
         # the surface potential: ln h vanishes at the inner edge on the equator.
         self._lnh_in = self._lnh_raw(r_in, math.pi / 2.0)
-        # the pressure maximum sits where l equals the local circular-orbit value again:
-        # the outer root of ell_of(r) = ell (ell_of has its minimum at r = 6M and grows
-        # outward, so bisect on [r_in + margin at the minimum side, far out]).
-        lo, hi = max(r_in, 6.0 * mass) * 1.0000001, 1.0e4 * mass
+        # the pressure maximum: the OUTER root of l(r) = l on the chosen branch
+        # (|l(r)| falls to its minimum near the marginally stable orbit and grows
+        # outward). dense log scan for the outer crossing, then bisection.
+        target = abs(self.ell)
+        nscan = 4096
+        r_hi = 1.0e4 * mass
+        rs = [r_in * (r_hi / r_in) ** (ii / (nscan - 1.0)) for ii in range(nscan)]
+        vals = [abs(self._ell_of(r)) for r in rs]
+        imin = min(range(nscan), key=lambda ii: vals[ii])
+        idx = next(
+            (ii for ii in range(imin, nscan) if vals[ii] >= target),
+            None,
+        )
+        if idx is None or idx == 0:
+            raise ValueError("no pressure maximum inside the scan range")
+        lo, hi = rs[idx - 1], rs[idx]
         for _ in range(200):
             mid = 0.5 * (lo + hi)
-            if ell_of(mid) < self.ell:
+            if abs(self._ell_of(mid)) < target:
                 lo = mid
             else:
                 hi = mid
@@ -109,41 +146,95 @@ class FishboneMoncrief:
         gm1 = gamma - 1.0
         self.kk = (h_max - 1.0) * gm1 / (gamma * rho_max**gm1)
 
-    def _lnh_raw(self, r: float, theta: float) -> float:
-        f = 1.0 - 2.0 * self.mass / r
+    # ---- boyer-lindquist metric functions ----
+    def _sdaw(self, r: float, theta: float) -> tuple[float, float, float, float]:
+        """(Sigma, Delta, A, omega) at (r, theta)."""
+        mm, a = self.mass, self.spin
         st = math.sin(theta)
-        chi = 1.0 + 4.0 * self.ell**2 * f / (r * st) ** 2
-        return 0.5 * math.log((1.0 + math.sqrt(chi)) / f) - 0.5 * math.sqrt(chi)
+        ct = math.cos(theta)
+        sigma = r * r + a * a * ct * ct
+        delta = r * r - 2.0 * mm * r + a * a
+        big_a = (r * r + a * a) ** 2 - a * a * delta * st * st
+        return sigma, delta, big_a, 2.0 * a * mm * r / big_a
+
+    def _ell_of(self, r: float) -> float:
+        """eq. 3.8: the circular-orbit l = u^t u_phi at radius r, on the chosen branch."""
+        mm, a = self.mass, self.spin
+        sq = math.sqrt(mm * r)
+        sgn = 1.0 if self.prograde else -1.0
+        num = r**4 + (r * a) ** 2 - 2.0 * mm * r * a * a - sgn * a * sq * (r * r - a * a)
+        den = r * r - 3.0 * mm * r + sgn * 2.0 * a * sq
+        return sgn * math.sqrt(mm / r**3) * num / den
+
+    def _lnh_raw(self, r: float, theta: float) -> float:
+        sigma, delta, big_a, _ = self._sdaw(r, theta)
+        st = math.sin(theta)
+        xx = 4.0 * (self.ell * sigma) ** 2 * delta / (big_a * st) ** 2
+        sq = math.sqrt(1.0 + xx)
+        return (
+            0.5 * math.log((1.0 + sq) / (sigma * delta / big_a))
+            - 0.5 * sq
+            - 2.0 * self.spin * self.mass * r * self.ell / big_a
+        )
 
     def _lnh(self, r: float, theta: float) -> float:
         return self._lnh_raw(r, theta) - self._lnh_in
 
+    def _four_velocity(self, r: float, theta: float) -> tuple[float, float]:
+        """(u^t, u^phi) of the constant-l azimuthal flow (LNRF projections, eq. 3.3)."""
+        sigma, delta, big_a, omega = self._sdaw(r, theta)
+        st = math.sin(theta)
+        xx = 4.0 * (self.ell * sigma) ** 2 * delta / (big_a * st) ** 2
+        u_lnrf = math.copysign(
+            math.sqrt(0.5 * (math.sqrt(1.0 + xx) - 1.0)), self.ell
+        )
+        e_nu = math.sqrt(sigma * delta / big_a)
+        e_psi = math.sqrt(big_a / sigma) * st
+        u_t = math.sqrt(1.0 + u_lnrf * u_lnrf) / e_nu
+        u_p = omega * u_t + u_lnrf / e_psi
+        return u_t, u_p
+
     def azimuthal_velocity(self, r: float, theta: float) -> float:
-        """the valencia contravariant v^phi of the constant-l rotation law — a GLOBAL
-        smooth field (it depends only on l and the metric), defined outside the torus
-        surface too. the corona sheath co-rotates with it so the torus surface carries
-        no velocity jump."""
-        f = 1.0 - 2.0 * self.mass / r
-        g_pp = (r * math.sin(theta)) ** 2
-        chi = 1.0 + 4.0 * self.ell**2 * f / g_pp
-        ut_sq = (1.0 + math.sqrt(chi)) / (2.0 * f)
-        return self.ell / (math.sqrt(f) * g_pp * ut_sq)
+        """the valencia contravariant v^phi in the configured chart — a GLOBAL smooth
+        field (it depends only on l and the metric), defined outside the disk too."""
+        u_t, u_p = self._four_velocity(r, theta)
+        if self.chart == "bl":
+            # a = 0: alpha = e^nu, zero shift.
+            sigma, delta, big_a, _ = self._sdaw(r, theta)
+            alpha = math.sqrt(sigma * delta / big_a)
+            return u_p / (alpha * u_t)
+        # ks: alpha = 1/sqrt(1 + b), zero azimuthal shift; the 4-velocity components
+        # transfer verbatim from BL (u^r = 0).
+        b = 2.0 * self.mass * r / (r * r + (self.spin * math.cos(theta)) ** 2)
+        return u_p * math.sqrt(1.0 + b) / u_t
+
+    def radial_velocity(self, r: float, theta: float) -> float:
+        """the valencia contravariant v^r in the configured chart: zero in BL; the
+        orbiter's drift against the infalling eulerian observers in KS,
+        v^r = beta^r / alpha = b / sqrt(1 + b)."""
+        if self.chart == "bl":
+            return 0.0
+        b = 2.0 * self.mass * r / (r * r + (self.spin * math.cos(theta)) ** 2)
+        return b / math.sqrt(1.0 + b)
 
     def primitive(
         self, r: float, theta: float
-    ) -> Optional[tuple[float, float, float]]:
-        """(rho, v^phi, p) inside the torus; None outside (atmosphere region)."""
+    ) -> Optional[tuple[float, float, float, float]]:
+        """(rho, v^r, v^phi, p) inside the disk; None outside (atmosphere region)."""
         if r < self.r_in:
             return None
         lnh = self._lnh(r, theta)
         if lnh <= 0.0:
             return None
         gm1 = self.gamma - 1.0
-        rho = ((math.exp(lnh) - 1.0) * gm1 / (self.gamma * self.kk)) ** (
-            1.0 / gm1
-        )
+        rho = ((math.exp(lnh) - 1.0) * gm1 / (self.gamma * self.kk)) ** (1.0 / gm1)
         pre = self.kk * rho**self.gamma
-        return rho, self.azimuthal_velocity(r, theta), pre
+        return (
+            rho,
+            self.radial_velocity(r, theta),
+            self.azimuthal_velocity(r, theta),
+            pre,
+        )
 
 
 class RotatingEquilibrium:
@@ -327,8 +418,18 @@ class GrFishboneMoncrief(SimbiProblem):
     def compute_defaults(self) -> "GrFishboneMoncrief":
         self.resolution = (self.nr, self.npolar)
         theta_c = math.pi / 2.0
+        if self.kerr_spin != 0.0:
+            # spinning: the kerr spacetime on the horizon-penetrating chart, inner
+            # boundary below r_plus = M + sqrt(M^2 - a^2) (supersonic through-horizon
+            # inflow decouples the inner ghosts).
+            self.spacetime = Spacetime.KERR
+            mm = self.schwarzschild_mass
+            r_plus = mm + math.sqrt(max(mm * mm - self.kerr_spin**2, 0.0))
+            r_lo = 0.85 * r_plus
+        else:
+            r_lo = 3.0
         self.bounds = [
-            (3.0, 100.0),
+            (r_lo, 100.0),
             (theta_c - self.theta_halfwidth, theta_c + self.theta_halfwidth),
         ]
         return self
@@ -340,6 +441,8 @@ class GrFishboneMoncrief(SimbiProblem):
             gamma=self.adiabatic_index,
             rho_max=self.rho_torus_max,
             kappa=self.kappa,
+            spin=self.kerr_spin,
+            chart="ks" if self.kerr_spin != 0.0 else "bl",
         )
 
     def atmosphere(self, r: float, r_ref: float) -> tuple[float, float]:
@@ -351,9 +454,14 @@ class GrFishboneMoncrief(SimbiProblem):
         gm1 = gm - 1.0
         mm = self.schwarzschild_mass
         h_ref = 1.0 + gm / gm1 * self.atm_pre_frac
-        hs = h_ref * math.sqrt(1.0 - 2.0 * mm / r_ref)
+        # the static-observer redshift sqrt(-g_tt) = sqrt(1 - 2Mr/Sigma); on the
+        # equator this is sqrt(1 - 2M/r) at EVERY spin. no static observers exist
+        # inside the ergosphere (r < 2M equatorially) — floor the factor there:
+        # that corona gas sits at/inside the horizon and free-falls regardless.
+        redshift = lambda rr: math.sqrt(max(1.0 - 2.0 * mm / rr, 1.0e-2))
+        hs = h_ref * redshift(r_ref)
         k_atm = gm1 * (h_ref - 1.0) / (gm * self.atm_rho**gm1)
-        h = hs / math.sqrt(1.0 - 2.0 * mm / r)
+        h = hs / redshift(r)
         rho = (gm1 * (h - 1.0) / (gm * k_atm)) ** (1.0 / gm1)
         return rho, k_atm * rho**gm
 
@@ -384,10 +492,10 @@ class GrFishboneMoncrief(SimbiProblem):
                     # interface is a pure contact (continuous p, a static-corona slip
                     # in v^phi that HLLE handles) — no crush wave, and the c2p-fragile
                     # p/rho -> 0 polytropic sliver never enters the grid.
-                    if state is None or state[2] < pre_a:
+                    if state is None or state[3] < pre_a:
                         yield (rho_a, 0.0, 0.0, 0.0, pre_a)
                     else:
-                        rho, vphi, pre = state
-                        yield (rho, 0.0, 0.0, vphi, pre)
+                        rho, v_r, vphi, pre = state
+                        yield (rho, v_r, 0.0, vphi, pre)
 
         return gas_state
