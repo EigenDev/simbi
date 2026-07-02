@@ -373,6 +373,14 @@ impl Geom {
         self
     }
 
+    // select the SPINNING kerr spacetime (ingoing kerr-schild coords: theta-dependent lapse
+    // 1/sqrt(1 + 2Mr/Sigma), radial shift, NON-DIAGONAL gamma_{r phi}); swirl (DOF = 3) only —
+    // the frame dragging needs the azimuthal momentum. `_kerr` slug; `kerr_spin` kernel scalar.
+    fn kerr(mut self) -> Self {
+        self.spacetime = Spacetime::Kerr;
+        self
+    }
+
     // the spacetime slug tag appended to the kernel name (after the spatial geom suffix), so the
     // bake name matches the runtime select. flat -> "" (existing kernels unchanged).
     fn spacetime_suffix(&self) -> &'static str {
@@ -380,6 +388,7 @@ impl Geom {
             Spacetime::Minkowski => "",
             Spacetime::Schwarzschild => "_schw",
             Spacetime::KerrSchild => "_ks",
+            Spacetime::Kerr => "_kerr",
         }
     }
 
@@ -755,14 +764,22 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 fn gen_rhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
     // the DOF-lift tag rides the name only when ncomp > naxes (the spherical swirl): the shift
     // advects every conserved component, so the lifted instance carries an extra momentum flux.
+    // the spacetime tag is EMPTY for kerr-schild (the family namesake) and `_kerr` for the
+    // spinning variant (theta-dependent shift coefficient).
     let lift = if geom.ncomp as usize > geom.axes.len() { geom.suffix() } else { "" };
-    let name = format!("rhd_ks_shift_flux{lift}{}_{ndim}d_{dir}", geom.spacing_suffix());
+    let st = if geom.spacetime == Spacetime::Kerr { "_kerr" } else { "" };
+    let name = format!("rhd_ks_shift_flux{lift}{}{st}_{ndim}d_{dir}", geom.spacing_suffix());
     // the const parameter is the momentum DOF (geom.ncomp).
-    let (k, writes) = match geom.ncomp {
-        1 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<1>(&geom.spacing),
-        2 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<2>(&geom.spacing),
-        3 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<3>(&geom.spacing),
-        nc => panic!("rhd_ks_shift_flux_gv: unsupported ncomp {nc}"),
+    let (k, writes) = if geom.spacetime == Spacetime::Kerr {
+        assert!(geom.ncomp == 3, "the kerr shift needs the swirl DOF");
+        symbi_discretize::gv::rhd_kerr_shift_flux_gv::<3>(geom.coords, &geom.spacing, &geom.axes)
+    } else {
+        match geom.ncomp {
+            1 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<1>(&geom.spacing),
+            2 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<2>(&geom.spacing),
+            3 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<3>(&geom.spacing),
+            nc => panic!("rhd_ks_shift_flux_gv: unsupported ncomp {nc}"),
+        }
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1194,8 +1211,13 @@ fn gen_rmhd_average_efield(out_dir: &str, ndim: u8) {
 // closed form (no inv_dx baked); the host folds max + cfl_from_smax(s_max,cfl,dx).
 fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     let name = format!("rhd_wave_speed_map{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
-    let (k, writes) =
-        rhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize);
+    // spinning kerr uses the coordinate light-cone map (state-independent; the theta-dependent
+    // lapse + non-diagonal gamma^{rr} break the radial-only backgrounds' factored BF form).
+    let (k, writes) = if geom.spacetime == Spacetime::Kerr {
+        symbi_discretize::gv::kerr_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize)
+    } else {
+        rhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize)
+    };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1406,6 +1428,19 @@ fn main() {
                 gen_rhd_ks_shift_flux(&out_dir, 2, 0, geom.clone());
             }
         }
+    }
+    // SPINNING KERR (ingoing kerr-schild, `_kerr`): swirl-only — the frame-dragging
+    // gamma_{r phi} needs the azimuthal momentum DOF. godunov (covariant Sigma-measure
+    // geometry + the kerr covariant source) + the light-cone wave-speed map + the
+    // metric-aware c2p/flux + the theta-dependent shift advection.
+    for geom in [Geom::sph_swirl().kerr(), Geom::sph_swirl().kerr().log_radial()] {
+        gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
+        gen_rhd_c2p_gr(&out_dir, 2, 20, geom.clone());
+        for dir in 0..2 {
+            gen_rhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
+        }
+        gen_rhd_ks_shift_flux(&out_dir, 2, 0, geom.clone());
     }
     // the snapshot + ghost fill are spacetime- and spacing-independent (pure copies /
     // lattice pullbacks over the lifted component set): one instance each.

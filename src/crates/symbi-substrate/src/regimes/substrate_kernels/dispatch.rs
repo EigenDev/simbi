@@ -82,6 +82,12 @@ where
                     .map(|(_, v)| *v)
                     .expect("cfl_wave_speed: kernel needs schwarzschild_mass but the metric supplied none"),
             ),
+            ScalarRef::KerrSpin => Sc::from_f64(
+                geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("cfl_wave_speed: kernel needs kerr_spin but the metric supplied none"),
+            ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
                     .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
@@ -452,6 +458,12 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
                     .map(|(_, v)| *v)
                     .expect("dispatch_flux: GR flux needs schwarzschild_mass but the metric supplied none"),
             ),
+            ScalarRef::KerrSpin => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("dispatch_flux: GR flux needs kerr_spin but the metric supplied none"),
+            ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
                     .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
@@ -484,15 +496,21 @@ pub fn dispatch_rhd_ks_shift_flux<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    if !matches!(sim.geom.spacetime, symbi_geometry::Spacetime::KerrSchild) || dir != 0 {
+    // the shift-advection add fires for BOTH kerr-schild charts (a = 0 and spinning) — the
+    // shift is purely radial in each, so dir 0 only.
+    let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
+    if !(is_kerr || matches!(sim.geom.spacetime, symbi_geometry::Spacetime::KerrSchild)) || dir != 0 {
         return;
     }
     let geom = &sim.geom;
     let sp_sfx = spacing_suffix(&geom.maps);
     // the DOF-lift tag (spherical swirl): the shift advects EVERY conserved component, so the
-    // DOF > NDIM instance carries extra momentum-flux fields and needs its own kernel.
+    // DOF > NDIM instance carries extra momentum-flux fields and needs its own kernel. the
+    // spacetime tag is empty for the a = 0 chart (the family namesake) and `_kerr` for the
+    // spinning variant (theta-dependent shift coefficient).
     let geom_sfx = if DOF != D { geom_suffix(geom.coords, DOF, D) } else { "" };
-    let name = format!("rhd_ks_shift_flux{geom_sfx}{sp_sfx}_{D}d_{dir}");
+    let st_sfx = if is_kerr { "_kerr" } else { "" };
+    let name = format!("rhd_ks_shift_flux{geom_sfx}{sp_sfx}{st_sfx}_{D}d_{dir}");
     let face = geom.interior.face_domain(dir);
     // the shift reads `x_lo_0`/`dx_0` through gv_axis_face_at -> the LOG-aware kernel scalars (dx is
     // the log slope on a log axis), NOT the physical spacing. mirrors the godunov binding.
@@ -507,6 +525,12 @@ pub fn dispatch_rhd_ks_shift_flux<const D: usize, const DOF: usize, Mem, Sc>(
                     .find(|(n, _)| n == "schwarzschild_mass")
                     .map(|(_, v)| *v)
                     .expect("dispatch_rhd_ks_shift_flux: KS kernel needs schwarzschild_mass"),
+            ),
+            ScalarRef::KerrSpin => Sc::from_f64(
+                geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("dispatch_rhd_ks_shift_flux: KS kernel needs kerr_spin"),
             ),
             other => Sc::from_f64(
                 geom_scalar(&x_lo, &dx, other)
@@ -576,6 +600,12 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
                     .find(|(n, _)| n == "schwarzschild_mass")
                     .map(|(_, v)| *v)
                     .expect("dispatch_godunov: kernel needs schwarzschild_mass but the metric supplied none"),
+            ),
+            ScalarRef::KerrSpin => Sc::from_f64(
+                geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("dispatch_godunov: kernel needs kerr_spin but the metric supplied none"),
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)

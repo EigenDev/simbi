@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Schwarzschild, SchwarzschildKS};
 use symbi_geometry::grhd_source::grhd_covariant_source;
 use symbi_algebra::Tensor;
 use symbi_ir::dual::Dual;
@@ -308,7 +308,12 @@ pub fn godunov_stage_gv_with_fused_built(
     // radial faces and the volume coincide, so 1D radial GR is bit-identical.
     let geo = (!is_cartesian_uniform(coords, spacing)).then(|| match spacetime {
         Spacetime::Minkowski => cell_geometry_gv(coords, spacing, axes, ndim as usize),
-        _ => cell_geometry_covariant_gv(coords, spacing, axes, ndim as usize),
+        // spinning kerr: the densitized measure is Sigma sin(theta) — the spin rides the
+        // `kerr_spin` kernel scalar into the face/volume moments.
+        Spacetime::Kerr => cell_geometry_covariant_gv(
+            coords, spacing, axes, ndim as usize, Some(Gv::scalar("kerr_spin")),
+        ),
+        _ => cell_geometry_covariant_gv(coords, spacing, axes, ndim as usize, None),
     });
     let rho = Gv::field("rho", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
@@ -391,6 +396,10 @@ pub fn godunov_stage_gv_with_fused_built(
             let src_at = |pp: Gv| match spacetime {
                 Spacetime::Schwarzschild => grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp),
                 Spacetime::KerrSchild => grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp),
+                Spacetime::Kerr => {
+                    let spin = Dual::constant(Gv::scalar("kerr_spin"));
+                    grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pp)
+                }
                 Spacetime::Minkowski => unreachable!("flat handled above"),
             };
             let (s_mom, _) = src_at(Gv::ZERO);

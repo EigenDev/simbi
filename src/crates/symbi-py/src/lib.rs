@@ -34,7 +34,7 @@ use symbi_display::{
 };
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
-use symbi_geometry::SchwarzschildKS;
+use symbi_geometry::{KerrKS, SchwarzschildKS};
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -61,6 +61,7 @@ struct Config {
     spacetime: String,
     // the Schwarzschild geometric mass M (G = c = 1); only meaningful when spacetime = schwarzschild.
     schwarzschild_mass: f64,
+    kerr_spin: f64,
     cyl_plane: CylPlane,
     dims: usize,
     n_cells: [usize; 3],
@@ -448,6 +449,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .map(|s| s.to_lowercase())
             .unwrap_or_else(|| "minkowski".to_string()),
         schwarzschild_mass: get_f64_or(dict, "schwarzschild_mass", 0.0),
+        kerr_spin: get_f64_or(dict, "kerr_spin", 0.0),
         cyl_plane,
         dims,
         n_cells,
@@ -2346,6 +2348,21 @@ macro_rules! hydro_dispatch {
                 $cfg, $prims, $regime, $regime_ty, 1, 1,
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
+            // spinning kerr (ingoing kerr-schild coords): the frame-dragging gamma_{r phi}
+            // needs the azimuthal momentum DOF, so the 5-tuple (swirl) generator row is
+            // REQUIRED — a 4-tuple config is a setup error, not a fallback.
+            (2, "spherical") if $cfg.spacetime == "kerr" => {
+                if !$prims.first().map_or(false, |row| row.len() == 5) {
+                    return Err(
+                        "the kerr spacetime requires the azimuthal momentum DOF: yield \
+                         5-tuple gas rows (rho, v_r, v_theta, v_phi, pre)".to_string(),
+                    );
+                }
+                build_and_run_hydro!(
+                    $cfg, $prims, $regime, $regime_ty, 2, 3,
+                    KerrKS { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin }, KerrKS<f64>
+                )
+            }
             (2, "spherical") if $cfg.spacetime == "kerr_schild" => {
                 if $prims.first().map_or(false, |row| row.len() == 5) {
                     build_and_run_hydro!(

@@ -45,6 +45,10 @@ class Spacetime(str, ExtendedEnum):
     # ingoing kerr-schild: the same physical schwarzschild vacuum in a HORIZON-PENETRATING chart
     # (regular across r = 2M) — the shift-advection-flux + KS densitization/wavespeed kernels.
     KERR_SCHILD = "kerr_schild"
+    # spinning kerr in ingoing kerr-schild coordinates: horizon-penetrating, non-diagonal
+    # spatial metric (frame dragging), theta-dependent lapse. requires the azimuthal momentum
+    # DOF (5-tuple gas rows) and the kerr_spin parameter.
+    KERR = "kerr"
 
 
 class Regime(str, ExtendedEnum):

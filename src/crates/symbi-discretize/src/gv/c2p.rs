@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_hydro::spatial_metric::SpatialMetric;
-use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
@@ -136,6 +136,7 @@ pub fn rhd_c2p_gr_gv<const D: usize>(
 where
     Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
+    KerrKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
     let den = Gv::field("cons_den", FieldRef::cons_den());
@@ -168,6 +169,12 @@ where
         }
         Spacetime::KerrSchild => {
             let m = SchwarzschildKS { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        Spacetime::Kerr => {
+            // spinning kerr: non-diagonal gamma_{r phi} — only the azimuthal-momentum (swirl,
+            // D = 3) instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
+            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
         Spacetime::Minkowski => unreachable!("the GR c2p is baked only for a curved spacetime"),

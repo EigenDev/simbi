@@ -1047,6 +1047,7 @@ impl<S: Scalar> DiagonalMetric<S, 3> for SchwarzschildKS<S> {}
 /// NOT a `DiagonalMetric` — the compile-time bound keeps scale-factor consumers off it.
 /// the physics needs the azimuthal momentum DOF, so only the D = 3 impl carries the metric;
 /// the D = 1 / D = 2 impls exist to satisfy generic kernel bounds and fail loud if reached.
+#[derive(Clone, Copy, Debug)]
 pub struct KerrKS<S> {
     /// the geometric mass M (G = c = 1).
     pub mass: S,
@@ -1146,6 +1147,9 @@ impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
 impl<S: Scalar> Metric<S, 1> for KerrKS<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
+    }
     fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
     fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
     fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
@@ -1162,15 +1166,35 @@ impl<S: Scalar> Metric<S, 1> for KerrKS<S> {
 impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
     fn geometry(&self) -> Geometry { Geometry::Spherical }
     fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
+    }
     fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
     fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
+    // the SCALAR pieces of the (r, theta) grid view — lapse, shift, and the proper volume
+    // element (which includes the suppressed phi direction) — are exact; only the 2x2 spatial
+    // matrix restriction is meaningless (the frame-dragging gamma_{r phi} row has no slot).
+    fn lapse(&self, x: Tensor<S, 2>) -> S {
+        S::ONE / (S::ONE + self.b(x[0], x[1])).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 2>) -> S {
+        S::ONE / (S::ONE + self.b(x[0], x[1]))
+    }
+    fn shift(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        let b = self.b(x[0], x[1]);
+        Tensor::new([b / (S::ONE + b), S::ZERO])
+    }
+    fn sqrt_det_gamma(&self, x: Tensor<S, 2>) -> S {
+        let (r, theta) = (x[0], x[1]);
+        self.sigma(r, theta) * theta.sin().abs() * (S::ONE + self.b(r, theta)).sqrt()
+    }
+    fn volume_factor(&self, x: Tensor<S, 2>) -> S {
+        self.sqrt_det_gamma(x)
+    }
     fn spatial_metric(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
         unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
     }
     fn spatial_metric_inv(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
-        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
-    }
-    fn sqrt_det_gamma(&self, _x: Tensor<S, 2>) -> S {
         unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
     }
 }

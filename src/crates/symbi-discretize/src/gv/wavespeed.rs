@@ -5,6 +5,7 @@
 // =============================================================================
 
 use super::*;
+use symbi_geometry::{KerrKS, Metric};
 
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
@@ -155,7 +156,7 @@ where
         } else {
             let r = coord_at(0).expect("GR wave-speed map needs a radial axis");
             match c {
-                0 => raw / gv_metric_lapse_at(spacetime, r),
+                0 => raw / gv_metric_lapse_at(spacetime, r, None),
                 1 => raw * r,
                 2 => raw * r * coord_at(1).expect("phi scale factor needs a polar axis").sin(),
                 _ => raw,
@@ -207,12 +208,12 @@ where
                 let is_radial = axes[d] == 0;
                 // radial factor = alpha^2 = alpha sqrt(gamma^{rr}); angular factor = alpha.
                 let factor = if is_radial {
-                    gv_metric_lapse_sq_at(spacetime, r)
+                    gv_metric_lapse_sq_at(spacetime, r, None)
                 } else {
-                    gv_metric_lapse_at(spacetime, r)
+                    gv_metric_lapse_at(spacetime, r, None)
                 };
                 // the radial shift beta^r (kerr-schild only); zero-shift backgrounds -> None.
-                match if is_radial { gv_metric_shift_r_at(spacetime, r) } else { None } {
+                match if is_radial { gv_metric_shift_r_at(spacetime, r, None) } else { None } {
                     // zero shift (Schwarzschild + every angular axis): `base * factor` -> bit-identical.
                     None => base * factor,
                     // shifted (kerr-schild radial): lambda_coord = factor*(s - vg) - beta^r, carried
@@ -228,6 +229,48 @@ where
         };
         lambda = lambda.max(contrib);
     }
+    let writes = wave_speed_map_writes(lambda.node());
+    (end_trace(), writes)
+}
+
+
+/// the SPINNING-KERR CFL wave-speed map — the coordinate LIGHT-CONE bound per gridded axis:
+/// `lambda_d = alpha sqrt(gamma^{dd}) + |beta^d|`, folded over axes with the in-kernel physical
+/// inverse widths. every fluid characteristic lies inside the coordinate light cone, so the bound
+/// is unconditionally CFL-safe; it is state-INDEPENDENT (a pure-geometry kernel — dt is set by the
+/// metric alone). the exact banyuls-font per-axis speeds of the radial-only backgrounds do not
+/// factor for kerr (the theta-dependent lapse and the non-diagonal gamma^{rr} break the
+/// alpha^2-times-SR-speed identity), and the light cone gives up at most the O(1 - |v| - cs)
+/// interior margin. static metric: no mesh-motion terms.
+pub fn kerr_wave_speed_map_gv(
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    assert!(
+        coords == Coords::Spherical && ndim == 2 && axes == [0, 1],
+        "the kerr wave-speed map is the (r, theta) swirl instance"
+    );
+    begin_trace();
+    let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
+    let half = Gv::from_f64(0.5);
+    let r = Gv::scalar("x_lo_0") + (Gv::coord(0) + half) * Gv::scalar("dx_0");
+    let th = Gv::scalar("x_lo_1") + (Gv::coord(1) + half) * Gv::scalar("dx_1");
+    let mass = Gv::scalar("schwarzschild_mass");
+    let spin = Gv::scalar("kerr_spin");
+    let g = KerrKS { mass, spin };
+    let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
+    let alpha = g.lapse(x);
+    let gi = g.spatial_metric_inv(x);
+    let beta_r = g.shift(x)[0];
+    // radial: (alpha sqrt(gamma^rr) + beta^r) / dr; the physical inv width for the flat radial
+    // scale factor h_r = 1 IS the coordinate 1/dr.
+    let lam_r = (alpha * gi[(0, 0)].sqrt() + beta_r) * inv_w[0];
+    // polar: alpha sqrt(gamma^{theta theta}) = alpha/sqrt(Sigma) over the coordinate dtheta; the
+    // physical inv width carries the flat h_theta = r, so multiply the ratio r/sqrt(Sigma) back.
+    let lam_t = alpha * gi[(1, 1)].sqrt() * r * inv_w[1];
+    let lambda = lam_r.max(lam_t);
     let writes = wave_speed_map_writes(lambda.node());
     (end_trace(), writes)
 }

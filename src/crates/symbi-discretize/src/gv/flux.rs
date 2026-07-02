@@ -7,7 +7,7 @@
 use super::*;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::spatial_metric::SpatialMetric;
-use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
 
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
@@ -318,9 +318,36 @@ pub fn rhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, V
     begin_trace();
     let r_face = gv_axis_face_at(0, spacing[0], 0); // this thread's radial face position
     // beta^r/alpha: the godunov's single uniform lapse then yields the densitized shift `-beta^r U`.
-    let beta_r = gv_metric_shift_r_at(Spacetime::KerrSchild, r_face).expect("kerr-schild has a radial shift");
-    let alpha = gv_metric_lapse_at(Spacetime::KerrSchild, r_face);
+    let beta_r = gv_metric_shift_r_at(Spacetime::KerrSchild, r_face, None).expect("kerr-schild has a radial shift");
+    let alpha = gv_metric_lapse_at(Spacetime::KerrSchild, r_face, None);
     let b = beta_r / alpha;
+    rhd_shift_flux_writes::<D>(b)
+}
+
+
+/// the SPINNING-KERR shift-advection variant of [`rhd_ks_shift_flux_gv`]: the same face-local
+/// `-(beta^r/alpha) U` add, with the theta-dependent kerr coefficient beta^r/alpha =
+/// b/sqrt(1 + b), b = 2 M r_face / Sigma(r_face, theta_centroid). the shift stays purely radial
+/// (beta^theta = beta^phi = 0), so this rides dir 0 only, exactly like the a = 0 kernel.
+pub fn rhd_kerr_shift_flux_gv<const D: usize>(
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let r_face = gv_axis_face_at(0, spacing[0], 0);
+    let theta_c = cell_geometry_gv(coords, spacing, axes, axes.len()).centroid[1];
+    let beta_r = gv_metric_shift_r_at(Spacetime::Kerr, r_face, Some(theta_c))
+        .expect("kerr has a radial shift");
+    let alpha = gv_metric_lapse_at(Spacetime::Kerr, r_face, Some(theta_c));
+    let b = beta_r / alpha;
+    rhd_shift_flux_writes::<D>(b)
+}
+
+
+/// the shared conserved-flux shift add `flux_X -= b * cons_X` for every conserved component —
+/// the body of the kerr-schild / kerr shift-advection kernels (requires an active trace).
+fn rhd_shift_flux_writes<const D: usize>(b: Gv) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     // add -b * U to each conserved face flux (upwind = outer cell = this face's own cell, offset 0).
     let fd = Gv::field("flux_den", FieldRef::flux_den());
     let cd = Gv::field("cons_den", FieldRef::cons_den());
@@ -354,6 +381,7 @@ pub fn rhd_flux_gr_gv<const D: usize>(
 where
     Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
+    KerrKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
     // `D` is the momentum/velocity DOF; the RECONSTRUCTION grid is `axes.len()` — they differ for
@@ -387,6 +415,11 @@ where
         }
         Spacetime::KerrSchild => {
             let m = SchwarzschildKS { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x))
+        }
+        Spacetime::Kerr => {
+            // spinning kerr: non-diagonal gamma_{r phi} at the face — swirl (D = 3) only.
+            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x))
         }
         Spacetime::Minkowski => unreachable!("the GR flux is baked only for a curved spacetime"),

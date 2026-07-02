@@ -48,5 +48,10 @@ pub enum Spacetime {
     /// beta^r = 2M/(r + 2M), gamma_rr = 1 + 2M/r. horizon-penetrating codegen TAG selecting the
     /// shift-advection flux + KS densitization path. mirrors `symbi_geometry::Spacetime::KerrSchild`.
     KerrSchild,
-    // spinning Kerr (non-diagonal gamma) lands as its own tag.
+    /// spinning kerr in ingoing kerr-schild coords: Sigma = r^2 + a^2 cos^2(theta), b = 2Mr/Sigma,
+    /// lapse alpha = 1/sqrt(1 + b) (THETA-dependent), radial shift beta^r = b/(1 + b),
+    /// NON-DIAGONAL gamma_{r phi} (frame dragging). requires the covariant valencia storage and
+    /// the azimuthal momentum DOF (the `_sph_swirl` family). the mass M and spin a ride as the
+    /// `schwarzschild_mass` / `kerr_spin` kernel scalars. mirrors `symbi_geometry::Spacetime::Kerr`.
+    Kerr,
 }

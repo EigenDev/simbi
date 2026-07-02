@@ -193,6 +193,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                             .map(|(_, v)| *v)
                             .expect("rhd GR c2p needs schwarzschild_mass but the metric supplied none"),
                     ),
+                    ScalarRef::KerrSpin => Sc::from_f64(
+                        sim.geom.spacetime_scalars.iter()
+                            .find(|(n, _)| n == "kerr_spin")
+                            .map(|(_, v)| *v)
+                            .expect("rhd GR c2p needs kerr_spin but the metric supplied none"),
+                    ),
                     other => Sc::from_f64(
                         geom_scalar(&x_lo, &dx, other)
                             .unwrap_or_else(|| panic!("rhd GR c2p: unexpected scalar {other:?}")),

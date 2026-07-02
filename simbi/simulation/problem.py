@@ -171,6 +171,15 @@ class SimbiProblem(BaseModel):
             "spacetime is schwarzschild",
         ),
     ]
+    kerr_spin: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            description="kerr specific angular momentum a = J/M, |a| < M; only used "
+            "when spacetime is kerr",
+        ),
+    ]
     regime: Annotated[Regime, ProblemParam(..., description="physics regime")]
     bounds: Annotated[
         Sequence[Sequence[float]],

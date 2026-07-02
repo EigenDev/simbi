@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
 use symbi_algebra::Tensor;
 
 
@@ -79,9 +79,14 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
         // flat (Minkowski) lapse alpha = 1: no densitization -> the weight is ELIDED from the graph
         // (no unity multiply) -> bit-identical.
         Spacetime::Minkowski => None,
-        // r = the radial centroid (coordinate slot 0); the lapse is radial-only, so the D=1
-        // evaluation gives the correct alpha for any sim dimension.
-        _ => Some(gv_metric_lapse_at(spacetime, coord_centroid[0])),
+        // r = the radial centroid (coordinate slot 0). the schwarzschild / kerr-schild lapses
+        // are radial-only; the spinning-kerr lapse also reads the polar centroid (slot 1) through
+        // Sigma = r^2 + a^2 cos^2(theta).
+        _ => Some(gv_metric_lapse_at(
+            spacetime,
+            coord_centroid[0],
+            coord_centroid.get(1).copied(),
+        )),
     }
 }
 
@@ -91,13 +96,20 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
 /// is a new `Metric` impl + one arm, not a lapse formula re-inlined per consumer. `M` rides as the
 /// host-filled scalar `schwarzschild_mass` so the kernel stays M-agnostic. flat spacetime never
 /// reaches this (its weight is elided by the caller); calling it is a bug.
-pub(crate) fn gv_metric_lapse_at(spacetime: Spacetime, r: Gv) -> Gv {
+/// `theta` is required by the spinning-kerr arm (Sigma depends on the polar angle) and ignored
+/// by the radial-only backgrounds; a theta-less caller requesting kerr is a bake-time bug.
+pub(crate) fn gv_metric_lapse_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>) -> Gv {
     let mass = Gv::scalar("schwarzschild_mass");
     match spacetime {
         // alpha = sqrt(1 - 2M/r) (schwarzschild coords) / alpha = 1/sqrt(1 + 2M/r) (kerr-schild),
         // each from its `Metric` impl (the SINGLE source of the lapse expression).
         Spacetime::Schwarzschild => Schwarzschild { mass }.lapse(Tensor::new([r])),
         Spacetime::KerrSchild => SchwarzschildKS { mass }.lapse(Tensor::new([r])),
+        Spacetime::Kerr => {
+            let spin = Gv::scalar("kerr_spin");
+            let th = theta.expect("the kerr lapse requires the polar coordinate");
+            KerrKS { mass, spin }.lapse(Tensor::new([r, th, Gv::ZERO]))
+        }
         Spacetime::Minkowski => unreachable!("flat lapse is elided by the densitization caller"),
     }
 }
@@ -106,11 +118,16 @@ pub(crate) fn gv_metric_lapse_at(spacetime: Spacetime, r: Gv) -> Gv {
 /// factor alpha sqrt(gamma^{rr}) = alpha^2 for the det-g-flat family (schwarzschild alpha^2 = f;
 /// kerr-schild alpha^2 = 1/(1 + 2M/r)). the closed form (NOT `lapse().powi(2)`) so the genericized
 /// wave-speed map reproduces the pre-refactor `f` node bitwise. flat never reaches this.
-pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv) -> Gv {
+pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>) -> Gv {
     let mass = Gv::scalar("schwarzschild_mass");
     match spacetime {
         Spacetime::Schwarzschild => Schwarzschild { mass }.lapse_sq(Tensor::new([r])),
         Spacetime::KerrSchild => SchwarzschildKS { mass }.lapse_sq(Tensor::new([r])),
+        Spacetime::Kerr => {
+            let spin = Gv::scalar("kerr_spin");
+            let th = theta.expect("the kerr lapse-square requires the polar coordinate");
+            KerrKS { mass, spin }.lapse_sq(Tensor::new([r, th, Gv::ZERO]))
+        }
         Spacetime::Minkowski => unreachable!("flat lapse-square is elided by the CFL caller"),
     }
 }
@@ -118,12 +135,18 @@ pub(crate) fn gv_metric_lapse_sq_at(spacetime: Spacetime, r: Gv) -> Gv {
 /// the analytic radial shift beta^r(r) from `Metric::shift` — nonzero ONLY for a shifted background
 /// (kerr-schild beta^r = 2M/(r + 2M)); the static diagonal cases (Minkowski, Schwarzschild) have
 /// beta = 0 -> None so the caller elides the shift term (bit-identical, no `- 0`).
-pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv) -> Option<Gv> {
+pub(crate) fn gv_metric_shift_r_at(spacetime: Spacetime, r: Gv, theta: Option<Gv>) -> Option<Gv> {
     match spacetime {
         Spacetime::Minkowski | Spacetime::Schwarzschild => None,
         Spacetime::KerrSchild => {
             let mass = Gv::scalar("schwarzschild_mass");
             Some(SchwarzschildKS { mass }.shift(Tensor::new([r]))[0])
+        }
+        Spacetime::Kerr => {
+            let mass = Gv::scalar("schwarzschild_mass");
+            let spin = Gv::scalar("kerr_spin");
+            let th = theta.expect("the kerr shift requires the polar coordinate");
+            Some(KerrKS { mass, spin }.shift(Tensor::new([r, th, Gv::ZERO]))[0])
         }
     }
 }
@@ -246,7 +269,7 @@ pub fn cell_geometry_gv(
     let (lo, hi, width) = gv_faces(spacing, ndim);
     match coords {
         Coords::Cartesian => cartesian_geometry_gv(&lo, &hi, &width, ndim),
-        Coords::Spherical => spherical_geometry_gv(&lo, &hi, &width, ndim, false),
+        Coords::Spherical => spherical_geometry_gv(&lo, &hi, &width, ndim, None),
         Coords::Cylindrical => cylindrical_geometry_gv(&lo, &hi, &width, axes, ndim),
     }
 }
@@ -268,6 +291,10 @@ pub fn cell_geometry_covariant_gv(
     spacing: &[Spacing],
     axes: &[usize],
     ndim: usize,
+    // the kerr spin `a` (as the `kerr_spin` scalar) when the densitized measure is the kerr
+    // `alpha sqrt(gamma) = Sigma sin(theta) = (r^2 + a^2 cos^2 theta) sin(theta)`; `None` for
+    // the det-g-flat family (schwarzschild, kerr-schild) whose measure is `r^2 sin(theta)`.
+    kerr_spin: Option<Gv>,
 ) -> CellGeometryGv {
     let _ = axes;
     assert!(
@@ -275,7 +302,7 @@ pub fn cell_geometry_covariant_gv(
         "the covariant cell geometry is defined for the spherical GR backgrounds"
     );
     let (lo, hi, width) = gv_faces(spacing, ndim);
-    spherical_geometry_gv(&lo, &hi, &width, ndim, true)
+    spherical_geometry_gv(&lo, &hi, &width, ndim, Some(kerr_spin))
 }
 
 
@@ -314,7 +341,15 @@ fn cartesian_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> Cel
 // (the radial centroid is volume-weighted, not the coordinate center). `covariant` selects
 // the coordinate-form (alpha sqrt(gamma)) angular face weights instead of the physical
 // (arc-length) areas — see `cell_geometry_covariant_gv`.
-fn spherical_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize, covariant: bool) -> CellGeometryGv {
+// `covariant`: `None` = the physical (orthonormal) geometry; `Some(None)` = the coordinate-form
+// r^2 sin(theta) measure (det-g-flat GR); `Some(Some(a))` = the kerr Sigma sin(theta) measure.
+fn spherical_geometry_gv(
+    lo: &[Gv],
+    hi: &[Gv],
+    width: &[Gv],
+    ndim: usize,
+    covariant: Option<Option<Gv>>,
+) -> CellGeometryGv {
     let pi = std::f64::consts::PI;
     let (rl, rh) = (lo[0], hi[0]);
     let ir1 = (gv_powi(rh, 3) - gv_powi(rl, 3)) / Gv::from_f64(3.0); // int r^2 dr
@@ -335,28 +370,66 @@ fn spherical_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize, covari
     };
     let i_phi = if ndim >= 3 { width[2] } else { Gv::from_f64(2.0 * pi) };
 
-    let inv_volume = Gv::ONE / (ir1 * i_theta * i_phi);
+    // the kerr Sigma-measure moments: i_c2s = int cos^2(theta) sin(theta) dtheta over the cell
+    // (the a^2 companion of i_theta), c2 at the theta faces, and the radial width. zero-spin
+    // (and the det-g-flat covariant form) never reads them.
+    let kerr = covariant.clone().flatten();
+    let (i_c2s, c2_lo, c2_hi, wr) = if ndim >= 2 {
+        let (tl, th) = (lo[1], hi[1]);
+        let (ctl, cth) = (tl.cos(), th.cos());
+        let third = Gv::from_f64(1.0 / 3.0);
+        (
+            (gv_powi(ctl, 3) - gv_powi(cth, 3)) * third,
+            ctl * ctl,
+            cth * cth,
+            rh - rl,
+        )
+    } else {
+        // full sphere: int cos^2 sin over [0, pi] = 2/3.
+        (Gv::from_f64(2.0 / 3.0), Gv::ZERO, Gv::ZERO, rh - rl)
+    };
+
+    // volume: physical AND det-g-flat covariant share int r^2 sin = ir1 * i_theta; the kerr
+    // measure adds the a^2 moment: int Sigma sin = ir1 * i_theta + a^2 * wr * i_c2s.
+    let vol = match &kerr {
+        Some(a) => ir1 * i_theta * i_phi + *a * *a * wr * i_c2s * i_phi,
+        None => ir1 * i_theta * i_phi,
+    };
+    let inv_volume = Gv::ONE / vol;
     let omega = i_theta * i_phi; // angular solid-angle measure for the r-face
 
     let mut area_lo = vec![Gv::ZERO; ndim];
     let mut area_hi = vec![Gv::ZERO; ndim];
     let mut centroid = vec![Gv::ZERO; ndim];
-    area_lo[0] = gv_powi(rl, 2) * omega; // r-face A = r_face^2 * Omega
-    area_hi[0] = gv_powi(rh, 2) * omega;
+    // r-face weight: r_f^2 * Omega, plus the kerr a^2 cos^2 moment of the Sigma measure.
+    let r_face_weight = |rf: Gv| match &kerr {
+        Some(a) => gv_powi(rf, 2) * omega + *a * *a * i_c2s * i_phi,
+        None => gv_powi(rf, 2) * omega,
+    };
+    area_lo[0] = r_face_weight(rl);
+    area_hi[0] = r_face_weight(rh);
     centroid[0] = centroid_r;
     // the angular radial moment: physical (orthonormal) faces carry the arc-length measure
-    // int r dr; the covariant (coordinate) form carries the alpha sqrt(gamma) = r^2 sin(theta)
-    // measure, int r^2 dr.
-    let ir_ang = if covariant { ir1 } else { ir2 };
+    // int r dr; the covariant (coordinate) form carries the alpha sqrt(gamma) measure, int r^2 dr
+    // (+ the kerr a^2 cos^2(theta_face) width moment).
+    let ir_ang = if covariant.is_some() { ir1 } else { ir2 };
     if ndim >= 2 {
-        area_lo[1] = ir_ang * sin_tl * i_phi; // theta-face weight = Ir * sin(theta_face) * Iphi
-        area_hi[1] = ir_ang * sin_th * i_phi;
+        let t_face_weight = |sin_f: Gv, c2_f: Gv| match &kerr {
+            Some(a) => sin_f * (ir1 + *a * *a * c2_f * wr) * i_phi,
+            None => sin_f * ir_ang * i_phi,
+        };
+        area_lo[1] = t_face_weight(sin_tl, c2_lo);
+        area_hi[1] = t_face_weight(sin_th, c2_hi);
         centroid[1] = centroid_t;
     }
     if ndim >= 3 {
-        // phi-face weight: physical = Ir2 * dtheta (arc length); covariant = Ir1 * Itheta
-        // (the r^2 sin(theta) measure over the face).
-        let aphi = if covariant { ir1 * i_theta } else { ir2 * width[1] };
+        // phi-face weight: physical = Ir2 * dtheta (arc length); covariant = the full measure
+        // over the (r, theta) face.
+        let aphi = match &kerr {
+            Some(a) => ir1 * i_theta + *a * *a * wr * i_c2s,
+            None if covariant.is_some() => ir1 * i_theta,
+            None => ir2 * width[1],
+        };
         area_lo[2] = aphi;
         area_hi[2] = aphi;
         centroid[2] = (lo[2] + hi[2]) * Gv::from_f64(0.5); // arithmetic mid (uniform in phi)
