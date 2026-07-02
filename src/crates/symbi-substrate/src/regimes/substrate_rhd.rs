@@ -35,8 +35,8 @@ use std::sync::Arc;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_rhd_ks_shift_flux,
-    dispatch_godunov, dispatch_runtime_source, geom_scalar, kernel_geom, resolve_params, scalars_for,
-    spacing_suffix,
+    dispatch_godunov, dispatch_runtime_source, geom_scalar, geom_suffix, kernel_geom, resolve_params,
+    scalars_for, spacing_suffix,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
@@ -110,33 +110,33 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     }
 }
 
-impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> KernelSet<D, D, Mem, Sc>
-    for RhdSubstrateKernelSet<Mem, Sc, D>
+impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const DOF: usize>
+    KernelSet<D, DOF, Mem, Sc> for RhdSubstrateKernelSet<Mem, Sc, D>
 {
-    fn flux(&self, sim: &FieldStore<D, D, Mem, Sc>, dir: usize) {
+    fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         dispatch_flux(sim, pre, "rhd", dir, self.gamma, self.theta, self.solver);
     }
 
-    fn ks_shift(&self, sim: &FieldStore<D, D, Mem, Sc>, dir: usize) {
+    fn ks_shift(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         // ingoing-Kerr-Schild shift-advection added to the radial face flux; no-op unless the
         // background is KerrSchild and dir == 0 (the dispatch gates both).
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         dispatch_rhd_ks_shift_flux(sim, pre, dir);
     }
 
-    fn c2p(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         let cnrg = sim.fields.cons.nrg_field().expect("Rhd requires cons.nrg");
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
 
-        // inputs: cons den, mom_0..mom_{D-1}, nrg. outputs: prim rho, vel_0.., pre.
+        // inputs: cons den, mom_0..mom_{DOF-1}, nrg. outputs: prim rho, vel_0.., pre.
         let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..D {
+        for k in 0..DOF {
             inputs.push(&sim.fields.cons.mom[k]);
         }
         inputs.push(cnrg);
         let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-        for k in 0..D {
+        for k in 0..DOF {
             outputs.push(&sim.fields.prim.vel[k]);
         }
         outputs.push(pre);
@@ -144,14 +144,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // the GR path uses the metric-aware Valencia recovery (`|S|^2 = gamma^{ij} S_i S_j`,
         // contravariant `v^i`); its name carries the spacing + spacetime slug and it reads the lapse
         // mass M + the LOG-AWARE radial grid scalars (the metric is evaluated at the cell centroid).
-        // flat keeps the plain `rhd_c2p_{D}d` (gamma only), bit-identical.
+        // flat keeps the plain `rhd_c2p_{D}d` (gamma only), bit-identical. the DOF-lift tag
+        // (spherical swirl) selects the instance whose manifest carries the extra momentum.
+        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
         let st_sfx = match sim.geom.spacetime {
             symbi_geometry::Spacetime::Minkowski => "",
             symbi_geometry::Spacetime::Schwarzschild => "_schw",
             symbi_geometry::Spacetime::KerrSchild => "_ks",
         };
         let (name, scalars) = if st_sfx.is_empty() {
-            let name = format!("rhd_c2p_{D}d");
+            let name = format!("rhd_c2p{geom_sfx}_{D}d");
             let scalars = scalars_for(&name, |bind| match bind {
                 ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
                 o => panic!("rhd c2p: unexpected scalar {o:?}"),
@@ -159,7 +161,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             (name, scalars)
         } else {
             let sp_sfx = spacing_suffix(&sim.geom.maps);
-            let name = format!("rhd_c2p{sp_sfx}{st_sfx}_{D}d");
+            let name = format!("rhd_c2p{geom_sfx}{sp_sfx}{st_sfx}_{D}d");
             let (x_lo, dx) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
             let scalars = scalars_for(&name, |bind| {
                 let ScalarBind::Ref(sref) = bind else {
@@ -192,7 +194,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         );
     }
 
-    fn godunov_stage(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+    fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         dispatch_godunov(sim, pre, "rhd", dt, a0, ac);
     }
@@ -201,7 +203,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         self.runtime_source.is_some()
     }
 
-    fn source_apply(&self, sim: &FieldStore<D, D, Mem, Sc>, weight: f64) {
+    fn source_apply(&self, sim: &FieldStore<D, DOF, Mem, Sc>, weight: f64) {
         // two-pass: plain godunov already ran; add the raw user source increment to
         // the conserved fields. dispatch_runtime_source is regime-agnostic (it adds
         // the BuiltSource outputs to their target conserved slots), so no RHD-specific
@@ -211,7 +213,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
     }
 
-    fn cfl(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
+    fn cfl(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
         // RHD's only contribution is the "rhd" map (its relativistic wave speed).
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
@@ -225,17 +227,19 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         )
     }
 
-    fn ghost_fill(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the SHARED lattice-map pullback (iso_ghost_fill_{D}d): the EOS-generic
-        // 3-field prim pullback (rho/vel/pre), in-place, per ghost region.
+        // prim pullback (rho/vel_0..DOF-1/pre), in-place, per ghost region. the DOF-lift
+        // tag (spherical swirl) selects the instance carrying the extra velocity.
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        let name = format!("iso_ghost_fill_{D}d");
+        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let name = format!("iso_ghost_fill{geom_sfx}_{D}d");
 
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
                 let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-                for k in 0..D {
+                for k in 0..DOF {
                     outputs.push(&sim.fields.prim.vel[k]);
                 }
                 outputs.push(pre);
@@ -270,23 +274,25 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         );
     }
 
-    fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {
+    fn snapshot(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         let cnrg = sim.fields.cons.nrg_field().expect("cons.nrg");
         let unrg = sim.workspace.u_n.nrg_field().expect("u_n.nrg");
 
-        // inputs: cons den, mom_0.., nrg. outputs: u_n den, mom_0.., nrg.
+        // inputs: cons den, mom_0.., nrg. outputs: u_n den, mom_0.., nrg. the DOF-lift tag
+        // (spherical swirl) selects the instance copying the extra momentum.
         let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for k in 0..D {
+        for k in 0..DOF {
             inputs.push(&sim.fields.cons.mom[k]);
         }
         inputs.push(cnrg);
         let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.workspace.u_n.den];
-        for k in 0..D {
+        for k in 0..DOF {
             outputs.push(&sim.workspace.u_n.mom[k]);
         }
         outputs.push(unrg);
 
-        let name = format!("rhd_snapshot_{D}d");
+        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let name = format!("rhd_snapshot{geom_sfx}_{D}d");
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,

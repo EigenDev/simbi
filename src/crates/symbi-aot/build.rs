@@ -399,6 +399,12 @@ impl Geom {
     fn sph(ndim: u8) -> Self {
         Self::make(Coords::Spherical, ndim, (0..ndim as usize).collect())
     }
+    // spherical axisymmetric swirl: 2-axis grid (r, theta) -> coords [0, 1], 3-component
+    // momentum (the azimuthal v_phi is the out-of-plane DOF — rotating GR flows: tori,
+    // spinning-hole accretion). ncomp > naxes -> "_sph_swirl".
+    fn sph_swirl() -> Self {
+        Self::make(Coords::Spherical, 3, vec![0, 1])
+    }
     // identity-axis instance at an arbitrary coordinate system (ncomp == ndim, the
     // grid axes ARE the coordinates) — the body-source / geometry-probe shape.
     fn identity(coords: Coords, ndim: u8) -> Self {
@@ -451,6 +457,10 @@ impl Geom {
     fn suffix(&self) -> &'static str {
         match self.coords {
             Coords::Cartesian => "",
+            // the spherical DOF lift (azimuthal swirl on an (r, theta) grid) needs its own
+            // instances (the extra momentum law changes the manifest) — mirrors the runtime
+            // geom_suffix.
+            Coords::Spherical if self.ncomp as usize > self.axes.len() => "_sph_swirl",
             Coords::Spherical => "_sph",
             Coords::Cylindrical => match self.axes.as_slice() {
                 [0, 2] => "_cyl_rz",
@@ -743,12 +753,16 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 // `_ks` is in the name, so the spacetime tag is implicit. geom (coords) suffix omitted — the shift
 // reads only the radial axis (DOF == D).
 fn gen_rhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
-    let name = format!("rhd_ks_shift_flux{}_{ndim}d_{dir}", geom.spacing_suffix());
-    let (k, writes) = match ndim {
+    // the DOF-lift tag rides the name only when ncomp > naxes (the spherical swirl): the shift
+    // advects every conserved component, so the lifted instance carries an extra momentum flux.
+    let lift = if geom.ncomp as usize > geom.axes.len() { geom.suffix() } else { "" };
+    let name = format!("rhd_ks_shift_flux{lift}{}_{ndim}d_{dir}", geom.spacing_suffix());
+    // the const parameter is the momentum DOF (geom.ncomp).
+    let (k, writes) = match geom.ncomp {
         1 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<1>(&geom.spacing),
         2 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<2>(&geom.spacing),
         3 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<3>(&geom.spacing),
-        _ => panic!("rhd_ks_shift_flux_gv: unsupported ndim {ndim}"),
+        nc => panic!("rhd_ks_shift_flux_gv: unsupported ncomp {nc}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -760,11 +774,16 @@ fn gen_rhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
 // matches. depends on the radial grid (centroid), so it carries the same schwarzschild_mass +
 // x_lo_0/dx_0 scalars the GR wavespeed/godunov use.
 fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
-    let name = format!("rhd_c2p{}{}_{ndim}d", geom.spacing_suffix(), geom.spacetime_suffix());
-    let (k, writes) = match ndim {
+    // the DOF-lift tag rides the name only when ncomp > naxes (the spherical swirl), matching the
+    // runtime dispatch (geom_suffix appears only for DOF != NDIM on this kernel family).
+    let lift = if geom.ncomp as usize > geom.axes.len() { geom.suffix() } else { "" };
+    let name = format!("rhd_c2p{lift}{}{}_{ndim}d", geom.spacing_suffix(), geom.spacetime_suffix());
+    // the const parameter is the momentum DOF (geom.ncomp); the grid dimension rides geom.axes.
+    let (k, writes) = match geom.ncomp {
         1 => symbi_discretize::gv::rhd_c2p_gr_gv::<1>(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, max_iters),
         2 => symbi_discretize::gv::rhd_c2p_gr_gv::<2>(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, max_iters),
-        _ => panic!("rhd_c2p_gr_gv: unsupported ndim {ndim}"),
+        3 => symbi_discretize::gv::rhd_c2p_gr_gv::<3>(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, max_iters),
+        nc => panic!("rhd_c2p_gr_gv: unsupported ncomp {nc}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -775,11 +794,16 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 // storage needs the metric-aware flux). name carries the spacing + spacetime slug + sweep dir. 1D
 // radial (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
 fn gen_rhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
-    let name = format!("rhd_face_flux{}{}_{ndim}d_{dir}", geom.spacing_suffix(), geom.spacetime_suffix());
-    let (k, writes) = match ndim {
+    // the DOF-lift tag rides the name only when ncomp > naxes (the spherical swirl), matching the
+    // runtime dispatch_flux (geom_suffix appears only for DOF != NDIM).
+    let lift = if geom.ncomp as usize > geom.axes.len() { geom.suffix() } else { "" };
+    let name = format!("rhd_face_flux{lift}{}{}_{ndim}d_{dir}", geom.spacing_suffix(), geom.spacetime_suffix());
+    // the const parameter is the momentum DOF (geom.ncomp); the reconstruction grid rides geom.axes.
+    let (k, writes) = match geom.ncomp {
         1 => symbi_discretize::gv::rhd_flux_gr_gv::<1>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes),
         2 => symbi_discretize::gv::rhd_flux_gr_gv::<2>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes),
-        _ => panic!("rhd_flux_gr_gv: unsupported ndim {ndim}"),
+        3 => symbi_discretize::gv::rhd_flux_gr_gv::<3>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes),
+        nc => panic!("rhd_flux_gr_gv: unsupported ncomp {nc}"),
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1364,6 +1388,29 @@ fn main() {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks_log.clone());
         }
     }
+    // GR spherical SWIRL (the azimuthal momentum DOF on the 2D (r, theta) grid, ncomp = 3 >
+    // ndim = 2, `_sph_swirl`): rotating flows on a curved background (tori, spinning-hole
+    // accretion). the covariant angular momentum S_phi is a conserved law with a zero
+    // axisymmetric source; the covariant stress-energy contraction carries the centrifugal
+    // blocks. per (spacetime, spacing): godunov + wave-speed + c2p + per-sweep flux + snapshot
+    // + ghost fill (+ the KS shift on the horizon-penetrating chart).
+    for base in [Geom::sph_swirl().schwarzschild(), Geom::sph_swirl().kerr_schild()] {
+        for geom in [base.clone(), base.clone().log_radial()] {
+            gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
+            gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
+            gen_rhd_c2p_gr(&out_dir, 2, 20, geom.clone());
+            for dir in 0..2 {
+                gen_rhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
+            }
+            if geom.spacetime == Spacetime::KerrSchild {
+                gen_rhd_ks_shift_flux(&out_dir, 2, 0, geom.clone());
+            }
+        }
+    }
+    // the snapshot + ghost fill are spacetime- and spacing-independent (pure copies /
+    // lattice pullbacks over the lifted component set): one instance each.
+    gen_snapshot(&out_dir, 2, "rhd", true, Geom::sph_swirl());
+    gen_iso_ghost_fill(&out_dir, 2, Geom::sph_swirl());
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.
     gen_rmhd_geometric_source(&out_dir, Geom::sph(3));

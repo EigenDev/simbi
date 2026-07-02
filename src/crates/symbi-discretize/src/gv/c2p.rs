@@ -122,9 +122,10 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, F
 /// (not identity): `|S|^2 = gamma^{ij} S_i S_j` and the recovered `v^i = gamma^{ij} S_j / (tau+D+p)`
 /// is the CONTRAVARIANT velocity (Valencia). the metric is evaluated at the volume-weighted radial
 /// centroid — the SAME cell radius the godunov densitization lapse uses — so the covariant conserved
-/// `S_i` round-trips. reduces to `rhd_c2p_gv` bit-for-bit at identity gamma. D-generic (the covariant
-/// recovery contracts all D momentum components); reads `schwarzschild_mass` + the grid scalars for the
-/// cell centroid.
+/// `S_i` round-trips. reduces to `rhd_c2p_gv` bit-for-bit at identity gamma. `D` is the momentum
+/// DOF (all D components contracted), the GRID dimension is `axes.len()` — they differ for the
+/// spherical swirl (DOF = 3 azimuthal momentum on a 2D (r, theta) grid). reads
+/// `schwarzschild_mass` + the grid scalars for the cell centroid.
 pub fn rhd_c2p_gr_gv<const D: usize>(
     coords: Coords,
     spacetime: Spacetime,
@@ -144,10 +145,21 @@ where
 
     // the in-kernel spatial metric at the cell centroid — the SAME volume-weighted centroid the
     // godunov densitization lapse uses, so the covariant `S_i` stored under `to_conserved` inverts
-    // exactly (well-balanced). all coordinate slots take the cell centroid (the metric reads only the
-    // radial coordinate for the diagonal spherical backgrounds, but the general position is correct).
-    let geo = cell_geometry_gv(coords, spacing, axes, D);
-    let x = Tensor::<Gv, D>::new(std::array::from_fn(|k| geo.centroid[k]));
+    // exactly (well-balanced). gridded coordinate slots take the cell centroid; an ungridded
+    // symmetry slot (the axisymmetric phi of the spherical swirl) takes zero — the spherical
+    // metrics never read phi, and gamma_{phi phi} = r^2 sin^2(theta) needs only the GRIDDED
+    // (r, theta). a suppressed POLAR slot would zero sin(theta) (singular gamma) — rejected.
+    let ndim = axes.len();
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => geo.centroid[d],
+            None => {
+                assert!(c == 2, "GR c2p: only the azimuthal coordinate may be ungridded");
+                Gv::ZERO
+            }
+        }
+    }));
     let mass = Gv::scalar("schwarzschild_mass");
     let (gm, gm_inv) = match spacetime {
         Spacetime::Schwarzschild => {

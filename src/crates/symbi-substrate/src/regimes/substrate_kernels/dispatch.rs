@@ -487,7 +487,10 @@ pub fn dispatch_rhd_ks_shift_flux<const D: usize, const DOF: usize, Mem, Sc>(
     }
     let geom = &sim.geom;
     let sp_sfx = spacing_suffix(&geom.maps);
-    let name = format!("rhd_ks_shift_flux{sp_sfx}_{D}d_{dir}");
+    // the DOF-lift tag (spherical swirl): the shift advects EVERY conserved component, so the
+    // DOF > NDIM instance carries extra momentum-flux fields and needs its own kernel.
+    let geom_sfx = if DOF != D { geom_suffix(geom.coords, DOF, D) } else { "" };
+    let name = format!("rhd_ks_shift_flux{geom_sfx}{sp_sfx}_{D}d_{dir}");
     let face = geom.interior.face_domain(dir);
     // the shift reads `x_lo_0`/`dx_0` through gv_axis_face_at -> the LOG-aware kernel scalars (dx is
     // the log slope on a log axis), NOT the physical spacing. mirrors the godunov binding.

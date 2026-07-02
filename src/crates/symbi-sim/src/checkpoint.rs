@@ -167,6 +167,9 @@ fn extract_field<const D: usize, Mem: MemorySpace>(
 /// written buffer carries the halo and a restart is not truncated.
 fn collect_bucket<'a, F, const D: usize, Mem: MemorySpace>(
     fields: &[FieldSpec],
+    // the vector-component count for DimVector fields (mom/vel): the momentum DOF, which
+    // exceeds the grid dimension for a lifted (swirl) run — every stored component writes.
+    dof: usize,
     mut pick: F,
 ) -> Vec<(String, Vec<f64>)>
 where
@@ -174,7 +177,7 @@ where
 {
     let mut out = Vec::new();
     for fs in fields {
-        let n = symbi_io::component_count(fs, D);
+        let n = symbi_io::component_count(fs, dof);
         for idx in 0..n {
             if let Some(field) = pick(fs, idx) {
                 let name = symbi_io::dataset_name(fs, idx);
@@ -241,7 +244,7 @@ where
         .map(|(ax, &x)| x * axis_scale(ax))
         .collect();
     // ----- RegimeSpec-driven conserved iteration ------
-    let conserved = collect_bucket(R::SPEC.fields, |fs, idx| match fs.name {
+    let conserved = collect_bucket(R::SPEC.fields, DOF, |fs, idx| match fs.name {
         "den" => Some(&sim.fields.cons.den),
         "mom" => Some(&sim.fields.cons.mom[idx]),
         "nrg" => sim.fields.cons.nrg_field(),
@@ -250,7 +253,7 @@ where
     });
 
     // ----- RegimeSpec-driven primitive iteration ------
-    let primitive = collect_bucket(R::SPEC.primitive_fields, |fs, idx| match fs.name {
+    let primitive = collect_bucket(R::SPEC.primitive_fields, DOF, |fs, idx| match fs.name {
         "rho" => Some(&sim.fields.prim.rho),
         "vel" => Some(&sim.fields.prim.vel[idx]),
         "pre" => sim.fields.prim.pre_field(),
@@ -738,7 +741,7 @@ where
         .find_group("conserved")
         .ok_or_else(|| IoError::MissingPath("level_0/conserved".into()))?;
     for fs in R::SPEC.fields {
-        let n = symbi_io::component_count(fs, D);
+        let n = symbi_io::component_count(fs, DOF);
         for idx in 0..n {
             let name = symbi_io::dataset_name(fs, idx);
             match fs.name {
@@ -772,7 +775,7 @@ where
     // primitives (optional). RegimeSpec-driven iteration mirrors the write.
     if let Some(prim) = level_0.find_group("primitives") {
         for fs in R::SPEC.primitive_fields {
-            let n = symbi_io::component_count(fs, D);
+            let n = symbi_io::component_count(fs, DOF);
             for idx in 0..n {
                 let name = symbi_io::dataset_name(fs, idx);
                 match fs.name {

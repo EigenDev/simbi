@@ -30,15 +30,19 @@ pub fn coord_suffix(coords: Geometry) -> &'static str {
     }
 }
 
-// the DOF-aware suffix: the cylindrical 2D plane is ambiguous — r-phi (the disk,
-// DOF == ndim, in-plane v_r/v_phi) vs r-z (axisymmetric, DOF > ndim, the swirl v_phi
-// out of the gridded r-z plane). DOF vs ndim discriminates them, matching build.rs's
-// Geom::suffix (ncomp vs naxes): r-phi -> "_cyl", r-z -> "_cyl_rz". cartesian/spherical
-// are DOF-independent. use this wherever a kernel's geometry depends on the cyl plane.
+// the DOF-aware suffix: a 2D plane with a lifted out-of-plane momentum needs its own
+// kernel instances (the extra conserved law changes the manifest). cylindrical — r-phi
+// (the disk, DOF == ndim, in-plane v_r/v_phi) vs r-z (axisymmetric, DOF > ndim, the
+// swirl v_phi out of the gridded r-z plane) -> "_cyl" / "_cyl_rz". spherical — the
+// axisymmetric (r, theta) grid with the azimuthal momentum DOF (DOF > ndim, rotating
+// GR flows) -> "_sph_swirl"; DOF == ndim -> "_sph". matches build.rs's Geom::suffix
+// (ncomp vs naxes). use this wherever a kernel's geometry depends on the DOF lift.
 pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
     match coords {
         Geometry::Cartesian => "",
-        Geometry::Spherical => "_sph",
+        Geometry::Spherical => {
+            if dof > ndim { "_sph_swirl" } else { "_sph" }
+        }
         Geometry::Cylindrical => {
             if dof > ndim { "_cyl_rz" } else { "_cyl" }
         }

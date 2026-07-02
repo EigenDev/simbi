@@ -356,16 +356,27 @@ where
     SchwarzschildKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
-    // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse coordinates at the cell
-    // centroid — the correct face-metric position for a `dir` sweep. the spherical GR spatial gamma is
-    // diag(1/f(r), r^2, r^2 sin^2 theta), so the 2D (r, theta) gamma is r-ONLY (theta enters only the
-    // suppressed phi component); the general per-axis position is correct for the 3D case too.
-    let x = Tensor::<Gv, D>::new(std::array::from_fn(|k| {
-        if k == dir as usize {
-            gv_axis_face_at(k, spacing[k], 0)
+    // `D` is the momentum/velocity DOF; the RECONSTRUCTION grid is `axes.len()` — they differ for
+    // the spherical swirl (DOF = 3 on a 2D (r, theta) grid, out-of-plane v_phi reconstructed along
+    // the gridded sweeps like any transverse component). the sweep NORMAL is coordinate `axes[dir]`.
+    let ndim = axes.len();
+    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(ndim as u8, dir, axes[dir as usize]);
+    // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse GRIDDED coordinates at
+    // the cell centroid — the correct face-metric position for a `dir` sweep. an ungridded symmetry
+    // slot (the axisymmetric phi) takes zero: the spherical metrics never read phi, and
+    // gamma_{phi phi} = r^2 sin^2(theta) needs only the gridded (r, theta).
+    let geo = (ndim > 1).then(|| cell_geometry_gv(coords, spacing, axes, ndim));
+    let x = Tensor::<Gv, D>::new(std::array::from_fn(|c| {
+        if c == axes[dir as usize] {
+            gv_axis_face_at(dir as usize, spacing[dir as usize], 0)
         } else {
-            cell_geometry_gv(coords, spacing, axes, D).centroid[k]
+            match axes.iter().position(|&a| a == c) {
+                Some(d) => geo.as_ref().expect("a transverse gridded axis implies ndim > 1").centroid[d],
+                None => {
+                    assert!(c == 2, "GR flux: only the azimuthal coordinate may be ungridded");
+                    Gv::ZERO
+                }
+            }
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");

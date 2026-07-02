@@ -1621,17 +1621,29 @@ macro_rules! into_hierarchy {
 /// drive the run loop. the build chain's typestate + per-regime `substrate()`
 /// resolve concretely here, so no generic bound-threading is needed.
 macro_rules! build_and_run_hydro {
-    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
+    ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $dof:literal, $geom:expr, $geom_ty:ty) => {{
         let cfg: &Config = $cfg;
         let prims: &[Vec<f64>] = $prims;
-        type Sim = SimDefault<$regime_ty, $d, $geom_ty, IdealGas<f64>>;
+        // `$d` is the grid dimension, `$dof` the momentum-component count; they differ for the
+        // spherical swirl (the azimuthal momentum lifted onto a 2D (r, theta) grid).
+        type Sim = SimDefaultGeneric<$regime_ty, $d, $dof, $geom_ty, IdealGas<f64>>;
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
+        // the DOF-lifted (swirl) tile decomposition is not wired; refuse rather than mis-run.
         if cfg.n_gpus > 1 {
+            if $dof != $d {
+                return Err("DOF-lifted (swirl) runs do not yet support gpus > 1".to_string());
+            }
             return build_and_run_hydro_decomposed!(
                 $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
             );
+        }
+        if $dof != $d && cfg.refinement_enabled {
+            return Err("DOF-lifted (swirl) runs do not yet support mesh refinement".to_string());
+        }
+        if $dof != $d && !cfg.bodies.is_empty() {
+            return Err("DOF-lifted (swirl) runs do not yet support immersed bodies".to_string());
         }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -1665,10 +1677,12 @@ macro_rules! build_and_run_hydro {
                     stride *= n[ax];
                 }
                 let row = &prims[lin];
+                // the generator row is (rho, v_0 .. v_{DOF-1}, pre) — DOF velocities, so the
+                // pressure sits at index 1 + DOF (== 1 + $d except for the swirl lift).
                 Prim {
                     rho: row[0],
                     vel: Tensor::new(std::array::from_fn(|k| row[1 + k])),
-                    pre: row[1 + $d],
+                    pre: row[1 + $dof],
                 }
             })
             .build();
@@ -1702,7 +1716,7 @@ macro_rules! build_and_run_hydro {
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
                     &scfg,
-                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                    <$regime_ty as Regime<f64, $dof>>::SPEC,
                 )
                 .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
@@ -2274,46 +2288,74 @@ macro_rules! hydro_dispatch {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
             (1, "cartesian") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Cartesian, Cartesian)
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, 1, Cartesian, Cartesian)
             }
             (2, "cartesian") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Cartesian, Cartesian)
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Cartesian, Cartesian)
             }
             (3, "cartesian") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Cartesian, Cartesian)
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, 3, Cartesian, Cartesian)
             }
             // GR (Schwarzschild) spherical: select the Schwarzschild metric (lapse-densitized +
             // GR-wavespeed `_schw` kernels). baked for 1D/2D (the Michel accretion targets); 3D
             // falls through to flat Spherical for now. ORTHOGONAL to the regime.
             (1, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_hydro!(
-                $cfg, $prims, $regime, $regime_ty, 1,
+                $cfg, $prims, $regime, $regime_ty, 1, 1,
                 Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
             ),
-            (2, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_hydro!(
-                $cfg, $prims, $regime, $regime_ty, 2,
-                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
-            ),
+            // 2D GR: the generator row length picks the momentum DOF — (rho, v_r, v_theta, pre)
+            // is the axisymmetric in-plane flow (DOF = 2); (rho, v_r, v_theta, v_phi, pre) lifts
+            // the azimuthal momentum onto the (r, theta) grid (DOF = 3, the `_sph_swirl`
+            // kernels: rotating flows — tori, spinning-hole accretion).
+            (2, "spherical") if $cfg.spacetime == "schwarzschild" => {
+                if $prims.first().map_or(false, |row| row.len() == 5) {
+                    build_and_run_hydro!(
+                        $cfg, $prims, $regime, $regime_ty, 2, 3,
+                        Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+                    )
+                } else {
+                    build_and_run_hydro!(
+                        $cfg, $prims, $regime, $regime_ty, 2, 2,
+                        Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+                    )
+                }
+            }
             // GR (ingoing Kerr-Schild) spherical: the HORIZON-PENETRATING chart (regular across
             // r = 2M) — the `_ks` shift-advection-flux + KS-densitized/wavespeed kernels. reuses the
-            // `schwarzschild_mass` scalar. 1D (the accretion target); others fall through to flat.
+            // `schwarzschild_mass` scalar. 1D radial + the 2D plane (with the same row-length DOF
+            // pick as schwarzschild: 5-tuples lift the azimuthal momentum, `_sph_swirl`).
             (1, "spherical") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
-                $cfg, $prims, $regime, $regime_ty, 1,
+                $cfg, $prims, $regime, $regime_ty, 1, 1,
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
+            (2, "spherical") if $cfg.spacetime == "kerr_schild" => {
+                if $prims.first().map_or(false, |row| row.len() == 5) {
+                    build_and_run_hydro!(
+                        $cfg, $prims, $regime, $regime_ty, 2, 3,
+                        SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
+                    )
+                } else {
+                    build_and_run_hydro!(
+                        $cfg, $prims, $regime, $regime_ty, 2, 2,
+                        SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
+                    )
+                }
+            }
             (1, "spherical") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, Spherical, Spherical)
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, 1, Spherical, Spherical)
             }
             (2, "spherical") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, Spherical, Spherical)
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Spherical, Spherical)
             }
             (3, "spherical") => {
-                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, Spherical, Spherical)
+                build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 3, 3, Spherical, Spherical)
             }
             (1, "cylindrical") => build_and_run_hydro!(
                 $cfg,
                 $prims,
                 $regime,
                 $regime_ty,
+                1,
                 1,
                 Cylindrical,
                 Cylindrical
@@ -2324,6 +2366,7 @@ macro_rules! hydro_dispatch {
                 $regime,
                 $regime_ty,
                 2,
+                2,
                 Cylindrical,
                 Cylindrical
             ),
@@ -2332,6 +2375,7 @@ macro_rules! hydro_dispatch {
                 $prims,
                 $regime,
                 $regime_ty,
+                3,
                 3,
                 Cylindrical,
                 Cylindrical

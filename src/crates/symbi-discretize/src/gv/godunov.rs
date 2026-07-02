@@ -5,24 +5,10 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
-use symbi_geometry::grhd_source::grhd_radial_geodesic_source;
+use symbi_geometry::{Schwarzschild, SchwarzschildKS};
+use symbi_geometry::grhd_source::grhd_covariant_source;
 use symbi_algebra::Tensor;
 use symbi_ir::dual::Dual;
-
-
-/// evaluate a concrete analytic metric at `Dual<Gv>` with the radial coordinate SEEDED, returning
-/// `(alpha, beta^r, gamma_rr, d_r alpha, d_r beta^r, d_r gamma_rr)` — the ADM block AND its radial
-/// derivatives in ONE forward-mode-autodiff pass. so the geodesic-source derivatives are AUTOMATIC
-/// (no hand-derived metric derivatives / christoffels — the metric supplies only its line element,
-/// and autodiff differentiates it). the mass is a constant dual (we differentiate w.r.t. r, not M).
-fn adm_block_autodiff<M: Metric<Dual<Gv>, 1>>(g: &M, r: Gv) -> (Gv, Gv, Gv, Gv, Gv, Gv) {
-    let rd = Tensor::new([Dual::variable(r)]); // seed d/dr = 1
-    let a = g.lapse(rd);
-    let b = g.shift(rd)[0];
-    let gg = g.spatial_metric(rd)[(0, 0)];
-    (a.value, b.value, gg.value, a.tangent, b.tangent, gg.tangent)
-}
 
 
 /// snapshot `u_n = cons` — a pure pointwise copy (the RK2 stage-0 hold), geometry-INDEPENDENT
@@ -321,6 +307,17 @@ pub fn godunov_stage_gv_with_fused_built(
     let mom: Vec<Gv> = (0..ncomp)
         .map(|k| Gv::field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))
         .collect();
+    // on a curved background the flat velocity-quadratic inertial is the WRONG contraction for the
+    // covariant momentum S_i (it treats the components as flat); the covariant stress-energy
+    // contraction below carries those blocks instead, so the hydro geometric source keeps ONLY its
+    // discrete well-balanced pressure form `p (A_hi - A_lo) / V` — which cancels the pressure flux
+    // divergence bit-exactly at a uniform-p hydrostatic state, unlike the analytic pressure block
+    // `p d_j ln(alpha sqrt(gamma))` of the contraction.
+    let source = match (spacetime, source) {
+        (Spacetime::Minkowski, s) => s,
+        (_, GeoSource::Hydro { .. }) => GeoSource::Hydro { inertial: false },
+        (_, s) => s,
+    };
     let src = geo
         .as_ref()
         .map(|g| gv_geometric_source(coords, axes, ndim as usize, ncomp, g, source, &mom, mag_from_bcell));
@@ -352,41 +349,51 @@ pub fn godunov_stage_gv_with_fused_built(
         None => Vec::new(),
     };
     let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
-    // the GR geodesic (gravity) sources on the radial momentum + energy, computed ONCE from the
-    // metric geometry via the generic contraction `grhd_radial_geodesic_source` — the perfect-fluid
-    // T^{mu nu} contracted with the metric's ADM block (alpha, beta^r, gamma_rr) + its ANALYTIC radial
-    // derivatives, giving S_{S_r} = (1/2) T^{mn} d_r g (t-r block) and S_tau. this REPLACES the
-    // per-spacetime hand-coded closed forms: the source PHYSICS is one function, the metric supplies
-    // only its geometry (the `Metric` trait + `adm_radial_derivs`). the momentum 2p/r geometric term
-    // rides gv_geometric_source; the alpha / alpha^2 densitization rides fe / the radial-momentum arm.
-    // flat -> None (no gravity). GRMHD-ready: the EM stress just changes T^{mu nu}.
-    let geodesic: Option<(Gv, Gv)> = match spacetime {
+    // the GR geodesic sources from the FULL covariant contraction `grhd_covariant_source`: the
+    // per-coordinate momentum source S_j = (1/2) T^{mu nu} d_j g_{mu nu} and the energy source
+    // S_tau, one forward-autodiff pass per axis at the metric's full spherical D = 3 (the metric
+    // supplies only its ADM line element — no hand-derived christoffels). the MOMENTUM call takes
+    // p = 0: the E-part only (gravity + covariant centrifugal), because the pressure block
+    // `p d_j ln(alpha sqrt(gamma))` rides the DISCRETE well-balanced form in gv_geometric_source
+    // above. the ENERGY call takes the full p — S_tau needs no discrete balance (it vanishes
+    // identically at a zero-shift hydrostatic state). the polar angle is the cell centroid when
+    // gridded, else pi/2 (exact: with no polar grid every theta-dependence cancels). flat -> None.
+    // GRMHD-ready: the EM stress just changes T^{mu nu}.
+    let geodesic: Option<(Tensor<Gv, 3>, Gv)> = match spacetime {
         Spacetime::Minkowski => None,
         _ => {
-            let r = coord_centroid[0];
-            let mass = Dual::constant(Gv::scalar("schwarzschild_mass")); // constant w.r.t. r
+            let mass = Dual::constant(Gv::scalar("schwarzschild_mass")); // constant w.r.t. position
+            let theta = if axes.contains(&1) {
+                coord_centroid[1]
+            } else {
+                Gv::from_f64(std::f64::consts::FRAC_PI_2)
+            };
+            let x = Tensor::<Gv, 3>::new([coord_centroid[0], theta, Gv::ZERO]);
             let e = rho + Gv::field("nrg", FieldRef::cons_nrg()) + Gv::field("pre", FieldRef::PrimPre);
-            // Valencia storage: `prim.vel` is the CONTRAVARIANT v^r (the metric-aware c2p output). the
-            // geodesic source is written in the orthonormal radial velocity V = sqrt(gamma_rr) v^r.
-            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0));
             let p = Gv::field("pre", FieldRef::PrimPre);
-            // the ADM block + its radial derivatives, both from ONE Dual<Gv> autodiff pass — the
-            // metric supplies only its line element (lapse/shift/gamma), autodiff differentiates it.
-            // beta^r = 0 for schwarzschild folds the shift terms to zero at codegen.
-            let (alpha, beta_r, gamma_rr, d_lapse, d_shift_r, d_gamma_rr) = match spacetime {
-                Spacetime::Schwarzschild => adm_block_autodiff(&Schwarzschild { mass }, r),
-                Spacetime::KerrSchild => adm_block_autodiff(&SchwarzschildKS { mass }, r),
+            // the CONTRAVARIANT velocity in coordinate slots (the metric-aware c2p output);
+            // spherical GR momentum slots are coordinate-ordered, so slot k == coordinate k.
+            // coordinates without a momentum slot carry zero.
+            let v = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                if c < ncomp {
+                    Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8))
+                } else {
+                    Gv::ZERO
+                }
+            }));
+            let src_at = |pp: Gv| match spacetime {
+                Spacetime::Schwarzschild => grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp),
+                Spacetime::KerrSchild => grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp),
                 Spacetime::Minkowski => unreachable!("flat handled above"),
             };
-            let big_v = v_r * gamma_rr.sqrt(); // orthonormal V = sqrt(gamma_rr) v^r
-            Some(grhd_radial_geodesic_source(
-                r, alpha, beta_r, gamma_rr, d_lapse, d_shift_r, d_gamma_rr, e, big_v, p,
-            ))
+            let (s_mom, _) = src_at(Gv::ZERO);
+            let (_, s_tau) = src_at(p);
+            Some((s_mom, s_tau))
         }
     };
-    let radial_gravity: Option<Gv> = geodesic.map(|(s_mom, _)| s_mom);
-    // the GR geodesic ENERGY source S_tau — the second output of the generic contraction above
-    // (gravity's rate of work on the infalling gas). zero on a flat background.
+    let mom_gravity: Option<Tensor<Gv, 3>> = geodesic.map(|(s_mom, _)| s_mom);
+    // the GR geodesic ENERGY source S_tau — the second output of the contraction (gravity's rate
+    // of work on the infalling gas). zero on a flat background.
     let nrg_gravity: Option<Gv> = geodesic.map(|(_, s_tau)| s_tau);
     let fe = |u: Gv, div: Gv, geo_src: Option<Gv>| {
         let div = match lapse { Some(a) => a * div, None => div };
@@ -419,19 +426,18 @@ pub fn godunov_stage_gv_with_fused_built(
     for k in 0..ncomp {
         let u_n_mom = Gv::field(&format!("u_n_mom_{k}"), FieldRef::un_mom(k as u8));
         let div = gv_divergence(&format!("mom_flux_{k}"), ndim, &geo);
-        // the radial momentum (coordinate axis 0) carries the gravitational source in addition to
-        // the geometric pressure/inertial source; the angular momenta carry only the latter.
         let geo_src = src.as_ref().map(|s| s[k]);
-        // the radial momentum is the gridded component mapping to coordinate 0; suppressed
-        // out-of-plane components (DOF > ndim) are never radial.
-        let is_radial = axes.get(k) == Some(&0);
-        let mom_src = match (is_radial, radial_gravity) {
-            (true, Some(g)) => Some(geo_src.map_or(g, |s| s + g)),
-            _ => geo_src,
+        // every momentum slot carries its covariant geodesic block (gravity + covariant
+        // centrifugal, coordinate k of the contraction) on top of the discrete pressure form in
+        // geo_src; a suppressed axisymmetric slot's block is identically zero (the metric never
+        // reads phi, so its autodiff tangent vanishes — angular-momentum conservation).
+        let mom_src = match mom_gravity {
+            Some(g) => Some(geo_src.map_or(g[k], |s| s + g[k])),
+            None => geo_src,
         };
         // Valencia covariant storage: the conserved momentum is the COVARIANT S_i = rho h W^2
         // gamma_ij v^j (the metric-aware c2p + flux), and the geodesic source is written for that
-        // covariant S_r, so d_t S_i = -alpha div(F) + alpha S — a SINGLE, uniform lapse on every
+        // covariant S_i, so d_t S_i = -alpha div(F) + alpha S — a SINGLE, uniform lapse on every
         // conserved law, supplied by the `fe` weight. no orthonormal alpha^2 asymmetry: the flux
         // kernel already carries the contravariant v^n (no V_rhat), and the metric coefficient
         // gamma_ij rides inside S_i, not the densitization.
