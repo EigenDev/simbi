@@ -342,18 +342,32 @@ pub fn rhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, V
 /// the in-kernel `SpatialMetric` (gamma/gamma^{-1}) + lapse from the metric at the radial face, and run
 /// `riemann::hlle_with_speeds` at the `RhdGr` regime. `RhdGr` REDUCES to `Rhd` at identity gamma, so at
 /// a flat metric this is bit-identical to `rhd_flux_gv`. the kerr-schild shift + the alpha
-/// densitization ride the godunov (unchanged). baked only for a curved spacetime; radial grid axis 0.
-pub fn rhd_flux_gr_gv(
+/// densitization ride the godunov (unchanged). D-generic over the sweep (metric at the swept-axis face,
+/// transverse coords at the centroid); baked only for a curved spacetime.
+pub fn rhd_flux_gr_gv<const D: usize>(
     dir: u8,
     spacetime: Spacetime,
+    coords: Coords,
     spacing: &[Spacing],
-) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    // 1D radial: the GR (curved-spacetime) accretion target. angular GR is task 9.
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
+where
+    Schwarzschild<Gv>: Metric<Gv, D>,
+    SchwarzschildKS<Gv>: Metric<Gv, D>,
+{
     begin_trace();
-    let (eos, left, right, nhat, vface) = euler_reconstruct::<1>(1, dir, dir as usize);
-    // the in-kernel spatial metric + lapse at the radial face (grid axis 0 = radial).
-    let r = gv_axis_face_at(0, spacing[0], 0);
-    let x = Tensor::<Gv, 1>::new([r]);
+    let (eos, left, right, nhat, vface) = euler_reconstruct::<D>(D as u8, dir, dir as usize);
+    // the in-kernel spatial metric + lapse at the SWEPT-axis face, transverse coordinates at the cell
+    // centroid — the correct face-metric position for a `dir` sweep. the spherical GR spatial gamma is
+    // diag(1/f(r), r^2, r^2 sin^2 theta), so the 2D (r, theta) gamma is r-ONLY (theta enters only the
+    // suppressed phi component); the general per-axis position is correct for the 3D case too.
+    let x = Tensor::<Gv, D>::new(std::array::from_fn(|k| {
+        if k == dir as usize {
+            gv_axis_face_at(k, spacing[k], 0)
+        } else {
+            cell_geometry_gv(coords, spacing, axes, D).centroid[k]
+        }
+    }));
     let mass = Gv::scalar("schwarzschild_mass");
     let (gamma, gamma_inv, alpha) = match spacetime {
         Spacetime::Schwarzschild => {

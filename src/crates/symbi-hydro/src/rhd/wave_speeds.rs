@@ -26,27 +26,25 @@ pub(crate) fn rhd_speeds_from_vn<S: Scalar>(cs_sq: S, vn: S) -> (S, S) {
     ((vn - fac) * qf, (vn + fac) * qf)
 }
 
-/// the Banyuls-Font (1997) COORDINATE-frame acoustic speeds on a STATIC DIAGONAL metric (shift
-/// beta = 0): the RHD dispersion relation with the inverse-metric normal component `gamma_nn`
-/// threaded INTO the discriminant and the lapse `alpha` scaling the result:
-///   `disc = (1 - vn^2)( gamma_nn(1 - vn^2 cs^2) - vn^2(1 - cs^2) )`
-///   `lambda_pm = alpha [ vn(1 - cs^2) +/- cs sqrt(disc) ] / (1 - vn^2 cs^2)`.
-/// at `gamma_nn = 1, alpha = 1` it reduces EXACTLY (in value) to `rhd_speeds_from_vn` — the flat
-/// limit — so Minkowski is unchanged. the curved `gamma_nn`/`alpha` come from the spacetime metric
-/// (Schwarzschild: `gamma_nn = f = 1-2M/r`, `alpha = sqrt(f)`). drives the GR CFL wave-speed map;
-/// `gamma_nn` inside the radical (NOT a post-multiply by alpha) is what pins the sonic point.
-///
-/// the CFL wave-speed map uses the algebraically-EQUIVALENT factored form (the Schwarzschild
-/// `gamma^{rr}=alpha^2` identity collapses this to `alpha^2 * lambda_SR` radial / `alpha` angular,
-/// so the map reuses the SR speed + a per-axis correction). this canonical BF form is kept as the
-/// verified reference (its unit test pins the reduction + the Schwarzschild values) and is the
-/// general-metric path for the B.6 Riemann coordinate speeds.
+/// the Banyuls-Font COORDINATE-frame acoustic speeds on a STATIC DIAGONAL metric (shift beta = 0),
+/// Font (2008) eq (37). CRITICAL: it takes TWO distinct velocities that a single-argument form would
+/// wrongly conflate:
+///   - `vn` = the CONTRAVARIANT normal velocity v^n = v^i n_i (Font's `v^x`), in the transport term
+///     AND inside the radical's second term.
+///   - `v_sq` = gamma_ij v^i v^j, the PHYSICAL speed squared (|V|^2), ONLY in the `(1 - v^2)` factors.
+///   `disc = (1 - v_sq)( gamma_nn (1 - v_sq cs^2) - vn^2 (1 - cs^2) )`
+///   `lambda_pm = alpha [ vn(1 - cs^2) +/- cs sqrt(disc) ] / (1 - v_sq cs^2)`, `gamma_nn = gamma^{nn}`.
+/// feeding the PHYSICAL velocity to BOTH slots (the old bug) drives `disc < 0` once |V| approaches
+/// alpha (near the horizon), collapsing the Riemann fan to NaN — the gr_bondi inner-boundary crash.
+/// with the correct split, cauchy-schwarz `vn^2 <= gamma^{nn} v_sq` guarantees `disc >= gamma^{nn}
+/// (1 - v_sq)^2 >= 0`; for Schwarzschild (`gamma^{rr} = alpha^2`, v^r = alpha V) `disc = alpha^2
+/// (1-V^2)^2` and `lambda_pm = alpha^2 (V +/- cs)/(1 +/- V cs)` (sonic point at |V| = cs).
+/// at `gamma_nn = 1, alpha = 1, v_sq = vn^2` it reduces EXACTLY to the flat `rhd_speeds_from_vn`.
 #[allow(dead_code)]
 #[inline]
-pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(cs_sq: S, vn: S, gamma_nn: S, alpha: S) -> (S, S) {
-    let vn_sq = vn * vn;
-    let one_m_v2cs2 = S::ONE - vn_sq * cs_sq;
-    let disc = (S::ONE - vn_sq) * (gamma_nn * one_m_v2cs2 - vn_sq * (S::ONE - cs_sq));
+pub(crate) fn rhd_speeds_from_vn_gr<S: Scalar>(cs_sq: S, vn: S, v_sq: S, gamma_nn: S, alpha: S) -> (S, S) {
+    let one_m_v2cs2 = S::ONE - v_sq * cs_sq;
+    let disc = (S::ONE - v_sq) * (gamma_nn * one_m_v2cs2 - vn * vn * (S::ONE - cs_sq));
     let term = vn * (S::ONE - cs_sq);
     let rad = cs_sq.sqrt() * disc.sqrt(); // cs * sqrt(disc)
     let inv = alpha / one_m_v2cs2;
@@ -175,30 +173,57 @@ mod tests {
 
     #[test]
     fn gr_speeds_reduce_to_flat_exactly() {
-        // the Banyuls-Font path at (gamma_nn = 1, alpha = 1) reduces EXACTLY (to 1e-12) to the SR
-        // form across the state space -> Minkowski wave speeds are unchanged.
+        // the Banyuls-Font path at (gamma_nn = 1, alpha = 1, v_sq = vn^2) reduces EXACTLY (to 1e-12)
+        // to the SR form across the state space -> Minkowski wave speeds are unchanged.
         for &cs_sq in &[0.05_f64, 0.2, 0.33] {
             for &vn in &[-0.8_f64, -0.3, 0.0, 0.3, 0.8] {
                 let (sl, sr) = rhd_speeds_from_vn(cs_sq, vn);
-                let (gl, gr) = rhd_speeds_from_vn_gr(cs_sq, vn, 1.0, 1.0);
+                let (gl, gr) = rhd_speeds_from_vn_gr(cs_sq, vn, vn * vn, 1.0, 1.0);
                 assert!(approx(sl, gl) && approx(sr, gr), "flat reduction ({sl},{sr}) vs ({gl},{gr})");
             }
         }
     }
 
     #[test]
-    fn gr_speeds_damp_under_schwarzschild() {
-        // Schwarzschild at r=10, M=1 -> f = 0.8: gamma_nn = f, alpha = sqrt(f). the lapse + the
-        // in-radical gamma_nn DAMP the COORDINATE speeds below the flat ones (gravity slows
-        // coordinate-time propagation). hand-computed lambda+ ~ 0.54684, lambda- ~ -0.10965.
-        let (cs_sq, vn, f) = (0.2_f64, 0.3_f64, 0.8_f64);
-        let (sl_flat, sr_flat) = rhd_speeds_from_vn(cs_sq, vn);
-        let (sl_gr, sr_gr) = rhd_speeds_from_vn_gr(cs_sq, vn, f, f.sqrt());
-        assert!(sr_gr.abs() < sr_flat.abs(), "right speed must damp: {sr_gr} vs {sr_flat}");
-        assert!(sl_gr.abs() < sl_flat.abs(), "left speed must damp: {sl_gr} vs {sl_flat}");
-        assert!((sr_gr - 0.54684).abs() < 1e-4, "lambda+ = {sr_gr}");
-        assert!((sl_gr + 0.10965).abs() < 1e-4, "lambda- = {sl_gr}");
-        // still subluminal-physical (no superluminal coordinate speed for this state).
-        assert!(sr_gr < 1.0 && sl_gr > -1.0);
+    fn gr_speeds_match_schwarzschild_closed_form() {
+        // Schwarzschild (gamma^{rr} = f = alpha^2, v^r = alpha V): the discriminant is a PERFECT
+        // SQUARE, disc = alpha^2 (1 - V^2)^2 >= 0, so lambda_pm = alpha^2 (V +/- cs)/(1 +/- V cs)
+        // with the sonic point exactly at |V| = cs. this is the value the fan MUST return; the old
+        // bug (physical velocity in both slots) drove disc < 0 -> NaN for V >~ alpha.
+        for &f in &[0.8_f64, 0.5, 0.34] {
+            // f = 1 - 2M/r; alpha = sqrt(f), gamma^{rr} = f. sweep the PHYSICAL velocity V incl. V > alpha.
+            let (alpha, grr_inv) = (f.sqrt(), f);
+            for &cs_sq in &[0.05_f64, 0.2, 0.33] {
+                for &big_v in &[-0.9_f64, -0.5, -0.1, 0.0, 0.3, 0.7, 0.9] {
+                    let vr = alpha * big_v; // contravariant v^r = alpha V
+                    let v_sq = big_v * big_v; // physical |v|^2 = V^2 (radial)
+                    let (sl, sr) = rhd_speeds_from_vn_gr(cs_sq, vr, v_sq, grr_inv, alpha);
+                    let cs = cs_sq.sqrt();
+                    let a2 = alpha * alpha;
+                    let (want_l, want_r) = (
+                        a2 * (big_v - cs) / (1.0 - big_v * cs),
+                        a2 * (big_v + cs) / (1.0 + big_v * cs),
+                    );
+                    assert!(sl.is_finite() && sr.is_finite(), "NaN fan at V={big_v}, f={f}, cs^2={cs_sq}");
+                    assert!(approx(sl, want_l) && approx(sr, want_r),
+                        "V={big_v} f={f} cs^2={cs_sq}: ({sl},{sr}) vs ({want_l},{want_r})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn gr_fan_is_finite_at_transonic_inner_state() {
+        // the gr_bondi crash regression: at the near-horizon steady inner state (r ~ 3.05, M=1, so
+        // f ~ 0.344, alpha ~ 0.587) with a transonic physical velocity |V| ~ 0.64 > alpha, the fan
+        // MUST be real. the pre-fix formula returned NaN here (disc < 0), collapsing the wave speed.
+        let (cs_sq, alpha) = (0.0132_f64, 0.587_f64); // cs ~ 0.115, alpha^2 ~ f
+        let grr_inv = alpha * alpha; // gamma^{rr} = alpha^2
+        for &big_v in &[-0.64_f64, -0.7, -0.85, -0.95] {
+            let vr = alpha * big_v;
+            let (sl, sr) = rhd_speeds_from_vn_gr(cs_sq, vr, big_v * big_v, grr_inv, alpha);
+            assert!(sl.is_finite() && sr.is_finite() && sl < sr,
+                "fan collapsed at transonic inner state V={big_v}: ({sl},{sr})");
+        }
     }
 }

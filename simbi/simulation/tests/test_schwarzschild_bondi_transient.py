@@ -28,11 +28,12 @@ needs_backend = pytest.mark.skipif(
     _BACKEND is None, reason="rust cpu_ext backend not built"
 )
 
-# the old crash was at t ~ 2.34; run well past it so the inner-boundary density
-# rise is unambiguous (the bug DEPLETED it to ~0.945 before crashing; the fix
-# builds it up above ambient). resolution is irrelevant to the defect (it is a
-# source-term densitization error, not a resolution artifact), so keep it small.
-_END_TIME = 10.0
+# the densitization crash was at t ~ 2.34; the riemann-fan crash at t ~ 11.8. run to 15 so
+# the inner flow crosses |V| = alpha (t ~ 10-12), where the banyuls-font discriminant
+# gamma^{nn}(1 - v^2 cs^2) - v^n v^n (1 - cs^2) goes negative if the physical velocity
+# sqrt(gamma_nn) v^n is conflated into the contravariant v^n slot (NaN fan, wave-speed
+# collapse). resolution is irrelevant to either defect; keep it small.
+_END_TIME = 15.0
 _RESOLUTION = 128
 _RHO_AMBIENT = 1.0
 _P_AMBIENT = 1.0e-2
@@ -56,7 +57,8 @@ def _read_interior(chkpt_path: str):
         prims = part["hydro/primitives"]
         rho = prims["rho"][lo:fin]
         pre = prims["pre"][lo:fin]
-    return rho, pre
+        vel = prims["v1"][lo:fin]
+    return rho, pre, vel
 
 
 @needs_backend
@@ -73,7 +75,7 @@ def test_bondi_transient_survives_and_pressure_stays_positive() -> None:
             "(radial-momentum densitization regression)"
         )
 
-        rho, pre = _read_interior(finals[0])
+        rho, pre, vel = _read_interior(finals[0])
 
         # NO FLOOR: the pressure must stay strictly positive on its own. the old
         # bug drove it negative near the inner boundary.
@@ -86,4 +88,16 @@ def test_bondi_transient_survives_and_pressure_stays_positive() -> None:
         assert rho[0] > 1.1 * _RHO_AMBIENT, (
             f"density did not rise at the inner boundary: rho_inner = {rho[0]:.3f} "
             f"(ambient {_RHO_AMBIENT})"
+        )
+
+        # the completion assertion only pins the riemann-fan discriminant if the flow
+        # actually entered the |V| > alpha regime at the inner boundary (below that,
+        # the conflated and correct banyuls-font forms are both real). verify it:
+        # V = v^r / alpha on schwarzschild, at the innermost log-spaced cell centroid.
+        r_inner = 3.0 * (100.0 / 3.0) ** (0.5 / _RESOLUTION)
+        alpha_inner = (1.0 - 2.0 / r_inner) ** 0.5
+        v_phys = abs(vel[0]) / alpha_inner
+        assert v_phys > alpha_inner, (
+            f"inner flow never crossed |V| = alpha (|V| = {v_phys:.3f}, "
+            f"alpha = {alpha_inner:.3f}); the fan regression is not exercised"
         )

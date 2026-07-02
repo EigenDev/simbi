@@ -134,23 +134,32 @@ where
     // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay ZERO and
     // never enter the graph — `wave_speeds_axis` reads only the normal velocity `vel[axes[d]]`.
     let half_c = Gv::from_f64(0.5);
+    // the cell-centroid coordinate on the grid axis carrying COORDINATE `target` (radial = 0, polar =
+    // 1), for the physical-velocity scale factors below. `None` if that coordinate is not a grid axis.
+    let coord_at = |target: usize| -> Option<Gv> {
+        axes.iter().position(|&c| c == target).map(|d| {
+            Gv::scalar(&format!("x_lo_{d}")) + (Gv::coord(d as u8) + half_c) * Gv::scalar(&format!("dx_{d}"))
+        })
+    };
     let mut vel = [Gv::ZERO; 3];
     for d in 0..ndim {
         let c = axes[d];
         let raw = Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
-        // Valencia storage: `prim.vel` is the CONTRAVARIANT v^i; the SR characteristic speed needs the
-        // PHYSICAL normal velocity V = sqrt(gamma_ii) v^i. for the det-g-flat family (Schwarzschild,
-        // Kerr-Schild) sqrt(gamma_rr) = 1/alpha, so the radial physical velocity is v^r/alpha; the
-        // coordinate factor alpha^2 = alpha sqrt(gamma^{rr}) applied below then completes the
-        // Banyuls-Font coordinate speed. flat -> alpha = 1 (untouched, bit-identical). angular GR
-        // physical scaling (sqrt(gamma_{theta theta}) = r) is task 9.
-        vel[c] = match (spacetime, c) {
-            (Spacetime::Minkowski, _) => raw,
-            (_, 0) => {
-                let r = Gv::scalar(&format!("x_lo_{d}")) + (Gv::coord(d as u8) + half_c) * Gv::scalar(&format!("dx_{d}"));
-                raw / gv_metric_lapse_at(spacetime, r)
+        // Valencia storage: `prim.vel` is the CONTRAVARIANT v^i; the SR characteristic speed is a
+        // function of the PHYSICAL velocity V^c = h_c v^c, with the metric scale factor h_c =
+        // sqrt(gamma_cc). spherical GR: h_r = sqrt(gamma_rr) = 1/alpha (det-g-flat), h_theta = r,
+        // h_phi = r sin(theta). the per-axis coordinate factor (alpha^2 radial / alpha angular) applied
+        // below completes the Banyuls-Font coordinate speed. flat -> h = 1 (untouched, bit-identical).
+        vel[c] = if matches!(spacetime, Spacetime::Minkowski) {
+            raw
+        } else {
+            let r = coord_at(0).expect("GR wave-speed map needs a radial axis");
+            match c {
+                0 => raw / gv_metric_lapse_at(spacetime, r),
+                1 => raw * r,
+                2 => raw * r * coord_at(1).expect("phi scale factor needs a polar axis").sin(),
+                _ => raw,
             }
-            _ => raw,
         };
     }
     let pre = Gv::field("prim_pre", FieldRef::PrimPre);

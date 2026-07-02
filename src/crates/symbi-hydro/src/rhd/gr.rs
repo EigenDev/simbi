@@ -98,15 +98,17 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
 
     #[inline]
     fn wave_speeds(&self, eos: &impl Eos<S>, prim: &Self::Prim, nhat: &Tensor<S, D>) -> (S, S) {
-        // the Banyuls-Font COORDINATE speed from the PHYSICAL normal velocity: V^n = sqrt(gamma_nn) v^n
-        // (|V^n| < 1), gamma^{nn} the inverse-metric normal, alpha the lapse. identity/1 -> V^n = v^n,
-        // gamma^{nn} = 1 -> reduces to `rhd_speeds_from_vn` (flat) bit-identically.
+        // Banyuls-Font coordinate speed (Font 2008 eq 37). the two velocities are DISTINCT and must
+        // NOT be conflated: `vn` = the CONTRAVARIANT normal v^n = v^i n_i (the transport term + inside
+        // the radical), `v_sq` = gamma_ij v^i v^j = the PHYSICAL speed squared (the `1 - v^2` factors).
+        // feeding the physical velocity sqrt(gamma_nn) v^n to BOTH slots drove the discriminant
+        // negative (NaN Riemann fan) once |v| approached alpha near the horizon — the gr_bondi crash.
+        // gamma^{nn} is the inverse-metric normal. identity gamma + alpha 1 (v_sq = vn^2) -> flat.
         let cs_sq = sound_speed_sq(eos, prim.rho, prim.pre);
-        let vn = prim.vel.dot(nhat);
-        let gamma_nn = self.metric.norm_sq_contra(nhat); // gamma_ij n^i n^j
+        let vn = prim.vel.dot(nhat); // contravariant v^n
+        let v_sq = self.metric.norm_sq_contra(&prim.vel); // gamma_ij v^i v^j (physical norm)
         let gamma_nn_inv = self.metric.norm_sq_cov(nhat); // gamma^{nn} (coordinate-unit normal)
-        let v_phys_n = gamma_nn.sqrt() * vn;
-        rhd_speeds_from_vn_gr(cs_sq, v_phys_n, gamma_nn_inv, self.alpha)
+        rhd_speeds_from_vn_gr(cs_sq, vn, v_sq, gamma_nn_inv, self.alpha)
     }
 
     #[inline]
