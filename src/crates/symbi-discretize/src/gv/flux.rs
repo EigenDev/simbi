@@ -5,6 +5,9 @@
 // =============================================================================
 
 use super::*;
+use symbi_hydro::rhd::RhdGr;
+use symbi_hydro::spatial_metric::SpatialMetric;
+use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
 
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
@@ -330,6 +333,43 @@ pub fn rhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, V
     let fe = Gv::field("flux_nrg", FieldRef::flux_nrg());
     let ce = Gv::field("cons_nrg", FieldRef::cons_nrg());
     writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), (fe - b * ce).node()));
+    (end_trace(), writes)
+}
+
+
+/// the RHD face flux on a curved SPATIAL metric — the `_schw`/`_ks` GR path (Valencia covariant U/F +
+/// Banyuls-Font coordinate wave speeds). PLM-reconstruct the CONTRAVARIANT-velocity primitive, build
+/// the in-kernel `SpatialMetric` (gamma/gamma^{-1}) + lapse from the metric at the radial face, and run
+/// `riemann::hlle_with_speeds` at the `RhdGr` regime. `RhdGr` REDUCES to `Rhd` at identity gamma, so at
+/// a flat metric this is bit-identical to `rhd_flux_gv`. the kerr-schild shift + the alpha
+/// densitization ride the godunov (unchanged). baked only for a curved spacetime; radial grid axis 0.
+pub fn rhd_flux_gr_gv(
+    dir: u8,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    // 1D radial: the GR (curved-spacetime) accretion target. angular GR is task 9.
+    begin_trace();
+    let (eos, left, right, nhat, vface) = euler_reconstruct::<1>(1, dir, dir as usize);
+    // the in-kernel spatial metric + lapse at the radial face (grid axis 0 = radial).
+    let r = gv_axis_face_at(0, spacing[0], 0);
+    let x = Tensor::<Gv, 1>::new([r]);
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gamma, gamma_inv, alpha) = match spacetime {
+        Spacetime::Schwarzschild => {
+            let m = Schwarzschild { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x))
+        }
+        Spacetime::KerrSchild => {
+            let m = SchwarzschildKS { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x))
+        }
+        Spacetime::Minkowski => unreachable!("the GR flux is baked only for a curved spacetime"),
+    };
+    let regime = RhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
+    let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
+    let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);
+    let writes = euler_flux_writes(&flux);
     (end_trace(), writes)
 }
 

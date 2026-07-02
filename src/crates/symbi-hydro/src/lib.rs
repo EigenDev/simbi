@@ -69,7 +69,7 @@ pub use gpu_launcher::launch_source_kernel;
 pub use newtonian::Newtonian;
 pub use newtonian_mhd::NewtonianMhd;
 pub use isothermal_mhd::{IsothermalMhd, imhd_recover};
-pub use rhd::Rhd;
+pub use rhd::{Rhd, RhdGr};
 pub use rmhd::Rmhd;
 pub use isothermal::{IsoNewtonian, IsoPrim, IsoCons};
 pub use mhd_state::{MhdPrim, MhdCons, MhdPrimG, MhdConsG, IsoMhdPrim, IsoMhdCons};
