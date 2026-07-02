@@ -301,8 +301,15 @@ pub fn godunov_stage_gv_with_fused_built(
     // ULP-close: the user source is added as a SEPARATE post-combine term with this weight, never
     // folded into the `ac*fe` multiply (which would distribute the rounding differently).
     let ac_dt = ac * dt;
-    let geo = (!is_cartesian_uniform(coords, spacing))
-        .then(|| cell_geometry_gv(coords, spacing, axes, ndim as usize));
+    // flat spacetime: the physical (orthonormal) finite-volume geometry. curved (GR): the
+    // COVARIANT geometry — coordinate-form angular face weights (the alpha sqrt(gamma) measure),
+    // matching the covariant momentum S_i and the contravariant fluxes v^i; the orthonormal
+    // angular weights would leave every theta-direction force on S_theta short by a factor r.
+    // radial faces and the volume coincide, so 1D radial GR is bit-identical.
+    let geo = (!is_cartesian_uniform(coords, spacing)).then(|| match spacetime {
+        Spacetime::Minkowski => cell_geometry_gv(coords, spacing, axes, ndim as usize),
+        _ => cell_geometry_covariant_gv(coords, spacing, axes, ndim as usize),
+    });
     let rho = Gv::field("rho", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
         .map(|k| Gv::field(&format!("mom_{k}"), FieldRef::cons_mom(k as u8)))

@@ -47,9 +47,14 @@ _L1_TOL = 1.5e-4
 # uniform specific angular momentum for the advection gate: small enough that the
 # rotating background stays near the michel profile (l^2/r^2 << 1 centrifugal shift),
 # large enough that a lost metric factor (gamma_{phi phi} ~ r^2 sin^2 theta ~ 10-1e4)
-# is orders of magnitude, not noise.
+# is orders of magnitude, not noise. the michel-plus-uniform-l state is NOT
+# theta-balanced (the polar centrifugal component E (v^phi)^2 r^2 sin cos has no
+# compensating pressure gradient), so a physical theta stir develops and the l
+# transport error rides that flow — this is a transport SANITY bound, not a precision
+# gate; the rotating-equilibrium hold (test_schwarzschild_rotating_equilibrium) is the
+# precision instrument for the rotating balance.
 _L0 = 0.05
-_L_DRIFT_TOL = 1.0e-3
+_L_DRIFT_TOL = 1.0e-2
 
 
 def _swirl_problem(data_dir: str, l0: float):

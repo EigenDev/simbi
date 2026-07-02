@@ -1723,6 +1723,24 @@ macro_rules! build_and_run_hydro {
             }
             None => sub,
         };
+        // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
+        // matches `driven_exprs[id]` — the complete prim prescription [rho, vel_0..DOF-1, pre]
+        // as coordinate DAGs (docs/design/33). a theta-stratified rotating equilibrium REQUIRES
+        // this: no local ghost rule can represent the state beyond a wedge wall.
+        let mut sub = sub;
+        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
+            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
+        }
+        for json in &cfg.driven_exprs {
+            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                .map_err(|e| format!("boundary expression parse: {e}"))?;
+            let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                &bcfg,
+                <$regime_ty as Regime<f64, $dof>>::SPEC,
+            )
+            .map_err(|e| format!("boundary expression lower: {e}"))?;
+            sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+        }
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
             .substrate()

@@ -34,9 +34,9 @@ use std::sync::Arc;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_rhd_ks_shift_flux,
-    dispatch_godunov, dispatch_runtime_source, geom_scalar, geom_suffix, kernel_geom, resolve_params,
-    scalars_for, spacing_suffix,
+    RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries, dispatch_fields,
+    dispatch_flux, dispatch_rhd_ks_shift_flux, dispatch_godunov, dispatch_runtime_source, geom_scalar,
+    geom_suffix, kernel_geom, resolve_params, scalars_for, spacing_suffix,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
@@ -58,6 +58,12 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// increment directly and it is added in `source_apply` via the regime-agnostic
     /// `dispatch_runtime_source`. None for source-free runs.
     pub runtime_source: Option<Arc<RuntimeSource>>,
+    /// DRIVEN (DYNAMIC) boundary prescriptions, indexed by `BoundaryType::Driven(id)` — the
+    /// complete prim state [rho, vel_0..DOF-1, pre] as coordinate DAGs, evaluated over the
+    /// face's ghost band after the standard pullback skips it. a rotating (theta-stratified)
+    /// equilibrium REQUIRES this: no local rule (mirror or copy) can represent the state
+    /// beyond a wedge wall — only the analytic continuation can.
+    pub boundary_dags: Vec<Arc<RuntimeSource>>,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
@@ -73,7 +79,18 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             cfl_scratch,
             solver: Solver::Hlle,
             runtime_source: None,
+            boundary_dags: Vec::new(),
         }
+    }
+
+    /// register a DRIVEN boundary (docs/design/33). the returned id (registration order,
+    /// 0-based) is what the sim's `Boundaries` must carry as `BoundaryType::Driven(id)` on the
+    /// prescribed face. build `built` from `expr_bridge::build_boundary_dag(&cfg, RHD_SPEC)` —
+    /// a complete prim prescription `[rho, vel.., pre]`.
+    pub fn with_driven_boundary(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> (Self, u16) {
+        let id = self.boundary_dags.len() as u16;
+        self.boundary_dags.push(RuntimeSource::new(built, params, true));
+        (self, id)
     }
 
     /// attach a runtime user source from already-lowered `(target, BuiltSource)`
@@ -272,6 +289,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 );
             },
         );
+
+        // docs/design/33: the standard pullback above SKIPPED any Driven faces (Driven ->
+        // BcType::Skip); prescribe their ghost prim state from the registered boundary DAGs.
+        if !self.boundary_dags.is_empty() {
+            dispatch_driven_boundaries(sim, &self.boundary_dags);
+        }
     }
 
     fn snapshot(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {

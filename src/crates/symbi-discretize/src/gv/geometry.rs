@@ -246,9 +246,36 @@ pub fn cell_geometry_gv(
     let (lo, hi, width) = gv_faces(spacing, ndim);
     match coords {
         Coords::Cartesian => cartesian_geometry_gv(&lo, &hi, &width, ndim),
-        Coords::Spherical => spherical_geometry_gv(&lo, &hi, &width, ndim),
+        Coords::Spherical => spherical_geometry_gv(&lo, &hi, &width, ndim, false),
         Coords::Cylindrical => cylindrical_geometry_gv(&lo, &hi, &width, axes, ndim),
     }
+}
+
+
+/// the COVARIANT (valencia) finite-volume geometry: face weights are integrals of the
+/// densitized volume element `alpha sqrt(gamma) = r^2 sin(theta)` (the det-g-flat family)
+/// over the face, and the divergence they build is the COORDINATE form
+/// `(1/sqrt(gamma)) d_i (alpha sqrt(gamma) F^i)` — what the covariant momentum S_i and the
+/// contravariant fluxes v^i require. it differs from the flat (orthonormal) geometry ONLY
+/// in the ANGULAR face weights: the theta face carries `int r^2 dr` where the physical area
+/// carries `int r dr` (the arc-length measure) — an orthonormal-form angular divergence
+/// applied to the covariant S_theta is short by a factor r in every theta-direction force
+/// (the pressure gradient in particular, which no radial-flow or theta-uniform state can
+/// detect). radial faces and the volume coincide with the flat geometry, so 1D radial GR
+/// is untouched. spherical-only (the curved backgrounds are spherical).
+pub fn cell_geometry_covariant_gv(
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: usize,
+) -> CellGeometryGv {
+    let _ = axes;
+    assert!(
+        coords == Coords::Spherical,
+        "the covariant cell geometry is defined for the spherical GR backgrounds"
+    );
+    let (lo, hi, width) = gv_faces(spacing, ndim);
+    spherical_geometry_gv(&lo, &hi, &width, ndim, true)
 }
 
 
@@ -284,8 +311,10 @@ fn cartesian_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> Cel
 
 
 // spherical (r, theta, phi): analytic exact-integral factors, volume-weighted centroids
-// (the radial centroid is volume-weighted, not the coordinate center).
-fn spherical_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> CellGeometryGv {
+// (the radial centroid is volume-weighted, not the coordinate center). `covariant` selects
+// the coordinate-form (alpha sqrt(gamma)) angular face weights instead of the physical
+// (arc-length) areas — see `cell_geometry_covariant_gv`.
+fn spherical_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize, covariant: bool) -> CellGeometryGv {
     let pi = std::f64::consts::PI;
     let (rl, rh) = (lo[0], hi[0]);
     let ir1 = (gv_powi(rh, 3) - gv_powi(rl, 3)) / Gv::from_f64(3.0); // int r^2 dr
@@ -315,13 +344,19 @@ fn spherical_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> Cel
     area_lo[0] = gv_powi(rl, 2) * omega; // r-face A = r_face^2 * Omega
     area_hi[0] = gv_powi(rh, 2) * omega;
     centroid[0] = centroid_r;
+    // the angular radial moment: physical (orthonormal) faces carry the arc-length measure
+    // int r dr; the covariant (coordinate) form carries the alpha sqrt(gamma) = r^2 sin(theta)
+    // measure, int r^2 dr.
+    let ir_ang = if covariant { ir1 } else { ir2 };
     if ndim >= 2 {
-        area_lo[1] = ir2 * sin_tl * i_phi; // theta-face A = Ir2 * sin(theta_face) * Iphi
-        area_hi[1] = ir2 * sin_th * i_phi;
+        area_lo[1] = ir_ang * sin_tl * i_phi; // theta-face weight = Ir * sin(theta_face) * Iphi
+        area_hi[1] = ir_ang * sin_th * i_phi;
         centroid[1] = centroid_t;
     }
     if ndim >= 3 {
-        let aphi = ir2 * width[1]; // phi-face A = Ir2 * dtheta
+        // phi-face weight: physical = Ir2 * dtheta (arc length); covariant = Ir1 * Itheta
+        // (the r^2 sin(theta) measure over the face).
+        let aphi = if covariant { ir1 * i_theta } else { ir2 * width[1] };
         area_lo[2] = aphi;
         area_hi[2] = aphi;
         centroid[2] = (lo[2] + hi[2]) * Gv::from_f64(0.5); // arithmetic mid (uniform in phi)
