@@ -61,7 +61,13 @@ pub enum Spacetime {
     /// radial shift beta^r, DIAGONAL spatial metric gamma_{rr} = 1 + 2M/r. reuses the
     /// `schwarzschild_mass` scalar. selects the shift-advection flux + KS densitization kernel path.
     KerrSchild = 2,
-    // spinning Kerr (non-diagonal spatial gamma, phi-shift, frame-dragging) lands as its own tag.
+    /// spinning Kerr in ingoing kerr-schild coordinates — horizon-penetrating, NON-DIAGONAL
+    /// spatial metric (gamma_{r phi} carries the frame dragging into the spatial slice), radial
+    /// shift beta^r = 2Mr/(Sigma + 2Mr). the covariant valencia storage is REQUIRED here (no
+    /// componentwise orthonormal frame exists for a non-diagonal gamma). the mass M and spin a
+    /// ride as kernel scalars (`schwarzschild_mass`, `kerr_spin`). reduces to `KerrSchild`
+    /// physics at a = 0 (different kernel expressions, same values).
+    Kerr = 3,
 }
 
 impl Spacetime {
@@ -1021,6 +1027,153 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKS<S> {
 impl<S: Scalar> DiagonalMetric<S, 1> for SchwarzschildKS<S> {}
 impl<S: Scalar> DiagonalMetric<S, 2> for SchwarzschildKS<S> {}
 impl<S: Scalar> DiagonalMetric<S, 3> for SchwarzschildKS<S> {}
+
+
+/// spinning Kerr in INGOING KERR-SCHILD coordinates (horizon-penetrating, spherical (r, theta,
+/// phi)). Sigma = r^2 + a^2 cos^2(theta), b = 2 M r / Sigma:
+///
+///   alpha      = 1 / sqrt(1 + b)
+///   beta^i     = (b / (1 + b), 0, 0)                       (radial, ingoing)
+///   gamma_rr   = 1 + b
+///   gamma_rp   = -a sin^2(theta) (1 + b)                   (the frame-dragging off-diagonal)
+///   gamma_tt   = Sigma
+///   gamma_pp   = sin^2(theta) (Sigma + a^2 sin^2(theta) (1 + b))
+///   sqrt(gamma) = Sigma sin(theta) sqrt(1 + b);  alpha sqrt(gamma) = Sigma sin(theta)
+///
+/// the analytic inverse (gamma^{theta theta} = 1/Sigma; the (r, phi) block inverts in closed
+/// form): gamma^rr = (Sigma + a^2 sin^2 (1+b)) / ((1+b) Sigma), gamma^{r phi} = a / Sigma,
+/// gamma^{phi phi} = 1 / (Sigma sin^2). every ADM identity is pinned by tests: g_tt = b - 1,
+/// g_{t phi} = -a b sin^2, det, inverse, and the a = 0 reduction to `SchwarzschildKS`.
+/// NOT a `DiagonalMetric` — the compile-time bound keeps scale-factor consumers off it.
+/// the physics needs the azimuthal momentum DOF, so only the D = 3 impl carries the metric;
+/// the D = 1 / D = 2 impls exist to satisfy generic kernel bounds and fail loud if reached.
+pub struct KerrKS<S> {
+    /// the geometric mass M (G = c = 1).
+    pub mass: S,
+    /// the specific angular momentum a = J/M, |a| < M (units of M).
+    pub spin: S,
+}
+
+impl<S: Scalar> KerrKS<S> {
+    #[inline]
+    fn sigma(&self, r: S, theta: S) -> S {
+        let ct = theta.cos();
+        r * r + self.spin * self.spin * ct * ct
+    }
+
+    /// b = 2 M r / Sigma — the kerr-schild scalar; gamma_rr = 1 + b, alpha^2 = 1/(1 + b).
+    #[inline]
+    fn b(&self, r: S, theta: S) -> S {
+        S::from_f64(2.0) * self.mass * r / self.sigma(r, theta)
+    }
+}
+
+impl<S: Scalar> Metric<S, 3> for KerrKS<S> {
+    fn geometry(&self) -> Geometry { Geometry::Spherical }
+    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
+    }
+
+    fn lapse(&self, x: Tensor<S, 3>) -> S {
+        S::ONE / (S::ONE + self.b(x[0], x[1])).sqrt()
+    }
+    fn lapse_sq(&self, x: Tensor<S, 3>) -> S {
+        S::ONE / (S::ONE + self.b(x[0], x[1]))
+    }
+    fn shift(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        let b = self.b(x[0], x[1]);
+        Tensor::new([b / (S::ONE + b), S::ZERO, S::ZERO])
+    }
+
+    fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
+        let (r, theta) = (x[0], x[1]);
+        let st = theta.sin();
+        let s2 = st * st;
+        let sig = self.sigma(r, theta);
+        let hb = S::ONE + self.b(r, theta);
+        let a = self.spin;
+        let g_rp = S::ZERO - a * s2 * hb;
+        let g_pp = s2 * (sig + a * a * s2 * hb);
+        Matrix::from_fn(|ii, jj| match (ii, jj) {
+            (0, 0) => hb,
+            (1, 1) => sig,
+            (2, 2) => g_pp,
+            (0, 2) | (2, 0) => g_rp,
+            _ => S::ZERO,
+        })
+    }
+    fn spatial_metric_inv(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
+        let (r, theta) = (x[0], x[1]);
+        let st = theta.sin();
+        let s2 = st * st;
+        let sig = self.sigma(r, theta);
+        let hb = S::ONE + self.b(r, theta);
+        let a = self.spin;
+        let gi_rr = (sig + a * a * s2 * hb) / (hb * sig);
+        let gi_rp = a / sig;
+        let gi_pp = S::ONE / (sig * s2);
+        Matrix::from_fn(|ii, jj| match (ii, jj) {
+            (0, 0) => gi_rr,
+            (1, 1) => S::ONE / sig,
+            (2, 2) => gi_pp,
+            (0, 2) | (2, 0) => gi_rp,
+            _ => S::ZERO,
+        })
+    }
+    fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
+        let (r, theta) = (x[0], x[1]);
+        self.sigma(r, theta) * theta.sin().abs() * (S::ONE + self.b(r, theta)).sqrt()
+    }
+
+    fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        let (r, theta, phi) = (x[0], x[1], x[2]);
+        let st = theta.sin();
+        Tensor::new([r * st * phi.cos(), r * st * phi.sin(), r * theta.cos()])
+    }
+    fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        let (cx, cy, cz) = (x[0], x[1], x[2]);
+        let r = (cx * cx + cy * cy + cz * cz).sqrt();
+        Tensor::new([r, (cz / r).acos(), cy.atan2(cx)])
+    }
+
+    /// proper volume element: sqrt(gamma) = Sigma sin(theta) sqrt(1 + b).
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S {
+        self.sqrt_det_gamma(x)
+    }
+}
+
+impl<S: Scalar> Metric<S, 1> for KerrKS<S> {
+    fn geometry(&self) -> Geometry { Geometry::Spherical }
+    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+    }
+    fn spatial_metric_inv(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+    }
+    fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+    }
+}
+
+impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
+    fn geometry(&self) -> Geometry { Geometry::Spherical }
+    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
+    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
+    fn spatial_metric(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
+        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+    }
+    fn spatial_metric_inv(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
+        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+    }
+    fn sqrt_det_gamma(&self, _x: Tensor<S, 2>) -> S {
+        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+    }
+}
 
 // ============================================================
 // cylindrical metric: x = (r, phi, z)
@@ -2119,6 +2272,84 @@ mod tests {
         assert!(approx(bh.lapse(xh), 1.0 / 2.0_f64.sqrt()));
         assert!(approx(bh.shift(xh)[0], 0.5));
         assert!(approx(bh.spatial_metric(xh)[(0, 0)], 2.0));
+    }
+
+    #[test]
+    fn kerr_metric_satisfies_the_adm_identities() {
+        // the spinning kerr-schild block against the KNOWN kerr line element: g_tt = b - 1,
+        // g_{t phi} = -a b sin^2(theta), g_{r phi} = -a sin^2(theta)(1 + b), det gamma =
+        // Sigma^2 sin^2(theta) (1 + b), and gamma * gamma^{-1} = identity — off the equator,
+        // inside and outside the horizon, prograde and retrograde.
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-12 * (1.0 + x.abs().max(y.abs()));
+        for &a in &[0.9_f64, -0.6, 0.3] {
+            let g = KerrKS { mass: 1.0_f64, spin: a };
+            for &(r, th) in &[(1.3_f64, 1.1_f64), (2.0, 0.7), (6.0, 1.9), (30.0, 1.4)] {
+                let x = Tensor::new([r, th, 0.0]);
+                let (st, ct) = (th.sin(), th.cos());
+                let sig = r * r + a * a * ct * ct;
+                let b = 2.0 * r / sig;
+                let gm = <KerrKS<f64> as Metric<f64, 3>>::spatial_metric(&g, x);
+                let gi = <KerrKS<f64> as Metric<f64, 3>>::spatial_metric_inv(&g, x);
+                let alpha = <KerrKS<f64> as Metric<f64, 3>>::lapse(&g, x);
+                let beta = <KerrKS<f64> as Metric<f64, 3>>::shift(&g, x);
+                // gamma * gamma^{-1} = 1
+                for ii in 0..3 {
+                    for jj in 0..3 {
+                        let mut acc = 0.0;
+                        for kk in 0..3 {
+                            acc += gm[(ii, kk)] * gi[(kk, jj)];
+                        }
+                        assert!(close(acc, if ii == jj { 1.0 } else { 0.0 }),
+                            "gamma inverse a={a} r={r}: ({ii},{jj}) = {acc}");
+                    }
+                }
+                // 4-metric identities from the ADM block.
+                let beta_low: [f64; 3] = std::array::from_fn(|ii| {
+                    (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum()
+                });
+                let g_tt = -alpha * alpha + (0..3).map(|ii| beta_low[ii] * beta[ii]).sum::<f64>();
+                assert!(close(g_tt, b - 1.0), "g_tt a={a} r={r}: {g_tt} vs {}", b - 1.0);
+                assert!(close(beta_low[2], -a * b * st * st), "g_t-phi a={a} r={r}");
+                assert!(close(gm[(0, 2)], -a * st * st * (1.0 + b)), "g_r-phi a={a} r={r}");
+                // determinant.
+                let det = gm[(1, 1)] * (gm[(0, 0)] * gm[(2, 2)] - gm[(0, 2)] * gm[(2, 0)]);
+                assert!(close(det, sig * sig * st * st * (1.0 + b)), "det gamma a={a} r={r}");
+                let sq = <KerrKS<f64> as Metric<f64, 3>>::sqrt_det_gamma(&g, x);
+                assert!(close(sq * sq, det), "sqrt_det_gamma a={a} r={r}");
+                // horizon-penetrating: the lapse is finite and positive everywhere sampled.
+                assert!(alpha > 0.0 && alpha.is_finite());
+            }
+        }
+    }
+
+    #[test]
+    fn kerr_at_zero_spin_reduces_to_schwarzschild_ks() {
+        // a = 0 must reproduce the schwarzschild kerr-schild ADM block exactly (different
+        // expressions, same values) at every position.
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-13 * (1.0 + x.abs().max(y.abs()));
+        let kerr = KerrKS { mass: 1.0_f64, spin: 0.0 };
+        let ks = SchwarzschildKS { mass: 1.0_f64 };
+        for &(r, th) in &[(1.5_f64, 0.9_f64), (2.0, 1.5707963), (10.0, 2.2)] {
+            let x = Tensor::new([r, th, 0.0]);
+            assert!(close(
+                <KerrKS<f64> as Metric<f64, 3>>::lapse(&kerr, x),
+                <SchwarzschildKS<f64> as Metric<f64, 3>>::lapse(&ks, x),
+            ));
+            let (bk, bs) = (
+                <KerrKS<f64> as Metric<f64, 3>>::shift(&kerr, x),
+                <SchwarzschildKS<f64> as Metric<f64, 3>>::shift(&ks, x),
+            );
+            let (gk, gs) = (
+                <KerrKS<f64> as Metric<f64, 3>>::spatial_metric(&kerr, x),
+                <SchwarzschildKS<f64> as Metric<f64, 3>>::spatial_metric(&ks, x),
+            );
+            for ii in 0..3 {
+                assert!(close(bk[ii], bs[ii]), "shift[{ii}] at r={r}");
+                for jj in 0..3 {
+                    assert!(close(gk[(ii, jj)], gs[(ii, jj)]), "gamma[{ii}{jj}] at r={r}");
+                }
+            }
+        }
     }
 
     #[test]

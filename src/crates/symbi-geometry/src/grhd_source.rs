@@ -419,6 +419,153 @@ mod tests {
         assert!(s[2].abs() < 1e-14 && s_tau.abs() < 1e-14, "flat gravity must vanish");
     }
 
+    // finite-difference mirror of the covariant contraction: the SAME T^{mu nu} algebra, but
+    // every metric derivative taken numerically — validates the Dual (autodiff) plumbing through
+    // an arbitrary theta-dependent, non-diagonal metric.
+    fn covariant_source_fd<M: crate::metric::Metric<f64, 3>>(
+        g: &M,
+        x: Tensor<f64, 3>,
+        e: f64,
+        v: Tensor<f64, 3>,
+        p: f64,
+    ) -> (Tensor<f64, 3>, f64) {
+        let eps = 1e-6;
+        let block = |x: Tensor<f64, 3>| -> [[f64; 4]; 4] {
+            let alpha = g.lapse(x);
+            let beta = g.shift(x);
+            let gm = g.spatial_metric(x);
+            let beta_low: [f64; 3] =
+                std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
+            let mut g4 = [[0.0; 4]; 4];
+            g4[0][0] = -alpha * alpha + (0..3).map(|ii| beta_low[ii] * beta[ii]).sum::<f64>();
+            for ii in 0..3 {
+                g4[0][ii + 1] = beta_low[ii];
+                g4[ii + 1][0] = beta_low[ii];
+                for jj in 0..3 {
+                    g4[ii + 1][jj + 1] = gm[(ii, jj)];
+                }
+            }
+            g4
+        };
+        let mut dg = [[[0.0; 4]; 4]; 3];
+        for kk in 0..2 {
+            // r and theta only; the phi derivative is zero by axisymmetry.
+            let mut xp = x;
+            let mut xm = x;
+            xp[kk] += eps;
+            xm[kk] -= eps;
+            let (bp, bm) = (block(xp), block(xm));
+            for aa in 0..4 {
+                for bb in 0..4 {
+                    dg[kk][aa][bb] = (bp[aa][bb] - bm[aa][bb]) / (2.0 * eps);
+                }
+            }
+        }
+        let alpha = g.lapse(x);
+        let beta = g.shift(x);
+        let gi = g.spatial_metric_inv(x);
+        let ia2 = 1.0 / (alpha * alpha);
+        let mut gi4 = [[0.0; 4]; 4];
+        gi4[0][0] = -ia2;
+        for ii in 0..3 {
+            gi4[0][ii + 1] = beta[ii] * ia2;
+            gi4[ii + 1][0] = beta[ii] * ia2;
+            for jj in 0..3 {
+                gi4[ii + 1][jj + 1] = gi[(ii, jj)] - beta[ii] * beta[jj] * ia2;
+            }
+        }
+        let mut uhat = [0.0; 4];
+        uhat[0] = 1.0 / alpha;
+        for ii in 0..3 {
+            uhat[ii + 1] = v[ii] - beta[ii] / alpha;
+        }
+        let mut t4 = [[0.0; 4]; 4];
+        for mm in 0..4 {
+            for nn in 0..4 {
+                t4[mm][nn] = e * uhat[mm] * uhat[nn] + p * gi4[mm][nn];
+            }
+        }
+        let s_mom = Tensor::<f64, 3>::from_fn(|kk| {
+            let mut acc = 0.0;
+            for mm in 0..4 {
+                for nn in 0..4 {
+                    acc += t4[mm][nn] * dg[kk][mm][nn];
+                }
+            }
+            0.5 * acc
+        });
+        let d = |mu: usize, aa: usize, bb: usize| if mu == 0 { 0.0 } else { dg[mu - 1][aa][bb] };
+        let mut t_gamma = 0.0;
+        for mm in 0..4 {
+            for nn in 0..4 {
+                let mut gt = 0.0;
+                for ss in 0..4 {
+                    gt += gi4[0][ss] * (d(mm, ss, nn) + d(nn, ss, mm) - d(ss, mm, nn));
+                }
+                t_gamma += t4[mm][nn] * 0.5 * gt;
+            }
+        }
+        let d_alpha = {
+            let mut out = [0.0; 3];
+            for kk in 0..2 {
+                let mut xp = x;
+                let mut xm = x;
+                xp[kk] += eps;
+                xm[kk] -= eps;
+                out[kk] = (g.lapse(xp) - g.lapse(xm)) / (2.0 * eps);
+            }
+            out
+        };
+        let work: f64 = (0..3).map(|kk| t4[0][kk + 1] * d_alpha[kk] / alpha).sum();
+        (s_mom, alpha * (work - t_gamma))
+    }
+
+    #[test]
+    fn covariant_source_on_kerr_matches_finite_differences() {
+        use crate::metric::KerrKS;
+        // a rotating state with all three velocity components, off the equator, sampled
+        // inside and outside the horizon — the autodiff contraction must agree with the
+        // finite-difference mirror through the non-diagonal theta-dependent metric.
+        let fd_close = |x: f64, y: f64, s: f64| (x - y).abs() < 1e-7 * (1.0 + s.abs());
+        for &a in &[0.9_f64, -0.5] {
+            let g = KerrKS { mass: 1.0_f64, spin: a };
+            let gd = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(a) };
+            let (e, p) = (2.3_f64, 0.05_f64);
+            for &(r, th) in &[(1.4_f64, 1.2_f64), (2.5, 0.8), (8.0, 1.9)] {
+                let x = Tensor::new([r, th, 0.0]);
+                let v = Tensor::new([-0.2_f64, 0.03, 0.02]);
+                let (s_ad, tau_ad) = grhd_covariant_source(&gd, x, e, v, p);
+                let (s_fd, tau_fd) = covariant_source_fd(&g, x, e, v, p);
+                for kk in 0..3 {
+                    assert!(fd_close(s_ad[kk], s_fd[kk], e),
+                        "S_mom[{kk}] a={a} r={r}: {} vs {}", s_ad[kk], s_fd[kk]);
+                }
+                assert!(fd_close(tau_ad, tau_fd, e), "S_tau a={a} r={r}: {tau_ad} vs {tau_fd}");
+            }
+        }
+    }
+
+    #[test]
+    fn covariant_source_on_kerr_at_zero_spin_matches_schwarzschild_ks() {
+        use crate::metric::{KerrKS, SchwarzschildKS};
+        // a = 0 kerr must reproduce the schwarzschild-KS source values for arbitrary
+        // rotating states (different expression paths, same physics).
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-11 * (1.0 + x.abs().max(y.abs()));
+        let kerr = KerrKS { mass: Dual::constant(1.0_f64), spin: Dual::constant(0.0) };
+        let ks = SchwarzschildKS { mass: Dual::constant(1.0_f64) };
+        let (e, p) = (2.3_f64, 0.05_f64);
+        for &(r, th) in &[(1.5_f64, 1.0_f64), (3.0, 1.9), (12.0, 1.3)] {
+            let x = Tensor::new([r, th, 0.0]);
+            let v = Tensor::new([-0.3_f64, 0.02, 0.015]);
+            let (sk, tk) = grhd_covariant_source(&kerr, x, e, v, p);
+            let (ss, ts) = grhd_covariant_source(&ks, x, e, v, p);
+            for kk in 0..3 {
+                assert!(close(sk[kk], ss[kk]), "S_mom[{kk}] r={r}: {} vs {}", sk[kk], ss[kk]);
+            }
+            assert!(close(tk, ts), "S_tau r={r}: {tk} vs {ts}");
+        }
+    }
+
     #[test]
     fn generic_source_matches_kerr_schild_closed_form() {
         let m = 1.0;

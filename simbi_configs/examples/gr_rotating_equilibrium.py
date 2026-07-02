@@ -33,7 +33,6 @@ from simbi.types import (
     Spacetime,
 )
 from simbi.types.typing import GasStateGenerator, InitialStateType
-
 from simbi_configs.examples.gr_fishbone_moncrief import RotatingEquilibrium
 
 
@@ -41,11 +40,14 @@ class GrRotatingEquilibrium(SimbiProblem):
     """the surface-free constant-l rotating equilibrium, all four faces pinned."""
 
     adiabatic_index: Annotated[
-        float, ProblemParam(4.0 / 3.0, description="adiabatic index gamma")
+        float,
+        ProblemParam(4.0 / 3.0, description="adiabatic index gamma"),
     ]
     spacetime: Annotated[
         Spacetime,
-        ProblemParam(Spacetime.SCHWARZSCHILD, description="background spacetime"),
+        ProblemParam(
+            Spacetime.SCHWARZSCHILD, description="background spacetime"
+        ),
     ]
     schwarzschild_mass: Annotated[
         float,
@@ -54,37 +56,50 @@ class GrRotatingEquilibrium(SimbiProblem):
     r_pressure_max: Annotated[
         float,
         ProblemParam(
-            16.0, cli=True, description="pressure-maximum radius of the rotation law"
+            16.0,
+            cli=True,
+            description="pressure-maximum radius of the rotation law",
         ),
     ]
     p_rho_ref: Annotated[
         float,
         ProblemParam(
-            1.0e-2, description="p/rho at the coldest domain point (thermal margin)"
+            1.0e-2,
+            description="p/rho at the coldest domain point (thermal margin)",
         ),
     ]
 
-    nr: Annotated[int, ProblemParam(96, cli=True, description="radial resolution")]
+    nr: Annotated[
+        int, ProblemParam(96, cli=True, description="radial resolution")
+    ]
     npolar: Annotated[
         int, ProblemParam(32, cli=True, description="polar (theta) resolution")
     ]
     resolution: Annotated[
         tuple[int, int],
-        ProblemParam((0, 0), description="grid resolution (nr, npolar) — computed"),
+        ProblemParam(
+            (0, 0), description="grid resolution (nr, npolar) — computed"
+        ),
     ]
     theta_halfwidth: Annotated[
         float,
-        ProblemParam(0.3, description="half-width of the equatorial theta wedge (rad)"),
+        ProblemParam(
+            0.3, description="half-width of the equatorial theta wedge (rad)"
+        ),
     ]
     bounds: Annotated[
         list[tuple[float, float]],
-        ProblemParam([(0.0, 0.0), (0.0, 0.0)], description="domain bounds — computed"),
+        ProblemParam(
+            [(0.0, 0.0), (0.0, 0.0)], description="domain bounds — computed"
+        ),
     ]
     coord_system: Annotated[
         CoordSystem,
         ProblemParam(CoordSystem.SPHERICAL, description="coordinate system"),
     ]
-    regime: Annotated[Regime, ProblemParam(Regime.RHD, description="physics regime")]
+    regime: Annotated[
+        Regime, ProblemParam(Regime.RHD, description="physics regime")
+    ]
     x1_spacing: Annotated[
         CellSpacing,
         ProblemParam(CellSpacing.LOG, description="log-spaced radial zones"),

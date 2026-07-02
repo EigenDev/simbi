@@ -168,6 +168,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             symbi_geometry::Spacetime::Minkowski => "",
             symbi_geometry::Spacetime::Schwarzschild => "_schw",
             symbi_geometry::Spacetime::KerrSchild => "_ks",
+        symbi_geometry::Spacetime::Kerr => "_kerr",
         };
         let (name, scalars) = if st_sfx.is_empty() {
             let name = format!("rhd_c2p{geom_sfx}_{D}d");
