@@ -105,3 +105,58 @@ pub fn imhd_ghost_fill_gv(ndim: usize, ncomp: usize) -> (GvKernel, Vec<(String, 
     }
     (end_trace(), writes)
 }
+
+
+/// the SPINNING-KERR lattice-map ghost fill — `iso_ghost_fill_gv` (2D grid, swirl DOF = 3)
+/// with the azimuthal ghost copied through the ANGULAR-MOMENTUM variable
+/// w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r instead of raw v^phi. a frame-dragging
+/// state (S_phi = 0) satisfies w = 0 at every radius; a raw v^phi copy plants the source
+/// cell's dragging velocity at the ghost's DIFFERENT (r, theta), violating the dragging
+/// relation there and generating boundary S_phi at truncation scale. the w copy keeps the
+/// pulled-back state on the dragging manifold exactly:
+///   v^phi(ghost) = [v^phi(src) + q(src) v^r(src)] - q(ghost) v^r(ghost),
+/// with q = gamma_{r phi}/gamma_{phi phi} evaluated at each cell's VOLUME-WEIGHTED centroid
+/// (the c2p metric point, so the cellwise cancellation transfers at roundoff) and
+/// v^r(ghost) carrying the wall map's vel_sign. q(src) needs the source cell's position, an
+/// integer map expression — `gv_axis_face_at_index` evaluates the coordinate map there.
+/// reduces to the plain copy when gamma_{r phi} = 0, so it is baked for Kerr only.
+pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_geometry::{KerrKS, Metric};
+    begin_trace();
+    let ndim = 2usize;
+    let src = gv_lattice_source(ndim);
+    let vel_sign: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("vel_sign_{ax}"))).collect();
+    let rho = gv_load_at("prim_rho", "prim.rho", &src);
+    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), rho.node())];
+    let v0_src = gv_load_at("prim_v0", FieldRef::PrimVel(0), &src);
+    let v0 = v0_src * vel_sign[0];
+    writes.push(("prim_v0".to_string(), FieldRef::PrimVel(0).into(), v0.node()));
+    let v1 = gv_load_at("prim_v1", FieldRef::PrimVel(1), &src) * vel_sign[1];
+    writes.push(("prim_v1".to_string(), FieldRef::PrimVel(1).into(), v1.node()));
+    // q at the volume-weighted centroid of the cell at integer indices (i, j):
+    // r_c = 0.75 (rh^4 - rl^4)/(rh^3 - rl^3), theta_c = [sin - t cos]_{tl}^{th}/(cos tl - cos th).
+    let mass = Gv::scalar("schwarzschild_mass");
+    let spin = Gv::scalar("kerr_spin");
+    let q_at = |i: Gv, j: Gv| -> Gv {
+        let rl = gv_axis_face_at_index(0, spacing[0], i);
+        let rh = gv_axis_face_at_index(0, spacing[0], i + Gv::ONE);
+        let r_c = Gv::from_f64(0.75) * (gv_powi(rh, 4) - gv_powi(rl, 4))
+            / (gv_powi(rh, 3) - gv_powi(rl, 3));
+        let tl = gv_axis_face_at_index(1, spacing[1], j);
+        let th = gv_axis_face_at_index(1, spacing[1], j + Gv::ONE);
+        let th_c = ((th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos()))
+            / (tl.cos() - th.cos());
+        let m = KerrKS { mass, spin };
+        let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+            &m, Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+        );
+        gm[(0, 2)] / gm[(2, 2)]
+    };
+    let v2_src = gv_load_at("prim_v2", FieldRef::PrimVel(2), &src);
+    let w_src = v2_src + q_at(Gv::of(src[0]), Gv::of(src[1])) * v0_src;
+    let v2 = w_src - q_at(Gv::coord(0), Gv::coord(1)) * v0;
+    writes.push(("prim_v2".to_string(), FieldRef::PrimVel(2).into(), v2.node()));
+    let pre = gv_load_at("prim_pre", "prim.pre", &src);
+    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), pre.node()));
+    (end_trace(), writes)
+}

@@ -172,9 +172,18 @@ pub(crate) fn is_cartesian_uniform(coords: Coords, spacing: &[Spacing]) -> bool 
 /// log-slope for Log). the integer coord promotes to f64 against the scalars at lowering.
 pub(crate) fn gv_axis_face_at(ax: usize, spacing: Spacing, offset: i64) -> Gv {
     let coord = Gv::coord(ax as u8);
+    let i = if offset == 0 { coord } else { coord + Gv::from_f64(offset as f64) };
+    gv_axis_face_at_index(ax, spacing, i)
+}
+
+
+/// the lower face position of the cell at an ARBITRARY integer index expression `i` along
+/// grid axis `ax` — the index-general form of [`gv_axis_face_at`] (which passes the thread
+/// coord). the lattice-map ghost fill evaluates metric coefficients at the SOURCE cell,
+/// whose index is a runtime map expression, not a thread-relative constant offset.
+pub(crate) fn gv_axis_face_at_index(ax: usize, spacing: Spacing, i: Gv) -> Gv {
     let start = Gv::scalar(&format!("x_lo_{ax}"));
     let param = Gv::scalar(&format!("dx_{ax}"));
-    let i = if offset == 0 { coord } else { coord + Gv::from_f64(offset as f64) };
     match spacing {
         Spacing::Uniform => start + i * param,                      // start + i*dx
         Spacing::Log => start * Gv::from_f64(10.0).powf(i * param), // start * 10^(i*slope)

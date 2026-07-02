@@ -8,14 +8,15 @@
 # the gates split by what double precision can promise. IDENTITY gates demand
 # machine precision: the ONE-STEP matched-dt kerr(a = 0) vs kerr-schild comparison
 # (same state, same dt -> only ULP reassociation differs), the one-step S_phi from
-# uniform data (nothing generates it in one step), and the spin-PARITY of full
+# uniform data (nothing generates it in one step), the spin-PARITY of full
 # trajectories (every kernel operation is IEEE parity-exact in a, and the +-a runs
-# share the dt sequence, so v^phi is BITWISE odd and rho bitwise even). CONSISTENCY
-# gates are truncation-bounded with convergence teeth: the full-trajectory a = 0
-# cross-check (the two spacetimes use different CFL maps, so dt sequences differ
-# and trajectories separate at the truncation floor) and the S_phi generation rate
-# (independent reconstruction of v^r/v^phi breaks the exact dragging cancellation
-# at faces; the residual converges under refinement).
+# share the dt sequence, so v^phi is BITWISE odd and rho bitwise even), and the
+# FULL-TRAJECTORY S_phi of zero-angular-momentum infall (both the flux and the
+# ghost fill carry the angular-momentum variable w = v^phi + (gamma_{r phi}/
+# gamma_{phi phi}) v^r, so a w = 0 state has no S_phi generator anywhere — interior
+# faces or boundary ghosts). CONSISTENCY gates are truncation-bounded: the
+# full-trajectory a = 0 cross-check (the two spacetimes use different CFL maps, so
+# dt sequences differ and trajectories separate at the truncation floor).
 #
 # frame dragging: infalling gas seeded with ZERO angular momentum. axisymmetry
 # keeps the S_phi law source-free (S_phi stays at truncation scale) — yet the
@@ -188,14 +189,15 @@ def test_frame_dragging_twists_zero_angular_momentum_infall() -> None:
     out_m = _run("kerr", -spin)
 
     assert out["pre"].min() > 0.0, f"pressure went non-positive: {out['pre'].min():.3e}"
-    # the S_phi law is source-free (axisymmetry). the flux kernel reconstructs the
-    # angular-momentum-carrying variable w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r,
-    # so interior reconstruction generates NO angular momentum (dragging states have w = 0
-    # to roundoff; interior |S_phi| measured 6.8e-9 at 96x16); the residual generation is
-    # boundary-ghost truncation (an outflow copy cannot satisfy the dragging relation at
-    # the shifted ghost radius) — measured 1.0e-3 at 96x16, shrinking under refinement.
-    assert np.abs(out["m3"]).max() < 8e-3, (
-        f"S_phi beyond the boundary-truncation scale: {np.abs(out['m3']).max():.3e}"
+    # the S_phi law is source-free (axisymmetry) and BOTH S_phi generators are closed:
+    # the flux kernel reconstructs the angular-momentum-carrying variable
+    # w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r (dragging states have w = 0 to
+    # roundoff at every face), and the kerr ghost fill copies w too (a raw v^phi copy
+    # would violate the dragging relation at the ghost's shifted radius — that boundary
+    # generator alone put |S_phi| at 1.0e-3). S_phi is conserved to ROUNDOFF over the
+    # full trajectory: measured 1.8e-15 at 96x16 over ~2000 steps.
+    assert np.abs(out["m3"]).max() < 1e-12, (
+        f"S_phi beyond roundoff: {np.abs(out['m3']).max():.3e}"
     )
     # frame dragging: with S_phi = 0 the recovered azimuthal velocity is PURELY the
     # non-diagonal inverse-metric lift v^phi = gamma^{phi r} S_r / (tau + D + p),
@@ -222,14 +224,10 @@ def test_frame_dragging_twists_zero_angular_momentum_infall() -> None:
     assert e_flip < 1e-14, f"v^phi is not spin-antisymmetric: {e_flip:.3e}"
     e_even = np.abs(out["rho"] - out_m["rho"]).max() / np.abs(out["rho"]).max()
     assert e_even < 1e-14, f"rho is not spin-even: {e_even:.3e}"
-    # the residual S_phi is BOUNDARY-sourced (the outflow ghost copies v^phi, which cannot
-    # satisfy the dragging relation at the shifted ghost radius; the interior sits at the
-    # 6.8e-9 roundoff scale) and advects inward, so it shrinks — but boundary-layer maxima
-    # converge slowly (measured 1.0e-3 -> 9.0e-4). copying the angular-momentum variable w
-    # in the kerr ghost fill is the identified fix that would remove this generator entirely.
+    # roundoff-scale S_phi at the refined resolution too (measured 2.2e-15 at 192x32) —
+    # a truncation-scale generator would grow visible orders above this floor.
     hi = _run_m3_max(2 * _NR, 2 * _NPOLAR)
-    lo = np.abs(out["m3"]).max()
-    assert hi < lo, f"S_phi generation grows under refinement: {lo:.3e} -> {hi:.3e}"
+    assert hi < 1e-12, f"S_phi beyond roundoff at 192x32: {hi:.3e}"
 
 
 def _run_m3_max(nr: int, npolar: int) -> float:

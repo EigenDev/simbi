@@ -1201,6 +1201,21 @@ fn gen_iso_ghost_fill(out_dir: &str, ndim: u8, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the spinning-kerr ghost fill: the swirl prim pullback with the azimuthal ghost copied
+// through the angular-momentum variable w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so
+// frame-dragging (w = 0) states stay on the dragging manifold at the ghost's own (r, theta).
+// evaluates the metric at both the ghost and SOURCE centroids, so it carries the spacing
+// suffix (face positions) + the mass/spin scalars; baked only for the kerr spacetime.
+fn gen_rhd_kerr_ghost_fill(out_dir: &str, geom: Geom) {
+    assert!(geom.spacetime == Spacetime::Kerr && geom.ncomp == 3, "the kerr ghost fill is swirl-only");
+    let name = format!(
+        "rhd_ghost_fill{}{}{}_2d",
+        geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+    );
+    let (k, writes) = symbi_discretize::gv::rhd_kerr_ghost_fill_gv(&geom.spacing);
+    emit_gv(out_dir, &name, 2, &k, &writes);
+}
+
 // P2 (curvilinear): the SPHERICAL mass-law godunov — `rho_new = rho - dt*div(F)` with the
 // analytic AREA-WEIGHTED divergence `(1/V)(F_hi*A_hi - F_lo*A_lo)` from the gv `cell_geometry_gv`.
 // a host test extracts div = -rho_new (rho=0, dt=1) and bit-diffs it against the analytic
@@ -1404,6 +1419,7 @@ fn main() {
         for dir in 0..2 {
             gen_rhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
         }
+        gen_rhd_kerr_ghost_fill(&out_dir, geom.clone());
     }
     // the snapshot + ghost fill are spacetime- and spacing-independent (pure copies /
     // lattice pullbacks over the lifted component set): one instance each.

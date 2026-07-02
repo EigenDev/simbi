@@ -247,11 +247,21 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the SHARED lattice-map pullback (iso_ghost_fill_{D}d): the EOS-generic
         // prim pullback (rho/vel_0..DOF-1/pre), in-place, per ghost region. the DOF-lift
-        // tag (spherical swirl) selects the instance carrying the extra velocity.
+        // tag (spherical swirl) selects the instance carrying the extra velocity. the
+        // spinning-kerr instance copies the azimuthal ghost through the angular-momentum
+        // variable w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r (dragging-consistent at
+        // the ghost's own radius), so it reads the metric scalars + the radial grid map.
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
-        let name = format!("iso_ghost_fill{geom_sfx}_{D}d");
+        let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
+        let name = if is_kerr {
+            let sp_sfx = spacing_suffix(&sim.geom.maps);
+            format!("rhd_ghost_fill{geom_sfx}{sp_sfx}_kerr_{D}d")
+        } else {
+            format!("iso_ghost_fill{geom_sfx}_{D}d")
+        };
+        let (x_lo, dx) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
 
         GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(
             |region, p| {
@@ -260,7 +270,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                     outputs.push(&sim.fields.prim.vel[k]);
                 }
                 outputs.push(pre);
-                // ints: map_type_0..{D-1}, arg_0..{D-1}. scalars: vel_sign_0..{D-1}.
+                // ints: map_type_0..{D-1}, arg_0..{D-1}. scalars: vel_sign_0..{D-1} (+ the
+                // metric mass/spin and the LOG-AWARE grid scalars on the kerr instance).
                 // params BY NAME via the type-sorted manifest: map_type/arg are INT lanes, vel_sign
                 // FLOAT — each routed to its ABI tail by the kernel's declared sort (the int ⊔ float
                 // coproduct).
@@ -275,6 +286,22 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                         ScalarBind::Ref(ScalarRef::VelSign(ax)) => {
                             Sc::from_f64(p.vel_sign[*ax as usize])
                         }
+                        ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
+                            sim.geom.spacetime_scalars.iter()
+                                .find(|(n, _)| n == "schwarzschild_mass")
+                                .map(|(_, v)| *v)
+                                .expect("kerr ghost fill needs schwarzschild_mass"),
+                        ),
+                        ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
+                            sim.geom.spacetime_scalars.iter()
+                                .find(|(n, _)| n == "kerr_spin")
+                                .map(|(_, v)| *v)
+                                .expect("kerr ghost fill needs kerr_spin"),
+                        ),
+                        ScalarBind::Ref(other) => Sc::from_f64(
+                            geom_scalar(&x_lo, &dx, *other)
+                                .unwrap_or_else(|| panic!("ghost_fill: unexpected scalar {other:?}")),
+                        ),
                         o => panic!("ghost_fill: unexpected scalar {o:?}"),
                     },
                 );
