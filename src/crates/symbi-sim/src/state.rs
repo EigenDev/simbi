@@ -1329,6 +1329,10 @@ pub struct FieldStore<
     // ---- time state ----
     pub time: f64,
     pub dt: f64,
+    /// an upper clamp on the CFL time step (`dt = min(dt_cfl, max_dt)`); 0 disables. pins the
+    /// dt SEQUENCE across runs whose CFL estimators differ (kernel cross-validation, temporal
+    /// convergence studies) — two clamped runs from the same state take bitwise-identical steps.
+    pub max_dt: f64,
     pub iteration: u64,
     pub cfl: f64,
     pub timestepping: Timestepping,
@@ -1682,7 +1686,7 @@ where
         Ok(Self {
             store: FieldStore {
                 fields, workspace, geom, boundaries,
-                time: 0.0, dt: 0.0, iteration: 0, cfl, timestepping,
+                time: 0.0, dt: 0.0, max_dt: 0.0, iteration: 0, cfl, timestepping,
                 motion: MotionState::static_mesh(),
                 motion_law: None,
                 immersed: None,

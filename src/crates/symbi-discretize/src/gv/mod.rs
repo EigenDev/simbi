@@ -111,6 +111,15 @@ fn plm_theta_gv(
     let qm1 = Gv::field_shifted(key, runtime.clone(), ndim, dir, -1);
     let q0 = Gv::field_shifted(key, runtime.clone(), ndim, dir, 0);
     let qp1 = Gv::field_shifted(key, runtime, ndim, dir, 1);
+    plm_theta_from_stencil(qm2, qm1, q0, qp1, theta)
+}
+
+
+/// the theta-MC / van-leer PLM face pair from FOUR stencil VALUES (offsets -2..+1 along the
+/// sweep) — the limiter core of `plm_theta_gv`, exposed so a reconstruction can run in a
+/// TRANSFORMED variable (values built from several fields + analytic coefficients) rather
+/// than a raw field.
+pub(crate) fn plm_theta_from_stencil(qm2: Gv, qm1: Gv, q0: Gv, qp1: Gv, theta: Gv) -> (Gv, Gv) {
     let half = Gv::from_f64(0.5);
     let slope = |vl: Gv, vc: Gv, vr: Gv| {
         let a = vc - vl;

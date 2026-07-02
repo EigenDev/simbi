@@ -644,7 +644,10 @@ where
             let scale = RATIO.pow(ll as u32) as f64;
             dt_cfl = dt_cfl.min(lvl.kernels.cfl(&lvl.state) * scale);
         }
-        dt_cfl
+        // the user clamp (max_dt > 0): pins the dt sequence across runs whose CFL
+        // estimators differ. applied AFTER the raw-cfl crash heuristics elsewhere.
+        let clamp = self.levels[0].state.max_dt;
+        if clamp > 0.0 { dt_cfl.min(clamp) } else { dt_cfl }
     }
 
     /// one root step: cfl-limited dt (clamped to t_final), the recursive level
@@ -682,6 +685,8 @@ where
             return;
         }
         let root = &mut self.levels[0];
+        let user_clamp = root.state.max_dt;
+        let dt_cfl = if user_clamp > 0.0 { dt_cfl.min(user_clamp) } else { dt_cfl };
         let dt = dt_cfl.min(t_final - root.state.time);
         check_dt_or_panic(dt, root.state.iteration, root.state.time);
         root.state.dt = dt;

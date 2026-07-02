@@ -238,7 +238,7 @@ pub struct CellGeometryGv {
 
 /// `a^n` for a small literal power `n >= 1` as repeated multiply — exact (no Pow), so the
 /// analytic radial integrals stay byte-form-identical across rebuilds.
-fn gv_powi(a: Gv, n: u32) -> Gv {
+pub(crate) fn gv_powi(a: Gv, n: u32) -> Gv {
     let mut acc = a;
     for _ in 1..n {
         acc = acc * a;

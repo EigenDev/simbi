@@ -424,6 +424,64 @@ where
         }
         Spacetime::Minkowski => unreachable!("the GR flux is baked only for a curved spacetime"),
     };
+    // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying
+    // variable w = v^phi + (gamma_{r phi} / gamma_{phi phi}) v^r, so a zero-angular-momentum
+    // (S_phi = 0) state — whose frame-dragging v^phi exactly cancels against v^r in the covariant
+    // lowering — reconstructs to a face pair that STILL cancels: S_phi(face) = E gamma_{phi phi} w
+    // exactly, and w = 0 to roundoff for dragging states. reconstructing v^phi raw mixes the
+    // geometric dragging profile into the limited slopes and generates S_phi at truncation level.
+    // the per-offset coefficient q = gamma_{r phi}/gamma_{phi phi} is evaluated at each stencil
+    // cell's VOLUME-WEIGHTED centroid — the exact position the c2p inverted the metric at, so the
+    // cell-wise cancellation transfers to the stencil values at roundoff; the face coefficient
+    // comes from the SAME face matrices the riemann states lower with. gamma_{r phi} vanishes for
+    // every other background, so this block is kerr-only.
+    let (left, right) = if spacetime == Spacetime::Kerr {
+        assert!(D == 3, "the kerr flux carries the swirl DOF");
+        let mass = Gv::scalar("schwarzschild_mass");
+        let spin = Gv::scalar("kerr_spin");
+        // q at the volume-weighted centroid of the cell `off` steps along the sweep axis; the
+        // transverse coordinate sits at THIS cell's centroid (the stencil shifts one axis only).
+        let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+        let q_at = |off: i32| -> Gv {
+            let (r_c, th_c) = if dir == 0 {
+                let rl = gv_axis_face_at(0, spacing[0], off as i64);
+                let rh = gv_axis_face_at(0, spacing[0], off as i64 + 1);
+                let num = gv_powi(rh, 4) - gv_powi(rl, 4);
+                let den = gv_powi(rh, 3) - gv_powi(rl, 3);
+                (Gv::from_f64(0.75) * num / den, geo.centroid[1])
+            } else {
+                let tl = gv_axis_face_at(1, spacing[1], off as i64);
+                let th = gv_axis_face_at(1, spacing[1], off as i64 + 1);
+                // volume-weighted polar centroid: [(sin - t cos)]_{tl}^{th} / (cos tl - cos th).
+                let num = (th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos());
+                (geo.centroid[0], num / (tl.cos() - th.cos()))
+            };
+            let m = KerrKS { mass, spin };
+            let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+                &m, Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]),
+            );
+            gm_c[(0, 2)] / gm_c[(2, 2)]
+        };
+        let theta_lim = Gv::scalar("theta");
+        let stencil = |off: i32| -> Gv {
+            let vr = Gv::field_shifted("prim_v0", FieldRef::PrimVel(0), ndim as u8, dir, off);
+            let vp = Gv::field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
+            vp + q_at(off) * vr
+        };
+        let (w_l, w_r) = plm_theta_from_stencil(
+            stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim,
+        );
+        // back to v^phi with the FACE coefficient — the same matrices the riemann states lower
+        // with, so the face cancellation is exact to roundoff.
+        let q_face = gamma[(0, 2)] / gamma[(2, 2)];
+        let mut lv = left;
+        let mut rv = right;
+        lv.vel[2] = w_l - q_face * lv.vel[0];
+        rv.vel[2] = w_r - q_face * rv.vel[0];
+        (lv, rv)
+    } else {
+        (left, right)
+    };
     let regime = RhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
     let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
     let flux = hlle_with_speeds(&regime, &eos, &left, &right, &nhat, vface, s_l, s_r);

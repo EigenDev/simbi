@@ -180,6 +180,15 @@ class SimbiProblem(BaseModel):
             "when spacetime is kerr",
         ),
     ]
+    max_dt: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            description="upper clamp on the CFL time step (dt = min(dt_cfl, max_dt)); "
+            "0 disables. pins the dt sequence across runs whose CFL estimators differ",
+        ),
+    ]
     regime: Annotated[Regime, ProblemParam(..., description="physics regime")]
     bounds: Annotated[
         Sequence[Sequence[float]],

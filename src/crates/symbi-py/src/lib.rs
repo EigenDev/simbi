@@ -62,6 +62,7 @@ struct Config {
     // the Schwarzschild geometric mass M (G = c = 1); only meaningful when spacetime = schwarzschild.
     schwarzschild_mass: f64,
     kerr_spin: f64,
+    max_dt: f64,
     cyl_plane: CylPlane,
     dims: usize,
     n_cells: [usize; 3],
@@ -450,6 +451,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .unwrap_or_else(|| "minkowski".to_string()),
         schwarzschild_mass: get_f64_or(dict, "schwarzschild_mass", 0.0),
         kerr_spin: get_f64_or(dict, "kerr_spin", 0.0),
+        max_dt: get_f64_or(dict, "max_dt", 0.0),
         cyl_plane,
         dims,
         n_cells,
@@ -1588,6 +1590,9 @@ fn axis_maps<const D: usize>(cfg: &Config) -> Option<[symbi_geometry::AxisMap; D
 macro_rules! into_hierarchy {
     ($sim:expr, $kernels:expr, $cfg:expr, $d:literal, $make:expr) => {{
         let mut sim = $sim;
+        // the user dt clamp (0 = disabled): pins the dt sequence across runs whose CFL
+        // estimators differ (kernel cross-validation, temporal convergence studies).
+        sim.max_dt = $cfg.max_dt;
         // the physical clock starts at start_time (t0): the IC is the state AT t0, and a moving-mesh
         // a(t) must be sampled at the physical time, not an elapsed-from-0 clock. (default 0 -> no
         // change for the common case.)

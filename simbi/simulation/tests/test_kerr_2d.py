@@ -5,11 +5,17 @@
 # (the `_kerr` swirl kernel family: non-diagonal gamma_{r phi}, theta-dependent
 # lapse, radial shift, Sigma sin(theta) covariant measure).
 #
-# zero-spin cross-check: kerr at a = 0 is the SAME physics as the a = 0
-# kerr-schild chart through DIFFERENT kernel expressions (Sigma = r^2 + a^2 cos^2
-# with a = 0 adds exact-zero terms), so a uniform-gas accretion transient run on
-# both spacetimes must agree to near roundoff — the wiring-exactness gate for the
-# whole `_kerr` family (metric, geometry moments, sources, shift, wave speeds).
+# the gates split by what double precision can promise. IDENTITY gates demand
+# machine precision: the ONE-STEP matched-dt kerr(a = 0) vs kerr-schild comparison
+# (same state, same dt -> only ULP reassociation differs), the one-step S_phi from
+# uniform data (nothing generates it in one step), and the spin-PARITY of full
+# trajectories (every kernel operation is IEEE parity-exact in a, and the +-a runs
+# share the dt sequence, so v^phi is BITWISE odd and rho bitwise even). CONSISTENCY
+# gates are truncation-bounded with convergence teeth: the full-trajectory a = 0
+# cross-check (the two spacetimes use different CFL maps, so dt sequences differ
+# and trajectories separate at the truncation floor) and the S_phi generation rate
+# (independent reconstruction of v^r/v^phi breaks the exact dragging cancellation
+# at faces; the residual converges under refinement).
 #
 # frame dragging: infalling gas seeded with ZERO angular momentum. axisymmetry
 # keeps the S_phi law source-free (S_phi stays at truncation scale) — yet the
@@ -87,6 +93,76 @@ def _run(spacetime: str, spin: float) -> dict:
     return out
 
 
+def _one_step(spacetime: str, spin: float, nr: int = _NR, npolar: int = _NPOLAR) -> dict:
+    with tempfile.TemporaryDirectory() as d:
+        d = d + "/"
+        p = _kerr_problem(d, spacetime, spin)
+        p.nr = nr
+        p.npolar = npolar
+        p.resolution = (nr, npolar)
+        # far below the CFL dt: both spacetimes take exactly this single step, so the
+        # comparison isolates the KERNELS from any dt-sequence difference.
+        p.end_time = 1e-6
+        p.checkpoint_interval = 1.0
+        runner.run(p, compute_mode="cpu")
+        with h5py.File(glob.glob(os.path.join(d, "*final*.h5"))[0]) as h:
+            c = h["level_0/conserved"]
+            return {k: c[k][:] for k in ("den", "m1", "m2", "m3", "nrg")}
+
+
+@needs_backend
+def test_kerr_zero_spin_one_step_is_machine_exact() -> None:
+    # the machine-precision wiring gate: same state, same dt, one step — the a = 0 kerr
+    # kernels (Sigma = r^2 + a^2 cos^2 folding to exact zeros) against the kerr-schild
+    # kernels. measured: den/nrg/m3 BITWISE equal, m1 at 1e-15 of its own scale, m2 at the
+    # roundoff of the exact well-balanced cancellation (|m2| ~ 4e-23 while the real update
+    # scale m1 ~ 2e-7). the absolute floor covers the cancellation-noise fields.
+    kerr0 = _one_step("kerr", 0.0)
+    ks = _one_step("kerr_schild", 0.0)
+    for k in ("den", "m1", "m2", "m3", "nrg"):
+        diff = np.abs(kerr0[k] - ks[k]).max()
+        bound = 1e-12 * np.abs(ks[k]).max() + 1e-18
+        assert diff <= bound, f"one-step {k}: |diff| {diff:.3e} exceeds {bound:.3e}"
+
+
+@needs_backend
+def test_one_step_generates_no_angular_momentum() -> None:
+    # from uniform data (v = 0 everywhere) nothing sources or fluxes S_phi in a single
+    # step: the axisymmetric covariant source is identically zero and the HLL flux of a
+    # uniform state is the (zero) analytic flux. measured 1.7e-15.
+    out = _one_step("kerr", 0.9)
+    assert np.abs(out["m3"]).max() < 1e-12, (
+        f"one-step S_phi from uniform data: {np.abs(out['m3']).max():.3e}"
+    )
+
+
+@needs_backend
+def test_kerr_zero_spin_matched_dt_trajectory_is_machine_exact() -> None:
+    # with the dt sequence PINNED (max_dt below both charts' CFL floors), the kerr(a = 0)
+    # and kerr-schild trajectories differ only by ULP reassociation: measured 7e-15 on the
+    # flowing fields over ~10^4 identical steps, m3 bitwise zero. m2 is the roundoff residue
+    # of the exact well-balanced cancellation (noise-scale field) — normalized by the flow
+    # scale like the transient check.
+    def traj(spacetime):
+        with tempfile.TemporaryDirectory() as d:
+            d = d + "/"
+            p = _kerr_problem(d, spacetime, 0.0)
+            p.max_dt = 1e-3
+            runner.run(p, compute_mode="cpu")
+            with h5py.File(glob.glob(os.path.join(d, "*final*.h5"))[0]) as h:
+                c = h["level_0/conserved"]
+                return {k: c[k][:] for k in ("den", "m1", "m2", "m3", "nrg")}
+
+    kerr0 = traj("kerr")
+    ks = traj("kerr_schild")
+    m_scale = np.abs(ks["m1"]).max()
+    for k in ("den", "m1", "m2", "m3", "nrg"):
+        scale = max(np.abs(ks[k]).max(), 1e-3 * m_scale)
+        e = np.abs(kerr0[k] - ks[k]).max() / scale
+        # 1e4 steps of ULP accumulation put the cancellation-noise m2 at ~1e-12 scaled.
+        assert e < 1e-11, f"matched-dt {k}: scaled max diff {e:.3e}"
+
+
 @needs_backend
 def test_kerr_at_zero_spin_matches_the_ks_chart() -> None:
     kerr = _run("kerr", 0.0)
@@ -112,13 +188,14 @@ def test_frame_dragging_twists_zero_angular_momentum_infall() -> None:
     out_m = _run("kerr", -spin)
 
     assert out["pre"].min() > 0.0, f"pressure went non-positive: {out['pre'].min():.3e}"
-    # the S_phi law is source-free (axisymmetry), so angular momentum is generated only at
-    # truncation level: the exact per-cell dragging cancellation gamma_{phi r} v^r +
-    # gamma_{phi phi} v^phi = 0 breaks under independent reconstruction of the two velocities,
-    # and HLL transports the residual. measured 5.2e-2 against near-horizon |S_r| ~ 10
-    # (relative ~1e-3) at 96x16; an order-unity S_phi mishandling sits far above.
-    assert np.abs(out["m3"]).max() < 0.15, (
-        f"S_phi beyond truncation scale: {np.abs(out['m3']).max():.3e}"
+    # the S_phi law is source-free (axisymmetry). the flux kernel reconstructs the
+    # angular-momentum-carrying variable w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r,
+    # so interior reconstruction generates NO angular momentum (dragging states have w = 0
+    # to roundoff); the residual generation is boundary-ghost truncation (an outflow copy
+    # cannot satisfy the dragging relation at the shifted ghost radius) — measured 2.2e-3
+    # at 96x16 (24x below the raw-v^phi reconstruction), converging under refinement.
+    assert np.abs(out["m3"]).max() < 8e-3, (
+        f"S_phi beyond the boundary-truncation scale: {np.abs(out['m3']).max():.3e}"
     )
     # frame dragging: with S_phi = 0 the recovered azimuthal velocity is PURELY the
     # non-diagonal inverse-metric lift v^phi = gamma^{phi r} S_r / (tau + D + p),
@@ -138,12 +215,30 @@ def test_frame_dragging_twists_zero_angular_momentum_infall() -> None:
         "frame dragging does not decay outward: "
         f"inner {np.abs(vphi_inner).mean():.3e} vs outer {np.abs(vphi_outer).mean():.3e}"
     )
-    # antisymmetry: the twist is odd in the spin while the scalar flow is even.
-    e_flip = np.abs(out["v3"] + out_m["v3"]) / (np.abs(out["v3"]) + 1e-300)
-    assert e_flip.max() < 1e-9, (
-        f"v^phi is not spin-antisymmetric: max rel {e_flip.max():.3e}"
-    )
-    e_even = np.abs(out["rho"] - out_m["rho"]) / np.abs(out["rho"])
-    assert e_even.max() < 1e-9, (
-        f"rho is not spin-even: max rel {e_even.max():.3e}"
-    )
+    # parity: every kernel operation is IEEE parity-exact in the spin and the +-a runs
+    # share the dt sequence (the light-cone CFL map is even in a), so the trajectory-level
+    # antisymmetry is BITWISE (measured exactly 0.0 over ~2000 steps).
+    e_flip = np.abs(out["v3"] + out_m["v3"]).max() / np.abs(out["v3"]).max()
+    assert e_flip < 1e-14, f"v^phi is not spin-antisymmetric: {e_flip:.3e}"
+    e_even = np.abs(out["rho"] - out_m["rho"]).max() / np.abs(out["rho"]).max()
+    assert e_even < 1e-14, f"rho is not spin-even: {e_even:.3e}"
+    # the residual S_phi is BOUNDARY-sourced (the outflow ghost copies v^phi, which cannot
+    # satisfy the dragging relation at the shifted ghost radius; the interior sits 10x lower
+    # at 2.3e-4) and advects inward, so it shrinks — but boundary-layer maxima converge
+    # slowly (measured 2.17e-3 -> 1.68e-3). copying the angular-momentum variable w in the
+    # kerr ghost fill is the identified fix that would remove this generator entirely.
+    hi = _run_m3_max(2 * _NR, 2 * _NPOLAR)
+    lo = np.abs(out["m3"]).max()
+    assert hi < lo, f"S_phi generation grows under refinement: {lo:.3e} -> {hi:.3e}"
+
+
+def _run_m3_max(nr: int, npolar: int) -> float:
+    with tempfile.TemporaryDirectory() as d:
+        d = d + "/"
+        p = _kerr_problem(d, "kerr", 0.9)
+        p.nr = nr
+        p.npolar = npolar
+        p.resolution = (nr, npolar)
+        runner.run(p, compute_mode="cpu")
+        with h5py.File(glob.glob(os.path.join(d, "*final*.h5"))[0]) as h:
+            return float(np.abs(h["level_0/conserved/m3"][:]).max())
