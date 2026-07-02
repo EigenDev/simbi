@@ -47,17 +47,18 @@ _L1_TOL = 1.5e-4
 # uniform specific angular momentum for the advection gate: small enough that the
 # rotating background stays near the michel profile (l^2/r^2 << 1 centrifugal shift),
 # large enough that a lost metric factor (gamma_{phi phi} ~ r^2 sin^2 theta ~ 10-1e4)
-# is orders of magnitude, not noise. the michel-plus-uniform-l state is NOT
-# theta-balanced (the polar centrifugal component E (v^phi)^2 r^2 sin cos has no
-# compensating pressure gradient), so a physical theta stir develops and the l
-# transport error rides that flow — this is a transport SANITY bound, not a precision
-# gate; the rotating-equilibrium hold (test_schwarzschild_rotating_equilibrium) is the
-# precision instrument for the rotating balance.
+# is orders of magnitude, not noise. the drift is l0-INDEPENDENT in relative terms
+# (measured 3.814e-3 at l0 = 0.05 vs 3.811e-3 at 0.01): it is the truncation of the
+# S_phi transport through the steep transonic infall, NOT a stir effect — and it
+# CONVERGES (128x8 -> 256x16 ratio 2.2), which the second assertion pins. tolerance
+# = measured 3.8e-3 with ~3x margin; a metric-factor transport bug is orders of
+# magnitude and resolution-INDEPENDENT, failing both assertions.
 _L0 = 0.05
-_L_DRIFT_TOL = 1.0e-2
+_L_DRIFT_TOL = 1.2e-2
+_L_DRIFT_CONV = 1.5
 
 
-def _swirl_problem(data_dir: str, l0: float):
+def _swirl_problem(data_dir: str, l0: float, nr: int = _NR, npolar: int = _NPOLAR):
     from simbi_configs.examples.gr_bondi_2d import GrBondi2D
     from simbi_configs.examples.gr_michel import MichelSolution
 
@@ -99,7 +100,7 @@ def _swirl_problem(data_dir: str, l0: float):
 
             return gas_state
 
-    p = GrMichelSwirl2D.from_cli(["--nr", str(_NR), "--npolar", str(_NPOLAR)])
+    p = GrMichelSwirl2D.from_cli(["--nr", str(nr), "--npolar", str(npolar)])
     p.end_time = _END_TIME
     p.data_directory = data_dir
     p.checkpoint_interval = _END_TIME
@@ -117,14 +118,14 @@ def _read_interior_2d(chkpt_path: str, nr: int, npolar: int):
     return out
 
 
-def _run(l0: float):
+def _run(l0: float, nr: int = _NR, npolar: int = _NPOLAR):
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"
-        p = _swirl_problem(d, l0)
+        p = _swirl_problem(d, l0, nr, npolar)
         runner.run(p, compute_mode="cpu")
         finals = glob.glob(os.path.join(d, "*.chkpt.final*.h5"))
         assert finals, f"swirl run (l0 = {l0}) crashed before completion"
-        prims = _read_interior_2d(finals[0], _NR, _NPOLAR)
+        prims = _read_interior_2d(finals[0], nr, npolar)
 
         from simbi_configs.examples.gr_michel import MichelSolution
 
@@ -135,8 +136,8 @@ def _run(l0: float):
             p_inf=p.p_ambient,
         )
         (rmin, rmax) = p.bounds[0]
-        q = (rmax / rmin) ** (1.0 / _NR)
-        rl = rmin * q ** np.arange(_NR)
+        q = (rmax / rmin) ** (1.0 / nr)
+        rl = rmin * q ** np.arange(nr)
         rh = rl * q
         rc = 0.75 * (rh**4 - rl**4) / (rh**3 - rl**3)
         ref_rho = np.array([sol.primitive(r)[0] for r in rc])
@@ -158,16 +159,13 @@ def test_swirl_zero_reduces_to_held_michel() -> None:
     assert e.mean() < _L1_TOL, f"interior L1 rho residual {e.mean():.3e}"
 
 
-@needs_backend
-def test_uniform_angular_momentum_is_advected() -> None:
-    p, prims, rc, ref_rho = _run(_L0)
-
+def _l_drift(nr: int, npolar: int) -> float:
+    p, prims, rc, ref_rho = _run(_L0, nr, npolar)
     assert prims["pre"].min() > 0.0, f"pressure went non-positive: {prims['pre'].min():.3e}"
-
     # rebuild l = S_phi/D = h W gamma_{phi phi} v^phi from the evolved primitives.
     (tmin, tmax) = p.bounds[1]
-    dth = (tmax - tmin) / _NPOLAR
-    theta = tmin + (np.arange(_NPOLAR) + 0.5) * dth
+    dth = (tmax - tmin) / npolar
+    theta = tmin + (np.arange(npolar) + 0.5) * dth
     st = np.sin(theta)[:, None]
     f = 1.0 - 2.0 * p.schwarzschild_mass / rc[None, :]
     v_sq = prims["v1"] ** 2 / f + rc[None, :] ** 2 * prims["v2"] ** 2 \
@@ -175,9 +173,18 @@ def test_uniform_angular_momentum_is_advected() -> None:
     ww = 1.0 / np.sqrt(1.0 - v_sq)
     hh = 1.0 + p.adiabatic_index / (p.adiabatic_index - 1.0) * prims["pre"] / prims["rho"]
     ll = hh * ww * rc[None, :] ** 2 * st**2 * prims["v3"]
+    cut = slice(_SKIP_INNER, nr - _SKIP_OUTER)
+    return float(np.abs(ll[:, cut] / _L0 - 1.0).mean())
 
-    cut = slice(_SKIP_INNER, _NR - _SKIP_OUTER)
-    drift = np.abs(ll[:, cut] / _L0 - 1.0)
-    assert drift.mean() < _L_DRIFT_TOL, (
-        f"specific angular momentum drifted: mean |l/l0 - 1| = {drift.mean():.3e}"
+
+@needs_backend
+def test_uniform_angular_momentum_is_advected() -> None:
+    d_lo = _l_drift(_NR, _NPOLAR)
+    d_hi = _l_drift(2 * _NR, 2 * _NPOLAR)
+    assert d_lo < _L_DRIFT_TOL, (
+        f"specific angular momentum drifted: mean |l/l0 - 1| = {d_lo:.3e}"
+    )
+    # truncation converges; a metric-factor transport error is resolution-independent.
+    assert d_lo / d_hi > _L_DRIFT_CONV, (
+        f"l drift does not converge: {d_lo:.3e} -> {d_hi:.3e}"
     )
