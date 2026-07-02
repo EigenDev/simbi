@@ -397,7 +397,23 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         ""
     };
     let solver_sfx = solver.kernel_suffix();
-    let name = format!("{prefix}_face_flux{solver_sfx}{geom_sfx}_{D}d_{dir}");
+    // the GR path selects the metric-aware Valencia flux (`RhdGr`): its name carries the spacing +
+    // spacetime slug (`rhd_face_flux[_logr]{_schw|_ks}_{D}d_{dir}`), baked only for a curved
+    // spacetime. flat (Minkowski) — INCLUDING a flat log-radial run — keeps the unsuffixed flux, so
+    // the slug is appended ONLY off-Minkowski (matching the bake gate).
+    let sp_st_sfx = match sim.geom.spacetime {
+        symbi_geometry::Spacetime::Minkowski => String::new(),
+        st => {
+            let sp = spacing_suffix(&sim.geom.maps);
+            let s = match st {
+                symbi_geometry::Spacetime::Schwarzschild => "_schw",
+                symbi_geometry::Spacetime::KerrSchild => "_ks",
+                symbi_geometry::Spacetime::Minkowski => unreachable!(),
+            };
+            format!("{sp}{s}")
+        }
+    };
+    let name = format!("{prefix}_face_flux{solver_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
     // scalars BY NAME: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
     // regime-generic `theta` (the theta-MC limiter compression; theta == 1 -> plain minmod).
     // declaring theta on the kernel can never silently shift a positional arg here.
@@ -406,7 +422,15 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // (per-dir) rates gate non-expanding curvilinear axes and route uniform
     // translation to axis 0. every binding is exactly identity/zero static.
     let a = sim.motion.a;
-    let (x_lo_phys, dx_phys) = physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, a);
+    // the flat flux reads PHYSICAL face coordinates (mesh-motion vface); the GR flux reads the radial
+    // FACE POSITION through `gv_axis_face_at`, which — on a log-radial grid — needs the LOG-AWARE
+    // kernel scalars (dx is the log slope), exactly as the shift/godunov dispatches. GR is static
+    // mesh, so kernel_geom == physical_geom for the uniform case.
+    let (x_lo_phys, dx_phys) = if matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
+        physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, a)
+    } else {
+        kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, a)
+    };
     // the flux is a per-direction kernel; it declares the moving-mesh rate for
     // its sweep axis as `mesh_adot_{dir}` (via MeshScalar) — the SAME per-axis
     // convention + resolver the wave-speed and godunov dispatches use. no bespoke
@@ -419,6 +443,13 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
         match *sref {
             ScalarRef::Gamma => Sc::from_f64(primary),
             ScalarRef::Theta => Sc::from_f64(theta),
+            // the GR flux builds the in-kernel spatial metric at the face from the lapse mass M.
+            ScalarRef::SchwarzschildMass => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("dispatch_flux: GR flux needs schwarzschild_mass but the metric supplied none"),
+            ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
                     .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))

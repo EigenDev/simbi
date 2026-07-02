@@ -49,7 +49,7 @@ pub use gv::{
     rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_3d_dir_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv, uct_master_emf_proof_kernel, rmhd_flux_gv, rmhd_ghost_fill_gv,
     rmhd_hllc_flux_gv, rmhd_hlld_flux_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv,
     rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv, imhd_wave_speeds_cell_gv, scalar_ghost_fill_gv, snapshot_gv,
-    rhd_c2p_gv, rhd_flux_gv, rhd_flux_gr_gv, rhd_ks_shift_flux_gv, rhd_hllc_flux_gv,
+    rhd_c2p_gv, rhd_c2p_gr_gv, rhd_flux_gv, rhd_flux_gr_gv, rhd_ks_shift_flux_gv, rhd_hllc_flux_gv,
     rhd_wave_speed_map_gv, GeoSource,
 };
 pub use gv_refinement::{

@@ -736,11 +736,12 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 }
 
 // the RHD ingoing-Kerr-Schild shift kernel: a FACE-domain in-place add of the shift-advection
-// `- (2M/r_face) U` to each conserved face flux (den/mom_k/nrg), run between the flat flux and the
-// godunov for the radial direction. depends on the radial SPACING (the face position `2M/r_face`
-// uses `gv_axis_face_at`), so it carries the spacing suffix (like the godunov/wavespeed); baked only
-// for KerrSchild + dir 0. `_ks` is in the name, so the spacetime tag is implicit (no `_schw`/`_ks`
-// suffix needed). geom (coords) suffix omitted — the shift reads only the radial axis (DOF == D).
+// `- (beta^r/alpha) U` to each conserved face flux (den/mom_k/nrg), run between the GR flux and the
+// godunov for the radial direction — the godunov's single uniform lapse then yields the Valencia
+// densitized `-beta^r U`. depends on the radial SPACING (the face position feeds `gv_axis_face_at`),
+// so it carries the spacing suffix (like the godunov/wavespeed); baked only for KerrSchild + dir 0.
+// `_ks` is in the name, so the spacetime tag is implicit. geom (coords) suffix omitted — the shift
+// reads only the radial axis (DOF == D).
 fn gen_rhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
     let name = format!("rhd_ks_shift_flux{}_{ndim}d_{dir}", geom.spacing_suffix());
     let (k, writes) = match ndim {
@@ -749,6 +750,32 @@ fn gen_rhd_ks_shift_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
         3 => symbi_discretize::gv::rhd_ks_shift_flux_gv::<3>(&geom.spacing),
         _ => panic!("rhd_ks_shift_flux_gv: unsupported ndim {ndim}"),
     };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the RHD cons->prim on a curved SPATIAL metric — the Valencia covariant recovery (`|S|^2 =
+// gamma^{ij} S_i S_j`, contravariant `v^i = gamma^{ij} S_j/(...)`) with gamma(r) evaluated at the
+// cell centroid. baked per (spacetime, spacing) on the GR path; 1D radial (angular GR is task 9).
+// name carries the spacing + spacetime slug (`rhd_c2p[_logr]{_schw|_ks}_1d`) so the runtime select
+// matches. depends on the radial grid (centroid), so it carries the same schwarzschild_mass +
+// x_lo_0/dx_0 scalars the GR wavespeed/godunov use.
+fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
+    let name = format!("rhd_c2p{}{}_{ndim}d", geom.spacing_suffix(), geom.spacetime_suffix());
+    let (k, writes) = match ndim {
+        1 => symbi_discretize::gv::rhd_c2p_gr_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize, max_iters),
+        _ => panic!("rhd_c2p_gr_gv: unsupported ndim {ndim} (angular GR is task 9)"),
+    };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the RHD face flux on a curved SPATIAL metric — the Valencia covariant U/F + Banyuls-Font
+// coordinate wave speeds (`rhd_flux_gr_gv` at the `RhdGr` regime). REPLACES the flat flux on the GR
+// path (the flat kernel stayed cartesian-agnostic and bolted GR on as post-processing; the covariant
+// storage needs the metric-aware flux). name carries the spacing + spacetime slug + sweep dir. 1D
+// radial (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
+fn gen_rhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
+    let name = format!("rhd_face_flux{}{}_{ndim}d_{dir}", geom.spacing_suffix(), geom.spacetime_suffix());
+    let (k, writes) = symbi_discretize::gv::rhd_flux_gr_gv(dir, geom.spacetime, &geom.spacing);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1291,13 +1318,21 @@ fn main() {
         gen_godunov_stage(&out_dir, ndim, "rhd", true, bh.clone(), None);
         // the GR CFL wave-speed map: the Banyuls-Font coordinate signal speed (the lapse + radial
         // proper-width correction) -> the correct dt near the horizon.
-        gen_rhd_wave_speed_map(&out_dir, ndim, bh);
+        gen_rhd_wave_speed_map(&out_dir, ndim, bh.clone());
         // the log-radial Schwarzschild grid (the bondi accretion zones span many decades in r):
         // same lapse-densitized stage + GR wave speeds on geometric-mean cell geometry, tagged
         // `_sph_logr_schw`.
         let bh_log = Geom::sph(ndim).schwarzschild().log_radial();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, bh_log.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, ndim, bh_log);
+        gen_rhd_wave_speed_map(&out_dir, ndim, bh_log.clone());
+        // the Valencia covariant-storage GR path (covariant `S_i`): the metric-aware c2p + face flux.
+        // 1D radial (the Michel/bondi oracle); angular GR (2D) is task 9, still on the flat kernels.
+        if ndim == 1 {
+            gen_rhd_c2p_gr(&out_dir, ndim, 20, bh);
+            gen_rhd_face_flux_gr(&out_dir, ndim, 0, Geom::sph(ndim).schwarzschild());
+            gen_rhd_c2p_gr(&out_dir, ndim, 20, bh_log);
+            gen_rhd_face_flux_gr(&out_dir, ndim, 0, Geom::sph(ndim).schwarzschild().log_radial());
+        }
     }
     // GR (ingoing Kerr-Schild) RHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
     // densitized godunov + KS coordinate wave speeds + the shift-advection flux kernel. 1D radial
@@ -1307,11 +1342,15 @@ fn main() {
         let ks = Geom::sph(ndim).kerr_schild();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
-        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks);
+        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks.clone());
+        gen_rhd_c2p_gr(&out_dir, ndim, 20, ks.clone());
+        gen_rhd_face_flux_gr(&out_dir, ndim, 0, ks);
         let ks_log = Geom::sph(ndim).kerr_schild().log_radial();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks_log.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, ndim, ks_log.clone());
-        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks_log);
+        gen_rhd_ks_shift_flux(&out_dir, ndim, 0, ks_log.clone());
+        gen_rhd_c2p_gr(&out_dir, ndim, 20, ks_log.clone());
+        gen_rhd_face_flux_gr(&out_dir, ndim, 0, ks_log);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.

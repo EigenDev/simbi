@@ -1,22 +1,18 @@
 # =============================================================================
 # test_schwarzschild_bondi_transient.py
 #
-# regression for the schwarzschild radial-momentum densitization. the stored
-# radial momentum is the ORTHONORMAL S_rhat = rho h W^2 V_rhat, but the valencia
-# conserved momentum is the COVARIANT S_r = S_rhat / alpha; substituting into
-# d_t S_r = -alpha div(F) + alpha S (font 2008, static schwarzschild) gives
-# d_t S_rhat = -alpha^2 div_flat(F) + alpha^2 S — TWO lapse factors on the radial
-# momentum flux divergence AND its geometric+gravity source. the earlier code
-# applied only ONE (the leading densitization lapse), leaving the inward gravity
-# source too strong by 1/alpha (1.73x at r = 3M); the gas over-accelerated,
-# pumped excess kinetic energy, and the recovered pressure p = (tau - KE)/3 was
-# driven negative near the inner boundary, collapsing the wave speed at t ~ 2.34.
+# transient positivity + accretion regression for the Valencia GRHD scheme on a static
+# schwarzschild background. the conserved momentum is the COVARIANT S_r = rho h W^2 gamma_rr v^r,
+# recovered/fluxed with the spatial metric and densitized by a single uniform lapse alpha on the
+# flux divergence AND the geodesic source (d_t S_r = -alpha div(F) + alpha S, font 2008). an error
+# in the inward gravity/densitization balance over-accelerates the gas, pumps excess kinetic energy,
+# and drives the recovered pressure p = (tau - KE)/3 negative near the inner boundary, collapsing the
+# wave speed (an earlier orthonormal-storage bug crashed at t ~ 2.34).
 #
-# the steady michel state cannot detect this (d_t = 0 -> div = S regardless of the
-# lapse power), so the check MUST be transient: a uniform-at-rest gas developing
-# transonic bondi accretion. with the correct alpha^2 the density RISES at the
-# inner boundary (gas piles up / accretes) and the pressure stays strictly
-# positive with NO floor. requires the built cpu_ext backend; skipped otherwise.
+# the steady michel state cannot detect a densitization-power error (d_t = 0 -> div = S regardless),
+# so the check MUST be transient: a uniform-at-rest gas developing transonic bondi accretion. correct
+# inward densitization makes the density RISE at the inner boundary (gas piles up / accretes) and the
+# pressure stay strictly positive with NO floor. requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
 import glob
 import os

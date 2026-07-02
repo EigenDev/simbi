@@ -68,6 +68,22 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// convert primitive to conservative.
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons;
 
+    /// convert primitive to conservative on a curved SPATIAL metric — the Valencia covariant momentum
+    /// `S_i = rho h W^2 gamma_ij v^j`, with `|v|^2 = gamma_ij v^i v^j`. the DEFAULT ignores the metric
+    /// and delegates to `to_conserved` (the flat / orthonormal storage), so every non-relativistic
+    /// regime and every flat run are unchanged; the relativistic regime OVERRIDES it so the
+    /// initial-condition conserved state matches the metric-aware c2p (the storage↔recovery bijection
+    /// is per-cell in the same gamma). `gamma`/`alpha` are the spatial metric + lapse at the cell.
+    fn to_conserved_covariant(
+        &self,
+        eos: &impl Eos<S>,
+        prim: &Self::Prim,
+        _gamma: &crate::spatial_metric::SpatialMetric<S, D>,
+        _alpha: S,
+    ) -> Self::Cons {
+        self.to_conserved(eos, prim)
+    }
+
     /// convert conservative to primitive. returns C2pResult with a usable
     /// (possibly floored) value and an error code describing any failures.
     ///

@@ -35,7 +35,8 @@ use std::sync::Arc;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_fields, dispatch_flux, dispatch_rhd_ks_shift_flux,
-    dispatch_godunov, dispatch_runtime_source, resolve_params, scalars_for,
+    dispatch_godunov, dispatch_runtime_source, geom_scalar, kernel_geom, resolve_params, scalars_for,
+    spacing_suffix,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
@@ -140,11 +141,46 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
         outputs.push(pre);
 
-        let name = format!("rhd_c2p_{D}d");
-        let scalars = scalars_for(&name, |bind| match bind {
-            ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
-            o => panic!("rhd c2p: unexpected scalar {o:?}"),
-        });
+        // the GR path uses the metric-aware Valencia recovery (`|S|^2 = gamma^{ij} S_i S_j`,
+        // contravariant `v^i`); its name carries the spacing + spacetime slug and it reads the lapse
+        // mass M + the LOG-AWARE radial grid scalars (the metric is evaluated at the cell centroid).
+        // flat keeps the plain `rhd_c2p_{D}d` (gamma only), bit-identical.
+        let st_sfx = match sim.geom.spacetime {
+            symbi_geometry::Spacetime::Minkowski => "",
+            symbi_geometry::Spacetime::Schwarzschild => "_schw",
+            symbi_geometry::Spacetime::KerrSchild => "_ks",
+        };
+        let (name, scalars) = if st_sfx.is_empty() {
+            let name = format!("rhd_c2p_{D}d");
+            let scalars = scalars_for(&name, |bind| match bind {
+                ScalarBind::Ref(ScalarRef::Gamma) => Sc::from_f64(self.gamma),
+                o => panic!("rhd c2p: unexpected scalar {o:?}"),
+            });
+            (name, scalars)
+        } else {
+            let sp_sfx = spacing_suffix(&sim.geom.maps);
+            let name = format!("rhd_c2p{sp_sfx}{st_sfx}_{D}d");
+            let (x_lo, dx) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+            let scalars = scalars_for(&name, |bind| {
+                let ScalarBind::Ref(sref) = bind else {
+                    panic!("rhd GR c2p: unexpected spec scalar {bind:?}");
+                };
+                match *sref {
+                    ScalarRef::Gamma => Sc::from_f64(self.gamma),
+                    ScalarRef::SchwarzschildMass => Sc::from_f64(
+                        sim.geom.spacetime_scalars.iter()
+                            .find(|(n, _)| n == "schwarzschild_mass")
+                            .map(|(_, v)| *v)
+                            .expect("rhd GR c2p needs schwarzschild_mass but the metric supplied none"),
+                    ),
+                    other => Sc::from_f64(
+                        geom_scalar(&x_lo, &dx, other)
+                            .unwrap_or_else(|| panic!("rhd GR c2p: unexpected scalar {other:?}")),
+                    ),
+                }
+            });
+            (name, scalars)
+        };
         dispatch_fields::<Sc, Mem, D>(
             &name,
             &sim.geom.allocated,

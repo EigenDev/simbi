@@ -133,10 +133,25 @@ where
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay ZERO and
     // never enter the graph — `wave_speeds_axis` reads only the normal velocity `vel[axes[d]]`.
+    let half_c = Gv::from_f64(0.5);
     let mut vel = [Gv::ZERO; 3];
     for d in 0..ndim {
         let c = axes[d];
-        vel[c] = Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
+        let raw = Gv::field(&format!("prim_v{c}"), FieldRef::PrimVel(c as u8));
+        // Valencia storage: `prim.vel` is the CONTRAVARIANT v^i; the SR characteristic speed needs the
+        // PHYSICAL normal velocity V = sqrt(gamma_ii) v^i. for the det-g-flat family (Schwarzschild,
+        // Kerr-Schild) sqrt(gamma_rr) = 1/alpha, so the radial physical velocity is v^r/alpha; the
+        // coordinate factor alpha^2 = alpha sqrt(gamma^{rr}) applied below then completes the
+        // Banyuls-Font coordinate speed. flat -> alpha = 1 (untouched, bit-identical). angular GR
+        // physical scaling (sqrt(gamma_{theta theta}) = r) is task 9.
+        vel[c] = match (spacetime, c) {
+            (Spacetime::Minkowski, _) => raw,
+            (_, 0) => {
+                let r = Gv::scalar(&format!("x_lo_{d}")) + (Gv::coord(d as u8) + half_c) * Gv::scalar(&format!("dx_{d}"));
+                raw / gv_metric_lapse_at(spacetime, r)
+            }
+            _ => raw,
+        };
     }
     let pre = Gv::field("prim_pre", FieldRef::PrimPre);
     let gamma = Gv::scalar("gamma");

@@ -306,21 +306,21 @@ pub fn rhd_flux_gv<const D: usize>(dir: u8) -> (GvKernel, Vec<(String, FieldBind
 }
 
 
-/// the KERR-SCHILD shift-advection added to the RADIAL face flux (dir 0), IN PLACE. Font (2008)
-/// eq (34): the transport velocity `tilde v^r = v^r - beta^r/alpha` carries every conserved scalar
-/// inward at the known single-signed speed `b = 2M/r`, so each radial face flux gains `- b U`. as a
-/// FLUX-FIELD term this is LOCAL: at the face this thread owns (a face-domain kernel, thread coord =
-/// face index) the inward drag upwinds from the OUTER cell, which IS this cell (offset 0) — no
-/// stencil, no cons-neighbour read (so no godunov in-place aliasing). the godunov then densitizes the
-/// combined flux: `alpha_face` on mass/energy, `alpha^2` on the radial momentum — so the shift term
-/// inherits the SAME densitization as the flat flux, exactly reproducing `F^r = alpha(flatF - b U)`
-/// (mass/energy) and `flatF_Srhat - b S_rhat` at `alpha^2` (momentum). `r_face = 2M/r` uses the
-/// radial face position (offset 0 on the face domain); baked ONLY for the KerrSchild spacetime.
+/// the KERR-SCHILD shift-advection added to the RADIAL face flux (dir 0), IN PLACE. the Valencia
+/// densitized flux is `d_i(alpha F^i - beta^i U)` (F^i = the pure spatial flux the `RhdGr` riemann
+/// kernel returns, no shift), so with the godunov applying a SINGLE uniform lapse alpha to the whole
+/// combined flux, the shift term this kernel adds must be `-(beta^r/alpha) U` — after densitization it
+/// becomes the exact `-beta^r U`. as a FLUX-FIELD term this is LOCAL: at the face this thread owns (a
+/// face-domain kernel, thread coord = face index) the inward drag upwinds from the OUTER cell, which
+/// IS this cell (offset 0) — no stencil, no cons-neighbour read (so no godunov in-place aliasing).
+/// `b = beta^r/alpha = 2M/sqrt(r(r+2M))` at the radial face; baked ONLY for the KerrSchild spacetime.
 pub fn rhd_ks_shift_flux_gv<const D: usize>(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let m = Gv::scalar("schwarzschild_mass");
     let r_face = gv_axis_face_at(0, spacing[0], 0); // this thread's radial face position
-    let b = Gv::from_f64(2.0) * m / r_face; // the shift-advection coefficient 2M/r_face
+    // beta^r/alpha: the godunov's single uniform lapse then yields the densitized shift `-beta^r U`.
+    let beta_r = gv_metric_shift_r_at(Spacetime::KerrSchild, r_face).expect("kerr-schild has a radial shift");
+    let alpha = gv_metric_lapse_at(Spacetime::KerrSchild, r_face);
+    let b = beta_r / alpha;
     // add -b * U to each conserved face flux (upwind = outer cell = this face's own cell, offset 0).
     let fd = Gv::field("flux_den", FieldRef::flux_den());
     let cd = Gv::field("cons_den", FieldRef::cons_den());

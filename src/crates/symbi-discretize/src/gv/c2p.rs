@@ -6,6 +6,7 @@
 
 use super::*;
 use symbi_hydro::spatial_metric::SpatialMetric;
+use symbi_geometry::{Metric, Schwarzschild, SchwarzschildKS};
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
@@ -112,6 +113,58 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, F
     }
     writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()));
 
+    (end_trace(), writes)
+}
+
+
+/// the RHD cons->prim on a curved SPATIAL metric — the `_schw`/`_ks` GR path. identical to
+/// `rhd_c2p_gv` except the recovery contracts with the REAL spatial metric gamma(r) at the cell
+/// (not identity): `|S|^2 = gamma^{ij} S_i S_j` and the recovered `v^i = gamma^{ij} S_j / (tau+D+p)`
+/// is the CONTRAVARIANT velocity (Valencia). the metric is evaluated at the volume-weighted radial
+/// centroid — the SAME cell radius the godunov densitization lapse uses — so the covariant conserved
+/// `S_i` round-trips. reduces to `rhd_c2p_gv` bit-for-bit at identity gamma. 1D radial (angular GR is
+/// task 9); reads `schwarzschild_mass` + the radial grid scalars (`x_lo_0`/`dx_0`) for the centroid.
+pub fn rhd_c2p_gr_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ndim: usize,
+    max_iters: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let den = Gv::field("cons_den", FieldRef::cons_den());
+    let mom = Gv::field("cons_mom_0", FieldRef::cons_mom(0));
+    let nrg = Gv::field("cons_nrg", FieldRef::cons_nrg());
+    let gamma = Gv::scalar("gamma");
+
+    // the in-kernel spatial metric at the cell radius. the volume-weighted radial centroid matches
+    // the godunov's lapse point, so the covariant `S_i` stored under `to_conserved` inverts exactly.
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let r = geo.centroid[axes.iter().position(|&c| c == 0).expect("GR c2p needs a radial axis")];
+    let x = Tensor::<Gv, 1>::new([r]);
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gm, gm_inv) = match spacetime {
+        Spacetime::Schwarzschild => {
+            let m = Schwarzschild { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        Spacetime::KerrSchild => {
+            let m = SchwarzschildKS { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        Spacetime::Minkowski => unreachable!("the GR c2p is baked only for a curved spacetime"),
+    };
+    let metric = SpatialMetric::<Gv, 1> { gamma: gm, gamma_inv: gm_inv };
+
+    let cons = Cons::<Gv, 1> { den, mom: Tensor::new([mom]), nrg };
+    let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
+
+    let writes = vec![
+        ("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node()),
+        ("prim_vel_0".to_string(), FieldRef::PrimVel(0).into(), prim.vel[0].node()),
+        ("prim_pre".to_string(), FieldRef::PrimPre.into(), prim.pre.node()),
+    ];
     (end_trace(), writes)
 }
 

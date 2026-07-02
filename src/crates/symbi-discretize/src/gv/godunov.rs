@@ -366,7 +366,9 @@ pub fn godunov_stage_gv_with_fused_built(
             let r = coord_centroid[0];
             let mass = Dual::constant(Gv::scalar("schwarzschild_mass")); // constant w.r.t. r
             let e = rho + Gv::field("nrg", FieldRef::cons_nrg()) + Gv::field("pre", FieldRef::PrimPre);
-            let big_v = Gv::field("prim_v0", FieldRef::PrimVel(0)); // orthonormal radial velocity V
+            // Valencia storage: `prim.vel` is the CONTRAVARIANT v^r (the metric-aware c2p output). the
+            // geodesic source is written in the orthonormal radial velocity V = sqrt(gamma_rr) v^r.
+            let v_r = Gv::field("prim_v0", FieldRef::PrimVel(0));
             let p = Gv::field("pre", FieldRef::PrimPre);
             // the ADM block + its radial derivatives, both from ONE Dual<Gv> autodiff pass — the
             // metric supplies only its line element (lapse/shift/gamma), autodiff differentiates it.
@@ -376,17 +378,13 @@ pub fn godunov_stage_gv_with_fused_built(
                 Spacetime::KerrSchild => adm_block_autodiff(&SchwarzschildKS { mass }, r),
                 Spacetime::Minkowski => unreachable!("flat handled above"),
             };
+            let big_v = v_r * gamma_rr.sqrt(); // orthonormal V = sqrt(gamma_rr) v^r
             Some(grhd_radial_geodesic_source(
                 r, alpha, beta_r, gamma_rr, d_lapse, d_shift_r, d_gamma_rr, e, big_v, p,
             ))
         }
     };
     let radial_gravity: Option<Gv> = geodesic.map(|(s_mom, _)| s_mom);
-    // Font (2008) Eq (34): on a static background the conserved mass + energy fluxes transport with
-    // the CONTRAVARIANT v^r = alpha V_rhat (one lapse factor per radial face vs the orthonormal flat
-    // flux). the radial momentum flux S_r v^r + p is INVARIANT (the covariant S_r ~ 1/alpha cancels
-    // v^r ~ alpha), so only mass/energy are lapse-weighted at the faces. flat -> None -> plain div.
-    let face_lapse = gv_radial_face_lapse(spacetime, spacing);
     // the GR geodesic ENERGY source S_tau — the second output of the generic contraction above
     // (gravity's rate of work on the infalling gas). zero on a flat background.
     let nrg_gravity: Option<Gv> = geodesic.map(|(_, s_tau)| s_tau);
@@ -414,7 +412,7 @@ pub fn godunov_stage_gv_with_fused_built(
 
     let u_n_rho = Gv::field("u_n_rho", FieldRef::un_den());
     let rho_new = with_sources(
-        combine(u_n_rho, fe(rho, gv_divergence_lapse("mass_flux", ndim, &geo, face_lapse), None)),
+        combine(u_n_rho, fe(rho, gv_divergence("mass_flux", ndim, &geo), None)),
         &contribs.den,
     );
     let mut writes = vec![("rho".to_string(), FieldRef::cons_den().into(), rho_new.node())];
@@ -431,19 +429,12 @@ pub fn godunov_stage_gv_with_fused_built(
             (true, Some(g)) => Some(geo_src.map_or(g, |s| s + g)),
             _ => geo_src,
         };
-        // the stored radial momentum is the ORTHONORMAL S_rhat = rho h W^2 V_rhat, but the
-        // Valencia conserved momentum is the COVARIANT S_r = rho h W^2 v_r = S_rhat / alpha.
-        // substituting S_r = S_rhat/alpha into d_t S_r = -alpha div(F) + alpha S (Font 2008,
-        // static schwarzschild) gives d_t S_rhat = -alpha^2 div_flat(F_flat) + alpha^2 S: TWO
-        // lapse factors on the radial momentum flux divergence AND its geometric+gravity source.
-        // the leading `fe` lapse supplies one; this cell lapse supplies the second. scalars
-        // (mass/energy) carry their second lapse as the contravariant v^r = alpha V_rhat face
-        // weight instead; the angular momenta carry a lame factor r (not alpha) folded into the
-        // flat curvilinear geometry, so only the radial component takes the extra lapse.
-        let (div, mom_src) = match (is_radial, lapse) {
-            (true, Some(a)) => (a * div, mom_src.map(|s| a * s)),
-            _ => (div, mom_src),
-        };
+        // Valencia covariant storage: the conserved momentum is the COVARIANT S_i = rho h W^2
+        // gamma_ij v^j (the metric-aware c2p + flux), and the geodesic source is written for that
+        // covariant S_r, so d_t S_i = -alpha div(F) + alpha S — a SINGLE, uniform lapse on every
+        // conserved law, supplied by the `fe` weight. no orthonormal alpha^2 asymmetry: the flux
+        // kernel already carries the contravariant v^n (no V_rhat), and the metric coefficient
+        // gamma_ij rides inside S_i, not the densitization.
         let mom_new = with_sources(
             combine(u_n_mom, fe(mom[k], div, mom_src)),
             &contribs.mom[k],
@@ -454,7 +445,7 @@ pub fn godunov_stage_gv_with_fused_built(
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
         let u_n_nrg = Gv::field("u_n_nrg", FieldRef::un_nrg());
         let nrg_new = with_sources(
-            combine(u_n_nrg, fe(nrg, gv_divergence_lapse("nrg_flux", ndim, &geo, face_lapse), nrg_gravity)),
+            combine(u_n_nrg, fe(nrg, gv_divergence("nrg_flux", ndim, &geo), nrg_gravity)),
             &contribs.nrg,
         );
         writes.push(("nrg".to_string(), FieldRef::cons_nrg().into(), nrg_new.node()));

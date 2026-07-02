@@ -951,7 +951,7 @@ impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc>
     SimBuilder<R, D, DOF, M, E, S, Mem, Sc, NeedsCells>
 where
     R: Regime<Sc, D> + Regime<Sc, DOF>,
-    M: Metric<Sc, D>,
+    M: Metric<Sc, D> + Metric<Sc, DOF>,
     E: Eos<Sc>,
     S: ExecutionSpace,
     Mem: MemorySpace,
@@ -1479,7 +1479,7 @@ pub fn axis_name(ax: usize) -> &'static str {
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc> SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
 where
     R: Regime<Sc, D> + Regime<Sc, DOF>,
-    M: Metric<Sc, D>,
+    M: Metric<Sc, D> + Metric<Sc, DOF>,
     E: Eos<Sc>,
     S: ExecutionSpace,
     Mem: MemorySpace,
@@ -1490,9 +1490,46 @@ where
     /// via the EnergyModel-generic scatter_from), and — for MHD regimes — the cell-centered B
     /// <- the primitive's magnetic 3-vector. the staggered bface is seeded separately by the
     /// IC (face values are not a function of a single cell's primitive).
+    ///
+    /// on a curved spacetime the conserved momentum is the Valencia COVARIANT `S_i = rho h W^2
+    /// gamma_ij v^j`, so the seed evaluates the spatial metric at the cell and stores the covariant
+    /// state (via `to_conserved_covariant`) — the metric radius is the VOLUME-WEIGHTED radial
+    /// centroid, the SAME point the metric-aware c2p inverts at, so the storage↔recovery round-trip
+    /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
     pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
         use symbi_hydro::state::SeedableCons;
-        let cons = <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim);
+        use symbi_hydro::spatial_metric::SpatialMetric;
+        let cons = if matches!(self.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
+            <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim)
+        } else {
+            // the volume-weighted radial centroid r_vw = (3/4)(rh^4 - rl^4)/(rh^3 - rl^3) — the exact
+            // spherical cell centroid the in-kernel `cell_geometry_gv` uses, from the cell's radial
+            // faces (map-aware, so log-radial grids match too). radial axis is 0 for the GR (spherical)
+            // backgrounds; angular slots take the plain cell centers.
+            let rl = self.geom.face_coord(coord, 0)[0];
+            let mut coord_hi = coord;
+            coord_hi[0] += 1;
+            let rh = self.geom.face_coord(coord_hi, 0)[0];
+            let r_vw = 0.75 * (rh.powi(4) - rl.powi(4)) / (rh.powi(3) - rl.powi(3));
+            let x_center = self.geom.cell_coord(coord);
+            let x_dof: Tensor<Sc, DOF> = Tensor::new(std::array::from_fn(|k| {
+                if k == 0 {
+                    Sc::from_f64(r_vw)
+                } else if k < D {
+                    Sc::from_f64(x_center[k])
+                } else {
+                    Sc::ZERO
+                }
+            }));
+            let sm = SpatialMetric {
+                gamma: <M as Metric<Sc, DOF>>::spatial_metric(&self.physics.metric, x_dof),
+                gamma_inv: <M as Metric<Sc, DOF>>::spatial_metric_inv(&self.physics.metric, x_dof),
+            };
+            let alpha = <M as Metric<Sc, DOF>>::lapse(&self.physics.metric, x_dof);
+            <R as Regime<Sc, DOF>>::to_conserved_covariant(
+                &self.physics.regime, &self.physics.eos, prim, &sm, alpha,
+            )
+        };
         self.fields.cons.scatter_from(coord, cons.hydro_part());
         if let Some(mag) = cons.mag_part() {
             if let Some(mhd) = self.fields.mhd.as_ref() {
