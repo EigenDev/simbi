@@ -969,7 +969,7 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     if geom.spacetime != Spacetime::Minkowski {
         let name = format!(
             "rmhd_wave_speed_map{}{}{}_{ndim}d",
-            geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+            mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
         );
         let (k, writes) = symbi_discretize::gv::gr_light_cone_wave_speed_map_gv(
             geom.spacetime, geom.coords, &geom.spacing, &geom.axes, ndim as usize,
@@ -1124,7 +1124,7 @@ fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
     // the face positions in the divergence measure depend on the spacing map + the spacetime
     // (covariant measure), so those slugs ride the name (empty for uniform/flat — the existing
     // names are unchanged).
-    let geo_slug = if geom.spacetime == Spacetime::Minkowski { mhd_geom_slug(&geom) } else { geom.suffix() };
+    let geo_slug = mhd_geom_slug(&geom); // MHD slug '_sph' for both flat and GR (swirl stays DOF=3 via the macro)
     let name = format!(
         "rmhd_bcell_godunov_euler{}{}{}_{ndim}d",
         geo_slug, geom.spacing_suffix(), geom.spacetime_suffix()
@@ -1135,7 +1135,7 @@ fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
 }
 
 fn gen_rmhd_bcell_godunov_rk2(out_dir: &str, geom: Geom, ndim: u8) {
-    let geo_slug = if geom.spacetime == Spacetime::Minkowski { mhd_geom_slug(&geom) } else { geom.suffix() };
+    let geo_slug = mhd_geom_slug(&geom); // MHD slug '_sph' for both flat and GR (swirl stays DOF=3 via the macro)
     let name = format!(
         "rmhd_bcell_godunov_rk2{}{}{}_{ndim}d",
         geo_slug, geom.spacing_suffix(), geom.spacetime_suffix()

@@ -3093,6 +3093,21 @@ macro_rules! mhd_dispatch {
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                 Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
             ),
+            // the 2D (r, theta) SPINNING-KERR GRMHD row (design 44 phase C): the non-diagonal
+            // gamma_{r phi} rides the tetrad HLLD, the radial shift the moving-interface fan, and
+            // the azimuthal (swirl) momentum the frame dragging. requires the 5-tuple swirl gas rows.
+            (2, "spherical") if $cfg.spacetime == "kerr" => {
+                if !$prims.first().map_or(false, |row| row.len() == 5) {
+                    return Err(
+                        "the kerr GRMHD spacetime requires the azimuthal momentum DOF: yield \
+                         5-tuple gas rows (rho, v_r, v_theta, v_phi, pre)".to_string(),
+                    );
+                }
+                build_and_run_mhd!(
+                    $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                    KerrKS { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin }, KerrKS<f64>
+                )
+            }
             (1, "cartesian") => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian
             ),

@@ -145,3 +145,58 @@ fn kerr_schild_ct_curl_preserves_div_b() {
 fn kerr_ct_curl_preserves_div_b() {
     preserves_div(Spacetime::Kerr);
 }
+
+// ---- the ACTUAL contact EMF kernel + curl, in isolation ----
+// drives rmhd_edge_emf_gr_gv (the real corner EMF, with the shift's beta_r) then the curl on a
+// div-free B, and checks div preservation. if this holds, the EMF+curl kernels are consistent and
+// the sim div drift is in the buffer/field management (swirl layout); if it breaks, the EMF kernel
+// itself feeds the curl an inconsistent (multi-valued) corner EMF on the shifted chart.
+use symbi_discretize::gv::rmhd_edge_emf_gr_gv;
+
+fn run_emf(st: Spacetime) -> Vec<f64> {
+    KernelRun::new(rmhd_edge_emf_gr_gv(st, &[Spacing::Uniform; 2]))
+        .grid([M, M])
+        .compute_window([1, 1], [M - 1, M - 1])
+        .field_with("edge_vp1", |c| 0.1 * (0.2 * c[0] as f64).sin() - 0.05 * (0.15 * c[1] as f64).cos())
+        .field_with("edge_vp2", |c| -0.08 * (0.13 * c[1] as f64).sin() + 0.04 * (0.1 * c[0] as f64).cos())
+        .field_with("edge_bp1", |c| 0.3 * (0.18 * c[0] as f64).cos() * (0.12 * c[1] as f64).sin())
+        .field_with("edge_bp2", |c| 0.25 * (0.11 * c[0] as f64).sin() + 0.1 * (0.2 * c[1] as f64).cos())
+        .field_with("edge_bflux_a", |c| 0.2 * (0.17 * c[0] as f64 + 0.1 * c[1] as f64).sin())
+        .field_with("edge_bflux_b", |c| 0.15 * (0.12 * c[0] as f64 - 0.14 * c[1] as f64).cos())
+        .field_with("edge_fden_p1", |c| 0.5 + 0.1 * (0.1 * c[0] as f64).sin())
+        .field_with("edge_fden_p2", |c| 0.4 - 0.08 * (0.13 * c[1] as f64).cos())
+        .scalars(&[
+            ("x_lo_0", R0), ("dx_0", DR), ("x_lo_1", T0), ("dx_1", DTH),
+            ("schwarzschild_mass", MASS), ("kerr_spin", SPIN),
+        ])
+        .run()
+        .values("emf")
+        .to_vec()
+}
+
+fn emf_then_curl_preserves_div(st: Spacetime) {
+    let f = M * M;
+    let avec = |i: usize, j: usize| (0.3 * i as f64).sin() * (0.2 * j as f64).cos();
+    let mut a = vec![0.0; f];
+    for i in 0..M { for j in 0..M { a[idx2(i, j)] = avec(i, j); } }
+    let zero = [vec![0.0; f], vec![0.0; f]];
+    let b = run_curl(st, &zero, &a, 1.0); // div-free B
+
+    let ez = run_emf(st);
+    let b2 = run_curl(st, &b, &ez, DT);
+
+    let mut max_change = 0.0_f64;
+    for i in 1..M - 3 {
+        for j in 1..M - 3 {
+            let d = (div_b(st, &b2[0], &b2[1], i, j) - div_b(st, &b[0], &b[1], i, j)).abs();
+            max_change = max_change.max(d);
+        }
+    }
+    eprintln!("{st:?} EMF+curl div(B) change = {max_change:e}");
+    assert!(max_change < 1e-11, "{st:?}: real EMF+curl broke div(B): {max_change:e}");
+}
+
+#[test]
+fn kerr_schild_emf_then_curl_preserves_div() { emf_then_curl_preserves_div(Spacetime::KerrSchild); }
+#[test]
+fn kerr_emf_then_curl_preserves_div() { emf_then_curl_preserves_div(Spacetime::Kerr); }

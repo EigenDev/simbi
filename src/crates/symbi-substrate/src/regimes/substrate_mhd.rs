@@ -244,6 +244,12 @@ where
                     .map(|(_, v)| *v)
                     .expect("GR MHD flux needs schwarzschild_mass"),
             ),
+            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("GR MHD flux needs kerr_spin"),
+            ),
             ScalarBind::Ref(other) => Sc::from_f64(
                 geom_scalar(&x_lo_k, &dx_k, *other)
                     .unwrap_or_else(|| panic!("{} flux: unexpected scalar {other:?}", Self::kernel_prefix())),
@@ -282,6 +288,12 @@ where
                     .find(|(n, _)| n == "schwarzschild_mass")
                     .map(|(_, v)| *v)
                     .expect("GR MHD c2p needs schwarzschild_mass"),
+            ),
+            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("GR MHD c2p needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
                 geom_scalar(&x_lo_k, &dx_k, *other)
