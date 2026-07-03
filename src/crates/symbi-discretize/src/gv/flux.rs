@@ -767,6 +767,45 @@ pub fn rmhd_flux_gr_gv(
         }
         Spacetime::Minkowski => unreachable!("the GRMHD flux is baked only for a curved spacetime"),
     };
+    // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying variable
+    // w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so a zero-angular-momentum (S_phi = 0) dragging
+    // state reconstructs to a face pair that STILL cancels (S_phi(face) = (rho h W^2 + b^2) gamma_pp w,
+    // exact to roundoff); reconstructing v^phi raw mixes the geometric dragging profile into the
+    // limited slopes and generates S_phi at truncation level. mirrors the RHD GR flux. kerr-only
+    // (gamma_{r phi} vanishes elsewhere). the per-offset q is at each cell's volume-weighted centroid
+    // (the c2p metric point), the face q from the SAME face matrix the riemann states lower with.
+    let (left, right) = if spacetime == Spacetime::Kerr {
+        let spin = Gv::scalar("kerr_spin");
+        let geo_c = cell_geometry_gv(coords, spacing, axes, ndim);
+        let q_at = |off: i32| -> Gv {
+            let (r_c, th_c) = if dir == 0 {
+                let rl = gv_axis_face_at(0, spacing[0], off as i64);
+                let rh = gv_axis_face_at(0, spacing[0], off as i64 + 1);
+                (Gv::from_f64(0.75) * (gv_powi(rh, 4) - gv_powi(rl, 4)) / (gv_powi(rh, 3) - gv_powi(rl, 3)), geo_c.centroid[1])
+            } else {
+                let tl = gv_axis_face_at(1, spacing[1], off as i64);
+                let th = gv_axis_face_at(1, spacing[1], off as i64 + 1);
+                let num = (th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos());
+                (geo_c.centroid[0], num / (tl.cos() - th.cos()))
+            };
+            let gm_c = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(&KerrKS { mass, spin }, Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]));
+            gm_c[(0, 2)] / gm_c[(2, 2)]
+        };
+        let stencil = |off: i32| -> Gv {
+            let vr = Gv::field_shifted("prim_v0", FieldRef::PrimVel(0), ndim as u8, dir, off);
+            let vp = Gv::field_shifted("prim_v2", FieldRef::PrimVel(2), ndim as u8, dir, off);
+            vp + q_at(off) * vr
+        };
+        let (w_l, w_r) = plm_theta_from_stencil(stencil(-2), stencil(-1), stencil(0), stencil(1), theta_lim);
+        let q_face = gamma[(0, 2)] / gamma[(2, 2)];
+        let mut lv = left;
+        let mut rv = right;
+        lv.hydro.vel[2] = w_l - q_face * lv.hydro.vel[0];
+        rv.hydro.vel[2] = w_r - q_face * rv.hydro.vel[0];
+        (lv, rv)
+    } else {
+        (left, right)
+    };
     let regime = RmhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
     let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
     let has_shift = matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr);

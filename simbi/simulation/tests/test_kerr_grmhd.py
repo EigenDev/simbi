@@ -86,3 +86,56 @@ def test_kerr_field_loop_divergence_free_and_stable(ct) -> None:
     assert float(np.abs(B1).max()) < 1.0, "field blew up"
     ratio = _kerr_wdiv(p, B1, B2)
     assert ratio < 1e-10, f"kerr w-weighted div(B) not machine-zero at {ct}: {ratio:.3e}"
+
+
+def _roteq_hold_l1(nr, npolar):
+    from simbi_configs.examples.gr_rotating_equilibrium_mhd import GrRotatingEquilibriumMhd
+
+    d = tempfile.mkdtemp() + "/"
+    p = GrRotatingEquilibriumMhd.from_cli(
+        ["--nr", str(nr), "--npolar", str(npolar), "--kerr-spin", "0.9"]
+    )
+    p.solver = Solver.HLLE
+    p.ct_method = CtMethod.CONTACT
+    p.end_time = 10.0
+    p.data_directory = d
+    p.checkpoint_interval = 100.0
+    runner.run(p, compute_mode="cpu")
+    assert not glob.glob(os.path.join(d, "*crashed*.h5")), "rot-eq-mhd crashed"
+    final = glob.glob(os.path.join(d, "*final*.h5"))[0]
+    with h5py.File(final) as h:
+        g = h["level_0/partition_0/hydro/primitives"]
+        shp = g["rho"].shape
+        halo = [(s - n) // 2 for s, n in zip(shp, (npolar, nr))]
+        sl = tuple(slice(hh, hh + n) for hh, n in zip(halo, (npolar, nr)))
+        rho = g["rho"][sl]
+    eq = p.equilibrium()
+    (rmin, rmax) = p.bounds[0]
+    (tmin, tmax) = p.bounds[1]
+    qf = (rmax / rmin) ** (1.0 / nr)
+    dth = (tmax - tmin) / npolar
+    ref = np.zeros((npolar, nr))
+    for jj in range(npolar):
+        th = tmin + (jj + 0.5) * dth
+        for ii in range(nr):
+            rl = rmin * qf**ii
+            rh = rl * qf
+            rr = 0.75 * (rh**4 - rl**4) / (rh**3 - rl**3)
+            ref[jj, ii] = eq.primitive(rr, th)[0]
+    return float(np.abs(rho[:, 3:-3] / ref[:, 3:-3] - 1.0).mean())
+
+
+@needs_backend
+def test_kerr_rotating_equilibrium_holds_and_converges() -> None:
+    # the frame-dragging ACCURACY oracle: the RMHD (B=0) constant-l orbit on the spinning-kerr
+    # background must HOLD to truncation and CONVERGE under refinement. the v^phi w-reconstruction
+    # keeps the flow on the zero-angular-momentum dragging manifold; a raw reconstruction generates
+    # spurious S_phi, degrades the hold, and breaks convergence.
+    l1_coarse = _roteq_hold_l1(64, 24)
+    l1_fine = _roteq_hold_l1(128, 48)
+    assert l1_coarse < 1e-3, f"rot-eq hold too large (coarse): {l1_coarse:.3e}"
+    assert l1_fine < l1_coarse, "rot-eq hold did not decrease under refinement"
+    assert l1_coarse / l1_fine > 2.0, (
+        f"rot-eq hold not converging (ratio {l1_coarse / l1_fine:.2f}): the frame-dragging "
+        "w-reconstruction is not holding the orbit"
+    )
