@@ -2553,16 +2553,12 @@ macro_rules! build_and_run_mhd {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                // gridded components: the flat path seeds cell-B zero (bcell_from_bface heals
-                // it with the euclidean energy patch); a curved spacetime seeds the TRUE face
-                // average so the covariant conserved state is exact from step zero.
-                let gr = cfg.spacetime != "minkowski";
+                // gridded components seed the TRUE cell B (the face average) so the conserved
+                // state carries every magnetic term from step zero — the old zero-seed left the
+                // relativistic momentum's B^2 v - (v.B) B block missing and the stage-1
+                // bcell_from_bface energy heal is exact only at v = 0 (and euclidean-only).
                 let mag_arr: [f64; 3] = std::array::from_fn(|k| {
-                    if k < $d {
-                        if gr { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { 0.0 }
-                    } else {
-                        bufs[k][lin]
-                    }
+                    if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
                 });
                 MhdPrim {
                     hydro: Prim {
@@ -2686,8 +2682,9 @@ macro_rules! build_and_run_imhd {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] =
-                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                let mag_arr: [f64; 3] = std::array::from_fn(|k| {
+                    if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                });
                 MhdPrimG::<f64, 3, IsoModel> {
                     hydro: PrimG {
                         rho: row[0],
@@ -2825,8 +2822,11 @@ macro_rules! build_and_run_mhd_decomposed {
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
-                        let mag_arr: [f64; 3] =
-                            std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                        let gidx: [isize; $d] =
+                            std::array::from_fn(|ax| (tc[ax] * m[ax]) as isize + idx[ax]);
+                        let mag_arr: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
+                        });
                         MhdPrim {
                             hydro: Prim {
                                 rho: row[0],
@@ -2896,8 +2896,9 @@ macro_rules! build_and_run_mhd_decomposed {
                     stride *= n[ax];
                 }
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] =
-                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                let mag_arr: [f64; 3] = std::array::from_fn(|k| {
+                    if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                });
                 MhdPrim {
                     hydro: Prim {
                         rho: row[0],
@@ -2978,8 +2979,11 @@ macro_rules! build_and_run_imhd_decomposed {
                             stride *= n[ax];
                         }
                         let row = &prims[lin];
-                        let mag_arr: [f64; 3] =
-                            std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                        let gidx: [isize; $d] =
+                            std::array::from_fn(|ax| (tc[ax] * m[ax]) as isize + idx[ax]);
+                        let mag_arr: [f64; 3] = std::array::from_fn(|k| {
+                            if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, gidx, n) } else { bufs[k][lin] }
+                        });
                         MhdPrimG::<f64, 3, IsoModel> {
                             hydro: PrimG {
                                 rho: row[0],
@@ -3045,8 +3049,9 @@ macro_rules! build_and_run_imhd_decomposed {
                     stride *= n[ax];
                 }
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] =
-                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                let mag_arr: [f64; 3] = std::array::from_fn(|k| {
+                    if k < $d { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { bufs[k][lin] }
+                });
                 MhdPrimG::<f64, 3, IsoModel> {
                     hydro: PrimG {
                         rho: row[0],
@@ -3075,6 +3080,12 @@ macro_rules! mhd_dispatch {
             (1, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1,
                 Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+            ),
+            // the horizon-penetrating chart: the `_ks` GRMHD row (the shifted riemann fan with
+            // the induction transpose term). the inner boundary can sit below r = 2M.
+            (1, "spherical") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 1,
+                SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
             (1, "cartesian") => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian

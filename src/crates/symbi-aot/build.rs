@@ -1488,11 +1488,21 @@ fn main() {
     // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
     // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
     // zero — the transverse-B curved measures land with the phase-B densitized CT).
-    for geom in [Geom::sph(1).schwarzschild(), Geom::sph(1).schwarzschild().log_radial()] {
+    for geom in [
+        Geom::sph(1).schwarzschild(),
+        Geom::sph(1).schwarzschild().log_radial(),
+        Geom::sph(1).kerr_schild(),
+        Geom::sph(1).kerr_schild().log_radial(),
+    ] {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone());
+    }
+    // the 1D bcell flux-divergence predictor is spacetime-INDEPENDENT (the radial B row's
+    // flux is identically zero; curved transverse-B measures land with the phase-B
+    // densitized CT), so one instance per SPACING serves both GR charts.
+    for geom in [Geom::sph(1), Geom::sph(1).log_radial()] {
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
     }

@@ -295,8 +295,24 @@ pub fn gr_light_cone_wave_speed_map_gv(
         let h_flat = gv_scale_factor(coords, c, &pos);
         lambda = lambda.max(lam_c * h_flat * inv_w[d]);
     }
+    let lambda = gv_state_finite_guard(lambda);
     let writes = wave_speed_map_writes(lambda.node());
     (end_trace(), writes)
+}
+
+
+/// the fail-loud guard for a STATE-INDEPENDENT wave-speed map: a pure-geometry lambda breaks
+/// the "NaN state -> NaN wave speed -> NaN dt -> halt" backstop (a blown-up run marches to
+/// t_final and writes garbage checkpoints). probe the conserved state at this cell and force
+/// lambda -> +inf when it is non-finite: dt collapses to ZERO and the driver's crash guard
+/// halts. the inf is built at RUNTIME as lambda/0 (an inf literal does not survive the json
+/// ir); `probe - probe` is NaN for BOTH NaN and +-inf inputs; the good path divides by one,
+/// bit-transparent. den + tau suffice: any physics NaN reaches them within one step's fluxes.
+fn gv_state_finite_guard(lambda: Gv) -> Gv {
+    let probe = Gv::field("cons_den", FieldRef::cons_den())
+        + Gv::field("cons_nrg", FieldRef::cons_nrg());
+    let diff = probe - probe;
+    lambda / Gv::select(diff.cmp_eq(diff), Gv::ONE, Gv::ZERO)
 }
 
 
@@ -336,7 +352,7 @@ pub fn kerr_wave_speed_map_gv(
     // polar: alpha sqrt(gamma^{theta theta}) = alpha/sqrt(Sigma) over the coordinate dtheta; the
     // physical inv width carries the flat h_theta = r, so multiply the ratio r/sqrt(Sigma) back.
     let lam_t = alpha * gi[(1, 1)].sqrt() * r * inv_w[1];
-    let lambda = lam_r.max(lam_t);
+    let lambda = gv_state_finite_guard(lam_r.max(lam_t));
     let writes = wave_speed_map_writes(lambda.node());
     (end_trace(), writes)
 }
