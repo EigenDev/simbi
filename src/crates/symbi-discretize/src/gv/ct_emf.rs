@@ -1653,21 +1653,21 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     let (_gr_xn, m_xn) = regime_at(r_f, th_c(0));
     let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
     let xn_r = prim_face(&ne, g1, -1.0, 0, bx_n_face, 1, by_e);
-    let st_xn = hlld_rmhd_states_gr_ortho(&eos, &xn_l, &xn_r, &Tensor::<Gv, 3>::unit(0), &m_xn);
+    let st_xn = hlld_rmhd_states_gr_ortho(&eos, &xn_l, &xn_r, 0, &m_xn);
     let (_gr_xs, m_xs) = regime_at(r_f, th_c(-1));
     let xs_l = prim_face(&sw, g1, 1.0, 0, bx_s_face, 1, by_w);
     let xs_r = prim_face(&se, g1, -1.0, 0, bx_s_face, 1, by_e);
-    let st_xs = hlld_rmhd_states_gr_ortho(&eos, &xs_l, &xs_r, &Tensor::<Gv, 3>::unit(0), &m_xs);
+    let st_xs = hlld_rmhd_states_gr_ortho(&eos, &xs_l, &xs_r, 0, &m_xs);
     let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e), wave_sum(&st_xs, 1, by_w, by_e));
     // y-Riemann (theta-direction) at the West + East theta-faces: metrics at (r_c(-1/0), th_f).
     let (_gr_yw, m_yw) = regime_at(r_c(-1), th_f);
     let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
     let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
-    let st_yw = hlld_rmhd_states_gr_ortho(&eos, &yw_l, &yw_r, &Tensor::<Gv, 3>::unit(1), &m_yw);
+    let st_yw = hlld_rmhd_states_gr_ortho(&eos, &yw_l, &yw_r, 1, &m_yw);
     let (_gr_ye, m_ye) = regime_at(r_c(0), th_f);
     let ye_l = prim_face(&se, g2, 1.0, 1, by_e_face, 0, bx_s);
     let ye_r = prim_face(&ne, g2, -1.0, 1, by_e_face, 0, bx_n);
-    let st_ye = hlld_rmhd_states_gr_ortho(&eos, &ye_l, &ye_r, &Tensor::<Gv, 3>::unit(1), &m_ye);
+    let st_ye = hlld_rmhd_states_gr_ortho(&eos, &ye_l, &ye_r, 1, &m_ye);
     let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n), wave_sum(&st_ye, 0, bx_s, bx_n));
     // advective transport velocities at the corner (vtilde = alpha v; schwarzschild beta = 0).
     let (_gr_c, m_c) = regime_at(r_f, th_f);

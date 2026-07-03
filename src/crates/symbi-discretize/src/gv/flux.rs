@@ -778,7 +778,7 @@ pub fn rmhd_flux_gr_gv(
             "GR HLLD requires a zero-shift chart (Schwarzschild); the kerr-schild/kerr shifted \
              HLLD fan is a design-44 increment"
         );
-        let flux = hlld_rmhd_gr_ortho(&eos, &left, &right, &nhat, Gv::ZERO, &regime.metric);
+        let flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, Gv::ZERO, &regime.metric);
         let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
         for k in 0..3 {
             writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));

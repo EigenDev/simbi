@@ -265,90 +265,85 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
 /// and Gv-traced kernel. on unphysical state or secant divergence, falls back
 /// to HLLE via a final mask-driven `select` over the flux. matches mignone,
 /// ugliano & bodo (2009).
-/// GR HLLD via the local ORTHONORMAL frame. for a DIAGONAL spatial metric gamma = diag(g_0..g_{D-1})
-/// the physical (contravariant) velocity and field map to the orthonormal frame where the metric is
-/// the identity: V_hat^i = sqrt(g_i) v^i, B_hat^i = sqrt(g_i) B^i (whence W_hat = W, |B_hat|^2 = |B|^2,
-/// V_hat.B_hat = v.B — every Lorentz scalar is preserved). the VALIDATED flat MUB09 solver runs there
-/// and the intercell flux maps back EXACTLY:
-///   F_D   = F_hat_D / sqrt(g_n),      F_tau = F_hat_tau / sqrt(g_n),
-///   F_S_j = (sqrt(g_j)/sqrt(g_n)) F_hat_S_j   (covariant momentum; the Valencia pressure term is the
-///           MIXED p_tot delta^n_j, so this holds for j = n too — no residual pressure term),
-///   F_B^i = F_hat_B^i / (sqrt(g_i) sqrt(g_n)).
-/// the ALE face speed rides along as vface_hat = sqrt(g_n) vface. exact for any diagonal metric
-/// (schwarzschild, ingoing kerr-schild); the off-diagonal (spinning kerr) case needs a full tetrad
-/// and is rejected upstream.
+/// GR HLLD via the local ORTHONORMAL frame (TETRAD form). the tetrad E = `metric.orthonormal_basis(dir)`
+/// maps the physical contravariant velocity/field into the frame where the spatial metric is the
+/// identity: V_hat = E^{-1} v, B_hat = E^{-1} B (whence W_hat = W, |B_hat|^2 = |B|^2, V_hat.B_hat = v.B
+/// — every Lorentz scalar preserved). the VALIDATED flat MUB09 solver runs there and the intercell
+/// flux maps back EXACTLY, with the single normal factor E_dd = E[dir][dir]:
+///   F_D   = E_dd F_hat_D,             F_tau = E_dd F_hat_tau,
+///   F_B^i = E_dd (E F_hat_B)^i        (contravariant induction flux),
+///   F_S_j = E_dd (E^{-T} F_hat_S)_j   (covariant momentum; the Valencia pressure term is the MIXED
+///           p_tot delta^n_j, so it cancels exactly under the transform — no residual).
+/// the ALE face speed rides along as vface_hat = vface / E_dd. exact for ANY symmetric-positive
+/// spatial metric: diagonal Schwarzschild/KS (E diagonal, reduces to the sqrt(g_i) scaling) and the
+/// non-diagonal spinning-Kerr gamma alike.
 pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    dir: usize,
     vface: S,
     metric: &SpatialMetric<S, D>,
 ) -> MhdCons<S, D> {
-    let one = S::ONE;
-    // sqrt(g_i) along each coordinate axis (the diagonal of gamma); sqrt(g_n) along the normal.
-    let sg: [S; D] = std::array::from_fn(|i| metric.norm_sq_contra(&Tensor::unit(i)).sqrt());
-    let sgn = metric.norm_sq_contra(nhat).sqrt();
+    let nhat = Tensor::<S, D>::unit(dir);
+    let e = metric.orthonormal_basis(dir);
+    let e_t = e.transpose();
+    let e_dd = e[(dir, dir)];
+    // the tetrad is orthonormal w.r.t. gamma, so the FORWARD map needs no matrix inverse:
+    // V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a. the covariant momentum flux maps back with
+    // T^{-T} = gamma E (F_S = E_dd gamma (E F_hat_S)); the contravariant field maps with E.
     let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
-        hydro: Prim {
-            rho: p.hydro.rho,
-            vel: Tensor { data: std::array::from_fn(|i| sg[i] * p.hydro.vel.data[i]) },
-            pre: p.hydro.pre,
-        },
-        mag: Tensor { data: std::array::from_fn(|i| sg[i] * p.mag.data[i]) },
+        hydro: Prim { rho: p.hydro.rho, vel: e_t.mul_vec(&metric.lower(&p.hydro.vel)), pre: p.hydro.pre },
+        mag: e_t.mul_vec(&metric.lower(&p.mag)),
     };
     let hat_l = to_hat(prim_l);
     let hat_r = to_hat(prim_r);
-    let fhat = hlld_rmhd(&Rmhd, eos, &hat_l, &hat_r, nhat, vface * sgn, &SpatialMetric::flat());
-    let inv_sgn = one / sgn;
+    let fhat = hlld_rmhd(&Rmhd, eos, &hat_l, &hat_r, &nhat, vface / e_dd, &SpatialMetric::flat());
     MhdCons {
         hydro: Cons {
-            den: fhat.hydro.den * inv_sgn,
-            mom: Tensor { data: std::array::from_fn(|j| sg[j] * inv_sgn * fhat.hydro.mom.data[j]) },
-            nrg: fhat.hydro.nrg * inv_sgn,
+            den: fhat.hydro.den * e_dd,
+            mom: metric.lower(&e.mul_vec(&fhat.hydro.mom)).scale(e_dd),
+            nrg: fhat.hydro.nrg * e_dd,
         },
-        mag: Tensor { data: std::array::from_fn(|i| fhat.mag.data[i] * inv_sgn / sg[i]) },
+        mag: e.mul_vec(&fhat.mag).scale(e_dd),
     }
 }
 
 /// the converged HLLD fan for the GR UCT-HLLD edge EMF, via the ORTHONORMAL frame (the states-only
-/// analogue of `hlld_rmhd_gr_ortho`). the flat MUB09 star states are extracted in the orthonormal
-/// frame and mapped back to the coordinate frame with the SAME diagonal-metric rules that make the
-/// wave-sum EMF telescope to the coordinate B_t flux: a CONTRAVARIANT field/velocity maps as
-/// X^i = X_hat^i / sqrt(g_i); a wave SPEED (dx^n/dt) maps as lambda = lambda_hat / sqrt(g_n). in the
-/// wave-sum Phi = sum |lambda_k| (B_t^{star} - B_t) these combine to the coordinate 1/(sqrt(g_t)
-/// sqrt(g_n)) the contravariant B_t flux carries, so Phi is the coordinate EMF directly. exact for
-/// any diagonal metric; the off-diagonal (kerr) case needs a tetrad and is rejected upstream.
+/// analogue of `hlld_rmhd_gr_ortho`). the flat MUB09 star states are extracted in the tetrad frame
+/// and mapped back to the coordinate frame with the SAME tetrad rules that make the wave-sum EMF
+/// telescope to the coordinate B_t flux: a CONTRAVARIANT field/velocity maps as X = E X_hat; a wave
+/// SPEED (dx^n/dt) maps as lambda = E_dd lambda_hat; the normal field maps as B^n = E_dd B_hat^n. in
+/// the wave-sum Phi = sum |lambda_k| (B_t^{star} - B_t) these combine exactly to the contravariant
+/// B_t flux, so Phi IS the coordinate EMF. exact for any symmetric-positive spatial metric (diagonal
+/// Schwarzschild/KS and non-diagonal Kerr alike).
 pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
-    nhat: &Tensor<S, D>,
+    dir: usize,
     metric: &SpatialMetric<S, D>,
 ) -> HlldStates<S, D> {
-    let one = S::ONE;
-    let sg: [S; D] = std::array::from_fn(|i| metric.norm_sq_contra(&Tensor::unit(i)).sqrt());
-    let sgn = metric.norm_sq_contra(nhat).sqrt();
-    let inv_sgn = one / sgn;
+    let nhat = Tensor::<S, D>::unit(dir);
+    let e = metric.orthonormal_basis(dir);
+    let e_t = e.transpose();
+    let e_dd = e[(dir, dir)];
+    // forward map (no inverse): V_hat^a = gamma(v, e_hat_a) = (E^T gamma v)_a.
     let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
-        hydro: Prim {
-            rho: p.hydro.rho,
-            vel: Tensor { data: std::array::from_fn(|i| sg[i] * p.hydro.vel.data[i]) },
-            pre: p.hydro.pre,
-        },
-        mag: Tensor { data: std::array::from_fn(|i| sg[i] * p.mag.data[i]) },
+        hydro: Prim { rho: p.hydro.rho, vel: e_t.mul_vec(&metric.lower(&p.hydro.vel)), pre: p.hydro.pre },
+        mag: e_t.mul_vec(&metric.lower(&p.mag)),
     };
-    let st = hlld_rmhd_states(&Rmhd, eos, &to_hat(prim_l), &to_hat(prim_r), nhat, &SpatialMetric::flat());
-    // contravariant field/velocity: X^i = X_hat^i / sqrt(g_i).
-    let down = |v: &Tensor<S, D>| Tensor { data: std::array::from_fn(|i| v.data[i] / sg[i]) };
+    let st = hlld_rmhd_states(&Rmhd, eos, &to_hat(prim_l), &to_hat(prim_r), &nhat, &SpatialMetric::flat());
+    // contravariant field/velocity: X = E X_hat.
+    let up = |v: &Tensor<S, D>| e.mul_vec(v);
     HlldStates {
-        lam: [st.lam[0] * inv_sgn, st.lam[1] * inv_sgn],
-        alf: [st.alf[0] * inv_sgn, st.alf[1] * inv_sgn],
-        lstar: st.lstar * inv_sgn,
-        bstar: [down(&st.bstar[0]), down(&st.bstar[1])],
-        bc: down(&st.bc),
-        vc: down(&st.vc),
-        bn: st.bn * inv_sgn,
+        lam: [st.lam[0] * e_dd, st.lam[1] * e_dd],
+        alf: [st.alf[0] * e_dd, st.alf[1] * e_dd],
+        lstar: st.lstar * e_dd,
+        bstar: [up(&st.bstar[0]), up(&st.bstar[1])],
+        bc: up(&st.bc),
+        vc: up(&st.vc),
+        bn: st.bn * e_dd,
         success: st.success,
     }
 }
@@ -1226,6 +1221,18 @@ mod tests {
         }
     }
 
+    // a MILD NON-DIAGONAL SPD spatial metric (the kerr-class case: off-diagonal gamma_r_phi-type
+    // couplings), exercising the FULL tetrad path in the orthonormal-frame HLLD (not just the
+    // diagonal sqrt(g) scaling). the inverse is computed exactly from the closed-form 3x3 inv.
+    fn mild_nondiag_metric() -> SpatialMetric<f64, 3> {
+        let gamma = symbi_algebra::Matrix::new([
+            [1.3, 0.2, 0.05],
+            [0.2, 1.15, 0.1],
+            [0.05, 0.1, 1.15],
+        ]);
+        SpatialMetric { gamma, gamma_inv: gamma.inv() }
+    }
+
     #[test]
     fn hlld_rmhd_gr_telescopes_to_flux_on_a_curved_metric() {
         // the DECISIVE proof for the metric-generalized MUB09 solver: the M&DZ wave-sum
@@ -1245,10 +1252,10 @@ mod tests {
             hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.08, 0.04]), pre: 0.4 },
             mag: Tensor::new([0.4, -0.5, 0.25]),
         };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let dir = 0usize;
         let _ = &gr;
         assert!(m.norm_sq_contra(&prim_l.vel) < 1.0 && m.norm_sq_contra(&prim_r.vel) < 1.0);
-        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, &nhat, &m);
+        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, dir, &m);
         assert!(s.success > 0.5, "GR HLLD must converge on the curved metric");
         let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
         let by = [prim_l.mag[1], prim_r.mag[1]];
@@ -1263,7 +1270,7 @@ mod tests {
                 - alf[0].abs() * (bc_y - by_ss_l)
                 - alf[1].abs() * (by_ss_r - bc_y)
                 - lam[1].abs() * (by[1] - by_ss_r));
-        let flux = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, &nhat, 0.0, &m);
+        let flux = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, dir, 0.0, &m);
         let f_ref = flux.mag[1];
         assert!(
             (f_hat - f_ref).abs() < 1e-8,
@@ -1289,9 +1296,9 @@ mod tests {
             hydro: Prim { rho: 0.3, vel: Tensor::new([-0.08, -0.1, 0.04]), pre: 0.4 },
             mag: Tensor::new([-0.5, 0.4, 0.25]),
         };
-        let nhat = Tensor::<f64, 3>::unit(1);
+        let dir = 1usize;
         let _ = &gr;
-        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, &nhat, &m);
+        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, dir, &m);
         assert!(s.success > 0.5, "GR HLLD (theta) must converge");
         // theta-Riemann dissipates B_r (component 0), normal B_theta (component 1).
         let (t, nrm) = (0usize, 1usize);
@@ -1309,7 +1316,7 @@ mod tests {
                 - s.alf[0].abs() * (s.bc[t] - bt_ss_l)
                 - s.alf[1].abs() * (bt_ss_r - s.bc[t])
                 - s.lam[1].abs() * (bt[1] - bt_ss_r));
-        let flux = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, &nhat, 0.0, &m);
+        let flux = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, dir, 0.0, &m);
         let f_ref = flux.mag[t];
         assert!(
             (f_hat - f_ref).abs() < 1e-8,
@@ -1336,7 +1343,7 @@ mod tests {
         };
         for d in 0..3usize {
             let nhat = Tensor::<f64, 3>::unit(d);
-            let ortho = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, &nhat, 0.0, &flat);
+            let ortho = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, d, 0.0, &flat);
             let flat_flux = hlld_rmhd(&Rmhd, &eos, &prim_l, &prim_r, &nhat, 0.0, &flat);
             assert_eq!(ortho.den, flat_flux.den, "d{d} den not bit-identical at flat");
             assert_eq!(ortho.nrg, flat_flux.nrg, "d{d} nrg not bit-identical at flat");
@@ -1365,7 +1372,7 @@ mod tests {
         };
         for d in 0..2 {
             let nhat = Tensor::<f64, 3>::unit(d);
-            let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, &nhat, 0.0, &m);
+            let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
             let exact = gr.to_flux(&prim, &nhat, &eos);
             assert!((flux.den - exact.den).abs() < 1e-12, "d{d} den: {} vs {}", flux.den, exact.den);
             for k in 0..3 {
@@ -1374,6 +1381,72 @@ mod tests {
             }
             assert!((flux.nrg - exact.nrg).abs() < 1e-12, "d{d} nrg: {} vs {}", flux.nrg, exact.nrg);
         }
+    }
+
+    #[test]
+    fn hlld_rmhd_gr_ortho_nondiagonal_smooth_equals_flux() {
+        // the TETRAD smooth-limit gate: on a NON-DIAGONAL (kerr-class) metric the orthonormal-frame
+        // HLLD must STILL equal F(U) exactly for L = R. this exercises the full Gram-Schmidt tetrad
+        // (off-diagonal gamma), not just the diagonal sqrt(g) scaling. all three coordinate normals.
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let m = mild_nondiag_metric();
+        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let prim = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.18, 0.06, -0.04]), pre: 1.0 },
+            mag: Tensor::new([0.5, 0.6, 0.3]),
+        };
+        for d in 0..3 {
+            let nhat = Tensor::<f64, 3>::unit(d);
+            let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, 0.0, &m);
+            let exact = gr.to_flux(&prim, &nhat, &eos);
+            assert!((flux.den - exact.den).abs() < 1e-11, "d{d} den: {} vs {}", flux.den, exact.den);
+            for k in 0..3 {
+                assert!((flux.mom[k] - exact.mom[k]).abs() < 1e-11, "d{d} mom{k}: {} vs {}", flux.mom[k], exact.mom[k]);
+                assert!((flux.mag[k] - exact.mag[k]).abs() < 1e-11, "d{d} mag{k}: {} vs {}", flux.mag[k], exact.mag[k]);
+            }
+            assert!((flux.nrg - exact.nrg).abs() < 1e-11, "d{d} nrg: {} vs {}", flux.nrg, exact.nrg);
+        }
+    }
+
+    #[test]
+    fn hlld_rmhd_gr_ortho_nondiagonal_telescopes() {
+        // the TETRAD wave-sum gate: on a NON-DIAGONAL metric the M&DZ wave-sum built from the tetrad
+        // star states must telescope EXACTLY to the tetrad HLLD B_t flux (the CT-flux consistency the
+        // GR-UCT-HLLD EMF relies on, now with the full frame-dragging-class metric). r-direction,
+        // dissipated component B_y. the induction flux F(B^i) = B^i v^n - v^i B^n is metric-free in
+        // contravariant components, so the telescoping FORMULA is unchanged; the tetrad enters only
+        // through the star fields + speeds.
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let m = mild_nondiag_metric();
+        let dir = 0usize;
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.15, 0.05, -0.03]), pre: 1.0 },
+            mag: Tensor::new([0.4, 0.6, 0.3]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.08, 0.04]), pre: 0.4 },
+            mag: Tensor::new([0.4, -0.5, 0.25]),
+        };
+        assert!(m.norm_sq_contra(&prim_l.vel) < 1.0 && m.norm_sq_contra(&prim_r.vel) < 1.0);
+        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, dir, &m);
+        assert!(s.success > 0.5, "tetrad HLLD must converge on the non-diagonal metric");
+        let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
+        let by = [prim_l.mag[1], prim_r.mag[1]];
+        let vx = [prim_l.vel[0], prim_r.vel[0]];
+        let vy = [prim_l.vel[1], prim_r.vel[1]];
+        let f = |i: usize| vx[i] * by[i] - vy[i] * bn;
+        let f_hat = 0.5
+            * (f(0) + f(1)
+                - lam[0].abs() * (s.bstar[0][1] - by[0])
+                - alf[0].abs() * (bc_y - s.bstar[0][1])
+                - alf[1].abs() * (s.bstar[1][1] - bc_y)
+                - lam[1].abs() * (by[1] - s.bstar[1][1]));
+        let flux = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, dir, 0.0, &m);
+        assert!(
+            (f_hat - flux.mag[1]).abs() < 1e-8,
+            "tetrad wave-sum does NOT telescope: {f_hat} vs {} (diff {})",
+            flux.mag[1], (f_hat - flux.mag[1]).abs()
+        );
     }
 
     #[test]
@@ -1391,9 +1464,9 @@ mod tests {
             hydro: Prim { rho: 0.5, vel: Tensor::new([-0.05, 0.06, -0.03]), pre: 0.5 },
             mag: Tensor::new([0.3, -0.4, 0.15]),
         };
-        let nhat = Tensor::<f64, 3>::unit(0);
+        let dir = 0usize;
         let _ = &gr;
-        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, &nhat, &m);
+        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, dir, &m);
         assert!(s.success > 0.5, "GR HLLD must converge");
         let tol = 1e-9;
         assert!(s.lam[0] <= s.alf[0] + tol, "lamL <= alfL");

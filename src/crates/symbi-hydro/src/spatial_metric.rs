@@ -85,4 +85,42 @@ impl<S: Scalar, const D: usize> SpatialMetric<S, D> {
     pub fn lower(&self, v: &Tensor<S, D>) -> Tensor<S, D> {
         self.gamma.mul_vec(v)
     }
+
+    /// the ORTHONORMAL basis matrix E for a Riemann solve along coordinate axis `dir`: the columns
+    /// are the orthonormal frame vectors e_hat_a (contravariant, in coordinate components) from a
+    /// GRAM-SCHMIDT of the coordinate basis with respect to gamma, processing the TRANSVERSE axes
+    /// FIRST and the normal `dir` LAST. because each transverse e_hat lives purely in the transverse
+    /// coordinate plane (zero `dir` component), the normal maps cleanly: v^dir = E[dir][dir]
+    /// V_hat^dir, so a contravariant/covariant/flux quantity transforms to and from the frame where
+    /// the metric is the identity by E (and E^{-1}) with the single normal factor E[dir][dir]. this
+    /// is the tetrad that reduces the GR MUB09 solve to the flat solver on ANY symmetric-positive
+    /// spatial metric (diagonal Schwarzschild/KS -> E = diag(1/sqrt(gamma_ii)); non-diagonal Kerr ->
+    /// the full triangular tetrad). the frame is: V_hat = E^{-1} v, B_hat = E^{-1} B.
+    pub fn orthonormal_basis(&self, dir: usize) -> Matrix<S, D> {
+        let one = S::ONE;
+        // gram-schmidt order: every transverse axis in index order, then the normal last.
+        let mut order = [0usize; D];
+        let mut n = 0;
+        for a in 0..D {
+            if a != dir {
+                order[n] = a;
+                n += 1;
+            }
+        }
+        order[D - 1] = dir;
+        let mut cols: [Tensor<S, D>; D] = [Tensor::zeros(); D];
+        for step in 0..D {
+            let a = order[step];
+            let mut u = Tensor::<S, D>::unit(a);
+            for prev in 0..step {
+                let b = order[prev];
+                // subtract the gamma-projection onto the already-orthonormalized column b.
+                let proj = self.contract_contra(&u, &cols[b]);
+                u = u - cols[b].scale(proj);
+            }
+            let inv_norm = one / self.norm_sq_contra(&u).sqrt();
+            cols[a] = u.scale(inv_norm);
+        }
+        Matrix::from_fn(|i, j| cols[j].data[i])
+    }
 }
