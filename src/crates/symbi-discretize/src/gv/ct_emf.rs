@@ -565,6 +565,80 @@ pub fn rmhd_edge_emf_gr_gv(
 }
 
 
+/// the CURVED-SPACETIME CT face->cell B interpolation + magnetic-energy correction: the
+/// flat [`rmhd_bcell_from_bface_gv`] with the energy patch contracted through the SPATIAL
+/// METRIC at the volume-weighted centroid (the c2p metric point):
+///   nrg += 1/2 [ gamma_ij B^i B^j |_new - gamma_ij B^i B^j |_old ]
+/// over the FULL 3-vector (in-plane comps interpolate from faces, the out-of-plane comp is
+/// untouched but enters the contraction through non-diagonal gamma). the flat euclidean
+/// sumsq under-counts the correction by the metric factors (gamma_rr = 1/f at schwarzschild).
+/// the v = 0 convention of the flat patch is kept — the one-step instrument adjudicates it.
+pub fn rmhd_bcell_from_bface_gr_gv(
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+    begin_trace();
+    let ndim = axes.len();
+    let half = Gv::from_f64(0.5);
+    let off = |ax: usize| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        o[ax] = 1;
+        o
+    };
+    // field order (positional dispatch): ndim faces, then THREE old cells, then nrg — the full
+    // cell B enters the metric contraction.
+    let bf: Vec<Gv> = (0..ndim).map(|c| Gv::field(&format!("bf_{c}"), &format!("bf_{c}"))).collect();
+    let bc: Vec<Gv> = (0..3).map(|c| Gv::field(&format!("bc_{c}"), FieldRef::BCell(c as u8))).collect();
+    let nrg = Gv::field("nrg", "nrg");
+    let mut bc_n: Vec<Gv> = bc.clone();
+    for (d, &c) in axes.iter().enumerate() {
+        bc_n[c] = (bf[d] + gv_field_at(&format!("bf_{d}"), &format!("bf_{d}"), ndim, &off(d))) * half;
+    }
+    // the spatial metric at the volume-weighted centroid; ungridded polar slot at pi/2.
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => geo.centroid[d],
+            None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
+            None => Gv::ZERO,
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let gm = match spacetime {
+        Spacetime::Schwarzschild => {
+            <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric(&Schwarzschild { mass }, x)
+        }
+        Spacetime::KerrSchild => {
+            <SchwarzschildKS<Gv> as Metric<Gv, 3>>::spatial_metric(&SchwarzschildKS { mass }, x)
+        }
+        Spacetime::Kerr => <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+            &KerrKS { mass, spin: Gv::scalar("kerr_spin") },
+            x,
+        ),
+        Spacetime::Minkowski => unreachable!("the GR interpolation is baked only for a curved spacetime"),
+    };
+    let bsq = |v: &[Gv]| -> Gv {
+        let mut s = Gv::ZERO;
+        for i in 0..3 {
+            for j in 0..3 {
+                s = s + gm[(i, j)] * v[i] * v[j];
+            }
+        }
+        s
+    };
+    let nrg_n = nrg + half * (bsq(&bc_n) - bsq(&bc));
+    let mut writes: Vec<(String, FieldBind, NodeId)> = axes
+        .iter()
+        .map(|&c| (format!("bc_{c}_new"), format!("bc_{c}").into(), bc_n[c].node()))
+        .collect();
+    writes.push(("nrg_new".to_string(), "nrg".into(), nrg_n.node()));
+    (end_trace(), writes)
+}
+
+
 /// the per-direction UCT flux/diffusion coefficients at the edge — the (a^L, a^R, d^L, d^R) of the
 /// master formula (Mignone & Del Zanna 2020, Eq. 30). `al`/`ar` are the advective flux weights of the
 /// upwind/downwind states (a^L + a^R = 1); `dl`/`dr` the dissipative diffusion coefficients (equal
