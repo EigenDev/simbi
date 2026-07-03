@@ -222,14 +222,16 @@ where
             let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
             format!("{}_face_flux{gsfx}{}_{D}d_{dir}", Self::kernel_prefix(), self.solver.kernel_suffix())
         } else {
-            // the metric-aware valencia flux (RmhdGr): inline bound wave speeds, HLLE-only —
-            // no contact/alfven-resolving GR fan is baked, so any other solver fails loud.
+            // the metric-aware valencia flux (RmhdGr). HLLE = the fast-magnetosonic-bound fan
+            // (any chart). HLLD = the metric-generalized MUB09 five-wave fan, baked SCHWARZSCHILD
+            // only (zero shift); the kerr-schild/kerr shifted HLLD fan is a design-44 increment.
             assert!(
-                matches!(self.solver, Solver::Hlle),
-                "the GR MHD flux is HLLE-only (the fast-magnetosonic-bound fan)"
+                matches!(self.solver, Solver::Hlle)
+                    || (matches!(self.solver, Solver::Hlld) && st == "_schw"),
+                "the GR MHD flux supports HLLE (any chart) and HLLD (schwarzschild only)"
             );
             let sp = spacing_suffix(&sim.geom.maps);
-            format!("{}_face_flux{sp}{st}_{D}d_{dir}", Self::kernel_prefix())
+            format!("{}_face_flux{}{sp}{st}_{D}d_{dir}", Self::kernel_prefix(), self.solver.kernel_suffix())
         };
         let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         let scalars = scalars_for(&flux_name, |bind| match bind {

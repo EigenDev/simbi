@@ -988,15 +988,17 @@ fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the GRMHD face flux: RmhdGr valencia U/F + the fast-magnetosonic-bound fan (+ the
-// kerr-schild shifted fan with the induction transpose). HLLE-only on the GR path.
-fn gen_rmhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
+// the GRMHD face flux: RmhdGr valencia U/F. `hlld` selects the metric-generalized MUB09
+// five-wave fan (Schwarzschild only — zero shift); false is the fast-magnetosonic-bound HLLE
+// fan (+ the kerr-schild shifted fan with the induction transpose). solver slug after face_flux.
+fn gen_rmhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom, hlld: bool) {
+    let solver = if hlld { "_hlld" } else { "" };
     let name = format!(
-        "rmhd_face_flux{}{}_{ndim}d_{dir}",
+        "rmhd_face_flux{solver}{}{}_{ndim}d_{dir}",
         geom.spacing_suffix(), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rmhd_flux_gr_gv(
-        dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+        dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, hlld,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1212,6 +1214,15 @@ fn gen_rmhd_bcell_from_bface_gr(out_dir: &str, ndim: u8, geom: &Geom) {
 
 // the GR-UCT machinery: the per-cell shifted BF-bound wave speeds (materialized for the edge
 // coefficients) + the densitized UCT-HLL corner EMF. one gen per (spacing, spacetime).
+// the GR-UCT-HLLD wave-sum edge EMF (schwarzschild only — zero shift). the per-cell shifted
+// wave speeds are shared with the HLL-UCT bake (rmhd_wave_speeds_cell); this adds only the EMF.
+fn gen_rmhd_gr_uct_hlld(out_dir: &str, geom: &Geom) {
+    let sp = geom.spacing_suffix();
+    let st = geom.spacetime_suffix();
+    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_gv(geom.spacetime, &geom.spacing);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{sp}{st}_2d_2"), 2, &k, &w);
+}
+
 fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
@@ -1546,7 +1557,7 @@ fn main() {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
-        gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone());
+        gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), false);
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_from_bface_gr(&out_dir, 1, &geom);
@@ -1560,12 +1571,15 @@ fn main() {
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
         for dir in 0..2 {
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            // the metric-generalized MUB09 HLLD gas flux (schwarzschild, zero shift).
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
         }
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
+        gen_rmhd_gr_uct_hlld(&out_dir, &geom);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.

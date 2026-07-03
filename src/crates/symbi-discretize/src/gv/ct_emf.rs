@@ -1511,19 +1511,19 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     // (M&DZ Eq. 34 edge average). normal B_x = the staggered FACE B_x; transverse B_y = by_w / by_e.
     let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
     let xn_r = prim_face(&ne, g1, -1.0, 0, bx_n_face, 1, by_e);
-    let st_xn = hlld_rmhd_states(&Rmhd, &eos, &xn_l, &xn_r, &Tensor::<Gv, 3>::unit(0));
+    let st_xn = hlld_rmhd_states(&Rmhd, &eos, &xn_l, &xn_r, &Tensor::<Gv, 3>::unit(0), &SpatialMetric::flat());
     let xs_l = prim_face(&sw, g1, 1.0, 0, bx_s_face, 1, by_w);
     let xs_r = prim_face(&se, g1, -1.0, 0, bx_s_face, 1, by_e);
-    let st_xs = hlld_rmhd_states(&Rmhd, &eos, &xs_l, &xs_r, &Tensor::<Gv, 3>::unit(0));
+    let st_xs = hlld_rmhd_states(&Rmhd, &eos, &xs_l, &xs_r, &Tensor::<Gv, 3>::unit(0), &SpatialMetric::flat());
     let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e), wave_sum(&st_xs, 1, by_w, by_e));
     // y-Riemann dissipates B_x (component 0), normal B_y (1). PER-FACE: West (SW->NW) and East
     // (SE->NE). normal B_y = the staggered FACE B_y; transverse B_x = bx_s / bx_n.
     let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
     let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
-    let st_yw = hlld_rmhd_states(&Rmhd, &eos, &yw_l, &yw_r, &Tensor::<Gv, 3>::unit(1));
+    let st_yw = hlld_rmhd_states(&Rmhd, &eos, &yw_l, &yw_r, &Tensor::<Gv, 3>::unit(1), &SpatialMetric::flat());
     let ye_l = prim_face(&se, g2, 1.0, 1, by_e_face, 0, bx_s);
     let ye_r = prim_face(&ne, g2, -1.0, 1, by_e_face, 0, bx_n);
-    let st_ye = hlld_rmhd_states(&Rmhd, &eos, &ye_l, &ye_r, &Tensor::<Gv, 3>::unit(1));
+    let st_ye = hlld_rmhd_states(&Rmhd, &eos, &ye_l, &ye_r, &Tensor::<Gv, 3>::unit(1), &SpatialMetric::flat());
     let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n), wave_sum(&st_ye, 0, bx_s, bx_n));
     // centered advective velocities (2-cell averages straddling the edge).
     let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
@@ -1537,6 +1537,154 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
         + half * (vy_n * bx_n + vy_s * bx_s)
         + phi_x
         - phi_y;
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+
+/// the CURVED-SPACETIME UCT-HLLD edge EMF (the wave-sum dissipative form, M&DZ Eq. 39) for the
+/// 2.5D (r, theta) poloidal plane — the sharp, Alfven-resolving GR-UCT EMF. mirrors the flat
+/// `rmhd_edge_emf_uct_hlld_gv` with three GR generalizations (design 44 GR-HLLD): (1) the per-face
+/// HLLD Riemann uses the metric-generalized MUB09 solver `hlld_rmhd_states(&RmhdGr, .., &face_metric)`
+/// — the star fields + speeds are metric-aware, and the wave-sum telescopes to the metric HLLD flux
+/// (proven, riemann/hlld.rs); (2) the advective velocity is the transport velocity vtilde = alpha v
+/// (schwarzschild: zero shift); (3) the whole coordinate EMF is densitized by sqrt(gamma)(corner)
+/// -> Etilde_phi (the same corner-densitization as the GR-UCT-HLL EMF; the corner-averaged Phi
+/// (Eq. 34) is a corner quantity). SCHWARZSCHILD ONLY — the kerr-schild/kerr shifted HLLD fan is a
+/// design-44 increment. the per-face metrics sit at each Riemann's face center, matching the gas
+/// HLLD flux. baked per spacing.
+pub fn rmhd_edge_emf_uct_hlld_gr_gv(
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_geometry::{Metric, Schwarzschild};
+    assert!(
+        matches!(spacetime, Spacetime::Schwarzschild),
+        "GR-UCT-HLLD is schwarzschild-only (zero shift); the shifted HLLD fan is a design-44 increment"
+    );
+    begin_trace();
+    let ndim = 2usize;
+    let (g1, g2) = (0usize, 1usize);
+    gv_register_field("e_rho", "rho");
+    gv_register_field("e_vp1", "vel_p1");
+    gv_register_field("e_vp2", "vel_p2");
+    gv_register_field("e_vout", "vel_out");
+    gv_register_field("e_pre", "pre");
+    gv_register_field("e_bp1", "bcell_p1");
+    gv_register_field("e_bp2", "bcell_p2");
+    gv_register_field("e_bout", "bcell_out");
+    gv_register_field("e_bface_a", "bface_a");
+    gv_register_field("e_bface_b", "bface_b");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes { o[ax] = -1; }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let eps = Gv::from_f64(1.0e-30);
+    let zero_g = Gv::ZERO;
+    let gamma = Gv::scalar("gamma");
+    let eos = IdealGas { gamma };
+    let avg2 = |a: Gv, b: Gv| (a + b) * half;
+    let ne = zero.clone();
+    let nw = cm(&[g1]);
+    let se = cm(&[g2]);
+    let sw = cm(&[g1, g2]);
+    // corner + cell/face positions.
+    let r_f = gv_axis_face_at(0, spacing[0], 0);
+    let th_f = gv_axis_face_at(1, spacing[1], 0);
+    let r_c = |o: i64| (gv_axis_face_at(0, spacing[0], o) + gv_axis_face_at(0, spacing[0], o + 1)) * half;
+    let th_c = |o: i64| (gv_axis_face_at(1, spacing[1], o) + gv_axis_face_at(1, spacing[1], o + 1)) * half;
+    let mass = Gv::scalar("schwarzschild_mass");
+    // the RmhdGr regime + its face metric at a point (schwarzschild diagonal).
+    let regime_at = |r: Gv, th: Gv| -> (RmhdGr<Gv, 3>, SpatialMetric<Gv, 3>) {
+        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
+        let m = Schwarzschild { mass };
+        let sm = SpatialMetric {
+            gamma: <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric(&m, x),
+            gamma_inv: <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric_inv(&m, x),
+        };
+        (RmhdGr { metric: sm, alpha: <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, x) }, sm)
+    };
+    let theta = Gv::scalar("theta");
+    let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| -> Gv {
+        let off = |d: i32| -> Vec<i32> { let mut o = base.to_vec(); o[naxis] += d; o };
+        let q0 = gv_field_at(key, rt, ndim, base);
+        let qm = gv_field_at(key, rt, ndim, &off(-1));
+        let qp = gv_field_at(key, rt, ndim, &off(1));
+        let a = q0 - qm;
+        let b = qp - q0;
+        let mm = minmod3(a * theta, half * (a + b), b * theta);
+        let slope = Gv::select(theta.cmp_lt(Gv::ZERO), van_leer(a, b), mm);
+        q0 + Gv::from_f64(0.5 * sign) * slope
+    };
+    let prim_face = |base: &[i32], naxis: usize, sign: f64, n_idx: usize, bn: Gv, t_idx: usize, bt: Gv| -> MhdPrim<Gv, 3> {
+        let r = |key: &str, rt: &str| recon_cell(key, rt, base, naxis, sign);
+        let rho = r("e_rho", "rho");
+        let pre = r("e_pre", "pre");
+        let v = [r("e_vp1", "vel_p1"), r("e_vp2", "vel_p2"), r("e_vout", "vel_out")];
+        let mut b = [r("e_bp1", "bcell_p1"), r("e_bp2", "bcell_p2"), r("e_bout", "bcell_out")];
+        b[n_idx] = bn;
+        b[t_idx] = bt;
+        MhdPrim::<Gv, 3> { hydro: Prim { rho, vel: Tensor::new(v), pre }, mag: Tensor::new(b) }
+    };
+    let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
+    let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
+    let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
+    let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
+    let bx_n_face = gv_field_at("e_bface_a", "bface_a", ndim, &ne);
+    let bx_s_face = gv_field_at("e_bface_a", "bface_a", ndim, &se);
+    let by_w_face = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
+    let by_e_face = gv_field_at("e_bface_b", "bface_b", ndim, &ne);
+    // the wave-sum Phi (coordinate frame, contravariant B jumps). success -> HLL fallback.
+    let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv| -> Gv {
+        let phi_hlld = half
+            * (st.lam[0].abs() * (st.bstar[0][t] - bt_l)
+                + st.alf[0].abs() * (st.bc[t] - st.bstar[0][t])
+                + st.alf[1].abs() * (st.bstar[1][t] - st.bc[t])
+                + st.lam[1].abs() * (bt_r - st.bstar[1][t]));
+        let ap = zero_g.max(st.lam[1]);
+        let am = zero_g.max(zero_g - st.lam[0]);
+        let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
+        Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
+    };
+    // x-Riemann (r-direction) at the North + South r-faces: metrics at (r_f, th_c(0/-1)).
+    let (gr_xn, m_xn) = regime_at(r_f, th_c(0));
+    let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
+    let xn_r = prim_face(&ne, g1, -1.0, 0, bx_n_face, 1, by_e);
+    let st_xn = hlld_rmhd_states(&gr_xn, &eos, &xn_l, &xn_r, &Tensor::<Gv, 3>::unit(0), &m_xn);
+    let (gr_xs, m_xs) = regime_at(r_f, th_c(-1));
+    let xs_l = prim_face(&sw, g1, 1.0, 0, bx_s_face, 1, by_w);
+    let xs_r = prim_face(&se, g1, -1.0, 0, bx_s_face, 1, by_e);
+    let st_xs = hlld_rmhd_states(&gr_xs, &eos, &xs_l, &xs_r, &Tensor::<Gv, 3>::unit(0), &m_xs);
+    let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e), wave_sum(&st_xs, 1, by_w, by_e));
+    // y-Riemann (theta-direction) at the West + East theta-faces: metrics at (r_c(-1/0), th_f).
+    let (gr_yw, m_yw) = regime_at(r_c(-1), th_f);
+    let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
+    let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
+    let st_yw = hlld_rmhd_states(&gr_yw, &eos, &yw_l, &yw_r, &Tensor::<Gv, 3>::unit(1), &m_yw);
+    let (gr_ye, m_ye) = regime_at(r_c(0), th_f);
+    let ye_l = prim_face(&se, g2, 1.0, 1, by_e_face, 0, bx_s);
+    let ye_r = prim_face(&ne, g2, -1.0, 1, by_e_face, 0, bx_n);
+    let st_ye = hlld_rmhd_states(&gr_ye, &eos, &ye_l, &ye_r, &Tensor::<Gv, 3>::unit(1), &m_ye);
+    let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n), wave_sum(&st_ye, 0, bx_s, bx_n));
+    // advective transport velocities at the corner (vtilde = alpha v; schwarzschild beta = 0).
+    let (_gr_c, m_c) = regime_at(r_f, th_f);
+    let alpha_c = <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&Schwarzschild { mass }, Tensor::<Gv, 3>::new([r_f, th_f, Gv::ZERO]));
+    let sqrtg_c = <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&Schwarzschild { mass }, Tensor::<Gv, 3>::new([r_f, th_f, Gv::ZERO]));
+    let _ = m_c;
+    let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
+    let vx_w = alpha_c * avg2(vp1(&nw), vp1(&sw));
+    let vx_e = alpha_c * avg2(vp1(&ne), vp1(&se));
+    let vy_s = alpha_c * avg2(vp2(&sw), vp2(&se));
+    let vy_n = alpha_c * avg2(vp2(&nw), vp2(&ne));
+    // the coordinate corner EMF, densitized to Etilde_phi = sqrt(gamma)(corner) * E_z.
+    let ez = zero_g - half * (vx_e * by_e + vx_w * by_w)
+        + half * (vy_n * bx_n + vy_s * bx_s)
+        + phi_x
+        - phi_y;
+    let emf = sqrtg_c * ez;
     (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
 }
 

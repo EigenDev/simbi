@@ -697,6 +697,7 @@ pub fn rmhd_flux_gr_gv(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
+    hlld: bool,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let ndim = axes.len();
@@ -765,6 +766,35 @@ pub fn rmhd_flux_gr_gv(
     let regime = RmhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
     let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
     let has_shift = matches!(spacetime, Spacetime::KerrSchild);
+    // GR HLLD (the metric-generalized MUB09 fan): the Schwarzschild chart has ZERO shift, so the
+    // solver's intercell flux is the complete kernel flux (the godunov applies alpha). the
+    // kerr-schild/kerr charts carry a radial shift whose HLLD moving-interface (x/t = beta) fan
+    // is a documented increment — gate loud rather than silently drop it.
+    if hlld {
+        assert!(
+            !has_shift,
+            "GR HLLD requires a zero-shift chart (Schwarzschild); the kerr-schild/kerr shifted \
+             HLLD fan is a design-44 increment"
+        );
+        let flux = hlld_rmhd(&regime, &eos, &left, &right, &nhat, Gv::ZERO, &regime.metric);
+        let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
+        for k in 0..3 {
+            writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));
+        }
+        writes.push(("flux_nrg".to_string(), FieldRef::flux_nrg().into(), flux.nrg.node()));
+        for k in 0..3 {
+            writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
+        }
+        let k = end_trace();
+        let stencil_keys = k.stencil_read_field_keys();
+        if stencil_keys.is_empty() {
+            return (k, writes);
+        }
+        let mut halo = vec![0u8; ndim];
+        halo[dir as usize] = 2;
+        let k = k.with_tile_spec(TileSpec { halo, tiled_field_keys: stencil_keys });
+        return (k, writes);
+    }
     let flux = if has_shift {
         // the shifted-system HLL (the RHD GR fan) with the induction transpose add per side.
         let beta_n = beta[coord_n];
@@ -887,7 +917,7 @@ pub fn rmhd_hllc_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(S
 pub fn rmhd_hlld_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let (eos, left, right, nhat) = nmhd_reconstruct(ndim, dir, coord_n);
-    let flux = hlld_rmhd(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO);
+    let flux = hlld_rmhd(&Rmhd, &eos, &left, &right, &nhat, Gv::ZERO, &SpatialMetric::flat());
     let writes = nmhd_flux_writes(&flux);
     (end_trace(), writes)
 }

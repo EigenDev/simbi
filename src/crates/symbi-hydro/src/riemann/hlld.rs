@@ -17,7 +17,6 @@ use crate::state::{Cons, ConsG};
 use crate::energy::Zero;
 use crate::regime::Regime;
 use crate::mhd_state::{MhdPrim, MhdCons, IsoMhdPrim, IsoMhdCons};
-use crate::rmhd::Rmhd;
 use crate::spatial_metric::SpatialMetric;
 use crate::newtonian_mhd::NewtonianMhd;
 use crate::isothermal_mhd::IsothermalMhd;
@@ -133,7 +132,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
         eta[ii] = sign * sgn_bn * wt.abs().sqrt();
         let eta_s = eta[ii];
         let var2 = one / (a_s * p + ret + bn * eta_s + eps);
-        let kn = (rmn + p + metric.contract_contra(&rs.mag, nhat) * eta_s) * var2; // B.n (contravariant)
+        let kn = (rmn + p + rs.mag.dot(nhat) * eta_s) * var2; // B.n (contravariant)
         let ktrans = (rmtrans + rbtrans.scale(eta_s)).scale(var2);
 
         bv[ii] = nhat.scale(bn) + btrans;
@@ -142,11 +141,11 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     }
 
     // K-vector + velocity are contravariant -> metric contractions.
-    let alf_l = metric.contract_contra(&kv[0], nhat);
-    let alf_r = metric.contract_contra(&kv[1], nhat);
+    let alf_l = kv[0].dot(nhat);
+    let alf_r = kv[1].dot(nhat);
     let alf = [alf_l, alf_r];
-    let vn_l = metric.contract_contra(&vv[0], nhat);
-    let vn_r = metric.contract_contra(&vv[1], nhat);
+    let vn_l = vv[0].dot(nhat);
+    let vn_r = vv[1].dot(nhat);
 
     // Eq (45): contact B-field.
     let dkn = alf_r - alf_l + eps;
@@ -262,22 +261,23 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
 /// and Gv-traced kernel. on unphysical state or secant divergence, falls back
 /// to HLLE via a final mask-driven `select` over the flux. matches mignone,
 /// ugliano & bodo (2009).
-pub fn hlld_rmhd<S: Scalar, const D: usize>(
-    regime: &Rmhd,
+pub fn hlld_rmhd<S: Scalar, const D: usize, R>(
+    regime: &R,
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Tensor<S, D>,
     vface: S,
-) -> MhdCons<S, D> {
+    metric: &SpatialMetric<S, D>,
+) -> MhdCons<S, D>
+where
+    R: Regime<S, D, Prim = MhdPrim<S, D>, Cons = MhdCons<S, D>>,
+{
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::from_f64(0.5);
     let eps = S::from_f64(DIVZERO_GUARD);
     let p_floor_val = S::from_f64(CONVERGENCE_TOL); // small positive floor
-    // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
-    // metric threads in here once the flux path carries it (B3).
-    let metric = SpatialMetric::flat();
 
     // eagerly compute HLLE — fallback if HLLD reports divergence at the end.
     let hlle_flux = hlle(regime, eos, prim_l, prim_r, nhat, vface);
@@ -298,7 +298,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let inv_dwave = one / (a_r - a_l + eps);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux  = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
-    let bn = metric.contract_contra(&hll_state.mag, nhat); // B.n (contravariant)
+    let bn = hll_state.mag.dot(nhat); // B.n (contravariant)
 
     // r-vectors for prim_l and prim_r (Eq. 12).
     let r_l = u_l * a_l - f_l;
@@ -337,7 +337,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
 
     // secant pressure iteration -> converged intermediate state (shared with the UCT-HLLD edge-EMF
     // star-state extraction). `success` is a 0/1 scalar; the flux falls back to HLLE when it is 0.
-    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, &metric);
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, metric);
     let p_final = conv.p_final;
     let v = conv.v;
     let vc = v.vc;
@@ -348,7 +348,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     let success = conv.success.cmp_gt(half);
 
     // pick fast-wave side via the contact-vs-vface test, branchless.
-    let vnc = metric.contract_contra(&vc, nhat); // v_c.n (contravariant)
+    let vnc = vc.dot(nhat); // v_c.n (contravariant)
     let on_left = vface.cmp_lt(vnc);
 
     // ---- fast-wave intermediate state (Section 3.1) ----
@@ -361,7 +361,7 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
         -> (MhdCons<S, D>, MhdCons<S, D>)
     {
         let vdba = metric.contract_contra(&va, &ba); // v.B (contravariant)
-        let vna = metric.contract_contra(&va, nhat); // v.n (contravariant)
+        let vna = va.dot(nhat); // v.n (contravariant)
         let inv_lc_vna = one / (lc - vna + eps);
         let da = r_side.den * inv_lc_vna;
         let ea = (r_side.nrg + r_side.den + p_final * vna - vdba * bn) * inv_lc_vna;
@@ -392,8 +392,8 @@ pub fn hlld_rmhd<S: Scalar, const D: usize>(
     // ---- contact-wave state (Section 3.3) ----
     let vdbc = metric.contract_contra(&vc, &bc); // v_c.B_c (contravariant)
     let vna_used = S::select(on_left,
-        metric.contract_contra(&vv_iso[0], nhat),
-        metric.contract_contra(&vv_iso[1], nhat));
+        vv_iso[0].dot(nhat),
+        vv_iso[1].dot(nhat));
     let inv_la_vnc = one / (la - vnc + eps);
     let dc = ua.den * (la - vna_used) * inv_la_vnc;
     let man = ua.mom.dot(nhat);
@@ -437,20 +437,26 @@ pub struct HlldStates<S: Scalar, const D: usize> {
 /// extract the converged HLLD fan for the edge-EMF coefficients WITHOUT building the flux. shares
 /// `hlld_rmhd_converge` with `hlld_rmhd` (identical secant), so the states are bit-consistent with
 /// the flux solve. carrier-generic.
-pub fn hlld_rmhd_states<S: Scalar, const D: usize>(
-    regime: &Rmhd,
+pub fn hlld_rmhd_states<S: Scalar, const D: usize, R>(
+    regime: &R,
     eos: &impl Eos<S>,
     prim_l: &MhdPrim<S, D>,
     prim_r: &MhdPrim<S, D>,
     nhat: &Tensor<S, D>,
-) -> HlldStates<S, D> {
+    metric: &SpatialMetric<S, D>,
+) -> HlldStates<S, D>
+where
+    R: Regime<S, D, Prim = MhdPrim<S, D>, Cons = MhdCons<S, D>>,
+{
     let zero = S::ZERO;
     let one = S::ONE;
     let half = S::from_f64(0.5);
     let eps = S::from_f64(DIVZERO_GUARD);
     let p_floor_val = S::from_f64(CONVERGENCE_TOL);
-    // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); GR face metric -> B3.
-    let metric = SpatialMetric::flat();
+    // the spatial metric at the face: `SpatialMetric::flat()` for the SR path (bit-identical to
+    // euclidean), the metric-aware gamma for the GR path. the MUB09 star-state algebra
+    // (`hlld_vdiff`/`hlld_rmhd_converge`) is fully metric-generic; only the L/R conserved/flux
+    // (from `regime`, metric-aware for `RmhdGr`) and these contractions carry the frame.
 
     let u_l = regime.to_conserved(eos, prim_l);
     let u_r = regime.to_conserved(eos, prim_r);
@@ -460,7 +466,7 @@ pub fn hlld_rmhd_states<S: Scalar, const D: usize>(
     let inv_dwave = one / (a_r - a_l + eps);
     let hll_state = (u_r * a_r - u_l * a_l - f_r + f_l) * inv_dwave;
     let hll_flux = (f_l * a_r - f_r * a_l + (u_r - u_l) * (a_l * a_r)) * inv_dwave;
-    let bn = metric.contract_contra(&hll_state.mag, nhat); // B.n (contravariant)
+    let bn = hll_state.mag.dot(nhat); // B.n (contravariant)
     let r_l = u_l * a_l - f_l;
     let r_r = u_r * a_r - f_r;
     let r_pair = [&r_l, &r_r];
@@ -482,12 +488,12 @@ pub fn hlld_rmhd_states<S: Scalar, const D: usize>(
     let p_lowb = S::select(p_lowb_raw.cmp_le(zero), p_floor_val, p_lowb_raw);
     let p_init = S::select(lowb_mask, p_lowb, p_hll);
 
-    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, &metric);
+    let conv = hlld_rmhd_converge(p_init, r_pair, lam, bn, nhat, metric);
     let v = conv.v;
     HlldStates {
         lam: [a_l, a_r],
         alf: v.alf,
-        lstar: metric.contract_contra(&v.vc, nhat), // v_c.n (contravariant)
+        lstar: v.vc.dot(nhat), // v_c.n (contravariant)
         bstar: v.bv,
         bc: v.bc,
         vc: v.vc,
@@ -939,6 +945,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rmhd::{Rmhd, RmhdGr};
     use crate::state::{Prim, PrimG};
     use crate::eos::{IdealGas, Isothermal};
 
@@ -955,7 +962,7 @@ mod tests {
             mag: Tensor::new([0.5, 1.0, 0.0]),
         };
         let nhat = Tensor::unit(0);
-        let flux = hlld_rmhd(&regime, &eos, &prim, &prim, &nhat, 0.0);
+        let flux = hlld_rmhd(&regime, &eos, &prim, &prim, &nhat, 0.0, &SpatialMetric::flat());
         let exact = regime.to_flux(&prim, &nhat, &eos);
         assert!(approx(flux.den, exact.den), "den: {} vs {}", flux.den, exact.den);
         for dd in 0..3 {
@@ -977,7 +984,7 @@ mod tests {
             mag: Tensor::new([0.5, -1.0, 0.0]),
         };
         let nhat = Tensor::unit(0);
-        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
+        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0, &SpatialMetric::flat());
         assert!(flux.den > 0.0, "density flux should be positive: {}", flux.den);
     }
 
@@ -998,7 +1005,7 @@ mod tests {
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
         println!(
             "GATE: success={} lam={:?} alf={:?} lstar={} bn={}",
             s.success, s.lam, s.alf, s.lstar, s.bn
@@ -1051,10 +1058,10 @@ mod tests {
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
         assert!(s.success > 0.5, "HLLD must converge for the reduction gate to be meaningful");
         assert!(s.alf[0] < 0.0 && s.alf[1] > 0.0, "need the double-star region to straddle the interface: alf={:?}", s.alf);
-        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
+        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0, &SpatialMetric::flat());
         let f_by = flux.mag[1]; // F_x[B_y], the induction flux == -E_z
         let identity = s.lstar * s.bc[1] - s.vc[1] * s.bn; // lambda* B_c^y - v_c^y B^x
         println!(
@@ -1086,7 +1093,7 @@ mod tests {
             mag: Tensor::new([0.5, -0.6, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
         assert!(s.success > 0.5, "HLLD must converge");
         let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
         // speed-only weights (classical kernel forms): v^s, v*, a^L=(1+v*)/2.
@@ -1106,7 +1113,7 @@ mod tests {
                 - alf[0].abs() * (bc_y - by_ss_l)
                 - alf[1].abs() * (by_ss_r - bc_y)
                 - lam[1].abs() * (by[1] - by_ss_r));
-        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0);
+        let flux = hlld_rmhd(&regime, &eos, &prim_l, &prim_r, &nhat, 0.0, &SpatialMetric::flat());
         let f_ref = flux.mag[1];
         println!("TELESCOPE: F_hat={f_hat:.10} vs flux.mag[1]={f_ref:.10}  diff={:.2e}", (f_hat - f_ref).abs());
         assert!(
@@ -1114,6 +1121,132 @@ mod tests {
             "UCT master form does NOT telescope to the HLLD flux: {f_hat} vs {f_ref} (diff {})",
             (f_hat - f_ref).abs()
         );
+    }
+
+    // a MILD diagonal SPD spatial metric (a physical Schwarzschild-scale perturbation of
+    // identity: gamma_rr = 1.3, gamma_tt = gamma_pp = 1.15) that exercises every metric
+    // contraction in the HLLD fan WITHOUT the r^2 blow-up that would map coordinate B to an
+    // unphysical ultra-low-beta physical field.
+    fn mild_curved_metric() -> SpatialMetric<f64, 3> {
+        SpatialMetric {
+            gamma: symbi_algebra::Matrix::diag(Tensor::new([1.3, 1.15, 1.15])),
+            gamma_inv: symbi_algebra::Matrix::diag(Tensor::new([1.0 / 1.3, 1.0 / 1.15, 1.0 / 1.15])),
+        }
+    }
+
+    #[test]
+    fn hlld_rmhd_gr_telescopes_to_flux_on_a_curved_metric() {
+        // the DECISIVE proof for the metric-generalized MUB09 solver: the M&DZ wave-sum
+        // (Eq. 39) built from the metric-aware star states must telescope EXACTLY to the
+        // metric-aware HLLD B_t flux — the star states and the flux are self-consistent on a
+        // curved background (the CT-flux consistency the GR-UCT-HLLD EMF relies on). the
+        // induction flux F(B^i) = B^i v^n - v^i B^n is metric-free in contravariant
+        // components, so the telescoping FORMULA is unchanged; only the star fields carry gamma.
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let m = mild_curved_metric();
+        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.15, 0.05, -0.03]), pre: 1.0 },
+            mag: Tensor::new([0.4, 0.6, 0.3]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.1, -0.08, 0.04]), pre: 0.4 },
+            mag: Tensor::new([0.4, -0.5, 0.25]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        assert!(m.norm_sq_contra(&prim_l.vel) < 1.0 && m.norm_sq_contra(&prim_r.vel) < 1.0);
+        let s = hlld_rmhd_states(&gr, &eos, &prim_l, &prim_r, &nhat, &m);
+        assert!(s.success > 0.5, "GR HLLD must converge on the curved metric");
+        let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
+        let by = [prim_l.mag[1], prim_r.mag[1]];
+        let vx = [prim_l.vel[0], prim_r.vel[0]];
+        let vy = [prim_l.vel[1], prim_r.vel[1]];
+        let f = |i: usize| vx[i] * by[i] - vy[i] * bn;
+        let by_ss_l = s.bstar[0][1];
+        let by_ss_r = s.bstar[1][1];
+        let f_hat = 0.5
+            * (f(0) + f(1)
+                - lam[0].abs() * (by_ss_l - by[0])
+                - alf[0].abs() * (bc_y - by_ss_l)
+                - alf[1].abs() * (by_ss_r - bc_y)
+                - lam[1].abs() * (by[1] - by_ss_r));
+        let flux = hlld_rmhd(&gr, &eos, &prim_l, &prim_r, &nhat, 0.0, &m);
+        let f_ref = flux.mag[1];
+        assert!(
+            (f_hat - f_ref).abs() < 1e-8,
+            "GR wave-sum does NOT telescope to the curved HLLD flux: {f_hat} vs {f_ref} (diff {})",
+            (f_hat - f_ref).abs()
+        );
+    }
+
+    #[test]
+    fn hlld_rmhd_gr_telescopes_on_the_theta_direction() {
+        // the theta-direction Riemann (nhat = unit(1)) — where the michel-monopole theta-momentum
+        // instability lives. the wave-sum for the dissipated transverse component (here B_r,
+        // component 0) must telescope to the metric HLLD flux for THAT component, or the
+        // theta-face flux has a directional metric bug.
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let m = mild_curved_metric();
+        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.05, 0.15, -0.03]), pre: 1.0 },
+            mag: Tensor::new([0.6, 0.4, 0.3]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.3, vel: Tensor::new([-0.08, -0.1, 0.04]), pre: 0.4 },
+            mag: Tensor::new([-0.5, 0.4, 0.25]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(1);
+        let s = hlld_rmhd_states(&gr, &eos, &prim_l, &prim_r, &nhat, &m);
+        assert!(s.success > 0.5, "GR HLLD (theta) must converge");
+        // theta-Riemann dissipates B_r (component 0), normal B_theta (component 1).
+        let (t, nrm) = (0usize, 1usize);
+        let bt = [prim_l.mag[t], prim_r.mag[t]];
+        // F(B_t) = B_t v^n - v_t B^n with n = theta: v^n = v^1, B^n = B^1.
+        let vn = [prim_l.vel[nrm], prim_r.vel[nrm]];
+        let vt = [prim_l.vel[t], prim_r.vel[t]];
+        let bn = s.bn;
+        let f = |i: usize| bt[i] * vn[i] - vt[i] * bn;
+        let bt_ss_l = s.bstar[0][t];
+        let bt_ss_r = s.bstar[1][t];
+        let f_hat = 0.5
+            * (f(0) + f(1)
+                - s.lam[0].abs() * (bt_ss_l - bt[0])
+                - s.alf[0].abs() * (s.bc[t] - bt_ss_l)
+                - s.alf[1].abs() * (bt_ss_r - s.bc[t])
+                - s.lam[1].abs() * (bt[1] - bt_ss_r));
+        let flux = hlld_rmhd(&gr, &eos, &prim_l, &prim_r, &nhat, 0.0, &m);
+        let f_ref = flux.mag[t];
+        assert!(
+            (f_hat - f_ref).abs() < 1e-8,
+            "GR theta-direction wave-sum does NOT telescope: {f_hat} vs {f_ref} (diff {})",
+            (f_hat - f_ref).abs()
+        );
+    }
+
+    #[test]
+    fn hlld_rmhd_gr_fan_is_ordered_on_a_curved_metric() {
+        // the five-wave fan on the curved metric must stay ordered
+        // lam^L <= alf^L <= lstar <= alf^R <= lam^R (MUB09), and the normal field single-valued.
+        let eos = IdealGas { gamma: 4.0 / 3.0 };
+        let m = mild_curved_metric();
+        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.2, vel: Tensor::new([0.1, -0.04, 0.02]), pre: 0.8 },
+            mag: Tensor::new([0.3, 0.5, -0.2]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.5, vel: Tensor::new([-0.05, 0.06, -0.03]), pre: 0.5 },
+            mag: Tensor::new([0.3, -0.4, 0.15]),
+        };
+        let nhat = Tensor::<f64, 3>::unit(0);
+        let s = hlld_rmhd_states(&gr, &eos, &prim_l, &prim_r, &nhat, &m);
+        assert!(s.success > 0.5, "GR HLLD must converge");
+        let tol = 1e-9;
+        assert!(s.lam[0] <= s.alf[0] + tol, "lamL <= alfL");
+        assert!(s.alf[0] <= s.lstar + tol, "alfL <= lstar");
+        assert!(s.lstar <= s.alf[1] + tol, "lstar <= alfR");
+        assert!(s.alf[1] <= s.lam[1] + tol, "alfR <= lamR");
     }
 
     #[test]
@@ -1131,7 +1264,7 @@ mod tests {
             mag: Tensor::new([0.0, -0.5, 0.3]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat);
+        let s = hlld_rmhd_states(&regime, &eos, &prim_l, &prim_r, &nhat, &SpatialMetric::flat());
         println!("GATE Bx=0: success={} lam={:?} alf={:?} lstar={}", s.success, s.lam, s.alf, s.lstar);
         assert!(s.lstar.is_finite() && s.alf[0].is_finite() && s.alf[1].is_finite(), "states finite at Bx=0");
         for k in 0..3 {
