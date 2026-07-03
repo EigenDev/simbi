@@ -59,14 +59,21 @@ def _kerr_wdiv(p, B1, B2):
 
 
 @needs_backend
-@pytest.mark.parametrize("ct", [CtMethod.CONTACT, CtMethod.UCT])
-def test_kerr_field_loop_divergence_free_and_stable(ct) -> None:
+@pytest.mark.parametrize(
+    "solver,ct",
+    [
+        (Solver.HLLE, CtMethod.CONTACT),
+        (Solver.HLLE, CtMethod.UCT),
+        (Solver.HLLD, CtMethod.UCT),  # the sharp tetrad HLLD flux + UCT-HLLD wave-sum EMF on kerr
+    ],
+)
+def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
     from simbi_configs.examples.gr_kerr_field_loop import GrKerrFieldLoop
 
     d = tempfile.mkdtemp() + "/"
     p = GrKerrFieldLoop.from_cli(["--nr", "128", "--npolar", "64", "--kerr-spin", "0.9"])
     p.ct_method = ct
-    p.solver = Solver.HLLE
+    p.solver = solver
     p.end_time = 4.0
     p.data_directory = d
     p.checkpoint_interval = 100.0

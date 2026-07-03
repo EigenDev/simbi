@@ -1547,20 +1547,21 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 /// HLLD Riemann uses the ORTHONORMAL-frame MUB09 solver `hlld_rmhd_states_gr_ortho(.., &face_metric)`
 /// — the flat star fields + speeds map back to the coordinate frame (fields /sqrt(g_i), speeds
 /// /sqrt(g_n)) so the wave-sum telescopes EXACTLY to the coordinate HLLD B_t flux (proven,
-/// riemann/hlld.rs); (2) the advective velocity is the transport velocity vtilde = alpha v
-/// (schwarzschild: zero shift); (3) the whole coordinate EMF is densitized by sqrt(gamma)(corner)
-/// -> Etilde_phi (the same corner-densitization as the GR-UCT-HLL EMF; the corner-averaged Phi
-/// (Eq. 34) is a corner quantity). SCHWARZSCHILD ONLY — the kerr-schild/kerr shifted HLLD fan is a
-/// design-44 increment. the per-face metrics sit at each Riemann's face center, matching the gas
-/// HLLD flux. baked per spacing.
+/// riemann/hlld.rs); (2) the advective velocity is the transport velocity vtilde = alpha v - beta
+/// (spinning kerr carries a radial shift; schwarzschild is zero-shift), and the wave-sum fan speeds
+/// enter RELATIVE to the moving interface vf = beta^r/alpha, matching the shifted gas HLLD flux;
+/// (3) the whole coordinate EMF is densitized by sqrt(gamma)(corner) -> Etilde_phi (the same corner-
+/// densitization as the GR-UCT-HLL EMF; the corner-averaged Phi (Eq. 34) is a corner quantity).
+/// SCHWARZSCHILD + SPINNING KERR — the kerr-schild 2D MHD row is unbaked. the per-face metrics sit at
+/// each Riemann's face center, matching the gas HLLD flux. baked per spacing.
 pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    use symbi_geometry::{Metric, Schwarzschild};
+    use symbi_geometry::{KerrKS, Metric, Schwarzschild};
     assert!(
-        matches!(spacetime, Spacetime::Schwarzschild),
-        "GR-UCT-HLLD is schwarzschild-only (zero shift); the shifted HLLD fan is a design-44 increment"
+        matches!(spacetime, Spacetime::Schwarzschild | Spacetime::Kerr),
+        "GR-UCT-HLLD is baked for schwarzschild + spinning kerr (the kerr-schild 2D MHD row is unbaked)"
     );
     begin_trace();
     let ndim = 2usize;
@@ -1597,15 +1598,35 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     let r_c = |o: i64| (gv_axis_face_at(0, spacing[0], o) + gv_axis_face_at(0, spacing[0], o + 1)) * half;
     let th_c = |o: i64| (gv_axis_face_at(1, spacing[1], o) + gv_axis_face_at(1, spacing[1], o + 1)) * half;
     let mass = Gv::scalar("schwarzschild_mass");
-    // the RmhdGr regime + its face metric at a point (schwarzschild diagonal).
-    let regime_at = |r: Gv, th: Gv| -> (RmhdGr<Gv, 3>, SpatialMetric<Gv, 3>) {
+    // the face spatial metric + the (alpha, sqrt(gamma), beta^r) ADM triad at a point, spacetime-
+    // aware: schwarzschild is diagonal + zero shift; spinning kerr is non-diagonal (gamma_{r phi})
+    // with a radial shift beta^r that the moving-interface fan carries.
+    let metric_at = |r: Gv, th: Gv| -> SpatialMetric<Gv, 3> {
         let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
-        let m = Schwarzschild { mass };
-        let sm = SpatialMetric {
-            gamma: <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric(&m, x),
-            gamma_inv: <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric_inv(&m, x),
+        let (gm, gmi) = match spacetime {
+            Spacetime::Kerr => {
+                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+                (<KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(&m, x), <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric_inv(&m, x))
+            }
+            _ => {
+                let m = Schwarzschild { mass };
+                (<Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric(&m, x), <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric_inv(&m, x))
+            }
         };
-        (RmhdGr { metric: sm, alpha: <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, x) }, sm)
+        SpatialMetric { gamma: gm, gamma_inv: gmi }
+    };
+    let adm_at = |r: Gv, th: Gv| -> (Gv, Gv, Gv) {
+        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
+        match spacetime {
+            Spacetime::Kerr => {
+                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+                (<KerrKS<Gv> as Metric<Gv, 3>>::lapse(&m, x), <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x)[0])
+            }
+            _ => {
+                let m = Schwarzschild { mass };
+                (<Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, x), <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x), Gv::ZERO)
+            }
+        }
     };
     let theta = Gv::scalar("theta");
     let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| -> Gv {
@@ -1637,47 +1658,55 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     let bx_s_face = gv_field_at("e_bface_a", "bface_a", ndim, &se);
     let by_w_face = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
     let by_e_face = gv_field_at("e_bface_b", "bface_b", ndim, &ne);
-    // the wave-sum Phi (coordinate frame, contravariant B jumps). success -> HLL fallback.
-    let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv| -> Gv {
+    // the wave-sum Phi (coordinate frame, contravariant B jumps), success -> HLL fallback. `vf` is
+    // the MOVING-INTERFACE speed (beta^n/alpha): the shifted chart evaluates the fan at x/t = vf, so
+    // every wave speed enters relative to it (lambda - vf) — matching the shifted gas HLLD flux
+    // (hlld_rmhd_gr_ortho with vface), which is what keeps the edge EMF flux-consistent. vf = 0 for
+    // the zero-shift schwarzschild chart and for the theta-direction fan (beta^theta = 0).
+    let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv, vf: Gv| -> Gv {
+        let (l0, l1) = (st.lam[0] - vf, st.lam[1] - vf);
+        let (a0, a1) = (st.alf[0] - vf, st.alf[1] - vf);
         let phi_hlld = half
-            * (st.lam[0].abs() * (st.bstar[0][t] - bt_l)
-                + st.alf[0].abs() * (st.bc[t] - st.bstar[0][t])
-                + st.alf[1].abs() * (st.bstar[1][t] - st.bc[t])
-                + st.lam[1].abs() * (bt_r - st.bstar[1][t]));
-        let ap = zero_g.max(st.lam[1]);
-        let am = zero_g.max(zero_g - st.lam[0]);
+            * (l0.abs() * (st.bstar[0][t] - bt_l)
+                + a0.abs() * (st.bc[t] - st.bstar[0][t])
+                + a1.abs() * (st.bstar[1][t] - st.bc[t])
+                + l1.abs() * (bt_r - st.bstar[1][t]));
+        let ap = zero_g.max(l1);
+        let am = zero_g.max(zero_g - l0);
         let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
-    // x-Riemann (r-direction) at the North + South r-faces: metrics at (r_f, th_c(0/-1)).
-    let (_gr_xn, m_xn) = regime_at(r_f, th_c(0));
+    // x-Riemann (r-direction) at the North + South r-faces: metrics at (r_f, th_c(0/-1)). the fan
+    // carries the radial moving-interface speed vf = beta^r/alpha at that face.
+    let m_xn = metric_at(r_f, th_c(0));
+    let (a_xn, _, b_xn) = adm_at(r_f, th_c(0));
+    let vf_xn = b_xn / a_xn;
     let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
     let xn_r = prim_face(&ne, g1, -1.0, 0, bx_n_face, 1, by_e);
     let st_xn = hlld_rmhd_states_gr_ortho(&eos, &xn_l, &xn_r, 0, &m_xn);
-    let (_gr_xs, m_xs) = regime_at(r_f, th_c(-1));
+    let m_xs = metric_at(r_f, th_c(-1));
+    let (a_xs, _, b_xs) = adm_at(r_f, th_c(-1));
+    let vf_xs = b_xs / a_xs;
     let xs_l = prim_face(&sw, g1, 1.0, 0, bx_s_face, 1, by_w);
     let xs_r = prim_face(&se, g1, -1.0, 0, bx_s_face, 1, by_e);
     let st_xs = hlld_rmhd_states_gr_ortho(&eos, &xs_l, &xs_r, 0, &m_xs);
-    let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e), wave_sum(&st_xs, 1, by_w, by_e));
-    // y-Riemann (theta-direction) at the West + East theta-faces: metrics at (r_c(-1/0), th_f).
-    let (_gr_yw, m_yw) = regime_at(r_c(-1), th_f);
+    let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e, vf_xn), wave_sum(&st_xs, 1, by_w, by_e, vf_xs));
+    // y-Riemann (theta-direction): beta^theta = 0 on every KS-family chart -> vf = 0.
+    let m_yw = metric_at(r_c(-1), th_f);
     let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
     let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
     let st_yw = hlld_rmhd_states_gr_ortho(&eos, &yw_l, &yw_r, 1, &m_yw);
-    let (_gr_ye, m_ye) = regime_at(r_c(0), th_f);
+    let m_ye = metric_at(r_c(0), th_f);
     let ye_l = prim_face(&se, g2, 1.0, 1, by_e_face, 0, bx_s);
     let ye_r = prim_face(&ne, g2, -1.0, 1, by_e_face, 0, bx_n);
     let st_ye = hlld_rmhd_states_gr_ortho(&eos, &ye_l, &ye_r, 1, &m_ye);
-    let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n), wave_sum(&st_ye, 0, bx_s, bx_n));
-    // advective transport velocities at the corner (vtilde = alpha v; schwarzschild beta = 0).
-    let (_gr_c, m_c) = regime_at(r_f, th_f);
-    let alpha_c = <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&Schwarzschild { mass }, Tensor::<Gv, 3>::new([r_f, th_f, Gv::ZERO]));
-    let sqrtg_c = <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&Schwarzschild { mass }, Tensor::<Gv, 3>::new([r_f, th_f, Gv::ZERO]));
-    let _ = m_c;
+    let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n, zero_g), wave_sum(&st_ye, 0, bx_s, bx_n, zero_g));
+    // advective transport velocity at the corner: vtilde = alpha v - beta (radial shift only).
+    let (alpha_c, sqrtg_c, beta_r_c) = adm_at(r_f, th_f);
     let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
     let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
-    let vx_w = alpha_c * avg2(vp1(&nw), vp1(&sw));
-    let vx_e = alpha_c * avg2(vp1(&ne), vp1(&se));
+    let vx_w = alpha_c * avg2(vp1(&nw), vp1(&sw)) - beta_r_c;
+    let vx_e = alpha_c * avg2(vp1(&ne), vp1(&se)) - beta_r_c;
     let vy_s = alpha_c * avg2(vp2(&sw), vp2(&se));
     let vy_n = alpha_c * avg2(vp2(&nw), vp2(&ne));
     // the coordinate corner EMF, densitized to Etilde_phi = sqrt(gamma)(corner) * E_z.

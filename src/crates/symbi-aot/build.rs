@@ -1639,6 +1639,9 @@ fn main() {
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
+        // the sharp Alfven-resolving UCT-HLLD wave-sum EMF (kerr: the tetrad states + the shifted
+        // moving-interface fan). the contact + UCT-HLL EMFs above stay available.
+        gen_rmhd_gr_uct_hlld(&out_dir, &geom);
         gen_rmhd_kerr_ghost_fill(&out_dir, &geom);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
