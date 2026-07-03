@@ -325,14 +325,17 @@ pub fn godunov_stage_gv_with_fused_built(
     // discrete well-balanced pressure form `p (A_hi - A_lo) / V` — which cancels the pressure flux
     // divergence bit-exactly at a uniform-p hydrostatic state, unlike the analytic pressure block
     // `p d_j ln(alpha sqrt(gamma))` of the contraction.
-    let source = match (spacetime, source) {
+    // the ideal-MHD stress moves to the covariant contraction on the GR path too — the flat
+    // Rmhd curvilinear source would double-count the inertia/tension with the WRONG (flat)
+    // contraction for covariant S_i; only the GAS-pressure discrete block stays.
+    let source_discrete = match (spacetime, source) {
         (Spacetime::Minkowski, s) => s,
-        (_, GeoSource::Hydro { .. }) => GeoSource::Hydro { inertial: false },
+        (_, GeoSource::Hydro { .. }) | (_, GeoSource::Rmhd) => GeoSource::Hydro { inertial: false },
         (_, s) => s,
     };
     let src = geo
         .as_ref()
-        .map(|g| gv_geometric_source(coords, axes, ndim as usize, ncomp, g, source, &mom, mag_from_bcell));
+        .map(|g| gv_geometric_source(coords, axes, ndim as usize, ncomp, g, source_discrete, &mom, mag_from_bcell));
 
     let contribs = splice_fused_sources_to_contribs(
         coords, spacing, axes, ndim, ncomp, has_energy, &geo, Some((rho, &mom)), sources,

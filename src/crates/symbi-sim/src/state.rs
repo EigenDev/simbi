@@ -1521,6 +1521,11 @@ where
                     Sc::from_f64(r_vw)
                 } else if k < D {
                     Sc::from_f64(x_center[k])
+                } else if k == 1 {
+                    // an ungridded POLAR slot (DOF-lifted vectors on a 1D radial grid) takes the
+                    // exact equatorial pi/2 — the same convention as the in-kernel metric points;
+                    // zero would degenerate gamma_{phi phi} = r^2 sin^2(theta).
+                    Sc::from_f64(std::f64::consts::FRAC_PI_2)
                 } else {
                     Sc::ZERO
                 }

@@ -153,10 +153,30 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     // mhd_geom_suffix keys on the GRID-AXIS SET (sim.geom.axes): cyl r-z [0,2] -> "_cyl_rz",
-    // r-phi disk [0,1] -> "_cyl_rphi", identity geometries -> "" / "_sph" / "_cyl".
-    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+    // r-phi disk [0,1] -> "_cyl_rphi", identity geometries -> "" / "_sph" / "_cyl". a curved
+    // spacetime appends the spacing + spacetime slugs (the GR godunov carries the covariant
+    // measure + the ideal-MHD stress contraction; the bcell predictor keeps the flat name —
+    // its curved measures land with the phase-B densitized CT, and the 1D radial B row's
+    // flux is identically zero).
+    let base_sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+    let st = crate::regimes::substrate_kernels::spacetime_slug(sim.geom.spacetime);
+    let sp = crate::regimes::substrate_kernels::spacing_suffix(&sim.geom.maps);
+    let sfx = if st.is_empty() {
+        base_sfx.to_string()
+    } else {
+        format!("{base_sfx}{sp}{st}")
+    };
 
     // the gas + bcell stages all bind BY MANIFEST (dispatch_named) — no hand-built buffer list.
+    // the GR godunov reads positions through gv_axis_face_at (log-aware kernel scalars);
+    // flat keeps the raw grid (identical for uniform spacing).
+    let (x_lo_k, dx_k) = if st.is_empty() {
+        (sim.geom.x_lo.clone(), sim.geom.dx.clone())
+    } else {
+        crate::regimes::substrate_kernels::kernel_geom(
+            &sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a,
+        )
+    };
     let scalar = |bind: &ScalarBind| -> Sc {
         let ScalarBind::Ref(sref) = bind else {
             panic!("mhd godunov_stage: unexpected spec scalar {bind:?}");
@@ -167,13 +187,25 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarRef::Ac => Sc::from_f64(ac),
             // gamma (adiabatic) and cs (isothermal) both map to the EOS param arg.
             ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(gamma),
+            ScalarRef::SchwarzschildMass => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("mhd godunov_stage: GR kernel needs schwarzschild_mass"),
+            ),
+            ScalarRef::KerrSpin => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("mhd godunov_stage: GR kernel needs kerr_spin"),
+            ),
             // the shared stage builder declares the mesh-motion dilution; the mhd
             // substrates run static (asserted at evolve entry), so this binds 0.
             other => Sc::from_f64(
                 crate::regimes::substrate_kernels::motion_scalar(
                     &sim.motion, sim.geom.coords, sim.geom.dx.len(), other,
                 )
-                    .or_else(|| geom_scalar(&sim.geom.x_lo, &sim.geom.dx, other))
+                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, other))
                     .unwrap_or_else(|| panic!("mhd godunov_stage: unexpected scalar {other:?}")),
             ),
         }
@@ -195,7 +227,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // no read-only-input-aliasing-an-output. cartesian fused has no geo source (no prim.mag), so it
     // was always alias-free. validated bit-identical to the unfused path (SYMBI_FUSE_GODUNOV=1 CPU
     // equivalence + the GPU diff gates).
-    let fusable = (is_euler || is_rk2) && fuse && has_energy && D == 3;
+    let fusable = (is_euler || is_rk2) && fuse && has_energy && D == 3 && st.is_empty();
 
     if fusable {
         // the FUSED gas + cell-B predictor in ONE launch, bound BY MANIFEST via `dispatch_named`
@@ -219,6 +251,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // buffer layout MUST track the kernel artifact. a hand-built list would be RMHD-shaped and
     // scramble NMHD/IMHD whenever DOF != D (the cyl r-z plane), draining mass at machine speed.
     let gname = format!("{gas_prefix}_godunov_stage{sfx}_{D}d");
+    let bcell_sfx = if st.is_empty() { base_sfx.to_string() } else { format!("{base_sfx}{sp}") };
     let gscalars = scalars_for(&gname, &scalar);
     let pre_bind = if has_energy {
         sim.fields.prim.pre_field().expect("prim.pre")
@@ -231,9 +264,9 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // conserved component; SSP-RK2 (1/2,1/2) combines with bcell_n. any other
     // (a0,ac) rejected (SSP-RK3 + CT unimplemented).
     let bname = if is_euler {
-        format!("rmhd_bcell_godunov_euler{sfx}_{D}d")
+        format!("rmhd_bcell_godunov_euler{bcell_sfx}_{D}d")
     } else if is_rk2 {
-        format!("rmhd_bcell_godunov_rk2{sfx}_{D}d")
+        format!("rmhd_bcell_godunov_rk2{bcell_sfx}_{D}d")
     } else {
         panic!(
             "MHD constrained transport supports only forward-Euler (0,1) and SSP-RK2 (1/2,1/2) \

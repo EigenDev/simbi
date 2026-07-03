@@ -35,8 +35,8 @@ use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
     dispatch_driven_boundaries, dispatch_named, dispatch_runtime_source, geom_scalar,
-    mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for, RegimeKind,
-    RuntimeSource, ScalarBind, Solver,
+    kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for,
+    spacetime_slug, spacing_suffix, RegimeKind, RuntimeSource, ScalarBind, Solver,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::substrate_seam::KernelSet;
@@ -217,14 +217,38 @@ where
                 face = face.expand(ax, 1);
             }
         }
-        let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
-        let flux_name = format!("{}_face_flux{gsfx}{}_{D}d_{dir}", Self::kernel_prefix(), self.solver.kernel_suffix());
+        let st = spacetime_slug(sim.geom.spacetime);
+        let flux_name = if st.is_empty() {
+            let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
+            format!("{}_face_flux{gsfx}{}_{D}d_{dir}", Self::kernel_prefix(), self.solver.kernel_suffix())
+        } else {
+            // the metric-aware valencia flux (RmhdGr): inline bound wave speeds, HLLE-only —
+            // no contact/alfven-resolving GR fan is baked, so any other solver fails loud.
+            assert!(
+                matches!(self.solver, Solver::Hlle),
+                "the GR MHD flux is HLLE-only (the fast-magnetosonic-bound fan)"
+            );
+            let sp = spacing_suffix(&sim.geom.maps);
+            format!("{}_face_flux{sp}{st}_{D}d_{dir}", Self::kernel_prefix())
+        };
+        let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         let scalars = scalars_for(&flux_name, |bind| match bind {
             // gamma (energy regimes) and cs (isothermal) are the EOS param's two names.
             ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
                 Sc::from_f64(self.eos_param)
             }
             ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(self.theta),
+            // the GR flux reads the metric mass + the LOG-AWARE face-position scalars.
+            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("GR MHD flux needs schwarzschild_mass"),
+            ),
+            ScalarBind::Ref(other) => Sc::from_f64(
+                geom_scalar(&x_lo_k, &dx_k, *other)
+                    .unwrap_or_else(|| panic!("{} flux: unexpected scalar {other:?}", Self::kernel_prefix())),
+            ),
             o => panic!("{} flux: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
         // bind BY MANIFEST: the staggered `bface_n` (-> bface[dir]) and the per-axis wave speeds
@@ -239,12 +263,31 @@ where
     }
 
     fn c2p(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
-        let cname = format!("{}_c2p_{D}d", Self::kernel_prefix());
+        let st = spacetime_slug(sim.geom.spacetime);
+        let cname = if st.is_empty() {
+            format!("{}_c2p_{D}d", Self::kernel_prefix())
+        } else {
+            // the metric-aware KKC recovery: gamma at the volume-weighted centroid, so the name
+            // carries the spacing + spacetime slugs and the kernel reads mass + grid scalars.
+            let sp = spacing_suffix(&sim.geom.maps);
+            format!("{}_c2p{sp}{st}_{D}d", Self::kernel_prefix())
+        };
+        let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         // iso c2p declares no scalars -> scalars_for returns [] (resolver never called).
         let scalars = scalars_for(&cname, |bind| match bind {
             ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
                 Sc::from_f64(self.eos_param)
             }
+            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("GR MHD c2p needs schwarzschild_mass"),
+            ),
+            ScalarBind::Ref(other) => Sc::from_f64(
+                geom_scalar(&x_lo_k, &dx_k, *other)
+                    .unwrap_or_else(|| panic!("{} c2p: unexpected scalar {other:?}", Self::kernel_prefix())),
+            ),
             o => panic!("{} c2p: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
         // bind BY MANIFEST: cons.{den,mom,nrg?} + bcell(3) reads -> prim.{rho,vel,pre?} writes.
@@ -262,7 +305,9 @@ where
         // wave_speed_l/r) run the per-cell pass; others compute speeds inline in the flux.
         let materialize = R::SPEC.materializes_wave_speeds
             || (self.ct_method == CtMethod::Uct && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
-        if !materialize {
+        // the GR flux computes its bound speeds INLINE (quartic-free), so the materialized
+        // per-cell pass would be dead work on a curved background.
+        if !materialize || !matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
             return;
         }
         let wsname = format!("{}_wave_speeds_cell_{D}d", Self::kernel_prefix());
@@ -283,17 +328,43 @@ where
 
     fn cfl(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> f64 {
         let geom = &sim.geom;
-        let wname = format!("{}_wave_speed_map{}_{D}d", Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes));
+        let st = spacetime_slug(geom.spacetime);
+        let wname = if st.is_empty() {
+            format!("{}_wave_speed_map{}_{D}d", Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes))
+        } else {
+            // curved background: the coordinate light-cone bound (state-independent).
+            let sp = spacing_suffix(&geom.maps);
+            format!("{}_wave_speed_map{}{sp}{st}_{D}d", Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes))
+        };
         // scalars BY NAME (the kernel's declared set drives it): eos param + the per-axis CFL
         // widths (cartesian `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`); the mhd substrates run
         // static, so the motion rates bind 0.
-        let (x_lo_phys, dx_phys) = physical_geom(&geom.x_lo, &geom.dx, geom.coords, sim.motion.a);
+        // the GR light-cone map builds positions through gv_axis_face_at, so it takes the
+        // LOG-AWARE kernel scalars; the flat maps keep the physical geometry (identical on a
+        // uniform static mesh).
+        let (x_lo_phys, dx_phys) = if st.is_empty() {
+            physical_geom(&geom.x_lo, &geom.dx, geom.coords, sim.motion.a)
+        } else {
+            kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a)
+        };
         let scalars = scalars_for(&wname, |bind| {
             let ScalarBind::Ref(sref) = bind else {
                 panic!("{} cfl: unexpected spec scalar {bind:?}", Self::kernel_prefix());
             };
             match *sref {
                 ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(self.eos_param),
+                ScalarRef::SchwarzschildMass => Sc::from_f64(
+                    geom.spacetime_scalars.iter()
+                        .find(|(n, _)| n == "schwarzschild_mass")
+                        .map(|(_, v)| *v)
+                        .expect("GR MHD cfl needs schwarzschild_mass"),
+                ),
+                ScalarRef::KerrSpin => Sc::from_f64(
+                    geom.spacetime_scalars.iter()
+                        .find(|(n, _)| n == "kerr_spin")
+                        .map(|(_, v)| *v)
+                        .expect("GR MHD cfl needs kerr_spin"),
+                ),
                 other => Sc::from_f64(
                     motion_scalar(&sim.motion, geom.coords, D, other)
                         .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))

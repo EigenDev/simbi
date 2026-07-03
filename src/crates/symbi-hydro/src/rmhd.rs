@@ -85,6 +85,20 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     }
 
     #[inline]
+    fn to_conserved_covariant(
+        &self,
+        eos: &impl Eos<S>,
+        prim: &Self::Prim,
+        gamma: &SpatialMetric<S, D>,
+        alpha: S,
+    ) -> Self::Cons {
+        // the Valencia covariant storage: delegate to `RmhdGr` at the cell's spatial metric so
+        // the initial conserved momentum is S_i = (rho h W^2 + B^2) v_i - (v.B) B_i — the state
+        // the metric-aware KKC c2p inverts.
+        RmhdGr { metric: *gamma, alpha }.to_conserved(eos, prim)
+    }
+
+    #[inline]
     fn to_primitive(&self, eos: &impl Eos<S>, cons: &Self::Cons) -> C2pResult<Self::Prim>
     where S: OrderedNumeric
     {

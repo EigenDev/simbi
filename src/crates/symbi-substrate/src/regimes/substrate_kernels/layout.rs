@@ -54,6 +54,17 @@ pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
 // = axes [0,2] (out-of-plane phi); r-phi disk grids (r, phi) = axes [0,1] (out-of-plane z).
 // cartesian/spherical/1D-radial/3D collapse to the coord suffix. drives gas godunov / wave-speed
 // / CT curl / bcell dispatch — anything whose metric depends on which cyl plane is gridded.
+/// the spacetime tag a GR kernel name carries (matches the bake `Geom::spacetime_suffix`):
+/// flat -> "" (the unsuffixed kernel), curved -> the chart slug.
+pub fn spacetime_slug(spacetime: symbi_geometry::Spacetime) -> &'static str {
+    match spacetime {
+        symbi_geometry::Spacetime::Minkowski => "",
+        symbi_geometry::Spacetime::Schwarzschild => "_schw",
+        symbi_geometry::Spacetime::KerrSchild => "_ks",
+        symbi_geometry::Spacetime::Kerr => "_kerr",
+    }
+}
+
 pub fn mhd_geom_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
     match coords {
         Geometry::Cartesian => "",

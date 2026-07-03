@@ -2439,6 +2439,30 @@ macro_rules! lin_index {
     }};
 }
 
+/// the cell-centered average of a staggered face buffer along its own axis `k`: the two
+/// bounding faces of cell `idx`. `faces` is axis-0-fastest over the face domain (cell dims `n`
+/// extended +1 on `k`). the curved-spacetime IC seeds the TRUE cell B so the covariant
+/// conserved state carries the magnetic terms exactly (the flat path's zero-seed +
+/// bcell-from-bface heal applies a EUCLIDEAN energy patch that is wrong under a metric, and
+/// never installs the -(v.B) B_i momentum block).
+fn face_avg_cell_b<const D: usize>(faces: &[f64], k: usize, idx: [isize; D], n: [usize; D]) -> f64 {
+    let mut dims = n;
+    dims[k] += 1;
+    let lin = |c: [usize; D]| -> usize {
+        let mut l = 0usize;
+        let mut stride = 1usize;
+        for ax in 0..D {
+            l += c[ax] * stride;
+            stride *= dims[ax];
+        }
+        l
+    };
+    let lo: [usize; D] = std::array::from_fn(|ax| idx[ax] as usize);
+    let mut hi = lo;
+    hi[k] += 1;
+    0.5 * (faces[lin(lo)] + faces[lin(hi)])
+}
+
 /// slice a GLOBAL per-axis staggered face buffer into the face buffer for one tile, in the
 /// axis-0-fastest order `seed_faces_indexed` consumes. `global` is the python `staggered_bfields`
 /// generator for axis `d`: axis-0-fastest over the global interior face domain (cell dims `n`
@@ -2529,8 +2553,17 @@ macro_rules! build_and_run_mhd {
             .set_initial_indexed(|idx, _x| {
                 let lin = lin_index!(idx, n, $d);
                 let row = &prims[lin];
-                let mag_arr: [f64; 3] =
-                    std::array::from_fn(|k| if k < $d { 0.0 } else { bufs[k][lin] });
+                // gridded components: the flat path seeds cell-B zero (bcell_from_bface heals
+                // it with the euclidean energy patch); a curved spacetime seeds the TRUE face
+                // average so the covariant conserved state is exact from step zero.
+                let gr = cfg.spacetime != "minkowski";
+                let mag_arr: [f64; 3] = std::array::from_fn(|k| {
+                    if k < $d {
+                        if gr { face_avg_cell_b::<$d>(&bufs[k], k, idx, n) } else { 0.0 }
+                    } else {
+                        bufs[k][lin]
+                    }
+                });
                 MhdPrim {
                     hydro: Prim {
                         rho: row[0],
@@ -3036,6 +3069,13 @@ macro_rules! build_and_run_imhd_decomposed {
 macro_rules! mhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
+            // GR (Schwarzschild) spherical MHD: the metric type selects the `_schw` GRMHD
+            // kernel row (RmhdGr valencia flux + metric-aware KKC c2p + the ideal-MHD stress
+            // in the covariant source). baked 1D radial (the magnetized-michel target).
+            (1, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 1,
+                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+            ),
             (1, "cartesian") => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian
             ),
@@ -3473,6 +3513,16 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         // wired for gpus>1: the decomposed loop applies the body source per tile, sums the backward
         // feedback across tiles, and advances the prescribed orbit identically (oracle-proven by
         // decomp_body_equivalence). no refusal needed here.
+    }
+    // a curved spacetime is a RELATIVISTIC construct: only the relativistic regimes compose
+    // with it (the non-relativistic kernel rows are never baked with a spacetime slug).
+    if cfg.spacetime != "minkowski"
+        && !matches!(cfg.regime.as_str(), "rhd" | "srmhd")
+    {
+        return Err(format!(
+            "spacetime '{}' requires a relativistic regime (rhd or srmhd); got '{}'",
+            cfg.spacetime, cfg.regime
+        ));
     }
     match cfg.regime.as_str() {
         "newtonian" => hydro_dispatch!(cfg, prims, Newtonian, Newtonian),

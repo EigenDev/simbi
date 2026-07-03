@@ -958,6 +958,23 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the GRMHD gas godunov: ncomp = 3 (B is always a 3-vector) with the mhd-style geometry
+// slug (the runtime's mhd_geom_suffix — "_sph", never the hydro DOF-lift "_sph_swirl"),
+// spacing + spacetime tags like every GR kernel. GeoSource::Rmhd selects the ideal-MHD
+// stress in the covariant contraction; unfused (the geo source reads prim.mag).
+fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
+    assert!(geom.coords == Coords::Spherical && geom.spacetime != Spacetime::Minkowski);
+    let name = format!(
+        "rmhd_godunov_stage_sph{}{}_{ndim}d",
+        geom.spacing_suffix(), geom.spacetime_suffix()
+    );
+    let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
+        geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim, 3, true,
+        GeoSource::Rmhd, &[], /* mag_from_bcell = */ false,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 // the GRMHD cons->prim: the metric-aware KKC recovery at the volume-weighted centroid.
 // name mirrors the rhd GR c2p (`rmhd_c2p[_logr]{_schw|_ks}_{ndim}d`).
 fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
@@ -1472,7 +1489,7 @@ fn main() {
     // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
     // zero — the transverse-B curved measures land with the phase-B densitized CT).
     for geom in [Geom::sph(1).schwarzschild(), Geom::sph(1).schwarzschild().log_radial()] {
-        gen_godunov_stage(&out_dir, 1, "rmhd", true, geom.clone(), None);
+        gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone());
