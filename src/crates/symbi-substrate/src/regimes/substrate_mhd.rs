@@ -305,9 +305,38 @@ where
         // wave_speed_l/r) run the per-cell pass; others compute speeds inline in the flux.
         let materialize = R::SPEC.materializes_wave_speeds
             || (self.ct_method == CtMethod::Uct && matches!(Self::kernel_prefix(), "nmhd" | "imhd"));
-        // the GR flux computes its bound speeds INLINE (quartic-free), so the materialized
-        // per-cell pass would be dead work on a curved background.
-        if !materialize || !matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
+        let st = spacetime_slug(sim.geom.spacetime);
+        // GR: the flux computes its bound speeds inline, so the ONLY consumer of the materialized
+        // per-cell speeds is the GR-UCT edge EMF. materialize (the cheap SHIFTED BF bound) exactly
+        // when UCT is requested on the curved background; skip on GR otherwise.
+        if !st.is_empty() {
+            if self.ct_method != CtMethod::Uct {
+                return;
+            }
+            let sp = spacing_suffix(&sim.geom.maps);
+            let wsname = format!("{}_wave_speeds_cell{sp}{st}_{D}d", Self::kernel_prefix());
+            let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+            let scalars = scalars_for(&wsname, |bind| match bind {
+                ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),
+                ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
+                    sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass")
+                        .map(|(_, v)| *v).expect("GR UCT wave speeds need schwarzschild_mass"),
+                ),
+                ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
+                    sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin")
+                        .map(|(_, v)| *v).expect("GR UCT wave speeds need kerr_spin"),
+                ),
+                ScalarBind::Ref(other) => Sc::from_f64(
+                    geom_scalar(&x_lo_k, &dx_k, *other)
+                        .unwrap_or_else(|| panic!("{} wave_speeds: unexpected scalar {other:?}", Self::kernel_prefix())),
+                ),
+                o => panic!("{} wave_speeds: unexpected scalar {o:?}", Self::kernel_prefix()),
+            });
+            let pre_bind = sim.fields.prim.pre_field().expect("GR MHD requires prim.pre");
+            dispatch_named(sim, pre_bind, None, 0, &wsname, &sim.geom.allocated, &[], &scalars);
+            return;
+        }
+        if !materialize {
             return;
         }
         let wsname = format!("{}_wave_speeds_cell_{D}d", Self::kernel_prefix());

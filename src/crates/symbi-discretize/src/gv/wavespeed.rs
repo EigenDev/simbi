@@ -435,6 +435,73 @@ pub fn rmhd_wave_speed_map_gv(
 /// cells' stored speeds for the Davis fan (`hlle_with_speeds`), and CFL folds the same fields
 /// — one computation, three consumers (flux, CFL, UCT-HLL). the zero-clamp for the HLL fan is
 /// applied at the FLUX (min/max of the two cells, clamped), so the stored values are raw.
+/// the CURVED-SPACETIME per-cell RMHD wave speeds — the SHIFTED coordinate characteristic
+/// speeds `lambda_pm = (RmhdGr fast-magnetosonic BF speed) - beta^d` per grid direction,
+/// materialized into wave_speed_l/r for the GR-UCT edge coefficients. UNLIKE the flat kernel
+/// (the exact magnetosonic quartic) these are the algebraic fast bound `c_ms^2 = c_s^2 + v_A^2
+/// - c_s^2 v_A^2` through the two-velocity BF transform — cheaper, and the ONLY consumer is the
+/// UCT edge EMF (the GR flux computes its own inline). the shift makes them the induction
+/// system's coordinate speeds, consistent with the transport velocity vtilde = alpha v - beta
+/// the edge advection uses. metric at the cell centroid (the c2p point), ungridded polar slot
+/// at pi/2. baked per (spacetime, spacing).
+pub fn rmhd_wave_speeds_cell_gr_gv(
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let vel: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+    let mag: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8)));
+    let gamma = Gv::scalar("gamma");
+    let eos = IdealGas { gamma };
+    let prim = MhdPrim::<Gv, 3> {
+        hydro: Prim { rho, vel: Tensor::new(vel), pre },
+        mag: Tensor::new(mag),
+    };
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => geo.centroid[d],
+            None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
+            None => Gv::ZERO,
+        }
+    }));
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (gm, gm_inv, alpha, beta) = match spacetime {
+        Spacetime::Schwarzschild => {
+            let m = Schwarzschild { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        Spacetime::KerrSchild => {
+            let m = SchwarzschildKS { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        Spacetime::Kerr => {
+            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        Spacetime::Minkowski => unreachable!("the GR cell wave speeds are baked only for a curved spacetime"),
+    };
+    let regime = RmhdGr { metric: SpatialMetric { gamma: gm, gamma_inv: gm_inv }, alpha };
+    let mut writes = Vec::with_capacity(2 * ndim);
+    for d in 0..ndim {
+        let nhat = Tensor::<Gv, 3>::unit(axes[d]);
+        // the unshifted BF fast-bound speeds, then the shift for this coordinate direction.
+        let (sl, sr) = regime.wave_speeds(&eos, &prim, &nhat);
+        let bd = beta[axes[d]];
+        writes.push((format!("ws_l_{d}"), format!("wave_speed_l[{d}]").into(), (sl - bd).node()));
+        writes.push((format!("ws_r_{d}"), format!("wave_speed_r[{d}]").into(), (sr - bd).node()));
+    }
+    (end_trace(), writes)
+}
+
+
 /// RMHD is fixed 3D. reads the full 3-velocity + 3-magnetic-field prim + gamma.
 pub fn rmhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();

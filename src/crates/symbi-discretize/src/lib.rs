@@ -52,6 +52,7 @@ pub use gv::{
     rhd_c2p_gv, rhd_c2p_gr_gv, rhd_flux_gv, rhd_flux_gr_gv,
     rmhd_c2p_gr_gv, rmhd_flux_gr_gv, gr_light_cone_wave_speed_map_gv,
     rmhd_ct_curl_2d_sph_gr_gv, rmhd_edge_emf_gr_gv, rmhd_bcell_from_bface_gr_gv,
+    rmhd_edge_emf_uct_gr_gv, rmhd_wave_speeds_cell_gr_gv,
     kerr_wave_speed_map_gv, rhd_hllc_flux_gv,
     rhd_wave_speed_map_gv, GeoSource,
 };

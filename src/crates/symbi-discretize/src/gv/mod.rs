@@ -30,7 +30,8 @@ use symbi_hydro::riemann::{
     hlld_isothermal_coeffs, hlld_newtonian, hlld_newtonian_coeffs, hlld_rmhd, hlld_rmhd_states,
     hlle, hlle_with_speeds,
 };
-use symbi_hydro::rmhd::{Rmhd, rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities};
+use symbi_hydro::rmhd::{Rmhd, RmhdGr, rmhd_magnetosonic_cfl_speeds, rmhd_recover, rmhd_source_quantities};
+use symbi_hydro::spatial_metric::SpatialMetric;
 use symbi_hydro::rhd::{Rhd, rhd_recover};
 use symbi_hydro::state::{Cons, ConsG, Prim, PrimG};
 use symbi_ir::Symbol;

@@ -791,6 +791,127 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec
 }
 
 
+/// the CURVED-SPACETIME UCT-HLL edge EMF for the 2.5D (r, theta) poloidal plane — the master
+/// form [`rmhd_edge_emf_uct_gv`] producing the DENSITIZED corner EMF `Etilde_phi` the GR curl
+/// consumes. GENERALIZATION (design 44 GR-UCT): (1) the edge signal speeds are the SHIFTED
+/// coordinate speeds materialized by `rmhd_wave_speeds_cell_gr_gv` (the BF fast bound minus the
+/// shift — quartic-free; the flux still computes its own inline); (2) the advective velocity is
+/// the transport velocity `vtilde = alpha v - beta` at the corner (the upwound physical v
+/// transformed there); (3) the whole master EMF is densitized by `sqrt(gamma)(corner)` — since
+/// reconstruction co-locates all four staggered fields AT the corner, one metric factor scales
+/// the entire (advective + dissipative) EMF, and div(B)=0 is preserved (a CT curl of one scalar
+/// corner EMF, coefficient-independent). reduces to the flat master form at gamma = id, alpha =
+/// 1, beta = 0. baked per (spacetime, spacing).
+pub fn rmhd_edge_emf_uct_gr_gv(
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+    begin_trace();
+    let ndim = 2usize;
+    let (g1, g2) = (0usize, 1usize);
+    gv_register_field("edge_vp1", "vel_p1");
+    gv_register_field("edge_vp2", "vel_p2");
+    gv_register_field("edge_bface_a", "bface_a");
+    gv_register_field("edge_bface_b", "bface_b");
+    gv_register_field("edge_wsr1", "wsr_p1");
+    gv_register_field("edge_wsl1", "wsl_p1");
+    gv_register_field("edge_wsr2", "wsr_p2");
+    gv_register_field("edge_wsl2", "wsl_p2");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let zero_g = Gv::ZERO;
+    let vp1 = |o: &[i32]| gv_field_at("edge_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("edge_vp2", "vel_p2", ndim, o);
+    let vx_e = (vp1(&zero) + vp1(&cm(&[g2]))) * half;
+    let vx_w = (vp1(&cm(&[g1])) + vp1(&cm(&[g1, g2]))) * half;
+    let vy_n = (vp2(&zero) + vp2(&cm(&[g1]))) * half;
+    let vy_s = (vp2(&cm(&[g2])) + vp2(&cm(&[g1, g2]))) * half;
+    let max4 = |key: &str, path: &str| -> Gv {
+        let v0 = gv_field_at(key, path, ndim, &zero);
+        let v1 = gv_field_at(key, path, ndim, &cm(&[g1]));
+        let v2 = gv_field_at(key, path, ndim, &cm(&[g2]));
+        let v3 = gv_field_at(key, path, ndim, &cm(&[g1, g2]));
+        v0.max(v1).max(v2).max(v3)
+    };
+    let neg_min4 = |key: &str, path: &str| -> Gv {
+        let v0 = zero_g - gv_field_at(key, path, ndim, &zero);
+        let v1 = zero_g - gv_field_at(key, path, ndim, &cm(&[g1]));
+        let v2 = zero_g - gv_field_at(key, path, ndim, &cm(&[g2]));
+        let v3 = zero_g - gv_field_at(key, path, ndim, &cm(&[g1, g2]));
+        v0.max(v1).max(v2).max(v3)
+    };
+    let apx = zero_g.max(max4("edge_wsr1", "wsr_p1"));
+    let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
+    let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
+    let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
+    let cx = uct_hll_coeffs(apx, amx);
+    let cy = uct_hll_coeffs(apy, amy);
+    let eps = Gv::from_f64(1.0e-30);
+    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
+    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    // the transport velocity at the corner: vtilde = alpha v - beta (beta^theta = 0). the metric
+    // at the corner (r_f, th_f) also densitizes the whole EMF below.
+    let r_f = gv_axis_face_at(0, spacing[0], 0);
+    let th_f = gv_axis_face_at(1, spacing[1], 0);
+    let xc = Tensor::<Gv, 3>::new([r_f, th_f, Gv::ZERO]);
+    let mass = Gv::scalar("schwarzschild_mass");
+    let (alpha_c, sqrtg_c, beta_r_c) = match spacetime {
+        Spacetime::Schwarzschild => {
+            let m = Schwarzschild { mass };
+            (
+                <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, xc),
+                <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, xc),
+                Gv::ZERO,
+            )
+        }
+        Spacetime::KerrSchild => {
+            let m = SchwarzschildKS { mass };
+            (
+                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::lapse(&m, xc),
+                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, xc),
+                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, xc)[0],
+            )
+        }
+        Spacetime::Kerr => {
+            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+            (
+                <KerrKS<Gv> as Metric<Gv, 3>>::lapse(&m, xc),
+                <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, xc),
+                <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, xc)[0],
+            )
+        }
+        Spacetime::Minkowski => unreachable!("the GR-UCT EMF is baked only for a curved spacetime"),
+    };
+    let vtilde_r = alpha_c * vbar_x - beta_r_c;
+    let vtilde_th = alpha_c * vbar_y;
+    let theta = Gv::scalar("theta");
+    let recon = |key: &str, rt: &str, base: &[i32], axis: usize, sign: f64| -> Gv {
+        let off = |d: i32| -> Vec<i32> { let mut o = base.to_vec(); o[axis] += d; o };
+        let q0 = gv_field_at(key, rt, ndim, base);
+        let qm = gv_field_at(key, rt, ndim, &off(-1));
+        let qp = gv_field_at(key, rt, ndim, &off(1));
+        let slope = minmod3((q0 - qm) * theta, half * (qp - qm), (qp - q0) * theta);
+        q0 + Gv::from_f64(0.5 * sign) * slope
+    };
+    let by_e = recon("edge_bface_b", "bface_b", &zero, g1, -1.0);
+    let by_w = recon("edge_bface_b", "bface_b", &cm(&[g1]), g1, 1.0);
+    let bx_n = recon("edge_bface_a", "bface_a", &zero, g2, -1.0);
+    let bx_s = recon("edge_bface_a", "bface_a", &cm(&[g2]), g2, 1.0);
+    // the physical master EMF with transport velocities, densitized at the corner -> Etilde_phi.
+    let emf_phys = uct_master_emf(&cx, &cy, vtilde_r, vtilde_th, by_e, by_w, bx_n, bx_s);
+    let emf = sqrtg_c * emf_phys;
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+
 /// PLM-reconstruct a staggered face field a half-cell to the EDGE (M&DZ: the staggered transverse
 /// field reconstructed from the adjacent interface — the 2nd-order piece that preserves smooth fields,
 /// VERIFIED on the field-loop test). `base` the face offset; `axis` the reconstruction direction (the

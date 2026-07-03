@@ -3087,6 +3087,12 @@ macro_rules! mhd_dispatch {
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1,
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
+            // the 2D (r, theta) GRMHD row: the curved-CT machinery (densitized corner EMF +
+            // curl + metric-contracted interpolation; contact EMF only — design 44 phase B).
+            (2, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
+            ),
             (1, "cartesian") => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian
             ),

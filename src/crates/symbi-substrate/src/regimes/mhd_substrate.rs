@@ -30,7 +30,7 @@ use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use symbi_algebra::Domain;
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
-use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, mhd_geom_suffix, push_curvilinear_geom, scalars_for, ScalarBind, Solver};
+use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, push_curvilinear_geom, scalars_for, spacetime_slug, spacing_suffix, ScalarBind, Solver};
 use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
 
@@ -562,10 +562,30 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     // the RMHD UCT-HLLD edge EMF declares the EOS scalar (gamma); the UCT edge EMFs declare the PLM
     // slope limiter (theta, for the transverse R± reconstruction of the staggered fields); the rest
     // have an empty scalar manifest. resolve BY MANIFEST so one call serves all.
+    let st = spacetime_slug(sim.geom.spacetime);
+    let sp = spacing_suffix(&sim.geom.maps);
+    // the GR EMF reads the metric mass (+ spin) and the LOG-AWARE face-position scalars.
+    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     let scalar = |bind: &ScalarBind| -> Sc {
         match bind {
             ScalarBind::Ref(ScalarRef::Gamma | ScalarRef::Cs) => Sc::from_f64(gamma),
             ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(theta),
+            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v)
+                    .expect("GR edge EMF needs schwarzschild_mass"),
+            ),
+            ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
+                sim.geom.spacetime_scalars.iter()
+                    .find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v)
+                    .expect("GR edge EMF needs kerr_spin"),
+            ),
+            ScalarBind::Ref(other) => Sc::from_f64(
+                geom_scalar(&x_lo_k, &dx_k, *other)
+                    .unwrap_or_else(|| panic!("mhd efield: unexpected scalar {other:?}")),
+            ),
             o => panic!("mhd efield: unexpected scalar {o:?}"),
         }
     };
@@ -583,6 +603,14 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         // classical ideal-gas lambda* kernel (NMHD only for now). the kernel manifest declares the
         // slots it reads (bface_a/b, wsr/wsl, + rho/pre/bcell for HLLC), bound below.
         let name = match ct_method {
+            // GR-UCT: the densitized master-form corner EMF (reads the materialized shifted BF
+            // speeds); HLL coefficients only for now (the GR-HLLD wave-sum is the next step).
+            CtMethod::Uct if !st.is_empty() => {
+                format!("rmhd_edge_emf_uct{sp}{st}_{D}d_{}", edge.name_k)
+            }
+            CtMethod::Contact if !st.is_empty() => {
+                format!("rmhd_edge_emf{sp}{st}_{D}d_{}", edge.name_k)
+            }
             CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k),
             // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
             // less-diffusive one, classical NMHD for now); everything else -> the regime-generic HLL
@@ -713,13 +741,48 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // 1.5D) is simply not updated — it stays at its constant IC.
     let curvilinear = sim.geom.coords != symbi_geometry::Geometry::Cartesian;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+    let st = spacetime_slug(sim.geom.spacetime);
+    let sp = spacing_suffix(&sim.geom.maps);
+    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
     for dir in 0..D {
         let (edge_slots, id_axes) = ct_face_curl(dir, &axes);
         if edge_slots.is_empty() {
             continue;
         }
-        let scalars: Vec<Sc> = if curvilinear {
+        let ct_name = if st.is_empty() {
+            format!("rmhd_ct_curl_{D}d_{dir}{sfx}")
+        } else {
+            // the densitized-space curl: coordinate lengths + the per-face sqrt(gamma) weight.
+            format!("rmhd_ct_curl_{D}d_{dir}{sfx}{sp}{st}")
+        };
+        let scalars: Vec<Sc> = if !st.is_empty() {
+            // by MANIFEST (dt + the log-aware grid scalars + the metric mass/spin).
+            scalars_for(&ct_name, |bind| {
+                let ScalarBind::Ref(sref) = bind else {
+                    panic!("gr ct curl: unexpected spec scalar {bind:?}");
+                };
+                match *sref {
+                    ScalarRef::Dt => Sc::from_f64(dt),
+                    ScalarRef::SchwarzschildMass => Sc::from_f64(
+                        sim.geom.spacetime_scalars.iter()
+                            .find(|(n, _)| n == "schwarzschild_mass")
+                            .map(|(_, v)| *v)
+                            .expect("gr ct curl needs schwarzschild_mass"),
+                    ),
+                    ScalarRef::KerrSpin => Sc::from_f64(
+                        sim.geom.spacetime_scalars.iter()
+                            .find(|(n, _)| n == "kerr_spin")
+                            .map(|(_, v)| *v)
+                            .expect("gr ct curl needs kerr_spin"),
+                    ),
+                    other => Sc::from_f64(
+                        geom_scalar(&x_lo_k, &dx_k, other)
+                            .unwrap_or_else(|| panic!("gr ct curl: unexpected scalar {other:?}")),
+                    ),
+                }
+            })
+        } else if curvilinear {
             let mut s = vec![Sc::from_f64(dt)];
             push_curvilinear_geom(&mut s, &sim.geom.x_lo, &sim.geom.dx);
             s
@@ -730,7 +793,6 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             }
             s
         };
-        let ct_name = format!("rmhd_ct_curl_{D}d_{dir}{sfx}");
         // bind BY MANIFEST: slot `b` (the in-place bface) + the incident edges (`e_p1`/`e_p2` in
         // 3D, `ez` in 2.5D) -> this face's actual fields, ordered by the recorded manifest so the
         // bind cannot drift from the producer's slot sequence. `b` is read+write (deduped to one
@@ -758,13 +820,23 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // (positional), so map each slot to its actual field, axis-role'd, and order by the recorded
     // manifest: `bf_{c}` (grid face c) -> bface[c]; `bc_{c}` (in-place cell, grid face c carries
     // physical component axes[c]) -> bcell[axes[c]]; `nrg` -> cons.nrg. no hand-ordered list.
-    let bname = if has_energy { format!("rmhd_bcell_from_bface_{D}d") } else { format!("imhd_bcell_from_bface_{D}d") };
+    let bname = if !st.is_empty() {
+        // the GR interpolation: the energy patch contracts through the spatial metric, and the
+        // kernel's bc_ indices are PHYSICAL components (all three enter the contraction).
+        format!("rmhd_bcell_from_bface{sp}{st}_{D}d")
+    } else if has_energy {
+        format!("rmhd_bcell_from_bface_{D}d")
+    } else {
+        format!("imhd_bcell_from_bface_{D}d")
+    };
+    let gr = !st.is_empty();
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if let Some(c) = s.strip_prefix("bf_") {
             return &mhd.bface[c.parse::<usize>().expect("bcell_from_bface: bad bf_ slot index")];
         }
         if let Some(c) = s.strip_prefix("bc_") {
-            return &mhd.bcell[axes[c.parse::<usize>().expect("bcell_from_bface: bad bc_ slot index")]];
+            let c = c.parse::<usize>().expect("bcell_from_bface: bad bc_ slot index");
+            return &mhd.bcell[if gr { c } else { axes[c] }];
         }
         if s == "nrg" {
             return cnrg.expect("cons.nrg");
@@ -777,5 +849,32 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         let fld = slot(&bind.name());
         if *is_out { outputs.push(fld); } else { inputs.push(fld); }
     }
-    dispatch_fields_each::<Sc, Mem, D>(&bname, interior, &inputs, &outputs, &[], &[]);
+    let bscalars: Vec<Sc> = if gr {
+        scalars_for(&bname, |bind| {
+            let ScalarBind::Ref(sref) = bind else {
+                panic!("gr bcell_from_bface: unexpected spec scalar {bind:?}");
+            };
+            match *sref {
+                ScalarRef::SchwarzschildMass => Sc::from_f64(
+                    sim.geom.spacetime_scalars.iter()
+                        .find(|(n, _)| n == "schwarzschild_mass")
+                        .map(|(_, v)| *v)
+                        .expect("gr bcell_from_bface needs schwarzschild_mass"),
+                ),
+                ScalarRef::KerrSpin => Sc::from_f64(
+                    sim.geom.spacetime_scalars.iter()
+                        .find(|(n, _)| n == "kerr_spin")
+                        .map(|(_, v)| *v)
+                        .expect("gr bcell_from_bface needs kerr_spin"),
+                ),
+                other => Sc::from_f64(
+                    geom_scalar(&x_lo_k, &dx_k, other)
+                        .unwrap_or_else(|| panic!("gr bcell_from_bface: unexpected scalar {other:?}")),
+                ),
+            }
+        })
+    } else {
+        Vec::new()
+    };
+    dispatch_fields_each::<Sc, Mem, D>(&bname, interior, &inputs, &outputs, &[], &bscalars);
 }

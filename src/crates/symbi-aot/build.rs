@@ -1193,6 +1193,48 @@ fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
     emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph"), 2, &k, &writes);
 }
 
+// the CURVED-SPACETIME 2.5D (r, theta) CT trio: the densitized corner EMF (contact assembly
+// with per-gather-point alpha sqrt(gamma) + the shift), the densitized-space curl (per-face
+// constant w = sqrt(gamma) x coordinate length), and the face->cell interpolation with the
+// metric-contracted energy patch. one gen per (spacing, spacetime) instance.
+// the GR face->cell interpolation alone (every GR MHD row needs it — the corrector runs at
+// ANY dimension; the edge/curl kernels exist only where CT edges do).
+fn gen_rmhd_bcell_from_bface_gr(out_dir: &str, ndim: u8, geom: &Geom) {
+    let name = format!(
+        "rmhd_bcell_from_bface{}{}_{ndim}d",
+        geom.spacing_suffix(), geom.spacetime_suffix()
+    );
+    let (k, w) = symbi_discretize::gv::rmhd_bcell_from_bface_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+    );
+    emit_gv(out_dir, &name, ndim, &k, &w);
+}
+
+// the GR-UCT machinery: the per-cell shifted BF-bound wave speeds (materialized for the edge
+// coefficients) + the densitized UCT-HLL corner EMF. one gen per (spacing, spacetime).
+fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
+    let sp = geom.spacing_suffix();
+    let st = geom.spacetime_suffix();
+    let (k, w) = symbi_discretize::gv::rmhd_wave_speeds_cell_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+    );
+    emit_gv(out_dir, &format!("rmhd_wave_speeds_cell{sp}{st}_2d"), 2, &k, &w);
+    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_gv(geom.spacetime, &geom.spacing);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct{sp}{st}_2d_2"), 2, &k, &w);
+}
+
+fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
+    let sp = geom.spacing_suffix();
+    let st = geom.spacetime_suffix();
+    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_gr_gv(geom.spacetime, &geom.spacing);
+    emit_gv(out_dir, &format!("rmhd_edge_emf{sp}{st}_2d_2"), 2, &k, &w);
+    for dir in 0..2usize {
+        let (k, w) = symbi_discretize::gv::rmhd_ct_curl_2d_sph_gr_gv(dir, geom.spacetime, &geom.spacing);
+        emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph{sp}{st}"), 2, &k, &w);
+    }
+    gen_rmhd_bcell_from_bface_gr(out_dir, 2, geom);
+}
+
 // the 2.5D cylindrical r-phi DISK CT curl B-update along in-plane face axis `dir` (0 -> B_r,
 // 1 -> B_phi), from the single out-of-plane corner EMF E_z. dir=0 carries the (1/r) d_phi metric
 // (mirror of r-z's dir=1); dir=1 is flat. name matches the geom_suffix dispatch "_cyl_rphi".
@@ -1507,6 +1549,23 @@ fn main() {
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone());
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
+        gen_rmhd_bcell_from_bface_gr(&out_dir, 1, &geom);
+    }
+    // GRMHD phase B: the 2D (r, theta) schwarzschild row — the gas/flux/c2p/map gens are
+    // ndim-generic; the CT trio (densitized EMF + curl + interpolation) is the curved-CT
+    // machinery (docs/design/44 phase B). ghost fill reuses the flat rmhd_ghost_fill_2d
+    // (a spacetime-free lattice pullback).
+    for geom in [Geom::sph(2).schwarzschild(), Geom::sph(2).schwarzschild().log_radial()] {
+        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
+        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
+        for dir in 0..2 {
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone());
+        }
+        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
+        gen_rmhd_ct_gr(&out_dir, &geom);
+        gen_rmhd_gr_uct(&out_dir, &geom);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.
