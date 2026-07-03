@@ -273,9 +273,13 @@ pub fn rmhd_c2p_gr_gv(
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
-        Spacetime::Kerr => panic!(
-            "spinning-kerr GRMHD c2p is design-44 phase C (needs the gridded polar axis)"
-        ),
+        Spacetime::Kerr => {
+            // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
+            // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
+            // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
+            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
         Spacetime::Minkowski => unreachable!("the GRMHD c2p is baked only for a curved spacetime"),
     };
     let metric = SpatialMetric { gamma: gm, gamma_inv: gm_inv };

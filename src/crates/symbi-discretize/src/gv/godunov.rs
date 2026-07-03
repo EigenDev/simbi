@@ -427,10 +427,13 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::KerrSchild => {
                         grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
                     }
-                    Spacetime::Kerr => panic!(
-                        "spinning-kerr GRMHD is design-44 phase C: the dragging-consistent \
-                         reconstruction does not yet extend to B"
-                    ),
+                    Spacetime::Kerr => {
+                        // the generic covariant stress contraction S_j = (1/2) T^{mu nu} d_j g_{mu nu}
+                        // with the EM stress; the non-diagonal kerr metric enters only through the
+                        // autodiff Dual pass, no per-block closed form.
+                        let spin = Dual::constant(Gv::scalar("kerr_spin"));
+                        grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pp, b)
+                    }
                     Spacetime::Minkowski => unreachable!("flat handled above"),
                 };
                 let (s_mom, _) = src_at(Gv::ZERO);

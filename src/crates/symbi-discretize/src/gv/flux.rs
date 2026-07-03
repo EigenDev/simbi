@@ -757,28 +757,32 @@ pub fn rmhd_flux_gr_gv(
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
-        Spacetime::Kerr => panic!(
-            "spinning-kerr GRMHD is design-44 phase C: the dragging-consistent reconstruction \
-             does not yet extend to B"
-        ),
+        Spacetime::Kerr => {
+            // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)
+            // and a radial shift (the moving-interface fan handles it). the flux is otherwise
+            // metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
+            let spin = Gv::scalar("kerr_spin");
+            let m = KerrKS { mass, spin };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
         Spacetime::Minkowski => unreachable!("the GRMHD flux is baked only for a curved spacetime"),
     };
     let regime = RmhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
     let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
-    let has_shift = matches!(spacetime, Spacetime::KerrSchild);
-    // GR HLLD (the ORTHONORMAL-frame MUB09 fan): the diagonal spatial metric maps to the local
-    // orthonormal frame where the validated flat solver runs, and the intercell flux maps back
-    // exactly. the Schwarzschild chart has ZERO shift, so the solver's intercell flux is the
-    // complete kernel flux (the godunov applies alpha). the kerr-schild/kerr charts carry a radial
-    // shift whose HLLD moving-interface (x/t = beta) fan is a documented increment — gate loud
-    // rather than silently drop it.
+    let has_shift = matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr);
+    // GR HLLD (the ORTHONORMAL-frame MUB09 fan): the spatial metric maps (via the tetrad) to the
+    // local orthonormal frame where the validated flat solver runs, and the intercell flux maps back
+    // exactly. a SHIFTED chart (kerr-schild / kerr) rides the shift as the MOVING-INTERFACE speed
+    // vface = beta^n/alpha, so the fan is evaluated at x/t = beta^n/alpha and the kernel flux is
+    // F* - (beta^n/alpha) U* (the godunov re-applies alpha). the induction equation carries one more
+    // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
+    // constant added to the magnetic flux after the fan (identical to adding it to both sides).
     if hlld {
-        assert!(
-            !has_shift,
-            "GR HLLD requires a zero-shift chart (Schwarzschild); the kerr-schild/kerr shifted \
-             HLLD fan is a design-44 increment"
-        );
-        let flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, Gv::ZERO, &regime.metric);
+        let w = if has_shift { beta[coord_n] / alpha } else { Gv::ZERO };
+        let mut flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, w, &regime.metric);
+        if has_shift {
+            flux.mag = flux.mag + beta.scale(bn_face / alpha);
+        }
         let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
         for k in 0..3 {
             writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));

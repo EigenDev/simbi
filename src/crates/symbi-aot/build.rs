@@ -1585,11 +1585,10 @@ fn main() {
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), false);
-        // the orthonormal-frame MUB09 HLLD gas flux: zero-shift (schwarzschild) charts only; the
-        // kerr-schild shifted-interface HLLD fan is a phase-C increment.
-        if matches!(geom.spacetime, Spacetime::Schwarzschild) {
-            gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), true);
-        }
+        // the orthonormal-frame MUB09 HLLD gas flux: schwarzschild (zero shift) and kerr-schild
+        // (the shift rides the fan as the moving-interface speed beta^r/alpha). spinning kerr is
+        // rejected in the flux match itself (dragging-consistent reconstruction, phase C).
+        gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), true);
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_from_bface_gr(&out_dir, 1, &geom);
@@ -1612,6 +1611,24 @@ fn main() {
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
         gen_rmhd_gr_uct_hlld(&out_dir, &geom);
+    }
+    // GRMHD phase C: the spinning-kerr 2D SWIRL row (sph_swirl -> DOF = 3 momentum for the frame
+    // dragging). the flux runs the tetrad HLLD (non-diagonal gamma_{r phi}) + the moving-interface
+    // shift; the covariant EM-stress source, the c2p, and the contact / UCT-HLL edge EMF are all
+    // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only for now (its kerr arm is a
+    // follow-on), so kerr runs the contact or UCT-HLL CT.
+    for geom in [Geom::sph_swirl().kerr(), Geom::sph_swirl().kerr().log_radial()] {
+        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
+        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
+        for dir in 0..2 {
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
+        }
+        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
+        gen_rmhd_ct_gr(&out_dir, &geom);
+        gen_rmhd_gr_uct(&out_dir, &geom);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.

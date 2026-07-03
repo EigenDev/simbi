@@ -1409,6 +1409,34 @@ mod tests {
     }
 
     #[test]
+    fn hlld_rmhd_gr_ortho_shift_smooth_equals_moving_flux() {
+        // the SHIFTED smooth-limit gate: a moving interface vface (the kerr-schild/kerr shift
+        // beta^n/alpha rides the fan this way) must give, for L = R, the intercell flux F(U) -
+        // vface U EXACTLY — the kernel flux of the shifted valencia system (the godunov re-applies
+        // alpha). validates the shifted HLLD; tested on the non-diagonal metric, all three normals.
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let m = mild_nondiag_metric();
+        let gr = RmhdGr { metric: m, alpha: 0.8 };
+        let prim = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.15, 0.05, -0.03]), pre: 1.0 },
+            mag: Tensor::new([0.5, 0.6, 0.3]),
+        };
+        let vface = 0.2;
+        for d in 0..3 {
+            let nhat = Tensor::<f64, 3>::unit(d);
+            let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, d, vface, &m);
+            let f = gr.to_flux(&prim, &nhat, &eos);
+            let u = gr.to_conserved(&eos, &prim);
+            assert!((flux.den - (f.den - vface * u.den)).abs() < 1e-11, "d{d} den");
+            for k in 0..3 {
+                assert!((flux.mom[k] - (f.mom[k] - vface * u.mom[k])).abs() < 1e-11, "d{d} mom{k}");
+                assert!((flux.mag[k] - (f.mag[k] - vface * u.mag[k])).abs() < 1e-11, "d{d} mag{k}");
+            }
+            assert!((flux.nrg - (f.nrg - vface * u.nrg)).abs() < 1e-11, "d{d} nrg");
+        }
+    }
+
+    #[test]
     fn hlld_rmhd_gr_ortho_nondiagonal_telescopes() {
         // the TETRAD wave-sum gate: on a NON-DIAGONAL metric the M&DZ wave-sum built from the tetrad
         // star states must telescope EXACTLY to the tetrad HLLD B_t flux (the CT-flux consistency the
