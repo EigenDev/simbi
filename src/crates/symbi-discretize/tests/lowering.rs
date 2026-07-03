@@ -236,10 +236,10 @@ fn ct_kernels_lower() {
     KernelRun::new(rmhd_bcell_from_bface_gv(3)).grid([8, 8, 8]).assert_lowers();
     // cell-B flux predictor (euler + rk2), cartesian + spherical + cylindrical.
     for coords in [Coords::Cartesian, Coords::Spherical, Coords::Cylindrical] {
-        KernelRun::new(rmhd_bcell_godunov_euler_gv(coords, &[Spacing::Uniform; 3], 3, 3, &[0, 1, 2]))
+        KernelRun::new(rmhd_bcell_godunov_euler_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 3], 3, 3, &[0, 1, 2]))
             .grid([8, 8, 8])
             .assert_lowers();
-        KernelRun::new(rmhd_bcell_godunov_rk2_gv(coords, &[Spacing::Uniform; 3], 3, 3, &[0, 1, 2]))
+        KernelRun::new(rmhd_bcell_godunov_rk2_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 3], 3, 3, &[0, 1, 2]))
             .grid([8, 8, 8])
             .assert_lowers();
     }

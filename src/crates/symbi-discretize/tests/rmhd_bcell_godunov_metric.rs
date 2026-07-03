@@ -20,6 +20,7 @@ mod harness;
 use harness::KernelRun;
 
 use symbi_discretize::{rmhd_bcell_godunov_euler_gv, Coords, Spacing};
+use symbi_discretize::Spacetime;
 
 const MR: usize = 8; // r cells
 const MZ: usize = 8; // z cells
@@ -46,7 +47,7 @@ fn cyl_rz_out_of_plane_bphi_uses_metric_free_divergence() {
 
     let (bc1c, bf01c) = (bc1.clone(), bf01.clone());
     // the cyl r-z bcell predictor (axes [0,2], DOF=3): out-of-plane = B_phi (comp 1).
-    let out = KernelRun::new(rmhd_bcell_godunov_euler_gv(Coords::Cylindrical, &[Spacing::Uniform; 2], 2, 3, &[0, 2]))
+    let out = KernelRun::new(rmhd_bcell_godunov_euler_gv(Coords::Cylindrical, Spacetime::Minkowski, &[Spacing::Uniform; 2], 2, 3, &[0, 2]))
         .grid([MR, MZ])
         // run over cells whose +1 neighbor (the flux divergence stencil) stays in bounds.
         .compute_window([0, 0], [MR - 1, MZ - 1])

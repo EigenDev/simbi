@@ -459,6 +459,112 @@ pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(St
 }
 
 
+/// the CURVED-SPACETIME CT edge EMF for the 2.5D (r, theta) poloidal plane (edge = phi) — the
+/// contact assembly of [`rmhd_edge_emf_gv`] producing the DENSITIZED corner EMF
+/// `Etilde_phi = vtilde_theta Btilde_r - vtilde_r Btilde_theta` (vtilde = alpha v - beta,
+/// Btilde = sqrt(gamma) B) that the GR curl consumes:
+///   cell terms:  sqrt(gamma)|cell x [(alpha v_p2 - beta_p2) b_p1 - (alpha v_p1 - beta_p1) b_p2]
+///   face terms:  alpha sqrt(gamma)|face x (raw mag-row flux) — the raw flux times the face
+///                measure IS the exact coordinate-form flux vtilde^n Btilde^i - vtilde^i Btilde^n,
+///                so the edge EMF stays flux-consistent (the UCT-checkerboard lesson).
+/// every gather point carries the metric factors at ITS OWN position (cells at the arithmetic
+/// centers matching the curl's prefactor convention, faces at (r_f, th_c)/(r_c, th_f)). the
+/// density fluxes stay RAW — the soft-sign blend uses only their signs, and the alpha
+/// sqrt(gamma) measure is positive. baked per (spacetime, spacing) for the (r, theta) grid.
+pub fn rmhd_edge_emf_gr_gv(
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+    begin_trace();
+    let ndim = 2usize;
+    let (g1, g2) = (0usize, 1usize);
+    gv_register_field("edge_vp1", "vel_p1");
+    gv_register_field("edge_vp2", "vel_p2");
+    gv_register_field("edge_bp1", "bcell_p1");
+    gv_register_field("edge_bp2", "bcell_p2");
+    gv_register_field("edge_bflux_a", "bflux_a");
+    gv_register_field("edge_bflux_b", "bflux_b");
+    gv_register_field("edge_fden_p1", "fden_p1");
+    gv_register_field("edge_fden_p2", "fden_p2");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    // the thread coord is the CORNER (r_f(0), th_f(0)); cell centers/faces at integer offsets.
+    let r_f = gv_axis_face_at(0, spacing[0], 0);
+    let th_f = gv_axis_face_at(1, spacing[1], 0);
+    let r_c = |o: i64| (gv_axis_face_at(0, spacing[0], o) + gv_axis_face_at(0, spacing[0], o + 1)) * half;
+    let th_c = |o: i64| (gv_axis_face_at(1, spacing[1], o) + gv_axis_face_at(1, spacing[1], o + 1)) * half;
+    let mass = Gv::scalar("schwarzschild_mass");
+    // (alpha, sqrt(gamma), beta^r) at a point; beta^theta = 0 on every KS-family chart.
+    let adm = |r: Gv, th: Gv| -> (Gv, Gv, Gv) {
+        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
+        match spacetime {
+            Spacetime::Schwarzschild => {
+                let m = Schwarzschild { mass };
+                (
+                    <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, x),
+                    <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
+                    Gv::ZERO,
+                )
+            }
+            Spacetime::KerrSchild => {
+                let m = SchwarzschildKS { mass };
+                (
+                    <SchwarzschildKS<Gv> as Metric<Gv, 3>>::lapse(&m, x),
+                    <SchwarzschildKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
+                    <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x)[0],
+                )
+            }
+            Spacetime::Kerr => {
+                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
+                (
+                    <KerrKS<Gv> as Metric<Gv, 3>>::lapse(&m, x),
+                    <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
+                    <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x)[0],
+                )
+            }
+            Spacetime::Minkowski => unreachable!("the GR edge EMF is baked only for a curved spacetime"),
+        }
+    };
+    // densitized cell EMF at the cell whose LOW corner offset is (o_r, o_th).
+    let cell = |o: &[i32]| -> Gv {
+        let (alpha, sqrtg, beta_r) = adm(r_c(o[0] as i64), th_c(o[1] as i64));
+        let vp1 = gv_field_at("edge_vp1", "vel_p1", ndim, o);
+        let vp2 = gv_field_at("edge_vp2", "vel_p2", ndim, o);
+        let bp1 = gv_field_at("edge_bp1", "bcell_p1", ndim, o);
+        let bp2 = gv_field_at("edge_bp2", "bcell_p2", ndim, o);
+        sqrtg * ((alpha * vp2) * bp1 - (alpha * vp1 - beta_r) * bp2)
+    };
+    let ene = cell(&zero);
+    let enw = cell(&cm(&[g1]));
+    let ese = cell(&cm(&[g2]));
+    let esw = cell(&cm(&[g1, g2]));
+    // densitized face EMFs: the r-face fluxes (bflux_a, at (r_f, th_c)) and the theta-face
+    // fluxes (bflux_b, at (r_c, th_f)), each times alpha sqrt(gamma) at its own face point.
+    let asg = |r: Gv, th: Gv| -> Gv {
+        let (alpha, sqrtg, _) = adm(r, th);
+        alpha * sqrtg
+    };
+    let en = Gv::ZERO - asg(r_f, th_c(0)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &zero);
+    let es = Gv::ZERO - asg(r_f, th_c(-1)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &cm(&[g2]));
+    let ee = asg(r_c(0), th_f) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &zero);
+    let ew = asg(r_c(-1), th_f) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &cm(&[g1]));
+    let fnf = gv_field_at("edge_fden_p1", "fden_p1", ndim, &zero);
+    let fs = gv_field_at("edge_fden_p1", "fden_p1", ndim, &cm(&[g2]));
+    let fe = gv_field_at("edge_fden_p2", "fden_p2", ndim, &zero);
+    let fw = gv_field_at("edge_fden_p2", "fden_p2", ndim, &cm(&[g1]));
+    let emf = ct_contact_emf_gv([en, es, ee, ew], [ene, enw, ese, esw], [fnf, fs, fe, fw]);
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+
 /// the per-direction UCT flux/diffusion coefficients at the edge — the (a^L, a^R, d^L, d^R) of the
 /// master formula (Mignone & Del Zanna 2020, Eq. 30). `al`/`ar` are the advective flux weights of the
 /// upwind/downwind states (a^L + a^R = 1); `dl`/`dr` the dissipative diffusion coefficients (equal

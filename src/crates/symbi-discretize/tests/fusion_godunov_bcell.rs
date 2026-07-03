@@ -49,6 +49,7 @@ fn godunov_plus_bcell_euler_fuses() {
     );
     let (mut k_bcell, w_bcell) = rmhd_bcell_godunov_euler_gv(
         Coords::Cartesian,
+        Spacetime::Minkowski,
         &[Spacing::Uniform; 3],
         3, 3, &[0, 1, 2],
     );
@@ -123,6 +124,7 @@ fn godunov_plus_bcell_rk2_fuses() {
     );
     let (mut k_bcell, w_bcell) = rmhd_bcell_godunov_rk2_gv(
         Coords::Cartesian,
+        Spacetime::Minkowski,
         &[Spacing::Uniform; 3],
         3, 3, &[0, 1, 2],
     );
@@ -146,6 +148,7 @@ fn untagged_pair_is_rejected() {
     );
     let (k_bcell, w_bcell) = rmhd_bcell_godunov_euler_gv(
         Coords::Cartesian,
+        Spacetime::Minkowski,
         &[Spacing::Uniform; 3],
         3, 3, &[0, 1, 2],
     );

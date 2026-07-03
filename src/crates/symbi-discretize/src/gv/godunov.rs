@@ -807,6 +807,7 @@ fn metric_free_oop_component(coords: Coords, axes: &[usize], ncomp: usize) -> Op
 /// mirror of `rmhd::rmhd_bcell_godunov_euler`; reuses `cell_geometry_gv` on curvilinear grids.
 pub fn rmhd_bcell_godunov_euler_gv(
     coords: Coords,
+    spacetime: Spacetime,
     spacing: &[Spacing],
     ndim: usize,
     ncomp: usize,
@@ -822,7 +823,7 @@ pub fn rmhd_bcell_godunov_euler_gv(
         }
     }
     let dt = Gv::scalar("dt");
-    let (geo, dx) = bcell_godunov_geom(coords, spacing, ndim, axes);
+    let (geo, dx) = bcell_godunov_geom(coords, spacetime, spacing, ndim, axes);
     let oop = metric_free_oop_component(coords, axes, ncomp);
     let writes = (0..ncomp)
         .map(|c| {
@@ -845,6 +846,7 @@ pub fn rmhd_bcell_godunov_euler_gv(
 /// dt*div(bflux_c)))`, in-place. mirror of `rmhd::rmhd_bcell_godunov_rk2`.
 pub fn rmhd_bcell_godunov_rk2_gv(
     coords: Coords,
+    spacetime: Spacetime,
     spacing: &[Spacing],
     ndim: usize,
     ncomp: usize,
@@ -860,7 +862,7 @@ pub fn rmhd_bcell_godunov_rk2_gv(
     }
     let dt = Gv::scalar("dt");
     let half = Gv::from_f64(0.5);
-    let (geo, dx) = bcell_godunov_geom(coords, spacing, ndim, axes);
+    let (geo, dx) = bcell_godunov_geom(coords, spacetime, spacing, ndim, axes);
     let oop = metric_free_oop_component(coords, axes, ncomp);
     let writes = (0..ncomp)
         .map(|c| {
@@ -881,13 +883,23 @@ pub fn rmhd_bcell_godunov_rk2_gv(
 /// the cell-B godunov geometry: curvilinear -> the gv cell geometry (area-weighted div);
 /// cartesian -> the uniform `dx_d` scalars. registered in the order the bcell godunov needs
 /// (the bf_d_c fields are read later by `bcell_flux_div_gv`). 3D, identity axes.
-fn bcell_godunov_geom(coords: Coords, spacing: &[Spacing], ndim: usize, axes: &[usize]) -> (Option<CellGeometryGv>, Vec<Gv>) {
+fn bcell_godunov_geom(coords: Coords, spacetime: Spacetime, spacing: &[Spacing], ndim: usize, axes: &[usize]) -> (Option<CellGeometryGv>, Vec<Gv>) {
     if coords == Coords::Cartesian {
         (None, (0..ndim).map(|d| Gv::scalar(&format!("dx_{d}"))).collect())
     } else {
         // axes maps grid axis -> coordinate (identity for sph/3d-cyl; [0,2] for cyl r-z) so the
-        // area-weighted divergence uses the right radial axis for the cylindrical metric.
-        (Some(cell_geometry_gv(coords, spacing, axes, ndim)), Vec::new())
+        // area-weighted divergence uses the right radial axis for the cylindrical metric. a
+        // curved spacetime takes the COVARIANT (alpha sqrt(gamma)) measure — the mag rows are
+        // densitized conserved laws of the same form as the gas (d_t(sqrt(g) B) + coordinate
+        // divergence), exactly like the gas godunov's geometry selection.
+        let g = match spacetime {
+            Spacetime::Minkowski => cell_geometry_gv(coords, spacing, axes, ndim),
+            Spacetime::Kerr => cell_geometry_covariant_gv(
+                coords, spacing, axes, ndim, Some(Gv::scalar("kerr_spin")),
+            ),
+            _ => cell_geometry_covariant_gv(coords, spacing, axes, ndim, None),
+        };
+        (Some(g), Vec::new())
     }
 }
 

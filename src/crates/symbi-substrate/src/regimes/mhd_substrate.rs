@@ -154,10 +154,8 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
 {
     // mhd_geom_suffix keys on the GRID-AXIS SET (sim.geom.axes): cyl r-z [0,2] -> "_cyl_rz",
     // r-phi disk [0,1] -> "_cyl_rphi", identity geometries -> "" / "_sph" / "_cyl". a curved
-    // spacetime appends the spacing + spacetime slugs (the GR godunov carries the covariant
-    // measure + the ideal-MHD stress contraction; the bcell predictor keeps the flat name —
-    // its curved measures land with the phase-B densitized CT, and the 1D radial B row's
-    // flux is identically zero).
+    // spacetime appends the spacing + spacetime slugs on BOTH the gas stage and the bcell
+    // predictor (each carries the covariant measure).
     let base_sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = crate::regimes::substrate_kernels::spacetime_slug(sim.geom.spacetime);
     let sp = crate::regimes::substrate_kernels::spacing_suffix(&sim.geom.maps);
@@ -251,7 +249,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // buffer layout MUST track the kernel artifact. a hand-built list would be RMHD-shaped and
     // scramble NMHD/IMHD whenever DOF != D (the cyl r-z plane), draining mass at machine speed.
     let gname = format!("{gas_prefix}_godunov_stage{sfx}_{D}d");
-    let bcell_sfx = if st.is_empty() { base_sfx.to_string() } else { format!("{base_sfx}{sp}") };
+    let bcell_sfx = sfx.clone();
     let gscalars = scalars_for(&gname, &scalar);
     let pre_bind = if has_energy {
         sim.fields.prim.pre_field().expect("prim.pre")

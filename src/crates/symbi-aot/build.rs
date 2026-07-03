@@ -1094,17 +1094,24 @@ fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 // reads the flux-implied B as b_old (scale_gas/add_gas include the magnetic
 // component). in-place on bcell (bc_{c} read+written).
 fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
-    // the face positions in the divergence measure depend on the spacing map, so the log-radial
-    // instance carries the spacing slug (empty for uniform — the existing names are unchanged).
-    let name = format!("rmhd_bcell_godunov_euler{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix());
+    // the face positions in the divergence measure depend on the spacing map + the spacetime
+    // (covariant measure), so those slugs ride the name (empty for uniform/flat — the existing
+    // names are unchanged).
+    let name = format!(
+        "rmhd_bcell_godunov_euler{}{}{}_{ndim}d",
+        geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+    );
     // ncomp = 3 (B is always a 3-vector); flux-divergence over ndim spatial directions.
-    let (k, writes) = rmhd_bcell_godunov_euler_gv(geom.coords, &geom.spacing, ndim as usize, 3, &geom.axes);
+    let (k, writes) = rmhd_bcell_godunov_euler_gv(geom.coords, geom.spacetime, &geom.spacing, ndim as usize, 3, &geom.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
 fn gen_rmhd_bcell_godunov_rk2(out_dir: &str, geom: Geom, ndim: u8) {
-    let name = format!("rmhd_bcell_godunov_rk2{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix());
-    let (k, writes) = rmhd_bcell_godunov_rk2_gv(geom.coords, &geom.spacing, ndim as usize, 3, &geom.axes);
+    let name = format!(
+        "rmhd_bcell_godunov_rk2{}{}{}_{ndim}d",
+        geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+    );
+    let (k, writes) = rmhd_bcell_godunov_rk2_gv(geom.coords, geom.spacetime, &geom.spacing, ndim as usize, 3, &geom.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1132,8 +1139,8 @@ fn gen_mhd_godunov_and_bcell(out_dir: &str, prefix: &str, geom: Geom, variant: &
     // the CT bcell predictor is regime-agnostic (Faraday induction) — always the rmhd_*
     // kernel; only the GAS stage's geometric source differs by regime (geo_source(prefix)).
     let bcell_kw = match variant {
-        "euler" => rmhd_bcell_godunov_euler_gv(geom.coords, &geom.spacing, 3, 3, &geom.axes),
-        "rk2" => rmhd_bcell_godunov_rk2_gv(geom.coords, &geom.spacing, 3, 3, &geom.axes),
+        "euler" => rmhd_bcell_godunov_euler_gv(geom.coords, geom.spacetime, &geom.spacing, 3, 3, &geom.axes),
+        "rk2" => rmhd_bcell_godunov_rk2_gv(geom.coords, geom.spacetime, &geom.spacing, 3, 3, &geom.axes),
         other => panic!("gen_mhd_godunov_and_bcell: unknown variant `{other}`"),
     };
     let (mut k_god, w_god) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
@@ -1498,11 +1505,6 @@ fn main() {
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone());
-    }
-    // the 1D bcell flux-divergence predictor is spacetime-INDEPENDENT (the radial B row's
-    // flux is identically zero; curved transverse-B measures land with the phase-B
-    // densitized CT), so one instance per SPACING serves both GR charts.
-    for geom in [Geom::sph(1), Geom::sph(1).log_radial()] {
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
     }
