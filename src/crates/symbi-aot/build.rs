@@ -1361,6 +1361,16 @@ fn gen_rhd_kerr_ghost_fill(out_dir: &str, geom: Geom) {
     emit_gv(out_dir, &name, 2, &k, &writes);
 }
 
+// the spinning-kerr RMHD ghost fill: the velocity w = v^phi + q v^r copy PLUS the cell-B, whose
+// out-of-plane B^phi rides the same dragging manifold via w_B = B^phi + q B^r. no geom-suffix (the
+// MHD ghost dispatch keys on spacing + spacetime only). kerr-only.
+fn gen_rmhd_kerr_ghost_fill(out_dir: &str, geom: &Geom) {
+    assert!(geom.spacetime == Spacetime::Kerr, "the rmhd kerr ghost fill is kerr-only");
+    let name = format!("rmhd_ghost_fill{}{}_2d", geom.spacing_suffix(), geom.spacetime_suffix());
+    let (k, writes) = symbi_discretize::gv::rmhd_kerr_ghost_fill_gv(&geom.spacing);
+    emit_gv(out_dir, &name, 2, &k, &writes);
+}
+
 // P2 (curvilinear): the SPHERICAL mass-law godunov — `rho_new = rho - dt*div(F)` with the
 // analytic AREA-WEIGHTED divergence `(1/V)(F_hi*A_hi - F_lo*A_lo)` from the gv `cell_geometry_gv`.
 // a host test extracts div = -rho_new (rho=0, dt=1) and bit-diffs it against the analytic
@@ -1629,6 +1639,7 @@ fn main() {
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
+        gen_rmhd_kerr_ghost_fill(&out_dir, &geom);
     }
     // P3b (RMHD): the full relativistic-MHD geometric source (3D spherical) — pressure +
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.

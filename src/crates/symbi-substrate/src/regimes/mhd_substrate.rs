@@ -290,20 +290,56 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     let bc = to_bc_array::<D>(&sim.boundaries);
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
 
-    let gname = if has_energy { format!("rmhd_ghost_fill_{D}d") } else { format!("imhd_ghost_fill_{D}d") };
+    // spinning kerr: the frame-dragging ghost (velocity w = v^phi + q v^r AND cell B^phi w_B copy),
+    // which reads the metric mass/spin + the radial grid map beyond the generic vel_sign reflect.
+    let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
+    let gname = if is_kerr {
+        format!("rmhd_ghost_fill{}{}_{D}d", spacing_suffix(&sim.geom.maps), spacetime_slug(sim.geom.spacetime))
+    } else if has_energy {
+        format!("rmhd_ghost_fill_{D}d")
+    } else {
+        format!("imhd_ghost_fill_{D}d")
+    };
+    let (x_lo_g, dx_g) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(|region, p| {
-        // int lanes: all D map_types then all D args (the ghost_fill manifest order).
-        let mut ints = Vec::with_capacity(2 * D);
-        for ax in 0..D {
-            ints.push(p.map_type[ax] as i32);
-        }
-        for ax in 0..D {
-            ints.push(p.arg[ax]);
-        }
-        let mut scalars = Vec::with_capacity(D);
-        for ax in 0..D {
-            scalars.push(Sc::from_f64(p.vel_sign[ax]));
-        }
+        // the generic ghost is float-only (vel_sign); the kerr instance is MIXED (map_type/arg ints
+        // + vel_sign/mass/spin/grid floats), so it routes BY MANIFEST through resolve_params.
+        let (ints, scalars): (Vec<i32>, Vec<Sc>) = if is_kerr {
+            crate::regimes::substrate_kernels::resolve_params(
+                &gname,
+                |bind| match bind {
+                    ScalarBind::Ref(symbi_ir::ScalarRef::MapType(ax)) => p.map_type[*ax as usize] as i32,
+                    ScalarBind::Ref(symbi_ir::ScalarRef::Arg(ax)) => p.arg[*ax as usize],
+                    o => panic!("mhd kerr ghost: unexpected int param {o:?}"),
+                },
+                |bind| match bind {
+                    ScalarBind::Ref(symbi_ir::ScalarRef::VelSign(ax)) => Sc::from_f64(p.vel_sign[*ax as usize]),
+                    ScalarBind::Ref(symbi_ir::ScalarRef::SchwarzschildMass) => Sc::from_f64(
+                        sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass").map(|(_, v)| *v).expect("kerr ghost fill needs schwarzschild_mass"),
+                    ),
+                    ScalarBind::Ref(symbi_ir::ScalarRef::KerrSpin) => Sc::from_f64(
+                        sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin").map(|(_, v)| *v).expect("kerr ghost fill needs kerr_spin"),
+                    ),
+                    ScalarBind::Ref(other) => Sc::from_f64(
+                        geom_scalar(&x_lo_g, &dx_g, *other).unwrap_or_else(|| panic!("mhd kerr ghost: unexpected scalar {other:?}")),
+                    ),
+                    o => panic!("mhd kerr ghost: unexpected scalar {o:?}"),
+                },
+            )
+        } else {
+            let mut ints = Vec::with_capacity(2 * D);
+            for ax in 0..D {
+                ints.push(p.map_type[ax] as i32);
+            }
+            for ax in 0..D {
+                ints.push(p.arg[ax]);
+            }
+            let mut scalars = Vec::with_capacity(D);
+            for ax in 0..D {
+                scalars.push(Sc::from_f64(p.vel_sign[ax]));
+            }
+            (ints, scalars)
+        };
         // bind BY MANIFEST: the in-place prim.{rho,vel,pre?} + bcell writes (read-at-source /
         // write-at-cell, over all DOF B-components). prim.pre is a real output for energy; iso
         // passes a dummy. no hand-ordered list.

@@ -160,3 +160,62 @@ pub fn rhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, Fi
     writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), pre.node()));
     (end_trace(), writes)
 }
+
+
+/// the SPINNING-KERR MHD lattice-map ghost fill — `rhd_kerr_ghost_fill_gv` (the velocity
+/// w = v^phi + q v^r copy) PLUS the cell-centered B, whose out-of-plane component gets the SAME
+/// frame-dragging treatment: the covariant B_phi = gamma_{phi phi} B^phi + gamma_{phi r} B^r is the
+/// magnetic angular-momentum density, so a B_phi = 0 state satisfies w_B = B^phi + q B^r = 0 at every
+/// radius (q = gamma_{r phi}/gamma_{phi phi}). copying B^phi raw plants the source cell's dragging
+/// profile at the ghost's DIFFERENT (r, theta) and generates a boundary B_phi (a spurious toroidal-
+/// field / azimuthal-tension source) at truncation; the w_B copy keeps the pulled-back B on the
+/// dragging manifold exactly:
+///   B^phi(ghost) = [B^phi(src) + q(src) B^r(src)] - q(ghost) B^r(ghost).
+/// the in-plane B^r/B^theta pick up the wall map's vel_sign like the velocity; q is at the same
+/// volume-weighted centroid the velocity copy + the c2p use. reduces to the plain copy at
+/// gamma_{r phi} = 0, so it is baked for Kerr only. DOF = 3 swirl (2D grid).
+pub fn rmhd_kerr_ghost_fill_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_geometry::{KerrKS, Metric};
+    begin_trace();
+    let ndim = 2usize;
+    let src = gv_lattice_source(ndim);
+    let vel_sign: Vec<Gv> = (0..ndim).map(|ax| Gv::scalar(&format!("vel_sign_{ax}"))).collect();
+    let mass = Gv::scalar("schwarzschild_mass");
+    let spin = Gv::scalar("kerr_spin");
+    let q_at = |i: Gv, j: Gv| -> Gv {
+        let rl = gv_axis_face_at_index(0, spacing[0], i);
+        let rh = gv_axis_face_at_index(0, spacing[0], i + Gv::ONE);
+        let r_c = Gv::from_f64(0.75) * (gv_powi(rh, 4) - gv_powi(rl, 4)) / (gv_powi(rh, 3) - gv_powi(rl, 3));
+        let tl = gv_axis_face_at_index(1, spacing[1], j);
+        let th = gv_axis_face_at_index(1, spacing[1], j + Gv::ONE);
+        let th_c = ((th.sin() - th * th.cos()) - (tl.sin() - tl * tl.cos())) / (tl.cos() - th.cos());
+        let gm = <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(&KerrKS { mass, spin }, Tensor::<Gv, 3>::new([r_c, th_c, Gv::ZERO]));
+        gm[(0, 2)] / gm[(2, 2)]
+    };
+    let q_src = q_at(Gv::of(src[0]), Gv::of(src[1]));
+    let q_gh = q_at(Gv::coord(0), Gv::coord(1));
+
+    let rho = gv_load_at("prim_rho", "prim.rho", &src);
+    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), rho.node())];
+    // velocity: v^r/v^theta reflect, v^phi via the angular-momentum variable w = v^phi + q v^r.
+    let v0_src = gv_load_at("prim_v0", FieldRef::PrimVel(0), &src);
+    let v0 = v0_src * vel_sign[0];
+    writes.push(("prim_v0".to_string(), FieldRef::PrimVel(0).into(), v0.node()));
+    let v1 = gv_load_at("prim_v1", FieldRef::PrimVel(1), &src) * vel_sign[1];
+    writes.push(("prim_v1".to_string(), FieldRef::PrimVel(1).into(), v1.node()));
+    let v2_src = gv_load_at("prim_v2", FieldRef::PrimVel(2), &src);
+    let v2 = (v2_src + q_src * v0_src) - q_gh * v0;
+    writes.push(("prim_v2".to_string(), FieldRef::PrimVel(2).into(), v2.node()));
+    let pre = gv_load_at("prim_pre", "prim.pre", &src);
+    writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), pre.node()));
+    // cell B: B^r/B^theta reflect, B^phi via w_B = B^phi + q B^r (the magnetic dragging manifold).
+    let b0_src = gv_load_at("bcell_0", "mhd.bcell[0]", &src);
+    let b0 = b0_src * vel_sign[0];
+    writes.push(("bcell_0".to_string(), "mhd.bcell[0]".into(), b0.node()));
+    let b1 = gv_load_at("bcell_1", "mhd.bcell[1]", &src) * vel_sign[1];
+    writes.push(("bcell_1".to_string(), "mhd.bcell[1]".into(), b1.node()));
+    let b2_src = gv_load_at("bcell_2", "mhd.bcell[2]", &src);
+    let b2 = (b2_src + q_src * b0_src) - q_gh * b0;
+    writes.push(("bcell_2".to_string(), "mhd.bcell[2]".into(), b2.node()));
+    (end_trace(), writes)
+}
