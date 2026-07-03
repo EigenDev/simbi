@@ -480,6 +480,23 @@ impl Geom {
     }
 }
 
+// the MHD kernel-name geometry slug — MIRRORS the runtime dispatch's `mhd_geom_suffix`
+// (substrate). MHD B is ALWAYS a 3-vector, so a spherical 2D MHD grid is NOT the hydro
+// "_sph_swirl" DOF-lift — it is the normal MHD case, named "_sph" (matching the dispatch). only
+// the GR HYDRO swirl (rhd prefix) uses "_sph_swirl". keeps the flat 2D spherical MHD bake+dispatch
+// consistent (cartesian/cylindrical/3D-spherical are identical to geom.suffix()).
+fn mhd_geom_slug(geom: &Geom) -> &'static str {
+    match geom.coords {
+        Coords::Cartesian => "",
+        Coords::Spherical => "_sph",
+        Coords::Cylindrical => match geom.axes.as_slice() {
+            [0, 2] => "_cyl_rz",
+            [0, 1] => "_cyl_rphi",
+            _ => "_cyl",
+        },
+    }
+}
+
 // every gen_* emits a GV-traced kernel through `emit_gv` — Gv is the sole IR front end.
 
 // the emit chokepoint for a GV-TRACED kernel (symbi-hydro physics instantiated at S=Gv): the
@@ -540,7 +557,15 @@ fn gen_godunov_stage(
     fused: Option<(&str, &[&symbi_hydro::source_spec::SourceSpec])>,
 ) {
     let suffix_with = fused.map(|(slug, _)| format!("_with_{slug}")).unwrap_or_default();
-    let name = format!("{prefix}_godunov_stage{suffix_with}{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
+    // MHD (rmhd/nmhd/imhd) on a FLAT background uses the mhd geometry slug ("_sph" for spherical),
+    // matching the runtime mhd_geom_suffix; the GR-hydro swirl (rhd) keeps geom.suffix()
+    // ("_sph_swirl"), and GR MHD goes through gen_rmhd_godunov_gr (hardcoded "_sph").
+    let geo_slug = if matches!(prefix, "rmhd" | "nmhd" | "imhd") && geom.spacetime == Spacetime::Minkowski {
+        mhd_geom_slug(&geom)
+    } else {
+        geom.suffix()
+    };
+    let name = format!("{prefix}_godunov_stage{suffix_with}{}{}{}_{ndim}d", geo_slug, geom.spacing_suffix(), geom.spacetime_suffix());
     let no_sources: [&symbi_hydro::source_spec::SourceSpec; 0] = [];
     let sources: &[&symbi_hydro::source_spec::SourceSpec] = match fused {
         Some((_, s)) => s,
@@ -952,7 +977,7 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
         emit_gv(out_dir, &name, ndim, &k, &writes);
         return;
     }
-    let name = format!("rmhd_wave_speed_map{}_{ndim}d", geom.suffix());
+    let name = format!("rmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         rmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1099,9 +1124,10 @@ fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
     // the face positions in the divergence measure depend on the spacing map + the spacetime
     // (covariant measure), so those slugs ride the name (empty for uniform/flat — the existing
     // names are unchanged).
+    let geo_slug = if geom.spacetime == Spacetime::Minkowski { mhd_geom_slug(&geom) } else { geom.suffix() };
     let name = format!(
         "rmhd_bcell_godunov_euler{}{}{}_{ndim}d",
-        geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+        geo_slug, geom.spacing_suffix(), geom.spacetime_suffix()
     );
     // ncomp = 3 (B is always a 3-vector); flux-divergence over ndim spatial directions.
     let (k, writes) = rmhd_bcell_godunov_euler_gv(geom.coords, geom.spacetime, &geom.spacing, ndim as usize, 3, &geom.axes);
@@ -1109,9 +1135,10 @@ fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
 }
 
 fn gen_rmhd_bcell_godunov_rk2(out_dir: &str, geom: Geom, ndim: u8) {
+    let geo_slug = if geom.spacetime == Spacetime::Minkowski { mhd_geom_slug(&geom) } else { geom.suffix() };
     let name = format!(
         "rmhd_bcell_godunov_rk2{}{}{}_{ndim}d",
-        geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+        geo_slug, geom.spacing_suffix(), geom.spacetime_suffix()
     );
     let (k, writes) = rmhd_bcell_godunov_rk2_gv(geom.coords, geom.spacetime, &geom.spacing, ndim as usize, 3, &geom.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1558,6 +1585,11 @@ fn main() {
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), false);
+        // the orthonormal-frame MUB09 HLLD gas flux: zero-shift (schwarzschild) charts only; the
+        // kerr-schild shifted-interface HLLD fan is a phase-C increment.
+        if matches!(geom.spacetime, Spacetime::Schwarzschild) {
+            gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), true);
+        }
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 1);
         gen_rmhd_bcell_from_bface_gr(&out_dir, 1, &geom);

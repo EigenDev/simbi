@@ -13,9 +13,10 @@
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::{Scalar, Selectable};
 use crate::eos::Eos;
-use crate::state::{Cons, ConsG};
+use crate::state::{Cons, ConsG, Prim};
 use crate::energy::Zero;
 use crate::regime::Regime;
+use crate::rmhd::Rmhd;
 use crate::mhd_state::{MhdPrim, MhdCons, IsoMhdPrim, IsoMhdCons};
 use crate::spatial_metric::SpatialMetric;
 use crate::newtonian_mhd::NewtonianMhd;
@@ -91,17 +92,20 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
     for ii in 0..2 {
         let a_s = lam[ii];
         let rs = r[ii];
-        // rmn / rmtrans are momentum-class (covariant S_i . n^i) -> metric-free (C1/Tier-2).
+        // the SR MUB09 star-state reconstruction (Mignone, Ugliano & Bodo 2009). the GR path does
+        // NOT drive this in the coordinate frame: it maps to the local ORTHONORMAL frame where the
+        // metric is identity, runs THIS flat reconstruction, and maps the flux back (the metric
+        // contractions below are euclidean at the flat metric the GR wrapper passes).
         let rmn = rs.mom.dot(nhat);
         let rmtrans = rs.mom - nhat.scale(rmn);
-        let rbtrans = metric.project_transverse(&rs.mag, nhat); // transverse magnetic part (contravariant B)
+        let rbtrans = metric.project_transverse(&rs.mag, nhat); // transverse magnetic part
         let ret = rs.nrg + rs.den;
 
         // Eqs (26)-(30): coefficients of the linear system for the side state.
         let a = rmn - a_s * ret + p * (one - a_s * a_s);
-        let g = metric.norm_sq_contra(&rbtrans); // |rbtrans|^2 (contravariant)
+        let g = metric.norm_sq_contra(&rbtrans); // |rbtrans|^2
         let ag = a + g;
-        let c = rbtrans.dot(&rmtrans); // B(contra) . momentum(cov) -> metric-free pairing
+        let c = rbtrans.dot(&rmtrans);
         let q = -ag + bn * bn * (one - a_s * a_s);
         let x = bn * (a * a_s * bn + c) - ag * (a_s * p + ret);
 
@@ -132,7 +136,7 @@ fn hlld_vdiff<S: Scalar, const D: usize>(
         eta[ii] = sign * sgn_bn * wt.abs().sqrt();
         let eta_s = eta[ii];
         let var2 = one / (a_s * p + ret + bn * eta_s + eps);
-        let kn = (rmn + p + rs.mag.dot(nhat) * eta_s) * var2; // B.n (contravariant)
+        let kn = (rmn + p + rs.mag.dot(nhat) * eta_s) * var2;
         let ktrans = (rmtrans + rbtrans.scale(eta_s)).scale(var2);
 
         bv[ii] = nhat.scale(bn) + btrans;
@@ -261,6 +265,94 @@ fn hlld_rmhd_converge<S: Scalar, const D: usize>(
 /// and Gv-traced kernel. on unphysical state or secant divergence, falls back
 /// to HLLE via a final mask-driven `select` over the flux. matches mignone,
 /// ugliano & bodo (2009).
+/// GR HLLD via the local ORTHONORMAL frame. for a DIAGONAL spatial metric gamma = diag(g_0..g_{D-1})
+/// the physical (contravariant) velocity and field map to the orthonormal frame where the metric is
+/// the identity: V_hat^i = sqrt(g_i) v^i, B_hat^i = sqrt(g_i) B^i (whence W_hat = W, |B_hat|^2 = |B|^2,
+/// V_hat.B_hat = v.B — every Lorentz scalar is preserved). the VALIDATED flat MUB09 solver runs there
+/// and the intercell flux maps back EXACTLY:
+///   F_D   = F_hat_D / sqrt(g_n),      F_tau = F_hat_tau / sqrt(g_n),
+///   F_S_j = (sqrt(g_j)/sqrt(g_n)) F_hat_S_j   (covariant momentum; the Valencia pressure term is the
+///           MIXED p_tot delta^n_j, so this holds for j = n too — no residual pressure term),
+///   F_B^i = F_hat_B^i / (sqrt(g_i) sqrt(g_n)).
+/// the ALE face speed rides along as vface_hat = sqrt(g_n) vface. exact for any diagonal metric
+/// (schwarzschild, ingoing kerr-schild); the off-diagonal (spinning kerr) case needs a full tetrad
+/// and is rejected upstream.
+pub fn hlld_rmhd_gr_ortho<S: Scalar, const D: usize>(
+    eos: &impl Eos<S>,
+    prim_l: &MhdPrim<S, D>,
+    prim_r: &MhdPrim<S, D>,
+    nhat: &Tensor<S, D>,
+    vface: S,
+    metric: &SpatialMetric<S, D>,
+) -> MhdCons<S, D> {
+    let one = S::ONE;
+    // sqrt(g_i) along each coordinate axis (the diagonal of gamma); sqrt(g_n) along the normal.
+    let sg: [S; D] = std::array::from_fn(|i| metric.norm_sq_contra(&Tensor::unit(i)).sqrt());
+    let sgn = metric.norm_sq_contra(nhat).sqrt();
+    let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
+        hydro: Prim {
+            rho: p.hydro.rho,
+            vel: Tensor { data: std::array::from_fn(|i| sg[i] * p.hydro.vel.data[i]) },
+            pre: p.hydro.pre,
+        },
+        mag: Tensor { data: std::array::from_fn(|i| sg[i] * p.mag.data[i]) },
+    };
+    let hat_l = to_hat(prim_l);
+    let hat_r = to_hat(prim_r);
+    let fhat = hlld_rmhd(&Rmhd, eos, &hat_l, &hat_r, nhat, vface * sgn, &SpatialMetric::flat());
+    let inv_sgn = one / sgn;
+    MhdCons {
+        hydro: Cons {
+            den: fhat.hydro.den * inv_sgn,
+            mom: Tensor { data: std::array::from_fn(|j| sg[j] * inv_sgn * fhat.hydro.mom.data[j]) },
+            nrg: fhat.hydro.nrg * inv_sgn,
+        },
+        mag: Tensor { data: std::array::from_fn(|i| fhat.mag.data[i] * inv_sgn / sg[i]) },
+    }
+}
+
+/// the converged HLLD fan for the GR UCT-HLLD edge EMF, via the ORTHONORMAL frame (the states-only
+/// analogue of `hlld_rmhd_gr_ortho`). the flat MUB09 star states are extracted in the orthonormal
+/// frame and mapped back to the coordinate frame with the SAME diagonal-metric rules that make the
+/// wave-sum EMF telescope to the coordinate B_t flux: a CONTRAVARIANT field/velocity maps as
+/// X^i = X_hat^i / sqrt(g_i); a wave SPEED (dx^n/dt) maps as lambda = lambda_hat / sqrt(g_n). in the
+/// wave-sum Phi = sum |lambda_k| (B_t^{star} - B_t) these combine to the coordinate 1/(sqrt(g_t)
+/// sqrt(g_n)) the contravariant B_t flux carries, so Phi is the coordinate EMF directly. exact for
+/// any diagonal metric; the off-diagonal (kerr) case needs a tetrad and is rejected upstream.
+pub fn hlld_rmhd_states_gr_ortho<S: Scalar, const D: usize>(
+    eos: &impl Eos<S>,
+    prim_l: &MhdPrim<S, D>,
+    prim_r: &MhdPrim<S, D>,
+    nhat: &Tensor<S, D>,
+    metric: &SpatialMetric<S, D>,
+) -> HlldStates<S, D> {
+    let one = S::ONE;
+    let sg: [S; D] = std::array::from_fn(|i| metric.norm_sq_contra(&Tensor::unit(i)).sqrt());
+    let sgn = metric.norm_sq_contra(nhat).sqrt();
+    let inv_sgn = one / sgn;
+    let to_hat = |p: &MhdPrim<S, D>| MhdPrim {
+        hydro: Prim {
+            rho: p.hydro.rho,
+            vel: Tensor { data: std::array::from_fn(|i| sg[i] * p.hydro.vel.data[i]) },
+            pre: p.hydro.pre,
+        },
+        mag: Tensor { data: std::array::from_fn(|i| sg[i] * p.mag.data[i]) },
+    };
+    let st = hlld_rmhd_states(&Rmhd, eos, &to_hat(prim_l), &to_hat(prim_r), nhat, &SpatialMetric::flat());
+    // contravariant field/velocity: X^i = X_hat^i / sqrt(g_i).
+    let down = |v: &Tensor<S, D>| Tensor { data: std::array::from_fn(|i| v.data[i] / sg[i]) };
+    HlldStates {
+        lam: [st.lam[0] * inv_sgn, st.lam[1] * inv_sgn],
+        alf: [st.alf[0] * inv_sgn, st.alf[1] * inv_sgn],
+        lstar: st.lstar * inv_sgn,
+        bstar: [down(&st.bstar[0]), down(&st.bstar[1])],
+        bc: down(&st.bc),
+        vc: down(&st.vc),
+        bn: st.bn * inv_sgn,
+        success: st.success,
+    }
+}
+
 pub fn hlld_rmhd<S: Scalar, const D: usize, R>(
     regime: &R,
     eos: &impl Eos<S>,
@@ -1154,8 +1246,9 @@ mod tests {
             mag: Tensor::new([0.4, -0.5, 0.25]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
+        let _ = &gr;
         assert!(m.norm_sq_contra(&prim_l.vel) < 1.0 && m.norm_sq_contra(&prim_r.vel) < 1.0);
-        let s = hlld_rmhd_states(&gr, &eos, &prim_l, &prim_r, &nhat, &m);
+        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, &nhat, &m);
         assert!(s.success > 0.5, "GR HLLD must converge on the curved metric");
         let (lam, alf, bn, bc_y) = (s.lam, s.alf, s.bn, s.bc[1]);
         let by = [prim_l.mag[1], prim_r.mag[1]];
@@ -1170,7 +1263,7 @@ mod tests {
                 - alf[0].abs() * (bc_y - by_ss_l)
                 - alf[1].abs() * (by_ss_r - bc_y)
                 - lam[1].abs() * (by[1] - by_ss_r));
-        let flux = hlld_rmhd(&gr, &eos, &prim_l, &prim_r, &nhat, 0.0, &m);
+        let flux = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, &nhat, 0.0, &m);
         let f_ref = flux.mag[1];
         assert!(
             (f_hat - f_ref).abs() < 1e-8,
@@ -1197,7 +1290,8 @@ mod tests {
             mag: Tensor::new([-0.5, 0.4, 0.25]),
         };
         let nhat = Tensor::<f64, 3>::unit(1);
-        let s = hlld_rmhd_states(&gr, &eos, &prim_l, &prim_r, &nhat, &m);
+        let _ = &gr;
+        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, &nhat, &m);
         assert!(s.success > 0.5, "GR HLLD (theta) must converge");
         // theta-Riemann dissipates B_r (component 0), normal B_theta (component 1).
         let (t, nrm) = (0usize, 1usize);
@@ -1215,13 +1309,71 @@ mod tests {
                 - s.alf[0].abs() * (s.bc[t] - bt_ss_l)
                 - s.alf[1].abs() * (bt_ss_r - s.bc[t])
                 - s.lam[1].abs() * (bt[1] - bt_ss_r));
-        let flux = hlld_rmhd(&gr, &eos, &prim_l, &prim_r, &nhat, 0.0, &m);
+        let flux = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, &nhat, 0.0, &m);
         let f_ref = flux.mag[t];
         assert!(
             (f_hat - f_ref).abs() < 1e-8,
             "GR theta-direction wave-sum does NOT telescope: {f_hat} vs {f_ref} (diff {})",
             (f_hat - f_ref).abs()
         );
+    }
+
+
+    #[test]
+    fn hlld_rmhd_gr_ortho_reduces_to_flat_at_identity() {
+        // the GR orthonormal wrapper at the identity metric (sqrt(g_i) = 1) must be BIT-IDENTICAL
+        // to the flat MUB09 solver on a genuine L != R shock: no metric factor may perturb the SR
+        // path. this is the guard that the SR-MHD path is untouched by the GR generalization.
+        let eos = IdealGas { gamma: 4.0 / 3.0 };
+        let flat = SpatialMetric::<f64, 3>::flat();
+        let prim_l = MhdPrim {
+            hydro: Prim { rho: 1.2, vel: Tensor::new([0.1, -0.04, 0.02]), pre: 0.8 },
+            mag: Tensor::new([0.3, 0.5, -0.2]),
+        };
+        let prim_r = MhdPrim {
+            hydro: Prim { rho: 0.5, vel: Tensor::new([-0.05, 0.06, -0.03]), pre: 0.5 },
+            mag: Tensor::new([0.3, -0.4, 0.15]),
+        };
+        for d in 0..3usize {
+            let nhat = Tensor::<f64, 3>::unit(d);
+            let ortho = hlld_rmhd_gr_ortho(&eos, &prim_l, &prim_r, &nhat, 0.0, &flat);
+            let flat_flux = hlld_rmhd(&Rmhd, &eos, &prim_l, &prim_r, &nhat, 0.0, &flat);
+            assert_eq!(ortho.den, flat_flux.den, "d{d} den not bit-identical at flat");
+            assert_eq!(ortho.nrg, flat_flux.nrg, "d{d} nrg not bit-identical at flat");
+            for k in 0..3 {
+                assert_eq!(ortho.mom[k], flat_flux.mom[k], "d{d} mom{k} not bit-identical at flat");
+                assert_eq!(ortho.mag[k], flat_flux.mag[k], "d{d} mag{k} not bit-identical at flat");
+            }
+        }
+    }
+
+
+    #[test]
+    fn hlld_rmhd_gr_uniform_state_equals_flux() {
+        // the SMOOTH-LIMIT gate: for identical L=R states on a CURVED metric, the HLLD intercell
+        // flux MUST equal the metric-aware physical flux F(U) exactly (no wave dissipation for a
+        // trivial Riemann). the orthonormal-frame wrapper reduces the GR solve to the validated
+        // flat MUB09 solver and maps the flux back, so this holds to roundoff in every component
+        // and every direction (the coordinate-frame reconstruction did not — it carried residual
+        // covariant-variance sqrt(gamma) factors in the transverse star fields).
+        let eos = IdealGas { gamma: 5.0 / 3.0 };
+        let m = mild_curved_metric();
+        let gr = RmhdGr { metric: m, alpha: 0.9 };
+        let prim = MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.2, 0.05, -0.03]), pre: 1.0 },
+            mag: Tensor::new([0.5, 0.6, 0.3]),
+        };
+        for d in 0..2 {
+            let nhat = Tensor::<f64, 3>::unit(d);
+            let flux = hlld_rmhd_gr_ortho(&eos, &prim, &prim, &nhat, 0.0, &m);
+            let exact = gr.to_flux(&prim, &nhat, &eos);
+            assert!((flux.den - exact.den).abs() < 1e-12, "d{d} den: {} vs {}", flux.den, exact.den);
+            for k in 0..3 {
+                assert!((flux.mom[k] - exact.mom[k]).abs() < 1e-12, "d{d} mom{k}: {} vs {}", flux.mom[k], exact.mom[k]);
+                assert!((flux.mag[k] - exact.mag[k]).abs() < 1e-12, "d{d} mag{k}: {} vs {}", flux.mag[k], exact.mag[k]);
+            }
+            assert!((flux.nrg - exact.nrg).abs() < 1e-12, "d{d} nrg: {} vs {}", flux.nrg, exact.nrg);
+        }
     }
 
     #[test]
@@ -1240,7 +1392,8 @@ mod tests {
             mag: Tensor::new([0.3, -0.4, 0.15]),
         };
         let nhat = Tensor::<f64, 3>::unit(0);
-        let s = hlld_rmhd_states(&gr, &eos, &prim_l, &prim_r, &nhat, &m);
+        let _ = &gr;
+        let s = hlld_rmhd_states_gr_ortho(&eos, &prim_l, &prim_r, &nhat, &m);
         assert!(s.success > 0.5, "GR HLLD must converge");
         let tol = 1e-9;
         assert!(s.lam[0] <= s.alf[0] + tol, "lamL <= alfL");

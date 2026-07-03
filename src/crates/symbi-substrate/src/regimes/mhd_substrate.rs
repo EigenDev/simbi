@@ -603,9 +603,9 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         // classical ideal-gas lambda* kernel (NMHD only for now). the kernel manifest declares the
         // slots it reads (bface_a/b, wsr/wsl, + rho/pre/bcell for HLLC), bound below.
         let name = match ct_method {
-            // GR-UCT: the densitized master-form corner EMF. HLLD -> the metric-generalized
-            // MUB09 wave-sum EMF (schwarzschild only); everything else -> the HLL master form
-            // (reads the materialized shifted BF speeds).
+            // GR-UCT: the densitized master-form corner EMF. HLLD gas -> the ORTHONORMAL-frame
+            // MUB09 wave-sum EMF (the sharp Alfven-resolving one, telescopes to the coordinate B_t
+            // flux); everything else -> the regime-generic HLL corner EMF.
             CtMethod::Uct if !st.is_empty() && matches!(solver, Solver::Hlld) => {
                 format!("rmhd_edge_emf_uct_hlld{sp}{st}_{D}d_{}", edge.name_k)
             }

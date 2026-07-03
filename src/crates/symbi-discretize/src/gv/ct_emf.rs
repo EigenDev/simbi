@@ -1544,9 +1544,10 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 /// the CURVED-SPACETIME UCT-HLLD edge EMF (the wave-sum dissipative form, M&DZ Eq. 39) for the
 /// 2.5D (r, theta) poloidal plane — the sharp, Alfven-resolving GR-UCT EMF. mirrors the flat
 /// `rmhd_edge_emf_uct_hlld_gv` with three GR generalizations (design 44 GR-HLLD): (1) the per-face
-/// HLLD Riemann uses the metric-generalized MUB09 solver `hlld_rmhd_states(&RmhdGr, .., &face_metric)`
-/// — the star fields + speeds are metric-aware, and the wave-sum telescopes to the metric HLLD flux
-/// (proven, riemann/hlld.rs); (2) the advective velocity is the transport velocity vtilde = alpha v
+/// HLLD Riemann uses the ORTHONORMAL-frame MUB09 solver `hlld_rmhd_states_gr_ortho(.., &face_metric)`
+/// — the flat star fields + speeds map back to the coordinate frame (fields /sqrt(g_i), speeds
+/// /sqrt(g_n)) so the wave-sum telescopes EXACTLY to the coordinate HLLD B_t flux (proven,
+/// riemann/hlld.rs); (2) the advective velocity is the transport velocity vtilde = alpha v
 /// (schwarzschild: zero shift); (3) the whole coordinate EMF is densitized by sqrt(gamma)(corner)
 /// -> Etilde_phi (the same corner-densitization as the GR-UCT-HLL EMF; the corner-averaged Phi
 /// (Eq. 34) is a corner quantity). SCHWARZSCHILD ONLY — the kerr-schild/kerr shifted HLLD fan is a
@@ -1649,24 +1650,24 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
     // x-Riemann (r-direction) at the North + South r-faces: metrics at (r_f, th_c(0/-1)).
-    let (gr_xn, m_xn) = regime_at(r_f, th_c(0));
+    let (_gr_xn, m_xn) = regime_at(r_f, th_c(0));
     let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
     let xn_r = prim_face(&ne, g1, -1.0, 0, bx_n_face, 1, by_e);
-    let st_xn = hlld_rmhd_states(&gr_xn, &eos, &xn_l, &xn_r, &Tensor::<Gv, 3>::unit(0), &m_xn);
-    let (gr_xs, m_xs) = regime_at(r_f, th_c(-1));
+    let st_xn = hlld_rmhd_states_gr_ortho(&eos, &xn_l, &xn_r, &Tensor::<Gv, 3>::unit(0), &m_xn);
+    let (_gr_xs, m_xs) = regime_at(r_f, th_c(-1));
     let xs_l = prim_face(&sw, g1, 1.0, 0, bx_s_face, 1, by_w);
     let xs_r = prim_face(&se, g1, -1.0, 0, bx_s_face, 1, by_e);
-    let st_xs = hlld_rmhd_states(&gr_xs, &eos, &xs_l, &xs_r, &Tensor::<Gv, 3>::unit(0), &m_xs);
+    let st_xs = hlld_rmhd_states_gr_ortho(&eos, &xs_l, &xs_r, &Tensor::<Gv, 3>::unit(0), &m_xs);
     let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e), wave_sum(&st_xs, 1, by_w, by_e));
     // y-Riemann (theta-direction) at the West + East theta-faces: metrics at (r_c(-1/0), th_f).
-    let (gr_yw, m_yw) = regime_at(r_c(-1), th_f);
+    let (_gr_yw, m_yw) = regime_at(r_c(-1), th_f);
     let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
     let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
-    let st_yw = hlld_rmhd_states(&gr_yw, &eos, &yw_l, &yw_r, &Tensor::<Gv, 3>::unit(1), &m_yw);
-    let (gr_ye, m_ye) = regime_at(r_c(0), th_f);
+    let st_yw = hlld_rmhd_states_gr_ortho(&eos, &yw_l, &yw_r, &Tensor::<Gv, 3>::unit(1), &m_yw);
+    let (_gr_ye, m_ye) = regime_at(r_c(0), th_f);
     let ye_l = prim_face(&se, g2, 1.0, 1, by_e_face, 0, bx_s);
     let ye_r = prim_face(&ne, g2, -1.0, 1, by_e_face, 0, bx_n);
-    let st_ye = hlld_rmhd_states(&gr_ye, &eos, &ye_l, &ye_r, &Tensor::<Gv, 3>::unit(1), &m_ye);
+    let st_ye = hlld_rmhd_states_gr_ortho(&eos, &ye_l, &ye_r, &Tensor::<Gv, 3>::unit(1), &m_ye);
     let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n), wave_sum(&st_ye, 0, bx_s, bx_n));
     // advective transport velocities at the corner (vtilde = alpha v; schwarzschild beta = 0).
     let (_gr_c, m_c) = regime_at(r_f, th_f);

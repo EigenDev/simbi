@@ -222,16 +222,13 @@ where
             let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
             format!("{}_face_flux{gsfx}{}_{D}d_{dir}", Self::kernel_prefix(), self.solver.kernel_suffix())
         } else {
-            // the metric-aware valencia flux (RmhdGr). HLLE = the fast-magnetosonic-bound fan
-            // (any chart). HLLD = the metric-generalized MUB09 five-wave fan, baked SCHWARZSCHILD
-            // only (zero shift); the kerr-schild/kerr shifted HLLD fan is a design-44 increment.
-            assert!(
-                matches!(self.solver, Solver::Hlle)
-                    || (matches!(self.solver, Solver::Hlld) && st == "_schw"),
-                "the GR MHD flux supports HLLE (any chart) and HLLD (schwarzschild only)"
-            );
+            // the metric-aware valencia flux (RmhdGr). HLLE = the fast-magnetosonic-bound fan;
+            // HLLD = the ORTHONORMAL-frame MUB09 fan (the diagonal spatial metric maps to the local
+            // orthonormal frame, the validated flat solver runs there, and the flux maps back
+            // exactly — reduces to F(U) in the smooth limit and to the SR solver at identity gamma).
+            let solver = if matches!(self.solver, Solver::Hlld) { "_hlld" } else { "" };
             let sp = spacing_suffix(&sim.geom.maps);
-            format!("{}_face_flux{}{sp}{st}_{D}d_{dir}", Self::kernel_prefix(), self.solver.kernel_suffix())
+            format!("{}_face_flux{solver}{sp}{st}_{D}d_{dir}", Self::kernel_prefix())
         };
         let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         let scalars = scalars_for(&flux_name, |bind| match bind {

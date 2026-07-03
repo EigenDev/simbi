@@ -766,17 +766,19 @@ pub fn rmhd_flux_gr_gv(
     let regime = RmhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
     let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
     let has_shift = matches!(spacetime, Spacetime::KerrSchild);
-    // GR HLLD (the metric-generalized MUB09 fan): the Schwarzschild chart has ZERO shift, so the
-    // solver's intercell flux is the complete kernel flux (the godunov applies alpha). the
-    // kerr-schild/kerr charts carry a radial shift whose HLLD moving-interface (x/t = beta) fan
-    // is a documented increment — gate loud rather than silently drop it.
+    // GR HLLD (the ORTHONORMAL-frame MUB09 fan): the diagonal spatial metric maps to the local
+    // orthonormal frame where the validated flat solver runs, and the intercell flux maps back
+    // exactly. the Schwarzschild chart has ZERO shift, so the solver's intercell flux is the
+    // complete kernel flux (the godunov applies alpha). the kerr-schild/kerr charts carry a radial
+    // shift whose HLLD moving-interface (x/t = beta) fan is a documented increment — gate loud
+    // rather than silently drop it.
     if hlld {
         assert!(
             !has_shift,
             "GR HLLD requires a zero-shift chart (Schwarzschild); the kerr-schild/kerr shifted \
              HLLD fan is a design-44 increment"
         );
-        let flux = hlld_rmhd(&regime, &eos, &left, &right, &nhat, Gv::ZERO, &regime.metric);
+        let flux = hlld_rmhd_gr_ortho(&eos, &left, &right, &nhat, Gv::ZERO, &regime.metric);
         let mut writes = vec![("flux_den".to_string(), FieldRef::flux_den().into(), flux.den.node())];
         for k in 0..3 {
             writes.push((format!("flux_mom_{k}"), FieldRef::flux_mom(k as u8).into(), flux.mom[k].node()));

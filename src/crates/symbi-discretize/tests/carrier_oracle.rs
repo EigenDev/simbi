@@ -992,7 +992,7 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
         mag: Tensor::new([0.5, 0.3, -0.2]),
     };
     let eos = IdealGas { gamma: RMHD_GAMMA };
-    let f = hlld_rmhd(&Rmhd, &eos, &prim, &prim, &Tensor::unit(0), 0.0);
+    let f = hlld_rmhd(&Rmhd, &eos, &prim, &prim, &Tensor::unit(0), 0.0, &symbi_hydro::spatial_metric::SpatialMetric::flat());
     let out = KernelRun::new(rmhd_hlld_flux_gv(1, 0, 0))
         .grid([NSWEEP])
         .compute_window([FCELL as i32], [1])
