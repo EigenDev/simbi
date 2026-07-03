@@ -229,6 +229,76 @@ pub fn rmhd_ct_curl_2d_sph_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec
 }
 
 
+/// the 2.5D CURVED-SPACETIME (r-theta plane) CT curl from the single DENSITIZED corner EMF
+/// `Etilde_phi` (efield[0]), in-place on the PHYSICAL `b` (bface[dir]). the update evolves the
+/// densitized field Btilde^i = sqrt(gamma) B^i with the COORDINATE curl — the form whose
+/// discrete divergence d_i Btilde^i telescopes to zero for ANY per-face constant weights —
+/// then divides back by this face's own weight `w = sqrt(gamma)(face center) x coordinate
+/// length` so the stored value stays the physical B every consumer reads:
+///   dir=0 (B_r,  r-face):     B_r  -= dt (Etilde(th_hi) - Etilde(th_lo)) / (sqrtg(r_f, th_c) dth)
+///   dir=1 (B_th, theta-face): B_th += dt (Etilde(r_hi)  - Etilde(r_lo))  / (sqrtg(r_c, th_f) dr)
+/// the signs mirror the flat spherical kernel (the same edge orientation). sqrt(gamma) comes
+/// from the metric trait at the face center, so one builder serves every KS-family chart.
+/// div preservation for a nontrivial poloidal field is pinned by
+/// tests/rmhd_ct_curl_2d_sph_gr_divb.rs (the w-weighted divergence, machine-zero).
+pub fn rmhd_ct_curl_2d_sph_gr_gv(
+    dir: usize,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+    begin_trace();
+    let b = Gv::field("b", "b");
+    let ez = Gv::field("ez", "ez"); // the out-of-plane DENSITIZED corner EMF Etilde_phi
+    let dt = Gv::scalar("dt");
+    // positional scalar ABI mirror of the flat curl: pin [x_lo_0, dx_0, x_lo_1, dx_1] up front.
+    for ax in 0..2 {
+        let _ = gv_axis_face_at(ax, spacing[ax], 0);
+        let _ = gv_axis_face_at(ax, spacing[ax], 1);
+    }
+    let half = Gv::from_f64(0.5);
+    let mass = Gv::scalar("schwarzschild_mass");
+    let sqrtg = |r: Gv, th: Gv| -> Gv {
+        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
+        match spacetime {
+            Spacetime::Schwarzschild => {
+                <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&Schwarzschild { mass }, x)
+            }
+            Spacetime::KerrSchild => {
+                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&SchwarzschildKS { mass }, x)
+            }
+            Spacetime::Kerr => <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(
+                &KerrKS { mass, spin: Gv::scalar("kerr_spin") },
+                x,
+            ),
+            Spacetime::Minkowski => {
+                unreachable!("the GR curl is baked only for a curved spacetime")
+            }
+        }
+    };
+    let b_new = if dir == 0 {
+        // B_r lives on the low r-face; th_lo/th_hi are the bounding corner thetas.
+        let r_f = gv_axis_face_at(0, spacing[0], 0);
+        let th_lo = gv_axis_face_at(1, spacing[1], 0);
+        let th_hi = gv_axis_face_at(1, spacing[1], 1);
+        let th_c = (th_lo + th_hi) * half;
+        let w = sqrtg(r_f, th_c) * (th_hi - th_lo);
+        let ez_thp = gv_field_at("ez", "ez", 2, &[0, 1]);
+        b - dt * (ez_thp - ez) / w
+    } else {
+        // B_theta lives on the low theta-face; r_lo/r_hi are the bounding corner radii.
+        let r_lo = gv_axis_face_at(0, spacing[0], 0);
+        let r_hi = gv_axis_face_at(0, spacing[0], 1);
+        let th_f = gv_axis_face_at(1, spacing[1], 0);
+        let r_c = (r_lo + r_hi) * half;
+        let w = sqrtg(r_c, th_f) * (r_hi - r_lo);
+        let ez_rp = gv_field_at("ez", "ez", 2, &[1, 0]);
+        b + dt * (ez_rp - ez) / w
+    };
+    (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
+}
+
+
 /// the 3D CT curl B-update along face axis `dir` (in-place on `b`), mirror of
 /// `rmhd::rmhd_ct_curl_3d_dir`: `B_dir += dt*curl`, `curl = dE_p1/dx_p2 - dE_p2/dx_p1`
 /// (cartesian, uniform `id_p1`/`id_p2`) or the orthogonal h-weighted curl (curvilinear, via
