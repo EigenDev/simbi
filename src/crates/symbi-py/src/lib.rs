@@ -34,7 +34,7 @@ use symbi_display::{
 };
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
-use symbi_geometry::{KerrKS, SchwarzschildKS, SchwarzschildKSCartesian};
+use symbi_geometry::{KerrKS, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -2409,6 +2409,23 @@ macro_rules! hydro_dispatch {
                 Cylindrical,
                 Cylindrical
             ),
+            // GR (kerr-schild) CYLINDRICAL 2.5D axisymmetric-swirl (design 45 phase 2): the (R, z)
+            // grid + the azimuthal v_phi DOF (the natural jet / disk chart). cyl_plane = Rz gives
+            // axes [0, 2]; DOF = 3 lifts v_phi. requires the 5-tuple (rho, v_R, v_phi, v_z, pre).
+            (2, "cylindrical") if $cfg.spacetime == "kerr_schild" => {
+                if !$prims.first().map_or(false, |row| row.len() == 5) {
+                    return Err(
+                        "the cylindrical kerr-schild 2.5D (axisymmetric) chart requires the \
+                         azimuthal momentum DOF: yield 5-tuple gas rows (rho, v_R, v_phi, v_z, pre)"
+                            .to_string(),
+                    );
+                }
+                build_and_run_hydro!(
+                    $cfg, $prims, $regime, $regime_ty, 2, 3,
+                    SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
+                    SchwarzschildKSCylindrical<f64>
+                )
+            }
             (2, "cylindrical") => build_and_run_hydro!(
                 $cfg,
                 $prims,
@@ -2418,6 +2435,12 @@ macro_rules! hydro_dispatch {
                 2,
                 Cylindrical,
                 Cylindrical
+            ),
+            // GR (kerr-schild) CYLINDRICAL full 3D (R, phi, z): DOF == NDIM = 3.
+            (3, "cylindrical") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 3, 3,
+                SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
+                SchwarzschildKSCylindrical<f64>
             ),
             (3, "cylindrical") => build_and_run_hydro!(
                 $cfg,

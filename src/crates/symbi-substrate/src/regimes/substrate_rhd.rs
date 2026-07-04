@@ -161,10 +161,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // spherical GR default); flat + spherical GR stay untagged here.
         let geom_sfx = if DOF != D {
             geom_suffix(sim.geom.coords, DOF, D)
-        } else if sim.geom.coords == symbi_geometry::Geometry::Cartesian
-            && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
-        {
-            "_cart"
+        } else if sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
+            match sim.geom.coords {
+                symbi_geometry::Geometry::Cartesian => "_cart",
+                symbi_geometry::Geometry::Cylindrical => "_cyl",
+                symbi_geometry::Geometry::Spherical => "",
+            }
         } else {
             ""
         };

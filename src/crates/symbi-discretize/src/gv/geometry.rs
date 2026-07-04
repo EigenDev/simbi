@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_algebra::Tensor;
 
 
@@ -87,6 +87,15 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
             Some(SchwarzschildKSCartesian { mass: Gv::scalar("schwarzschild_mass") }.lapse(x))
+        }
+        // cylindrical kerr-schild: alpha = 1/sqrt(1 + 2M/r), r = sqrt(R^2 + z^2) the SPHERICAL radius
+        // at the FULL (R, phi, z) position — the metric reads slots 0 and 2, not the cylindrical R
+        // alone. same radial-shortcut trap the cartesian arm avoids.
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
+            }));
+            Some(SchwarzschildKSCylindrical { mass: Gv::scalar("schwarzschild_mass") }.lapse(x))
         }
         // spherical charts: r = the radial centroid (coordinate slot 0). the schwarzschild /
         // kerr-schild lapses are radial-only; the spinning-kerr lapse also reads the polar centroid
@@ -327,7 +336,6 @@ pub fn cell_geometry_covariant_gv(
     // the det-g-flat family (schwarzschild, kerr-schild) whose measure is `r^2 sin(theta)`.
     kerr_spin: Option<Gv>,
 ) -> CellGeometryGv {
-    let _ = axes;
     let (lo, hi, width) = gv_faces(spacing, ndim);
     match coords {
         // det-g-flat cartesian: alpha sqrt(gamma) = 1 = the flat cartesian coordinate volume, and
@@ -337,9 +345,11 @@ pub fn cell_geometry_covariant_gv(
         // the angular (theta) face carries the covariant int r^2 dr measure, not the flat arc-length
         // int r dr — the sole flat-vs-covariant difference (see the type doc).
         Coords::Spherical => spherical_geometry_gv(&lo, &hi, &width, ndim, Some(kerr_spin)),
-        Coords::Cylindrical => {
-            unreachable!("covariant cell geometry: cylindrical GR lands in design 45 phase 2")
-        }
+        // cylindrical: the flat cylindrical geometry ALREADY uses the coordinate R-measure (volume
+        // int R dR, face areas with sqrt(gamma_phi-phi) = R), so physical == coordinate == covariant
+        // (h_phi = R appears identically in the volume and every face — no arc-length shortcut like
+        // spherical). alpha sqrt(gamma) = R is the det-g-flat identity; a = 0 so no kerr moment.
+        Coords::Cylindrical => cylindrical_geometry_gv(&lo, &hi, &width, axes, ndim),
     }
 }
 

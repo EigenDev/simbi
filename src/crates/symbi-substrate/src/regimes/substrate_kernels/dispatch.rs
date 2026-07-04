@@ -401,10 +401,14 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // bake's gr_chart_dof_tag. flat cartesian + spherical GR stay unsuffixed.
     let geom_sfx = if DOF != D {
         geom_suffix(sim.geom.coords, DOF, D)
-    } else if sim.geom.coords == symbi_geometry::Geometry::Cartesian
-        && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
-    {
-        "_cart"
+    } else if sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
+        // GR chart tag (mirror the bake's gr_chart_dof_tag): cartesian / cylindrical carry an
+        // explicit tag; spherical stays untagged (the validated spherical GR kernel names).
+        match sim.geom.coords {
+            symbi_geometry::Geometry::Cartesian => "_cart",
+            symbi_geometry::Geometry::Cylindrical => "_cyl",
+            symbi_geometry::Geometry::Spherical => "",
+        }
     } else {
         ""
     };

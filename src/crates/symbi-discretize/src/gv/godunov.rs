@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
+use symbi_geometry::{KerrKS, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_algebra::Tensor;
 use symbi_ir::dual::Dual;
@@ -429,6 +429,9 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::KerrSchild if coords == Coords::Cartesian => {
                         grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pp, b)
                     }
+                    Spacetime::KerrSchild if coords == Coords::Cylindrical => {
+                        grmhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, rho_h, v, pp, b)
+                    }
                     Spacetime::KerrSchild => {
                         grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
                     }
@@ -449,6 +452,9 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::Schwarzschild => grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp),
                     Spacetime::KerrSchild if coords == Coords::Cartesian => {
                         grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pp)
+                    }
+                    Spacetime::KerrSchild if coords == Coords::Cylindrical => {
+                        grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pp)
                     }
                     Spacetime::KerrSchild => grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp),
                     Spacetime::Kerr => {

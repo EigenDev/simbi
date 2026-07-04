@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
@@ -269,20 +269,33 @@ pub fn gr_light_cone_wave_speed_map_gv(
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let (alpha, gi, beta) = match spacetime {
-        Spacetime::Schwarzschild => {
+    // the light-cone speed alpha sqrt(gamma^{dd}) + |beta^d| at the FULL position, dispatched by
+    // (spacetime, chart): the kerr-schild spacetime is expressed in spherical, CARTESIAN, or
+    // CYLINDRICAL coordinates — the metric computes r = |x| (cartesian) / sqrt(R^2 + z^2)
+    // (cylindrical) internally, so the wrong-chart spherical metric (which would read x[0] as the
+    // radius) is never used.
+    let (alpha, gi, beta) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
             let g = Schwarzschild { mass };
             (g.lapse(x), g.spatial_metric_inv(x), <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&g, x))
         }
-        Spacetime::KerrSchild => {
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let g = SchwarzschildKSCartesian { mass };
+            (g.lapse(x), g.spatial_metric_inv(x), <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&g, x))
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let g = SchwarzschildKSCylindrical { mass };
+            (g.lapse(x), g.spatial_metric_inv(x), <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&g, x))
+        }
+        (Spacetime::KerrSchild, _) => {
             let g = SchwarzschildKS { mass };
             (g.lapse(x), g.spatial_metric_inv(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&g, x))
         }
-        Spacetime::Kerr => {
+        (Spacetime::Kerr, _) => {
             let g = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (g.lapse(x), g.spatial_metric_inv(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&g, x))
         }
-        Spacetime::Minkowski => unreachable!("the light-cone map is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => unreachable!("the light-cone map is baked only for a curved spacetime"),
     };
     // per gridded axis: coordinate light-cone speed times the coordinate inverse width — the
     // flat physical inv width times the flat scale factor h_d at the cell center.

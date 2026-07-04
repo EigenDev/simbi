@@ -8,7 +8,7 @@ use super::*;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::RmhdGr;
 use symbi_hydro::spatial_metric::SpatialMetric;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
@@ -325,6 +325,7 @@ where
     Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
+    SchwarzschildKSCylindrical<Gv>: Metric<Gv, D>,
     KerrKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
@@ -360,6 +361,10 @@ where
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let m = SchwarzschildKSCylindrical { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         (Spacetime::KerrSchild, _) => {
@@ -446,6 +451,9 @@ where
     let coord_n = axes[dir as usize];
     let shifted = match (spacetime, coords) {
         (Spacetime::KerrSchild, Coords::Cartesian) => true,
+        // cylindrical: beta^R (coord 0) and beta^z (coord 2) are nonzero, beta^phi (coord 1) = 0
+        // (a = 0, no frame dragging), so every sweep EXCEPT the azimuthal carries the shift.
+        (Spacetime::KerrSchild, Coords::Cylindrical) => coord_n != 1,
         (Spacetime::KerrSchild, _) | (Spacetime::Kerr, _) => coord_n == 0,
         _ => false,
     };

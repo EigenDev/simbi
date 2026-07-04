@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_hydro::spatial_metric::SpatialMetric;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
@@ -137,6 +137,7 @@ where
     Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
+    SchwarzschildKSCylindrical<Gv>: Metric<Gv, D>,
     KerrKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
@@ -167,6 +168,10 @@ where
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let m = SchwarzschildKSCylindrical { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
         (Spacetime::KerrSchild, _) => {
@@ -272,6 +277,10 @@ pub fn rmhd_c2p_gr_gv(
         }
         (Spacetime::KerrSchild, Coords::Cartesian) => {
             let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let m = SchwarzschildKSCylindrical { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
         (Spacetime::KerrSchild, _) => {

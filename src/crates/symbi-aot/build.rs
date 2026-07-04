@@ -792,9 +792,15 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 /// keep their names + dispatch); every other case is untagged. the runtime dispatch mirrors this.
 fn gr_chart_dof_tag(geom: &Geom) -> &'static str {
     if geom.ncomp as usize > geom.axes.len() {
-        geom.suffix()
-    } else if geom.coords == Coords::Cartesian && geom.spacetime != Spacetime::Minkowski {
-        "_cart"
+        geom.suffix() // swirl (ncomp > naxes): _sph_swirl / _cyl_rz
+    } else if geom.spacetime != Spacetime::Minkowski {
+        // GR non-swirl chart tag: cartesian / cylindrical carry an explicit tag; spherical stays the
+        // implicit default (untagged) so the validated spherical GR kernels keep their names.
+        match geom.coords {
+            Coords::Cartesian => "_cart",
+            Coords::Cylindrical => "_cyl",
+            Coords::Spherical => "",
+        }
     } else {
         ""
     }
@@ -1346,10 +1352,10 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // lapse + non-diagonal gamma^{rr} break the radial-only backgrounds' factored BF form).
     let (k, writes) = if geom.spacetime == Spacetime::Kerr {
         symbi_discretize::gv::kerr_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize)
-    } else if geom.coords == Coords::Cartesian && geom.spacetime != Spacetime::Minkowski {
-        // cartesian GR: the non-diagonal gamma + shift on every axis break the radial-only factored
-        // Banyuls-Font form; the state-independent coordinate light-cone map is the generic CFL bound
-        // (the light speed brackets every fluid characteristic).
+    } else if geom.coords != Coords::Spherical && geom.spacetime != Spacetime::Minkowski {
+        // non-spherical GR (cartesian, cylindrical): the non-diagonal gamma + multi-axis shift break
+        // the radial-only factored Banyuls-Font form; the state-independent coordinate light-cone map
+        // is the generic CFL bound (the light speed brackets every fluid characteristic).
         symbi_discretize::gv::gr_light_cone_wave_speed_map_gv(geom.spacetime, geom.coords, &geom.spacing, &geom.axes, ndim as usize)
     } else {
         rhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize)
@@ -1584,6 +1590,25 @@ fn main() {
             gen_rhd_face_flux_gr(&out_dir, 2, dir, ks.clone());
         }
     }
+    // GR CYLINDRICAL kerr-schild (design 45 phase 2): the natural chart for AXISYMMETRIC relativistic
+    // jets / disks around a hole. r = sqrt(R^2 + z^2) (the spherical radius) drives the KS block +
+    // lapse; the cylindrical R drives the measure (alpha sqrt(gamma) = R). the kerr-schild structure
+    // is the NON-diagonal POLOIDAL (R, z) block; phi decouples (gamma_phi-phi = R^2, beta^phi = 0), so
+    // the shift rides the R and z sweeps but not the azimuth. the state-independent light-cone CFL; a =
+    // 0 -> the generic ghost (no frame dragging). 2.5D axisymmetric-swirl (R, z gridded + the v_phi
+    // out-of-plane DOF, `_cyl_rz`) + full 3D (R, phi, z, `_cyl`).
+    for (geom, ndim) in [(Geom::cyl_rz().kerr_schild(), 2u8), (Geom::cyl_3d().kerr_schild(), 3u8)] {
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, geom.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, ndim, geom.clone());
+        gen_rhd_c2p_gr(&out_dir, ndim, 20, geom.clone());
+        for dir in 0..ndim {
+            gen_rhd_face_flux_gr(&out_dir, ndim, dir, geom.clone());
+        }
+    }
+    // the cyl_rz SWIRL snapshot (DOF = 3 cons -> u_n copy; geometry- and spacetime-independent) —
+    // the flat cylindrical hydro is DOF = 2, so this swirl instance is otherwise unbaked. cyl_3d
+    // (DOF == NDIM) reuses the unsuffixed rhd_snapshot_3d.
+    gen_snapshot(&out_dir, 2, "rhd", true, Geom::cyl_rz());
     // GR spherical SWIRL (the azimuthal momentum DOF on the 2D (r, theta) grid, ncomp = 3 >
     // ndim = 2, `_sph_swirl`): rotating flows on a curved background (tori, spinning-hole
     // accretion). the covariant angular momentum S_phi is a conserved law with a zero
