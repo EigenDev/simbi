@@ -20,7 +20,7 @@ needs_backend = pytest.mark.skipif(
 
 
 def _run(data_dir, **overrides):
-    from simbi_configs.examples.sod import SodProblem
+    from simbi_configs.examples.newtonian.sod import SodProblem
 
     p = SodProblem(
         end_time=0.05, checkpoint_interval=1.0, data_directory=data_dir, **overrides
@@ -42,7 +42,7 @@ def test_per_axis_resolution_tag_2d() -> None:
     # the name tag is the per-axis resolution joined by 'x', not the zone count.
     import tempfile
 
-    from simbi_configs.examples.kh import KelvinHelmholtz
+    from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"

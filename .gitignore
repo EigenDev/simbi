@@ -4,8 +4,9 @@ builddir/
 simbi/src/libs/
 src/libs/
 *.egg-info/
-/data
+data/
 manuscripts/
+docs/
 science
 movies/
 deprecated/

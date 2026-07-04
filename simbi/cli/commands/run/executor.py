@@ -6,8 +6,8 @@
 # =============================================================================
 from __future__ import annotations
 
-import ast
 import importlib
+import inspect
 import os
 import sys
 from argparse import Namespace
@@ -17,57 +17,44 @@ from typing import Optional, Sequence
 from simbi.simulation import SimbiProblem, run
 
 
-def _get_problem_classes(script: str) -> list[str]:
+def _discover_problem_classes(script: str) -> list[tuple[str, type[SimbiProblem]]]:
     """
-    extract all classes that inherit from SimbiProblem.
-    uses ast parsing to avoid importing the module twice.
+    import the config module and return its SimbiProblem subclasses in source order.
+
+    discovery imports the module (the same import the run itself performs) and tests
+    the real subclass relationship, so a config may inherit from another config in an
+    imported module — a config subclassing an imported base is resolved correctly,
+    which a base-NAME scan of the file cannot do. only classes DEFINED in the script
+    are returned: an imported base config is a SimbiProblem subclass too, but its
+    __module__ names its own module, so it is excluded.
     """
-    with open(script) as f:
-        root = ast.parse(f.read())
-
-    # build inheritance graph
-    graph: dict[str, set[str]] = {}
-    for node in root.body:
-        if isinstance(node, ast.ClassDef):
-            bases = [b.id for b in node.bases if isinstance(b, ast.Name)]
-            graph[node.name] = set(bases)
-
-    # find all classes deriving from SimbiProblem (directly or indirectly)
-    def is_problem_class(name: str, visited: set[str] | None = None) -> bool:
-        if visited is None:
-            visited = set()
-        if name in visited:
-            return False
-        visited.add(name)
-
-        if name == "SimbiProblem":
-            return True
-
-        bases = graph.get(name, set())
-        return any(is_problem_class(b, visited) for b in bases)
-
-    return [
-        name
-        for name in graph
-        if is_problem_class(name) and name != "SimbiProblem"
-    ]
-
-
-def _load_problem_class(script: str, class_name: str) -> type[SimbiProblem]:
-    """dynamically import and return a problem class."""
     script_path = Path(script).resolve()
     module_name = script_path.stem
 
-    # add script directory to path
     sys.path.insert(0, str(script_path.parent))
-
     try:
         module = importlib.import_module(module_name)
-        return getattr(module, class_name)
     finally:
-        # clean up sys.path
         if str(script_path.parent) in sys.path:
             sys.path.remove(str(script_path.parent))
+
+    def source_line(cls: type) -> int:
+        # a class without recoverable source (dynamically built) sorts first.
+        try:
+            return inspect.getsourcelines(cls)[1]
+        except (OSError, TypeError):
+            return 0
+
+    found = [
+        (name, obj)
+        for name, obj in vars(module).items()
+        if inspect.isclass(obj)
+        and issubclass(obj, SimbiProblem)
+        and obj is not SimbiProblem
+        and obj.__module__ == module.__name__
+    ]
+    found.sort(key=lambda pair: source_line(pair[1]))
+    return found
 
 
 def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
@@ -98,7 +85,7 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
             sys.exit(2)
         return
 
-    problem_classes = _get_problem_classes(script)
+    problem_classes = _discover_problem_classes(script)
 
     if not problem_classes:
         raise ValueError(
@@ -106,10 +93,7 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
             "ensure your config defines a class that inherits from SimbiProblem."
         )
 
-    for class_name in problem_classes:
-        # load the class
-        problem_class = _load_problem_class(script, class_name)
-
+    for class_name, problem_class in problem_classes:
         # setup cli params from the problem class
         if active_parser is not None:
             problem_class.setup_cli(active_parser)

@@ -45,7 +45,7 @@ def _poisoned_prescription() -> dict:
 
 @needs_backend
 def test_poisoned_state_halts_under_a_state_independent_cfl_map() -> None:
-    from simbi_configs.examples.gr_rotating_equilibrium import GrRotatingEquilibrium
+    from simbi_configs.examples.grhd.gr_rotating_equilibrium import GrRotatingEquilibrium
 
     class Poisoned(GrRotatingEquilibrium):
         """the kerr rotating equilibrium with a NaN-producing inner ghost band."""

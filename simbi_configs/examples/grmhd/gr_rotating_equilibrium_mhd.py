@@ -23,7 +23,7 @@ from simbi import ProblemParam
 from simbi.types import Regime, Solver, CtMethod
 from simbi.types.typing import InitialStateType, StaggeredBFieldGenerator
 
-from simbi_configs.examples.gr_rotating_equilibrium import GrRotatingEquilibrium
+from simbi_configs.examples.grhd.gr_rotating_equilibrium import GrRotatingEquilibrium
 
 
 class GrRotatingEquilibriumMhd(GrRotatingEquilibrium):

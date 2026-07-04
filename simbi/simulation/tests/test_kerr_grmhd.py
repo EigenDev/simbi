@@ -68,7 +68,7 @@ def _kerr_wdiv(p, B1, B2):
     ],
 )
 def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
-    from simbi_configs.examples.gr_kerr_field_loop import GrKerrFieldLoop
+    from simbi_configs.examples.grmhd.gr_kerr_field_loop import GrKerrFieldLoop
 
     d = tempfile.mkdtemp() + "/"
     p = GrKerrFieldLoop.from_cli(["--nr", "128", "--npolar", "64", "--kerr-spin", "0.9"])
@@ -96,7 +96,7 @@ def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
 
 
 def _roteq_hold_l1(nr, npolar):
-    from simbi_configs.examples.gr_rotating_equilibrium_mhd import GrRotatingEquilibriumMhd
+    from simbi_configs.examples.grmhd.gr_rotating_equilibrium_mhd import GrRotatingEquilibriumMhd
 
     d = tempfile.mkdtemp() + "/"
     p = GrRotatingEquilibriumMhd.from_cli(
@@ -153,7 +153,7 @@ def test_magnetized_fm_torus_seeds_divergence_free_and_stable() -> None:
     # the MRI initial condition (design 44 phase C step 4): the fat FM torus threaded with a weak
     # beta-normalized poloidal seed field on the spinning-kerr RMHD path (tetrad HLLD + UCT-HLLD).
     # the seed must be div-free to machine zero, the torus core resolved, and the state stable.
-    from simbi_configs.examples.gr_fishbone_moncrief_mhd import GrFishboneMoncriefMhd
+    from simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd import GrFishboneMoncriefMhd
 
     d = tempfile.mkdtemp() + "/"
     p = GrFishboneMoncriefMhd.from_cli(

@@ -48,7 +48,7 @@ _NPOLAR = 16
 
 
 def _kerr_problem(data_dir: str, spacetime: str, spin: float):
-    from simbi_configs.examples.gr_bondi_2d import GrBondi2D
+    from simbi_configs.examples.grhd.gr_bondi_2d import GrBondi2D
     from simbi.types import Spacetime
 
     class GrKerrBondi2D(GrBondi2D):
@@ -248,7 +248,7 @@ def test_spinning_fm_disk_holds_through_half_an_orbit() -> None:
     # kerr grid (the science configuration): completes half an orbital period at its
     # pressure maximum with no floors, the disk core keeps its density and its
     # rotation sense, and the corona-fed through-horizon inflow stays positive.
-    from simbi_configs.examples.gr_fishbone_moncrief import GrFishboneMoncrief
+    from simbi_configs.examples.grmhd.gr_fishbone_moncrief import GrFishboneMoncrief
 
     with tempfile.TemporaryDirectory() as d:
         d = d + "/"

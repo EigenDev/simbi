@@ -50,7 +50,7 @@ _SILENT_ROWS_TOL = 1e-12
 
 
 def _run(n: int, b_ref: float, t_end: float):
-    from simbi_configs.examples.gr_michel_magnetized import GrMichelMagnetized
+    from simbi_configs.examples.grmhd.gr_michel_magnetized import GrMichelMagnetized
 
     d = tempfile.mkdtemp() + "/"
     p = GrMichelMagnetized.from_cli(

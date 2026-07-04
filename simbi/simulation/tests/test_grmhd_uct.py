@@ -40,7 +40,7 @@ needs_backend = pytest.mark.skipif(
 
 
 def _run_michel(ct: CtMethod):
-    from simbi_configs.examples.gr_michel_magnetized_2d import GrMichelMagnetized2D
+    from simbi_configs.examples.grmhd.gr_michel_magnetized_2d import GrMichelMagnetized2D
 
     d = tempfile.mkdtemp() + "/"
     p = GrMichelMagnetized2D.from_cli(
@@ -109,7 +109,7 @@ def _w_div_max(p, B1, B2) -> tuple[float, float]:
 def test_field_loop_preserves_divergence_and_is_stable(ct) -> None:
     # the nontrivial 2D poloidal loop: the full curved-CT machinery (contact and
     # UCT) must hold the w-weighted div(B) at machine zero and run stably.
-    from simbi_configs.examples.gr_field_loop import GrFieldLoop
+    from simbi_configs.examples.grmhd.gr_field_loop import GrFieldLoop
 
     d = tempfile.mkdtemp() + "/"
     p = GrFieldLoop.from_cli(["--nr", "128", "--npolar", "64", "--inflow", "0.3"])

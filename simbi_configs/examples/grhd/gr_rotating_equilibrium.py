@@ -33,7 +33,7 @@ from simbi.types import (
     Spacetime,
 )
 from simbi.types.typing import GasStateGenerator, InitialStateType
-from simbi_configs.examples.gr_fishbone_moncrief import RotatingEquilibrium
+from simbi_configs.examples.grmhd.gr_fishbone_moncrief import RotatingEquilibrium
 
 
 class GrRotatingEquilibrium(SimbiProblem):

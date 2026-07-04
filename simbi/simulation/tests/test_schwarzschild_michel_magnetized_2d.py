@@ -51,7 +51,7 @@ _SILENT_TOL = 1e-10
 
 
 def _run(nr: int, npolar: int, t_end: float):
-    from simbi_configs.examples.gr_michel_magnetized_2d import GrMichelMagnetized2D
+    from simbi_configs.examples.grmhd.gr_michel_magnetized_2d import GrMichelMagnetized2D
 
     d = tempfile.mkdtemp() + "/"
     p = GrMichelMagnetized2D.from_cli(

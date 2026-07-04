@@ -30,7 +30,7 @@ from simbi.types.typing import (
     StaggeredBFieldGenerator,
 )
 
-from simbi_configs.examples.gr_fishbone_moncrief import GrFishboneMoncrief
+from simbi_configs.examples.grmhd.gr_fishbone_moncrief import GrFishboneMoncrief
 
 
 class GrFishboneMoncriefMhd(GrFishboneMoncrief):
@@ -69,13 +69,6 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
             return 1.0 + 2.0 * mm * r / sigma, sigma
         return 1.0 / (1.0 - 2.0 * mm / r), r * r
 
-    def _aphi(self, r: float, th: float) -> float:
-        # A_phi from the torus density; zero outside the torus (rho below the cut / atmosphere).
-        state = self.torus().primitive(r, th)
-        if state is None:
-            return 0.0
-        return max(state[0] / self.rho_torus_max - self.rho_cut, 0.0)
-
     def initial_primitive_state(self) -> InitialStateType:
         gas_state = super().initial_primitive_state()
         torus = self.torus()
@@ -89,29 +82,40 @@ class GrFishboneMoncriefMhd(GrFishboneMoncrief):
         r_c = [0.5 * (rf[i] + rf[i + 1]) for i in range(nr)]
         th_c = [0.5 * (tf[j] + tf[j + 1]) for j in range(npolar)]
 
+        # A_phi = max(rho/rho_max - rho_cut, 0) sampled at every FACE CORNER, ONCE against a
+        # single torus. torus construction runs a 4096-point scan + a 200-step bisection for
+        # r_max, so re-deriving the potential per gather point (curl stencils x beta scan x the
+        # three staggered generators = O(nr*npolar) evaluations) dominates the ic cost. the curl,
+        # beta normalization, and generators all index this grid instead.
+        def aphi_corner(r: float, th: float) -> float:
+            state = torus.primitive(r, th)
+            if state is None:
+                return 0.0
+            return max(state[0] / self.rho_torus_max - self.rho_cut, 0.0)
+
+        aphi = [[aphi_corner(rf[i], tf[j]) for j in range(npolar + 1)] for i in range(nr + 1)]
+        # cell-centered torus primitive, sampled once for the beta scan (rho + pressure).
+        cell = [[torus.primitive(r_c[i], th_c[j]) for j in range(npolar)] for i in range(nr)]
+
         # unit-amplitude poloidal field from the metric-weighted curl of A_phi (arithmetic face
         # centers, matching the CT curl weights so the w-weighted div(B) is machine zero).
         def br_unit(i: int, j: int) -> float:
             w = self._sqrtg(rf[i], th_c[j]) * dth
-            return (self._aphi(rf[i], tf[j + 1]) - self._aphi(rf[i], tf[j])) / w
+            return (aphi[i][j + 1] - aphi[i][j]) / w
 
         def bth_unit(i: int, j: int) -> float:
             w = self._sqrtg(r_c[i], tf[j]) * (rf[i + 1] - rf[i])
-            return -(self._aphi(rf[i + 1], tf[j]) - self._aphi(rf[i], tf[j])) / w
+            return -(aphi[i + 1][j] - aphi[i][j]) / w
 
         # beta normalization: the minimum plasma beta over the DENSE CORE (rho > 0.5 of the actual
         # grid-peak density). the cut excludes the low-pressure torus surface, where beta is small
         # for any field and would otherwise pin the amplitude to a truncation-noise edge cell (the
         # standard FM-MRI recipe). the threshold adapts to the resolved peak, not the nominal rho_max.
-        rho_peak = max(
-            (torus.primitive(r_c[ii], th_c[jj]) or (0.0,))[0]
-            for jj in range(npolar)
-            for ii in range(nr)
-        )
+        rho_peak = max((cell[ii][jj] or (0.0,))[0] for jj in range(npolar) for ii in range(nr))
         beta_min = math.inf
         for jj in range(npolar):
             for ii in range(nr):
-                state = torus.primitive(r_c[ii], th_c[jj])
+                state = cell[ii][jj]
                 if state is None or state[0] < 0.5 * rho_peak:
                     continue
                 bcell_r = 0.5 * (br_unit(ii, jj) + br_unit(ii + 1, jj))

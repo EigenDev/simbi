@@ -40,7 +40,7 @@ _P_AMBIENT = 1.0e-2
 
 
 def _bondi_problem(data_dir: str):
-    from simbi_configs.examples.gr_bondi import GrBondi
+    from simbi_configs.examples.grhd.gr_bondi import GrBondi
 
     p = GrBondi.from_cli(["--resolution", str(_RESOLUTION)])
     p.end_time = _END_TIME

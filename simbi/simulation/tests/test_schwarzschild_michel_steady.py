@@ -57,7 +57,7 @@ _MAX_TOL_128 = 6.0e-2
 
 
 def _michel_problem(res: int, data_dir: str):
-    from simbi_configs.examples.gr_michel import GrMichel
+    from simbi_configs.examples.grhd.gr_michel import GrMichel
 
     p = GrMichel.from_cli(["--resolution", str(res)])
     p.end_time = _END_TIME
@@ -77,7 +77,7 @@ def _read_interior(chkpt_path: str, res: int):
 
 
 def test_michel_oracle_satisfies_the_flow_invariants() -> None:
-    from simbi_configs.examples.gr_michel import MichelSolution
+    from simbi_configs.examples.grhd.gr_michel import MichelSolution
 
     sol = MichelSolution(mass=1.0, gamma=4.0 / 3.0, rho_inf=1.0, p_inf=1.0e-2)
 

@@ -40,7 +40,7 @@ from simbi.types.typing import (
     InitialStateType,
     StaggeredBFieldGenerator,
 )
-from simbi_configs.examples.gr_michel import MichelSolution
+from simbi_configs.examples.grhd.gr_michel import MichelSolution
 
 
 class GrMichelMagnetized(SimbiProblem):

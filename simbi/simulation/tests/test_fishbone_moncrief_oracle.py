@@ -20,7 +20,7 @@ import math
 import numpy as np
 import pytest
 
-from simbi_configs.examples.gr_fishbone_moncrief import FishboneMoncrief
+from simbi_configs.examples.grmhd.gr_fishbone_moncrief import FishboneMoncrief
 
 # extreme kerr: the paper's disks sit AT a = M; the oracle guards |a| < M, so the
 # vectors evaluate in the limit (the printed 3-4 digit values are insensitive).

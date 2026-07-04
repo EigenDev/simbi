@@ -24,7 +24,7 @@ needs_backend = pytest.mark.skipif(
 
 
 def _order_problem(order: int, data_dir: str):
-    from simbi_configs.examples.kh import KelvinHelmholtz
+    from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 
     p = KelvinHelmholtz.from_cli(
         ["--resolution", "32,32", "--solver", "hlle", "--order", str(order)]

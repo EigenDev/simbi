@@ -63,7 +63,7 @@ _SPINS = [0.0, 0.9]
 
 
 def _run(nr: int, npolar: int, t_end: float, spin: float):
-    from simbi_configs.examples.gr_rotating_equilibrium import GrRotatingEquilibrium
+    from simbi_configs.examples.grhd.gr_rotating_equilibrium import GrRotatingEquilibrium
 
     d = tempfile.mkdtemp() + "/"
     p = GrRotatingEquilibrium.from_cli(

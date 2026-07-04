@@ -5,7 +5,9 @@
 # includes actions for compute mode selection, gpu block dimensions,
 # version printing, and config discovery.
 # =============================================================================
+import ast
 import os
+import warnings
 from argparse import SUPPRESS, Action, ArgumentParser, Namespace
 from pathlib import Path
 from typing import Any, Optional, Sequence
@@ -28,11 +30,13 @@ _EXCLUDED_DIRS = frozenset(
     }
 )
 
-# a simbi config DEFINES a SimbiProblem subclass, so the class name appears in
-# the file text. content-filtering on this marker keeps the listing precise —
-# a symlinked tree's own non-config scripts (plot helpers, analysis) are excluded
-# without importing (which would be slow and run module side effects).
-_CONFIG_MARKER = "SimbiProblem"
+# a simbi config DEFINES a SimbiProblem subclass — directly, or by subclassing a
+# base config it imports from another simbi_configs module. `_defines_a_config`
+# recognizes both from the ast without importing (importing every candidate would
+# be slow and run module side effects across a symlinked tree). config bases live
+# only under simbi_configs, so a class subclassing a simbi_configs import is a
+# config subclass; plot/analysis helpers subclass neither and are excluded.
+_SIMBI_PROBLEM_BASE = "SimbiProblem"
 
 
 class ComputeModeAction(Action):
@@ -136,17 +140,42 @@ class print_available_configs(Action):
         parser.exit()
 
 
+def _defines_a_config(tree: ast.Module) -> bool:
+    """true if the module defines a class subclassing SimbiProblem, directly or via
+    a base imported from a simbi_configs module (a sibling config it extends)."""
+    config_bases: set[str] = {_SIMBI_PROBLEM_BASE}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and "simbi_configs" in node.module:
+            for alias in node.names:
+                config_bases.add(alias.asname or alias.name)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                if isinstance(base, ast.Name) and base.id in config_bases:
+                    return True
+                if isinstance(base, ast.Attribute) and base.attr in config_bases:
+                    return True
+    return False
+
+
 def _is_config_file(path: Path) -> bool:
-    """a candidate is a real config if it is an importable, non-private module
-    that references SimbiProblem. dunder / private files (setup, conftest,
-    __init__, _helpers) are skipped."""
+    """a candidate is a real config if it is an importable, non-private module that
+    defines a SimbiProblem subclass (see `_defines_a_config`). dunder / private
+    files (setup, conftest, __init__, _helpers) are skipped."""
     stem = path.stem
     if stem.startswith("_") or stem in ("setup", "conftest"):
         return False
     try:
-        return _CONFIG_MARKER in path.read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        with warnings.catch_warnings():
+            # classifying a candidate must stay silent: the scan inspects structure,
+            # it does not import or execute. a config tree's own latent warnings
+            # (invalid string escapes, deprecations) are surfaced when that config is
+            # actually run, not when every `simbi run` lists the available configs.
+            warnings.simplefilter("ignore")
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except (OSError, SyntaxError, ValueError):
         return False
+    return _defines_a_config(tree)
 
 
 def _find_configs(root: Path) -> list[Path]:

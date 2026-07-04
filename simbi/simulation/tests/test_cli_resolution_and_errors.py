@@ -15,7 +15,7 @@ import pytest
 from simbi.simulation.param import ProblemParam
 from simbi.simulation.problem import ConfigError, SimbiProblem
 from simbi.types.input import Solver
-from simbi_configs.examples.rmhd_orszag_tang import OrszagTang
+from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang
 
 
 def test_short_resolution_pads_to_field_arity() -> None:

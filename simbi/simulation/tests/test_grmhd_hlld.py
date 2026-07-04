@@ -37,7 +37,7 @@ needs_backend = pytest.mark.skipif(
 
 
 def _run_michel(solver: Solver, ct: CtMethod):
-    from simbi_configs.examples.gr_michel_magnetized_2d import GrMichelMagnetized2D
+    from simbi_configs.examples.grmhd.gr_michel_magnetized_2d import GrMichelMagnetized2D
 
     d = tempfile.mkdtemp() + "/"
     p = GrMichelMagnetized2D.from_cli(["--nr", "128", "--npolar", "16", "--b-ref", "0.5"])
@@ -80,7 +80,7 @@ def test_gr_hlld_flux_uct_hlld_emf_holds_the_michel_monopole() -> None:
 @needs_backend
 def test_gr_hlle_still_runs() -> None:
     # the HLLE GR path is unaffected and remains the robust default.
-    from simbi_configs.examples.gr_field_loop import GrFieldLoop
+    from simbi_configs.examples.grmhd.gr_field_loop import GrFieldLoop
 
     d = tempfile.mkdtemp() + "/"
     p = GrFieldLoop.from_cli(["--nr", "64", "--npolar", "32"])

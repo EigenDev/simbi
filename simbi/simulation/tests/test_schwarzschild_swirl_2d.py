@@ -59,8 +59,8 @@ _L_DRIFT_CONV = 1.5
 
 
 def _swirl_problem(data_dir: str, l0: float, nr: int = _NR, npolar: int = _NPOLAR):
-    from simbi_configs.examples.gr_bondi_2d import GrBondi2D
-    from simbi_configs.examples.gr_michel import MichelSolution
+    from simbi_configs.examples.grhd.gr_bondi_2d import GrBondi2D
+    from simbi_configs.examples.grhd.gr_michel import MichelSolution
 
     class GrMichelSwirl2D(GrBondi2D):
         """the michel profile on the (r, theta) wedge with a lifted azimuthal momentum:
@@ -127,7 +127,7 @@ def _run(l0: float, nr: int = _NR, npolar: int = _NPOLAR):
         assert finals, f"swirl run (l0 = {l0}) crashed before completion"
         prims = _read_interior_2d(finals[0], nr, npolar)
 
-        from simbi_configs.examples.gr_michel import MichelSolution
+        from simbi_configs.examples.grhd.gr_michel import MichelSolution
 
         sol = MichelSolution(
             mass=p.schwarzschild_mass,

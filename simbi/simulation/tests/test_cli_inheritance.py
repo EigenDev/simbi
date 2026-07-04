@@ -13,7 +13,7 @@ from typing import Annotated
 from simbi.simulation.param import ProblemParam
 from simbi.simulation.problem import SimbiProblem
 from simbi.types.input import Solver
-from simbi_configs.examples.kh import KelvinHelmholtz
+from simbi_configs.examples.newtonian.kh import KelvinHelmholtz
 
 
 class _ShadowSolver(SimbiProblem):

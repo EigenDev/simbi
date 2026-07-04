@@ -65,3 +65,24 @@ def test_is_config_file_requires_marker_and_public_name(tmp_path: Path) -> None:
         f = tmp_path / name
         f.write_text(_CONFIG_SRC)
         assert not _is_config_file(f)
+
+
+def test_is_config_file_recognizes_a_subclass_of_an_imported_base(tmp_path: Path) -> None:
+    # a config that extends a base config it imports from simbi_configs carries no
+    # literal "SimbiProblem" text, yet is a runnable config. a raw-marker scan would
+    # drop it from the registry (so `simbi run <name>` fails); the ast marker keeps it.
+    derived = tmp_path / "derived.py"
+    derived.write_text(
+        "from simbi_configs.examples.grmhd.base import BaseCfg\n"
+        "class Derived(BaseCfg):\n    pass\n"
+    )
+    assert _is_config_file(derived)
+
+    # importing a config without subclassing it (an analysis / plot helper) is NOT a
+    # config — the base name must appear as a class base, not merely be referenced.
+    helper = tmp_path / "analysis.py"
+    helper.write_text(
+        "from simbi_configs.examples.grmhd.base import BaseCfg\n"
+        "print(BaseCfg.__name__)\n"
+    )
+    assert not _is_config_file(helper)

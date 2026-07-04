@@ -13,9 +13,13 @@ import math
 import numpy as np
 import pytest
 
-from simbi_configs.examples.imhd_orszag_tang import IsothermalOrszagTang
-from simbi_configs.examples.nmhd_orszag_tang import NewtonianOrszagTang
-from simbi_configs.examples.rmhd_orszag_tang import OrszagTang
+from simbi_configs.examples.isothermal.imhd_orszag_tang import (
+    IsothermalOrszagTang,
+)
+from simbi_configs.examples.newtonian.nmhd_orszag_tang import (
+    NewtonianOrszagTang,
+)
+from simbi_configs.examples.srmhd.rmhd_orszag_tang import OrszagTang
 
 _N = 8  # small even grid; bounds default to [0,1]^2 so dy = 1/N
 

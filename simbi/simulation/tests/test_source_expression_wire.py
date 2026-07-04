@@ -10,7 +10,7 @@
 import json
 
 import simbi.expression as expr
-from simbi_configs.examples.rt import RayleighTaylor
+from simbi_configs.examples.newtonian.rt import RayleighTaylor
 
 
 def test_serialize_source_emits_sourceconfig_schema() -> None:

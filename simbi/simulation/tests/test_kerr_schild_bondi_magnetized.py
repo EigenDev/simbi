@@ -43,7 +43,7 @@ _FIELD_INDEP_TOL = 3e-3
 
 
 def _run(b_ref: float) -> dict:
-    from simbi_configs.examples.gr_bondi_ks_magnetized import GrBondiKsMagnetized
+    from simbi_configs.examples.grmhd.gr_bondi_ks_magnetized import GrBondiKsMagnetized
 
     d = tempfile.mkdtemp() + "/"
     p = GrBondiKsMagnetized.from_cli(

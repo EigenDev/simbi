@@ -30,7 +30,7 @@ _HORIZON = 2.0  # 2M, M = 1
 
 
 def _bondi_ks_problem(data_dir: str):
-    from simbi_configs.examples.gr_bondi_ks import GrBondiKS
+    from simbi_configs.examples.grhd.gr_bondi_ks import GrBondiKS
 
     p = GrBondiKS.from_cli(["--resolution", str(_RESOLUTION)])
     p.end_time = _END_TIME

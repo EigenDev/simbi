@@ -34,7 +34,7 @@ _RHO_AMBIENT = 1.0
 
 
 def _bondi_2d_problem(data_dir: str):
-    from simbi_configs.examples.gr_bondi_2d import GrBondi2D
+    from simbi_configs.examples.grhd.gr_bondi_2d import GrBondi2D
 
     p = GrBondi2D.from_cli(["--nr", str(_NR), "--npolar", str(_NPOLAR)])
     p.end_time = _END_TIME
