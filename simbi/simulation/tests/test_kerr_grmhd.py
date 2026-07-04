@@ -146,3 +146,61 @@ def test_kerr_rotating_equilibrium_holds_and_converges() -> None:
         f"rot-eq hold not converging (ratio {l1_coarse / l1_fine:.2f}): the frame-dragging "
         "w-reconstruction is not holding the orbit"
     )
+
+
+@needs_backend
+def test_magnetized_fm_torus_seeds_divergence_free_and_stable() -> None:
+    # the MRI initial condition (design 44 phase C step 4): the fat FM torus threaded with a weak
+    # beta-normalized poloidal seed field on the spinning-kerr RMHD path (tetrad HLLD + UCT-HLLD).
+    # the seed must be div-free to machine zero, the torus core resolved, and the state stable.
+    from simbi_configs.examples.gr_fishbone_moncrief_mhd import GrFishboneMoncriefMhd
+
+    d = tempfile.mkdtemp() + "/"
+    p = GrFishboneMoncriefMhd.from_cli(
+        ["--nr", "96", "--npolar", "48", "--kerr-spin", "0.9", "--target-beta", "100"]
+    )
+    p.end_time = 5.0
+    p.data_directory = d
+    p.checkpoint_interval = 100.0
+    runner.run(p, compute_mode="cpu")
+    assert not glob.glob(os.path.join(d, "*crashed*.h5")), "fm torus crashed"
+    final = glob.glob(os.path.join(d, "*final*.h5"))[0]
+    with h5py.File(final) as h:
+        B1 = h["level_0/partition_0/hydro/magnetic/B1/data"][:]
+        B2 = h["level_0/partition_0/hydro/magnetic/B2/data"][:]
+        g = h["level_0/partition_0/hydro/primitives"]
+        shp = g["rho"].shape
+        halo = [(s - n) // 2 for s, n in zip(shp, (48, 96))]
+        sl = tuple(slice(hh, hh + n) for hh, n in zip(halo, (48, 96)))
+        pre, rho = g["pre"][sl], g["rho"][sl]
+    assert pre.min() > 0.0, "pressure went non-positive"
+    assert not np.isnan(rho).any(), "NaN in the torus"
+    assert float(rho.max()) > 0.5, "torus core not resolved"
+    assert float(np.abs(B1).max()) > 1e-4, "seed field vanished"
+    mm, a = p.schwarzschild_mass, p.kerr_spin
+    nr, npolar = p.resolution
+    (rmin, rmax) = p.bounds[0]
+    (tmin, tmax) = p.bounds[1]
+    qf = (rmax / rmin) ** (1.0 / nr)
+    dth = (tmax - tmin) / npolar
+    rf = [rmin * qf**ii for ii in range(nr + 1)]
+    tf = [tmin + jj * dth for jj in range(npolar + 1)]
+    rc = [0.5 * (rf[i] + rf[i + 1]) for i in range(nr)]
+    tc = [0.5 * (tf[j] + tf[j + 1]) for j in range(npolar)]
+
+    def sg(r, th):
+        s = r * r + a * a * math.cos(th) ** 2
+        return s * math.sin(th) * math.sqrt(1.0 + 2.0 * mm * r / s)
+
+    md = sc = 0.0
+    for j in range(npolar):
+        for i in range(nr):
+            div = (
+                sg(rf[i + 1], tc[j]) * dth * B1[j, i + 1]
+                - sg(rf[i], tc[j]) * dth * B1[j, i]
+                + sg(rc[i], tf[j + 1]) * (rf[i + 1] - rf[i]) * B2[j + 1, i]
+                - sg(rc[i], tf[j]) * (rf[i + 1] - rf[i]) * B2[j, i]
+            )
+            md = max(md, abs(div))
+            sc = max(sc, abs(sg(rf[i + 1], tc[j]) * dth * B1[j, i + 1]))
+    assert md / max(sc, 1e-30) < 1e-10, f"fm-torus seed div(B) not machine-zero: {md / sc:.3e}"
