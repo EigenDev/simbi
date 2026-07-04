@@ -1281,40 +1281,53 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindrical<S> {
     }
 }
 
+// the D = 2 view is the (R, phi) EQUATORIAL DISK (z = 0): the razor-thin accretion-disk chart. on
+// the equator the spherical and cylindrical radii coincide (r = R), so the kerr-schild off-diagonal
+// vanishes and the metric is DIAGONAL — gamma = diag(1 + 2M/R, R^2), alpha = 1/sqrt(1 + 2M/R), shift
+// beta^R = 2M/(R + 2M) (beta^phi = 0), sqrt(gamma) = R sqrt(1 + 2M/R) so alpha sqrt(gamma) = R (the
+// cylindrical measure). the SAME physical vacuum as the (R, z) D = 3 view, restricted to z = 0.
 impl<S: Scalar> Metric<S, 2> for SchwarzschildKSCylindrical<S> {
     fn geometry(&self) -> Geometry { Geometry::Cylindrical }
     fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
     fn spacetime_scalars(&self) -> Vec<(&'static str, S)> { vec![("schwarzschild_mass", self.mass)] }
-    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
-    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
-    // the SCALAR pieces of the (R, z) grid view — lapse, shift, proper volume — are exact (r =
-    // sqrt(R^2 + z^2) at slots 0, 1); only the 2x2 spatial matrix restriction is meaningless (the
-    // azimuthal DOF has no slot). mirrors the KerrKS D = 2 pattern.
+    fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        let (big_r, phi) = (x[0], x[1]);
+        Tensor::new([big_r * phi.cos(), big_r * phi.sin()])
+    }
+    fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
+        let (cx, cy) = (x[0], x[1]);
+        Tensor::new([(cx * cx + cy * cy).sqrt(), cy.atan2(cx)])
+    }
+
     fn lapse(&self, x: Tensor<S, 2>) -> S {
-        let (_r, two_h) = self.radius_two_h(x[0], x[1]);
+        let two_h = S::from_f64(2.0) * self.mass / x[0]; // 2M/R (r = R on the equator)
         S::ONE / (S::ONE + two_h).sqrt()
     }
     fn lapse_sq(&self, x: Tensor<S, 2>) -> S {
-        let (_r, two_h) = self.radius_two_h(x[0], x[1]);
+        let two_h = S::from_f64(2.0) * self.mass / x[0];
         S::ONE / (S::ONE + two_h)
     }
     fn shift(&self, x: Tensor<S, 2>) -> Tensor<S, 2> {
-        let (r, two_h) = self.radius_two_h(x[0], x[1]);
-        let s = (two_h / (S::ONE + two_h)) / r;
-        Tensor::new([s * x[0], s * x[1]])
+        let two_h = S::from_f64(2.0) * self.mass / x[0];
+        Tensor::new([two_h / (S::ONE + two_h), S::ZERO]) // beta^R = 2M/(R + 2M), beta^phi = 0
+    }
+    fn spatial_metric(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
+        let big_r = x[0];
+        let two_h = S::from_f64(2.0) * self.mass / big_r;
+        Matrix::diag(Tensor::new([S::ONE + two_h, big_r * big_r]))
+    }
+    fn spatial_metric_inv(&self, x: Tensor<S, 2>) -> Matrix<S, 2> {
+        let big_r = x[0];
+        let two_h = S::from_f64(2.0) * self.mass / big_r;
+        Matrix::diag(Tensor::new([S::ONE / (S::ONE + two_h), S::ONE / (big_r * big_r)]))
     }
     fn sqrt_det_gamma(&self, x: Tensor<S, 2>) -> S {
-        let (_r, two_h) = self.radius_two_h(x[0], x[1]);
-        x[0].abs() * (S::ONE + two_h).sqrt()
+        let big_r = x[0];
+        let two_h = S::from_f64(2.0) * self.mass / big_r;
+        big_r.abs() * (S::ONE + two_h).sqrt()
     }
     fn volume_factor(&self, x: Tensor<S, 2>) -> S {
         self.sqrt_det_gamma(x)
-    }
-    fn spatial_metric(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
-        unreachable!("cylindrical kerr-schild needs the azimuthal DOF: it requires D = 3")
-    }
-    fn spatial_metric_inv(&self, _x: Tensor<S, 2>) -> Matrix<S, 2> {
-        unreachable!("cylindrical kerr-schild needs the azimuthal DOF: it requires D = 3")
     }
 }
 
@@ -3025,6 +3038,37 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn cylindrical_ks_equatorial_disk_is_diagonal_and_correct() {
+        // the D = 2 (R, phi) EQUATORIAL DISK: on the equator r = R, so the kerr-schild off-diagonal
+        // vanishes -> gamma = diag(1 + 2M/R, R^2), alpha sqrt(gamma) = R, agreeing with the (R, z)
+        // D = 3 view at z = 0. beta_R = gamma_RR beta^R = 2M/R (g_tR); beta_phi = 0.
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-12 * (1.0 + x.abs().max(y.abs()));
+        let bh = SchwarzschildKSCylindrical { mass: 1.3_f64 };
+        for &(big_r, phi) in &[(3.0_f64, 0.7), (6.0, 2.1), (2.6, 4.0)] {
+            let x = Tensor::new([big_r, phi]);
+            let two_h = 2.0 * 1.3 / big_r;
+            let gm = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::spatial_metric(&bh, x);
+            let gi = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::spatial_metric_inv(&bh, x);
+            assert!(close(gm[(0, 0)], 1.0 + two_h) && close(gm[(1, 1)], big_r * big_r));
+            assert!(gm[(0, 1)] == 0.0 && gm[(1, 0)] == 0.0, "the equatorial disk must be diagonal");
+            for ii in 0..2 {
+                for jj in 0..2 {
+                    let acc: f64 = (0..2).map(|kk| gm[(ii, kk)] * gi[(kk, jj)]).sum();
+                    assert!(close(acc, if ii == jj { 1.0 } else { 0.0 }), "gamma inverse ({ii},{jj})");
+                }
+            }
+            let alpha = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::lapse(&bh, x);
+            let vf = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::volume_factor(&bh, x);
+            assert!(close(alpha * vf, big_r), "alpha sqrt(gamma) = R at R={big_r}");
+            let beta = <SchwarzschildKSCylindrical<f64> as Metric<f64, 2>>::shift(&bh, x);
+            assert!(close(gm[(0, 0)] * beta[0], two_h) && beta[1] == 0.0, "beta_R = 2M/R, beta_phi = 0");
+            // agrees with the (R, z) D = 3 poloidal block at z = 0.
+            let gm3 = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&bh, Tensor::new([big_r, phi, 0.0]));
+            assert!(close(gm[(0, 0)], gm3[(0, 0)]) && close(gm[(1, 1)], gm3[(1, 1)]));
         }
     }
 }

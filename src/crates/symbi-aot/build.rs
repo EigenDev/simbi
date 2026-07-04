@@ -1609,6 +1609,19 @@ fn main() {
     // the flat cylindrical hydro is DOF = 2, so this swirl instance is otherwise unbaked. cyl_3d
     // (DOF == NDIM) reuses the unsuffixed rhd_snapshot_3d.
     gen_snapshot(&out_dir, 2, "rhd", true, Geom::cyl_rz());
+    // GR CYLINDRICAL (R, phi) EQUATORIAL DISK (design 45): the razor-thin accretion-disk chart, the
+    // z = 0 slice where r = R so the metric is DIAGONAL gamma = diag(1 + 2M/R, R^2). DOF == NDIM = 2
+    // (v_R, v_phi), axes [0, 1]; the shift rides the R sweep (beta^phi = 0); light-cone CFL. reuses
+    // the unsuffixed rhd_snapshot_2d (DOF == NDIM copy).
+    {
+        let disk = Geom::cyl_rphi().kerr_schild();
+        gen_godunov_stage(&out_dir, 2, "rhd", true, disk.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, 2, disk.clone());
+        gen_rhd_c2p_gr(&out_dir, 2, 20, disk.clone());
+        for dir in 0..2 {
+            gen_rhd_face_flux_gr(&out_dir, 2, dir, disk.clone());
+        }
+    }
     // GR spherical SWIRL (the azimuthal momentum DOF on the 2D (r, theta) grid, ncomp = 3 >
     // ndim = 2, `_sph_swirl`): rotating flows on a curved background (tori, spinning-hole
     // accretion). the covariant angular momentum S_phi is a conserved law with a zero

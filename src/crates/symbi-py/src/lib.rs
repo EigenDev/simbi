@@ -2409,23 +2409,31 @@ macro_rules! hydro_dispatch {
                 Cylindrical,
                 Cylindrical
             ),
-            // GR (kerr-schild) CYLINDRICAL 2.5D axisymmetric-swirl (design 45 phase 2): the (R, z)
-            // grid + the azimuthal v_phi DOF (the natural jet / disk chart). cyl_plane = Rz gives
-            // axes [0, 2]; DOF = 3 lifts v_phi. requires the 5-tuple (rho, v_R, v_phi, v_z, pre).
-            (2, "cylindrical") if $cfg.spacetime == "kerr_schild" => {
-                if !$prims.first().map_or(false, |row| row.len() == 5) {
-                    return Err(
-                        "the cylindrical kerr-schild 2.5D (axisymmetric) chart requires the \
-                         azimuthal momentum DOF: yield 5-tuple gas rows (rho, v_R, v_phi, v_z, pre)"
-                            .to_string(),
-                    );
-                }
-                build_and_run_hydro!(
-                    $cfg, $prims, $regime, $regime_ty, 2, 3,
+            // GR (kerr-schild) CYLINDRICAL 2D: the plane selector splits the two charts. the (R, phi)
+            // equatorial DISK (planar_cylindrical) is DIAGONAL (z = 0, r = R), DOF = 2 (v_R, v_phi);
+            // the (R, z) 2.5D axisymmetric-swirl (the default) lifts v_phi, DOF = 3, requiring the
+            // 5-tuple. both use the one SchwarzschildKSCylindrical metric (D = 2 disk / D = 3 swirl).
+            (2, "cylindrical") if $cfg.spacetime == "kerr_schild" => match $cfg.cyl_plane {
+                symbi_sim::state::CylPlane::RPhi => build_and_run_hydro!(
+                    $cfg, $prims, $regime, $regime_ty, 2, 2,
                     SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
                     SchwarzschildKSCylindrical<f64>
-                )
-            }
+                ),
+                symbi_sim::state::CylPlane::Rz => {
+                    if !$prims.first().map_or(false, |row| row.len() == 5) {
+                        return Err(
+                            "the cylindrical kerr-schild 2.5D (axisymmetric) chart requires the \
+                             azimuthal momentum DOF: yield 5-tuple gas rows (rho, v_R, v_phi, v_z, pre)"
+                                .to_string(),
+                        );
+                    }
+                    build_and_run_hydro!(
+                        $cfg, $prims, $regime, $regime_ty, 2, 3,
+                        SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
+                        SchwarzschildKSCylindrical<f64>
+                    )
+                }
+            },
             (2, "cylindrical") => build_and_run_hydro!(
                 $cfg,
                 $prims,
