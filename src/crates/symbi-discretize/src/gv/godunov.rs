@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_algebra::Tensor;
 use symbi_ir::dual::Dual;
@@ -306,7 +306,10 @@ pub fn godunov_stage_gv_with_fused_built(
     // matching the covariant momentum S_i and the contravariant fluxes v^i; the orthonormal
     // angular weights would leave every theta-direction force on S_theta short by a factor r.
     // radial faces and the volume coincide, so 1D radial GR is bit-identical.
-    let geo = (!is_cartesian_uniform(coords, spacing)).then(|| match spacetime {
+    // a curved spacetime ALWAYS needs the geometry (the metric position + the alpha sqrt(gamma)
+    // densitization measure), even on a cartesian-uniform grid where flat hydro skips it.
+    let geo = (!is_cartesian_uniform(coords, spacing) || spacetime != Spacetime::Minkowski)
+        .then(|| match spacetime {
         Spacetime::Minkowski => cell_geometry_gv(coords, spacing, axes, ndim as usize),
         // spinning kerr: the densitized measure is Sigma sin(theta) — the spin rides the
         // `kerr_spin` kernel scalar into the face/volume moments.
@@ -423,6 +426,9 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::Schwarzschild => {
                         grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pp, b)
                     }
+                    Spacetime::KerrSchild if coords == Coords::Cartesian => {
+                        grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pp, b)
+                    }
                     Spacetime::KerrSchild => {
                         grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
                     }
@@ -441,6 +447,9 @@ pub fn godunov_stage_gv_with_fused_built(
             } else {
                 let src_at = |pp: Gv| match spacetime {
                     Spacetime::Schwarzschild => grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pp),
+                    Spacetime::KerrSchild if coords == Coords::Cartesian => {
+                        grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pp)
+                    }
                     Spacetime::KerrSchild => grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp),
                     Spacetime::Kerr => {
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));

@@ -379,6 +379,27 @@ mod tests {
         (a - b).abs() < 1e-11 * (1.0 + a.abs().max(b.abs()))
     }
 
+    #[test]
+    fn cartesian_ks_covariant_source_is_x_y_symmetric() {
+        // the cartesian kerr-schild metric is exactly symmetric under the x <-> y coordinate +
+        // index swap, so the geodesic source must satisfy S_x(x, y) = S_y(y, x) (and S_tau
+        // symmetric). a resolution-independent x <-> y asymmetry in a cartesian GR run would show
+        // up here if the D-generic contraction dropped an axis.
+        use crate::metric::SchwarzschildKSCartesian;
+        let m = SchwarzschildKSCartesian { mass: Dual::constant(1.0_f64) };
+        let (px, py, e, p) = (3.0_f64, 5.0, 1.5, 0.1);
+        let (s1, tau1) = grhd_covariant_source(
+            &m, Tensor::new([px, py, 0.0]), e, Tensor::new([0.1, 0.2, 0.0]), p,
+        );
+        let (s2, tau2) = grhd_covariant_source(
+            &m, Tensor::new([py, px, 0.0]), e, Tensor::new([0.2, 0.1, 0.0]), p,
+        );
+        assert!((s1[0] - s2[1]).abs() < 1e-12, "S_x(x,y) = {} != S_y(y,x) = {}", s1[0], s2[1]);
+        assert!((s1[1] - s2[0]).abs() < 1e-12, "S_y(x,y) = {} != S_x(y,x) = {}", s1[1], s2[0]);
+        assert!(s1[2].abs() < 1e-12 && s2[2].abs() < 1e-12, "z-momentum source nonzero on the slice");
+        assert!((tau1 - tau2).abs() < 1e-12, "S_tau asymmetric: {tau1} vs {tau2}");
+    }
+
     // the schwarzschild-coordinate ADM block + its radial derivatives (f = 1 - 2M/r).
     fn schwarzschild_adm(r: f64, m: f64) -> (f64, f64, f64, AdmRadialDerivs<f64>) {
         let f = 1.0 - 2.0 * m / r;

@@ -785,10 +785,26 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 // name carries the spacing + spacetime slug (`rhd_c2p[_logr]{_schw|_ks}_1d`) so the runtime select
 // matches. depends on the radial grid (centroid), so it carries the same schwarzschild_mass +
 // x_lo_0/dx_0 scalars the GR wavespeed/godunov use.
+/// the chart/DOF tag for the GR c2p + face-flux kernel names, which historically encoded the
+/// coordinate chart ONLY through the spherical-swirl DOF lift. the spherical swirl (ncomp > naxes)
+/// rides `geom.suffix()` (`_sph_swirl`); the cartesian GR chart rides an explicit `_cart` (distinct
+/// from the implicit spherical default, which stays untagged so the validated spherical GR kernels
+/// keep their names + dispatch); every other case is untagged. the runtime dispatch mirrors this.
+fn gr_chart_dof_tag(geom: &Geom) -> &'static str {
+    if geom.ncomp as usize > geom.axes.len() {
+        geom.suffix()
+    } else if geom.coords == Coords::Cartesian && geom.spacetime != Spacetime::Minkowski {
+        "_cart"
+    } else {
+        ""
+    }
+}
+
 fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
-    // the DOF-lift tag rides the name only when ncomp > naxes (the spherical swirl), matching the
-    // runtime dispatch (geom_suffix appears only for DOF != NDIM on this kernel family).
-    let lift = if geom.ncomp as usize > geom.axes.len() { geom.suffix() } else { "" };
+    // the chart/DOF tag: the spherical swirl (ncomp > naxes) rides geom.suffix(); the cartesian GR
+    // chart rides an explicit `_cart` (distinct from the implicit spherical default, which stays
+    // untagged so the validated spherical kernels keep their names); every other case is untagged.
+    let lift = gr_chart_dof_tag(&geom);
     let name = format!("rhd_c2p{lift}{}{}_{ndim}d", geom.spacing_suffix(), geom.spacetime_suffix());
     // the const parameter is the momentum DOF (geom.ncomp); the grid dimension rides geom.axes.
     let (k, writes) = match geom.ncomp {
@@ -806,9 +822,9 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 // storage needs the metric-aware flux). name carries the spacing + spacetime slug + sweep dir. 1D
 // radial (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
 fn gen_rhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
-    // the DOF-lift tag rides the name only when ncomp > naxes (the spherical swirl), matching the
-    // runtime dispatch_flux (geom_suffix appears only for DOF != NDIM).
-    let lift = if geom.ncomp as usize > geom.axes.len() { geom.suffix() } else { "" };
+    // the chart/DOF tag (see gr_chart_dof_tag): spherical swirl -> geom.suffix(), cartesian GR ->
+    // `_cart`, else untagged — matching the runtime dispatch_flux.
+    let lift = gr_chart_dof_tag(&geom);
     let name = format!("rhd_face_flux{lift}{}{}_{ndim}d_{dir}", geom.spacing_suffix(), geom.spacetime_suffix());
     // the const parameter is the momentum DOF (geom.ncomp); the reconstruction grid rides geom.axes.
     let (k, writes) = match geom.ncomp {
@@ -1330,6 +1346,11 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // lapse + non-diagonal gamma^{rr} break the radial-only backgrounds' factored BF form).
     let (k, writes) = if geom.spacetime == Spacetime::Kerr {
         symbi_discretize::gv::kerr_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize)
+    } else if geom.coords == Coords::Cartesian && geom.spacetime != Spacetime::Minkowski {
+        // cartesian GR: the non-diagonal gamma + shift on every axis break the radial-only factored
+        // Banyuls-Font form; the state-independent coordinate light-cone map is the generic CFL bound
+        // (the light speed brackets every fluid characteristic).
+        symbi_discretize::gv::gr_light_cone_wave_speed_map_gv(geom.spacetime, geom.coords, &geom.spacing, &geom.axes, ndim as usize)
     } else {
         rhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize)
     };
@@ -1545,6 +1566,22 @@ fn main() {
         gen_rhd_c2p_gr(&out_dir, ndim, 20, ks_log.clone());
         for dir in 0..ndim {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks_log.clone());
+        }
+    }
+    // GR CARTESIAN kerr-schild (design 45): the (x, y) equatorial slice of the horizon-penetrating
+    // chart — NON-diagonal gamma_ij = delta_ij + 2M x_i x_j / r^3, a shift beta^i on EVERY axis, and
+    // alpha sqrt(gamma) = 1 (the det-g-flat cartesian volume). NO polar axis. the covariant godunov
+    // (flat cartesian face measure + the covariant geodesic source), the state-independent light-cone
+    // CFL (the diagonal Banyuls-Font form does not apply to a non-diagonal metric), and the
+    // metric-aware c2p / per-sweep flux (the shift rides every sweep's fan). tagged `_ks` (cartesian
+    // suffix is empty). 2D only for now (the equatorial slice; 3D is a later dimension lift).
+    {
+        let ks = Geom::cart(2).kerr_schild();
+        gen_godunov_stage(&out_dir, 2, "rhd", true, ks.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, 2, ks.clone());
+        gen_rhd_c2p_gr(&out_dir, 2, 20, ks.clone());
+        for dir in 0..2 {
+            gen_rhd_face_flux_gr(&out_dir, 2, dir, ks.clone());
         }
     }
     // GR spherical SWIRL (the azimuthal momentum DOF on the 2D (r, theta) grid, ncomp = 3 >

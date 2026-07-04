@@ -395,11 +395,16 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     // iso path here hardcodes HLLE), so a non-MHD `dispatch_flux` can never carry HLLD — no runtime
     // assert needed.
     let face = sim.geom.interior.face_domain(dir);
-    // the flux is geometry-independent EXCEPT for the axis-role velocity layout (DOF>NDIM):
-    // cartesian + spherical share the unsuffixed flux; the cyl-axisymmetric flux is its own
-    // (ncomp=3, normal vel = vel[axes[dir]]), so it carries the coord suffix iff DOF != NDIM.
+    // the flux is geometry-independent EXCEPT for the axis-role velocity layout (DOF>NDIM,
+    // spherical swirl / cyl-axisymmetric) AND the cartesian GR chart (`_cart`, a NON-diagonal metric
+    // with shift on every axis, distinct from the implicit spherical GR default) — mirroring the
+    // bake's gr_chart_dof_tag. flat cartesian + spherical GR stay unsuffixed.
     let geom_sfx = if DOF != D {
         geom_suffix(sim.geom.coords, DOF, D)
+    } else if sim.geom.coords == symbi_geometry::Geometry::Cartesian
+        && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
+    {
+        "_cart"
     } else {
         ""
     };

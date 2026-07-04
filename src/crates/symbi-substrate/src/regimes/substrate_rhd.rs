@@ -156,7 +156,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // mass M + the LOG-AWARE radial grid scalars (the metric is evaluated at the cell centroid).
         // flat keeps the plain `rhd_c2p_{D}d` (gamma only), bit-identical. the DOF-lift tag
         // (spherical swirl) selects the instance whose manifest carries the extra momentum.
-        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        // the chart/DOF tag mirrors the bake's gr_chart_dof_tag: the spherical swirl (DOF != D)
+        // rides geom_suffix; the cartesian GR chart rides `_cart` (distinct from the implicit
+        // spherical GR default); flat + spherical GR stay untagged here.
+        let geom_sfx = if DOF != D {
+            geom_suffix(sim.geom.coords, DOF, D)
+        } else if sim.geom.coords == symbi_geometry::Geometry::Cartesian
+            && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski
+        {
+            "_cart"
+        } else {
+            ""
+        };
         let st_sfx = match sim.geom.spacetime {
             symbi_geometry::Spacetime::Minkowski => "",
             symbi_geometry::Spacetime::Schwarzschild => "_schw",

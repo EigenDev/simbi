@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_hydro::spatial_metric::SpatialMetric;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
@@ -136,6 +136,7 @@ pub fn rhd_c2p_gr_gv<const D: usize>(
 where
     Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
+    SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
     KerrKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
@@ -159,22 +160,26 @@ where
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let (gm, gm_inv) = match spacetime {
-        Spacetime::Schwarzschild => {
+    let (gm, gm_inv) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
-        Spacetime::KerrSchild => {
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
-        Spacetime::Kerr => {
+        (Spacetime::Kerr, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} — only the azimuthal-momentum (swirl,
             // D = 3) instantiation carries the metric; the D = 1/2 arms are unreachable at bake.
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
-        Spacetime::Minkowski => unreachable!("the GR c2p is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => unreachable!("the GR c2p is baked only for a curved spacetime"),
     };
     let metric = SpatialMetric::<Gv, D> { gamma: gm, gamma_inv: gm_inv };
 
@@ -260,23 +265,27 @@ pub fn rmhd_c2p_gr_gv(
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let (gm, gm_inv) = match spacetime {
-        Spacetime::Schwarzschild => {
+    let (gm, gm_inv) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
-        Spacetime::KerrSchild => {
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+        (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
-        Spacetime::Kerr => {
+        (Spacetime::Kerr, _) => {
             // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
-        Spacetime::Minkowski => unreachable!("the GRMHD c2p is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => unreachable!("the GRMHD c2p is baked only for a curved spacetime"),
     };
     let metric = SpatialMetric { gamma: gm, gamma_inv: gm_inv };
 

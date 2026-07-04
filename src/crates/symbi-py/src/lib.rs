@@ -34,7 +34,7 @@ use symbi_display::{
 };
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
-use symbi_geometry::{KerrKS, SchwarzschildKS};
+use symbi_geometry::{KerrKS, SchwarzschildKS, SchwarzschildKSCartesian};
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -2315,6 +2315,15 @@ macro_rules! hydro_dispatch {
             (1, "cartesian") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, 1, Cartesian, Cartesian)
             }
+            // GR (kerr-schild) CARTESIAN: the (x, y) equatorial slice of the horizon-penetrating
+            // chart (design 45) — SchwarzschildKSCartesian selects the `_cart` metric-aware c2p +
+            // per-sweep flux + light-cone CFL (non-diagonal gamma, shift on every axis, no polar
+            // axis). guarded BEFORE the flat cartesian arm; 2D equatorial slice, DOF = 2 (no swirl).
+            (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 2, 2,
+                SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
+                SchwarzschildKSCartesian<f64>
+            ),
             (2, "cartesian") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Cartesian, Cartesian)
             }

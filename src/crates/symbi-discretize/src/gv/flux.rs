@@ -8,7 +8,7 @@ use super::*;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::RmhdGr;
 use symbi_hydro::spatial_metric::SpatialMetric;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
 
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
@@ -324,6 +324,7 @@ pub fn rhd_flux_gr_gv<const D: usize>(
 where
     Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
+    SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
     KerrKS<Gv>: Metric<Gv, D>,
 {
     begin_trace();
@@ -348,21 +349,29 @@ where
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let (gamma, gamma_inv, alpha) = match spacetime {
-        Spacetime::Schwarzschild => {
+    // the ADM face block, selected by (spacetime, chart): the kerr-schild spacetime is expressed in
+    // the SPHERICAL chart (SchwarzschildKS, radial shift) OR the CARTESIAN chart
+    // (SchwarzschildKSCartesian, non-diagonal, shift along every axis). the shift `beta` is carried
+    // out for the per-axis shift term below (zero for the static Schwarzschild chart).
+    let (gamma, gamma_inv, alpha, beta) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        Spacetime::KerrSchild => {
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+        (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        Spacetime::Kerr => {
+        (Spacetime::Kerr, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} at the face — swirl (D = 3) only.
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x))
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
-        Spacetime::Minkowski => unreachable!("the GR flux is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => unreachable!("the GR flux is baked only for a curved spacetime"),
     };
     // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying
     // variable w = v^phi + (gamma_{r phi} / gamma_{phi phi}) v^r, so a zero-angular-momentum
@@ -424,24 +433,24 @@ where
     };
     let regime = RhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
     let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
-    // the kerr-schild charts carry a RADIAL shift: the face flux is the hll solution of the full
-    // valencia system d_t U + (1/sqrt(gm)) d_r (sqrt(gm) [alpha F - beta^r U]). with the godunov
-    // applying the alpha sqrt(gm) measure to the kernel flux, the exact pieces are: per-side
-    // fluxes G = F - (beta^n/alpha) U, signal speeds s - beta^n (the banyuls-font s already
-    // carries alpha), and fan dissipation (s_l s_r / alpha) dU — densitization then lands the
-    // true central part sqrt(gm)(alpha F - beta U) AND the true dissipation sqrt(gm) s_l s_r dU.
-    // beta^theta = beta^phi = 0 on both charts, so the transverse sweeps keep the shift-free
-    // path; mesh motion (vface) never composes with a curved spacetime in the bake.
-    let radial_shift = matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
-        && axes[dir as usize] == 0;
-    let flux = if radial_shift {
-        let beta_n = match spacetime {
-            Spacetime::KerrSchild => SchwarzschildKS { mass }.shift(x)[0],
-            Spacetime::Kerr => {
-                KerrKS { mass, spin: Gv::scalar("kerr_spin") }.shift(x)[0]
-            }
-            _ => unreachable!("the radial shift is a kerr-schild-chart property"),
-        };
+    // the kerr-schild charts carry a shift: the face flux is the hll solution of the full valencia
+    // system d_t U + (1/sqrt(gm)) d_n (sqrt(gm) [alpha F - beta^n U]). with the godunov applying the
+    // alpha sqrt(gm) measure to the kernel flux, the exact pieces are: per-side fluxes
+    // G = F - (beta^n/alpha) U, signal speeds s - beta^n (the banyuls-font s already carries alpha),
+    // and fan dissipation (s_l s_r / alpha) dU — densitization then lands the true central part
+    // sqrt(gm)(alpha F - beta U) AND the true dissipation sqrt(gm) s_l s_r dU. the SWEPT-axis shift
+    // component beta^n = beta[coord_n]: the spherical kerr-schild + kerr charts carry only beta^r, so
+    // only the radial sweep is shifted (beta^theta = beta^phi = 0); the CARTESIAN kerr-schild chart
+    // carries beta^i on every axis, so every sweep is shifted. a zero beta^n reduces to the plain
+    // HLL bit-identically. mesh motion (vface) never composes with a curved spacetime in the bake.
+    let coord_n = axes[dir as usize];
+    let shifted = match (spacetime, coords) {
+        (Spacetime::KerrSchild, Coords::Cartesian) => true,
+        (Spacetime::KerrSchild, _) | (Spacetime::Kerr, _) => coord_n == 0,
+        _ => false,
+    };
+    let flux = if shifted {
+        let beta_n = beta[coord_n];
         let u_l = regime.to_conserved(&eos, &left);
         let u_r = regime.to_conserved(&eos, &right);
         let f_l = regime.to_flux(&left, &nhat, &eos);
