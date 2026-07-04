@@ -68,23 +68,18 @@ def test_cartesian_ks_bh_runs_stably() -> None:
 
 
 @needs_backend
-@pytest.mark.xfail(
-    reason="a residual ~1e-3 x<->y asymmetry remains: a bulk, RESOLUTION-INDEPENDENT GR-term "
-    "asymmetry. the flat limit (M=0) is symmetric to roundoff and the covariant geodesic source is "
-    "unit-tested x<->y symmetric (grhd_source::cartesian_ks_covariant_source_is_x_y_symmetric), so "
-    "it is neither the scheme structure nor the source; root-cause pending (design 45).",
-    strict=False,
-)
 def test_cartesian_ks_bh_preserves_x_y_symmetry() -> None:
     # the cartesian KS metric is EXACTLY symmetric under the x <-> y coordinate + index swap, so a
     # symmetric initial state on a square patch must evolve symmetrically under transpose to roundoff:
-    # rho / pre transpose-symmetric, v_x at (i, j) == v_y at (j, i). the TARGET is roundoff.
+    # rho / pre transpose-symmetric, v_x at (i, j) == v_y at (j, i). the tolerance is roundoff
+    # accumulated over the run, NOT physics — any coordinate-role bug (an axis treated as radial, as
+    # the densitization lapse once did with r = x-coordinate) breaks it far above this.
     with tempfile.TemporaryDirectory() as d:
         rho, pre, v1, v2 = _run(64, d + "/")
 
     def rel(a: np.ndarray, b: np.ndarray) -> float:
         return float(np.abs(a - b).max() / (np.abs(a).max() + 1e-300))
 
-    assert rel(rho, rho.T) < 1e-9, f"rho not x<->y symmetric: {rel(rho, rho.T):.3e}"
-    assert rel(pre, pre.T) < 1e-9, f"pre not x<->y symmetric: {rel(pre, pre.T):.3e}"
-    assert rel(v1, v2.T) < 1e-9, f"v_x != v_y^T: {rel(v1, v2.T):.3e}"
+    assert rel(rho, rho.T) < 1e-10, f"rho not x<->y symmetric: {rel(rho, rho.T):.3e}"
+    assert rel(pre, pre.T) < 1e-10, f"pre not x<->y symmetric: {rel(pre, pre.T):.3e}"
+    assert rel(v1, v2.T) < 1e-10, f"v_x != v_y^T: {rel(v1, v2.T):.3e}"

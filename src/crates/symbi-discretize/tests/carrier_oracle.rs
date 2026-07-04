@@ -22,7 +22,7 @@ use symbi_discretize::{
     imhd_hlld_flux_gv, imhd_wave_speed_map_gv, iso_c2p_gv, iso_flux_gv, iso_wave_speed_map_gv,
     nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv, nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv,
     rmhd_c2p_gv, rmhd_flux_gv, rmhd_hllc_flux_gv, rmhd_hlld_flux_gv, rmhd_wave_speed_map_gv,
-    rhd_c2p_gv, rhd_flux_gv, rhd_hllc_flux_gv, rhd_wave_speed_map_gv, Coords, GvKernel, Spacing, Spacetime,
+    rhd_c2p_gv, rhd_flux_gv, rhd_flux_gr_gv, rhd_hllc_flux_gv, rhd_wave_speed_map_gv, Coords, GvKernel, Spacing, Spacetime,
 };
 use symbi_hydro::eos::{IdealGas, Isothermal};
 use symbi_hydro::energy::Zero;
@@ -1102,4 +1102,148 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
         &[("flux_den", f.den), ("flux_mom_0", f.mom[0]), ("flux_mom_1", f.mom[1]), ("flux_nrg", f.nrg)],
         1e-12,
     );
+}
+
+// =============================================================================
+// cartesian kerr-schild flux x<->y symmetry (design 45): the metric is exactly
+// symmetric under the x<->y coordinate + index swap, so on a transpose-symmetric
+// state the x-face flux at (i,j) must map to the y-face flux at (j,i) with the
+// momentum components swapped. isolates the flux kernel from the full sim (boundary,
+// RK, accumulation) — pinning the ~1e-3 run-level asymmetry to the flux or ruling it out.
+// =============================================================================
+#[test]
+fn cartesian_ks_flux_is_x_y_symmetric() {
+    const N: usize = 6;
+    let cart2 = [Spacing::Uniform, Spacing::Uniform];
+    let axes = [0usize, 1];
+    let (x_lo, dx) = (4.0_f64, 1.0_f64);
+    // transpose-symmetric state: rho/pre symmetric in (i,j); v^x[i][j] = v^y[j][i].
+    let rho = |c: &[usize]| 1.0 + 0.03 * (c[0] as f64 + c[1] as f64);
+    let pre = |c: &[usize]| 0.10 + 0.01 * (c[0] as f64 + c[1] as f64);
+    let vx = |c: &[usize]| 0.02 * (c[0] as f64) - 0.01 * (c[1] as f64);
+    let vy = |c: &[usize]| 0.02 * (c[1] as f64) - 0.01 * (c[0] as f64);
+
+    let run_flux = |dir: u8| {
+        KernelRun::new(rhd_flux_gr_gv::<2>(dir, Spacetime::KerrSchild, Coords::Cartesian, &cart2, &axes))
+            .grid([N, N])
+            // interior only: the 4-wide PLM stencil (i-2..i+1) is in-bounds for i,j in [2, N-2].
+            .compute_window([2i32, 2], [N - 3, N - 3])
+            .field_with("prim_rho", rho)
+            .field_with("prim_v0", vx)
+            .field_with("prim_v1", vy)
+            .field_with("prim_pre", pre)
+            .scalars(&[
+                ("gamma", 4.0 / 3.0), ("theta", 1.0), ("schwarzschild_mass", 1.0),
+                ("x_lo_0", x_lo), ("dx_0", dx), ("x_lo_1", x_lo), ("dx_1", dx),
+                (MeshScalar::Adot(0).name().as_str(), 0.0), (MeshScalar::Vtrans(0).name().as_str(), 0.0),
+                (MeshScalar::Adot(1).name().as_str(), 0.0), (MeshScalar::Vtrans(1).name().as_str(), 0.0),
+            ])
+            .run()
+    };
+    let fx = run_flux(0);
+    let fy = run_flux(1);
+
+    // the x-face flux at (i,j) vs the y-face flux at (j,i): den/nrg equal, momentum components swap.
+    let (i, j) = (3usize, 2usize);
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-12 * (1.0 + a.abs().max(b.abs()));
+    let (fxc, fyc) = ([i, j], [j, i]);
+    assert!(close(fx.get(fxc, "flux_den"), fy.get(fyc, "flux_den")),
+        "den: {} vs {}", fx.get(fxc, "flux_den"), fy.get(fyc, "flux_den"));
+    assert!(close(fx.get(fxc, "flux_mom_0"), fy.get(fyc, "flux_mom_1")),
+        "S_x-flux {} vs S_y-flux {}", fx.get(fxc, "flux_mom_0"), fy.get(fyc, "flux_mom_1"));
+    assert!(close(fx.get(fxc, "flux_mom_1"), fy.get(fyc, "flux_mom_0")),
+        "S_y-flux {} vs S_x-flux {}", fx.get(fxc, "flux_mom_1"), fy.get(fyc, "flux_mom_0"));
+    assert!(close(fx.get(fxc, "flux_nrg"), fy.get(fyc, "flux_nrg")),
+        "nrg: {} vs {}", fx.get(fxc, "flux_nrg"), fy.get(fyc, "flux_nrg"));
+}
+
+// the cartesian kerr-schild c2p x<->y symmetry (design 45): a transpose-symmetric conserved state
+// (den/nrg symmetric, S_x[i][j] = S_y[j][i]) must recover transpose-symmetric primitives. per-cell,
+// so it isolates the metric-aware Valencia recovery from the flux/godunov.
+#[test]
+fn cartesian_ks_c2p_is_x_y_symmetric() {
+    use symbi_discretize::rhd_c2p_gr_gv;
+    const N: usize = 4;
+    let cart2 = [Spacing::Uniform, Spacing::Uniform];
+    let axes = [0usize, 1];
+    // admissible + transpose-symmetric conserved: den/nrg symmetric, S_x[i][j] = S_y[j][i].
+    let den = |c: &[usize]| 1.0 + 0.02 * (c[0] as f64 + c[1] as f64);
+    let nrg = |c: &[usize]| 0.5 + 0.02 * (c[0] as f64 + c[1] as f64);
+    let sx = |c: &[usize]| 0.010 * (c[0] as f64) + 0.005 * (c[1] as f64);
+    let sy = |c: &[usize]| 0.010 * (c[1] as f64) + 0.005 * (c[0] as f64);
+    let out = KernelRun::new(rhd_c2p_gr_gv::<2>(Coords::Cartesian, Spacetime::KerrSchild, &cart2, &axes, 20))
+        .grid([N, N])
+        .field_with("cons_den", den)
+        .field_with("cons_mom_0", sx)
+        .field_with("cons_mom_1", sy)
+        .field_with("cons_nrg", nrg)
+        .scalars(&[
+            ("gamma", 4.0 / 3.0), ("schwarzschild_mass", 1.0),
+            ("x_lo_0", 4.0), ("dx_0", 1.0), ("x_lo_1", 4.0), ("dx_1", 1.0),
+        ])
+        .run();
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-11 * (1.0 + a.abs().max(b.abs()));
+    for i in 0..N {
+        for j in 0..N {
+            let g = |name: &str, c: [usize; 2]| out.get(c, name);
+            assert!(close(g("prim_rho", [i, j]), g("prim_rho", [j, i])), "rho ({i},{j})");
+            assert!(close(g("prim_pre", [i, j]), g("prim_pre", [j, i])), "pre ({i},{j})");
+            assert!(close(g("prim_vel_0", [i, j]), g("prim_vel_1", [j, i])),
+                "v_x({i},{j})={} != v_y({j},{i})={}", g("prim_vel_0", [i, j]), g("prim_vel_1", [j, i]));
+        }
+    }
+}
+
+// the cartesian kerr-schild GODUNOV STAGE x<->y symmetry (design 45): the assembled integrator —
+// flux-divergence + the covariant geodesic source + the lapse densitization — on a transpose-
+// symmetric state (cons/u_n/prims symmetric, per-direction fluxes swap: F^i_{S_k}(c) <->
+// F^{swap i}_{S_swap k}(swap c)) must produce a transpose-symmetric update. isolates the stage
+// assembly from the driver (RK / ghosts / dt).
+#[test]
+fn cartesian_ks_godunov_stage_is_x_y_symmetric() {
+    use symbi_discretize::{godunov_stage_gv, GeoSource};
+    const N: usize = 4;
+    let sp = [Spacing::Uniform, Spacing::Uniform];
+    let axes = [0usize, 1];
+    let kernel = godunov_stage_gv(
+        Coords::Cartesian, Spacetime::KerrSchild, &sp, &axes, 2, 2, true,
+        GeoSource::Hydro { inertial: false },
+    );
+    // symmetric scalar fields s(i,j) and swap-paired vector/flux fields.
+    let s = |a: f64, b: f64| move |c: &[usize]| a + b * (c[0] as f64 + c[1] as f64);
+    // f(i,j) with its transpose partner g(i,j) = f(j,i).
+    let f = |a: f64, b: f64| move |c: &[usize]| a * (c[0] as f64) + b * (c[1] as f64);
+    let ft = |a: f64, b: f64| move |c: &[usize]| a * (c[1] as f64) + b * (c[0] as f64);
+
+    let out = KernelRun::new(kernel)
+        .grid([N, N])
+        .compute_window([1i32, 1], [2usize, 2])
+        // cons (current) — for the geodesic source's e = rho + nrg + pre.
+        .field_with("rho", s(1.0, 0.02)).field_with("nrg", s(3.0, 0.02))
+        .field_with("mom_0", f(0.02, 0.01)).field_with("mom_1", ft(0.02, 0.01))
+        // u_n snapshot (RK) — symmetric.
+        .field_with("u_n_rho", s(1.0, 0.02)).field_with("u_n_nrg", s(3.0, 0.02))
+        .field_with("u_n_mom_0", f(0.02, 0.01)).field_with("u_n_mom_1", ft(0.02, 0.01))
+        // prims — for the source (v swaps, rho/pre symmetric).
+        .field_with("prim_rho", s(1.0, 0.02)).field_with("pre", s(0.1, 0.01))
+        .field_with("prim_v0", f(0.01, -0.005)).field_with("prim_v1", ft(0.01, -0.005))
+        // per-direction fluxes: F^i_{S_k}. diagonal (0_0 <-> 1_1), cross (0_1 <-> 1_0).
+        .field_with("mass_flux_0", f(0.03, 0.01)).field_with("mass_flux_1", ft(0.03, 0.01))
+        .field_with("nrg_flux_0", f(0.04, 0.02)).field_with("nrg_flux_1", ft(0.04, 0.02))
+        .field_with("mom_flux_0_0", f(0.05, 0.02)).field_with("mom_flux_1_1", ft(0.05, 0.02))
+        .field_with("mom_flux_0_1", f(0.03, 0.06)).field_with("mom_flux_1_0", ft(0.03, 0.06))
+        .scalars(&[
+            ("dt", 0.01), ("a0", 0.0), ("ac", 1.0), ("mesh_hdil", 0.0),
+            ("dx_0", 0.125), ("dx_1", 0.125), ("x_lo_0", 4.0), ("x_lo_1", 4.0),
+            ("schwarzschild_mass", 1.0),
+        ])
+        .run();
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-11 * (1.0 + a.abs().max(b.abs()));
+    for (i, j) in [(1usize, 2usize), (2, 1), (1, 1), (2, 2)] {
+        let g = |n: &str, c: [usize; 2]| out.get(c, n);
+        assert!(close(g("rho", [i, j]), g("rho", [j, i])), "rho ({i},{j})");
+        assert!(close(g("nrg", [i, j]), g("nrg", [j, i])), "nrg ({i},{j})");
+        assert!(close(g("mom_0", [i, j]), g("mom_1", [j, i])),
+            "mom_x({i},{j})={} != mom_y({j},{i})={}", g("mom_0", [i, j]), g("mom_1", [j, i]));
+    }
 }

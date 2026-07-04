@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian};
 use symbi_algebra::Tensor;
 
 
@@ -74,14 +74,23 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
 /// returns `Some(alpha)` dispatched `Coords -> concrete Metric -> metric.lapse(centroid)` as a
 /// traced Gv expression in the cell coordinate (the established B1 source-dispatch pattern).
 pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centroid: &[Gv]) -> Option<Gv> {
-    let _ = coords; // the spatial coords select the concrete `Metric` impl in the GR arms.
-    match spacetime {
+    match (spacetime, coords) {
         // flat (Minkowski) lapse alpha = 1: no densitization -> the weight is ELIDED from the graph
         // (no unity multiply) -> bit-identical.
-        Spacetime::Minkowski => None,
-        // r = the radial centroid (coordinate slot 0). the schwarzschild / kerr-schild lapses
-        // are radial-only; the spinning-kerr lapse also reads the polar centroid (slot 1) through
-        // Sigma = r^2 + a^2 cos^2(theta).
+        (Spacetime::Minkowski, _) => None,
+        // cartesian kerr-schild has NO radial axis: alpha = 1/sqrt(1 + 2M/|x|) is evaluated at the
+        // FULL cartesian position (the metric computes r = |x| internally). the spherical shortcut
+        // r = coord_centroid[0] would use the x-coordinate as the radius — wrong and NOT symmetric
+        // under x <-> y.
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
+            }));
+            Some(SchwarzschildKSCartesian { mass: Gv::scalar("schwarzschild_mass") }.lapse(x))
+        }
+        // spherical charts: r = the radial centroid (coordinate slot 0). the schwarzschild /
+        // kerr-schild lapses are radial-only; the spinning-kerr lapse also reads the polar centroid
+        // (slot 1) through Sigma = r^2 + a^2 cos^2(theta).
         _ => Some(gv_metric_lapse_at(
             spacetime,
             coord_centroid[0],
