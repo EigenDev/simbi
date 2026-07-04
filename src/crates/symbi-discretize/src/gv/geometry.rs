@@ -205,6 +205,19 @@ pub(crate) fn gv_scale_factor(coords: Coords, dir: usize, pos: &[Gv]) -> Gv {
     }
 }
 
+/// the coordinate value for an UNGRIDDED metric slot `c` — the symmetry default the GR kernels fill
+/// a coordinate the grid does not resolve. spherical: the polar angle defaults to the equator
+/// (theta = pi/2, sin theta = 1); the azimuth and every cartesian / cylindrical suppressed axis
+/// default to 0. this is the SINGLE chart authority for ungridded fills — the GR flux / c2p /
+/// wave-speed / godunov position builders read it instead of inlining `None if c == 1 => pi/2`, so
+/// spherical stays bit-identical (same values) and cartesian / cylindrical fall out (all zero).
+pub(crate) fn gv_ungridded_slot(coords: Coords, c: usize) -> Gv {
+    match (coords, c) {
+        (Coords::Spherical, 1) => Gv::from_f64(std::f64::consts::FRAC_PI_2),
+        _ => Gv::ZERO,
+    }
+}
+
 
 /// per-cell PHYSICAL inverse widths `1 / (h_d * width_d)` per gridded axis — the metric-
 /// correct CFL length scale (the wave crosses the physical extent `h_d * Δcoord_d`, not the
@@ -306,12 +319,19 @@ pub fn cell_geometry_covariant_gv(
     kerr_spin: Option<Gv>,
 ) -> CellGeometryGv {
     let _ = axes;
-    assert!(
-        coords == Coords::Spherical,
-        "the covariant cell geometry is defined for the spherical GR backgrounds"
-    );
     let (lo, hi, width) = gv_faces(spacing, ndim);
-    spherical_geometry_gv(&lo, &hi, &width, ndim, Some(kerr_spin))
+    match coords {
+        // det-g-flat cartesian: alpha sqrt(gamma) = 1 = the flat cartesian coordinate volume, and
+        // there is no distinguished angular direction, so the covariant geometry IS the flat
+        // cartesian geometry (the spherical int r^2 dr angular correction has no analog).
+        Coords::Cartesian => cartesian_geometry_gv(&lo, &hi, &width, ndim),
+        // the angular (theta) face carries the covariant int r^2 dr measure, not the flat arc-length
+        // int r dr — the sole flat-vs-covariant difference (see the type doc).
+        Coords::Spherical => spherical_geometry_gv(&lo, &hi, &width, ndim, Some(kerr_spin)),
+        Coords::Cylindrical => {
+            unreachable!("covariant cell geometry: cylindrical GR lands in design 45 phase 2")
+        }
+    }
 }
 
 

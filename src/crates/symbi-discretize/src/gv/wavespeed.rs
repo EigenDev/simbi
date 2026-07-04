@@ -265,8 +265,7 @@ pub fn gr_light_cone_wave_speed_map_gv(
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => center(d),
-            None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
-            None => Gv::ZERO,
+            None => gv_ungridded_slot(coords, c),
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
@@ -468,8 +467,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => geo.centroid[d],
-            None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
-            None => Gv::ZERO,
+            None => gv_ungridded_slot(coords, c),
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");

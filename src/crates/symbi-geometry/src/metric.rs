@@ -1028,6 +1028,126 @@ impl<S: Scalar> DiagonalMetric<S, 1> for SchwarzschildKS<S> {}
 impl<S: Scalar> DiagonalMetric<S, 2> for SchwarzschildKS<S> {}
 impl<S: Scalar> DiagonalMetric<S, 3> for SchwarzschildKS<S> {}
 
+// ============================================================
+// schwarzschild in CARTESIAN kerr-schild coordinates: x = (x, y, z)
+//   the SAME physical vacuum as `Schwarzschild` / `SchwarzschildKS`, in the cartesian kerr-schild
+//   chart — horizon-penetrating and with NO polar axis (the natural chart for binary black holes and
+//   octree AMR). H = M / r, r = sqrt(x^2 + y^2 + z^2), l_i = x_i / r (the unit kerr-schild covector):
+//     gamma_ij   = delta_ij + 2H l_i l_j = delta_ij + 2M x_i x_j / r^3   (NON-diagonal: the KS null structure)
+//     alpha      = 1 / sqrt(1 + 2H)                                     (1/sqrt(2) at r = 2M; never zero)
+//     beta^i     = (2H / (1 + 2H)) l^i = 2M x_i / (r^2 (r + 2M))        (ingoing, along the radial direction)
+//     gamma^{ij} = delta_ij - (2H / (1 + 2H)) l_i l_j                   (sherman-morrison; l a unit vector)
+//     sqrt(gamma) = sqrt(1 + 2H);  alpha sqrt(gamma) = 1   (the det-g-flat identity, cartesian instance)
+//   NON-diagonal even at zero spin, so NOT a `DiagonalMetric` (the covariant/tetrad storage is required).
+//   r = |x| is rotation-generic — there are NO coordinate-role assumptions (no radial/angular axis), so
+//   the D = 2 impl is the z = 0 equatorial slice (exact for equatorially-symmetric flows) and D = 3 the
+//   full chart. reduces to flat cartesian at M = 0.
+// ============================================================
+
+/// schwarzschild in cartesian kerr-schild coordinates — horizon-penetrating, no polar axis. same
+/// geometric `mass` M and `schwarzschild_mass` kernel scalar as [`Schwarzschild`] / [`SchwarzschildKS`],
+/// differing only in the coordinate chart: a NON-diagonal `gamma_ij = delta_ij + 2M x_i x_j / r^3` and a
+/// shift `beta^i` spread along all cartesian axes. NOT a `DiagonalMetric`.
+#[derive(Debug, Clone, Copy)]
+pub struct SchwarzschildKSCartesian<S> {
+    /// the geometric mass M (units G = c = 1); the horizon is at r = 2M. CARRIER-GENERIC over `S`
+    /// (an `f64` host value or a `Gv::scalar` in the trace), exactly like [`SchwarzschildKS::mass`].
+    pub mass: S,
+}
+
+impl<S: Scalar> SchwarzschildKSCartesian<S> {
+    /// (r, 2H) at a cartesian position: r = sqrt(sum x_i^2) the euclidean/kerr-schild radius,
+    /// 2H = 2M/r. the number of gridded axes D is the slice (D = 2 -> the z = 0 equatorial plane).
+    #[inline]
+    fn radius_two_h<const D: usize>(&self, x: Tensor<S, D>) -> (S, S) {
+        let mut r2 = S::ZERO;
+        for ii in 0..D {
+            r2 = r2 + x[ii] * x[ii];
+        }
+        let r = r2.sqrt();
+        (r, S::from_f64(2.0) * self.mass / r)
+    }
+}
+
+macro_rules! impl_schwarzschild_ks_cartesian {
+    ($d:literal) => {
+        impl<S: Scalar> Metric<S, $d> for SchwarzschildKSCartesian<S> {
+            fn geometry(&self) -> Geometry { Geometry::Cartesian }
+            fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
+            fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+                vec![("schwarzschild_mass", self.mass)]
+            }
+
+            fn lapse(&self, x: Tensor<S, $d>) -> S {
+                let (_r, two_h) = self.radius_two_h(x);
+                S::ONE / (S::ONE + two_h).sqrt()
+            }
+            // alpha^2 = 1/(1 + 2M/r) in EXACT closed form (no sqrt round-trip; the GR CFL depends on it).
+            fn lapse_sq(&self, x: Tensor<S, $d>) -> S {
+                let (_r, two_h) = self.radius_two_h(x);
+                S::ONE / (S::ONE + two_h)
+            }
+            // beta^i = (2H / (1 + 2H)) l^i, l^i = x_i / r.
+            fn shift(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                let (r, two_h) = self.radius_two_h(x);
+                let s = (two_h / (S::ONE + two_h)) / r;
+                Tensor::new(std::array::from_fn(|ii| s * x[ii]))
+            }
+
+            // gamma_ij = delta_ij + (2H / r^2) x_i x_j.
+            fn spatial_metric(&self, x: Tensor<S, $d>) -> Matrix<S, $d> {
+                let (r, two_h) = self.radius_two_h(x);
+                let coef = two_h / (r * r);
+                Matrix::from_fn(|ii, jj| {
+                    let kron = if ii == jj { S::ONE } else { S::ZERO };
+                    kron + coef * x[ii] * x[jj]
+                })
+            }
+            // gamma^{ij} = delta_ij - (2H / (1 + 2H)) l^i l^j (sherman-morrison, l a unit vector).
+            fn spatial_metric_inv(&self, x: Tensor<S, $d>) -> Matrix<S, $d> {
+                let (r, two_h) = self.radius_two_h(x);
+                let coef = (two_h / (S::ONE + two_h)) / (r * r);
+                Matrix::from_fn(|ii, jj| {
+                    let kron = if ii == jj { S::ONE } else { S::ZERO };
+                    kron - coef * x[ii] * x[jj]
+                })
+            }
+            fn sqrt_det_gamma(&self, x: Tensor<S, $d>) -> S {
+                let (_r, two_h) = self.radius_two_h(x);
+                (S::ONE + two_h).sqrt()
+            }
+
+            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+        }
+    };
+}
+
+impl_schwarzschild_ks_cartesian!(2);
+impl_schwarzschild_ks_cartesian!(3);
+
+// D = 1 is degenerate (cartesian GR has no radial structure on a line); provided fail-loud so
+// generic kernel bounds `Metric<S, 1>` resolve, never reached at bake time (the cartesian GR bakes
+// are D = 2, 3). mirrors the KerrKS D = 1 stub.
+impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
+    fn geometry(&self) -> Geometry { Geometry::Cartesian }
+    fn spacetime(&self) -> Spacetime { Spacetime::KerrSchild }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass)]
+    }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+    }
+    fn spatial_metric_inv(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+    }
+    fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+    }
+}
+
 
 /// spinning Kerr in INGOING KERR-SCHILD coordinates (horizon-penetrating, spherical (r, theta,
 /// phi)). Sigma = r^2 + a^2 cos^2(theta), b = 2 M r / Sigma:
@@ -2474,6 +2594,138 @@ mod tests {
                 let v_contra = big_v / h.sqrt(); // v^r = V / sqrt(gamma_rr)
                 let tilde = v_contra - beta_r / alpha;
                 assert!(tilde < 0.0, "tilde v^r = {tilde} not ingoing at r={r}, V={big_v}");
+            }
+        }
+    }
+
+    #[test]
+    fn cartesian_ks_satisfies_the_adm_identities() {
+        // the cartesian kerr-schild block against the known ADM identities at off-axis positions,
+        // inside and outside the horizon: gamma gamma^{-1} = 1, sqrt_det^2 = det, beta_i = 2H l_i
+        // (the covariant shift = g_{0i}), g_tt = -alpha^2 + beta_i beta^i = 2H - 1, alpha finite > 0.
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-12 * (1.0 + x.abs().max(y.abs()));
+        let bh = SchwarzschildKSCartesian { mass: 1.0_f64 };
+        for &(px, py, pz) in &[(1.0_f64, 0.4, 0.7), (2.0, -1.5, 0.3), (-4.0, 3.0, 5.0), (0.9, 0.2, 0.1)] {
+            let x = Tensor::new([px, py, pz]);
+            let r = (px * px + py * py + pz * pz).sqrt();
+            let two_h = 2.0 / r;
+            let l = [px / r, py / r, pz / r];
+            let gm = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&bh, x);
+            let gi = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spatial_metric_inv(&bh, x);
+            let alpha = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::lapse(&bh, x);
+            let beta = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::shift(&bh, x);
+            // gamma gamma^{-1} = identity.
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    let acc: f64 = (0..3).map(|kk| gm[(ii, kk)] * gi[(kk, jj)]).sum();
+                    assert!(close(acc, if ii == jj { 1.0 } else { 0.0 }),
+                        "gamma inverse ({ii},{jj}) = {acc} at r={r}");
+                }
+            }
+            // beta_i = gamma_ij beta^j = 2H l_i (the covariant shift = the KS off-diagonal 4-metric).
+            let beta_low: [f64; 3] = std::array::from_fn(|ii| (0..3).map(|jj| gm[(ii, jj)] * beta[jj]).sum());
+            for ii in 0..3 {
+                assert!(close(beta_low[ii], two_h * l[ii]), "beta_low[{ii}] at r={r}");
+            }
+            // g_tt = -alpha^2 + beta_i beta^i = 2H - 1.
+            let g_tt = -alpha * alpha + (0..3).map(|ii| beta_low[ii] * beta[ii]).sum::<f64>();
+            assert!(close(g_tt, two_h - 1.0), "g_tt = {g_tt} vs {} at r={r}", two_h - 1.0);
+            // sqrt_det^2 = det gamma (det via cofactor).
+            let det = gm[(0, 0)] * (gm[(1, 1)] * gm[(2, 2)] - gm[(1, 2)] * gm[(2, 1)])
+                - gm[(0, 1)] * (gm[(1, 0)] * gm[(2, 2)] - gm[(1, 2)] * gm[(2, 0)])
+                + gm[(0, 2)] * (gm[(1, 0)] * gm[(2, 1)] - gm[(1, 1)] * gm[(2, 0)]);
+            let sq = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::sqrt_det_gamma(&bh, x);
+            assert!(close(sq * sq, det), "sqrt_det^2 = {} vs det = {det} at r={r}", sq * sq);
+            assert!(close(det, 1.0 + two_h), "det = {det} vs 1+2H at r={r}");
+            assert!(alpha > 0.0 && alpha.is_finite());
+        }
+    }
+
+    #[test]
+    fn cartesian_ks_det_g_flat_identity_is_one() {
+        // alpha sqrt(gamma) = 1 = the flat cartesian volume element (sqrt(-g) is chart-independent);
+        // the densitization seam relies on this (design 43). checked in D = 2 and D = 3.
+        let bh = SchwarzschildKSCartesian { mass: 0.8_f64 };
+        let x3 = Tensor::new([3.0_f64, -2.0, 1.5]);
+        assert!(approx(bh.lapse(x3) * bh.volume_factor(x3), 1.0));
+        let x2 = Tensor::new([3.0_f64, -2.0]);
+        assert!(approx(<SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::lapse(&bh, x2)
+            * <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::volume_factor(&bh, x2), 1.0));
+    }
+
+    #[test]
+    fn cartesian_ks_reduces_to_flat_at_zero_mass() {
+        // M = 0 -> H = 0 -> gamma = delta, alpha = 1, beta = 0: the flat cartesian metric exactly.
+        let bh = SchwarzschildKSCartesian { mass: 0.0_f64 };
+        let x = Tensor::new([2.0_f64, -3.0, 4.0]);
+        assert!(approx(bh.lapse(x), 1.0));
+        let g = bh.spatial_metric(x);
+        for ii in 0..3 {
+            assert!(approx(bh.shift(x)[ii], 0.0));
+            for jj in 0..3 {
+                assert!(approx(g[(ii, jj)], if ii == jj { 1.0 } else { 0.0 }));
+            }
+        }
+        assert!(approx(bh.sqrt_det_gamma(x), 1.0));
+        assert_eq!(<SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::geometry(&bh), Geometry::Cartesian);
+        assert_eq!(<SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spacetime(&bh), Spacetime::KerrSchild);
+    }
+
+    #[test]
+    fn cartesian_ks_matches_spherical_ks_physics_via_rotation_invariants() {
+        // the SAME physical vacuum as the spherical KS chart: the rotation-invariant scalars must
+        // agree at the same physical radius. the lapse alpha(r) is a scalar (chart-independent), and
+        // the PHYSICAL radial stretch l^i l^j gamma_ij (cartesian) equals the spherical KS gamma_rr
+        // (whose radial scale factor is 1, so gamma_rr IS the physical radial metric) = 1 + 2M/r.
+        let close = |x: f64, y: f64| (x - y).abs() < 1e-13 * (1.0 + x.abs().max(y.abs()));
+        let cart = SchwarzschildKSCartesian { mass: 1.3_f64 };
+        let sph = SchwarzschildKS { mass: 1.3_f64 };
+        for &(px, py, pz) in &[(1.0_f64, 2.0, 2.0), (5.0, 0.0, 0.0), (-3.0, 4.0, 12.0)] {
+            let xc = Tensor::new([px, py, pz]);
+            let r = (px * px + py * py + pz * pz).sqrt();
+            let xs = Tensor::new([r, FRAC_PI_4, 0.0]); // any (theta, phi): the scalars are angle-free
+            assert!(close(cart.lapse(xc),
+                <SchwarzschildKS<f64> as Metric<f64, 3>>::lapse(&sph, xs)), "lapse at r={r}");
+            let gm = cart.spatial_metric(xc);
+            let l = [px / r, py / r, pz / r];
+            let radial_stretch: f64 = (0..3).map(|ii| (0..3).map(|jj| l[ii] * gm[(ii, jj)] * l[jj]).sum::<f64>()).sum();
+            let gamma_rr = <SchwarzschildKS<f64> as Metric<f64, 3>>::spatial_metric(&sph, xs)[(0, 0)];
+            assert!(close(radial_stretch, gamma_rr), "radial stretch {radial_stretch} vs gamma_rr {gamma_rr} at r={r}");
+            assert!(close(radial_stretch, 1.0 + 2.0 * 1.3 / r), "radial stretch != 1+2M/r at r={r}");
+        }
+    }
+
+    #[test]
+    fn cartesian_ks_autodiff_derivs_match_finite_difference() {
+        // the geodesic source gets its metric derivatives from FORWARD-MODE AUTODIFF w.r.t. the
+        // CARTESIAN coordinates (one seeded axis per Dual pass). this is the load-bearing check that
+        // the covariant source works in the cartesian chart: d_k gamma_ij and d_k (lapse, shift) via
+        // Dual must equal a central finite difference of the metric's own components. off-axis so all
+        // three coordinate derivatives are nontrivial, and inside the horizon (r < 2M) too.
+        use symbi_ir::dual::Dual;
+        let dd = 1e-4;
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-5 * (1.0 + a.abs().max(b.abs()));
+        for &p in &[[1.0_f64, 0.6, 0.8], [0.7, 0.2, 0.1], [-3.0, 2.0, 4.0]] {
+            let mf = SchwarzschildKSCartesian { mass: 1.0_f64 };
+            let md = SchwarzschildKSCartesian { mass: Dual::constant(1.0_f64) };
+            for kk in 0..3 {
+                // seed axis kk (d/dx_kk = 1), the others constant.
+                let seed: Tensor<Dual<f64>, 3> = Tensor::new(std::array::from_fn(|ii| {
+                    if ii == kk { Dual::variable(p[ii]) } else { Dual::constant(p[ii]) }
+                }));
+                let fd = |f: &dyn Fn([f64; 3]) -> f64| {
+                    let mut hi = p; hi[kk] += dd;
+                    let mut lo = p; lo[kk] -= dd;
+                    (f(hi) - f(lo)) / (2.0 * dd)
+                };
+                assert!(close(md.lapse(seed).tangent, fd(&|q| mf.lapse(Tensor::new(q)))), "d_{kk} lapse at {p:?}");
+                for ii in 0..3 {
+                    assert!(close(md.shift(seed)[ii].tangent, fd(&|q| mf.shift(Tensor::new(q))[ii])), "d_{kk} shift[{ii}] at {p:?}");
+                    for jj in 0..3 {
+                        assert!(close(md.spatial_metric(seed)[(ii, jj)].tangent,
+                            fd(&|q| mf.spatial_metric(Tensor::new(q))[(ii, jj)])), "d_{kk} gamma[{ii}{jj}] at {p:?}");
+                    }
+                }
             }
         }
     }

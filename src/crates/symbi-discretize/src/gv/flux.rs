@@ -343,10 +343,7 @@ where
         } else {
             match axes.iter().position(|&a| a == c) {
                 Some(d) => geo.as_ref().expect("a transverse gridded axis implies ndim > 1").centroid[d],
-                None => {
-                    assert!(c == 2, "GR flux: only the azimuthal coordinate may be ungridded");
-                    Gv::ZERO
-                }
+                None => gv_ungridded_slot(coords, c),
             }
         }
     }));
@@ -742,8 +739,7 @@ pub fn rmhd_flux_gr_gv(
         } else {
             match axes.iter().position(|&a| a == c) {
                 Some(d) => geo.as_ref().expect("a transverse gridded axis implies ndim > 1").centroid[d],
-                None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
-                None => Gv::ZERO,
+                None => gv_ungridded_slot(coords, c),
             }
         }
     }));

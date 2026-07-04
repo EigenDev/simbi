@@ -597,13 +597,12 @@ pub fn rmhd_bcell_from_bface_gr_gv(
     for (d, &c) in axes.iter().enumerate() {
         bc_n[c] = (bf[d] + gv_field_at(&format!("bf_{d}"), &format!("bf_{d}"), ndim, &off(d))) * half;
     }
-    // the spatial metric at the volume-weighted centroid; ungridded polar slot at pi/2.
+    // the spatial metric at the volume-weighted centroid; ungridded slots at the chart default.
     let geo = cell_geometry_gv(coords, spacing, axes, ndim);
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
             Some(d) => geo.centroid[d],
-            None if c == 1 => Gv::from_f64(std::f64::consts::FRAC_PI_2),
-            None => Gv::ZERO,
+            None => gv_ungridded_slot(coords, c),
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");

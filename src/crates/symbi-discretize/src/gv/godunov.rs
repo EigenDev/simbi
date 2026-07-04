@@ -383,12 +383,11 @@ pub fn godunov_stage_gv_with_fused_built(
         Spacetime::Minkowski => None,
         _ => {
             let mass = Dual::constant(Gv::scalar("schwarzschild_mass")); // constant w.r.t. position
-            let theta = if axes.contains(&1) {
-                coord_centroid[1]
-            } else {
-                Gv::from_f64(std::f64::consts::FRAC_PI_2)
-            };
-            let x = Tensor::<Gv, 3>::new([coord_centroid[0], theta, Gv::ZERO]);
+            // coordinate-indexed metric position: each gridded coordinate at its centroid, each
+            // ungridded coordinate at its chart symmetry default (spherical polar -> pi/2, else 0).
+            let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                if axes.contains(&c) { coord_centroid[c] } else { gv_ungridded_slot(coords, c) }
+            }));
             let e = rho + Gv::field("nrg", FieldRef::cons_nrg()) + Gv::field("pre", FieldRef::PrimPre);
             let p = Gv::field("pre", FieldRef::PrimPre);
             // the CONTRAVARIANT velocity in coordinate slots (the metric-aware c2p output);
