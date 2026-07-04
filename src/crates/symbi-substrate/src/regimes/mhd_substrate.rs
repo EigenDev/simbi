@@ -600,6 +600,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     // have an empty scalar manifest. resolve BY MANIFEST so one call serves all.
     let st = spacetime_slug(sim.geom.spacetime);
     let sp = spacing_suffix(&sim.geom.maps);
+    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     // the GR EMF reads the metric mass (+ spin) and the LOG-AWARE face-position scalars.
     let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     let scalar = |bind: &ScalarBind| -> Sc {
@@ -643,13 +644,13 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             // MUB09 wave-sum EMF (the sharp Alfven-resolving one, telescopes to the coordinate B_t
             // flux); everything else -> the regime-generic HLL corner EMF.
             CtMethod::Uct if !st.is_empty() && matches!(solver, Solver::Hlld) => {
-                format!("rmhd_edge_emf_uct_hlld{sp}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf_uct_hlld{sfx}{sp}{st}_{D}d_{}", edge.name_k)
             }
             CtMethod::Uct if !st.is_empty() => {
-                format!("rmhd_edge_emf_uct{sp}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf_uct{sfx}{sp}{st}_{D}d_{}", edge.name_k)
             }
             CtMethod::Contact if !st.is_empty() => {
-                format!("rmhd_edge_emf{sp}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf{sfx}{sp}{st}_{D}d_{}", edge.name_k)
             }
             CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k),
             // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
@@ -863,7 +864,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     let bname = if !st.is_empty() {
         // the GR interpolation: the energy patch contracts through the spatial metric, and the
         // kernel's bc_ indices are PHYSICAL components (all three enter the contraction).
-        format!("rmhd_bcell_from_bface{sp}{st}_{D}d")
+        format!("rmhd_bcell_from_bface{sfx}{sp}{st}_{D}d")
     } else if has_energy {
         format!("rmhd_bcell_from_bface_{D}d")
     } else {

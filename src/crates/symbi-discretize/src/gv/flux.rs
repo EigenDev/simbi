@@ -761,16 +761,24 @@ pub fn rmhd_flux_gr_gv(
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let (gamma, gamma_inv, alpha, beta) = match spacetime {
-        Spacetime::Schwarzschild => {
+    let (gamma, gamma_inv, alpha, beta) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
-        Spacetime::KerrSchild => {
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let m = SchwarzschildKSCylindrical { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
-        Spacetime::Kerr => {
+        (Spacetime::Kerr, _) => {
             // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)
             // and a radial shift (the moving-interface fan handles it). the flux is otherwise
             // metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
@@ -778,7 +786,7 @@ pub fn rmhd_flux_gr_gv(
             let m = KerrKS { mass, spin };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
-        Spacetime::Minkowski => unreachable!("the GRMHD flux is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => unreachable!("the GRMHD flux is baked only for a curved spacetime"),
     };
     // spinning kerr: re-reconstruct the AZIMUTHAL velocity in the angular-momentum-carrying variable
     // w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so a zero-angular-momentum (S_phi = 0) dragging

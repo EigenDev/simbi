@@ -227,8 +227,9 @@ where
             // orthonormal frame, the validated flat solver runs there, and the flux maps back
             // exactly — reduces to F(U) in the smooth limit and to the SR solver at identity gamma).
             let solver = if matches!(self.solver, Solver::Hlld) { "_hlld" } else { "" };
+            let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
             let sp = spacing_suffix(&sim.geom.maps);
-            format!("{}_face_flux{solver}{sp}{st}_{D}d_{dir}", Self::kernel_prefix())
+            format!("{}_face_flux{solver}{gsfx}{sp}{st}_{D}d_{dir}", Self::kernel_prefix())
         };
         let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         let scalars = scalars_for(&flux_name, |bind| match bind {
@@ -273,9 +274,10 @@ where
             format!("{}_c2p_{D}d", Self::kernel_prefix())
         } else {
             // the metric-aware KKC recovery: gamma at the volume-weighted centroid, so the name
-            // carries the spacing + spacetime slugs and the kernel reads mass + grid scalars.
+            // carries the chart + spacing + spacetime slugs and the kernel reads mass + grid scalars.
+            let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
             let sp = spacing_suffix(&sim.geom.maps);
-            format!("{}_c2p{sp}{st}_{D}d", Self::kernel_prefix())
+            format!("{}_c2p{gsfx}{sp}{st}_{D}d", Self::kernel_prefix())
         };
         let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         // iso c2p declares no scalars -> scalars_for returns [] (resolver never called).
@@ -325,7 +327,8 @@ where
                 return;
             }
             let sp = spacing_suffix(&sim.geom.maps);
-            let wsname = format!("{}_wave_speeds_cell{sp}{st}_{D}d", Self::kernel_prefix());
+            let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+            let wsname = format!("{}_wave_speeds_cell{gsfx}{sp}{st}_{D}d", Self::kernel_prefix());
             let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
             let scalars = scalars_for(&wsname, |bind| match bind {
                 ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),

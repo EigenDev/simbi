@@ -15,7 +15,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Spacetime, Spacing};
+use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Coords, Spacetime, Spacing};
 
 const M: usize = 8;
 const R0: f64 = 3.0;
@@ -70,7 +70,7 @@ fn run_curl(st: Spacetime, b_in: &[Vec<f64>; 2], ez: &[f64], dt: f64) -> [Vec<f6
     let mut new_b: [Vec<f64>; 2] = [vec![0.0; f], vec![0.0; f]];
     for dir in 0..2usize {
         let (bvec, ezv) = (b_in[dir].clone(), ez.to_vec());
-        new_b[dir] = KernelRun::new(rmhd_ct_curl_2d_sph_gr_gv(dir, st, &[Spacing::Uniform; 2]))
+        new_b[dir] = KernelRun::new(rmhd_ct_curl_2d_sph_gr_gv(dir, st, Coords::Spherical, &[Spacing::Uniform; 2], &[0, 1]))
             .grid([M, M])
             .compute_window([0, 0], [M - 1, M - 1])
             .field_with("b", move |c| bvec[idx2(c[0], c[1])])
@@ -154,7 +154,7 @@ fn kerr_ct_curl_preserves_div_b() {
 use symbi_discretize::gv::rmhd_edge_emf_gr_gv;
 
 fn run_emf(st: Spacetime) -> Vec<f64> {
-    KernelRun::new(rmhd_edge_emf_gr_gv(st, &[Spacing::Uniform; 2]))
+    KernelRun::new(rmhd_edge_emf_gr_gv(st, Coords::Spherical, &[Spacing::Uniform; 2], &[0, 1]))
         .grid([M, M])
         .compute_window([1, 1], [M - 1, M - 1])
         .field_with("edge_vp1", |c| 0.1 * (0.2 * c[0] as f64).sin() - 0.05 * (0.15 * c[1] as f64).cos())

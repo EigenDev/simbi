@@ -484,20 +484,28 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let (gm, gm_inv, alpha, beta) = match spacetime {
-        Spacetime::Schwarzschild => {
+    let (gm, gm_inv, alpha, beta) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
             let m = Schwarzschild { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <Schwarzschild<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
-        Spacetime::KerrSchild => {
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let m = SchwarzschildKSCartesian { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let m = SchwarzschildKSCylindrical { mass };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+        (Spacetime::KerrSchild, _) => {
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
-        Spacetime::Kerr => {
+        (Spacetime::Kerr, _) => {
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
-        Spacetime::Minkowski => unreachable!("the GR cell wave speeds are baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => unreachable!("the GR cell wave speeds are baked only for a curved spacetime"),
     };
     let regime = RmhdGr { metric: SpatialMetric { gamma: gm, gamma_inv: gm_inv }, alpha };
     let mut writes = Vec::with_capacity(2 * ndim);

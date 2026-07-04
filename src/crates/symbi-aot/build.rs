@@ -1010,10 +1010,10 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 // spacing + spacetime tags like every GR kernel. GeoSource::Rmhd selects the ideal-MHD
 // stress in the covariant contraction; unfused (the geo source reads prim.mag).
 fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
-    assert!(geom.coords == Coords::Spherical && geom.spacetime != Spacetime::Minkowski);
+    assert!(geom.spacetime != Spacetime::Minkowski);
     let name = format!(
-        "rmhd_godunov_stage_sph{}{}_{ndim}d",
-        geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_godunov_stage{}{}{}_{ndim}d",
+        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
         geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim, 3, true,
@@ -1026,8 +1026,8 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
 // name mirrors the rhd GR c2p (`rmhd_c2p[_logr]{_schw|_ks}_{ndim}d`).
 fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
     let name = format!(
-        "rmhd_c2p{}{}_{ndim}d",
-        geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_c2p{}{}{}_{ndim}d",
+        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rmhd_c2p_gr_gv(
         geom.coords, geom.spacetime, &geom.spacing, &geom.axes, max_iters,
@@ -1041,8 +1041,8 @@ fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 fn gen_rmhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom, hlld: bool) {
     let solver = if hlld { "_hlld" } else { "" };
     let name = format!(
-        "rmhd_face_flux{solver}{}{}_{ndim}d_{dir}",
-        geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_face_flux{solver}{}{}{}_{ndim}d_{dir}",
+        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rmhd_flux_gr_gv(
         dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, hlld,
@@ -1252,8 +1252,8 @@ fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
 // ANY dimension; the edge/curl kernels exist only where CT edges do).
 fn gen_rmhd_bcell_from_bface_gr(out_dir: &str, ndim: u8, geom: &Geom) {
     let name = format!(
-        "rmhd_bcell_from_bface{}{}_{ndim}d",
-        geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_bcell_from_bface{}{}{}_{ndim}d",
+        mhd_geom_slug(geom), geom.spacing_suffix(), geom.spacetime_suffix()
     );
     let (k, w) = symbi_discretize::gv::rmhd_bcell_from_bface_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
@@ -1266,31 +1266,40 @@ fn gen_rmhd_bcell_from_bface_gr(out_dir: &str, ndim: u8, geom: &Geom) {
 // the GR-UCT-HLLD wave-sum edge EMF (schwarzschild only — zero shift). the per-cell shifted
 // wave speeds are shared with the HLL-UCT bake (rmhd_wave_speeds_cell); this adds only the EMF.
 fn gen_rmhd_gr_uct_hlld(out_dir: &str, geom: &Geom) {
+    let gs = mhd_geom_slug(geom);
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_gv(geom.spacetime, &geom.spacing);
-    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{sp}{st}_2d_2"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{gs}{sp}{st}_2d_2"), 2, &k, &w);
 }
 
 fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
+    let gs = mhd_geom_slug(geom);
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
     let (k, w) = symbi_discretize::gv::rmhd_wave_speeds_cell_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
-    emit_gv(out_dir, &format!("rmhd_wave_speeds_cell{sp}{st}_2d"), 2, &k, &w);
-    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_gv(geom.spacetime, &geom.spacing);
-    emit_gv(out_dir, &format!("rmhd_edge_emf_uct{sp}{st}_2d_2"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_wave_speeds_cell{gs}{sp}{st}_2d"), 2, &k, &w);
+    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+    );
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{sp}{st}_2d_2"), 2, &k, &w);
 }
 
 fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
+    let gs = mhd_geom_slug(geom);
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
-    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_gr_gv(geom.spacetime, &geom.spacing);
-    emit_gv(out_dir, &format!("rmhd_edge_emf{sp}{st}_2d_2"), 2, &k, &w);
+    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+    );
+    emit_gv(out_dir, &format!("rmhd_edge_emf{gs}{sp}{st}_2d_2"), 2, &k, &w);
     for dir in 0..2usize {
-        let (k, w) = symbi_discretize::gv::rmhd_ct_curl_2d_sph_gr_gv(dir, geom.spacetime, &geom.spacing);
-        emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph{sp}{st}"), 2, &k, &w);
+        let (k, w) = symbi_discretize::gv::rmhd_ct_curl_2d_sph_gr_gv(
+            dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+        );
+        emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}{gs}{sp}{st}"), 2, &k, &w);
     }
     gen_rmhd_bcell_from_bface_gr(out_dir, 2, geom);
 }
@@ -1696,6 +1705,25 @@ fn main() {
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
         gen_rmhd_gr_uct_hlld(&out_dir, &geom);
+    }
+    // GRMHD in the cartesian kerr-schild (x, y) plane: the spatial metric is NON-DIAGONAL
+    // (gamma_ij = delta_ij + 2H x_i x_j / r^2, H = M/r, r = |x|), so the gas flux runs the
+    // fast-magnetosonic HLLE fan (the orthonormal MUB09 HLLD wrapper assumes a diagonal spatial
+    // metric — the tetrad generalization is a follow-on) and the CT runs the contact / UCT-HLL
+    // densitized corner EMF. div(B) is preserved by the coordinate curl of the densitized EMF
+    // Etilde = sqrt(gamma) E divided by the per-face sqrt(gamma) weight (Font eq. 101), which
+    // telescopes for any weight. the covariant geodesic + EM-stress source carries the gravity.
+    for geom in [Geom::cart(2).kerr_schild()] {
+        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
+        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
+        for dir in 0..2 {
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+        }
+        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
+        gen_rmhd_ct_gr(&out_dir, &geom);
+        gen_rmhd_gr_uct(&out_dir, &geom);
     }
     // GRMHD phase C: the spinning-kerr 2D SWIRL row (sph_swirl -> DOF = 3 momentum for the frame
     // dragging). the flux runs the tetrad HLLD (non-diagonal gamma_{r phi}) + the moving-interface

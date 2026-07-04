@@ -19,7 +19,7 @@
 mod harness;
 use harness::KernelRun;
 
-use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Spacetime, Spacing};
+use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Coords, Spacetime, Spacing};
 
 const M: usize = 8; // buffer extent per axis (r, theta)
 const R0: f64 = 3.0; // outside the horizon (mass 1)
@@ -71,7 +71,9 @@ fn run_curl(b_in: &[Vec<f64>; 2], ez: &[f64], dt: f64) -> [Vec<f64>; 2] {
         let out = KernelRun::new(rmhd_ct_curl_2d_sph_gr_gv(
             dir,
             Spacetime::Schwarzschild,
+            Coords::Spherical,
             &[Spacing::Uniform; 2],
+            &[0, 1],
         ))
         .grid([M, M])
         .compute_window([0, 0], [M - 1, M - 1])

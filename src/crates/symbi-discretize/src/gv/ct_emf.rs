@@ -7,6 +7,64 @@
 use super::*;
 
 
+/// chart-generic ADM data (lapse alpha, sqrt(det gamma), full shift beta) at a world position, for
+/// the curved-spacetime CT stack. one (spacetime, coords) match selects the KS-family metric of the
+/// active chart. the shift is the FULL 3-vector: a chart with a transverse in-plane shift (cartesian
+/// carries it on every axis, cylindrical on r and z) contributes both plane components to the
+/// transport EMF; the spherical polar chart has beta only along r, so its second plane component
+/// vanishes identically and the generic form reduces to the single-shift spherical EMF.
+fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
+    use symbi_geometry::{
+        KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+        SchwarzschildKSCylindrical,
+    };
+    let mass = Gv::scalar("schwarzschild_mass");
+    macro_rules! adm {
+        ($m:expr, $ty:ty) => {{
+            let m = $m;
+            (
+                <$ty as Metric<Gv, 3>>::lapse(&m, x),
+                <$ty as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
+                <$ty as Metric<Gv, 3>>::shift(&m, x),
+            )
+        }};
+    }
+    match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => adm!(Schwarzschild { mass }, Schwarzschild<Gv>),
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            adm!(SchwarzschildKSCartesian { mass }, SchwarzschildKSCartesian<Gv>)
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            adm!(SchwarzschildKSCylindrical { mass }, SchwarzschildKSCylindrical<Gv>)
+        }
+        (Spacetime::KerrSchild, _) => adm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
+        (Spacetime::Kerr, _) => {
+            adm!(KerrKS { mass, spin: Gv::scalar("kerr_spin") }, KerrKS<Gv>)
+        }
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the GR CT stack is baked only for a curved spacetime")
+        }
+    }
+}
+
+
+/// the world position (3-vector) of a 2D CT-plane point: the two in-plane grid axes `axes = [a0, a1]`
+/// take the coordinate values `(p0, p1)`; the ungridded slot takes the chart default (the equatorial
+/// pi/2 for the spherical polar angle, zero elsewhere). one builder for every corner / face / cell
+/// metric point of the poloidal CT, so the metric reads the true world position of each chart.
+fn gr_plane_pos(coords: Coords, axes: &[usize], p0: Gv, p1: Gv) -> Tensor<Gv, 3> {
+    Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        if c == axes[0] {
+            p0
+        } else if c == axes[1] {
+            p1
+        } else {
+            gv_ungridded_slot(coords, c)
+        }
+    }))
+}
+
+
 /// the Gardiner & Stone CT-contact edge EMF (the SOFT-SIGN blend), carrier-generic at S=Gv.
 /// a pointwise function of the 4 face EMFs, 4 cell-corner
 /// EMFs, and 4 density fluxes: `s = f/(|f|+eps)`; `0.5*((a+b) + s*(a-b))`, transitions
@@ -234,22 +292,24 @@ pub fn rmhd_ct_curl_2d_sph_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec
 /// densitized field Btilde^i = sqrt(gamma) B^i with the COORDINATE curl — the form whose
 /// discrete divergence d_i Btilde^i telescopes to zero for ANY per-face constant weights —
 /// then divides back by this face's own weight `w = sqrt(gamma)(face center) x coordinate
-/// length` so the stored value stays the physical B every consumer reads:
-///   dir=0 (B_r,  r-face):     B_r  -= dt (Etilde(th_hi) - Etilde(th_lo)) / (sqrtg(r_f, th_c) dth)
-///   dir=1 (B_th, theta-face): B_th += dt (Etilde(r_hi)  - Etilde(r_lo))  / (sqrtg(r_c, th_f) dr)
-/// the signs mirror the flat spherical kernel (the same edge orientation). sqrt(gamma) comes
-/// from the metric trait at the face center, so one builder serves every KS-family chart.
-/// div preservation for a nontrivial poloidal field is pinned by
+/// length` so the stored value stays the physical B every consumer reads. with the two in-plane
+/// grid axes `axes = [a0, a1]` (spherical [r, theta], cartesian [x, y], cylindrical r-z [R, z]):
+///   dir=0 (B_a0, a0-face):  B_a0 -= dt (Etilde(a1_hi) - Etilde(a1_lo)) / (sqrtg(a0_f, a1_c) da1)
+///   dir=1 (B_a1, a1-face):  B_a1 += dt (Etilde(a0_hi) - Etilde(a0_lo)) / (sqrtg(a0_c, a1_f) da0)
+/// the signs are the 2D-curl antisymmetry (chart-independent). sqrt(gamma) comes from the metric
+/// trait at the face center via [`gr_adm_at`] / [`gr_plane_pos`], so one builder serves every
+/// KS-family chart. div preservation for a nontrivial poloidal field is pinned by
 /// tests/rmhd_ct_curl_2d_sph_gr_divb.rs (the w-weighted divergence, machine-zero).
 pub fn rmhd_ct_curl_2d_sph_gr_gv(
     dir: usize,
     spacetime: Spacetime,
+    coords: Coords,
     spacing: &[Spacing],
+    axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
     begin_trace();
     let b = Gv::field("b", "b");
-    let ez = Gv::field("ez", "ez"); // the out-of-plane DENSITIZED corner EMF Etilde_phi
+    let ez = Gv::field("ez", "ez"); // the out-of-plane DENSITIZED corner EMF Etilde
     let dt = Gv::scalar("dt");
     // positional scalar ABI mirror of the flat curl: pin [x_lo_0, dx_0, x_lo_1, dx_1] up front.
     for ax in 0..2 {
@@ -257,43 +317,25 @@ pub fn rmhd_ct_curl_2d_sph_gr_gv(
         let _ = gv_axis_face_at(ax, spacing[ax], 1);
     }
     let half = Gv::from_f64(0.5);
-    let mass = Gv::scalar("schwarzschild_mass");
-    let sqrtg = |r: Gv, th: Gv| -> Gv {
-        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
-        match spacetime {
-            Spacetime::Schwarzschild => {
-                <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&Schwarzschild { mass }, x)
-            }
-            Spacetime::KerrSchild => {
-                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&SchwarzschildKS { mass }, x)
-            }
-            Spacetime::Kerr => <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(
-                &KerrKS { mass, spin: Gv::scalar("kerr_spin") },
-                x,
-            ),
-            Spacetime::Minkowski => {
-                unreachable!("the GR curl is baked only for a curved spacetime")
-            }
-        }
-    };
+    let sqrtg = |p0: Gv, p1: Gv| -> Gv { gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, p0, p1)).1 };
     let b_new = if dir == 0 {
-        // B_r lives on the low r-face; th_lo/th_hi are the bounding corner thetas.
-        let r_f = gv_axis_face_at(0, spacing[0], 0);
-        let th_lo = gv_axis_face_at(1, spacing[1], 0);
-        let th_hi = gv_axis_face_at(1, spacing[1], 1);
-        let th_c = (th_lo + th_hi) * half;
-        let w = sqrtg(r_f, th_c) * (th_hi - th_lo);
-        let ez_thp = gv_field_at("ez", "ez", 2, &[0, 1]);
-        b - dt * (ez_thp - ez) / w
+        // B_a0 lives on the low a0-face; a1_lo/a1_hi are the bounding corners of the a1 axis.
+        let a0_f = gv_axis_face_at(0, spacing[0], 0);
+        let a1_lo = gv_axis_face_at(1, spacing[1], 0);
+        let a1_hi = gv_axis_face_at(1, spacing[1], 1);
+        let a1_c = (a1_lo + a1_hi) * half;
+        let w = sqrtg(a0_f, a1_c) * (a1_hi - a1_lo);
+        let ez_a1p = gv_field_at("ez", "ez", 2, &[0, 1]);
+        b - dt * (ez_a1p - ez) / w
     } else {
-        // B_theta lives on the low theta-face; r_lo/r_hi are the bounding corner radii.
-        let r_lo = gv_axis_face_at(0, spacing[0], 0);
-        let r_hi = gv_axis_face_at(0, spacing[0], 1);
-        let th_f = gv_axis_face_at(1, spacing[1], 0);
-        let r_c = (r_lo + r_hi) * half;
-        let w = sqrtg(r_c, th_f) * (r_hi - r_lo);
-        let ez_rp = gv_field_at("ez", "ez", 2, &[1, 0]);
-        b + dt * (ez_rp - ez) / w
+        // B_a1 lives on the low a1-face; a0_lo/a0_hi are the bounding corners of the a0 axis.
+        let a0_lo = gv_axis_face_at(0, spacing[0], 0);
+        let a0_hi = gv_axis_face_at(0, spacing[0], 1);
+        let a1_f = gv_axis_face_at(1, spacing[1], 0);
+        let a0_c = (a0_lo + a0_hi) * half;
+        let w = sqrtg(a0_c, a1_f) * (a0_hi - a0_lo);
+        let ez_a0p = gv_field_at("ez", "ez", 2, &[1, 0]);
+        b + dt * (ez_a0p - ez) / w
     };
     (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
 }
@@ -473,9 +515,10 @@ pub fn rmhd_edge_emf_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(St
 /// sqrt(gamma) measure is positive. baked per (spacetime, spacing) for the (r, theta) grid.
 pub fn rmhd_edge_emf_gr_gv(
     spacetime: Spacetime,
+    coords: Coords,
     spacing: &[Spacing],
+    axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
     begin_trace();
     let ndim = 2usize;
     let (g1, g2) = (0usize, 1usize);
@@ -496,66 +539,43 @@ pub fn rmhd_edge_emf_gr_gv(
     };
     let zero = vec![0i32; ndim];
     let half = Gv::from_f64(0.5);
-    // the thread coord is the CORNER (r_f(0), th_f(0)); cell centers/faces at integer offsets.
-    let r_f = gv_axis_face_at(0, spacing[0], 0);
-    let th_f = gv_axis_face_at(1, spacing[1], 0);
-    let r_c = |o: i64| (gv_axis_face_at(0, spacing[0], o) + gv_axis_face_at(0, spacing[0], o + 1)) * half;
-    let th_c = |o: i64| (gv_axis_face_at(1, spacing[1], o) + gv_axis_face_at(1, spacing[1], o + 1)) * half;
-    let mass = Gv::scalar("schwarzschild_mass");
-    // (alpha, sqrt(gamma), beta^r) at a point; beta^theta = 0 on every KS-family chart.
-    let adm = |r: Gv, th: Gv| -> (Gv, Gv, Gv) {
-        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
-        match spacetime {
-            Spacetime::Schwarzschild => {
-                let m = Schwarzschild { mass };
-                (
-                    <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, x),
-                    <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
-                    Gv::ZERO,
-                )
-            }
-            Spacetime::KerrSchild => {
-                let m = SchwarzschildKS { mass };
-                (
-                    <SchwarzschildKS<Gv> as Metric<Gv, 3>>::lapse(&m, x),
-                    <SchwarzschildKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
-                    <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x)[0],
-                )
-            }
-            Spacetime::Kerr => {
-                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-                (
-                    <KerrKS<Gv> as Metric<Gv, 3>>::lapse(&m, x),
-                    <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x),
-                    <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x)[0],
-                )
-            }
-            Spacetime::Minkowski => unreachable!("the GR edge EMF is baked only for a curved spacetime"),
-        }
+    // the thread coord is the CORNER (a0_f, a1_f); cell centers/faces at integer offsets.
+    let a0_f = gv_axis_face_at(0, spacing[0], 0);
+    let a1_f = gv_axis_face_at(1, spacing[1], 0);
+    let a0_c = |o: i64| (gv_axis_face_at(0, spacing[0], o) + gv_axis_face_at(0, spacing[0], o + 1)) * half;
+    let a1_c = |o: i64| (gv_axis_face_at(1, spacing[1], o) + gv_axis_face_at(1, spacing[1], o + 1)) * half;
+    // (alpha, sqrt(gamma), beta_p0, beta_p1) at an in-plane point: the transport velocity of the
+    // densitized EMF is alpha v - beta on EACH in-plane axis. beta_p0 = shift along the a0 grid axis
+    // (spherical r, cartesian x, cylindrical R), beta_p1 = shift along a1 (cartesian y, cylindrical z;
+    // identically zero on the spherical polar angle, so the spherical EMF keeps its single radial shift).
+    let adm = |p0: Gv, p1: Gv| -> (Gv, Gv, Gv, Gv) {
+        let (alpha, sqrtg, beta) = gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, p0, p1));
+        (alpha, sqrtg, beta[axes[0]], beta[axes[1]])
     };
-    // densitized cell EMF at the cell whose LOW corner offset is (o_r, o_th).
+    // densitized cell EMF at the cell whose LOW corner offset is (o_a0, o_a1). the transport EMF is
+    // sqrt(gamma) [ (alpha v_p1 - beta_p1) B_p0 - (alpha v_p0 - beta_p0) B_p1 ].
     let cell = |o: &[i32]| -> Gv {
-        let (alpha, sqrtg, beta_r) = adm(r_c(o[0] as i64), th_c(o[1] as i64));
+        let (alpha, sqrtg, beta_p0, beta_p1) = adm(a0_c(o[0] as i64), a1_c(o[1] as i64));
         let vp1 = gv_field_at("edge_vp1", "vel_p1", ndim, o);
         let vp2 = gv_field_at("edge_vp2", "vel_p2", ndim, o);
         let bp1 = gv_field_at("edge_bp1", "bcell_p1", ndim, o);
         let bp2 = gv_field_at("edge_bp2", "bcell_p2", ndim, o);
-        sqrtg * ((alpha * vp2) * bp1 - (alpha * vp1 - beta_r) * bp2)
+        sqrtg * ((alpha * vp2 - beta_p1) * bp1 - (alpha * vp1 - beta_p0) * bp2)
     };
     let ene = cell(&zero);
     let enw = cell(&cm(&[g1]));
     let ese = cell(&cm(&[g2]));
     let esw = cell(&cm(&[g1, g2]));
-    // densitized face EMFs: the r-face fluxes (bflux_a, at (r_f, th_c)) and the theta-face
-    // fluxes (bflux_b, at (r_c, th_f)), each times alpha sqrt(gamma) at its own face point.
-    let asg = |r: Gv, th: Gv| -> Gv {
-        let (alpha, sqrtg, _) = adm(r, th);
+    // densitized face EMFs: the a0-face fluxes (bflux_a, at (a0_f, a1_c)) and the a1-face fluxes
+    // (bflux_b, at (a0_c, a1_f)), each times alpha sqrt(gamma) at its own face point.
+    let asg = |p0: Gv, p1: Gv| -> Gv {
+        let (alpha, sqrtg, ..) = adm(p0, p1);
         alpha * sqrtg
     };
-    let en = Gv::ZERO - asg(r_f, th_c(0)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &zero);
-    let es = Gv::ZERO - asg(r_f, th_c(-1)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &cm(&[g2]));
-    let ee = asg(r_c(0), th_f) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &zero);
-    let ew = asg(r_c(-1), th_f) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &cm(&[g1]));
+    let en = Gv::ZERO - asg(a0_f, a1_c(0)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &zero);
+    let es = Gv::ZERO - asg(a0_f, a1_c(-1)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &cm(&[g2]));
+    let ee = asg(a0_c(0), a1_f) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &zero);
+    let ew = asg(a0_c(-1), a1_f) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &cm(&[g1]));
     let fnf = gv_field_at("edge_fden_p1", "fden_p1", ndim, &zero);
     let fs = gv_field_at("edge_fden_p1", "fden_p1", ndim, &cm(&[g2]));
     let fe = gv_field_at("edge_fden_p2", "fden_p2", ndim, &zero);
@@ -579,7 +599,10 @@ pub fn rmhd_bcell_from_bface_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
+    use symbi_geometry::{
+        KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+        SchwarzschildKSCylindrical,
+    };
     begin_trace();
     let ndim = axes.len();
     let half = Gv::from_f64(0.5);
@@ -606,18 +629,24 @@ pub fn rmhd_bcell_from_bface_gr_gv(
         }
     }));
     let mass = Gv::scalar("schwarzschild_mass");
-    let gm = match spacetime {
-        Spacetime::Schwarzschild => {
+    let gm = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
             <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric(&Schwarzschild { mass }, x)
         }
-        Spacetime::KerrSchild => {
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::spatial_metric(&SchwarzschildKSCartesian { mass }, x)
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::spatial_metric(&SchwarzschildKSCylindrical { mass }, x)
+        }
+        (Spacetime::KerrSchild, _) => {
             <SchwarzschildKS<Gv> as Metric<Gv, 3>>::spatial_metric(&SchwarzschildKS { mass }, x)
         }
-        Spacetime::Kerr => <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
+        (Spacetime::Kerr, _) => <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
             &KerrKS { mass, spin: Gv::scalar("kerr_spin") },
             x,
         ),
-        Spacetime::Minkowski => unreachable!("the GR interpolation is baked only for a curved spacetime"),
+        (Spacetime::Minkowski, _) => unreachable!("the GR interpolation is baked only for a curved spacetime"),
     };
     let bsq = |v: &[Gv]| -> Gv {
         let mut s = Gv::ZERO;
@@ -803,9 +832,10 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec
 /// 1, beta = 0. baked per (spacetime, spacing).
 pub fn rmhd_edge_emf_uct_gr_gv(
     spacetime: Spacetime,
+    coords: Coords,
     spacing: &[Spacing],
+    axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS};
     begin_trace();
     let ndim = 2usize;
     let (g1, g2) = (0usize, 1usize);
@@ -856,41 +886,14 @@ pub fn rmhd_edge_emf_uct_gr_gv(
     let eps = Gv::from_f64(1.0e-30);
     let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
     let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
-    // the transport velocity at the corner: vtilde = alpha v - beta (beta^theta = 0). the metric
-    // at the corner (r_f, th_f) also densitizes the whole EMF below.
-    let r_f = gv_axis_face_at(0, spacing[0], 0);
-    let th_f = gv_axis_face_at(1, spacing[1], 0);
-    let xc = Tensor::<Gv, 3>::new([r_f, th_f, Gv::ZERO]);
-    let mass = Gv::scalar("schwarzschild_mass");
-    let (alpha_c, sqrtg_c, beta_r_c) = match spacetime {
-        Spacetime::Schwarzschild => {
-            let m = Schwarzschild { mass };
-            (
-                <Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, xc),
-                <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, xc),
-                Gv::ZERO,
-            )
-        }
-        Spacetime::KerrSchild => {
-            let m = SchwarzschildKS { mass };
-            (
-                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::lapse(&m, xc),
-                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, xc),
-                <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, xc)[0],
-            )
-        }
-        Spacetime::Kerr => {
-            let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-            (
-                <KerrKS<Gv> as Metric<Gv, 3>>::lapse(&m, xc),
-                <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, xc),
-                <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, xc)[0],
-            )
-        }
-        Spacetime::Minkowski => unreachable!("the GR-UCT EMF is baked only for a curved spacetime"),
-    };
-    let vtilde_r = alpha_c * vbar_x - beta_r_c;
-    let vtilde_th = alpha_c * vbar_y;
+    // the transport velocity at the corner: vtilde = alpha v - beta on EACH in-plane axis (beta_p1
+    // vanishes on the spherical polar angle but not on cartesian y / cylindrical z). the metric at
+    // the corner (a0_f, a1_f) also densitizes the whole EMF below.
+    let a0_f = gv_axis_face_at(0, spacing[0], 0);
+    let a1_f = gv_axis_face_at(1, spacing[1], 0);
+    let (alpha_c, sqrtg_c, beta_c) = gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, a0_f, a1_f));
+    let vtilde_r = alpha_c * vbar_x - beta_c[axes[0]];
+    let vtilde_th = alpha_c * vbar_y - beta_c[axes[1]];
     let theta = Gv::scalar("theta");
     let recon = |key: &str, rt: &str, base: &[i32], axis: usize, sign: f64| -> Gv {
         let off = |d: i32| -> Vec<i32> { let mut o = base.to_vec(); o[axis] += d; o };

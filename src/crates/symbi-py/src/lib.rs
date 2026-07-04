@@ -3148,6 +3148,15 @@ macro_rules! mhd_dispatch {
                     KerrKS { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin }, KerrKS<f64>
                 )
             }
+            // the 2D cartesian (x, y) GRMHD row (design 45): the NON-DIAGONAL kerr-schild spatial
+            // metric selects the fast-magnetosonic HLLE gas flux + the contact / UCT-HLL densitized
+            // CT (the orthonormal HLLD wrapper needs a diagonal metric — a tetrad follow-on). the
+            // covariant geodesic + EM-stress source carries the gravity.
+            (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
+                SchwarzschildKSCartesian<f64>
+            ),
             (1, "cartesian") => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian
             ),
