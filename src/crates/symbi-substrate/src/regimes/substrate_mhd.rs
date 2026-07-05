@@ -34,13 +34,13 @@ use crate::kernels::support::cfl_from_lambda;
 use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
-    dispatch_driven_boundaries, dispatch_named, dispatch_runtime_source, geom_scalar,
-    kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for,
+    dispatch_driven_boundaries, dispatch_fields_each, dispatch_named, dispatch_runtime_source, geom_scalar,
+    kernel_field_binds, kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for,
     spacetime_slug, spacing_suffix, RegimeKind, RuntimeSource, ScalarBind, Solver,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::substrate_seam::KernelSet;
-use symbi_sim::state::FieldStore;
+use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 use symbi_sim::state::CtMethod;
 
 /// the per-coordinate metric scale factor `h` (in f64): the
@@ -202,14 +202,17 @@ where
     }
 }
 
-impl<R, Mem, Sc, const D: usize> KernelSet<D, 3, Mem, Sc>
-    for MhdSubstrateKernelSet<R, Mem, Sc, D>
+impl<R, Mem, Sc, const D: usize> MhdSubstrateKernelSet<R, Mem, Sc, D>
 where
     R: Regime<Sc, D>,
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    fn flux(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize) {
+    /// the flux sweep, parameterized by the flat solver suffix, the GR HLLD toggle, and the slope
+    /// limiter `theta` — so FOFC can re-run it at FIRST ORDER (HLLE + theta = 0) through the same
+    /// code path the production sweep uses. the production `flux` calls this with the configured
+    /// solver + `self.theta`.
+    fn flux_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize, flat_suffix: &str, gr_solver: &str, theta: f64) {
         // face domain extended +1 on the sweep hi + 1 on each transverse axis (CT corners).
         let mut face = sim.geom.interior.extend(dir, 0, 1);
         for ax in 0..D {
@@ -220,36 +223,26 @@ where
         let st = spacetime_slug(sim.geom.spacetime);
         let flux_name = if st.is_empty() {
             let gsfx = mhd_flux_suffix(sim.geom.coords, &sim.geom.axes);
-            format!("{}_face_flux{gsfx}{}_{D}d_{dir}", Self::kernel_prefix(), self.solver.kernel_suffix())
+            format!("{}_face_flux{gsfx}{flat_suffix}_{D}d_{dir}", Self::kernel_prefix())
         } else {
-            // the metric-aware valencia flux (RmhdGr). HLLE = the fast-magnetosonic-bound fan;
-            // HLLD = the ORTHONORMAL-frame MUB09 fan (the diagonal spatial metric maps to the local
-            // orthonormal frame, the validated flat solver runs there, and the flux maps back
-            // exactly — reduces to F(U) in the smooth limit and to the SR solver at identity gamma).
-            let solver = if matches!(self.solver, Solver::Hlld) { "_hlld" } else { "" };
+            // the metric-aware valencia flux (RmhdGr). "" = HLLE, "_hlld" = tetrad MUB09, "_rusanov"
+            // = the light-cone Lax-Friedrichs fan (the FOFC first-order fallback).
+            let solver = gr_solver;
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
             let sp = spacing_suffix(&sim.geom.maps);
             format!("{}_face_flux{solver}{gsfx}{sp}{st}_{D}d_{dir}", Self::kernel_prefix())
         };
         let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         let scalars = scalars_for(&flux_name, |bind| match bind {
-            // gamma (energy regimes) and cs (isothermal) are the EOS param's two names.
-            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => {
-                Sc::from_f64(self.eos_param)
-            }
-            ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(self.theta),
-            // the GR flux reads the metric mass + the LOG-AWARE face-position scalars.
+            ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),
+            ScalarBind::Ref(ScalarRef::Theta) => Sc::from_f64(theta),
             ScalarBind::Ref(ScalarRef::SchwarzschildMass) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
-                    .find(|(n, _)| n == "schwarzschild_mass")
-                    .map(|(_, v)| *v)
-                    .expect("GR MHD flux needs schwarzschild_mass"),
+                sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "schwarzschild_mass")
+                    .map(|(_, v)| *v).expect("GR MHD flux needs schwarzschild_mass"),
             ),
             ScalarBind::Ref(ScalarRef::KerrSpin) => Sc::from_f64(
-                sim.geom.spacetime_scalars.iter()
-                    .find(|(n, _)| n == "kerr_spin")
-                    .map(|(_, v)| *v)
-                    .expect("GR MHD flux needs kerr_spin"),
+                sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin")
+                    .map(|(_, v)| *v).expect("GR MHD flux needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
                 geom_scalar(&x_lo_k, &dx_k, *other)
@@ -257,15 +250,134 @@ where
             ),
             o => panic!("{} flux: unexpected scalar {o:?}", Self::kernel_prefix()),
         });
-        // bind BY MANIFEST: the staggered `bface_n` (-> bface[dir]) and the per-axis wave speeds
-        // resolve through the typed `resolve_path` like every cell field, and the per-buffer
-        // dispatch layout binds bface with its OWN (staggered) domain. no hand-ordered list.
         let pre_bind = if R::SPEC.has_energy {
             sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
         dispatch_named(sim, pre_bind, None, dir, &flux_name, &face, &[], &scalars);
+    }
+
+    /// FIRST-ORDER FLUX CORRECTION (see the trait doc). the flow: snapshot the high-order cons+prim
+    /// into `u_fofc`/`prim_fofc`; restore `cons <- u_stage` and c2p so the redo reconstructs from the
+    /// PHYSICAL stage-input state; re-flux at HLLE + theta = 0 -> re-godunov -> re-c2p (the first-order
+    /// update, in place on cons/prim); then select `physical(prim_fofc) ? high_order : first_order`
+    /// per cell. B / CT are untouched (the gas conserved is corrected, div(B) preserved). v1 runs
+    /// unconditionally; the host-gate on a failure reduction is a perf overlay added on top.
+    fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        // (1) snapshot the HIGH-ORDER cons+prim -> u_fofc/prim_fofc (whole domain, ghosts too, so the
+        //     first-order reconstruction has valid ghost inputs).
+        self.fofc_copy(sim, "snap", true,
+            (&sim.fields.cons, &sim.fields.prim), (&sim.workspace.u_fofc, &sim.workspace.prim_fofc));
+        // (2) restore cons <- u_stage (cons only): the redo reconstructs from the PHYSICAL stage input.
+        self.fofc_copy(sim, "restore", false,
+            (&sim.workspace.u_stage, &sim.fields.prim), (&sim.fields.cons, &sim.fields.prim));
+        // (3) prim <- c2p(stage-input cons); (4) re-flux at first order (light-cone Rusanov, theta = 0
+        //     -> admissibility-preserving); (5) re-godunov; (6) re-c2p.
+        self.c2p(sim);
+        for dir in 0..D {
+            self.flux_impl(sim, dir, "", "_rusanov", 0.0);
+        }
+        self.godunov_stage(sim, dt, a0, ac);
+        if self.has_additive_source() {
+            self.source_apply(sim, ac * dt);
+        }
+        self.c2p(sim);
+        // (7) select physical(prim_fofc high-order) ? high-order : first-order, over the interior.
+        self.fofc_select(sim);
+    }
+
+    /// component field for a FOFC copy/select slot name (`den`/`mom_k`/`nrg`/`rho`/`vel_k`/`pre`).
+    fn fofc_comp<'a>(
+        cons: &'a ConsFieldsGeneric<D, 3, Mem, Sc>,
+        prim: &'a PrimFieldsGeneric<D, 3, Mem, Sc>,
+        name: &str,
+    ) -> &'a Field<Sc, D, Mem> {
+        match name {
+            "den" => &cons.den,
+            "nrg" => cons.nrg_field().expect("fofc: energy field"),
+            "rho" => &prim.rho,
+            "pre" => prim.pre_field().expect("fofc: pressure field"),
+            s if s.starts_with("mom_") => &cons.mom[s[4..].parse::<usize>().unwrap()],
+            s if s.starts_with("vel_") => &prim.vel[s[4..].parse::<usize>().unwrap()],
+            o => panic!("fofc_comp: unknown component '{o}'"),
+        }
+    }
+
+    /// dispatch the componentwise FOFC copy kernel `{prefix}_fofc_{tag}_{D}d` (src `s_*` -> dst `d_*`).
+    fn fofc_copy(
+        &self,
+        sim: &FieldStore<D, 3, Mem, Sc>,
+        tag: &str,
+        include_prim: bool,
+        src: (&ConsFieldsGeneric<D, 3, Mem, Sc>, &PrimFieldsGeneric<D, 3, Mem, Sc>),
+        dst: (&ConsFieldsGeneric<D, 3, Mem, Sc>, &PrimFieldsGeneric<D, 3, Mem, Sc>),
+    ) {
+        let _ = include_prim;
+        let name = format!("{}_fofc_{tag}_{D}d", Self::kernel_prefix());
+        let slot = |s: &str| -> &Field<Sc, D, Mem> {
+            let comp = &s[2..]; // strip "s_" / "d_"
+            if s.starts_with("s_") {
+                Self::fofc_comp(src.0, src.1, comp)
+            } else {
+                Self::fofc_comp(dst.0, dst.1, comp)
+            }
+        };
+        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        for (bind, is_out) in kernel_field_binds(&name).iter() {
+            let fld = slot(&bind.name());
+            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        }
+        dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.allocated, &inputs, &outputs, &[], &[]);
+    }
+
+    /// dispatch the FOFC select kernel `{prefix}_fofc_select_{D}d`: `physical(ho_prim) ? ho : fo`, with
+    /// `ho_*` = the high-order snapshot (u_fofc/prim_fofc), `fo_*` = out_* = the live cons/prim (the
+    /// first-order redo, corrected in place), over the interior.
+    fn fofc_select(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        let name = format!("{}_fofc_select_{D}d", Self::kernel_prefix());
+        let (u_fofc, prim_fofc) = (&sim.workspace.u_fofc, &sim.workspace.prim_fofc);
+        let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
+        let slot = |s: &str| -> &Field<Sc, D, Mem> {
+            if let Some(c) = s.strip_prefix("ho_") {
+                Self::fofc_comp(u_fofc, prim_fofc, c)
+            } else if let Some(c) = s.strip_prefix("x_") {
+                // the in-place cons/prim: read (first-order) + write (select result), one binding.
+                Self::fofc_comp(cons, prim, c)
+            } else {
+                panic!("fofc_select: unknown slot '{s}'")
+            }
+        };
+        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        for (bind, is_out) in kernel_field_binds(&name).iter() {
+            let fld = slot(&bind.name());
+            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        }
+        dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
+    }
+}
+
+impl<R, Mem, Sc, const D: usize> KernelSet<D, 3, Mem, Sc>
+    for MhdSubstrateKernelSet<R, Mem, Sc, D>
+where
+    R: Regime<Sc, D>,
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    fn flux(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize) {
+        // the production sweep: the configured solver + slope limiter.
+        let gr_solver = if matches!(self.solver, Solver::Hlld) { "_hlld" } else { "" };
+        self.flux_impl(sim, dir, self.solver.kernel_suffix(), gr_solver, self.theta);
+    }
+
+    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        self.fofc_impl(sim, dt, a0, ac);
+    }
+
+    fn fofc_active(&self) -> bool {
+        true
     }
 
     fn c2p(&self, sim: &FieldStore<D, 3, Mem, Sc>) {

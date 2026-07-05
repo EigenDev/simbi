@@ -32,6 +32,38 @@ pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, Fi
 }
 
 
+/// a componentwise field copy for the FOFC scratch: `dst = src` over the gas conserved
+/// (den, mom[k], nrg?) and, when `include_prim`, the primitive (rho, vel[k], pre?). used to (a)
+/// snapshot the high-order cons+prim into `u_fofc`/`prim_fofc` before the substage is redone at
+/// first order, and (b) restore `cons <- u_stage` (cons only) so the redo reconstructs from the
+/// physical stage-input state. explicit-field dispatch: slots `s_*` (source) -> `d_*` (dest).
+pub fn fofc_copy_gv(ncomp: usize, has_energy: bool, include_prim: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut cp = |name: &str| {
+        let v = Gv::field(&format!("s_{name}"), &format!("s_{name}"));
+        writes.push((format!("d_{name}"), format!("d_{name}").into(), v.node()));
+    };
+    cp("den");
+    for k in 0..ncomp {
+        cp(&format!("mom_{k}"));
+    }
+    if has_energy {
+        cp("nrg");
+    }
+    if include_prim {
+        cp("rho");
+        for k in 0..ncomp {
+            cp(&format!("vel_{k}"));
+        }
+        if has_energy {
+            cp("pre");
+        }
+    }
+    (end_trace(), writes)
+}
+
+
 /// the FIRST-ORDER FLUX-CORRECTION select: `out = physical(ho_prim) ? ho : fo`, componentwise over
 /// the gas conserved (den, mom[k], nrg?) and primitive (rho, vel[k], pre?). the high-order state
 /// `ho_*` is the snapshot taken before the substage was redone at first order; `fo_*` is the redone
@@ -48,33 +80,33 @@ pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String,
         Some(p) => ho_rho.cmp_gt(Gv::ZERO) & p.cmp_gt(Gv::ZERO),
         None => ho_rho.cmp_gt(Gv::ZERO),
     };
-    let sel = |ho: Gv, fo: Gv| Gv::select(physical, ho, fo);
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
-    // conserved: den, mom[k], nrg?
+    // the live cons/prim (`x_*`) is read+write IN PLACE: it currently holds the FIRST-ORDER result,
+    // and is overwritten with the high-order snapshot (`ho_*`) where the high-order c2p was physical.
+    // one slot per component (read path == write path) so the IR dedups it to a single in-place
+    // binding (the CT-`b` pattern) — no input/output aliasing.
+    let mut sel_inplace = |comp: &str, ho: Gv| {
+        let path = format!("x_{comp}");
+        let x = Gv::field(&path, &path);
+        writes.push((path.clone(), path.into(), Gv::select(physical, ho, x).node()));
+    };
     let ho_den = Gv::field("ho_den", "ho_den");
-    let fo_den = Gv::field("fo_den", "fo_den");
-    writes.push(("out_den".to_string(), "out_den".into(), sel(ho_den, fo_den).node()));
+    sel_inplace("den", ho_den);
     for k in 0..ncomp {
         let ho = Gv::field(&format!("ho_mom_{k}"), &format!("ho_mom_{k}"));
-        let fo = Gv::field(&format!("fo_mom_{k}"), &format!("fo_mom_{k}"));
-        writes.push((format!("out_mom_{k}"), format!("out_mom_{k}").into(), sel(ho, fo).node()));
+        sel_inplace(&format!("mom_{k}"), ho);
     }
     if has_energy {
         let ho = Gv::field("ho_nrg", "ho_nrg");
-        let fo = Gv::field("fo_nrg", "fo_nrg");
-        writes.push(("out_nrg".to_string(), "out_nrg".into(), sel(ho, fo).node()));
+        sel_inplace("nrg", ho);
     }
-    // primitive: rho, vel[k], pre?
-    let fo_rho = Gv::field("fo_rho", "fo_rho");
-    writes.push(("out_rho".to_string(), "out_rho".into(), sel(ho_rho, fo_rho).node()));
+    sel_inplace("rho", ho_rho);
     for k in 0..ncomp {
         let ho = Gv::field(&format!("ho_vel_{k}"), &format!("ho_vel_{k}"));
-        let fo = Gv::field(&format!("fo_vel_{k}"), &format!("fo_vel_{k}"));
-        writes.push((format!("out_vel_{k}"), format!("out_vel_{k}").into(), sel(ho, fo).node()));
+        sel_inplace(&format!("vel_{k}"), ho);
     }
     if let Some(ho) = ho_pre {
-        let fo = Gv::field("fo_pre", "fo_pre");
-        writes.push(("out_pre".to_string(), "out_pre".into(), sel(ho, fo).node()));
+        sel_inplace("pre", ho);
     }
     (end_trace(), writes)
 }

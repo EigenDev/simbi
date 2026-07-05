@@ -63,6 +63,21 @@ where
     fn ghost_fill(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
     fn snapshot(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>);
 
+    /// FIRST-ORDER FLUX CORRECTION, run per RK substage AFTER c2p: any zone whose high-order c2p
+    /// went unphysical (p <= 0, rho <= 0, NaN) is redone with first-order (PCM + HLLE) fluxes
+    /// reconstructed from the PHYSICAL stage-input state (`u_stage`), and the sharp high-order state
+    /// is kept everywhere else. a floor-free robustness layer: cells the sharp scheme cannot recover
+    /// fall back to the diffusive-but-robust first-order update, not to a pressure floor. host-gated
+    /// on a failure reduction, so a clean substage pays only the scan. default: no-op.
+    fn fofc(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _a0: f64, _ac: f64) {}
+
+    /// whether this kernel set runs FOFC (`fofc` is non-trivial). when true the driver also takes the
+    /// per-stage `u_stage` snapshot every substage (FOFC restores `cons <- u_stage` to reconstruct the
+    /// first-order fluxes from the physical stage input). default: false.
+    fn fofc_active(&self) -> bool {
+        false
+    }
+
     /// post-godunov hook (e.g., constrained transport for MHD). default: no-op.
     fn post_godunov(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64, _stage: u8) {}
 

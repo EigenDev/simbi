@@ -712,6 +712,7 @@ pub fn rmhd_flux_gr_gv(
     spacing: &[Spacing],
     axes: &[usize],
     hlld: bool,
+    rusanov: bool,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let ndim = axes.len();
@@ -828,7 +829,17 @@ pub fn rmhd_flux_gr_gv(
         (left, right)
     };
     let regime = RmhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
-    let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
+    // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
+    // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
+    // applied by the has_shift fan below). this is the provably admissibility-preserving low-order
+    // scheme: unlike the state-dependent extremal speeds, it cannot under-bound near the boundary of
+    // the physical set, so the update keeps the conserved state inside the physical cone.
+    let (s_l, s_r) = if rusanov {
+        let lam = alpha * regime.metric.gamma_inv[(coord_n, coord_n)].sqrt();
+        (Gv::ZERO - lam, lam)
+    } else {
+        regime.extremal_speeds(&eos, &left, &right, &nhat)
+    };
     let has_shift = matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr);
     // GR HLLD (the ORTHONORMAL-frame MUB09 fan): the spatial metric maps (via the tetrad) to the
     // local orthonormal frame where the validated flat solver runs, and the intercell flux maps back
@@ -837,7 +848,7 @@ pub fn rmhd_flux_gr_gv(
     // F* - (beta^n/alpha) U* (the godunov re-applies alpha). the induction equation carries one more
     // shift term, the transpose +(beta^i/alpha) B^n; B^n is single-valued at the face, so it is a
     // constant added to the magnetic flux after the fan (identical to adding it to both sides).
-    if hlld {
+    if hlld && !rusanov {
         let w = if has_shift { beta[coord_n] / alpha } else { Gv::ZERO };
         let mut flux = hlld_rmhd_gr_ortho(&eos, &left, &right, coord_n, w, &regime.metric);
         if has_shift {

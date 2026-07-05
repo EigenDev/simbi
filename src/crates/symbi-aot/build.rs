@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    snapshot_gv, fofc_copy_gv, fofc_select_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -700,6 +700,18 @@ fn gen_snapshot(out_dir: &str, ndim: u8, prefix: &str, has_energy: bool, geom: G
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the first-order flux-correction copies + select (pointwise, geometry-independent): the substage
+// snapshot (cons+prim), the stage-input restore (cons only), and the physical(HO) ? HO : FO select.
+// ncomp = 3 for MHD (the 3-vector momentum). one triple per (regime prefix, has_energy, ndim).
+fn gen_fofc(out_dir: &str, ndim: u8, prefix: &str, ncomp: usize, has_energy: bool) {
+    let (k, w) = fofc_copy_gv(ncomp, has_energy, true);
+    emit_gv(out_dir, &format!("{prefix}_fofc_snap_{ndim}d"), ndim, &k, &w);
+    let (k, w) = fofc_copy_gv(ncomp, has_energy, false);
+    emit_gv(out_dir, &format!("{prefix}_fofc_restore_{ndim}d"), ndim, &k, &w);
+    let (k, w) = fofc_select_gv(ncomp, has_energy);
+    emit_gv(out_dir, &format!("{prefix}_fofc_select_{ndim}d"), ndim, &k, &w);
+}
+
 // the GEOMETRY-DEPENDENT hydro kernels for ALL THREE EOS regimes (iso / adiabatic /
 // rhd) at one (ndim, Geom): the one godunov-stage kernel (area-weighted divergence +
 // the regime-shared `GeoSource::Hydro` geometric source — pressure hoop + inertial
@@ -1039,13 +1051,19 @@ fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 // five-wave fan (Schwarzschild only — zero shift); false is the fast-magnetosonic-bound HLLE
 // fan (+ the kerr-schild shifted fan with the induction transpose). solver slug after face_flux.
 fn gen_rmhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom, hlld: bool) {
-    let solver = if hlld { "_hlld" } else { "" };
+    gen_rmhd_face_flux_gr_mode(out_dir, ndim, dir, geom, hlld, false);
+}
+
+// the GRMHD face flux (`hlld` / HLLE / `rusanov`). RUSANOV = the light-cone Lax-Friedrichs fan, the
+// FOFC first-order fallback (state-independent maximal speed -> admissibility-preserving).
+fn gen_rmhd_face_flux_gr_mode(out_dir: &str, ndim: u8, dir: u8, geom: Geom, hlld: bool, rusanov: bool) {
+    let solver = if rusanov { "_rusanov" } else if hlld { "_hlld" } else { "" };
     let name = format!(
         "rmhd_face_flux{solver}{}{}{}_{ndim}d_{dir}",
         mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rmhd_flux_gr_gv(
-        dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, hlld,
+        dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, hlld, rusanov,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
@@ -1692,6 +1710,7 @@ fn main() {
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 1, 100, geom.clone());
         gen_rmhd_face_flux_gr(&out_dir, 1, 0, geom.clone(), false);
+        gen_rmhd_face_flux_gr_mode(&out_dir, 1, 0, geom.clone(), false, true); // FOFC rusanov fallback
         // the orthonormal-frame MUB09 HLLD gas flux: schwarzschild (zero shift) and kerr-schild
         // (the shift rides the fan as the moving-interface speed beta^r/alpha). spinning kerr is
         // rejected in the flux match itself (dragging-consistent reconstruction, phase C).
@@ -1710,6 +1729,7 @@ fn main() {
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
             // the metric-generalized MUB09 HLLD gas flux (schwarzschild, zero shift).
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
         }
@@ -1732,6 +1752,7 @@ fn main() {
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
             // the tetrad-frame MUB09 HLLD gas flux: orthonormal_basis(dir) is the full Gram-Schmidt
             // triad of the NON-DIAGONAL cartesian gamma, so the validated flat solver runs in the
             // frame and the intercell flux maps back with the single normal factor E_dd (+ the
@@ -1761,6 +1782,7 @@ fn main() {
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
             // the tetrad-frame MUB09 HLLD gas flux: orthonormal_basis(dir) orthonormalizes the disk's
             // diagonal gamma and the (R, z) plane's NON-DIAGONAL gamma_Rz alike; the flux maps back
             // with the normal factor E_dd (+ the kerr-schild shift + induction transpose).
@@ -1786,6 +1808,7 @@ fn main() {
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
         }
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
@@ -1999,6 +2022,14 @@ fn main() {
         gen_mhd_godunov_and_bcell(&out_dir, "rmhd", geom, "rk2");
     }
     gen_snapshot(&out_dir, 3, "rmhd", true, Geom::cart(3));
+    // first-order flux-correction copies + select for every MHD regime x dimension (the MHD
+    // substrate runs FOFC after c2p; ncomp = 3 for the 3-vector momentum). pointwise, so one triple
+    // per (prefix, has_energy, ndim) covers every chart.
+    for ndim in 1u8..=3 {
+        gen_fofc(&out_dir, ndim, "rmhd", 3, true);
+        gen_fofc(&out_dir, ndim, "nmhd", 3, true);
+        gen_fofc(&out_dir, ndim, "imhd", 3, false);
+    }
     // Isothermal MHD (Mignone 2007): the no-energy regime. c2p (rho, v_k only) + HLLE/HLLD
     // flux (D, S_k, B_k) + CFL map mirror NMHD; the CT stack is shared (Faraday induction is
     // regime-agnostic). gas stage carries no energy (has_energy=false).
