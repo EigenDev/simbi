@@ -283,8 +283,12 @@ where
             self.source_apply(sim, ac * dt);
         }
         self.c2p(sim);
-        // (7) select physical(prim_fofc high-order) ? high-order : first-order, over the interior.
+        // (7) select the conserved per zone: high-order if physical, else first-order if physical,
+        //     else FREEZE to the stage-input u_stage (over the interior). (8) re-derive the primitive
+        //     from the selected conserved — the frozen zones carry admissible u_stage, so c2p
+        //     converges; the first-order and high-order zones re-recover consistently.
         self.fofc_select(sim);
+        self.c2p(sim);
     }
 
     /// component field for a FOFC copy/select slot name (`den`/`mom_k`/`nrg`/`rho`/`vel_k`/`pre`).
@@ -338,12 +342,17 @@ where
     fn fofc_select(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         let name = format!("{}_fofc_select_{D}d", Self::kernel_prefix());
         let (u_fofc, prim_fofc) = (&sim.workspace.u_fofc, &sim.workspace.prim_fofc);
+        let u_stage = &sim.workspace.u_stage;
         let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
         let slot = |s: &str| -> &Field<Sc, D, Mem> {
             if let Some(c) = s.strip_prefix("ho_") {
                 Self::fofc_comp(u_fofc, prim_fofc, c)
+            } else if let Some(c) = s.strip_prefix("us_") {
+                // the stage-input freeze tier: conserved only (den/mom/nrg); the prim arg is unread.
+                Self::fofc_comp(u_stage, prim, c)
             } else if let Some(c) = s.strip_prefix("x_") {
-                // the in-place cons/prim: read (first-order) + write (select result), one binding.
+                // the in-place cons: read (first-order) + write (select result), one binding. the
+                // prim (x_rho/x_pre) is read-only for the first-order physicality test.
                 Self::fofc_comp(cons, prim, c)
             } else {
                 panic!("fofc_select: unknown slot '{s}'")

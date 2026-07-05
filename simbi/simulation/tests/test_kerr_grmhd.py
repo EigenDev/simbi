@@ -149,12 +149,6 @@ def test_kerr_rotating_equilibrium_holds_and_converges() -> None:
 
 
 @needs_backend
-@pytest.mark.xfail(
-    reason="floor-less RMHD c2p (no pressure floor): the cold torus surface/cusp cells fail c2p "
-    "and the run halts fail-loud (~t=0.3) instead of the floor silently masking them. the fix is "
-    "first-order flux correction (redo failed zones at PCM+HLLE); re-enable when FOFC lands.",
-    strict=False,
-)
 def test_magnetized_fm_torus_seeds_divergence_free_and_stable() -> None:
     # the MRI initial condition (design 44 phase C step 4): the fat FM torus threaded with a weak
     # beta-normalized poloidal seed field on the spinning-kerr RMHD path (tetrad HLLD + UCT-HLLD).

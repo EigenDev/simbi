@@ -74,39 +74,47 @@ pub fn fofc_copy_gv(ncomp: usize, has_energy: bool, include_prim: bool) -> (GvKe
 /// first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).
 pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
+    // finite AND positive: (v - v) is 0 for a finite value and NaN for NaN OR +-inf (inf - inf =
+    // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
+    // "physical" tier is one whose density (and pressure, when modelled) passes both.
+    let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
     let ho_rho = Gv::field("ho_rho", "ho_rho");
-    let ho_pre = has_energy.then(|| Gv::field("ho_pre", "ho_pre"));
-    let physical = match ho_pre {
-        Some(p) => ho_rho.cmp_gt(Gv::ZERO) & p.cmp_gt(Gv::ZERO),
-        None => ho_rho.cmp_gt(Gv::ZERO),
+    let x_rho = Gv::field("x_rho", "x_rho");
+    let (physical_ho, physical_fo) = if has_energy {
+        let ho_pre = Gv::field("ho_pre", "ho_pre");
+        let x_pre = Gv::field("x_pre", "x_pre");
+        (finite_pos(ho_rho) & finite_pos(ho_pre), finite_pos(x_rho) & finite_pos(x_pre))
+    } else {
+        (finite_pos(ho_rho), finite_pos(x_rho))
     };
+    // THREE-TIER conserved select: the high-order zone if it is physical, else the first-order redo
+    // if THAT is physical, else FREEZE to the stage-input state u_stage (`us_*`) — the pre-godunov
+    // conserved, which already recovered its primitive at stage entry, so it is admissible and the
+    // final c2p converges on it. the finiteness guard makes the frozen tier unconditional: a zone no
+    // flux can update admissibly holds its stage-input value rather than propagating a NaN. only the
+    // conserved is chosen here; the primitive is re-derived by the c2p that follows the select.
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
-    // the live cons/prim (`x_*`) is read+write IN PLACE: it currently holds the FIRST-ORDER result,
-    // and is overwritten with the high-order snapshot (`ho_*`) where the high-order c2p was physical.
-    // one slot per component (read path == write path) so the IR dedups it to a single in-place
-    // binding (the CT-`b` pattern) — no input/output aliasing.
-    let mut sel_inplace = |comp: &str, ho: Gv| {
+    // the live cons (`x_*`) is read+write IN PLACE: it holds the first-order result and is
+    // overwritten with the chosen tier. one slot per component (read path == write path) so the IR
+    // dedups it to a single in-place binding (the CT-`b` pattern) — no input/output aliasing.
+    let mut sel_inplace = |comp: &str, ho: Gv, us: Gv| {
         let path = format!("x_{comp}");
         let x = Gv::field(&path, &path);
-        writes.push((path.clone(), path.into(), Gv::select(physical, ho, x).node()));
+        let chosen = Gv::select(physical_ho, ho, Gv::select(physical_fo, x, us));
+        writes.push((path.clone(), path.into(), chosen.node()));
     };
     let ho_den = Gv::field("ho_den", "ho_den");
-    sel_inplace("den", ho_den);
+    let us_den = Gv::field("us_den", "us_den");
+    sel_inplace("den", ho_den, us_den);
     for k in 0..ncomp {
         let ho = Gv::field(&format!("ho_mom_{k}"), &format!("ho_mom_{k}"));
-        sel_inplace(&format!("mom_{k}"), ho);
+        let us = Gv::field(&format!("us_mom_{k}"), &format!("us_mom_{k}"));
+        sel_inplace(&format!("mom_{k}"), ho, us);
     }
     if has_energy {
         let ho = Gv::field("ho_nrg", "ho_nrg");
-        sel_inplace("nrg", ho);
-    }
-    sel_inplace("rho", ho_rho);
-    for k in 0..ncomp {
-        let ho = Gv::field(&format!("ho_vel_{k}"), &format!("ho_vel_{k}"));
-        sel_inplace(&format!("vel_{k}"), ho);
-    }
-    if let Some(ho) = ho_pre {
-        sel_inplace("pre", ho);
+        let us = Gv::field("us_nrg", "us_nrg");
+        sel_inplace("nrg", ho, us);
     }
     (end_trace(), writes)
 }
