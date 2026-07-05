@@ -3185,6 +3185,16 @@ macro_rules! mhd_dispatch {
                 Cylindrical,
                 Cylindrical
             ),
+            // GR (kerr-schild) CYLINDRICAL 2D GRMHD (design 45): the cyl_plane selector (threaded
+            // into the geom axes by the builder) splits the two charts — the (R, z) 2.5D poloidal
+            // plane (axes [0, 2], non-diagonal gamma_Rz, toroidal E_phi CT) and the (R, phi)
+            // equatorial DISK (axes [0, 1], diagonal on the equator, vertical E_z CT). MHD momentum
+            // is a full 3-vector in both, so one metric arm serves; HLLE gas flux + contact/UCT-HLL CT.
+            (2, "cylindrical") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
+                SchwarzschildKSCylindrical<f64>
+            ),
             (2, "cylindrical") => build_and_run_mhd!(
                 $cfg,
                 $prims,

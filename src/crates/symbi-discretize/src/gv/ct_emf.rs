@@ -48,6 +48,22 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
 }
 
 
+/// the poloidal CT plane's in-plane physical components `(p1, p2)` in the cyclic order that fixes
+/// the corner-EMF sign, and the grid axes `(g1, g2) = (pos(p1), pos(p2))` carrying them. the
+/// out-of-plane component is `k = 3 - a0 - a1`; `p1 = (k+1) % 3`, `p2 = (k+2) % 3`. contiguous
+/// identity axes (spherical/cartesian/disk `[0,1]`) give `(0, 1, 0, 1)`, so the shift indexing and
+/// the +/-2 face reconstruction address grid axes 0/1 directly; the GAPPED cylindrical `(R, z)` set
+/// `[0,2]` gives `(2, 0, 1, 0)` — phi is out-of-plane, `p1 = z` on grid axis 1, `p2 = R` on axis 0 —
+/// so the shift pairs with the right velocity component and the reconstruction reads the axis whose
+/// transverse halo the staggered field actually carries. matches the runtime `ct_edges` mapping.
+fn gr_ct_plane(axes: &[usize]) -> (usize, usize, usize, usize) {
+    let k = 3 - axes[0] - axes[1];
+    let (p1, p2) = ((k + 1) % 3, (k + 2) % 3);
+    let pos = |c: usize| axes.iter().position(|&a| a == c).expect("an in-plane component is a grid axis");
+    (p1, p2, pos(p1), pos(p2))
+}
+
+
 /// the world position (3-vector) of a 2D CT-plane point: the two in-plane grid axes `axes = [a0, a1]`
 /// take the coordinate values `(p0, p1)`; the ungridded slot takes the chart default (the equatorial
 /// pi/2 for the spherical polar angle, zero elsewhere). one builder for every corner / face / cell
@@ -521,7 +537,7 @@ pub fn rmhd_edge_emf_gr_gv(
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let ndim = 2usize;
-    let (g1, g2) = (0usize, 1usize);
+    let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
     gv_register_field("edge_vp1", "vel_p1");
     gv_register_field("edge_vp2", "vel_p2");
     gv_register_field("edge_bp1", "bcell_p1");
@@ -544,23 +560,24 @@ pub fn rmhd_edge_emf_gr_gv(
     let a1_f = gv_axis_face_at(1, spacing[1], 0);
     let a0_c = |o: i64| (gv_axis_face_at(0, spacing[0], o) + gv_axis_face_at(0, spacing[0], o + 1)) * half;
     let a1_c = |o: i64| (gv_axis_face_at(1, spacing[1], o) + gv_axis_face_at(1, spacing[1], o + 1)) * half;
-    // (alpha, sqrt(gamma), beta_p0, beta_p1) at an in-plane point: the transport velocity of the
-    // densitized EMF is alpha v - beta on EACH in-plane axis. beta_p0 = shift along the a0 grid axis
-    // (spherical r, cartesian x, cylindrical R), beta_p1 = shift along a1 (cartesian y, cylindrical z;
-    // identically zero on the spherical polar angle, so the spherical EMF keeps its single radial shift).
-    let adm = |p0: Gv, p1: Gv| -> (Gv, Gv, Gv, Gv) {
-        let (alpha, sqrtg, beta) = gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, p0, p1));
-        (alpha, sqrtg, beta[axes[0]], beta[axes[1]])
+    // (alpha, sqrt(gamma), beta_p1, beta_p2) at an in-plane point: the transport velocity of the
+    // densitized EMF is alpha v - beta on EACH in-plane axis, the shift taken at the SAME physical
+    // component as the paired velocity (beta_p1 = shift of the p1 component carried by vel_p1, etc).
+    // spherical r maps to p1 with beta_theta = 0 on p2; cartesian carries both; cylindrical (R, z)
+    // carries both with (p1, p2) = (z, R) (phi out-of-plane), so the shift addresses the true axes.
+    let adm = |c0: Gv, c1: Gv| -> (Gv, Gv, Gv, Gv) {
+        let (alpha, sqrtg, beta) = gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, c0, c1));
+        (alpha, sqrtg, beta[pc1], beta[pc2])
     };
     // densitized cell EMF at the cell whose LOW corner offset is (o_a0, o_a1). the transport EMF is
-    // sqrt(gamma) [ (alpha v_p1 - beta_p1) B_p0 - (alpha v_p0 - beta_p0) B_p1 ].
+    // sqrt(gamma) [ (alpha v_p2 - beta_p2) B_p1 - (alpha v_p1 - beta_p1) B_p2 ].
     let cell = |o: &[i32]| -> Gv {
-        let (alpha, sqrtg, beta_p0, beta_p1) = adm(a0_c(o[0] as i64), a1_c(o[1] as i64));
+        let (alpha, sqrtg, beta_p1, beta_p2) = adm(a0_c(o[0] as i64), a1_c(o[1] as i64));
         let vp1 = gv_field_at("edge_vp1", "vel_p1", ndim, o);
         let vp2 = gv_field_at("edge_vp2", "vel_p2", ndim, o);
         let bp1 = gv_field_at("edge_bp1", "bcell_p1", ndim, o);
         let bp2 = gv_field_at("edge_bp2", "bcell_p2", ndim, o);
-        sqrtg * ((alpha * vp2 - beta_p1) * bp1 - (alpha * vp1 - beta_p0) * bp2)
+        sqrtg * ((alpha * vp2 - beta_p2) * bp1 - (alpha * vp1 - beta_p1) * bp2)
     };
     let ene = cell(&zero);
     let enw = cell(&cm(&[g1]));
@@ -838,7 +855,7 @@ pub fn rmhd_edge_emf_uct_gr_gv(
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let ndim = 2usize;
-    let (g1, g2) = (0usize, 1usize);
+    let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
     gv_register_field("edge_vp1", "vel_p1");
     gv_register_field("edge_vp2", "vel_p2");
     gv_register_field("edge_bface_a", "bface_a");
@@ -892,8 +909,8 @@ pub fn rmhd_edge_emf_uct_gr_gv(
     let a0_f = gv_axis_face_at(0, spacing[0], 0);
     let a1_f = gv_axis_face_at(1, spacing[1], 0);
     let (alpha_c, sqrtg_c, beta_c) = gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, a0_f, a1_f));
-    let vtilde_r = alpha_c * vbar_x - beta_c[axes[0]];
-    let vtilde_th = alpha_c * vbar_y - beta_c[axes[1]];
+    let vtilde_r = alpha_c * vbar_x - beta_c[pc1];
+    let vtilde_th = alpha_c * vbar_y - beta_c[pc2];
     let theta = Gv::scalar("theta");
     let recon = |key: &str, rt: &str, base: &[i32], axis: usize, sign: f64| -> Gv {
         let off = |d: i32| -> Vec<i32> { let mut o = base.to_vec(); o[axis] += d; o };

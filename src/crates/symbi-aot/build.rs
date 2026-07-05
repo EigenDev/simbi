@@ -1265,18 +1265,28 @@ fn gen_rmhd_bcell_from_bface_gr(out_dir: &str, ndim: u8, geom: &Geom) {
 // coefficients) + the densitized UCT-HLL corner EMF. one gen per (spacing, spacetime).
 // the GR-UCT-HLLD wave-sum edge EMF (schwarzschild only — zero shift). the per-cell shifted
 // wave speeds are shared with the HLL-UCT bake (rmhd_wave_speeds_cell); this adds only the EMF.
+// the out-of-plane physical component of the poloidal CT: the third axis not in the 2D grid
+// plane (axes a subset of {0,1,2}). spherical (r,theta)/cartesian (x,y)/disk (R,phi) -> the
+// azimuthal-or-vertical slot 2; cylindrical (R,z) -> the toroidal phi slot 1. matches the
+// dispatch's `edge.name_k` (the corner EMF's physical component index).
+fn gr_ct_out_of_plane(geom: &Geom) -> usize {
+    3 - geom.axes[0] - geom.axes[1]
+}
+
 fn gen_rmhd_gr_uct_hlld(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
+    let ok = gr_ct_out_of_plane(geom);
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_gv(geom.spacetime, &geom.spacing);
-    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{gs}{sp}{st}_2d_2"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{gs}{sp}{st}_2d_{ok}"), 2, &k, &w);
 }
 
 fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
+    let ok = gr_ct_out_of_plane(geom);
     let (k, w) = symbi_discretize::gv::rmhd_wave_speeds_cell_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
@@ -1284,17 +1294,18 @@ fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
-    emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{sp}{st}_2d_2"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{sp}{st}_2d_{ok}"), 2, &k, &w);
 }
 
 fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
+    let ok = gr_ct_out_of_plane(geom);
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
-    emit_gv(out_dir, &format!("rmhd_edge_emf{gs}{sp}{st}_2d_2"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_edge_emf{gs}{sp}{st}_2d_{ok}"), 2, &k, &w);
     for dir in 0..2usize {
         let (k, w) = symbi_discretize::gv::rmhd_ct_curl_2d_sph_gr_gv(
             dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
@@ -1714,6 +1725,26 @@ fn main() {
     // Etilde = sqrt(gamma) E divided by the per-face sqrt(gamma) weight (Font eq. 101), which
     // telescopes for any weight. the covariant geodesic + EM-stress source carries the gravity.
     for geom in [Geom::cart(2).kerr_schild()] {
+        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
+        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
+        for dir in 0..2 {
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+        }
+        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
+        gen_rmhd_ct_gr(&out_dir, &geom);
+        gen_rmhd_gr_uct(&out_dir, &geom);
+    }
+    // GRMHD in the cylindrical kerr-schild charts (design 45): the equatorial (R, phi) DISK (DIAGONAL
+    // on the equator, r = R, gamma = diag(1 + 2M/R, R^2), beta^phi = 0, out-of-plane corner EMF the
+    // vertical E_z) and the 2.5D poloidal (R, z) plane (NON-DIAGONAL gamma_Rz = 2H R z / r^2, r =
+    // sqrt(R^2 + z^2); the CT carries the TWO-component in-plane shift beta^R, beta^z; out-of-plane
+    // corner EMF the toroidal E_phi). the CT (contact + UCT-HLL) addresses the true in-plane axes via
+    // gr_ct_plane, so the GAPPED (R, z) grid-axis set [0, 2] reconstructs the staggered field along
+    // the axis whose transverse halo it carries. HLLE gas flux; the HLLD orthonormal wrapper is a
+    // follow-on (diagonal-metric only, so even the disk defers it).
+    for geom in [Geom::cyl_rphi().kerr_schild(), Geom::cyl_rz().kerr_schild()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
