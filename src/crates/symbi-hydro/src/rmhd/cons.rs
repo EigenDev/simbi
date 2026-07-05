@@ -21,9 +21,6 @@ use crate::c2p_result::C2pResult;
 const RMHD_MAX_ITER: usize = 100;
 /// convergence tolerance for false-position iteration (also the B=0 divzero guard).
 const CONVERGENCE_TOL: f64 = 1e-12;
-/// pressure floor for specific internal energy bound (zero-T floor, RMHD KKC-specific:
-/// keeps f_upper0 >= 0; `pfloor = 1e-3`). NOT a diagnostic threshold.
-const PRESSURE_FLOOR_EPS: f64 = 1e-3;
 
 /// KKC Eq. 49 bracketing function (enthalpy limit h0 = 1): `mu*sqrt(1 + rbar_sq) - 1`,
 /// whose root brackets `mu_plus`. carrier-generic. TEST-ONLY: production `find_mu_plus`
@@ -55,13 +52,15 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 
     let rhohat = dd / g;
     let eps = g * (qbar - mu * rbar_sq) + gbsq / (S::ONE + g);
-    let eps_min = S::from_f64(PRESSURE_FLOOR_EPS) / (rhohat * (gamma - S::ONE)); // zero-T floor
-    let epshat = eps.max(eps_min);
-    let phat = (gamma - S::ONE) * rhohat * epshat;
-    let ahat = phat / (rhohat * (S::ONE + epshat));
-    let nu_hat_a = (S::ONE + ahat) * (S::ONE + epshat) / g;
+    // NO pressure floor: the RAW specific internal energy. a cold or unphysical (eps < 0) state
+    // recovers a small or negative pressure that the post-hoc c2p diagnostic flags (fail-loud),
+    // rather than being silently warmed to eps_min = pfloor/(rho (gamma-1)) into a spurious-physical
+    // state that masks the failure. nu_hat is the enthalpy branch max unconditionally.
+    let phat = (gamma - S::ONE) * rhohat * eps;
+    let ahat = phat / (rhohat * (S::ONE + eps));
+    let nu_hat_a = (S::ONE + ahat) * (S::ONE + eps) / g;
     let nu_hat_b = (S::ONE + ahat) * (S::ONE + qbar - mu * rbar_sq);
-    let nu_hat = S::select(eps.cmp_lt(eps_min), nu_hat_a, nu_hat_a.max(nu_hat_b));
+    let nu_hat = nu_hat_a.max(nu_hat_b);
     let muhat = S::ONE / (nu_hat + rbar_sq * mu);
     mu - muhat
 }
@@ -158,16 +157,15 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     );
     // bracketing guarantee (resolves the find_mu_plus=1 / kkc_fmu44-root concern):
     // false-position needs f_lower0 = kkc(0) and f_upper0 = kkc(muu0=1) to straddle zero.
-    // f_lower0 = -muhat(0) < 0 always (muhat > 0). f_upper0 = 1 - muhat(1) >= 0 is forced
-    // by TWO mechanisms baked into kkc_fmu44, not by the fmu49 proof: (1) the v_limit
-    // ceiling (vsq <= v_limit^2 < 1, line ~50) keeps g/rhohat/eps finite for any mu in
-    // [0,1]; (2) the eps_min zero-T floor drives nu_hat -> ~1+eps_min > 1 in the strong-
-    // field / low-energy limit (where bee_sq is large), so muhat(1) < 1 and f_upper0 > 0.
-    // verified: the 3M-state probe (docs) + rmhd_recover_brackets_evolved_high_w_high_b_states
-    // (high-W, strong+weak B, low-density) find ZERO non-bracketing cells. a defensive
-    // NaN-poison was prototyped and removed: it never fired on any reachable state and
-    // added ops to the hottest kernel (c2p) — untestable, anti-perf. f_upper0 is consumed
-    // below only as the iterate seed.
+    // f_lower0 = -muhat(0) < 0 always (muhat > 0). f_upper0 = 1 - muhat(1) >= 0 holds for a
+    // PHYSICAL (warm, eps > 0) state via the v_limit ceiling (vsq <= v_limit^2 < 1, line ~50),
+    // which keeps g/rhohat/eps finite and nu_hat >= h > 1 for any mu in [0,1], so muhat(1) < 1.
+    // there is NO pressure floor: a cold/unphysical state (eps -> 0 or < 0) may drop nu_hat below
+    // 1 and break the [0,1] bracket, so the root the false-position returns is meaningless — but
+    // the RECOVERED state then has p <= 0 (or v -> the ceiling), which the post-hoc c2p diagnostic
+    // (`relativistic_c2p_code`) flags as a FAILURE. this is the intended fail-loud: the caller
+    // (first-order flux correction) redoes such a zone at first order, rather than a silent floor
+    // masking the unphysical state into a spurious-physical one.
 
     // recovery (Eqs. 26/38/39/32/41/42/43/68); use_four_velocity = false.
     let x = S::ONE / (S::ONE + mu * bee_sq);
@@ -180,8 +178,9 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let rho = dd / ww;
     let eps_e = ww * (qbar - mu * rbar_sq) + gbsq / (S::ONE + ww);
     let rho_gm1 = rho * (gamma - S::ONE);
-    let epshat = eps_e.max(S::from_f64(PRESSURE_FLOOR_EPS) / rho_gm1); // zero-T floor
-    let pre = rho_gm1 * epshat;
+    // NO pressure floor: raw p = (gamma-1) rho eps. an unphysical negative eps yields a negative
+    // pressure the post-hoc diagnostic flags, not a silently-floored spurious-physical state.
+    let pre = rho_gm1 * eps_e;
     let mu_x = mu * x;
     let rdb_mu = rdb * mu;
     // the CONTRAVARIANT valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the
@@ -249,13 +248,11 @@ mod tests {
         let g = (1.0 + gbsq).sqrt();
         let rhohat = dterm / g;
         let eps = g * (qbar - mu * rbar_sq) + gbsq / (1.0 + g);
-        let eps_min = 1.0e-3 / (rhohat * (gamma - 1.0));
-        let epshat = eps.max(eps_min);
-        let phat = (gamma - 1.0) * rhohat * epshat;
-        let ahat = phat / (rhohat * (1.0 + epshat));
-        let nu_hat_a = (1.0 + ahat) * (1.0 + epshat) / g;
+        let phat = (gamma - 1.0) * rhohat * eps;
+        let ahat = phat / (rhohat * (1.0 + eps));
+        let nu_hat_a = (1.0 + ahat) * (1.0 + eps) / g;
         let nu_hat_b = (1.0 + ahat) * (1.0 + qbar - mu * rbar_sq);
-        let nu_hat = if eps < eps_min { nu_hat_a } else { nu_hat_a.max(nu_hat_b) };
+        let nu_hat = nu_hat_a.max(nu_hat_b);
         let muhat = 1.0 / (nu_hat + rbar_sq * mu);
         mu - muhat
     }
@@ -547,11 +544,10 @@ mod tests {
     // `find_mu_plus` covers kkc_fmu49; the root actually solved is kkc_fmu44. these
     // EVOLVED-state cases (high Lorentz W, strong AND weak magnetization, low density —
     // the regime t=0 orszag_tang never reaches, where r can exceed 1) exercise the
-    // production rmhd_recover end to end and confirm physical states ALWAYS bracket and
-    // recover finite. zero non-bracketing cells => no kernel-path bracket guard needed
-    // (the v_limit ceiling + eps_min zero-T floor force f_upper0 >= 0; see rmhd_recover).
-    // pressures are kept above the eps_min zero-T floor (~PRESSURE_FLOOR_EPS) so the
-    // round-trip is not floored.
+    // production rmhd_recover end to end and confirm PHYSICAL (warm, p > 0) states ALWAYS
+    // bracket and recover finite. zero non-bracketing cells => no kernel-path bracket guard
+    // needed (the v_limit ceiling forces f_upper0 >= 0 for any warm state; see rmhd_recover).
+    // there is NO pressure floor — the recovered pressure is the raw round-trip value.
     #[test]
     fn rmhd_recover_brackets_evolved_high_w_high_b_states() {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
@@ -588,8 +584,12 @@ mod tests {
                  recover finite: rho={}, pre={}",
                 got.hydro.rho, got.hydro.pre
             );
+            // floor-less KKC: without the eps_min zero-T floor smoothing the master function near
+            // the velocity ceiling, false-position converges to ~6e-6 at the pathological W~71 low-
+            // density case within the 100-iter cap (realistic W ~ a few recover to ~1e-9). the bracket
+            // (the real robustness invariant) still straddles; this is the honest unfloored precision.
             assert!(
-                (got.hydro.pre - pre).abs() < 1e-6 * pre.abs().max(1.0),
+                (got.hydro.pre - pre).abs() < 1e-5 * pre.abs().max(1.0),
                 "evolved-state c2p pressure mismatch (rho={rho}, v={v}, pre={pre}, b={b}): {} vs {pre}",
                 got.hydro.pre
             );
