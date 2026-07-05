@@ -352,6 +352,25 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         self.additive_source.is_some() || self.runtime_source.is_some()
     }
 
+    fn fofc_active(&self) -> bool {
+        true
+    }
+
+    fn fofc(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
+        // (PCM) — the positivity-preserving Einfeldt fan. the substrate-owned pressure (cs^2*rho)
+        // feeds the flux as in the production sweep.
+        crate::regimes::fofc::fofc_orchestrate(
+            sim,
+            "iso",
+            self.has_additive_source(),
+            |dir| dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, 0.0, Solver::Hlle),
+            || self.c2p(sim),
+            || self.godunov_stage(sim, dt, a0, ac),
+            || self.source_apply(sim, ac * dt),
+        );
+    }
+
     fn snapshot_stage(&self, sim: &FieldStore<D, D, Mem, Sc>) {
         // u_stage = cons (pure copy via the snapshot kernel), positional buffers (no nrg).
         // identical to `snapshot` but targets u_stage — the stage-input state the additive

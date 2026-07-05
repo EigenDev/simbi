@@ -366,4 +366,53 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             &[],
         );
     }
+
+    fn snapshot_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        // u_stage = cons (den, mom_0.., nrg), the pre-godunov state FOFC restores to reconstruct
+        // the first-order redo from. mirrors `snapshot` (which targets u_n).
+        let cnrg = sim.fields.cons.nrg_field().expect("cons.nrg");
+        let unrg = sim.workspace.u_stage.nrg_field().expect("u_stage.nrg");
+        let mut inputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+        for k in 0..DOF {
+            inputs.push(&sim.fields.cons.mom[k]);
+        }
+        inputs.push(cnrg);
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.workspace.u_stage.den];
+        for k in 0..DOF {
+            outputs.push(&sim.workspace.u_stage.mom[k]);
+        }
+        outputs.push(unrg);
+        let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+        let name = format!("rhd_snapshot{geom_sfx}_{D}d");
+        dispatch_fields::<Sc, Mem, D>(
+            &name, &sim.geom.allocated, &sim.geom.allocated, &inputs, &outputs, &[], &[],
+        );
+    }
+
+    fn fofc_active(&self) -> bool {
+        // the first-order flux correction covers the DOF == D charts (the fofc select's momentum
+        // count is baked to ncomp = D); the spherical-swirl DOF-lift is a follow-on.
+        DOF == D
+    }
+
+    fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        // FLAT (special-relativistic) hydro only: the first-order redo dispatches the flat `rhd`
+        // flux, valid on Minkowski. GR-hydro FOFC needs the metric-aware flux + the source-
+        // admissibility CFL (the GRMHD lambda_S mechanism) and is a follow-on.
+        if sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
+            return;
+        }
+        // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
+        // fan — regardless of the production solver (HLLC can undershoot in a strong rarefaction).
+        let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
+        crate::regimes::fofc::fofc_orchestrate(
+            sim,
+            "rhd",
+            <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
+            |dir| dispatch_flux(sim, pre, "rhd", dir, self.gamma, 0.0, Solver::Hlle),
+            || self.c2p(sim),
+            || self.godunov_stage(sim, dt, a0, ac),
+            || self.source_apply(sim, ac * dt),
+        );
+    }
 }

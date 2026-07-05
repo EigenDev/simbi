@@ -10,6 +10,7 @@
 // =============================================================================
 
 pub mod source_config;
+pub mod fofc;
 pub mod mhd_substrate;
 pub mod substrate;
 pub mod regime_substrate;

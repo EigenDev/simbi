@@ -2040,13 +2040,17 @@ fn main() {
         gen_mhd_godunov_and_bcell(&out_dir, "rmhd", geom, "rk2");
     }
     gen_snapshot(&out_dir, 3, "rmhd", true, Geom::cart(3));
-    // first-order flux-correction copies + select for every MHD regime x dimension (the MHD
-    // substrate runs FOFC after c2p; ncomp = 3 for the 3-vector momentum). pointwise, so one triple
-    // per (prefix, has_energy, ndim) covers every chart.
+    // first-order flux-correction copies + select for every regime x dimension (the substrate runs
+    // FOFC after c2p). pointwise, so one triple per (prefix, has_energy, ndim) covers every chart.
+    // MHD: ncomp = 3 (the 3-vector momentum). hydro: ncomp = ndim (momentum = dimensions, DOF == D;
+    // the spherical-swirl DOF-lift is a follow-on).
     for ndim in 1u8..=3 {
         gen_fofc(&out_dir, ndim, "rmhd", 3, true);
         gen_fofc(&out_dir, ndim, "nmhd", 3, true);
         gen_fofc(&out_dir, ndim, "imhd", 3, false);
+        gen_fofc(&out_dir, ndim, "rhd", ndim as usize, true);
+        gen_fofc(&out_dir, ndim, "adiabatic", ndim as usize, true);
+        gen_fofc(&out_dir, ndim, "iso", ndim as usize, false);
     }
     // Isothermal MHD (Mignone 2007): the no-energy regime. c2p (rho, v_k only) + HLLE/HLLD
     // flux (D, S_k, B_k) + CFL map mirror NMHD; the CT stack is shared (Faraday induction is

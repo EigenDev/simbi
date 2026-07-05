@@ -255,6 +255,27 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         self.additive_source.is_some() || self.runtime_source.is_some()
     }
 
+    fn fofc_active(&self) -> bool {
+        // the first-order flux correction covers the DOF == D charts (the fofc select's momentum
+        // count is baked to ncomp = D); the spherical-swirl DOF-lift is a follow-on.
+        DOF == D
+    }
+
+    fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
+        // fan — regardless of the production solver (HLLC can undershoot in a strong rarefaction).
+        let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
+        crate::regimes::fofc::fofc_orchestrate(
+            sim,
+            "adiabatic",
+            <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
+            |dir| dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, 0.0, Solver::Hlle),
+            || self.c2p(sim),
+            || self.godunov_stage(sim, dt, a0, ac),
+            || self.source_apply(sim, ac * dt),
+        );
+    }
+
     fn snapshot_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // u_stage = cons (pure copy), positional [den, mom_0.., nrg] — the snapshot kernel's
         // manifest order (snapshot_gv) — over the interior the source pass iterates. explicit

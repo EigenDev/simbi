@@ -34,13 +34,13 @@ use crate::kernels::support::cfl_from_lambda;
 use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
-    dispatch_driven_boundaries, dispatch_fields_each, dispatch_named, dispatch_runtime_source, geom_scalar,
-    kernel_field_binds, kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for,
+    dispatch_driven_boundaries, dispatch_named, dispatch_runtime_source, geom_scalar,
+    kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for,
     spacetime_slug, spacing_suffix, RegimeKind, RuntimeSource, ScalarBind, Solver,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::substrate_seam::KernelSet;
-use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
+use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
 
 /// the per-coordinate metric scale factor `h` (in f64): the
@@ -258,113 +258,21 @@ where
         dispatch_named(sim, pre_bind, None, dir, &flux_name, &face, &[], &scalars);
     }
 
-    /// FIRST-ORDER FLUX CORRECTION (see the trait doc). the flow: snapshot the high-order cons+prim
-    /// into `u_fofc`/`prim_fofc`; restore `cons <- u_stage` and c2p so the redo reconstructs from the
-    /// PHYSICAL stage-input state; re-flux at HLLE + theta = 0 -> re-godunov -> re-c2p (the first-order
-    /// update, in place on cons/prim); then select `physical(prim_fofc) ? high_order : first_order`
-    /// per cell. B / CT are untouched (the gas conserved is corrected, div(B) preserved). v1 runs
-    /// unconditionally; the host-gate on a failure reduction is a perf overlay added on top.
+    /// FIRST-ORDER FLUX CORRECTION for the MHD regimes: the shared FOFC orchestration with the
+    /// first-order flux = the light-cone Lax-Friedrichs (Rusanov) fan (`_rusanov`, theta = 0 -> the
+    /// admissibility-preserving PCM update). B / CT are untouched (the gas conserved is corrected,
+    /// div(B) preserved). v1 runs unconditionally; the host-gate on a failure reduction is a perf
+    /// overlay added on top.
     fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
-        // (1) snapshot the HIGH-ORDER cons+prim -> u_fofc/prim_fofc (whole domain, ghosts too, so the
-        //     first-order reconstruction has valid ghost inputs).
-        self.fofc_copy(sim, "snap", true,
-            (&sim.fields.cons, &sim.fields.prim), (&sim.workspace.u_fofc, &sim.workspace.prim_fofc));
-        // (2) restore cons <- u_stage (cons only): the redo reconstructs from the PHYSICAL stage input.
-        self.fofc_copy(sim, "restore", false,
-            (&sim.workspace.u_stage, &sim.fields.prim), (&sim.fields.cons, &sim.fields.prim));
-        // (3) prim <- c2p(stage-input cons); (4) re-flux at first order (light-cone Rusanov, theta = 0
-        //     -> admissibility-preserving); (5) re-godunov; (6) re-c2p.
-        self.c2p(sim);
-        for dir in 0..D {
-            self.flux_impl(sim, dir, "", "_rusanov", 0.0);
-        }
-        self.godunov_stage(sim, dt, a0, ac);
-        if self.has_additive_source() {
-            self.source_apply(sim, ac * dt);
-        }
-        self.c2p(sim);
-        // (7) select the conserved per zone: high-order if physical, else first-order if physical,
-        //     else FREEZE to the stage-input u_stage (over the interior). (8) re-derive the primitive
-        //     from the selected conserved — the frozen zones carry admissible u_stage, so c2p
-        //     converges; the first-order and high-order zones re-recover consistently.
-        self.fofc_select(sim);
-        self.c2p(sim);
-    }
-
-    /// component field for a FOFC copy/select slot name (`den`/`mom_k`/`nrg`/`rho`/`vel_k`/`pre`).
-    fn fofc_comp<'a>(
-        cons: &'a ConsFieldsGeneric<D, 3, Mem, Sc>,
-        prim: &'a PrimFieldsGeneric<D, 3, Mem, Sc>,
-        name: &str,
-    ) -> &'a Field<Sc, D, Mem> {
-        match name {
-            "den" => &cons.den,
-            "nrg" => cons.nrg_field().expect("fofc: energy field"),
-            "rho" => &prim.rho,
-            "pre" => prim.pre_field().expect("fofc: pressure field"),
-            s if s.starts_with("mom_") => &cons.mom[s[4..].parse::<usize>().unwrap()],
-            s if s.starts_with("vel_") => &prim.vel[s[4..].parse::<usize>().unwrap()],
-            o => panic!("fofc_comp: unknown component '{o}'"),
-        }
-    }
-
-    /// dispatch the componentwise FOFC copy kernel `{prefix}_fofc_{tag}_{D}d` (src `s_*` -> dst `d_*`).
-    fn fofc_copy(
-        &self,
-        sim: &FieldStore<D, 3, Mem, Sc>,
-        tag: &str,
-        include_prim: bool,
-        src: (&ConsFieldsGeneric<D, 3, Mem, Sc>, &PrimFieldsGeneric<D, 3, Mem, Sc>),
-        dst: (&ConsFieldsGeneric<D, 3, Mem, Sc>, &PrimFieldsGeneric<D, 3, Mem, Sc>),
-    ) {
-        let _ = include_prim;
-        let name = format!("{}_fofc_{tag}_{D}d", Self::kernel_prefix());
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            let comp = &s[2..]; // strip "s_" / "d_"
-            if s.starts_with("s_") {
-                Self::fofc_comp(src.0, src.1, comp)
-            } else {
-                Self::fofc_comp(dst.0, dst.1, comp)
-            }
-        };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
-        }
-        dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.allocated, &inputs, &outputs, &[], &[]);
-    }
-
-    /// dispatch the FOFC select kernel `{prefix}_fofc_select_{D}d`: `physical(ho_prim) ? ho : fo`, with
-    /// `ho_*` = the high-order snapshot (u_fofc/prim_fofc), `fo_*` = out_* = the live cons/prim (the
-    /// first-order redo, corrected in place), over the interior.
-    fn fofc_select(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
-        let name = format!("{}_fofc_select_{D}d", Self::kernel_prefix());
-        let (u_fofc, prim_fofc) = (&sim.workspace.u_fofc, &sim.workspace.prim_fofc);
-        let u_stage = &sim.workspace.u_stage;
-        let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            if let Some(c) = s.strip_prefix("ho_") {
-                Self::fofc_comp(u_fofc, prim_fofc, c)
-            } else if let Some(c) = s.strip_prefix("us_") {
-                // the stage-input freeze tier: conserved only (den/mom/nrg); the prim arg is unread.
-                Self::fofc_comp(u_stage, prim, c)
-            } else if let Some(c) = s.strip_prefix("x_") {
-                // the in-place cons: read (first-order) + write (select result), one binding. the
-                // prim (x_rho/x_pre) is read-only for the first-order physicality test.
-                Self::fofc_comp(cons, prim, c)
-            } else {
-                panic!("fofc_select: unknown slot '{s}'")
-            }
-        };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(&name).iter() {
-            let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
-        }
-        dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
+        crate::regimes::fofc::fofc_orchestrate(
+            sim,
+            Self::kernel_prefix(),
+            self.has_additive_source(),
+            |dir| self.flux_impl(sim, dir, "", "_rusanov", 0.0),
+            || self.c2p(sim),
+            || self.godunov_stage(sim, dt, a0, ac),
+            || self.source_apply(sim, ac * dt),
+        );
     }
 }
 
