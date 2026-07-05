@@ -5,7 +5,10 @@
 // =============================================================================
 
 use super::*;
+use symbi_algebra::Matrix;
+use symbi_geometry::grhd_source::grmhd_covariant_source;
 use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_ir::dual::Dual;
 
 
 /// trace the newtonian-MHD CFL wave-speed map — `NewtonianMhd::wave_speeds` (the
@@ -518,6 +521,124 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
         writes.push((format!("ws_r_{d}"), format!("wave_speed_r[{d}]").into(), (sr - bd).node()));
     }
     (end_trace(), writes)
+}
+
+
+/// the SOURCE-admissibility CFL limit for GR-RMHD — the wu 2017 (arXiv:1708.07267) lambda_S
+/// mechanism. the geometric (gravity + covariant centrifugal + EM-tension) source
+/// S = (S_mom, S_tau) advances the conserved state U -> U + dt S; for the light-cone LxF flux to
+/// stay physical-constraint-preserving the timestep must ALSO keep U + dt S inside the admissible
+/// cone q(U) = E - sqrt(D^2 + gamma^{ij} S_i S_j) >= 0, D > 0 (E = tau + D). q is concave along the
+/// source ray and lipschitz-bounded below: q(U + dt S) >= q(U) - dt (|S_tau| + ||S_mom||_gamma),
+/// so dt (|S_tau| + ||S_mom||_gamma)/q(U) <= 1 is SUFFICIENT for admissibility. this gives the
+/// source characteristic rate lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U), added into the CFL
+/// scratch alongside the flux light-cone rate (wu eq 22: dt (lambda_flux + lambda_S) < 1).
+/// lambda_S -> inf as q -> 0, collapsing dt at the cone boundary — the behavior that holds the
+/// magnetized-torus cusp admissible with no floor. conservative: the lipschitz slope underestimates
+/// the exact concave-quadratic root, so dt is at most that root. reads the flux rate already in the
+/// scratch and writes their sum in place; the momentum source takes p = 0 and the energy source
+/// the full p, matching the fused godunov source that actually advances U. metric at the cell
+/// centroid, ungridded polar slot at pi/2.
+pub fn rmhd_source_cfl_gr_gv(
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    mag_from_bcell: bool,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let vel: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8)));
+    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+    let v = Tensor::<Gv, 3>::new(vel);
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => geo.centroid[d],
+            None => gv_ungridded_slot(coords, c),
+        }
+    }));
+    // the metric-free rest enthalpy density rho_h = rho + Gamma/(Gamma-1) p (the source builds W
+    // and b^mu from the harvested gamma internally); the cell magnetic field under the same key
+    // convention as the fused godunov source.
+    let gamma_eos = Gv::scalar("gamma");
+    let rho_h = rho + gamma_eos / (gamma_eos - Gv::ONE) * pre;
+    let b = Tensor::<Gv, 3>::new(std::array::from_fn(|k| {
+        if mag_from_bcell {
+            Gv::field(&format!("bc_{k}"), FieldRef::BCell(k as u8))
+        } else {
+            Gv::field(&format!("prim_b{k}"), FieldRef::PrimMag(k as u8))
+        }
+    }));
+    let mass_gv = Gv::scalar("schwarzschild_mass");
+    let mass = Dual::constant(mass_gv);
+    // the inverse spatial metric (raises the covariant momentum for the admissible-cone norm) and
+    // the covariant source (autodiff Dual metric), dispatched by (spacetime, chart). the momentum
+    // source at p = 0, the energy source at the full p.
+    let (gm_inv, s_mom, s_tau): (Matrix<Gv, 3>, Tensor<Gv, 3>, Gv) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
+            let gi = Schwarzschild { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&Schwarzschild { mass }, x, rho_h, v, pre, b);
+            (gi, sm, st)
+        }
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, rho_h, v, pre, b);
+            (gi, sm, st)
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let gi = SchwarzschildKSCylindrical { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grmhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, rho_h, v, pre, b);
+            (gi, sm, st)
+        }
+        (Spacetime::KerrSchild, _) => {
+            let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pre, b);
+            (gi, sm, st)
+        }
+        (Spacetime::Kerr, _) => {
+            let spin_gv = Gv::scalar("kerr_spin");
+            let gi = KerrKS { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let spin = Dual::constant(spin_gv);
+            let (sm, _) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&KerrKS { mass, spin }, x, rho_h, v, pre, b);
+            (gi, sm, st)
+        }
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
+        }
+    };
+    // the admissible cone at the current cell: E = tau + D, |S|^2 = gamma^{ij} S_i S_j.
+    let d_cons = Gv::field("cons_den", FieldRef::cons_den());
+    let mom: [Gv; 3] =
+        std::array::from_fn(|k| Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8)));
+    let tau = Gv::field("cons_nrg", FieldRef::cons_nrg());
+    let e_cons = tau + d_cons;
+    let gamma_norm = |a: &[Gv; 3]| {
+        let mut acc = Gv::ZERO;
+        for ii in 0..3 {
+            for jj in 0..3 {
+                acc = acc + gm_inv[(ii, jj)] * a[ii] * a[jj];
+            }
+        }
+        acc
+    };
+    let q0 = e_cons - (d_cons * d_cons + gamma_norm(&mom)).sqrt();
+    let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
+    let sm_norm = gamma_norm(&sm_arr).sqrt();
+    // lambda_S = (|S_tau| + ||S_mom||_gamma) / q; the max keeps a near-boundary cell driving
+    // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0).
+    let q_safe = q0.max(Gv::from_f64(1e-12));
+    let lam_s = (s_tau.abs() + sm_norm) / q_safe;
+    let lam_flux = Gv::field("lambda", FieldRef::Scratch);
+    let total = lam_flux + lam_s;
+    (end_trace(), vec![("lambda".to_string(), FieldRef::Scratch.into(), total.node())])
 }
 
 

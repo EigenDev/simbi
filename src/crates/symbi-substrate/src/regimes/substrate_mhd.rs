@@ -502,7 +502,7 @@ where
         } else {
             kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a)
         };
-        let scalars = scalars_for(&wname, |bind| {
+        let resolve_scalar = |bind: &ScalarBind| -> Sc {
             let ScalarBind::Ref(sref) = bind else {
                 panic!("{} cfl: unexpected spec scalar {bind:?}", Self::kernel_prefix());
             };
@@ -526,7 +526,8 @@ where
                         .unwrap_or_else(|| panic!("{} cfl: unexpected scalar {other:?}", Self::kernel_prefix())),
                 ),
             }
-        });
+        };
+        let scalars = scalars_for(&wname, &resolve_scalar);
         // bind BY MANIFEST: prim + bcell reads -> the `scratch` lambda write (the cfl_scratch
         // field, supplied as the scratch override). iso passes a dummy pre (reads cs^2*rho).
         let pre_bind = if R::SPEC.has_energy {
@@ -535,6 +536,22 @@ where
             &sim.fields.cons.den
         };
         dispatch_named(sim, pre_bind, Some(&self.cfl_scratch), 0, &wname, &geom.interior, &[], &scalars);
+        // the wu 2017 (arXiv:1708.07267) source-admissibility rate: on a curved background the
+        // geometric source S advances U -> U + dt S and can push the conserved state out of the
+        // physical-constraint cone; the light-cone LxF FOFC flux is only physical-constraint-
+        // preserving under a timestep that also keeps U + dt S admissible. this kernel reads the
+        // flux light-cone rate already in the scratch and adds the source characteristic rate
+        // lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U) in place, so the reduction sizes dt against
+        // both (dt (lambda_flux + lambda_S) < 1). the source-CFL kernel is baked for GR-RMHD only.
+        if !st.is_empty() {
+            let sp = spacing_suffix(&geom.maps);
+            let sname = format!(
+                "{}_source_cfl{}{sp}{st}_{D}d",
+                Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes)
+            );
+            let sscalars = scalars_for(&sname, &resolve_scalar);
+            dispatch_named(sim, pre_bind, Some(&self.cfl_scratch), 0, &sname, &geom.interior, &[], &sscalars);
+        }
         let mut lambda_max = crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
         // DRIVEN-INFLOW CFL CAP: the per-cell wave-speed map only scans the INTERIOR, so a driven
         // boundary's inflow state (which lives in the ghost band) is invisible to it — a relativistic

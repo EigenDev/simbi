@@ -1009,11 +1009,29 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
             geom.spacetime, geom.coords, &geom.spacing, &geom.axes, ndim as usize,
         );
         emit_gv(out_dir, &name, ndim, &k, &writes);
+        // the wu 2017 source-admissibility rate folds into the same scratch after this map.
+        gen_rmhd_source_cfl_gr(out_dir, ndim, geom);
         return;
     }
     let name = format!("rmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         rmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the GRMHD source-admissibility CFL (wu 2017 lambda_S): reads the flux light-cone rate already
+// in the scratch and adds the source characteristic rate, folding the source-limited timestep into
+// the same reduction. curved spacetime only; mag_from_bcell = false to match the fused godunov
+// source (which reads prim.mag). name parallels the wave-speed map.
+fn gen_rmhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
+    assert!(geom.spacetime != Spacetime::Minkowski);
+    let name = format!(
+        "rmhd_source_cfl{}{}{}_{ndim}d",
+        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
+    );
+    let (k, writes) = symbi_discretize::gv::rmhd_source_cfl_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes, /* mag_from_bcell = */ false,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
