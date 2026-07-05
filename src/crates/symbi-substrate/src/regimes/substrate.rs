@@ -364,6 +364,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             sim,
             "iso",
             self.has_additive_source(),
+            &self.cfl_scratch,
+            &sim.fields.cons.den,
             |dir| dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, 0.0, Solver::Hlle),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),

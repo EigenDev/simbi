@@ -18,7 +18,8 @@ use symbi_algebra::OrderedNumeric;
 use symbi_xpu::MemorySpace;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 
-use crate::regimes::substrate_kernels::{dispatch_fields_each, kernel_field_binds};
+use crate::regimes::substrate_kernels::{dispatch_fields_each, dispatch_named, kernel_field_binds};
+use crate::regimes::substrate_gpu::field_max_reduce;
 
 /// resolve a FOFC copy/select slot name to its field: `den`/`mom_k`/`nrg` (conserved),
 /// `rho`/`vel_k`/`pre` (primitive). regime-generic over the degrees of freedom `DOF`.
@@ -123,6 +124,8 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
     has_additive: bool,
+    scratch: &Field<Sc, D, Mem>,
+    pre_bind: &Field<Sc, D, Mem>,
     first_order_flux: impl Fn(usize),
     c2p: impl Fn(),
     godunov: impl Fn(),
@@ -131,6 +134,15 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    // HOST GATE: probe the high-order c2p for any unphysical zone. FOFC only ever modifies an
+    // unphysical zone (a physical one keeps its high-order value), so with none the whole pass is a
+    // no-op — skip it. a clean substage costs one pointwise probe + a reduction, not the flux
+    // sweep + two extra c2p passes.
+    let probe = format!("{prefix}_fofc_probe_{D}d");
+    dispatch_named(sim, pre_bind, Some(scratch), 0, &probe, &sim.geom.interior, &[], &[]);
+    if field_max_reduce(scratch, &sim.geom.interior) <= 0.5 {
+        return;
+    }
     let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
     let ws = &sim.workspace;
     fofc_copy(sim, prefix, "snap", (cons, prim), (&ws.u_fofc, &ws.prim_fofc));

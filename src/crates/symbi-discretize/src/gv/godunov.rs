@@ -72,6 +72,25 @@ pub fn fofc_copy_gv(ncomp: usize, has_energy: bool, include_prim: bool) -> (GvKe
 /// as rho <= 0, pre <= 0, or NaN (all of which fail `> 0`), never as superluminal. so a cell whose
 /// HIGH-ORDER c2p is physical keeps its sharp state; only the failed cells take the diffusive
 /// first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).
+/// the FOFC HOST GATE probe: write 1 to the scratch where the high-order c2p is unphysical (density
+/// or, for an energy regime, pressure non-finite or non-positive), else 0. a max-reduce over the
+/// interior is > 0 exactly when some zone needs correcting; a clean substage reduces to 0 and skips
+/// the whole FOFC pass (which would keep the high-order everywhere anyway — bit-identical to skip).
+pub fn fofc_probe_gv(has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let physical = if has_energy {
+        let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+        finite_pos(rho) & finite_pos(pre)
+    } else {
+        finite_pos(rho)
+    };
+    let flag = Gv::select(physical, Gv::ZERO, Gv::ONE);
+    (end_trace(), vec![("flag".to_string(), FieldRef::Scratch.into(), flag.node())])
+}
+
+
 pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // finite AND positive: (v - v) is 0 for a finite value and NaN for NaN OR +-inf (inf - inf =

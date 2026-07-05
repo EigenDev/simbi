@@ -269,6 +269,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             sim,
             "adiabatic",
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
+            &self.cfl_scratch,
+            pre,
             |dir| dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, 0.0, Solver::Hlle),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),

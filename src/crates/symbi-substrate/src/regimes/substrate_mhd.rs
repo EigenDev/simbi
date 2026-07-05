@@ -264,10 +264,17 @@ where
     /// div(B) preserved). v1 runs unconditionally; the host-gate on a failure reduction is a perf
     /// overlay added on top.
     fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        let pre_bind = if R::SPEC.has_energy {
+            sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
+        } else {
+            &sim.fields.cons.den
+        };
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             Self::kernel_prefix(),
             self.has_additive_source(),
+            &self.cfl_scratch,
+            pre_bind,
             |dir| self.flux_impl(sim, dir, "", "_rusanov", 0.0),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
