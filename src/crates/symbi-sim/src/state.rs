@@ -609,6 +609,13 @@ pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpac
     /// invariant (see `godunov_with_fused_source` S2 proof). dead weight unless an
     /// additive source overlay is active (the step loop gates the snapshot).
     pub u_stage: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
+    /// first-order flux-correction scratch: the HIGH-ORDER conserved + primitive result of a
+    /// substage, snapshotted before FOFC redoes the failed cells at first order (PCM + HLLE), so the
+    /// per-cell select `failed ? first_order : high_order` has both states. only touched when a c2p
+    /// failure is detected in the substage (the reduction gates the whole correction); a no-op
+    /// otherwise, and for regimes that never dispatch FOFC.
+    pub u_fofc: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
+    pub prim_fofc: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
 }
 
 /// the natural case: vector dimension == grid dimension.
@@ -1684,6 +1691,8 @@ where
             u_n: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
             prim_n: PrimFieldsGeneric::zeros_with_pressure(&allocated, alloc_pre)?,
             u_stage: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
+            u_fofc: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
+            prim_fofc: PrimFieldsGeneric::zeros_with_pressure(&allocated, alloc_pre)?,
         };
 
         let exec = Executor::<S>::new(device_id)?;

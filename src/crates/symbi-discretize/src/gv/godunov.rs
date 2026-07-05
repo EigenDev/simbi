@@ -32,6 +32,54 @@ pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, Fi
 }
 
 
+/// the FIRST-ORDER FLUX-CORRECTION select: `out = physical(ho_prim) ? ho : fo`, componentwise over
+/// the gas conserved (den, mom[k], nrg?) and primitive (rho, vel[k], pre?). the high-order state
+/// `ho_*` is the snapshot taken before the substage was redone at first order; `fo_*` is the redone
+/// (PCM + HLLE) result, aliased to the live cons/prim `out_*` (in-place read+write). the failure
+/// test is metric-free: the c2p velocity ceiling keeps |v| < 1, so an unphysical recovery shows up
+/// as rho <= 0, pre <= 0, or NaN (all of which fail `> 0`), never as superluminal. so a cell whose
+/// HIGH-ORDER c2p is physical keeps its sharp state; only the failed cells take the diffusive
+/// first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).
+pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ho_rho = Gv::field("ho_rho", "ho_rho");
+    let ho_pre = has_energy.then(|| Gv::field("ho_pre", "ho_pre"));
+    let physical = match ho_pre {
+        Some(p) => ho_rho.cmp_gt(Gv::ZERO) & p.cmp_gt(Gv::ZERO),
+        None => ho_rho.cmp_gt(Gv::ZERO),
+    };
+    let sel = |ho: Gv, fo: Gv| Gv::select(physical, ho, fo);
+    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    // conserved: den, mom[k], nrg?
+    let ho_den = Gv::field("ho_den", "ho_den");
+    let fo_den = Gv::field("fo_den", "fo_den");
+    writes.push(("out_den".to_string(), "out_den".into(), sel(ho_den, fo_den).node()));
+    for k in 0..ncomp {
+        let ho = Gv::field(&format!("ho_mom_{k}"), &format!("ho_mom_{k}"));
+        let fo = Gv::field(&format!("fo_mom_{k}"), &format!("fo_mom_{k}"));
+        writes.push((format!("out_mom_{k}"), format!("out_mom_{k}").into(), sel(ho, fo).node()));
+    }
+    if has_energy {
+        let ho = Gv::field("ho_nrg", "ho_nrg");
+        let fo = Gv::field("fo_nrg", "fo_nrg");
+        writes.push(("out_nrg".to_string(), "out_nrg".into(), sel(ho, fo).node()));
+    }
+    // primitive: rho, vel[k], pre?
+    let fo_rho = Gv::field("fo_rho", "fo_rho");
+    writes.push(("out_rho".to_string(), "out_rho".into(), sel(ho_rho, fo_rho).node()));
+    for k in 0..ncomp {
+        let ho = Gv::field(&format!("ho_vel_{k}"), &format!("ho_vel_{k}"));
+        let fo = Gv::field(&format!("fo_vel_{k}"), &format!("fo_vel_{k}"));
+        writes.push((format!("out_vel_{k}"), format!("out_vel_{k}").into(), sel(ho, fo).node()));
+    }
+    if let Some(ho) = ho_pre {
+        let fo = Gv::field("fo_pre", "fo_pre");
+        writes.push(("out_pre".to_string(), "out_pre".into(), sel(ho, fo).node()));
+    }
+    (end_trace(), writes)
+}
+
+
 /// the single mass-law godunov step to a SEPARATE output buffer (the P2.2 demo):
 /// `rho_new = rho - dt*div(mass_flux)`. cartesian-uniform OR curvilinear (area-weighted).
 /// write -> `cons.den_new`.
