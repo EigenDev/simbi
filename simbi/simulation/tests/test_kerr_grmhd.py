@@ -68,7 +68,7 @@ def _kerr_wdiv(p, B1, B2):
     ],
 )
 def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
-    from simbi_configs.examples.grmhd.gr_kerr_field_loop import GrKerrFieldLoop
+    from simbi.simulation.tests.fixtures.gr_kerr_field_loop import GrKerrFieldLoop
 
     d = tempfile.mkdtemp() + "/"
     p = GrKerrFieldLoop.from_cli(["--nr", "128", "--npolar", "64", "--kerr-spin", "0.9"])
@@ -96,7 +96,7 @@ def test_kerr_field_loop_divergence_free_and_stable(solver, ct) -> None:
 
 
 def _roteq_hold_l1(nr, npolar):
-    from simbi_configs.examples.grmhd.gr_rotating_equilibrium_mhd import GrRotatingEquilibriumMhd
+    from simbi.simulation.tests.fixtures.gr_rotating_equilibrium_mhd import GrRotatingEquilibriumMhd
 
     d = tempfile.mkdtemp() + "/"
     p = GrRotatingEquilibriumMhd.from_cli(

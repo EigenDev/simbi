@@ -83,7 +83,7 @@ def _run(p, d, ct, end_time=2.5, solver=None):
 @needs_backend
 @pytest.mark.parametrize("ct", [CtMethod.CONTACT, CtMethod.UCT])
 def test_cylindrical_rz_field_loop_preserves_divergence(ct) -> None:
-    from simbi_configs.examples.grmhd.gr_cylindrical_rz_field_loop import (
+    from simbi.simulation.tests.fixtures.gr_cylindrical_rz_field_loop import (
         GrCylindricalRzFieldLoop,
     )
 
@@ -105,7 +105,7 @@ def test_cylindrical_rz_field_loop_preserves_divergence(ct) -> None:
 # the two-component shift (beta^R, beta^z) rides both fans. div(B) machine-zero + stable at t = 0.7.
 @needs_backend
 def test_cylindrical_rz_uct_hlld_preserves_divergence() -> None:
-    from simbi_configs.examples.grmhd.gr_cylindrical_rz_field_loop import (
+    from simbi.simulation.tests.fixtures.gr_cylindrical_rz_field_loop import (
         GrCylindricalRzFieldLoop,
     )
 
@@ -124,7 +124,7 @@ def test_cylindrical_rz_uct_hlld_preserves_divergence() -> None:
 @needs_backend
 @pytest.mark.parametrize("ct", [CtMethod.CONTACT, CtMethod.UCT])
 def test_disk_field_loop_preserves_divergence(ct) -> None:
-    from simbi_configs.examples.grmhd.gr_disk_field_loop import GrDiskFieldLoop
+    from simbi.simulation.tests.fixtures.gr_disk_field_loop import GrDiskFieldLoop
 
     d = tempfile.mkdtemp() + "/"
     p = GrDiskFieldLoop.from_cli(["--nr", "80", "--nphi", "64"])
