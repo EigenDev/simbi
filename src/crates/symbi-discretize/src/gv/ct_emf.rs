@@ -48,6 +48,41 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
 }
 
 
+/// the chart-generic spatial metric (gamma + gamma^{-1}) at a world position — the tetrad-frame
+/// HLLD fan needs the full metric, not just the ADM scalars. same (spacetime, coords) selection as
+/// [`gr_adm_at`]; the orthonormal_basis(dir) Gram-Schmidt of this gamma is the tetrad.
+fn gr_spatial_metric_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> SpatialMetric<Gv, 3> {
+    use symbi_geometry::{
+        KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+        SchwarzschildKSCylindrical,
+    };
+    let mass = Gv::scalar("schwarzschild_mass");
+    macro_rules! sm {
+        ($m:expr, $ty:ty) => {{
+            let m = $m;
+            SpatialMetric {
+                gamma: <$ty as Metric<Gv, 3>>::spatial_metric(&m, x),
+                gamma_inv: <$ty as Metric<Gv, 3>>::spatial_metric_inv(&m, x),
+            }
+        }};
+    }
+    match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => sm!(Schwarzschild { mass }, Schwarzschild<Gv>),
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            sm!(SchwarzschildKSCartesian { mass }, SchwarzschildKSCartesian<Gv>)
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            sm!(SchwarzschildKSCylindrical { mass }, SchwarzschildKSCylindrical<Gv>)
+        }
+        (Spacetime::KerrSchild, _) => sm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
+        (Spacetime::Kerr, _) => sm!(KerrKS { mass, spin: Gv::scalar("kerr_spin") }, KerrKS<Gv>),
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the GR CT stack is baked only for a curved spacetime")
+        }
+    }
+}
+
+
 /// the poloidal CT plane's in-plane physical components `(p1, p2)` in the cyclic order that fixes
 /// the corner-EMF sign, and the grid axes `(g1, g2) = (pos(p1), pos(p2))` carrying them. the
 /// out-of-plane component is `k = 3 - a0 - a1`; `p1 = (k+1) % 3`, `p2 = (k+2) % 3`. contiguous
@@ -1575,16 +1610,20 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 /// each Riemann's face center, matching the gas HLLD flux. baked per spacing.
 pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     spacetime: Spacetime,
+    coords: Coords,
     spacing: &[Spacing],
+    axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    use symbi_geometry::{KerrKS, Metric, Schwarzschild};
-    assert!(
-        matches!(spacetime, Spacetime::Schwarzschild | Spacetime::Kerr),
-        "GR-UCT-HLLD is baked for schwarzschild + spinning kerr (the kerr-schild 2D MHD row is unbaked)"
-    );
+    // the kernel feeds a full 3-vector prim + the WORLD spatial metric to the tetrad HLLD fan, so it
+    // is indexed by the in-plane physical components (pc1, pc2) and the out-of-plane one (`out`): the
+    // prim is assembled in WORLD order (v[pc]=..), the fan solves along the world normal (dir = pc),
+    // and the shift/transverse fields address the physical axes. offsets/reconstructions stay in grid
+    // space via (g1, g2). contiguous axes [0,1] give (pc1,pc2,g1,g2) = (0,1,0,1) (bit-identical to the
+    // former hardcode); the gapped (R,z) set [0,2] gives (2,0,1,0) and is handled by the same code.
     begin_trace();
     let ndim = 2usize;
-    let (g1, g2) = (0usize, 1usize);
+    let (pc1, pc2, g1, g2) = gr_ct_plane(axes);
+    let out = 3 - pc1 - pc2;
     gv_register_field("e_rho", "rho");
     gv_register_field("e_vp1", "vel_p1");
     gv_register_field("e_vp2", "vel_p2");
@@ -1611,41 +1650,28 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
     let nw = cm(&[g1]);
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
-    // corner + cell/face positions.
+    // the corner (grid-0 face, grid-1 face) — the advective-EMF densitization point.
     let r_f = gv_axis_face_at(0, spacing[0], 0);
     let th_f = gv_axis_face_at(1, spacing[1], 0);
-    let r_c = |o: i64| (gv_axis_face_at(0, spacing[0], o) + gv_axis_face_at(0, spacing[0], o + 1)) * half;
-    let th_c = |o: i64| (gv_axis_face_at(1, spacing[1], o) + gv_axis_face_at(1, spacing[1], o + 1)) * half;
-    let mass = Gv::scalar("schwarzschild_mass");
-    // the face spatial metric + the (alpha, sqrt(gamma), beta^r) ADM triad at a point, spacetime-
-    // aware: schwarzschild is diagonal + zero shift; spinning kerr is non-diagonal (gamma_{r phi})
-    // with a radial shift beta^r that the moving-interface fan carries.
-    let metric_at = |r: Gv, th: Gv| -> SpatialMetric<Gv, 3> {
-        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
-        let (gm, gmi) = match spacetime {
-            Spacetime::Kerr => {
-                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-                (<KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(&m, x), <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric_inv(&m, x))
-            }
-            _ => {
-                let m = Schwarzschild { mass };
-                (<Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric(&m, x), <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric_inv(&m, x))
-            }
-        };
-        SpatialMetric { gamma: gm, gamma_inv: gmi }
+    // the face spatial metric (for the tetrad fan) + the (alpha, sqrt(gamma), FULL shift) ADM triad at
+    // a point, chart-generic via [`gr_spatial_metric_at`] / [`gr_adm_at`]: diagonal Schwarzschild/disk,
+    // the non-diagonal cartesian/kerr gamma, and the KS multi-axis shift alike.
+    let metric_at = |c0: Gv, c1: Gv| -> SpatialMetric<Gv, 3> {
+        gr_spatial_metric_at(spacetime, coords, gr_plane_pos(coords, axes, c0, c1))
     };
-    let adm_at = |r: Gv, th: Gv| -> (Gv, Gv, Gv) {
-        let x = Tensor::<Gv, 3>::new([r, th, Gv::ZERO]);
-        match spacetime {
-            Spacetime::Kerr => {
-                let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
-                (<KerrKS<Gv> as Metric<Gv, 3>>::lapse(&m, x), <KerrKS<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x)[0])
-            }
-            _ => {
-                let m = Schwarzschild { mass };
-                (<Schwarzschild<Gv> as Metric<Gv, 3>>::lapse(&m, x), <Schwarzschild<Gv> as Metric<Gv, 3>>::sqrt_det_gamma(&m, x), Gv::ZERO)
-            }
-        }
+    let adm_at = |c0: Gv, c1: Gv| -> (Gv, Gv, Tensor<Gv, 3>) {
+        gr_adm_at(spacetime, coords, gr_plane_pos(coords, axes, c0, c1))
+    };
+    // the world position (grid-0 coord, grid-1 coord) of a face point: grid axis `fa` sits on a FACE
+    // (offset `fo`), the OTHER grid axis on a CELL centre (offset `co`). feeds metric_at / adm_at at
+    // each Riemann's own face centre.
+    let face_cell = |fa: usize, fo: i64, co: i64| -> (Gv, Gv) {
+        let ca = 1 - fa;
+        let cell = |d: usize, o: i64| (gv_axis_face_at(d, spacing[d], o) + gv_axis_face_at(d, spacing[d], o + 1)) * half;
+        let mut c = [Gv::ZERO; 2];
+        c[fa] = gv_axis_face_at(fa, spacing[fa], fo);
+        c[ca] = cell(ca, co);
+        (c[0], c[1])
     };
     let theta = Gv::scalar("theta");
     let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| -> Gv {
@@ -1659,14 +1685,24 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
         let slope = Gv::select(theta.cmp_lt(Gv::ZERO), van_leer(a, b), mm);
         q0 + Gv::from_f64(0.5 * sign) * slope
     };
-    let prim_face = |base: &[i32], naxis: usize, sign: f64, n_idx: usize, bn: Gv, t_idx: usize, bt: Gv| -> MhdPrim<Gv, 3> {
+    // the reconstructed face prim in WORLD component order: vel_p1/p2/out carry the physical
+    // components (pc1, pc2, out), so place each at its world index. the staggered normal face-B
+    // `bn` overrides the physical normal component `n_phys`, the transverse edge-B `bt` the
+    // transverse `t_phys` — both world component indices (pc for the active Riemann).
+    let prim_face = |base: &[i32], naxis: usize, sign: f64, n_phys: usize, bn: Gv, t_phys: usize, bt: Gv| -> MhdPrim<Gv, 3> {
         let r = |key: &str, rt: &str| recon_cell(key, rt, base, naxis, sign);
         let rho = r("e_rho", "rho");
         let pre = r("e_pre", "pre");
-        let v = [r("e_vp1", "vel_p1"), r("e_vp2", "vel_p2"), r("e_vout", "vel_out")];
-        let mut b = [r("e_bp1", "bcell_p1"), r("e_bp2", "bcell_p2"), r("e_bout", "bcell_out")];
-        b[n_idx] = bn;
-        b[t_idx] = bt;
+        let mut v = [Gv::ZERO; 3];
+        v[pc1] = r("e_vp1", "vel_p1");
+        v[pc2] = r("e_vp2", "vel_p2");
+        v[out] = r("e_vout", "vel_out");
+        let mut b = [Gv::ZERO; 3];
+        b[pc1] = r("e_bp1", "bcell_p1");
+        b[pc2] = r("e_bp2", "bcell_p2");
+        b[out] = r("e_bout", "bcell_out");
+        b[n_phys] = bn;
+        b[t_phys] = bt;
         MhdPrim::<Gv, 3> { hydro: Prim { rho, vel: Tensor::new(v), pre }, mag: Tensor::new(b) }
     };
     let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
@@ -1695,39 +1731,47 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
         let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
         Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
     };
-    // x-Riemann (r-direction) at the North + South r-faces: metrics at (r_f, th_c(0/-1)). the fan
-    // carries the radial moving-interface speed vf = beta^r/alpha at that face.
-    let m_xn = metric_at(r_f, th_c(0));
-    let (a_xn, _, b_xn) = adm_at(r_f, th_c(0));
-    let vf_xn = b_xn / a_xn;
-    let xn_l = prim_face(&nw, g1, 1.0, 0, bx_n_face, 1, by_w);
-    let xn_r = prim_face(&ne, g1, -1.0, 0, bx_n_face, 1, by_e);
-    let st_xn = hlld_rmhd_states_gr_ortho(&eos, &xn_l, &xn_r, 0, &m_xn);
-    let m_xs = metric_at(r_f, th_c(-1));
-    let (a_xs, _, b_xs) = adm_at(r_f, th_c(-1));
-    let vf_xs = b_xs / a_xs;
-    let xs_l = prim_face(&sw, g1, 1.0, 0, bx_s_face, 1, by_w);
-    let xs_r = prim_face(&se, g1, -1.0, 0, bx_s_face, 1, by_e);
-    let st_xs = hlld_rmhd_states_gr_ortho(&eos, &xs_l, &xs_r, 0, &m_xs);
-    let phi_x = avg2(wave_sum(&st_xn, 1, by_w, by_e, vf_xn), wave_sum(&st_xs, 1, by_w, by_e, vf_xs));
-    // y-Riemann (theta-direction): beta^theta = 0 on every KS-family chart -> vf = 0.
-    let m_yw = metric_at(r_c(-1), th_f);
-    let yw_l = prim_face(&sw, g2, 1.0, 1, by_w_face, 0, bx_s);
-    let yw_r = prim_face(&nw, g2, -1.0, 1, by_w_face, 0, bx_n);
-    let st_yw = hlld_rmhd_states_gr_ortho(&eos, &yw_l, &yw_r, 1, &m_yw);
-    let m_ye = metric_at(r_c(0), th_f);
-    let ye_l = prim_face(&se, g2, 1.0, 1, by_e_face, 0, bx_s);
-    let ye_r = prim_face(&ne, g2, -1.0, 1, by_e_face, 0, bx_n);
-    let st_ye = hlld_rmhd_states_gr_ortho(&eos, &ye_l, &ye_r, 1, &m_ye);
-    let phi_y = avg2(wave_sum(&st_yw, 0, bx_s, bx_n, zero_g), wave_sum(&st_ye, 0, bx_s, bx_n, zero_g));
-    // advective transport velocity at the corner: vtilde = alpha v - beta (radial shift only).
-    let (alpha_c, sqrtg_c, beta_r_c) = adm_at(r_f, th_f);
+    // the grid-g1-face Riemann (world normal pc1) at its two grid-g2 cell centres (N=0, S=-1): the
+    // fan solves along the world axis pc1 and rides the moving-interface speed vf = beta^{pc1}/alpha.
+    // its wave-sum feeds the pc2 (transverse) field flux, read at the world index pc2 of the states.
+    let (an0, an1) = face_cell(g1, 0, 0);
+    let (a_xn, _, b_xn) = adm_at(an0, an1);
+    let vf_xn = b_xn[pc1] / a_xn;
+    let xn_l = prim_face(&nw, g1, 1.0, pc1, bx_n_face, pc2, by_w);
+    let xn_r = prim_face(&ne, g1, -1.0, pc1, bx_n_face, pc2, by_e);
+    let st_xn = hlld_rmhd_states_gr_ortho(&eos, &xn_l, &xn_r, pc1, &metric_at(an0, an1));
+    let (as0, as1) = face_cell(g1, 0, -1);
+    let (a_xs, _, b_xs) = adm_at(as0, as1);
+    let vf_xs = b_xs[pc1] / a_xs;
+    let xs_l = prim_face(&sw, g1, 1.0, pc1, bx_s_face, pc2, by_w);
+    let xs_r = prim_face(&se, g1, -1.0, pc1, bx_s_face, pc2, by_e);
+    let st_xs = hlld_rmhd_states_gr_ortho(&eos, &xs_l, &xs_r, pc1, &metric_at(as0, as1));
+    let phi_x = avg2(wave_sum(&st_xn, pc2, by_w, by_e, vf_xn), wave_sum(&st_xs, pc2, by_w, by_e, vf_xs));
+    // the grid-g2-face Riemann (world normal pc2) at its two grid-g1 cell centres (W=-1, E=0): vf =
+    // beta^{pc2}/alpha (zero on the spherical polar angle and the disk azimuth, nonzero on cartesian
+    // y and cylindrical z). its wave-sum feeds the pc1 field flux (world index pc1 of the states).
+    let (bw0, bw1) = face_cell(g2, 0, -1);
+    let (a_yw, _, b_yw) = adm_at(bw0, bw1);
+    let vf_yw = b_yw[pc2] / a_yw;
+    let yw_l = prim_face(&sw, g2, 1.0, pc2, by_w_face, pc1, bx_s);
+    let yw_r = prim_face(&nw, g2, -1.0, pc2, by_w_face, pc1, bx_n);
+    let st_yw = hlld_rmhd_states_gr_ortho(&eos, &yw_l, &yw_r, pc2, &metric_at(bw0, bw1));
+    let (be0, be1) = face_cell(g2, 0, 0);
+    let (a_ye, _, b_ye) = adm_at(be0, be1);
+    let vf_ye = b_ye[pc2] / a_ye;
+    let ye_l = prim_face(&se, g2, 1.0, pc2, by_e_face, pc1, bx_s);
+    let ye_r = prim_face(&ne, g2, -1.0, pc2, by_e_face, pc1, bx_n);
+    let st_ye = hlld_rmhd_states_gr_ortho(&eos, &ye_l, &ye_r, pc2, &metric_at(be0, be1));
+    let phi_y = avg2(wave_sum(&st_yw, pc1, bx_s, bx_n, vf_yw), wave_sum(&st_ye, pc1, bx_s, bx_n, vf_ye));
+    // advective transport velocity at the corner: vtilde = alpha v - beta on EACH in-plane axis.
+    let (alpha_c, sqrtg_c, beta_c) = adm_at(r_f, th_f);
+    let (beta_x_c, beta_y_c) = (beta_c[pc1], beta_c[pc2]);
     let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
     let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
-    let vx_w = alpha_c * avg2(vp1(&nw), vp1(&sw)) - beta_r_c;
-    let vx_e = alpha_c * avg2(vp1(&ne), vp1(&se)) - beta_r_c;
-    let vy_s = alpha_c * avg2(vp2(&sw), vp2(&se));
-    let vy_n = alpha_c * avg2(vp2(&nw), vp2(&ne));
+    let vx_w = alpha_c * avg2(vp1(&nw), vp1(&sw)) - beta_x_c;
+    let vx_e = alpha_c * avg2(vp1(&ne), vp1(&se)) - beta_x_c;
+    let vy_s = alpha_c * avg2(vp2(&sw), vp2(&se)) - beta_y_c;
+    let vy_n = alpha_c * avg2(vp2(&nw), vp2(&ne)) - beta_y_c;
     // the coordinate corner EMF, densitized to Etilde_phi = sqrt(gamma)(corner) * E_z.
     let ez = zero_g - half * (vx_e * by_e + vx_w * by_w)
         + half * (vy_n * bx_n + vy_s * bx_s)

@@ -22,7 +22,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation import runner
-from simbi.types import CtMethod
+from simbi.types import CtMethod, Solver
 
 _BACKEND = runner._load_backend("cpu")
 needs_backend = pytest.mark.skipif(
@@ -53,8 +53,10 @@ def _w_div_max(sg, rf, tf, B1, B2) -> tuple[float, float]:
     return md, sc
 
 
-def _run(p, d, ct, end_time=2.5):
+def _run(p, d, ct, end_time=2.5, solver=None):
     p.ct_method = ct
+    if solver is not None:
+        p.solver = solver
     p.end_time = end_time
     p.data_directory = d
     p.checkpoint_interval = 100.0
@@ -95,6 +97,28 @@ def test_cylindrical_rz_field_loop_preserves_divergence(ct) -> None:
     zf = np.array(p.z_faces())
     md, sc = _w_div_max(sg, rf, zf, B1, B2)
     assert md < 1e-12 * max(sc, 1.0), f"(R,z) w-div(B) broke at {ct}: {md:.3e} (scale {sc:.3e})"
+
+
+# the sharp UCT-HLLD wave-sum edge EMF on the GAPPED (R, z) grid axes [0, 2]: the tetrad HLLD fan
+# reads a full 3-vector prim + the world (R, z) metric, so the kernel assembles the prim in WORLD
+# order (v[pc]=..) and solves along the world normal (dir = pc); gr_ct_plane maps the gapped axes.
+# the two-component shift (beta^R, beta^z) rides both fans. div(B) machine-zero + stable at t = 0.7.
+@needs_backend
+def test_cylindrical_rz_uct_hlld_preserves_divergence() -> None:
+    from simbi_configs.examples.grmhd.gr_cylindrical_rz_field_loop import (
+        GrCylindricalRzFieldLoop,
+    )
+
+    d = tempfile.mkdtemp() + "/"
+    p = GrCylindricalRzFieldLoop.from_cli(["--nr", "80", "--nz", "80"])
+    B1, B2 = _run(p, d, CtMethod.UCT, end_time=0.7, solver=Solver.HLLD)
+
+    mm = p.schwarzschild_mass
+    sg = lambda r, z: r * math.sqrt(1.0 + 2.0 * mm / math.hypot(r, z))
+    rf = np.array(p.radial_faces())
+    zf = np.array(p.z_faces())
+    md, sc = _w_div_max(sg, rf, zf, B1, B2)
+    assert md < 1e-12 * max(sc, 1.0), f"(R,z) UCT-HLLD w-div(B) broke: {md:.3e} (scale {sc:.3e})"
 
 
 @needs_backend

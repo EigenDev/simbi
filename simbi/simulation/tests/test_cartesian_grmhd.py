@@ -21,7 +21,7 @@ import numpy as np
 import pytest
 
 from simbi.simulation import runner
-from simbi.types import CtMethod
+from simbi.types import CtMethod, Solver
 
 _BACKEND = runner._load_backend("cpu")
 needs_backend = pytest.mark.skipif(
@@ -90,3 +90,42 @@ def test_cartesian_field_loop_preserves_divergence_and_is_stable(ct) -> None:
     # the constrained-transport correctness gate: the w-weighted div(B) stays at roundoff.
     md, sc = _w_div_max(p, B1, B2)
     assert md < 1e-12 * max(sc, 1.0), f"w-weighted div(B) broke at {ct}: {md:.3e} (scale {sc:.3e})"
+
+
+@needs_backend
+@pytest.mark.parametrize("ct", [CtMethod.CONTACT, CtMethod.UCT])
+def test_cartesian_hlld_gas_flux_runs_and_preserves_divergence(ct) -> None:
+    # the tetrad-frame MUB09 HLLD gas flux on the NON-DIAGONAL cartesian kerr-schild metric:
+    # orthonormal_basis(dir) Gram-Schmidts gamma_ij = delta + 2H x_i x_j / r^2 into the local flat
+    # frame where the validated flat solver runs, and the flux maps back with the normal factor E_dd.
+    # UCT additionally exercises the sharp UCT-HLLD wave-sum edge EMF (the tetrad states fan + the
+    # multi-axis moving-interface shift beta^x, beta^y). the tetrad's exactness is pinned by the rust
+    # unit gates; this is the pipeline gate that it bakes, dispatches, runs stably, and holds div(B) = 0.
+    from simbi_configs.examples.grmhd.gr_cartesian_field_loop import GrCartesianFieldLoop
+
+    d = tempfile.mkdtemp() + "/"
+    p = GrCartesianFieldLoop.from_cli(["--nx", str(_NX), "--ny", str(_NY)])
+    p.solver = Solver.HLLD
+    p.ct_method = ct
+    p.end_time = 3.0
+    p.data_directory = d
+    p.checkpoint_interval = 100.0
+    runner.run(p, compute_mode="cpu")
+
+    assert not glob.glob(os.path.join(d, "*crashed*.h5")), "cartesian HLLD run crashed"
+    final = glob.glob(os.path.join(d, "*final*.h5"))[0]
+    with h5py.File(final) as h:
+        B1 = h["level_0/partition_0/hydro/magnetic/B1/data"][:]
+        B2 = h["level_0/partition_0/hydro/magnetic/B2/data"][:]
+        g = h["level_0/partition_0/hydro/primitives"]
+        shp = g["rho"].shape
+        halo = [(s - n) // 2 for s, n in zip(shp, (_NY, _NX))]
+        sl = tuple(slice(hh, hh + n) for hh, n in zip(halo, (_NY, _NX)))
+        pre, rho = g["pre"][sl], g["rho"][sl]
+
+    assert np.isfinite(rho).all() and np.isfinite(pre).all(), "NaN/inf under HLLD"
+    assert pre.min() > 0.0, f"pressure went non-positive under HLLD: {pre.min():.3e}"
+    assert rho.min() > 0.0, f"density went non-positive under HLLD: {rho.min():.3e}"
+    assert float(np.abs(B1).max()) < 1.0, "field blew up under HLLD"
+    md, sc = _w_div_max(p, B1, B2)
+    assert md < 1e-12 * max(sc, 1.0), f"HLLD w-weighted div(B) broke: {md:.3e} (scale {sc:.3e})"

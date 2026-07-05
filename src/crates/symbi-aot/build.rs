@@ -1278,7 +1278,9 @@ fn gen_rmhd_gr_uct_hlld(out_dir: &str, geom: &Geom) {
     let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
     let ok = gr_ct_out_of_plane(geom);
-    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_gv(geom.spacetime, &geom.spacing);
+    let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+    );
     emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{gs}{sp}{st}_2d_{ok}"), 2, &k, &w);
 }
 
@@ -1730,11 +1732,20 @@ fn main() {
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            // the tetrad-frame MUB09 HLLD gas flux: orthonormal_basis(dir) is the full Gram-Schmidt
+            // triad of the NON-DIAGONAL cartesian gamma, so the validated flat solver runs in the
+            // frame and the intercell flux maps back with the single normal factor E_dd (+ the
+            // kerr-schild shift as the moving-interface speed beta^n/alpha + the induction transpose).
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
         }
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
+        // the sharp Alfven-resolving UCT-HLLD wave-sum edge EMF, via the tetrad states fan: the
+        // cartesian (x, y) grid axes are CONTIGUOUS [0,1], so the world-order prim + world solve
+        // direction hold, and the multi-axis moving-interface shift (beta^x, beta^y) rides the fan.
+        gen_rmhd_gr_uct_hlld(&out_dir, &geom);
     }
     // GRMHD in the cylindrical kerr-schild charts (design 45): the equatorial (R, phi) DISK (DIAGONAL
     // on the equator, r = R, gamma = diag(1 + 2M/R, R^2), beta^phi = 0, out-of-plane corner EMF the
@@ -1750,11 +1761,19 @@ fn main() {
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
         for dir in 0..2 {
             gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
+            // the tetrad-frame MUB09 HLLD gas flux: orthonormal_basis(dir) orthonormalizes the disk's
+            // diagonal gamma and the (R, z) plane's NON-DIAGONAL gamma_Rz alike; the flux maps back
+            // with the normal factor E_dd (+ the kerr-schild shift + induction transpose).
+            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
         }
         gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
         gen_rmhd_ct_gr(&out_dir, &geom);
         gen_rmhd_gr_uct(&out_dir, &geom);
+        // the sharp UCT-HLLD edge EMF on BOTH cylindrical charts: the disk (R, phi) = [0,1] and the
+        // gapped (R, z) = [0,2] — the kernel assembles the tetrad-fan prim in world order and solves
+        // along the world normal (pc), so the gapped grid-axis set is handled.
+        gen_rmhd_gr_uct_hlld(&out_dir, &geom);
     }
     // GRMHD phase C: the spinning-kerr 2D SWIRL row (sph_swirl -> DOF = 3 momentum for the frame
     // dragging). the flux runs the tetrad HLLD (non-diagonal gamma_{r phi}) + the moving-interface
