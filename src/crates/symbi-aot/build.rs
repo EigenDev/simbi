@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_splice_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -718,9 +718,7 @@ fn gen_state_finite(out_dir: &str, ndim: u8) {
 // spherical-swirl (DOF > D) instance (ncomp = DOF) from the DOF == D one (both share the `_{ndim}d`
 // grid tag) — "" for DOF == D and for the always-3-vector MHD, matching the runtime name build.
 fn gen_fofc_tagged(out_dir: &str, ndim: u8, prefix: &str, dof_sfx: &str, ncomp: usize, has_energy: bool) {
-    let (k, w) = fofc_copy_gv(ncomp, has_energy, true);
-    emit_gv(out_dir, &format!("{prefix}_fofc_snap{dof_sfx}_{ndim}d"), ndim, &k, &w);
-    let (k, w) = fofc_copy_gv(ncomp, has_energy, false);
+    let (k, w) = fofc_copy_gv(ncomp, has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_restore{dof_sfx}_{ndim}d"), ndim, &k, &w);
     let (k, w) = fofc_select_gv(ncomp, has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_select{dof_sfx}_{ndim}d"), ndim, &k, &w);
@@ -728,6 +726,12 @@ fn gen_fofc_tagged(out_dir: &str, ndim: u8, prefix: &str, dof_sfx: &str, ncomp: 
     emit_gv(out_dir, &format!("{prefix}_fofc_probe{dof_sfx}_{ndim}d"), ndim, &k, &w);
     let (k, w) = fofc_freeze_probe_gv(has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_freeze{dof_sfx}_{ndim}d"), ndim, &k, &w);
+    // the face-based flux splice, one kernel per sweep axis: choose FO on faces adjacent to a flagged
+    // cell, else HO, so the single re-godunov telescopes conservatively across every fallback boundary.
+    for dir in 0..ndim as usize {
+        let (k, w) = fofc_splice_gv(ndim as usize, dir, ncomp, has_energy);
+        emit_gv(out_dir, &format!("{prefix}_fofc_splice{dof_sfx}_{ndim}d_{dir}"), ndim, &k, &w);
+    }
 }
 
 // the GEOMETRY-DEPENDENT hydro kernels for ALL THREE EOS regimes (iso / adiabatic /

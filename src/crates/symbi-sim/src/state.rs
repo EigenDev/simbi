@@ -609,13 +609,16 @@ pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpac
     /// invariant (see `godunov_with_fused_source` S2 proof). dead weight unless an
     /// additive source overlay is active (the step loop gates the snapshot).
     pub u_stage: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
-    /// first-order flux-correction scratch: the HIGH-ORDER conserved + primitive result of a
-    /// substage, snapshotted before FOFC redoes the failed cells at first order (PCM + HLLE), so the
-    /// per-cell select `failed ? first_order : high_order` has both states. only touched when a c2p
-    /// failure is detected in the substage (the reduction gates the whole correction); a no-op
-    /// otherwise, and for regimes that never dispatch FOFC.
-    pub u_fofc: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
-    pub prim_fofc: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
+    /// first-order flux-correction scratch: the HIGH-ORDER per-direction conserved fluxes, saved
+    /// before FOFC redoes the substage at first order (which overwrites `fields.flux`). the
+    /// face-based splice reads HO here and FO from the live `fields.flux`, choosing per face by the
+    /// fallback flag so every face carries ONE flux -> the re-godunov telescopes conservatively.
+    /// only touched when a substage fires FOFC; a no-op otherwise and for regimes without FOFC.
+    pub flux_ho: [ConsFieldsGeneric<NDIM, DOF, M, Sc>; NDIM],
+    /// the per-cell FOFC fallback flag over the allocated domain: 1 where the high-order c2p is
+    /// unphysical, else 0, with boundary-consistent ghosts (a face is first-order iff either
+    /// adjacent cell is flagged). the splice stencil reads it at the two cells sharing each face.
+    pub fofc_flag: Field<Sc, NDIM, M>,
 }
 
 /// the natural case: vector dimension == grid dimension.
@@ -1691,8 +1694,8 @@ where
             u_n: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
             prim_n: PrimFieldsGeneric::zeros_with_pressure(&allocated, alloc_pre)?,
             u_stage: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
-            u_fofc: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
-            prim_fofc: PrimFieldsGeneric::zeros_with_pressure(&allocated, alloc_pre)?,
+            flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
+            fofc_flag: Field::zeros(&allocated)?,
         };
 
         let exec = Executor::<S>::new(device_id)?;

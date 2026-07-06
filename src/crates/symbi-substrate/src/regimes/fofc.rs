@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::regimes::substrate_kernels::{dispatch_fields_each, dispatch_named, kernel_field_binds};
 use crate::regimes::substrate_gpu::field_max_reduce;
+use crate::kernels::support::FaceDomain;
 
 /// consecutive substages the FOFC freeze tier may fire before the run halts. the freeze is the
 /// last-resort MOOD parachute (neither high- nor first-order recovered a zone); it deploys rarely
@@ -85,16 +86,16 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.allocated, &inputs, &outputs, &[], &[]);
 }
 
-/// dispatch the three-tier select kernel `{prefix}_fofc_select_{D}d` over the interior: choose the
-/// conserved per zone as high-order (`ho_*` = u_fofc/prim_fofc) if physical, else first-order
-/// (`x_*` = the in-place live cons/prim) if physical, else FREEZE to the stage input (`us_*` =
-/// u_stage). only the conserved is chosen; the primitive is re-derived by the c2p after the select.
+/// dispatch the FREEZE-tier select kernel `{prefix}_fofc_select_{D}d` over the interior: keep the
+/// live spliced first-order conserved (`x_*` = the in-place cons/prim) where physical, else FREEZE to
+/// the stage input (`us_*` = u_stage). the face-based splice already made every kept cell
+/// conservative; this handles only the rare cell no flux can update admissibly (the documented
+/// single-cell conservation waiver). only the conserved is chosen; the primitive is re-derived by the
+/// c2p after the select.
 pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
     dof_sfx: &str,
-    u_fofc: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
-    prim_fofc: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
     u_stage: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
     cons: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
     prim: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
@@ -104,14 +105,12 @@ pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let name = format!("{prefix}_fofc_select{dof_sfx}_{D}d");
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
-        if let Some(c) = s.strip_prefix("ho_") {
-            fofc_comp(u_fofc, prim_fofc, c)
-        } else if let Some(c) = s.strip_prefix("us_") {
+        if let Some(c) = s.strip_prefix("us_") {
             // the stage-input freeze tier: conserved only (den/mom/nrg); the prim arg is unread.
             fofc_comp(u_stage, prim, c)
         } else if let Some(c) = s.strip_prefix("x_") {
-            // the in-place cons: read (first-order) + write (select result), one binding. the
-            // prim (x_rho/x_pre) is read-only for the first-order physicality test.
+            // the in-place cons: read (spliced first-order) + write (select result), one binding. the
+            // prim (x_rho/x_pre) is read-only for the physicality test.
             fofc_comp(cons, prim, c)
         } else {
             panic!("fofc_select: unknown slot '{s}'")
@@ -126,19 +125,57 @@ pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
 }
 
-/// FOFC FREEZE DIAGNOSTIC (task 1 instrumentation): count the zones where neither the high-order
-/// nor the first-order tier is physical — the zones the select freezes to the stage input. writes
-/// the per-zone freeze flag to the scratch (reusing `{prefix}_fofc_freeze{dof_sfx}_{D}d`) and
-/// max-reduces it over the interior: > 0 iff some zone froze this substage. dispatched between the
-/// first-order c2p and the select, so `ho_*` is the high-order snapshot and `x_*` is the first-order
-/// live state — exactly the pair the select's tiers test.
+
+/// dispatch the FACE-BASED FLUX SPLICE kernel `{prefix}_fofc_splice_{D}d_{dir}` over the axis-`dir`
+/// interior face domain: on each face the live first-order flux (`fo_*` = `fields.flux[dir]`, spliced
+/// in place) is kept where either adjacent cell is flagged, else replaced with the saved high-order
+/// flux (`ho_*` = `flux_ho[dir]`). the flag is the 0/1 cell field. after all axes are spliced every
+/// face carries ONE flux and the following godunov telescopes conservatively.
+pub(crate) fn fofc_splice<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    dof_sfx: &str,
+    dir: usize,
+    flag: &Field<Sc, D, Mem>,
+    flux_ho: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("{prefix}_fofc_splice{dof_sfx}_{D}d_{dir}");
+    let flux = &sim.fields.flux[dir];
+    let prim = &sim.fields.prim;
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        if s == "flag" {
+            flag
+        } else if let Some(c) = s.strip_prefix("fo_") {
+            // the live flux buffer: read (first-order) + write (spliced), one in-place binding.
+            fofc_comp(flux, prim, c)
+        } else if let Some(c) = s.strip_prefix("ho_") {
+            fofc_comp(flux_ho, prim, c)
+        } else {
+            panic!("fofc_splice: unknown slot '{s}'")
+        }
+    };
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    for (bind, is_out) in kernel_field_binds(&name).iter() {
+        let fld = slot(&bind.name());
+        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+    }
+    dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior.face_domain(dir), &inputs, &outputs, &[], &[]);
+}
+
+/// FOFC FREEZE DIAGNOSTIC: count the zones where the SPLICED first-order result is still unphysical —
+/// the zones the freeze tier holds at the stage input (the conservation waiver). writes the per-zone
+/// freeze flag to the scratch (`{prefix}_fofc_freeze{dof_sfx}_{D}d`) and max-reduces it over the
+/// interior: > 0 iff some zone froze this substage. dispatched after the spliced-godunov c2p, so `x_*`
+/// is the live conserved the select tests.
 pub(crate) fn fofc_freeze_count<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
     dof_sfx: &str,
     scratch: &Field<Sc, D, Mem>,
-    u_fofc: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
-    prim_fofc: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
     cons: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
     prim: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
 ) -> f64
@@ -150,8 +187,6 @@ where
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if s == "freeze" {
             scratch
-        } else if let Some(c) = s.strip_prefix("ho_") {
-            fofc_comp(u_fofc, prim_fofc, c)
         } else if let Some(c) = s.strip_prefix("x_") {
             fofc_comp(cons, prim, c)
         } else {
@@ -169,11 +204,16 @@ where
 }
 
 
-/// the FOFC flow: (1) snapshot the high-order cons+prim -> u_fofc/prim_fofc; (2) restore
-/// cons <- u_stage so the redo reconstructs from the PHYSICAL stage-input state; (3) c2p; (4)
-/// re-flux at first order (the caller's `first_order_flux`); (5) re-godunov; (6) additive source
-/// when present; (7) re-c2p; (8) three-tier select; (9) c2p to re-derive the primitive from the
-/// selected conserved (the frozen zones carry admissible u_stage, so c2p converges). the caller
+/// the FACE-BASED FOFC flow. (1) flag every zone whose high-order c2p is unphysical (the probe write
+/// over the interior), boundary-fill the flag; early-out if none. (2) save the high-order fluxes.
+/// (3) restore cons <- u_stage so the first-order flux reconstructs from the PHYSICAL stage input;
+/// c2p. (4) re-flux at first order (the caller's `first_order_flux`). (5) SPLICE per face: keep the
+/// first-order flux where either adjacent cell is flagged, else the saved high-order flux — one flux
+/// per face. (6) the SINGLE conservative godunov from the spliced fluxes (+ additive source); c2p.
+/// (7) the freeze tier holds the stage input on any cell the spliced update still left unphysical
+/// (the documented single-cell conservation waiver); c2p to re-derive the primitive. because every
+/// face carries ONE flux, the update telescopes exactly across every fallback boundary — the mass /
+/// momentum / energy created at flag boundaries by a per-cell state replacement is gone. the caller
 /// supplies the substrate's own first-order flux (per direction) / c2p / godunov / source_apply.
 pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -193,44 +233,59 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    // HOST GATE: probe the high-order c2p for any unphysical zone. FOFC only ever modifies an
-    // unphysical zone (a physical one keeps its high-order value), so with none the whole pass is a
-    // no-op — skip it. a clean substage costs one pointwise probe + a reduction, not the flux
-    // sweep + two extra c2p passes.
+    let ws = &sim.workspace;
+    let flag = &ws.fofc_flag;
+    // HOST GATE + FLAG: write the per-cell fallback flag (1 where the high-order c2p is unphysical)
+    // over the interior. FOFC only corrects a flagged cell (a physical one keeps its high-order flux
+    // on every non-fallback face), so with none the whole pass is a no-op — skip it. a clean substage
+    // costs one pointwise probe + a reduction, not the flux sweep + two extra c2p passes.
     let probe = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
-    dispatch_named(sim, pre_bind, Some(scratch), 0, &probe, &sim.geom.interior, &[], &[]);
-    if field_max_reduce(scratch, &sim.geom.interior) <= 0.5 {
+    dispatch_named(sim, pre_bind, Some(flag), 0, &probe, &sim.geom.interior, &[], &[]);
+    if field_max_reduce(flag, &sim.geom.interior) <= 0.5 {
         return;
     }
+    // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
+    // must take ONE first-order decision from both of its cells, else the splice re-creates the very
+    // non-conservation it exists to remove.
+    crate::regimes::mhd_substrate::flag_ghost_fill(sim, flag);
+
     let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
-    let ws = &sim.workspace;
-    fofc_copy(sim, prefix, dof_sfx, "snap", (cons, prim), (&ws.u_fofc, &ws.prim_fofc));
+    // save the HIGH-ORDER fluxes before the first-order redo overwrites the live buffers. the
+    // componentwise conserved copy is exactly `fofc_restore` (d_x = s_x), reused on the per-direction
+    // flux ConsFields.
+    for dir in 0..D {
+        fofc_copy(sim, prefix, dof_sfx, "restore", (&sim.fields.flux[dir], prim), (&ws.flux_ho[dir], prim));
+    }
     fofc_copy(sim, prefix, dof_sfx, "restore", (&ws.u_stage, prim), (cons, prim));
     c2p();
     for dir in 0..D {
         first_order_flux(dir);
+    }
+    for dir in 0..D {
+        fofc_splice(sim, prefix, dof_sfx, dir, flag, &ws.flux_ho[dir]);
     }
     godunov();
     if has_additive {
         source_apply();
     }
     c2p();
-    // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier deploys where neither high- nor first-order
-    // recovered a zone. it is the rare correct parachute for a genuinely hard cell (isolated in
-    // time), so a single firing is not a failure — but a poisoned source / initial datum that FOFC
-    // cannot fix freezes EVERY stage. track the consecutive streak and halt loudly once it persists.
-    let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, &ws.u_fofc, &ws.prim_fofc, cons, prim);
+    // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier holds the stage input where even full first-order
+    // fluxes leave a cell unphysical. it is the rare correct parachute for a genuinely hard cell
+    // (isolated in time), so a single firing is not a failure — but a poisoned source / initial datum
+    // that FOFC cannot fix freezes EVERY stage. track the consecutive streak and halt loudly once it
+    // persists.
+    let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, cons, prim);
     if froze > 0.5 {
         let streak = freeze_streak.fetch_add(1, Ordering::Relaxed) + 1;
         assert!(
             streak < FOFC_FREEZE_HALT_STREAK,
             "FOFC last-resort freeze fired on {streak} consecutive substages (regime={prefix}{dof_sfx}): \
-             a zone is persistently unrecoverable by both high- and first-order — a genuine breakdown, \
-             not the rare isolated parachute. check the source / initial data / boundary for a poison."
+             a zone is persistently unrecoverable by the first-order redo — a genuine breakdown, not \
+             the rare isolated parachute. check the source / initial data / boundary for a poison."
         );
     } else {
         freeze_streak.store(0, Ordering::Relaxed);
     }
-    fofc_select(sim, prefix, dof_sfx, &ws.u_fofc, &ws.prim_fofc, &ws.u_stage, cons, prim);
+    fofc_select(sim, prefix, dof_sfx, &ws.u_stage, cons, prim);
     c2p();
 }

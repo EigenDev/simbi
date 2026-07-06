@@ -32,12 +32,12 @@ pub fn snapshot_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, Fi
 }
 
 
-/// a componentwise field copy for the FOFC scratch: `dst = src` over the gas conserved
-/// (den, mom[k], nrg?) and, when `include_prim`, the primitive (rho, vel[k], pre?). used to (a)
-/// snapshot the high-order cons+prim into `u_fofc`/`prim_fofc` before the substage is redone at
-/// first order, and (b) restore `cons <- u_stage` (cons only) so the redo reconstructs from the
-/// physical stage-input state. explicit-field dispatch: slots `s_*` (source) -> `d_*` (dest).
-pub fn fofc_copy_gv(ncomp: usize, has_energy: bool, include_prim: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+/// a componentwise conserved-field copy `dst = src` over the gas conserved (den, mom[k], nrg?).
+/// used to (a) restore `cons <- u_stage` so the first-order redo reconstructs from the physical
+/// stage-input state, and (b) save the high-order per-direction fluxes before the redo overwrites the
+/// live flux buffers (both are ConsFields). explicit-field dispatch: slots `s_*` (source) -> `d_*`
+/// (dest).
+pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
     let mut cp = |name: &str| {
@@ -50,15 +50,6 @@ pub fn fofc_copy_gv(ncomp: usize, has_energy: bool, include_prim: bool) -> (GvKe
     }
     if has_energy {
         cp("nrg");
-    }
-    if include_prim {
-        cp("rho");
-        for k in 0..ncomp {
-            cp(&format!("vel_{k}"));
-        }
-        if has_energy {
-            cp("pre");
-        }
     }
     (end_trace(), writes)
 }
@@ -106,72 +97,99 @@ pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 }
 
 
-/// FOFC FREEZE diagnostic: write 1 to `freeze` where NEITHER the high-order (`ho_*`) NOR the
-/// first-order (`x_*`) tier is physical — the zones the three-tier select falls back (freezes) to
-/// the stage input. reads the same primitive pair the select tests. reduced over the interior to
-/// count freezes per substage; a fully physical-constraint-preserving pipeline drives this to zero
-/// (the first-order tier always recovers from admissible neighbours), so a nonzero count localizes
-/// where a PCP assumption leaks.
+/// FOFC FREEZE diagnostic: write 1 to `freeze` where the SPLICED first-order result (`x_*`, the live
+/// cons after the face-based redo) is still unphysical — the zones the freeze tier holds at the
+/// stage input. reduced over the interior to count freezes per substage; a fully
+/// physical-constraint-preserving low-order scheme recovers every flagged cell (full first-order
+/// fluxes on all its faces), driving this to zero, so a nonzero count localizes where a PCP
+/// assumption leaks and the run trades a cell's conservation for finiteness.
 pub fn fofc_freeze_probe_gv(has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
-    let ho_rho = Gv::field("ho_rho", "ho_rho");
     let x_rho = Gv::field("x_rho", "x_rho");
-    let (physical_ho, physical_fo) = if has_energy {
-        let ho_pre = Gv::field("ho_pre", "ho_pre");
+    let physical = if has_energy {
         let x_pre = Gv::field("x_pre", "x_pre");
-        (finite_pos(ho_rho) & finite_pos(ho_pre), finite_pos(x_rho) & finite_pos(x_pre))
+        finite_pos(x_rho) & finite_pos(x_pre)
     } else {
-        (finite_pos(ho_rho), finite_pos(x_rho))
+        finite_pos(x_rho)
     };
-    let frozen = Gv::select(physical_ho, Gv::ZERO, Gv::select(physical_fo, Gv::ZERO, Gv::ONE));
+    let frozen = Gv::select(physical, Gv::ZERO, Gv::ONE);
     (end_trace(), vec![("freeze".to_string(), "freeze".into(), frozen.node())])
 }
 
 
+/// the FOFC FREEZE tier select (the face-based redo's only per-cell state replacement): keep the
+/// live spliced first-order conserved (`x_*`) where it is physical, else FREEZE to the stage-input
+/// state `u_stage` (`us_*`) — the pre-godunov conserved, admissible from stage entry, so the final
+/// c2p converges on it. the face-based splice already made every kept cell conservative (one flux per
+/// face); this handles only the rare cell that no flux can update admissibly, holding its stage input
+/// rather than propagating a NaN. that single-cell hold is the documented conservation waiver — it
+/// discards the cell's flux exchange, bounded by the persistent-freeze fail-loud. only the conserved
+/// is chosen; the primitive is re-derived by the c2p that follows.
 pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // finite AND positive: (v - v) is 0 for a finite value and NaN for NaN OR +-inf (inf - inf =
     // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
-    // "physical" tier is one whose density (and pressure, when modelled) passes both.
+    // "physical" cell is one whose density (and pressure, when modelled) passes both.
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
-    let ho_rho = Gv::field("ho_rho", "ho_rho");
     let x_rho = Gv::field("x_rho", "x_rho");
-    let (physical_ho, physical_fo) = if has_energy {
-        let ho_pre = Gv::field("ho_pre", "ho_pre");
+    let physical = if has_energy {
         let x_pre = Gv::field("x_pre", "x_pre");
-        (finite_pos(ho_rho) & finite_pos(ho_pre), finite_pos(x_rho) & finite_pos(x_pre))
+        finite_pos(x_rho) & finite_pos(x_pre)
     } else {
-        (finite_pos(ho_rho), finite_pos(x_rho))
+        finite_pos(x_rho)
     };
-    // THREE-TIER conserved select: the high-order zone if it is physical, else the first-order redo
-    // if THAT is physical, else FREEZE to the stage-input state u_stage (`us_*`) — the pre-godunov
-    // conserved, which already recovered its primitive at stage entry, so it is admissible and the
-    // final c2p converges on it. the finiteness guard makes the frozen tier unconditional: a zone no
-    // flux can update admissibly holds its stage-input value rather than propagating a NaN. only the
-    // conserved is chosen here; the primitive is re-derived by the c2p that follows the select.
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
-    // the live cons (`x_*`) is read+write IN PLACE: it holds the first-order result and is
+    // the live cons (`x_*`) is read+write IN PLACE: it holds the spliced first-order result and is
     // overwritten with the chosen tier. one slot per component (read path == write path) so the IR
     // dedups it to a single in-place binding (the CT-`b` pattern) — no input/output aliasing.
-    let mut sel_inplace = |comp: &str, ho: Gv, us: Gv| {
+    let mut sel_inplace = |comp: &str, us: Gv| {
         let path = format!("x_{comp}");
         let x = Gv::field(&path, &path);
-        let chosen = Gv::select(physical_ho, ho, Gv::select(physical_fo, x, us));
+        let chosen = Gv::select(physical, x, us);
         writes.push((path.clone(), path.into(), chosen.node()));
     };
-    let ho_den = Gv::field("ho_den", "ho_den");
-    let us_den = Gv::field("us_den", "us_den");
-    sel_inplace("den", ho_den, us_den);
+    sel_inplace("den", Gv::field("us_den", "us_den"));
     for k in 0..ncomp {
-        let ho = Gv::field(&format!("ho_mom_{k}"), &format!("ho_mom_{k}"));
-        let us = Gv::field(&format!("us_mom_{k}"), &format!("us_mom_{k}"));
-        sel_inplace(&format!("mom_{k}"), ho, us);
+        sel_inplace(&format!("mom_{k}"), Gv::field(&format!("us_mom_{k}"), &format!("us_mom_{k}")));
     }
     if has_energy {
-        let ho = Gv::field("ho_nrg", "ho_nrg");
-        let us = Gv::field("us_nrg", "us_nrg");
-        sel_inplace("nrg", ho, us);
+        sel_inplace("nrg", Gv::field("us_nrg", "us_nrg"));
+    }
+    (end_trace(), writes)
+}
+
+
+/// the FOFC FACE-BASED FLUX SPLICE for axis `dir`: choose, per interior face, the FIRST-ORDER flux
+/// (`fo_*`, the redone HLLE/rusanov flux held in the live `fields.flux[dir]`) where either adjacent
+/// cell is flagged for fallback, else the HIGH-ORDER flux (`ho_*`, saved in `flux_ho[dir]` before the
+/// redo overwrote the live buffer). the finite-volume convention stores the axis-`dir` flux at cell
+/// `c` on the LOW face of `c` (between `c - e_dir` and `c`), so the face is first-order iff
+/// `flag[c] > 0 OR flag[c - e_dir] > 0`. the `fo_*` slot is read+write IN PLACE (the live flux
+/// buffer), so after the splice every face carries ONE flux value and the following godunov
+/// telescopes conservatively across every fallback boundary. componentwise over the conserved flux
+/// (den, mom[k], nrg?); the flag is a plain 0/1 cell field with boundary-consistent ghosts.
+pub fn fofc_splice_gv(ndim: usize, dir: usize, ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let nd = ndim as u8;
+    let d = dir as u8;
+    let flag_c = Gv::field("flag", "flag");
+    let flag_lo = Gv::field_shifted("flag", "flag", nd, d, -1);
+    let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
+    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut splice = |comp: &str| {
+        let fo_name = format!("fo_{comp}");
+        let fo = Gv::field(&fo_name, &fo_name);
+        let ho = Gv::field(&format!("ho_{comp}"), &format!("ho_{comp}"));
+        let chosen = Gv::select(face_fo, fo, ho);
+        writes.push((fo_name.clone(), fo_name.into(), chosen.node()));
+    };
+    splice("den");
+    for k in 0..ncomp {
+        splice(&format!("mom_{k}"));
+    }
+    if has_energy {
+        splice("nrg");
     }
     (end_trace(), writes)
 }

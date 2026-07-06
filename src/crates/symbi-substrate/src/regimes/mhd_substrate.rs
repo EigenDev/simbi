@@ -128,6 +128,46 @@ where
     }
 }
 
+/// fill the ghost band of a single 0/1 flag scalar field via the lattice pullback
+/// (`scalar_ghost_fill_{D}d`) with reflect sign +1 (a true scalar copies on a reflect wall):
+/// periodic wraps to the opposite interior, reflect/outflow copy the nearest interior. gives the
+/// FOFC fallback flag boundary-consistent ghosts, so a face straddling the periodic wrap takes ONE
+/// first-order decision from both sides and the flux splice stays conservative there. drives over the
+/// cell-centered (allocated, interior) domain pair.
+pub(crate) fn flag_ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    flag: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let bc = to_bc_array::<D>(&sim.boundaries);
+    let name = format!("scalar_ghost_fill_{D}d");
+    let (flo, fext, fvol) = field_layout(flag);
+    GhostFillDriver::<D>::new(&sim.geom.allocated, &sim.geom.interior, bc).drive_sweep(|region, p| {
+        let (grid, dlo) = exec_layout(&region.domain);
+        let mut ints = Vec::with_capacity(2 * D);
+        for ax in 0..D { ints.push(p.map_type[ax] as i32); }
+        for ax in 0..D { ints.push(p.arg[ax]); }
+        let scalars = [Sc::from_f64(1.0)];
+        let inv = KernelInvocation {
+            buffers: vec![Buf {
+                handle: BufHandle::HostMut(unsafe {
+                    std::slice::from_raw_parts_mut(flag.as_mut_ptr(), fvol)
+                }),
+                lo: &flo,
+                extent: &fext,
+            }],
+            grid: &grid,
+            dom_lo: &dlo,
+            ints: &ints,
+            scalars: &scalars,
+        };
+        let (gf, gir) = expect_kernel::<Sc>(&name);
+        invoke::<Sc, Mem, _>(inv, gir, &name, gf);
+    });
+}
+
 // =============================================================================
 // the shared MHD KernelSet methods, regime-generic over `R: Regime<Sc, 3>`.
 // =============================================================================

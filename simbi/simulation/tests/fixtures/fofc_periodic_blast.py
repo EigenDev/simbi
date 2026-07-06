@@ -1,15 +1,18 @@
 # =============================================================================
 # fofc_periodic_blast.py
 #
-# periodic 1d colliding ultra-relativistic cold streams (v = +0.999 / -0.99,
-# p = 1e-8): the collision shocks at x = 0.5 and at the periodic wrap drive the
-# high-order c2p unphysical, so the first-order flux-correction fallback fires
-# (a marti & muller pressure jump alone does NOT fire it at this resolution —
-# the probe finds no unphysical zone and the pass early-returns). the slight
-# velocity asymmetry keeps the total momentum drift from cancelling by symmetry.
-# periodicity makes the total conserved state (sum of D, S, tau over the
-# interior) an exact invariant of any face-telescoping finite-volume update —
-# the instrument for conservation gates on the fallback.
+# periodic 1d colliding relativistic streams (v = +0.99 / -0.96, p = 1e-3): the
+# collision shocks at x = 0.5 and at the periodic wrap drive the high-order c2p
+# unphysical, so the first-order flux-correction fallback fires on a few hundred
+# substages over the run (a marti & muller pressure jump alone does NOT fire it —
+# the probe finds no unphysical zone and the pass early-returns). the velocity
+# asymmetry keeps the total momentum drift from cancelling by symmetry. the
+# stream strength is tuned so the first-order redo RECOVERS every flagged cell
+# (the freeze tier — the one non-conservative FOFC operation — never fires), so a
+# correct face-based redo conserves the total to roundoff. periodicity makes the
+# total conserved state (sum of D, S, tau over the interior) an exact invariant
+# of any face-telescoping finite-volume update — the instrument for the FOFC
+# conservation gate.
 # =============================================================================
 
 from typing import Annotated
@@ -53,7 +56,7 @@ class FofcPeriodicBlast(SimbiProblem):
     ]
 
     def initial_primitive_state(self) -> InitialStateType:
-        """cold ultra-relativistic streams colliding at x = 0.5 and the wrap."""
+        """relativistic streams colliding at x = 0.5 and the periodic wrap."""
 
         def gas_state() -> GasStateGenerator:
             nx = self.resolution
@@ -61,7 +64,7 @@ class FofcPeriodicBlast(SimbiProblem):
             dx = (xmax - xmin) / nx
             for ii in range(nx):
                 xi = xmin + (ii + 0.5) * dx
-                v = 0.999 if xi <= 0.5 * (xmax - xmin) else -0.99
-                yield (1.0, v, 1e-8)
+                v = 0.99 if xi <= 0.5 * (xmax - xmin) else -0.96
+                yield (1.0, v, 1e-3)
 
         return gas_state
