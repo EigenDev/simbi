@@ -45,6 +45,10 @@ pub fn cfl_wave_speed<const D: usize, const DOF: usize, Mem, Sc>(
     prefix: &str,
     gamma: f64,
     cfl_number: f64,
+    // the GR source-admissibility CFL kernel to fold in after the wave-speed map (the wu 2017
+    // lambda_S; None on a flat background or a regime without a covariant source). it reads the flux
+    // rate already in the scratch and adds the source rate in place before the reduction.
+    source_cfl: Option<&str>,
 ) -> f64
 where
     Mem: MemorySpace + Sync,
@@ -69,7 +73,7 @@ where
     // identities at a = 1; expanding axes only) pair with the per-axis
     // hubble/translation rates for the in-kernel relative speed `|s - v_g|`.
     let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
-    let scalars = scalars_for(&name, |bind| {
+    let resolve = |bind: &ScalarBind| -> Sc {
         let ScalarBind::Ref(sref) = bind else {
             panic!("cfl_wave_speed: unexpected spec scalar {bind:?}");
         };
@@ -94,7 +98,8 @@ where
                     .unwrap_or_else(|| panic!("cfl_wave_speed: unexpected scalar {other:?}")),
             ),
         }
-    });
+    };
+    let scalars = scalars_for(&name, &resolve);
     dispatch_named(
         sim,
         pre,
@@ -105,6 +110,11 @@ where
         &[],
         &scalars,
     );
+    // fold the source-admissibility rate into the same scratch before the reduction (in place).
+    if let Some(scfl) = source_cfl {
+        let ss = scalars_for(scfl, &resolve);
+        dispatch_named(sim, pre, Some(scratch), 0, scfl, &geom.interior, &[], &ss);
+    }
     let lambda_max = field_max_reduce(scratch, &geom.interior);
     cfl_from_lambda(lambda_max, cfl_number)
 }
@@ -385,6 +395,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     primary: f64,
     theta: f64,
     solver: Solver,
+    rusanov: bool,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -412,7 +423,11 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     } else {
         ""
     };
-    let solver_sfx = solver.kernel_suffix();
+    // the FOFC first-order redo on a CURVED background runs the light-cone Lax-Friedrichs (rusanov)
+    // fan — a distinct baked kernel (`_rusanov`), the provably admissibility-preserving low-order
+    // scheme. rusanov is GR-only (a curved-spacetime kernel); the flat first-order redo is HLLE at
+    // theta = 0 through the normal solver suffix.
+    let solver_sfx = if rusanov { "_rusanov" } else { solver.kernel_suffix() };
     // the GR path selects the metric-aware Valencia flux (`RhdGr`): its name carries the spacing +
     // spacetime slug (`rhd_face_flux[_logr]{_schw|_ks}_{D}d_{dir}`), baked only for a curved
     // spacetime. flat (Minkowski) — INCLUDING a flat log-radial run — keeps the unsuffixed flux, so

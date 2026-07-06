@@ -704,14 +704,21 @@ fn gen_snapshot(out_dir: &str, ndim: u8, prefix: &str, has_energy: bool, geom: G
 // snapshot (cons+prim), the stage-input restore (cons only), and the physical(HO) ? HO : FO select.
 // ncomp = 3 for MHD (the 3-vector momentum). one triple per (regime prefix, has_energy, ndim).
 fn gen_fofc(out_dir: &str, ndim: u8, prefix: &str, ncomp: usize, has_energy: bool) {
+    gen_fofc_tagged(out_dir, ndim, prefix, "", ncomp, has_energy);
+}
+
+// the fofc copy/select/probe triple + probe for one (prefix, ncomp). `dof_sfx` distinguishes the
+// spherical-swirl (DOF > D) instance (ncomp = DOF) from the DOF == D one (both share the `_{ndim}d`
+// grid tag) — "" for DOF == D and for the always-3-vector MHD, matching the runtime name build.
+fn gen_fofc_tagged(out_dir: &str, ndim: u8, prefix: &str, dof_sfx: &str, ncomp: usize, has_energy: bool) {
     let (k, w) = fofc_copy_gv(ncomp, has_energy, true);
-    emit_gv(out_dir, &format!("{prefix}_fofc_snap_{ndim}d"), ndim, &k, &w);
+    emit_gv(out_dir, &format!("{prefix}_fofc_snap{dof_sfx}_{ndim}d"), ndim, &k, &w);
     let (k, w) = fofc_copy_gv(ncomp, has_energy, false);
-    emit_gv(out_dir, &format!("{prefix}_fofc_restore_{ndim}d"), ndim, &k, &w);
+    emit_gv(out_dir, &format!("{prefix}_fofc_restore{dof_sfx}_{ndim}d"), ndim, &k, &w);
     let (k, w) = fofc_select_gv(ncomp, has_energy);
-    emit_gv(out_dir, &format!("{prefix}_fofc_select_{ndim}d"), ndim, &k, &w);
+    emit_gv(out_dir, &format!("{prefix}_fofc_select{dof_sfx}_{ndim}d"), ndim, &k, &w);
     let (k, w) = fofc_probe_gv(has_energy);
-    emit_gv(out_dir, &format!("{prefix}_fofc_probe_{ndim}d"), ndim, &k, &w);
+    emit_gv(out_dir, &format!("{prefix}_fofc_probe{dof_sfx}_{ndim}d"), ndim, &k, &w);
 }
 
 // the GEOMETRY-DEPENDENT hydro kernels for ALL THREE EOS regimes (iso / adiabatic /
@@ -842,17 +849,42 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 // storage needs the metric-aware flux). name carries the spacing + spacetime slug + sweep dir. 1D
 // radial (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
 fn gen_rhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
+    gen_rhd_face_flux_gr_mode(out_dir, ndim, dir, geom.clone(), false);
+    // the light-cone rusanov FOFC fallback rides every GR-hydro flux bake (DOF == D charts, where
+    // FOFC is active); the swirl DOF-lift skips FOFC so needs no rusanov instance.
+    if geom.ncomp == ndim {
+        gen_rhd_face_flux_gr_mode(out_dir, ndim, dir, geom, true);
+    }
+}
+
+// the GR-hydro face flux (`rusanov` / HLLE). RUSANOV = the light-cone Lax-Friedrichs fan, the FOFC
+// first-order fallback (state-independent maximal speed -> admissibility-preserving on the curved
+// metric). solver slug after face_flux, matching the runtime dispatch_flux.
+fn gen_rhd_face_flux_gr_mode(out_dir: &str, ndim: u8, dir: u8, geom: Geom, rusanov: bool) {
     // the chart/DOF tag (see gr_chart_dof_tag): spherical swirl -> geom.suffix(), cartesian GR ->
     // `_cart`, else untagged — matching the runtime dispatch_flux.
     let lift = gr_chart_dof_tag(&geom);
-    let name = format!("rhd_face_flux{lift}{}{}_{ndim}d_{dir}", geom.spacing_suffix(), geom.spacetime_suffix());
+    let solver = if rusanov { "_rusanov" } else { "" };
+    let name = format!("rhd_face_flux{solver}{lift}{}{}_{ndim}d_{dir}", geom.spacing_suffix(), geom.spacetime_suffix());
     // the const parameter is the momentum DOF (geom.ncomp); the reconstruction grid rides geom.axes.
     let (k, writes) = match geom.ncomp {
-        1 => symbi_discretize::gv::rhd_flux_gr_gv::<1>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes),
-        2 => symbi_discretize::gv::rhd_flux_gr_gv::<2>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes),
-        3 => symbi_discretize::gv::rhd_flux_gr_gv::<3>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes),
+        1 => symbi_discretize::gv::rhd_flux_gr_gv::<1>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, rusanov),
+        2 => symbi_discretize::gv::rhd_flux_gr_gv::<2>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, rusanov),
+        3 => symbi_discretize::gv::rhd_flux_gr_gv::<3>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, rusanov),
         nc => panic!("rhd_flux_gr_gv: unsupported ncomp {nc}"),
     };
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+// the GR-hydro source-admissibility CFL (wu 2017 lambda_S): reads the flux light-cone rate in the
+// scratch and adds the geodesic source rate. curved spacetime, DOF == D only. name parallels the
+// wave-speed map so the runtime cfl builds the matching string.
+fn gen_rhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
+    assert!(geom.spacetime != Spacetime::Minkowski && geom.ncomp == ndim);
+    let name = format!("rhd_source_cfl{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
+    let (k, writes) = symbi_discretize::gv::rhd_source_cfl_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes, geom.ncomp as usize,
+    );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
@@ -1421,6 +1453,11 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
         rhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize)
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
+    // the wu 2017 source-admissibility rate folds into the same scratch after this map (curved
+    // background, DOF == D — where GR-hydro FOFC is active).
+    if geom.spacetime != Spacetime::Minkowski && geom.ncomp == ndim {
+        gen_rhd_source_cfl_gr(out_dir, ndim, geom);
+    }
 }
 
 // the lattice-map pullback ghost fill (docs/design/11): read prim at the per-axis

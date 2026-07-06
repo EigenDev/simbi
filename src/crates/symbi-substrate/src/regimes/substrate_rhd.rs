@@ -132,7 +132,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 {
     fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        dispatch_flux(sim, pre, "rhd", dir, self.gamma, self.theta, self.solver);
+        dispatch_flux(sim, pre, "rhd", dir, self.gamma, self.theta, self.solver, false);
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
@@ -245,8 +245,22 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn cfl(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> f64 {
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
-        // RHD's only contribution is the "rhd" map (its relativistic wave speed).
+        // RHD's only contribution is the "rhd" map (its relativistic wave speed). on a CURVED
+        // background (DOF == D, where FOFC is active) the source-admissibility rate lambda_S folds in
+        // after the map: the geodesic source must not push U + dt S out of the physical cone.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
+        let source_cfl = (DOF == D && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski)
+            .then(|| {
+                let sfx = geom_suffix(sim.geom.coords, DOF, D);
+                let sp = spacing_suffix(&sim.geom.maps);
+                let st = match sim.geom.spacetime {
+                    symbi_geometry::Spacetime::Schwarzschild => "_schw",
+                    symbi_geometry::Spacetime::KerrSchild => "_ks",
+                    symbi_geometry::Spacetime::Kerr => "_kerr",
+                    symbi_geometry::Spacetime::Minkowski => unreachable!(),
+                };
+                format!("rhd_source_cfl{sfx}{sp}{st}_{D}d")
+            });
         cfl_wave_speed(
             sim,
             pre,
@@ -254,6 +268,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             "rhd",
             self.gamma,
             self.cfl_number,
+            source_cfl.as_deref(),
         )
     }
 
@@ -390,28 +405,34 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn fofc_active(&self) -> bool {
-        // the first-order flux correction covers the DOF == D charts (the fofc select's momentum
-        // count is baked to ncomp = D); the spherical-swirl DOF-lift is a follow-on.
+        // the first-order flux correction covers the DOF == D charts; the spherical-swirl DOF-lift
+        // is a follow-on (it defeats the poisoned-state finiteness backstop — FOFC recovers the
+        // injected NaN — which needs a FOFC-aware fail-loud mechanism first).
         DOF == D
     }
 
     fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
-        // FLAT (special-relativistic) hydro only: the first-order redo dispatches the flat `rhd`
-        // flux, valid on Minkowski. GR-hydro FOFC needs the metric-aware flux + the source-
-        // admissibility CFL (the GRMHD lambda_S mechanism) and is a follow-on.
-        if sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
+        // `fofc` is called unconditionally by the driver; the DOF == D gate lives here (fofc_active
+        // only guards the stage-input snapshot). the spherical-swirl DOF-lift is deferred.
+        if DOF != D {
             return;
         }
-        // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
-        // fan — regardless of the production solver (HLLC can undershoot in a strong rarefaction).
+        // the first-order redo runs at theta = 0 (PCM). FLAT (Minkowski) SRHD uses HLLE — the
+        // positivity-preserving Einfeldt fan — regardless of the production solver (HLLC can
+        // undershoot in a strong rarefaction). the CURVED (GR) background uses the light-cone rusanov
+        // fan: the state-dependent HLLE speeds can under-bound near the physical-set boundary on a
+        // curved metric, whereas alpha sqrt(gamma^{nn}) bounds every fluid characteristic. the GR
+        // source-admissibility timestep (the lambda_S folded into the CFL) keeps U + dt S in the cone.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
+        let curved = sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "rhd",
+            "", // DOF == D past the gate above; no DOF-lift tag
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.cfl_scratch,
             pre,
-            |dir| dispatch_flux(sim, pre, "rhd", dir, self.gamma, 0.0, Solver::Hlle),
+            |dir| dispatch_flux(sim, pre, "rhd", dir, self.gamma, 0.0, Solver::Hlle, curved),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),

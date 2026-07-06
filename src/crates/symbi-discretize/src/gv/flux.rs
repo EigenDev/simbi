@@ -320,6 +320,7 @@ pub fn rhd_flux_gr_gv<const D: usize>(
     coords: Coords,
     spacing: &[Spacing],
     axes: &[usize],
+    rusanov: bool,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>)
 where
     Schwarzschild<Gv>: Metric<Gv, D>,
@@ -437,7 +438,18 @@ where
         (left, right)
     };
     let regime = RhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
-    let (s_l, s_r) = regime.extremal_speeds(&eos, &left, &right, &nhat);
+    let coord_n = axes[dir as usize];
+    // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
+    // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
+    // applied by the shifted fan below). every fluid characteristic lies inside the light cone, so
+    // it cannot under-bound near the boundary of the physical set; the low-order update keeps the
+    // conserved state inside the physical cone.
+    let (s_l, s_r) = if rusanov {
+        let lam = alpha * regime.metric.gamma_inv[(coord_n, coord_n)].sqrt();
+        (Gv::ZERO - lam, lam)
+    } else {
+        regime.extremal_speeds(&eos, &left, &right, &nhat)
+    };
     // the kerr-schild charts carry a shift: the face flux is the hll solution of the full valencia
     // system d_t U + (1/sqrt(gm)) d_n (sqrt(gm) [alpha F - beta^n U]). with the godunov applying the
     // alpha sqrt(gm) measure to the kernel flux, the exact pieces are: per-side fluxes
@@ -448,7 +460,6 @@ where
     // only the radial sweep is shifted (beta^theta = beta^phi = 0); the CARTESIAN kerr-schild chart
     // carries beta^i on every axis, so every sweep is shifted. a zero beta^n reduces to the plain
     // HLL bit-identically. mesh motion (vface) never composes with a curved spacetime in the bake.
-    let coord_n = axes[dir as usize];
     let shifted = match (spacetime, coords) {
         (Spacetime::KerrSchild, Coords::Cartesian) => true,
         // cylindrical: beta^R (coord 0) and beta^z (coord 2) are nonzero, beta^phi (coord 1) = 0

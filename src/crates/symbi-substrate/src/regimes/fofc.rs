@@ -49,6 +49,7 @@ where
 pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
+    dof_sfx: &str,
     tag: &str,
     src: (&ConsFieldsGeneric<D, DOF, Mem, Sc>, &PrimFieldsGeneric<D, DOF, Mem, Sc>),
     dst: (&ConsFieldsGeneric<D, DOF, Mem, Sc>, &PrimFieldsGeneric<D, DOF, Mem, Sc>),
@@ -56,7 +57,7 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let name = format!("{prefix}_fofc_{tag}_{D}d");
+    let name = format!("{prefix}_fofc_{tag}{dof_sfx}_{D}d");
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         let comp = &s[2..]; // strip "s_" / "d_"
         if s.starts_with("s_") {
@@ -81,6 +82,7 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
 pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
+    dof_sfx: &str,
     u_fofc: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
     prim_fofc: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
     u_stage: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
@@ -90,7 +92,7 @@ pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    let name = format!("{prefix}_fofc_select_{D}d");
+    let name = format!("{prefix}_fofc_select{dof_sfx}_{D}d");
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if let Some(c) = s.strip_prefix("ho_") {
             fofc_comp(u_fofc, prim_fofc, c)
@@ -123,6 +125,9 @@ pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
 pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
+    // the DOF-lift tag distinguishing the spherical-swirl (DOF > D) fofc kernels from the DOF == D
+    // ones (both share the `_{D}d` grid tag); "" for DOF == D and for the always-3-vector MHD.
+    dof_sfx: &str,
     has_additive: bool,
     scratch: &Field<Sc, D, Mem>,
     pre_bind: &Field<Sc, D, Mem>,
@@ -138,15 +143,15 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // unphysical zone (a physical one keeps its high-order value), so with none the whole pass is a
     // no-op — skip it. a clean substage costs one pointwise probe + a reduction, not the flux
     // sweep + two extra c2p passes.
-    let probe = format!("{prefix}_fofc_probe_{D}d");
+    let probe = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
     dispatch_named(sim, pre_bind, Some(scratch), 0, &probe, &sim.geom.interior, &[], &[]);
     if field_max_reduce(scratch, &sim.geom.interior) <= 0.5 {
         return;
     }
     let (cons, prim) = (&sim.fields.cons, &sim.fields.prim);
     let ws = &sim.workspace;
-    fofc_copy(sim, prefix, "snap", (cons, prim), (&ws.u_fofc, &ws.prim_fofc));
-    fofc_copy(sim, prefix, "restore", (&ws.u_stage, prim), (cons, prim));
+    fofc_copy(sim, prefix, dof_sfx, "snap", (cons, prim), (&ws.u_fofc, &ws.prim_fofc));
+    fofc_copy(sim, prefix, dof_sfx, "restore", (&ws.u_stage, prim), (cons, prim));
     c2p();
     for dir in 0..D {
         first_order_flux(dir);
@@ -156,6 +161,6 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         source_apply();
     }
     c2p();
-    fofc_select(sim, prefix, &ws.u_fofc, &ws.prim_fofc, &ws.u_stage, cons, prim);
+    fofc_select(sim, prefix, dof_sfx, &ws.u_fofc, &ws.prim_fofc, &ws.u_stage, cons, prim);
     c2p();
 }

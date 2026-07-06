@@ -204,6 +204,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             ISO_GAMMA,
             self.theta,
             Solver::Hlle,
+            false,
         );
     }
 
@@ -281,6 +282,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             "iso",
             ISO_GAMMA,
             self.cfl_number,
+            None,
         )
     }
 
@@ -363,10 +365,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "iso",
+            "", // iso is DOF == D (no swirl lift)
             self.has_additive_source(),
             &self.cfl_scratch,
             &sim.fields.cons.den,
-            |dir| dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, 0.0, Solver::Hlle),
+            |dir| dispatch_flux(sim, &self.pre, "iso", dir, ISO_GAMMA, 0.0, Solver::Hlle, false),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),

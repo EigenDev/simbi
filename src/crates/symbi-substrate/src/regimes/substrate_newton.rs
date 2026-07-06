@@ -168,7 +168,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 {
     fn flux(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dir: usize) {
         let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, self.theta, self.solver);
+        dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, self.theta, self.solver, false);
     }
 
     fn c2p(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
@@ -205,7 +205,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // adiabatic shares the iso wave-speed map (cs = sqrt(gamma*p/rho), gamma=1.4 vs 1);
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
         let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        cfl_wave_speed(sim, pre, &self.cfl_scratch, "iso", self.gamma, self.cfl_number)
+        cfl_wave_speed(sim, pre, &self.cfl_scratch, "iso", self.gamma, self.cfl_number, None)
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
@@ -262,16 +262,23 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D); the
+        // spherical-swirl DOF-lift is a follow-on. `fofc` is called unconditionally by the driver, so
+        // the gate lives here (fofc_active only guards the stage-input snapshot).
+        if DOF != D {
+            return;
+        }
         // the first-order redo runs HLLE at theta = 0 (PCM) — the positivity-preserving Einfeldt
         // fan — regardless of the production solver (HLLC can undershoot in a strong rarefaction).
         let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "adiabatic",
+            "", // the DOF != D early-return above means this path is always DOF == D
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.cfl_scratch,
             pre,
-            |dir| dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, 0.0, Solver::Hlle),
+            |dir| dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, 0.0, Solver::Hlle, false),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),

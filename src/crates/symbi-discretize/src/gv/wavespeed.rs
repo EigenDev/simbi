@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_algebra::Matrix;
-use symbi_geometry::grhd_source::grmhd_covariant_source;
+use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_ir::dual::Dual;
 
@@ -634,6 +634,111 @@ pub fn rmhd_source_cfl_gr_gv(
     let sm_norm = gamma_norm(&sm_arr).sqrt();
     // lambda_S = (|S_tau| + ||S_mom||_gamma) / q; the max keeps a near-boundary cell driving
     // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0).
+    let q_safe = q0.max(Gv::from_f64(1e-12));
+    let lam_s = (s_tau.abs() + sm_norm) / q_safe;
+    let lam_flux = Gv::field("lambda", FieldRef::Scratch);
+    let total = lam_flux + lam_s;
+    (end_trace(), vec![("lambda".to_string(), FieldRef::Scratch.into(), total.node())])
+}
+
+
+/// the SOURCE-admissibility CFL for GR-HYDRO — the wu 2017 lambda_S mechanism, the perfect-fluid
+/// analogue of [`rmhd_source_cfl_gr_gv`] (no magnetic field). the covariant geodesic source
+/// S = (S_mom, S_tau) advances U -> U + dt S; the timestep must keep U + dt S inside the admissible
+/// cone q(U) = E - sqrt(D^2 + gamma^{ij} S_i S_j) >= 0 (E = tau + D). lambda_S = (|S_tau| +
+/// ||S_mom||_gamma)/q(U), added into the CFL scratch alongside the flux light-cone rate. `ncomp` is
+/// the momentum DOF (1..3): momentum/velocity slots >= ncomp carry zero, so the metric-3D
+/// contraction reduces to the actual gridded momenta. the energy input to the source is
+/// e = rho + tau + p (the total energy density), matching the fused godunov hydro source.
+pub fn rhd_source_cfl_gr_gv(
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+    axes: &[usize],
+    ncomp: usize,
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = axes.len();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let vel: [Gv; 3] = std::array::from_fn(|k| {
+        if k < ncomp {
+            Gv::field(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8))
+        } else {
+            Gv::ZERO
+        }
+    });
+    let pre = Gv::field("prim_pre", FieldRef::PrimPre);
+    let v = Tensor::<Gv, 3>::new(vel);
+    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
+    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+        match axes.iter().position(|&a| a == c) {
+            Some(d) => geo.centroid[d],
+            None => gv_ungridded_slot(coords, c),
+        }
+    }));
+    let d_cons = Gv::field("cons_den", FieldRef::cons_den());
+    let tau = Gv::field("cons_nrg", FieldRef::cons_nrg());
+    // the total energy density the covariant hydro source contracts (rest + internal + pressure).
+    let e = rho + tau + pre;
+    let mass_gv = Gv::scalar("schwarzschild_mass");
+    let mass = Dual::constant(mass_gv);
+    let (gm_inv, s_mom, s_tau): (Matrix<Gv, 3>, Tensor<Gv, 3>, Gv) = match (spacetime, coords) {
+        (Spacetime::Schwarzschild, _) => {
+            let gi = Schwarzschild { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grhd_covariant_source(&Schwarzschild { mass }, x, e, v, Gv::ZERO);
+            let (_, st) = grhd_covariant_source(&Schwarzschild { mass }, x, e, v, pre);
+            (gi, sm, st)
+        }
+        (Spacetime::KerrSchild, Coords::Cartesian) => {
+            let gi = SchwarzschildKSCartesian { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, Gv::ZERO);
+            let (_, st) = grhd_covariant_source(&SchwarzschildKSCartesian { mass }, x, e, v, pre);
+            (gi, sm, st)
+        }
+        (Spacetime::KerrSchild, Coords::Cylindrical) => {
+            let gi = SchwarzschildKSCylindrical { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, Gv::ZERO);
+            let (_, st) = grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pre);
+            (gi, sm, st)
+        }
+        (Spacetime::KerrSchild, _) => {
+            let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
+            let (sm, _) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, Gv::ZERO);
+            let (_, st) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pre);
+            (gi, sm, st)
+        }
+        (Spacetime::Kerr, _) => {
+            let spin_gv = Gv::scalar("kerr_spin");
+            let gi = KerrKS { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let spin = Dual::constant(spin_gv);
+            let (sm, _) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, Gv::ZERO);
+            let (_, st) = grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pre);
+            (gi, sm, st)
+        }
+        (Spacetime::Minkowski, _) => {
+            unreachable!("the source-admissibility CFL is baked only for a curved spacetime")
+        }
+    };
+    let mom: [Gv; 3] = std::array::from_fn(|k| {
+        if k < ncomp {
+            Gv::field(&format!("cons_mom_{k}"), FieldRef::cons_mom(k as u8))
+        } else {
+            Gv::ZERO
+        }
+    });
+    let e_cons = tau + d_cons;
+    let gamma_norm = |a: &[Gv; 3]| {
+        let mut acc = Gv::ZERO;
+        for ii in 0..3 {
+            for jj in 0..3 {
+                acc = acc + gm_inv[(ii, jj)] * a[ii] * a[jj];
+            }
+        }
+        acc
+    };
+    let q0 = e_cons - (d_cons * d_cons + gamma_norm(&mom)).sqrt();
+    let sm_arr: [Gv; 3] = std::array::from_fn(|k| s_mom[k]);
+    let sm_norm = gamma_norm(&sm_arr).sqrt();
     let q_safe = q0.max(Gv::from_f64(1e-12));
     let lam_s = (s_tau.abs() + sm_norm) / q_safe;
     let lam_flux = Gv::field("lambda", FieldRef::Scratch);

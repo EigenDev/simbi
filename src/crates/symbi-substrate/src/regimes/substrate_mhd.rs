@@ -272,6 +272,7 @@ where
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             Self::kernel_prefix(),
+            "", // MHD momentum is always a 3-vector; no DOF-lift tag
             self.has_additive_source(),
             &self.cfl_scratch,
             pre_bind,
