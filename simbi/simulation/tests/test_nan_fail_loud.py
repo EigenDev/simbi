@@ -69,3 +69,33 @@ def test_poisoned_state_halts_under_a_state_independent_cfl_map() -> None:
         "a NaN-poisoned run completed as a success under the light-cone CFL map — "
         "the state-finiteness guard is not reaching dt"
     )
+
+
+@needs_backend
+def test_persistent_freeze_halts_on_unrecoverable_source() -> None:
+    # the SECOND FOFC-surviving fail-loud: a poison that stays FINITE (so the ghost-band /
+    # finiteness guards never fire) but is unrecoverable by first-order flux correction, forcing
+    # the freeze tier every stage. a huge energy-SINK raw source drives eps < 0 (finite negative
+    # pressure); FOFC restores the stage input, but the source re-cools it the next stage, so the
+    # freeze fires on consecutive substages until the persistent-freeze streak halts loudly. the
+    # rare correct parachute (isolated freezes) never reaches the streak; a genuine poison does.
+    import simbi.expression as expr
+    from simbi_configs.examples.newtonian.sod import SodProblem
+
+    class EnergySink(SodProblem):
+        @property
+        def hydro_source_expressions(self):
+            g = expr.ExprGraph()
+            sink = expr.constant(-1.0e6, g)  # subtract energy every step -> eps < 0, finite
+            return g.compile([sink]).serialize_source(expr.SourceKind.RAW, dim=1, target="nrg")
+
+    p = EnergySink.from_cli([])
+    p.data_directory = tempfile.mkdtemp() + "/"
+    p.checkpoint_interval = 1.0e30
+    # the halt is a Rust panic (assert) surfaced as pyo3_runtime.PanicException, which derives from
+    # BaseException (NOT Exception) — catch the broad base.
+    with pytest.raises(BaseException) as excinfo:
+        runner.run(p, compute_mode="cpu")
+    assert "freeze" in str(excinfo.value).lower(), (
+        f"expected the persistent-freeze fail-loud, got {type(excinfo.value).__name__}: {excinfo.value}"
+    )
