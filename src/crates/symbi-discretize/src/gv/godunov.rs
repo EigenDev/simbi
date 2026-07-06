@@ -91,6 +91,29 @@ pub fn fofc_probe_gv(has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, Nod
 }
 
 
+/// FOFC FREEZE diagnostic: write 1 to `freeze` where NEITHER the high-order (`ho_*`) NOR the
+/// first-order (`x_*`) tier is physical — the zones the three-tier select falls back (freezes) to
+/// the stage input. reads the same primitive pair the select tests. reduced over the interior to
+/// count freezes per substage; a fully physical-constraint-preserving pipeline drives this to zero
+/// (the first-order tier always recovers from admissible neighbours), so a nonzero count localizes
+/// where a PCP assumption leaks.
+pub fn fofc_freeze_probe_gv(has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
+    let ho_rho = Gv::field("ho_rho", "ho_rho");
+    let x_rho = Gv::field("x_rho", "x_rho");
+    let (physical_ho, physical_fo) = if has_energy {
+        let ho_pre = Gv::field("ho_pre", "ho_pre");
+        let x_pre = Gv::field("x_pre", "x_pre");
+        (finite_pos(ho_rho) & finite_pos(ho_pre), finite_pos(x_rho) & finite_pos(x_pre))
+    } else {
+        (finite_pos(ho_rho), finite_pos(x_rho))
+    };
+    let frozen = Gv::select(physical_ho, Gv::ZERO, Gv::select(physical_fo, Gv::ZERO, Gv::ONE));
+    (end_trace(), vec![("freeze".to_string(), "freeze".into(), frozen.node())])
+}
+
+
 pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     // finite AND positive: (v - v) is 0 for a finite value and NaN for NaN OR +-inf (inf - inf =

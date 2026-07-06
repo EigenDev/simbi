@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_probe_gv, fofc_freeze_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -719,6 +719,8 @@ fn gen_fofc_tagged(out_dir: &str, ndim: u8, prefix: &str, dof_sfx: &str, ncomp: 
     emit_gv(out_dir, &format!("{prefix}_fofc_select{dof_sfx}_{ndim}d"), ndim, &k, &w);
     let (k, w) = fofc_probe_gv(has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_probe{dof_sfx}_{ndim}d"), ndim, &k, &w);
+    let (k, w) = fofc_freeze_probe_gv(has_energy);
+    emit_gv(out_dir, &format!("{prefix}_fofc_freeze{dof_sfx}_{ndim}d"), ndim, &k, &w);
 }
 
 // the GEOMETRY-DEPENDENT hydro kernels for ALL THREE EOS regimes (iso / adiabatic /

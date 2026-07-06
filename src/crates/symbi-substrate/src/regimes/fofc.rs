@@ -116,6 +116,49 @@ pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
 }
 
+/// FOFC FREEZE DIAGNOSTIC (task 1 instrumentation): count the zones where neither the high-order
+/// nor the first-order tier is physical — the zones the select freezes to the stage input. writes
+/// the per-zone freeze flag to the scratch (reusing `{prefix}_fofc_freeze{dof_sfx}_{D}d`) and
+/// max-reduces it over the interior: > 0 iff some zone froze this substage. dispatched between the
+/// first-order c2p and the select, so `ho_*` is the high-order snapshot and `x_*` is the first-order
+/// live state — exactly the pair the select's tiers test.
+pub(crate) fn fofc_freeze_count<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    dof_sfx: &str,
+    scratch: &Field<Sc, D, Mem>,
+    u_fofc: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    prim_fofc: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
+    cons: &ConsFieldsGeneric<D, DOF, Mem, Sc>,
+    prim: &PrimFieldsGeneric<D, DOF, Mem, Sc>,
+) -> f64
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("{prefix}_fofc_freeze{dof_sfx}_{D}d");
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        if s == "freeze" {
+            scratch
+        } else if let Some(c) = s.strip_prefix("ho_") {
+            fofc_comp(u_fofc, prim_fofc, c)
+        } else if let Some(c) = s.strip_prefix("x_") {
+            fofc_comp(cons, prim, c)
+        } else {
+            panic!("fofc_freeze_count: unknown slot '{s}'")
+        }
+    };
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    for (bind, is_out) in kernel_field_binds(&name).iter() {
+        let fld = slot(&bind.name());
+        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+    }
+    dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
+    field_max_reduce(scratch, &sim.geom.interior)
+}
+
+
 /// the FOFC flow: (1) snapshot the high-order cons+prim -> u_fofc/prim_fofc; (2) restore
 /// cons <- u_stage so the redo reconstructs from the PHYSICAL stage-input state; (3) c2p; (4)
 /// re-flux at first order (the caller's `first_order_flux`); (5) re-godunov; (6) additive source
@@ -161,6 +204,12 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         source_apply();
     }
     c2p();
+    // task 1 instrumentation: count the zones about to hit the freeze tier (neither HO nor FO
+    // physical). a fully-PCP pipeline drives this to zero; a nonzero count flags a leak.
+    let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, &ws.u_fofc, &ws.prim_fofc, cons, prim);
+    if froze > 0.5 {
+        eprintln!("[fofc-diag] freeze tier fired (regime={prefix}{dof_sfx})");
+    }
     fofc_select(sim, prefix, dof_sfx, &ws.u_fofc, &ws.prim_fofc, &ws.u_stage, cons, prim);
     c2p();
 }
