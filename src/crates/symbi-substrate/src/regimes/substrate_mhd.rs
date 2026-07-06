@@ -266,19 +266,12 @@ where
     /// admissibility-preserving PCM update). B / CT are untouched (the gas conserved is corrected,
     /// div(B) preserved). v1 runs unconditionally; the host-gate on a failure reduction is a perf
     /// overlay added on top.
-    fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) {
+    fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         let pre_bind = if R::SPEC.has_energy {
             sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
-        // the constrained-transport curl + face->cell B interpolation (with the magnetic-energy
-        // patch) runs on the SINGLE (Euler, tag 0) and CORRECTOR (rk2 final, tag 2) stages, not the
-        // predictor (tag 1). the FOFC gas-only godunov overwrites cons.nrg WITHOUT the patch, so on
-        // exactly those stages the redo must re-run bcell_from_bface to restore it (idempotent when
-        // bcell already equals interp(bface)).
-        let patch_stage = stage == 0 || stage == 2;
-        let has_energy = R::SPEC.has_energy;
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             Self::kernel_prefix(),
@@ -291,11 +284,6 @@ where
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
-            || {
-                if patch_stage {
-                    crate::regimes::mhd_substrate::bcell_from_bface(sim, has_energy);
-                }
-            },
         );
     }
 }
@@ -313,8 +301,8 @@ where
         self.flux_impl(sim, dir, self.solver.kernel_suffix(), gr_solver, self.theta);
     }
 
-    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) {
-        self.fofc_impl(sim, dt, a0, ac, stage);
+    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+        self.fofc_impl(sim, dt, a0, ac);
     }
 
     fn fofc_active(&self) -> bool {

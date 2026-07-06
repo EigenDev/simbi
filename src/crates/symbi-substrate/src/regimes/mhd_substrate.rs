@@ -765,6 +765,8 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    // iso (no energy) skips the 1/2|B|^2 magnetic-energy correction in bcell_from_bface.
+    let cnrg = sim.fields.cons.nrg_field();
     let interior = &sim.geom.interior;
     let axes = sim.geom.axes;
     let edges = ct_edges(&axes);
@@ -894,36 +896,12 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         dispatch_fields_each::<Sc, Mem, D>(&ct_name, &interior.extend(dir, 0, 1), &inputs, &outputs, &[], &scalars);
     }
 
-    // face->cell B interpolation + the magnetic-energy correction on cons.nrg, in place.
-    bcell_from_bface::<D, DOF, Mem, Sc>(sim, has_energy);
-}
-
-/// face->cell B interpolation (the D in-plane components) + magnetic-energy correction, in-place on
-/// bcell + cons.nrg over the interior. `bcell = interp(bface)` and `nrg += (1/2)(gamma_ij B^i B^j |
-/// interp - | bcell_old)` keeps the total energy consistent with the CT-updated face field. bind BY
-/// MANIFEST: the kernel is component-agnostic (positional), so each slot maps to its actual field,
-/// axis-role'd, ordered by the recorded manifest: `bf_{c}` (grid face c) -> bface[c]; `bc_{c}`
-/// (in-place cell, grid face c carries physical component axes[c]) -> bcell[axes[c]]; `nrg` ->
-/// cons.nrg. IDEMPOTENT: once bcell == interp(bface) a second call adds a zero energy patch, so the
-/// FOFC redo can re-run it to restore the patch the gas-only godunov overwrote (fixes the C2 energy
-/// inconsistency).
-pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
-    sim: &FieldStore<D, DOF, Mem, Sc>,
-    has_energy: bool,
-) where
-    Mem: MemorySpace + Sync,
-    Sc: Scalar + OrderedNumeric,
-{
-    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-    let cnrg = sim.fields.cons.nrg_field();
-    let interior = &sim.geom.interior;
-    let axes = sim.geom.axes;
-    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-    let st = spacetime_slug(sim.geom.spacetime);
-    let sp = spacing_suffix(&sim.geom.maps);
-    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
-    let gr = !st.is_empty();
-    let bname = if gr {
+    // face->cell B interpolation (the D in-plane components) + magnetic-energy correction, in-place
+    // on bcell + cons.nrg over the interior. bind BY MANIFEST: this kernel is component-agnostic
+    // (positional), so map each slot to its actual field, axis-role'd, and order by the recorded
+    // manifest: `bf_{c}` (grid face c) -> bface[c]; `bc_{c}` (in-place cell, grid face c carries
+    // physical component axes[c]) -> bcell[axes[c]]; `nrg` -> cons.nrg. no hand-ordered list.
+    let bname = if !st.is_empty() {
         // the GR interpolation: the energy patch contracts through the spatial metric, and the
         // kernel's bc_ indices are PHYSICAL components (all three enter the contraction).
         format!("rmhd_bcell_from_bface{sfx}{sp}{st}_{D}d")
@@ -932,6 +910,7 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     } else {
         format!("imhd_bcell_from_bface_{D}d")
     };
+    let gr = !st.is_empty();
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if let Some(c) = s.strip_prefix("bf_") {
             return &mhd.bface[c.parse::<usize>().expect("bcell_from_bface: bad bf_ slot index")];

@@ -361,7 +361,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         true
     }
 
-    fn fofc(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) {
+    fn fofc(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         // isothermal is HLLE-only by physics; the first-order redo is the same fan at theta = 0
         // (PCM) — the positivity-preserving Einfeldt fan. the substrate-owned pressure (cs^2*rho)
         // feeds the flux as in the production sweep.
@@ -377,7 +377,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
-            || {}, // hydro: no cell B to re-sync
         );
     }
 
