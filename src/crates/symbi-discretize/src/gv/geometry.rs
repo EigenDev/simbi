@@ -354,6 +354,27 @@ pub fn cell_geometry_covariant_gv(
 }
 
 
+/// the out-of-plane induction divergence geometry for the FLAT spherical (r,theta) plane:
+/// the toroidal PHYSICAL component obeys `d_t B_phi = -(1/r)[d_r(r F^r) + d_theta F^theta]`
+/// ((curl E)_phi with in-plane lame factors h_r = 1, h_theta = r — NO r^2 and NO sin(theta);
+/// the gas r^2 sin(theta) measure would inject spurious `-F^r/r - cot(theta) F^theta/r`
+/// sources). equivalently the conservation law `d_t(r B_phi) + d_r(r F^r) + d_theta F^theta
+/// = 0` on the measure `r dr dtheta`: face weights (r_face, 1), volume `r_c dr dtheta` with
+/// the arithmetic midpoint r_c — EXACT, the r-weight is linear in r.
+pub(crate) fn oop_curl_geometry_sph_rtheta_gv(spacing: &[Spacing]) -> CellGeometryGv {
+    let (lo, hi, width) = gv_faces(spacing, 2);
+    let half = Gv::from_f64(0.5);
+    let r_c = (lo[0] + hi[0]) * half;
+    let th_c = (lo[1] + hi[1]) * half;
+    CellGeometryGv {
+        inv_volume: Gv::ONE / (r_c * width[0] * width[1]),
+        area_lo: vec![lo[0] * width[1], width[0]],
+        area_hi: vec![hi[0] * width[1], width[0]],
+        centroid: vec![r_c, th_c],
+    }
+}
+
+
 // cartesian: V = prod(width); A_dir = prod_{j!=dir}(width); centroid = arithmetic mid.
 fn cartesian_geometry_gv(lo: &[Gv], hi: &[Gv], width: &[Gv], ndim: usize) -> CellGeometryGv {
     let mut vol = width[0];

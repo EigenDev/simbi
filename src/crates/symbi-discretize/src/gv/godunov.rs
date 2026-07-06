@@ -948,19 +948,92 @@ fn bcell_flux_div_plain_gv(c: usize, ndim: usize, spacing: &[Spacing]) -> Gv {
 }
 
 
-/// the OUT-OF-PLANE B component (the one not in `axes`) whose induction curl is METRIC-FREE on the
-/// gridded plane, so it must use the PLAIN divergence instead of the gas area-weighted one. the
-/// out-of-plane component's curl carries the prefactor 1/(h_g1 h_g2) over the gridded axes — for
-/// cylindrical the only non-unit Lame factor is h_phi = r, so this is the AZIMUTHAL component (phi
-/// = 1) gridded as r-z (axes [0,2]): (curl E)_phi = d_z E_r - d_r E_z has NO 1/r, yet the gas FV
-/// divergence carries h_phi=r in the cell volume (a spurious F_r/r source if reused). the r-phi
-/// disk (out-of-plane z, h_z=1) and cartesian are unaffected — their out-of-plane curl IS the
-/// area-weighted divergence. returns Some(phi=1) only for the cyl r-z plane.
-fn metric_free_oop_component(coords: Coords, axes: &[usize], ncomp: usize) -> Option<usize> {
-    if coords != Coords::Cylindrical {
-        return None;
+/// the divergence operator for the OUT-OF-PLANE B component (the one not in `axes`) on a FLAT
+/// background, where the stored component is PHYSICAL (orthonormal) and its induction curl is
+/// `d_t B_c = -(1/(h1 h2))[d_1(h2 F^1) + d_2(h1 F^2)]` over the in-plane lame factors — which
+/// only sometimes coincides with the gas area-weighted divergence.
+enum OopDiv {
+    /// in-plane lame factors are both 1 (cyl r-z: (curl E)_phi = d_z E_r - d_r E_z), so the
+    /// operator is the plain unweighted divergence; the gas h_phi = r cell volume would inject
+    /// a spurious F_r/r source.
+    Plain,
+    /// a non-unit in-plane lame factor rides the curl as a face weight (sph r-theta: h_theta =
+    /// r, so `d_t B_phi = -(1/r)[d_r(r F^r) + d_theta F^theta]`); the gas r^2 sin(theta)
+    /// measure would inject spurious `-F^r/r - cot(theta) F^theta/r` sources.
+    Curl(CellGeometryGv),
+}
+
+
+/// the out-of-plane B component and its curl divergence for a FLAT (physical-component) plane:
+/// - cyl r-z (axes [0,2]) -> B_phi (comp 1), metric-free (Plain).
+/// - sph r-theta (axes [0,1]) -> B_phi (comp 2), the (r, 1)-weighted curl on the r dr dtheta
+///   measure (Curl).
+/// - cyl r-phi (axes [0,1]) -> B_z: the z-curl `(1/R)[d_R(R F^R) + d_phi F^phi]` IS the gas
+///   R-measure divergence -> None (the gas path is already the curl).
+/// - cartesian / fully-gridded (3D): None (plain == gas, or no out-of-plane component).
+/// a CURVED spacetime never takes these shortcuts: B is stored CONTRAVARIANT and every
+/// component obeys the densitized conservation law `d_t(sqrt(gamma) B^i) + d_j(alpha
+/// sqrt(gamma) G^j) = 0` — the covariant area-weighted divergence with the lapse weight.
+fn flat_oop_divergence(coords: Coords, spacing: &[Spacing], axes: &[usize], ncomp: usize) -> Option<(usize, OopDiv)> {
+    match (coords, axes) {
+        (Coords::Cylindrical, [0, 2]) if ncomp > 1 => Some((1, OopDiv::Plain)),
+        (Coords::Spherical, [0, 1]) if ncomp > 2 => {
+            Some((2, OopDiv::Curl(oop_curl_geometry_sph_rtheta_gv(spacing))))
+        }
+        _ => None,
     }
-    (0..ncomp).find(|c| !axes.contains(c) && *c == 1)
+}
+
+
+/// the per-component induction-flux divergences for the cell-B predictor, GR-lapse-weighted.
+/// flat: the gas area-weighted divergence, except the out-of-plane component's curl operator
+/// (`flat_oop_divergence`). curved: the covariant `alpha sqrt(gamma)` measure for EVERY
+/// component, times the lapse `alpha(centroid)` — the same densitization contract as the gas
+/// godunov (the face kernel writes `G = F - (beta^n/alpha) U`, deferring one alpha to the
+/// divergence; see `gv_lapse_weight`). flat spacetime elides the weight (bit-identical).
+fn bcell_flux_divs_gv(
+    coords: Coords,
+    spacetime: Spacetime,
+    spacing: &[Spacing],
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> Vec<Gv> {
+    let (geo, dx) = bcell_godunov_geom(coords, spacetime, spacing, ndim, axes);
+    let oop = match spacetime {
+        Spacetime::Minkowski => flat_oop_divergence(coords, spacing, axes, ncomp),
+        _ => None,
+    };
+    // coordinate-indexed cell centroid for the lapse alpha(x) (matching the gas godunov's
+    // convention: gridded axes at their centroids, ungridded slots zero). the curved path
+    // always carries a geometry (bcell_godunov_geom), so the centroid exists whenever the
+    // lapse is non-unit.
+    let coord_centroid: Vec<Gv> = match &geo {
+        Some(g) => {
+            let mut c = vec![Gv::ZERO; 3];
+            for d in 0..ndim {
+                c[axes[d]] = g.centroid[d];
+            }
+            c
+        }
+        None => Vec::new(),
+    };
+    let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
+    (0..ncomp)
+        .map(|c| {
+            let div = match &oop {
+                Some((co, OopDiv::Plain)) if c == *co => bcell_flux_div_plain_gv(c, ndim, spacing),
+                Some((co, OopDiv::Curl(g))) if c == *co => {
+                    bcell_flux_div_gv(c, ndim, &Some(g.clone()), &dx)
+                }
+                _ => bcell_flux_div_gv(c, ndim, &geo, &dx),
+            };
+            match lapse {
+                Some(a) => a * div,
+                None => div,
+            }
+        })
+        .collect()
 }
 
 
@@ -985,18 +1058,10 @@ pub fn rmhd_bcell_godunov_euler_gv(
         }
     }
     let dt = Gv::scalar("dt");
-    let (geo, dx) = bcell_godunov_geom(coords, spacetime, spacing, ndim, axes);
-    let oop = metric_free_oop_component(coords, axes, ncomp);
+    let divs = bcell_flux_divs_gv(coords, spacetime, spacing, ndim, ncomp, axes);
     let writes = (0..ncomp)
         .map(|c| {
-            // the metric-free out-of-plane component (cyl r-z B_phi) uses the PLAIN divergence;
-            // every other component the gas area-weighted (cartesian dx or the geo metric).
-            let div = if Some(c) == oop {
-                bcell_flux_div_plain_gv(c, ndim, spacing)
-            } else {
-                bcell_flux_div_gv(c, ndim, &geo, &dx)
-            };
-            let bnew = bc[c] - dt * div;
+            let bnew = bc[c] - dt * divs[c];
             (format!("bc_{c}_new"), format!("bc_{c}").into(), bnew.node())
         })
         .collect();
@@ -1024,16 +1089,10 @@ pub fn rmhd_bcell_godunov_rk2_gv(
     }
     let dt = Gv::scalar("dt");
     let half = Gv::from_f64(0.5);
-    let (geo, dx) = bcell_godunov_geom(coords, spacetime, spacing, ndim, axes);
-    let oop = metric_free_oop_component(coords, axes, ncomp);
+    let divs = bcell_flux_divs_gv(coords, spacetime, spacing, ndim, ncomp, axes);
     let writes = (0..ncomp)
         .map(|c| {
-            let div = if Some(c) == oop {
-                bcell_flux_div_plain_gv(c, ndim, spacing)
-            } else {
-                bcell_flux_div_gv(c, ndim, &geo, &dx)
-            };
-            let bc_star = bc[c] - dt * div;
+            let bc_star = bc[c] - dt * divs[c];
             let bnew = half * (bcn[c] + bc_star);
             (format!("bc_{c}_new"), format!("bc_{c}").into(), bnew.node())
         })
@@ -1042,11 +1101,12 @@ pub fn rmhd_bcell_godunov_rk2_gv(
 }
 
 
-/// the cell-B godunov geometry: curvilinear -> the gv cell geometry (area-weighted div);
-/// cartesian -> the uniform `dx_d` scalars. registered in the order the bcell godunov needs
-/// (the bf_d_c fields are read later by `bcell_flux_div_gv`). 3D, identity axes.
+/// the cell-B godunov geometry: curvilinear or curved -> the gv cell geometry (area-weighted
+/// div); flat cartesian -> the uniform `dx_d` scalars. a curved CARTESIAN chart (kerr-schild)
+/// still carries the (flat-equal) cartesian geometry so the lapse weight has a centroid to
+/// evaluate at — its covariant measure `alpha sqrt(gamma) = 1` equals the coordinate volume.
 fn bcell_godunov_geom(coords: Coords, spacetime: Spacetime, spacing: &[Spacing], ndim: usize, axes: &[usize]) -> (Option<CellGeometryGv>, Vec<Gv>) {
-    if coords == Coords::Cartesian {
+    if coords == Coords::Cartesian && spacetime == Spacetime::Minkowski {
         (None, (0..ndim).map(|d| Gv::scalar(&format!("dx_{d}"))).collect())
     } else {
         // axes maps grid axis -> coordinate (identity for sph/3d-cyl; [0,2] for cyl r-z) so the

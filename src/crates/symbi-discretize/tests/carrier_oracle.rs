@@ -1124,7 +1124,7 @@ fn cartesian_ks_flux_is_x_y_symmetric() {
     let vy = |c: &[usize]| 0.02 * (c[1] as f64) - 0.01 * (c[0] as f64);
 
     let run_flux = |dir: u8| {
-        KernelRun::new(rhd_flux_gr_gv::<2>(dir, Spacetime::KerrSchild, Coords::Cartesian, &cart2, &axes))
+        KernelRun::new(rhd_flux_gr_gv::<2>(dir, Spacetime::KerrSchild, Coords::Cartesian, &cart2, &axes, false))
             .grid([N, N])
             // interior only: the 4-wide PLM stencil (i-2..i+1) is in-bounds for i,j in [2, N-2].
             .compute_window([2i32, 2], [N - 3, N - 3])
