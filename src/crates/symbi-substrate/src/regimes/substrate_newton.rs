@@ -77,6 +77,8 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// Riemann solver — HLLE (default, two-wave) or HLLC (contact-resolving).
     /// see [[Solver]]. tunable via `.with_solver(Solver::Hllc)`.
     pub solver: Solver,
+    /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
+    pub freeze_streak: std::sync::atomic::AtomicU32,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSubstrateKernelSet<Mem, Sc, D> {
@@ -84,7 +86,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate adiabatic CFL scratch field");
         // theta defaults to 1.0 (plain minmod) — exact prior behavior; set `theta` to tune.
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, boundary_dags: Vec::new(), solver: Solver::Hlle }
+        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, boundary_dags: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
@@ -278,6 +280,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.cfl_scratch,
             pre,
+            &self.freeze_streak,
             |dir| dispatch_flux(sim, pre, "adiabatic", dir, self.gamma, 0.0, Solver::Hlle, false),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),

@@ -132,6 +132,9 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// complete prim DAG `[rho, vel.., pre, B..]`; the standard ghost-fill skips the driven face,
     /// then `dispatch_driven_boundaries` assigns its ghost state. empty => no driven faces.
     pub boundary_dags: Vec<Arc<RuntimeSource>>,
+    /// consecutive substages on which the FOFC last-resort freeze tier fired; a genuine unrecoverable
+    /// poison freezes every stage, while the rare correct parachute is isolated (see fofc.rs).
+    pub freeze_streak: std::sync::atomic::AtomicU32,
     _r: PhantomData<R>,
 }
 
@@ -144,7 +147,7 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), _r: PhantomData }
+        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), _r: PhantomData }
     }
 
     /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
@@ -276,6 +279,7 @@ where
             self.has_additive_source(),
             &self.cfl_scratch,
             pre_bind,
+            &self.freeze_streak,
             |dir| self.flux_impl(sim, dir, "", "_rusanov", 0.0),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
@@ -487,6 +491,11 @@ where
         // the c = 1 bound; non-relativistic driven inflow is a future refinement.
         if R::SPEC.is_relativistic {
             lambda_max = lambda_max.max(driven_inflow_lambda(sim));
+        }
+        // GHOST-BAND FAIL-LOUD: a poisoned boundary leaves a non-finite ghost that FOFC never touches;
+        // force the rate to +inf (dt -> 0, halt) if any zone in the allocated domain is non-finite.
+        if !crate::regimes::substrate_kernels::state_finite_over_allocated(sim, pre_bind, &self.cfl_scratch) {
+            lambda_max = f64::INFINITY;
         }
         cfl_from_lambda(lambda_max, self.cfl_number)
     }

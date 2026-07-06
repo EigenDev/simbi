@@ -91,6 +91,21 @@ pub fn fofc_probe_gv(has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, Nod
 }
 
 
+/// GHOST-BAND FAIL-LOUD probe: write 1 where the density is non-finite (NaN or +-inf via
+/// `(rho - rho) != 0`), else 0. run over the ALLOCATED domain (interior + ghosts): first-order flux
+/// correction keeps the INTERIOR finite, but it never touches the ghost band, so a poisoned boundary
+/// (a driven-inflow expression producing NaN, a broken BC) leaves a non-finite ghost that FOFC cannot
+/// mask. a max-reduce > 0 forces the CFL rate to +inf (dt -> 0, the driver halts) — the fail-loud that
+/// survives FOFC recovery. density-only, so regime- and energy-independent (one kernel per dimension);
+/// a poison in any primitive reaches the density within one c2p / flux divergence.
+pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let flag = Gv::select((rho - rho).cmp_eq(Gv::ZERO), Gv::ZERO, Gv::ONE);
+    (end_trace(), vec![("flag".to_string(), FieldRef::Scratch.into(), flag.node())])
+}
+
+
 /// FOFC FREEZE diagnostic: write 1 to `freeze` where NEITHER the high-order (`ho_*`) NOR the
 /// first-order (`x_*`) tier is physical — the zones the three-tier select falls back (freezes) to
 /// the stage input. reads the same primitive pair the select tests. reduced over the interior to

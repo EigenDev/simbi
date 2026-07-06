@@ -18,8 +18,18 @@ use symbi_algebra::OrderedNumeric;
 use symbi_xpu::MemorySpace;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use crate::regimes::substrate_kernels::{dispatch_fields_each, dispatch_named, kernel_field_binds};
 use crate::regimes::substrate_gpu::field_max_reduce;
+
+/// consecutive substages the FOFC freeze tier may fire before the run halts. the freeze is the
+/// last-resort MOOD parachute (neither high- nor first-order recovered a zone); it deploys rarely
+/// and in ISOLATION for a genuine hard cell (the magnetized-torus inner-cliff pathology freezes on
+/// ~0.5% of stages, never consecutively), but a poisoned source / initial datum that FOFC cannot fix
+/// freezes EVERY stage. so a long consecutive streak is the honest "genuinely broken" fail-loud that
+/// survives FOFC recovery, without false-halting the rare correct parachute. generous margin.
+const FOFC_FREEZE_HALT_STREAK: u32 = 16;
 
 /// resolve a FOFC copy/select slot name to its field: `den`/`mom_k`/`nrg` (conserved),
 /// `rho`/`vel_k`/`pre` (primitive). regime-generic over the degrees of freedom `DOF`.
@@ -174,6 +184,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     has_additive: bool,
     scratch: &Field<Sc, D, Mem>,
     pre_bind: &Field<Sc, D, Mem>,
+    freeze_streak: &AtomicU32,
     first_order_flux: impl Fn(usize),
     c2p: impl Fn(),
     godunov: impl Fn(),
@@ -204,11 +215,21 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         source_apply();
     }
     c2p();
-    // task 1 instrumentation: count the zones about to hit the freeze tier (neither HO nor FO
-    // physical). a fully-PCP pipeline drives this to zero; a nonzero count flags a leak.
+    // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier deploys where neither high- nor first-order
+    // recovered a zone. it is the rare correct parachute for a genuinely hard cell (isolated in
+    // time), so a single firing is not a failure — but a poisoned source / initial datum that FOFC
+    // cannot fix freezes EVERY stage. track the consecutive streak and halt loudly once it persists.
     let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, &ws.u_fofc, &ws.prim_fofc, cons, prim);
     if froze > 0.5 {
-        eprintln!("[fofc-diag] freeze tier fired (regime={prefix}{dof_sfx})");
+        let streak = freeze_streak.fetch_add(1, Ordering::Relaxed) + 1;
+        assert!(
+            streak < FOFC_FREEZE_HALT_STREAK,
+            "FOFC last-resort freeze fired on {streak} consecutive substages (regime={prefix}{dof_sfx}): \
+             a zone is persistently unrecoverable by both high- and first-order — a genuine breakdown, \
+             not the rare isolated parachute. check the source / initial data / boundary for a poison."
+        );
+    } else {
+        freeze_streak.store(0, Ordering::Relaxed);
     }
     fofc_select(sim, prefix, dof_sfx, &ws.u_fofc, &ws.prim_fofc, &ws.u_stage, cons, prim);
     c2p();

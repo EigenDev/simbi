@@ -181,6 +181,14 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // NO pressure floor: raw p = (gamma-1) rho eps. an unphysical negative eps yields a negative
     // pressure the post-hoc diagnostic flags, not a silently-floored spurious-physical state.
     let pre = rho_gm1 * eps_e;
+    // EXACT admissibility (wu 2017 cone) folded into the pressure verdict. the velocity-ceiling
+    // clamp (mu -> muu0, v -> v_limit) recovers a cold near-light-speed state that IS superluminal:
+    // q(U)/D = (tau/D + 1) - sqrt(1 + gamma^{ij} S_i S_j / D^2) < 0. the raw (rho > 0 & pre > 0)
+    // test accepts such a clamped state (pre from eps_e stays > 0), so its face state poisons a
+    // neighbour's first-order redo -> a freeze. forcing the pressure non-positive when q(U) <= 0
+    // routes the zone through first-order correction instead. r_sq is metric-raised (line ~115).
+    let q_over_d = qq + S::ONE - (S::ONE + r_sq).sqrt();
+    let pre = S::select(q_over_d.cmp_gt(S::ZERO), pre, S::ZERO - S::from_f64(1e-30));
     let mu_x = mu * x;
     let rdb_mu = rdb * mu;
     // the CONTRAVARIANT valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the

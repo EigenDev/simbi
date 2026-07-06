@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_probe_gv, fofc_freeze_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -707,6 +707,13 @@ fn gen_fofc(out_dir: &str, ndim: u8, prefix: &str, ncomp: usize, has_energy: boo
     gen_fofc_tagged(out_dir, ndim, prefix, "", ncomp, has_energy);
 }
 
+// the ghost-band fail-loud probe: density-only, so regime/energy/DOF-independent — one per dimension.
+// the finiteness backstop that survives FOFC recovery of a poisoned boundary.
+fn gen_state_finite(out_dir: &str, ndim: u8) {
+    let (k, w) = state_finite_probe_gv();
+    emit_gv(out_dir, &format!("state_finite_{ndim}d"), ndim, &k, &w);
+}
+
 // the fofc copy/select/probe triple + probe for one (prefix, ncomp). `dof_sfx` distinguishes the
 // spherical-swirl (DOF > D) instance (ncomp = DOF) from the DOF == D one (both share the `_{ndim}d`
 // grid tag) — "" for DOF == D and for the always-3-vector MHD, matching the runtime name build.
@@ -852,11 +859,9 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 // radial (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
 fn gen_rhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
     gen_rhd_face_flux_gr_mode(out_dir, ndim, dir, geom.clone(), false);
-    // the light-cone rusanov FOFC fallback rides every GR-hydro flux bake (DOF == D charts, where
-    // FOFC is active); the swirl DOF-lift skips FOFC so needs no rusanov instance.
-    if geom.ncomp == ndim {
-        gen_rhd_face_flux_gr_mode(out_dir, ndim, dir, geom, true);
-    }
+    // the light-cone rusanov FOFC fallback rides every GR-hydro flux bake (DOF == D + the swirl
+    // DOF-lift; the flux carries the DOF via geom.ncomp and the swirl w-reconstruction).
+    gen_rhd_face_flux_gr_mode(out_dir, ndim, dir, geom, true);
 }
 
 // the GR-hydro face flux (`rusanov` / HLLE). RUSANOV = the light-cone Lax-Friedrichs fan, the FOFC
@@ -882,7 +887,7 @@ fn gen_rhd_face_flux_gr_mode(out_dir: &str, ndim: u8, dir: u8, geom: Geom, rusan
 // scratch and adds the geodesic source rate. curved spacetime, DOF == D only. name parallels the
 // wave-speed map so the runtime cfl builds the matching string.
 fn gen_rhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
-    assert!(geom.spacetime != Spacetime::Minkowski && geom.ncomp == ndim);
+    assert!(geom.spacetime != Spacetime::Minkowski);
     let name = format!("rhd_source_cfl{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
     let (k, writes) = symbi_discretize::gv::rhd_source_cfl_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes, geom.ncomp as usize,
@@ -1455,9 +1460,9 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
         rhd_wave_speed_map_gv(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim as usize)
     };
     emit_gv(out_dir, &name, ndim, &k, &writes);
-    // the wu 2017 source-admissibility rate folds into the same scratch after this map (curved
-    // background, DOF == D — where GR-hydro FOFC is active).
-    if geom.spacetime != Spacetime::Minkowski && geom.ncomp == ndim {
+    // the wu 2017 source-admissibility rate folds into the same scratch after this map (every curved
+    // background — DOF == D and the swirl DOF-lift, where GR-hydro FOFC is active).
+    if geom.spacetime != Spacetime::Minkowski {
         gen_rhd_source_cfl_gr(out_dir, ndim, geom);
     }
 }
@@ -2092,7 +2097,15 @@ fn main() {
         gen_fofc(&out_dir, ndim, "rhd", ndim as usize, true);
         gen_fofc(&out_dir, ndim, "adiabatic", ndim as usize, true);
         gen_fofc(&out_dir, ndim, "iso", ndim as usize, false);
+        gen_state_finite(&out_dir, ndim);
     }
+    // the DOF-lift GR-hydro charts (D = 2 grid, DOF = 3 momentum with an out-of-plane component):
+    // the ncomp = 3 fofc triple, tagged by geom_suffix to distinguish from the ncomp = 2 (DOF == D)
+    // 2D instance. spherical swirl (Kerr angular momentum, `_sph_swirl`) + cylindrical r-z / r-phi
+    // (`_cyl_rz`, the out-of-plane momentum). the kernels are pointwise so identical across the two
+    // tags; only the name differs (matching the c2p/flux/snapshot geom_suffix naming).
+    gen_fofc_tagged(&out_dir, 2, "rhd", "_sph_swirl", 3, true);
+    gen_fofc_tagged(&out_dir, 2, "rhd", "_cyl_rz", 3, true);
     // Isothermal MHD (Mignone 2007): the no-energy regime. c2p (rho, v_k only) + HLLE/HLLD
     // flux (D, S_k, B_k) + CFL map mirror NMHD; the CT stack is shared (Faraday induction is
     // regime-agnostic). gas stage carries no energy (has_energy=false).

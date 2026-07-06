@@ -115,8 +115,33 @@ where
         let ss = scalars_for(scfl, &resolve);
         dispatch_named(sim, pre, Some(scratch), 0, scfl, &geom.interior, &[], &ss);
     }
-    let lambda_max = field_max_reduce(scratch, &geom.interior);
+    let mut lambda_max = field_max_reduce(scratch, &geom.interior);
+    // GHOST-BAND FAIL-LOUD: a poisoned boundary (a driven-inflow expression producing NaN, a broken
+    // BC) leaves a non-finite ghost that first-order flux correction never touches — so the interior
+    // finiteness guard (folded into the wave-speed map above) can miss it. probe the density over the
+    // ALLOCATED domain and force the rate to +inf (dt -> 0, the driver halts) if any zone is
+    // non-finite. legitimate boundaries fill finite ghosts, so there is no false halt.
+    if !state_finite_over_allocated(sim, pre, scratch) {
+        lambda_max = f64::INFINITY;
+    }
     cfl_from_lambda(lambda_max, cfl_number)
+}
+
+/// probe the density finiteness over the ALLOCATED domain (interior + ghosts) via the
+/// `state_finite_{D}d` kernel; returns `false` if any zone is non-finite. the fail-loud backstop that
+/// survives FOFC recovery — FOFC keeps the interior finite but never touches the ghost band.
+pub fn state_finite_over_allocated<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &Field<Sc, D, Mem>,
+    scratch: &Field<Sc, D, Mem>,
+) -> bool
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!("state_finite_{D}d");
+    dispatch_named(sim, pre, Some(scratch), 0, &name, &sim.geom.allocated, &[], &[]);
+    field_max_reduce(scratch, &sim.geom.allocated) <= 0.5
 }
 
 /// bind a kernel's buffers by its recorded manifest, then dispatch. the buffer order +

@@ -64,6 +64,8 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// equilibrium REQUIRES this: no local rule (mirror or copy) can represent the state
     /// beyond a wedge wall — only the analytic continuation can.
     pub boundary_dags: Vec<Arc<RuntimeSource>>,
+    /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
+    pub freeze_streak: std::sync::atomic::AtomicU32,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
@@ -80,6 +82,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             solver: Solver::Hlle,
             runtime_source: None,
             boundary_dags: Vec::new(),
+            freeze_streak: std::sync::atomic::AtomicU32::new(0),
         }
     }
 
@@ -249,7 +252,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // background (DOF == D, where FOFC is active) the source-admissibility rate lambda_S folds in
         // after the map: the geodesic source must not push U + dt S out of the physical cone.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
-        let source_cfl = (DOF == D && sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski)
+        let source_cfl = (sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski)
             .then(|| {
                 let sfx = geom_suffix(sim.geom.coords, DOF, D);
                 let sp = spacing_suffix(&sim.geom.maps);
@@ -405,33 +408,29 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn fofc_active(&self) -> bool {
-        // the first-order flux correction covers the DOF == D charts; the spherical-swirl DOF-lift
-        // is a follow-on (it defeats the poisoned-state finiteness backstop — FOFC recovers the
-        // injected NaN — which needs a FOFC-aware fail-loud mechanism first).
-        DOF == D
+        true
     }
 
     fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
-        // `fofc` is called unconditionally by the driver; the DOF == D gate lives here (fofc_active
-        // only guards the stage-input snapshot). the spherical-swirl DOF-lift is deferred.
-        if DOF != D {
-            return;
-        }
         // the first-order redo runs at theta = 0 (PCM). FLAT (Minkowski) SRHD uses HLLE — the
         // positivity-preserving Einfeldt fan — regardless of the production solver (HLLC can
         // undershoot in a strong rarefaction). the CURVED (GR) background uses the light-cone rusanov
         // fan: the state-dependent HLLE speeds can under-bound near the physical-set boundary on a
         // curved metric, whereas alpha sqrt(gamma^{nn}) bounds every fluid characteristic. the GR
         // source-admissibility timestep (the lambda_S folded into the CFL) keeps U + dt S in the cone.
+        // the spherical-swirl DOF-lift (DOF > D) selects the ncomp = DOF fofc/rusanov kernels via the
+        // geom tag; the ghost-band finiteness halt provides the FOFC-surviving fail-loud.
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         let curved = sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski;
+        let dof_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "rhd",
-            "", // DOF == D past the gate above; no DOF-lift tag
+            dof_sfx,
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.cfl_scratch,
             pre,
+            &self.freeze_streak,
             |dir| dispatch_flux(sim, pre, "rhd", dir, self.gamma, 0.0, Solver::Hlle, curved),
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
