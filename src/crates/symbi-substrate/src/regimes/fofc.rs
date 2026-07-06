@@ -229,6 +229,11 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     c2p: impl Fn(),
     godunov: impl Fn(),
     source_apply: impl Fn(),
+    // MHD-only: re-run the face->cell B interpolation + magnetic-energy patch after the gas-only
+    // godunov redo, so the FO-tier cons.nrg regains the patch that gas-only overwrote (fixes the C2
+    // energy inconsistency). gated by the caller to the RK stages that apply the patch (single /
+    // corrector). a NO-OP closure for every hydro regime (no cell B).
+    ct_resync: impl Fn(),
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -268,6 +273,10 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     if has_additive {
         source_apply();
     }
+    // re-sync the cell B + magnetic-energy patch from the (unchanged, CT-consistent) face field: the
+    // gas-only godunov above overwrote cons.nrg without the patch, so an MHD redo would otherwise
+    // lose it (C2). idempotent, so it also corrects the doubly-advanced cell B. hydro: no-op.
+    ct_resync();
     c2p();
     // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier holds the stage input where even full first-order
     // fluxes leave a cell unphysical. it is the rare correct parachute for a genuinely hard cell

@@ -263,7 +263,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         DOF == D
     }
 
-    fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+    fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) {
         // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D); the
         // spherical-swirl DOF-lift is a follow-on. `fofc` is called unconditionally by the driver, so
         // the gate lives here (fofc_active only guards the stage-input snapshot).
@@ -285,6 +285,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
+            || {}, // hydro: no cell B to re-sync
         );
     }
 

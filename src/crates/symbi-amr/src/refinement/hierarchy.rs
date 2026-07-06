@@ -888,7 +888,7 @@ where
         // first-order flux correction: redo any zone whose high-order c2p went unphysical with a
         // first-order (PCM + HLLE) update from the stage-input state. host-gated on a failure
         // reduction, so a clean substage is a scan + return (a no-op for regimes without FOFC).
-        prof("fofc", || l.kernels.fofc(&l.state, dt, a0, ac));
+        prof("fofc", || l.kernels.fofc(&l.state, dt, a0, ac, stage_tag(ii, n)));
         // c2p over the full allocated domain recomputed the coarse-fine
         // prim ghosts from stale cons; re-prolong them at the time of the
         // state entering the NEXT stage (the last stage's tail lands on
