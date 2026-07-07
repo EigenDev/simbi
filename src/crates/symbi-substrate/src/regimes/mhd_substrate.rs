@@ -251,45 +251,22 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     const EPS: f64 = 1e-12;
     let is_euler = a0.abs() < EPS && (ac - 1.0).abs() < EPS;
     let is_rk2 = (a0 - 0.5).abs() < EPS && (ac - 0.5).abs() < EPS;
-    // fuse the god+bcell kernel only on a device backend (CPU loses ~1.5x on this
-    // phase; GPU wins). SYMBI_FUSE_GODUNOV=0/1 overrides.
-    let fuse = match std::env::var("SYMBI_FUSE_GODUNOV").ok().as_deref() {
-        Some("1") => true,
-        Some("0") => false,
-        _ => Mem::IS_DEVICE_ACCESSIBLE,
-    };
-    // the fused god+bcell kernel exists only for the energy regimes (rmhd/nmhd), at 3D (no
-    // godunov_and_bcell_2d — 2.5D runs the unfused path); iso never fuses (no energy). curvilinear
-    // is now SAFE: the codegen dedup makes the fused gas stage's geo source read cell-B via the
-    // predictor's `bc_k` key, so try_fuse merges the two cell-B reads into ONE in-place binding —
-    // no read-only-input-aliasing-an-output. cartesian fused has no geo source (no prim.mag), so it
-    // was always alias-free. validated bit-identical to the unfused path (SYMBI_FUSE_GODUNOV=1 CPU
-    // equivalence + the GPU diff gates).
-    let fusable = (is_euler || is_rk2) && fuse && has_energy && D == 3 && st.is_empty();
+    // constrained transport supports only forward-Euler (0,1) and SSP-RK2 (1/2,1/2) stages (the CT
+    // curl time-averages the rk2 EMF; SSP-RK3 + CT is unimplemented). reject anything else up front.
+    assert!(
+        is_euler || is_rk2,
+        "MHD constrained transport supports only forward-Euler (0,1) and SSP-RK2 (1/2,1/2) stages; \
+         got (a0,ac)=({a0},{ac})."
+    );
 
-    if fusable {
-        // the FUSED gas + cell-B predictor in ONE launch, bound BY MANIFEST via `dispatch_named`
-        // (same regime-agnostic seam as the unfused stage) — resolve_path maps the conserved /
-        // flux / geo-source-prim / bc_/bcn_/bf_ paths to the sim buffers. a hand-built list
-        // would be RMHD-shaped (prim.rho first) and scramble NMHD/IMHD curvilinear fusion.
-        let fname = if is_euler {
-            format!("{gas_prefix}_godunov_and_bcell_euler{sfx}_{D}d")
-        } else {
-            format!("{gas_prefix}_godunov_and_bcell_rk2{sfx}_{D}d")
-        };
-        let fscalars = scalars_for(&fname, &scalar);
-        let pre_bind = sim.fields.prim.pre_field().expect("prim.pre"); // fused == energy regimes only
-        dispatch_named(sim, pre_bind, None, 0, &fname, &sim.geom.interior, &[], &fscalars);
-        return;
-    }
-
-    // the GAS conserved update (D/S_k/tau or D/S_k) via the runtime-coefficient stage kernel,
-    // bound BY MANIFEST through `dispatch_named` — the curvilinear geo-source prim reads are
-    // regime-specific (RMHD rho/vel/pre/mag, NMHD/IMHD vel/mag/pre, different orders), so the
-    // buffer layout MUST track the kernel artifact. a hand-built list would be RMHD-shaped and
-    // scramble NMHD/IMHD whenever DOF != D (the cyl r-z plane), draining mass at machine speed.
+    // the GAS conserved update (D/S_k/tau or D/S_k) via the runtime-coefficient stage kernel, bound
+    // BY MANIFEST through `dispatch_named`. cell B is NOT flux-evolved here — it is a DERIVED quantity,
+    // `interp(bface)` from the CT (bcell_from_bface). the gas energy flux F_tau already carries the
+    // magnetic energy (the Poynting term), so tau is conserved by the flux WITHOUT any magnetic-energy
+    // patch — the canonical CT-conservative scheme (spec §6). the curvilinear geo-source prim reads are
+    // regime-specific (RMHD rho/vel/pre/mag, NMHD/IMHD vel/mag/pre), so the buffer layout tracks the
+    // kernel artifact (a hand-built list would scramble NMHD/IMHD when DOF != D).
     let gname = format!("{gas_prefix}_godunov_stage{sfx}_{D}d");
-    let bcell_sfx = sfx.clone();
     let gscalars = scalars_for(&gname, &scalar);
     let pre_bind = if has_energy {
         sim.fields.prim.pre_field().expect("prim.pre")
@@ -297,25 +274,6 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
         &sim.fields.cons.den // iso geo-source reads cs^2*rho, not prim.pre; pass a dummy.
     };
     dispatch_named(sim, pre_bind, None, 0, &gname, &sim.geom.interior, &[], &gscalars);
-
-    // CT cell-B predictor-corrector — forward-Euler (0,1) flux-evolves bcell as a
-    // conserved component; SSP-RK2 (1/2,1/2) combines with bcell_n. any other
-    // (a0,ac) rejected (SSP-RK3 + CT unimplemented).
-    let bname = if is_euler {
-        format!("rmhd_bcell_godunov_euler{bcell_sfx}_{D}d")
-    } else if is_rk2 {
-        format!("rmhd_bcell_godunov_rk2{bcell_sfx}_{D}d")
-    } else {
-        panic!(
-            "MHD constrained transport supports only forward-Euler (0,1) and SSP-RK2 (1/2,1/2) \
-             stages; got (a0,ac)=({a0},{ac})."
-        );
-    };
-    let bscalars = scalars_for(&bname, &scalar);
-    // bind BY MANIFEST: rk2's bcell^n (BCellN) + the bflux block (BFlux{d,c}) reads -> the cell-B
-    // (BCell) writes. the euler/rk2 kernels carry different manifests (rk2 adds bcell_n), so the
-    // recorded order drives the bind — no hand-ordered list. reads no prim.pre (dummy override).
-    dispatch_named(sim, &sim.fields.cons.den, None, 0, &bname, &sim.geom.interior, &[], &bscalars);
 }
 
 /// the lattice-map pullback ghost fill: prim rho/vel/pre + bcell, in-place

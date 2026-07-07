@@ -465,9 +465,12 @@ pub fn imhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 }
 
 
-/// the CT face->cell B interpolation + magnetic-energy correction, mirror of
-/// `rmhd::rmhd_bcell_from_bface`: `bcell_c = 0.5*(bface_c + bface_c[+e_c])`,
-/// `nrg += 0.5*(|bcell_new|^2 - |bcell_old|^2)`. in-place on bcell + nrg.
+/// the CT face->cell B interpolation `bcell_c = 0.5*(bface_c + bface_c[+e_c])`, in place on the
+/// in-plane cell B (mag rows only). the cell field is a DERIVED quantity — the arithmetic average of
+/// its two bounding faces — used for reconstruction + the c2p magnetic-energy subtraction. NO energy
+/// correction: `cons.nrg` (tau) already carries the magnetic energy and is conserved by the Godunov
+/// flux (the Poynting term); the old `nrg += 0.5 d|bcell|^2` patch DOUBLE-ACCOUNTED it and did not
+/// telescope (spec §6 / energy_conservation_spec.md).
 pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let half = Gv::from_f64(0.5);
@@ -476,21 +479,15 @@ pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
         o[ax] = 1;
         o
     };
-    // field order (positional dispatch): all ndim faces, then all ndim old cells, then nrg.
     let bf: Vec<Gv> = (0..ndim).map(|c| Gv::field(&format!("bf_{c}"), &format!("bf_{c}"))).collect();
-    let bc: Vec<Gv> = (0..ndim).map(|c| Gv::field(&format!("bc_{c}"), FieldRef::BCell(c as u8))).collect();
-    let nrg = Gv::field("nrg", "nrg");
     // interpolate the ndim in-plane components from their faces; out-of-plane components
-    // (Bz in 2.5D) are untouched here, and their |B|^2 term cancels in the energy diff.
+    // (Bz in 2.5D) are untouched here.
     let bc_n: Vec<Gv> = (0..ndim)
         .map(|c| (bf[c] + gv_field_at(&format!("bf_{c}"), &format!("bf_{c}"), ndim, &off(c))) * half)
         .collect();
-    let sumsq = |v: &[Gv]| v.iter().fold(Gv::ZERO, |a, &x| a + x * x);
-    let nrg_n = nrg + half * (sumsq(&bc_n) - sumsq(&bc));
-    let mut writes: Vec<(String, FieldBind, NodeId)> = (0..ndim)
+    let writes: Vec<(String, FieldBind, NodeId)> = (0..ndim)
         .map(|c| (format!("bc_{c}_new"), format!("bc_{c}").into(), bc_n[c].node()))
         .collect();
-    writes.push(("nrg_new".to_string(), "nrg".into(), nrg_n.node()));
     (end_trace(), writes)
 }
 
@@ -646,15 +643,13 @@ pub fn rmhd_edge_emf_gr_gv(
 /// sumsq under-counts the correction by the metric factors (gamma_rr = 1/f at schwarzschild).
 /// the v = 0 convention of the flat patch is kept — the one-step instrument adjudicates it.
 pub fn rmhd_bcell_from_bface_gr_gv(
-    spacetime: Spacetime,
-    coords: Coords,
-    spacing: &[Spacing],
+    // the interpolation is metric-FREE now (the metric only entered the deleted energy patch); the
+    // chart args are kept for the bake's call-site symmetry with the other GR kernels.
+    _spacetime: Spacetime,
+    _coords: Coords,
+    _spacing: &[Spacing],
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
-    use symbi_geometry::{
-        KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
-        SchwarzschildKSCylindrical,
-    };
     begin_trace();
     let ndim = axes.len();
     let half = Gv::from_f64(0.5);
@@ -663,58 +658,19 @@ pub fn rmhd_bcell_from_bface_gr_gv(
         o[ax] = 1;
         o
     };
-    // field order (positional dispatch): ndim faces, then THREE old cells, then nrg — the full
-    // cell B enters the metric contraction.
     let bf: Vec<Gv> = (0..ndim).map(|c| Gv::field(&format!("bf_{c}"), &format!("bf_{c}"))).collect();
-    let bc: Vec<Gv> = (0..3).map(|c| Gv::field(&format!("bc_{c}"), FieldRef::BCell(c as u8))).collect();
-    let nrg = Gv::field("nrg", "nrg");
-    let mut bc_n: Vec<Gv> = bc.clone();
-    for (d, &c) in axes.iter().enumerate() {
-        bc_n[c] = (bf[d] + gv_field_at(&format!("bf_{d}"), &format!("bf_{d}"), ndim, &off(d))) * half;
-    }
-    // the spatial metric at the volume-weighted centroid; ungridded slots at the chart default.
-    let geo = cell_geometry_gv(coords, spacing, axes, ndim);
-    let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
-        match axes.iter().position(|&a| a == c) {
-            Some(d) => geo.centroid[d],
-            None => gv_ungridded_slot(coords, c),
-        }
-    }));
-    let mass = Gv::scalar("schwarzschild_mass");
-    let gm = match (spacetime, coords) {
-        (Spacetime::Schwarzschild, _) => {
-            <Schwarzschild<Gv> as Metric<Gv, 3>>::spatial_metric(&Schwarzschild { mass }, x)
-        }
-        (Spacetime::KerrSchild, Coords::Cartesian) => {
-            <SchwarzschildKSCartesian<Gv> as Metric<Gv, 3>>::spatial_metric(&SchwarzschildKSCartesian { mass }, x)
-        }
-        (Spacetime::KerrSchild, Coords::Cylindrical) => {
-            <SchwarzschildKSCylindrical<Gv> as Metric<Gv, 3>>::spatial_metric(&SchwarzschildKSCylindrical { mass }, x)
-        }
-        (Spacetime::KerrSchild, _) => {
-            <SchwarzschildKS<Gv> as Metric<Gv, 3>>::spatial_metric(&SchwarzschildKS { mass }, x)
-        }
-        (Spacetime::Kerr, _) => <KerrKS<Gv> as Metric<Gv, 3>>::spatial_metric(
-            &KerrKS { mass, spin: Gv::scalar("kerr_spin") },
-            x,
-        ),
-        (Spacetime::Minkowski, _) => unreachable!("the GR interpolation is baked only for a curved spacetime"),
-    };
-    let bsq = |v: &[Gv]| -> Gv {
-        let mut s = Gv::ZERO;
-        for i in 0..3 {
-            for j in 0..3 {
-                s = s + gm[(i, j)] * v[i] * v[j];
-            }
-        }
-        s
-    };
-    let nrg_n = nrg + half * (bsq(&bc_n) - bsq(&bc));
-    let mut writes: Vec<(String, FieldBind, NodeId)> = axes
+    // interpolate each in-plane cell component from its two bounding faces (arithmetic average;
+    // metric-free — the cell field is a derived reconstruction / c2p quantity, not conserved). NO
+    // energy patch (spec §6): tau carries the magnetic energy and is conserved by the Godunov flux;
+    // the old metric-weighted `nrg += 1/2 d(gamma_ij B^i B^j)` double-accounted it non-conservatively.
+    let writes: Vec<(String, FieldBind, NodeId)> = axes
         .iter()
-        .map(|&c| (format!("bc_{c}_new"), format!("bc_{c}").into(), bc_n[c].node()))
+        .enumerate()
+        .map(|(d, &c)| {
+            let interp = (bf[d] + gv_field_at(&format!("bf_{d}"), &format!("bf_{d}"), ndim, &off(d))) * half;
+            (format!("bc_{c}_new"), format!("bc_{c}").into(), interp.node())
+        })
         .collect();
-    writes.push(("nrg_new".to_string(), "nrg".into(), nrg_n.node()));
     (end_trace(), writes)
 }
 
