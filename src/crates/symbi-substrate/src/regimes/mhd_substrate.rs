@@ -260,12 +260,12 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     );
 
     // the GAS conserved update (D/S_k/tau or D/S_k) via the runtime-coefficient stage kernel, bound
-    // BY MANIFEST through `dispatch_named`. cell B is NOT flux-evolved here — it is a DERIVED quantity,
-    // `interp(bface)` from the CT (bcell_from_bface). the gas energy flux F_tau already carries the
-    // magnetic energy (the Poynting term), so tau is conserved by the flux WITHOUT any magnetic-energy
-    // patch — the canonical CT-conservative scheme (spec §6). the curvilinear geo-source prim reads are
-    // regime-specific (RMHD rho/vel/pre/mag, NMHD/IMHD vel/mag/pre), so the buffer layout tracks the
-    // kernel artifact (a hand-built list would scramble NMHD/IMHD when DOF != D).
+    // BY MANIFEST through `dispatch_named`. the IN-PLANE cell B is a DERIVED quantity — after the CT
+    // curl, `bcell_from_bface` overwrites it with `interp(bface)` — but the gas energy flux F_tau
+    // carries the magnetic energy (the Poynting term), so tau is conserved by the flux WITHOUT any
+    // magnetic-energy patch (spec §6). the curvilinear geo-source prim reads are regime-specific (RMHD
+    // rho/vel/pre/mag, NMHD/IMHD vel/mag/pre), so the buffer layout tracks the kernel artifact (a
+    // hand-built list would scramble NMHD/IMHD when DOF != D).
     let gname = format!("{gas_prefix}_godunov_stage{sfx}_{D}d");
     let gscalars = scalars_for(&gname, &scalar);
     let pre_bind = if has_energy {
@@ -274,6 +274,23 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
         &sim.fields.cons.den // iso geo-source reads cs^2*rho, not prim.pre; pass a dummy.
     };
     dispatch_named(sim, pre_bind, None, 0, &gname, &sim.geom.interior, &[], &gscalars);
+
+    // the cell-B induction-flux predictor: forward-Euler (0,1) flux-evolves bcell as a conserved
+    // component; SSP-RK2 (1/2,1/2) combines with bcell_n (both guaranteed by the assert above). in
+    // full CT (2D/3D) `bcell_from_bface` overwrites the in-plane components from the faces, so only the
+    // OUT-OF-PLANE components survive this step: By,Bz in 1.5D and Bz in 2.5D have no face to curl and
+    // are cell-centered conserved variables carried SOLELY by this induction-flux divergence
+    // (docs/design/30). the predictor is always the rmhd_* kernel (Faraday induction is regime-
+    // agnostic); its name carries the same geometry/spacetime slug `sfx` as the gas stage. bound BY
+    // MANIFEST: rk2's bcell^n (BCellN) + the bflux block (BFlux{d,c}) reads -> the cell-B (BCell)
+    // writes; reads no prim.pre (dummy override).
+    let bname = if is_euler {
+        format!("rmhd_bcell_godunov_euler{sfx}_{D}d")
+    } else {
+        format!("rmhd_bcell_godunov_rk2{sfx}_{D}d")
+    };
+    let bscalars = scalars_for(&bname, &scalar);
+    dispatch_named(sim, &sim.fields.cons.den, None, 0, &bname, &sim.geom.interior, &[], &bscalars);
 }
 
 /// the lattice-map pullback ghost fill: prim rho/vel/pre + bcell, in-place
