@@ -59,10 +59,12 @@ pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, F
 /// the gas conserved (den, mom[k], nrg?) and primitive (rho, vel[k], pre?). the high-order state
 /// `ho_*` is the snapshot taken before the substage was redone at first order; `fo_*` is the redone
 /// (PCM + HLLE) result, aliased to the live cons/prim `out_*` (in-place read+write). the failure
-/// test is metric-free: the c2p velocity ceiling keeps |v| < 1, so an unphysical recovery shows up
-/// as rho <= 0, pre <= 0, or NaN (all of which fail `> 0`), never as superluminal. so a cell whose
-/// HIGH-ORDER c2p is physical keeps its sharp state; only the failed cells take the diffusive
-/// first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).
+/// test is metric-free and needs only rho/pre: both relativistic recoveries drive an out-of-cone
+/// state to a FINITE flagged result — density from the ceiling-clamped Lorentz factor, pressure to
+/// the non-positive `C2P_CONE_FAIL_PRESSURE` sentinel (see c2p_result) — so an unphysical recovery
+/// always shows up as rho <= 0 or pre <= 0 (both fail `> 0`), never needing a velocity test. so a
+/// cell whose HIGH-ORDER c2p is physical keeps its sharp state; only the failed cells take the
+/// diffusive first-order result. carrier-generic, regime-generic (has_energy toggles the pressure law).
 /// the FOFC HOST GATE probe: write 1 to the scratch where the high-order c2p is unphysical (density
 /// or, for an energy regime, pressure non-finite or non-positive), else 0. a max-reduce over the
 /// interior is > 0 exactly when some zone needs correcting; a clean substage reduces to 0 and skips

@@ -44,10 +44,8 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
     let rbar_sq = r * r * x * x + mu * x * (S::ONE + x) * rdb_sq;
     let qbar = qq - half * (bee_sq + mu * mu * x * x * bee_sq * rp_sq);
 
-    // velocity ceiling z_upper = r/h0 = r; v_limit = z/sqrt(1+z^2).
-    let z_upper = r;
-    let v_limit = z_upper / (S::ONE + z_upper * z_upper).sqrt();
-    let vsq = (mu * mu * rbar_sq).min(v_limit * v_limit);
+    // the shared c2p velocity ceiling v_limit^2 = r^2/(1+r^2) (KKC h0 = 1).
+    let vsq = (mu * mu * rbar_sq).min(crate::c2p_result::relativistic_velocity_ceiling_sq(r * r));
     let gbsq = vsq / (S::ONE - vsq);
     let g = (S::ONE + gbsq).sqrt();
 
@@ -187,13 +185,12 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     let mu2 = mu * mu;
     let rbar_sq = r_sq * x * x + mu * x * (S::ONE + x) * rdb_sq;
     let qbar = qq - half * (bee_sq + mu2 * x * x * bee_sq * rp_sq);
-    // MIRROR the root-finder's velocity ceiling (kkc_fmu44: v_limit = r/sqrt(1+r^2) < 1). the
+    // MIRROR the root-finder's velocity ceiling (the shared c2p ceiling v_limit^2 = r^2/(1+r^2)). the
     // recovery must apply the SAME cap: a strong-field root sits at the ceiling, so the uncapped
     // vsq = mu^2 rbar_sq can reach >= 1, giving gbsq < -1 and ww = sqrt(1+gbsq) = NaN — a NaN rho/p
     // that poisons neighbours instead of the intended clean fail-loud (p <= 0 flagged below). capped,
     // ww/rho/p stay finite and the q(U) verdict routes the zone through first-order correction.
-    let v_limit = r_mag / (S::ONE + r_sq).sqrt();
-    let vsq = (mu2 * rbar_sq).min(v_limit * v_limit);
+    let vsq = (mu2 * rbar_sq).min(crate::c2p_result::relativistic_velocity_ceiling_sq(r_sq));
     let gbsq = vsq / (S::ONE - vsq);
     let ww = (S::ONE + gbsq).sqrt();
     let rho = dd / ww;
@@ -208,8 +205,8 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
     // test accepts such a clamped state (pre from eps_e stays > 0), so its face state poisons a
     // neighbour's first-order redo -> a freeze. forcing the pressure non-positive when q(U) <= 0
     // routes the zone through first-order correction instead. r_sq is metric-raised (line ~115).
-    let q_over_d = qq + S::ONE - (S::ONE + r_sq).sqrt();
-    let pre = S::select(q_over_d.cmp_gt(S::ZERO), pre, S::ZERO - S::from_f64(1e-30));
+    let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
+    let pre = S::select(cone_ok, pre, S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE));
     let mu_x = mu * x;
     let rdb_mu = rdb * mu;
     // the CONTRAVARIANT valencia velocity v^i = mu x (gamma^{ij} r_j + mu (r.b) h^i) — the

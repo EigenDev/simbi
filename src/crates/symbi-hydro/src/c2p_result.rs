@@ -149,6 +149,35 @@ pub fn relativistic_density_guard<S: symbi_ir::algebra::Scalar + symbi_algebra::
     }
 }
 
+/// the pressure written when a relativistic recovery finds the conserved state OUT of the
+/// physical cone. a small NEGATIVE value: finite (so it never poisons a neighbour the way a NaN
+/// does), yet non-positive so the FOFC probe's `finite_pos(pre)` and the post-hoc
+/// `relativistic_c2p_code` both flag it, and a downstream sound speed `sqrt(gamma p / rho h)`
+/// turns non-finite — the fail-loud that survives even where FOFC is inactive. shared by RHD + RMHD
+/// (feedback_no_silent_floors: a flagged non-physical state, NOT a floored spurious-physical one).
+pub const C2P_CONE_FAIL_PRESSURE: f64 = -1e-30;
+
+/// the shared relativistic-c2p velocity ceiling, squared: `v_limit^2 = r^2 / (1 + r^2)` with
+/// `r = |S| / D` the rescaled conserved-momentum magnitude (enthalpy floor `h0 = 1`; KKC/Kastaun
+/// 2021 Eq. 40). the true 3-velocity of ANY in-cone state with `p >= 0` satisfies `v <= v_limit`,
+/// so clamping a recovered `v^2` to this leaves a valid recovery unchanged while keeping the
+/// Lorentz factor / density finite for an out-of-cone input — no NaN. ONE source shared by
+/// `rhd_recover` and `rmhd_recover` so the two regimes cannot drift. carrier-generic.
+#[inline]
+pub fn relativistic_velocity_ceiling_sq<S: symbi_ir::algebra::Scalar>(r_sq: S) -> S {
+    r_sq / (S::ONE + r_sq)
+}
+
+/// the shared relativistic-c2p admissibility residual `q(U)/D = tau/D + 1 - sqrt(1 + r^2)`,
+/// `r = |S| / D` (Wu 2017; the B-free hydro limit of the RMHD KKC form — the magnetic terms do
+/// not enter the cone bound). strictly positive iff a physical subluminal (`p > 0`, `v < 1`)
+/// recovery exists; non-positive marks an out-of-cone conserved state whose pressure the caller
+/// drives to `C2P_CONE_FAIL_PRESSURE`. ONE source shared by both recoveries. carrier-generic.
+#[inline]
+pub fn relativistic_cone_residual<S: symbi_ir::algebra::Scalar>(qq: S, r_sq: S) -> S {
+    qq + S::ONE - (S::ONE + r_sq).sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

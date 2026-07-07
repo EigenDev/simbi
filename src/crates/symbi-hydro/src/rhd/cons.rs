@@ -42,6 +42,14 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     // THIS is the SR->GR seam (B2): the metric is a carrier-generic value the physics contracts
     // with, transported by the homomorphism like `eos`.
     let s_mag = metric.norm_sq_cov(&cons.mom).sqrt();
+    // the rescaled conserved-momentum norm r^2 = |S|^2 / D^2 and the shared c2p velocity ceiling
+    // v_limit^2 = r^2/(1+r^2) (KKC h0 = 1). clamping every recovered v^2 to this keeps the Lorentz
+    // factor finite for an OUT-of-cone input (no NaN to poison a neighbour) while leaving an
+    // in-cone recovery bit-identical (its true v is strictly below the ceiling). the cone test at
+    // the end drives the pressure non-positive to signal the out-of-cone case. same contract as
+    // rmhd_recover — see c2p_result::relativistic_velocity_ceiling_sq / relativistic_cone_residual.
+    let r_sq = s_mag * s_mag / (dd * dd);
+    let v_ceiling_sq = crate::c2p_result::relativistic_velocity_ceiling_sq(r_sq);
 
     // initial pressure guess: |S - D - tau|
     let p_init = (s_mag - dd - tau).abs();
@@ -50,7 +58,10 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     // f(p) = eos.pressure - p and g = df/dp = cs_rel^2*v^2 - 1, return the updated guess.
     let newton_step = |p_eq: S| -> S {
         let et = tau + dd + p_eq;
-        let v_sq = s_mag * s_mag / (et * et);
+        // an undershooting iterate (et < |S|) would give v^2 > 1 and a NaN Lorentz factor; the
+        // ceiling keeps the iterate finite. inactive for an in-cone root, so the recovered p is
+        // unchanged for a valid state.
+        let v_sq = (s_mag * s_mag / (et * et)).min(v_ceiling_sq);
         let ww = S::ONE / (S::ONE - v_sq).sqrt();
         let rho = dd / ww;
         let eps = (tau + (S::ONE - ww) * dd + (S::ONE - ww * ww) * p_eq) / (dd * ww);
@@ -77,9 +88,19 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     // norm_sq_cov (without the raise, S_i/et is the COVARIANT velocity — wrong for non-identity gamma).
     let et = tau + dd + p_eq;
     let vel = metric.raise(&cons.mom).map(|s| s / et);
-    let ww = lorentz_factor(metric.norm_sq_contra(&vel));
+    // density from the CEILING-clamped Lorentz factor: an out-of-cone state recovers a finite (if
+    // flagged) rho instead of a NaN. the velocity VECTOR is left exact (finite, possibly
+    // superluminal — the post-hoc diagnostic flags it); the clamp only sanitizes rho.
+    let ww = lorentz_factor(metric.norm_sq_contra(&vel).min(v_ceiling_sq));
     let rho = dd / ww;
-    Prim { rho, vel, pre: p_eq }
+    // Wu-2017 cone test: q(U)/D <= 0 means no physical subluminal p > 0 solution exists. drive the
+    // pressure to the shared non-positive sentinel so the FOFC probe and the c2p diagnostic flag
+    // the zone (fail-loud) rather than accepting a spurious recovered pressure. identical contract
+    // and math to rmhd_recover.
+    let qq = tau / dd;
+    let cone_ok = crate::c2p_result::relativistic_cone_residual(qq, r_sq).cmp_gt(S::ZERO);
+    let pre = S::select(cone_ok, p_eq, S::from_f64(crate::c2p_result::C2P_CONE_FAIL_PRESSURE));
+    Prim { rho, vel, pre }
 }
 
 /// the host RHD cons->prim: the branch-free `rhd_recover` plus post-hoc C2pResult
@@ -222,27 +243,32 @@ mod tests {
         assert!(result.error.is_err());
     }
 
-    // DELIBERATE no-clamp pin: the branch-free kernel body (`rhd_recover`, what the
-    // substrate c2p kernel computes) must return a NON-FINITE prim for unphysical cons
-    // (s_mag > d + tau => v_sq >= 1 => 1/sqrt(1-v_sq) blows up). the newton_fg step is
-    // unguarded and the outer loop detects !isfinite; this is
-    // REQUIRED by feedback_no_silent_floors: the kernel path has no ErrorCode channel,
-    // so the NaN must propagate to the CFL max-reduction (now NaN-propagating, item 1)
-    // and trip check_dt_or_panic. clamping v_sq here would silently recover a garbage
-    // finite state and defeat that guard. if this test fails because someone added a
-    // clamp, the clamp is the bug.
+    // the unified relativistic-c2p contract (shared with rmhd_recover): the branch-free kernel body
+    // recovers a FINITE state for an out-of-cone conserved input — density from the ceiling-clamped
+    // Lorentz factor, pressure driven to the shared non-positive `C2P_CONE_FAIL_PRESSURE` sentinel
+    // by the Wu-2017 cone test — NOT a NaN. rationale for the change from the old NaN convention:
+    // the FOFC probe's `finite_pos(pre)` rejects the non-positive sentinel IDENTICALLY to a NaN (so
+    // the fail-loud is preserved), while a finite sentinel cannot poison a neighbour's
+    // reconstruction the way an absorbing NaN does (the demonstrated FM-torus / RMHD failure mode).
+    // where FOFC is inactive, the sentinel still fails loud: a sound speed `sqrt(gamma p / rho h)`
+    // on p < 0 goes non-finite and trips the CFL check. feedback_no_silent_floors holds — the state
+    // is FLAGGED (non-positive pressure), never floored to a spurious-physical value.
     #[test]
-    fn kernel_path_unphysical_cons_is_non_finite() {
+    fn kernel_path_unphysical_cons_recovers_finite_and_flagged() {
         let eos = IdealGas { gamma: 5.0 / 3.0 };
-        // s_mag = 10 >> d + tau = 1.1, so the very first Newton iterate has v_sq > 1.
+        // s_mag = 10 >> d + tau = 1.1 => out of cone (tau + d < sqrt(d^2 + s_mag^2)).
         let cons: Cons<f64, 1> = Cons { den: 1.0, mom: Tensor::new([10.0]), nrg: 0.1 };
         let prim = rhd_recover(&eos, &cons, &SpatialMetric::flat(), MAX_ITER);
-        let finite = prim.rho.is_finite() && prim.pre.is_finite() && prim.vel[0].is_finite();
         assert!(
-            !finite,
-            "unphysical cons silently recovered to a finite prim (rho={}, pre={}, v={}); \
-             the kernel path must surface NaN, not mask it",
+            prim.rho.is_finite() && prim.pre.is_finite() && prim.vel[0].is_finite(),
+            "unified c2p must recover a FINITE state (rho={}, pre={}, v={}), not a NaN",
             prim.rho, prim.pre, prim.vel[0]
+        );
+        assert!(prim.rho > 0.0, "density must stay positive/finite, got {}", prim.rho);
+        assert!(
+            prim.pre <= 0.0,
+            "out-of-cone state must flag a non-positive pressure (the FOFC-visible signal), got {}",
+            prim.pre
         );
     }
 

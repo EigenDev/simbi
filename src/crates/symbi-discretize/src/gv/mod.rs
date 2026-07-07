@@ -542,19 +542,26 @@ mod tests {
             k.graph.errors()
         );
 
-        // the recovered pressure is a fixed-count inline Newton loop.
+        // the recovered pressure is the Wu-2017 cone select over the fixed-count inline Newton
+        // loop: `pre = select(q(U)/D > 0, newton_p, cone_fail_sentinel)`. the select's THEN branch
+        // is the ONE Op::IterateInline (the deep Newton stays folded, not an exponential tree); the
+        // ELSE branch is the shared non-positive out-of-cone sentinel (see c2p_result).
         let pre_id = writes
             .iter()
             .find(|(_, rt, _)| rt.name() == "prim.pre")
             .unwrap()
             .2;
+        let newton_id = match &k.graph.node(pre_id).op {
+            Op::Select(_, then_branch, _) => *then_branch,
+            other => panic!("expected prim.pre = Select(cone, newton, sentinel), got {other:?}"),
+        };
         assert!(
             matches!(
-                &k.graph.node(pre_id).op,
+                &k.graph.node(newton_id).op,
                 Op::IterateInline { count: 20, .. }
             ),
-            "expected prim.pre = IterateInline(count=20), got {:?}",
-            k.graph.node(pre_id).op
+            "expected the cone select's then-branch = IterateInline(count=20), got {:?}",
+            k.graph.node(newton_id).op
         );
     }
 
