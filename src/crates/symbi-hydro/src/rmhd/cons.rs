@@ -21,9 +21,9 @@ use crate::c2p_result::C2pResult;
 const RMHD_MAX_ITER: usize = 100;
 /// convergence tolerance for false-position iteration (also the B=0 divzero guard).
 const CONVERGENCE_TOL: f64 = 1e-12;
-/// bisection steps for the `mu_+` upper bracket (root of `kkc_fmu49` on `[0, 1]`). 54 halvings
-/// drive the bracket width below 2^-54 ~ 5.6e-17 (sub-ulp), pinning `mu_+` tight enough that the
-/// master false-position never re-enters the post-`mu_+` kink region that holds the spurious root.
+/// the MAX iteration cap for the `mu_+` bracketed Illinois solve (root of `kkc_fmu49` on `[0, 1]`).
+/// Illinois is superlinear so a warm cell converges in ~10 and early-breaks; this cap only bounds a
+/// pathological non-converging cell. generous headroom over the typical count.
 const FIND_MU_PLUS_ITERS: usize = 54;
 
 /// KKC Eq. 49 auxiliary function (enthalpy limit h0 = 1): `f_a(mu) = mu*sqrt(1 + rbar_sq(mu)) - 1`.
@@ -85,17 +85,34 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
 /// `f(result) >= 0` and a valid straddle `f(0) < 0 <= f(result)` for the master false-position.
 fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
     let half = S::from_f64(0.5);
+    let eps = S::from_f64(CONVERGENCE_TOL);
+    // bracketed Illinois (regula falsi + stale-endpoint half-damp) on the monotone-increasing f_a.
+    // superlinear, so it reaches tol in ~10 iters (vs ~54 for bisection); `converged` drives the
+    // IterateInline early-break so a converged cell stops. `hi` ALWAYS satisfies f_a(hi) >= 0 (the
+    // straddle-preserving upper bracket >= mu_+): every step either keeps the old hi or moves hi to
+    // a point with f_a >= 0. the halved f_hi/f_lo are interpolation weights only — the bracket
+    // POSITIONS keep their true signs, so the >= mu_+ guarantee is exact regardless of the damping.
+    let f_lo0 = kkc_fmu49(S::ZERO, bee_sq, rdb_sq, r); // = -1 < 0
+    let f_hi0 = kkc_fmu49(S::ONE, bee_sq, rdb_sq, r); // >= 0 for any state
     S::iterate_vec(
-        [S::ZERO, S::ONE], // [lo, hi] maintaining f_a(lo) < 0 <= f_a(hi)
+        [S::ZERO, S::ONE, f_lo0, f_hi0, S::ZERO], // [lo, hi, f_lo, f_hi, done]; f_a(lo) < 0 <= f_a(hi)
         FIND_MU_PLUS_ITERS,
         |s| {
-            let (lo, hi) = (s[0], s[1]);
-            let mid = half * (lo + hi);
-            let below = kkc_fmu49(mid, bee_sq, rdb_sq, r).cmp_lt(S::ZERO);
-            [S::select(below, mid, lo), S::select(below, hi, mid)]
+            let (lo, hi, f_lo, f_hi, done) = (s[0], s[1], s[2], s[3], s[4]);
+            let mu = (lo * f_hi - hi * f_lo) / (f_hi - f_lo);
+            let ff = kkc_fmu49(mu, bee_sq, rdb_sq, r);
+            let below = ff.cmp_lt(S::ZERO); // f_a(mu) < 0 => root above mu => raise lo, keep hi
+            let lo_n = S::select(below, mu, lo);
+            let hi_n = S::select(below, hi, mu);
+            // Illinois: half-damp the RETAINED endpoint's function value (hi when below, else lo).
+            let f_lo_n = S::select(below, ff, half * f_lo);
+            let f_hi_n = S::select(below, half * f_hi, ff);
+            let conv = ff.abs().min(hi_n - lo_n).cmp_lt(eps);
+            let done_n = done.max(S::select(conv, S::ONE, S::ZERO)); // sticky
+            [lo_n, hi_n, f_lo_n, f_hi_n, done_n]
         },
-        |_, _| S::ZERO.cmp_lt(S::ZERO), // always-false: run the fixed iteration count, no early freeze
-        1,                              // result = hi, the upper bracket >= mu_+
+        |s, _next| half.cmp_lt(s[4]), // early-break once `done` is set (branch-free break_when)
+        1,                            // result = hi, the upper bracket >= mu_+
     )
 }
 
@@ -341,7 +358,11 @@ mod tests {
             let mu_plus = find_mu_plus::<f64>(beesq, beedrsq, r);
             let f_at = kkc_fmu49::<f64>(mu_plus, beesq, beedrsq, r);
             assert!(mu_plus > 0.0 && mu_plus <= 1.0, "mu_+ out of (0,1] for r={r}: {mu_plus}");
-            assert!(f_at.abs() < 1e-12, "mu_+ is not a root of f_a for r={r}: f_a={f_at}");
+            // the correctness invariant is a TIGHT UPPER bracket: f_a(mu_+) >= 0 (so it exceeds the
+            // f_a root => f_master(mu_+) >= 0, straddle holds) AND close to the root (Illinois returns
+            // the hi endpoint within ~tol of the root, so f_a(hi) ~ f_a'*tol, a few e-12).
+            assert!(f_at >= 0.0, "mu_+ is not an upper bracket of the f_a root for r={r}: f_a={f_at}");
+            assert!(f_at < 1e-10, "mu_+ not a tight bracket for r={r}: f_a={f_at}");
             // upper bracket: f_a strictly increasing, so just below mu_+ it is negative.
             assert!(kkc_fmu49::<f64>(mu_plus - 1e-9, beesq, beedrsq, r) < f_at,
                 "f_a not increasing through mu_+ for r={r}");
