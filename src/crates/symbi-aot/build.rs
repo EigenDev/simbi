@@ -49,7 +49,6 @@ use symbi_discretize::{
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::{Graph, NodeId};
-use symbi_ir::gv::{try_fuse, LaunchGrade};
 use symbi_ir::{emit_kernel_cpu, emit_kernel_cpu_serial, prepare, prepared_to_ir, FieldBind, KernelEmitInputs};
 
 // the immersed-body kernels pack one slot per body; the count is owned by the
@@ -1224,11 +1223,17 @@ fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the RMHD cell-B flux predictor (Euler + RK2): flux-evolve the CELL B by the
-// induction-flux divergence, so the magnetic-energy correction in bcell_from_bface
-// reads the flux-implied B as b_old (scale_gas/add_gas include the magnetic
-// component). in-place on bcell (bc_{c} read+written).
+// the RMHD cell-B flux predictor (Euler + RK2): flux-evolve the OUT-OF-PLANE (non-CT) cell B
+// components by the induction-flux divergence, in-place on their bc_{c} slots. the in-plane
+// components live on faces and are re-derived by bcell_from_bface, so the predictor leaves them
+// alone (oop_predictor_spec.md).
 fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
+    // a fully-gridded chart (3D) carries all three B components on staggered faces, so there is no
+    // out-of-plane cell-centered component and the predictor is empty — skip it (godunov_stage elides
+    // the dispatch at D == DOF; oop_predictor_spec.md).
+    if (0..3).all(|c| geom.axes.contains(&c)) {
+        return;
+    }
     // the face positions in the divergence measure depend on the spacing map + the spacetime
     // (covariant measure), so those slugs ride the name (empty for uniform/flat — the existing
     // names are unchanged).
@@ -1243,6 +1248,10 @@ fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
 }
 
 fn gen_rmhd_bcell_godunov_rk2(out_dir: &str, geom: Geom, ndim: u8) {
+    // no out-of-plane component on a fully-gridded chart -> empty predictor; skip (see the euler gen).
+    if (0..3).all(|c| geom.axes.contains(&c)) {
+        return;
+    }
     let geo_slug = mhd_geom_slug(&geom); // MHD slug '_sph' for both flat and GR (swirl stays DOF=3 via the macro)
     let name = format!(
         "rmhd_bcell_godunov_rk2{}{}{}_{ndim}d",
@@ -1250,54 +1259,6 @@ fn gen_rmhd_bcell_godunov_rk2(out_dir: &str, geom: Geom, ndim: u8) {
     );
     let (k, writes) = rmhd_bcell_godunov_rk2_gv(geom.coords, geom.spacetime, &geom.spacing, ndim as usize, 3, &geom.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
-}
-
-// the canonical 3D interior cell-centered launch grade. structural fingerprint
-// (rank + space names + placeholder extents) — runtime supplies real bounds at
-// dispatch. both halves of the fused god+bcell launch declare THIS so the
-// fusion algebra accepts the merge (gv-kernel-fusion phase B).
-fn interior_3d_grade() -> LaunchGrade {
-    use symbi_algebra::{domain, Space};
-    LaunchGrade::from_domain(&domain([
-        Space { name: "i", lo: 0, hi: 1 },
-        Space { name: "j", lo: 0, hi: 1 },
-        Space { name: "k", lo: 0, hi: 1 },
-    ]))
-}
-
-// the RMHD GAS-STAGE + CELL-B-PREDICTOR fused launch. the two stages share grid
-// + dt and write to disjoint slots (cons.{den,mom,nrg} vs bc_{0,1,2}). `try_fuse`
-// merges the two GvKernels into one — the substrate then issues one launch per stage.
-//
-// emits `rmhd_godunov_and_bcell_{variant}{geom_suffix}_3d` for variant in
-// {euler, rk2}; the GAS-stage builder args mirror `gen_godunov_stage` for the
-// rmhd 3D row (ncomp=3, has_energy=true, GeoSource::Rmhd).
-fn gen_mhd_godunov_and_bcell(out_dir: &str, prefix: &str, geom: Geom, variant: &str) {
-    // the CT bcell predictor is regime-agnostic (Faraday induction) — always the rmhd_*
-    // kernel; only the GAS stage's geometric source differs by regime (geo_source(prefix)).
-    let bcell_kw = match variant {
-        "euler" => rmhd_bcell_godunov_euler_gv(geom.coords, geom.spacetime, &geom.spacing, 3, 3, &geom.axes),
-        "rk2" => rmhd_bcell_godunov_rk2_gv(geom.coords, geom.spacetime, &geom.spacing, 3, 3, &geom.axes),
-        other => panic!("gen_mhd_godunov_and_bcell: unknown variant `{other}`"),
-    };
-    let (mut k_god, w_god) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
-        geom.coords, symbi_discretize::Spacetime::Minkowski, &geom.spacing, &geom.axes, 3, 3, true,
-        geo_source(prefix), &[], /* mag_from_bcell = */ true, // FUSED: read cell-B via bc_k so try_fuse dedups it
-    );
-    let (mut k_bcell, w_bcell) = bcell_kw;
-    let grade = interior_3d_grade();
-    k_god.grade = grade.clone();
-    k_bcell.grade = grade;
-
-    let (fused, writes) = try_fuse(k_god, w_god, k_bcell, w_bcell)
-        .unwrap_or_else(|e| panic!(
-            "gen_rmhd_godunov_and_bcell {variant}: try_fuse rejected the pair: {e}\n\
-             this should be a structural diagnostic — investigate the rejected hazard \
-             before re-emitting the fused kernel.",
-        ));
-
-    let name = format!("{prefix}_godunov_and_bcell_{variant}{}_3d", geom.suffix());
-    emit_gv(out_dir, &name, 3, &fused, &writes);
 }
 
 // the RMHD 3D constrained-transport curl B-update along ONE face axis `dir`
@@ -2069,31 +2030,18 @@ fn main() {
         gen_rmhd_ct_curl_3d_dir(&out_dir, dir, Geom::cyl_3d());
     }
     gen_rmhd_bcell_from_bface(&out_dir, 3);
-    gen_rmhd_bcell_godunov_euler(&out_dir, Geom::cart(3), 3);
-    gen_rmhd_bcell_godunov_euler(&out_dir, Geom::sph(3), 3);
-    gen_rmhd_bcell_godunov_euler(&out_dir, Geom::cyl_3d(), 3);
-    gen_rmhd_bcell_godunov_rk2(&out_dir, Geom::cart(3), 3);
-    gen_rmhd_bcell_godunov_rk2(&out_dir, Geom::sph(3), 3);
-    gen_rmhd_bcell_godunov_rk2(&out_dir, Geom::cyl_3d(), 3);
+    // no cell-B predictor at 3D: all three B components are staggered on faces (full CT), so there is
+    // no out-of-plane cell-centered component to flux-evolve (oop_predictor_spec.md).
     gen_rmhd_save_efield(&out_dir, 3);
     gen_rmhd_average_efield(&out_dir, 3);
     gen_rmhd_ghost_fill(&out_dir);
     // RMHD GAS update (D/S_k/tau) is EOS-generic — it uses the SAME unified runtime-coefficient
-    // `_stage` kernel as hydro. only the constrained-transport BCELL predictor-corrector
-    // (`rmhd_bcell_godunov_euler/rk2`, emitted above) + the post_godunov EMF time-average stay
-    // baked + 2-stage, so the RMHD `godunov_stage` gates (a0,ac) -> {euler, rk2} on the bcell
-    // step and rejects other coefficients (SSP-RK3 + CT is unimplemented).
+    // `_stage` kernel as hydro. only the constrained transport stays baked + 2-stage: the bface curl
+    // time-averages the rk2 edge EMF, so the RMHD `godunov_stage` gates (a0,ac) -> {euler, rk2} and
+    // rejects other coefficients (SSP-RK3 + CT is unimplemented).
     gen_godunov_stage(&out_dir, 3, "rmhd", true, Geom::cart(3), None);
     gen_godunov_stage(&out_dir, 3, "rmhd", true, Geom::sph(3), None);
     gen_godunov_stage(&out_dir, 3, "rmhd", true, Geom::cyl_3d(), None);
-    // FUSED gas-stage + cell-B-predictor variants for all 3 geometries. one
-    // launch per stage in the substrate's god_stage (vs the two-launch
-    // baseline). algebra-validated: write sets disjoint (cons.* vs bc_*),
-    // no inter-dependency, same 3D interior grade.
-    for geom in [Geom::cart(3), Geom::sph(3), Geom::cyl_3d()] {
-        gen_mhd_godunov_and_bcell(&out_dir, "rmhd", geom.clone(), "euler");
-        gen_mhd_godunov_and_bcell(&out_dir, "rmhd", geom, "rk2");
-    }
     gen_snapshot(&out_dir, 3, "rmhd", true, Geom::cart(3));
     // first-order flux-correction copies + select for every regime x dimension (the substrate runs
     // FOFC after c2p). pointwise, so one triple per (prefix, has_energy, ndim) covers every chart.
@@ -2160,28 +2108,26 @@ fn main() {
     // the NMHD gas stage carries the NEWTONIAN geometric momentum source (pressure +
     // inertial + magnetic tension via lab-frame B, GeoSource::NewtonianMhd) — the only
     // godunov piece that differs from RMHD by geometry. emitted for all 3 coords (Cartesian
-    // has zero source, so it matches the EOS-generic stage). the fused god+bcell mirrors RMHD.
+    // has zero source, so it matches the EOS-generic stage).
     for geom in [Geom::cart(3), Geom::sph(3), Geom::cyl_3d()] {
-        gen_godunov_stage(&out_dir, 3, "nmhd", true, geom.clone(), None);
-        gen_mhd_godunov_and_bcell(&out_dir, "nmhd", geom.clone(), "euler");
-        gen_mhd_godunov_and_bcell(&out_dir, "nmhd", geom, "rk2");
+        gen_godunov_stage(&out_dir, 3, "nmhd", true, geom, None);
     }
     // =========================================================================
     // 2.5D MHD (spatial D=2, vector DOF=3) constrained transport — docs/design/30.
     // cartesian. the out-of-plane Bz rides the ordinary induction-flux divergence
     // (no CT: with d/dz=0 only the in-plane field is div-B-constrained); only the
     // in-plane Bx,By use CT via the SINGLE corner E_z (edge dir=2 -> p1=x, p2=y).
-    // fusion is disabled at D=2 (CPU unfused path), so no godunov_and_bcell_2d; the
-    // RK2 efield save/average use the dimension-agnostic fused memcpy (no _2d copy
-    // kernel needed on CPU). ncomp = 3 (B/momentum are 3-vectors) on the 2-axis grid.
+    // the out-of-plane predictor emits `rmhd_bcell_godunov_{euler,rk2}_2d` writing bc_2 only. the
+    // RK2 efield save/average use the dimension-agnostic fused memcpy (no _2d copy kernel needed on
+    // CPU). ncomp = 3 (B/momentum are 3-vectors) on the 2-axis grid.
     // =========================================================================
     {
         // gas/snapshot geom: cartesian, 2 grid axes, 3 vector components (DOF=3).
         let g2 = Geom::make(Coords::Cartesian, 3, vec![0, 1]);
         // shared regime-agnostic CT pieces: the corner E_z (edge dir=2), the in-plane
         // curl B-update (rmhd_ct_curl_2d already emitted above), the cell-B predictor
-        // (euler/rk2, evolves all 3 components; Bz is final, Bx/By predictor), the
-        // face->cell interpolation over the 2 in-plane components, and the ghosts.
+        // (euler/rk2, evolves the out-of-plane Bz only; Bx/By are CT and come from
+        // face->cell interpolation), the interpolation over the 2 in-plane components, and the ghosts.
         gen_rmhd_edge_emf(&out_dir, 2, 2, 0, 1);
         // UCT-HLL twin (selectable via CtMethod::Uct); geometry-agnostic, also serves spherical 2.5D.
         gen_rmhd_edge_emf_uct(&out_dir, 2, 2, 0, 1);

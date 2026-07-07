@@ -275,22 +275,25 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     };
     dispatch_named(sim, pre_bind, None, 0, &gname, &sim.geom.interior, &[], &gscalars);
 
-    // the cell-B induction-flux predictor: forward-Euler (0,1) flux-evolves bcell as a conserved
-    // component; SSP-RK2 (1/2,1/2) combines with bcell_n (both guaranteed by the assert above). in
-    // full CT (2D/3D) `bcell_from_bface` overwrites the in-plane components from the faces, so only the
-    // OUT-OF-PLANE components survive this step: By,Bz in 1.5D and Bz in 2.5D have no face to curl and
-    // are cell-centered conserved variables carried SOLELY by this induction-flux divergence
-    // (docs/design/30). the predictor is always the rmhd_* kernel (Faraday induction is regime-
-    // agnostic); its name carries the same geometry/spacetime slug `sfx` as the gas stage. bound BY
-    // MANIFEST: rk2's bcell^n (BCellN) + the bflux block (BFlux{d,c}) reads -> the cell-B (BCell)
-    // writes; reads no prim.pre (dummy override).
-    let bname = if is_euler {
-        format!("rmhd_bcell_godunov_euler{sfx}_{D}d")
-    } else {
-        format!("rmhd_bcell_godunov_rk2{sfx}_{D}d")
-    };
-    let bscalars = scalars_for(&bname, &scalar);
-    dispatch_named(sim, &sim.fields.cons.den, None, 0, &bname, &sim.geom.interior, &[], &bscalars);
+    // the cell-B induction-flux predictor for the OUT-OF-PLANE (non-CT) magnetic components: By,Bz in
+    // 1.5D and Bz in 2.5D (curvilinear: Bphi) have no staggered face to curl and are cell-centered
+    // conserved variables evolved here by the induction-flux divergence (docs/design/30). the in-plane
+    // components are re-derived by `bcell_from_bface` and are NOT touched by the predictor — flux-
+    // evolving them would poison the FOFC/c2p recoverability probe now that the magnetic-energy patch
+    // is gone (spec §6 / oop_predictor_spec.md). a fully-gridded chart (D == DOF, i.e. 3D) has NO
+    // out-of-plane component, so the predictor is a no-op and is not dispatched. forward-Euler (0,1)
+    // steps bcell; SSP-RK2 (1/2,1/2) combines with bcell_n (both guaranteed by the assert above). the
+    // predictor is always the rmhd_* kernel (Faraday induction is regime-agnostic); its name carries
+    // the same geometry/spacetime slug `sfx` as the gas stage. bound BY MANIFEST.
+    if D < DOF {
+        let bname = if is_euler {
+            format!("rmhd_bcell_godunov_euler{sfx}_{D}d")
+        } else {
+            format!("rmhd_bcell_godunov_rk2{sfx}_{D}d")
+        };
+        let bscalars = scalars_for(&bname, &scalar);
+        dispatch_named(sim, &sim.fields.cons.den, None, 0, &bname, &sim.geom.interior, &[], &bscalars);
+    }
 }
 
 /// the lattice-map pullback ghost fill: prim rho/vel/pre + bcell, in-place

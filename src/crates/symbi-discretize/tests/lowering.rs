@@ -232,15 +232,16 @@ fn ct_kernels_lower() {
     for dir in 0..3 {
         KernelRun::new(rmhd_edge_emf_gv(3, (dir + 1) % 3, (dir + 2) % 3)).grid([8, 8, 8]).assert_lowers();
     }
-    // face->cell B interpolation + magnetic-energy correction.
+    // face->cell B interpolation.
     KernelRun::new(rmhd_bcell_from_bface_gv(3)).grid([8, 8, 8]).assert_lowers();
-    // cell-B flux predictor (euler + rk2), cartesian + spherical + cylindrical.
+    // cell-B out-of-plane flux predictor (euler + rk2) on a 2D reduced plane (axes [0,1] -> the
+    // predictor writes the single out-of-plane component); cartesian + spherical + cylindrical.
     for coords in [Coords::Cartesian, Coords::Spherical, Coords::Cylindrical] {
-        KernelRun::new(rmhd_bcell_godunov_euler_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 3], 3, 3, &[0, 1, 2]))
-            .grid([8, 8, 8])
+        KernelRun::new(rmhd_bcell_godunov_euler_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 2], 2, 3, &[0, 1]))
+            .grid([8, 8])
             .assert_lowers();
-        KernelRun::new(rmhd_bcell_godunov_rk2_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 3], 3, 3, &[0, 1, 2]))
-            .grid([8, 8, 8])
+        KernelRun::new(rmhd_bcell_godunov_rk2_gv(coords, Spacetime::Minkowski, &[Spacing::Uniform; 2], 2, 3, &[0, 1]))
+            .grid([8, 8])
             .assert_lowers();
     }
     // edge-EMF save (out-of-place copy) + time-average (in-place).

@@ -1041,6 +1041,7 @@ fn bcell_flux_divs_gv(
     spacetime: Spacetime,
     spacing: &[Spacing],
     ndim: usize,
+    comps: &[usize],
     ncomp: usize,
     axes: &[usize],
 ) -> Vec<Gv> {
@@ -1064,8 +1065,11 @@ fn bcell_flux_divs_gv(
         None => Vec::new(),
     };
     let lapse = gv_lapse_weight(coords, spacetime, &coord_centroid);
-    (0..ncomp)
-        .map(|c| {
+    // one divergence per REQUESTED component (the predictor evaluates only the out-of-plane set),
+    // returned in `comps` order.
+    comps
+        .iter()
+        .map(|&c| {
             let div = match &oop {
                 Some((co, OopDiv::Plain)) if c == *co => bcell_flux_div_plain_gv(c, ndim, spacing),
                 Some((co, OopDiv::Curl(g))) if c == *co => {
@@ -1081,10 +1085,24 @@ fn bcell_flux_divs_gv(
         .collect()
 }
 
+/// the OUT-OF-PLANE (non-CT) magnetic components for a chart: the B-vector slots whose coordinate
+/// is NOT one of the grid axes. those live on staggered faces and are re-derived cell-centered by
+/// `bcell_from_bface = interp(bface)`, so the predictor must leave them alone; the complement — the
+/// out-of-plane components — have no face to curl and ARE evolved here as cell-centered conserved
+/// variables (docs/design/30). cartesian `[0..ndim)` grid -> `[ndim..ncomp)`; cyl r-z (axes [0,2])
+/// -> {phi=1}; sph r-theta (axes [0,1]) -> {phi=2}; a fully-gridded 3D chart -> empty.
+fn oop_components(ncomp: usize, axes: &[usize]) -> Vec<usize> {
+    (0..ncomp).filter(|c| !axes.contains(c)).collect()
+}
 
-/// the RMHD cell-B FLUX PREDICTOR (Euler): `bcell[c] -= dt*div(bflux_c)`, in-place. flux-evolves
-/// the cell B as a conserved component (so the energy correction reads the flux-implied b_old).
-/// mirror of `rmhd::rmhd_bcell_godunov_euler`; reuses `cell_geometry_gv` on curvilinear grids.
+
+/// the RMHD cell-B FLUX PREDICTOR (Euler): `bcell[c] -= dt*div(bflux_c)`, in-place, for the
+/// OUT-OF-PLANE components ONLY (`oop_components`). those are the genuinely cell-centered magnetic
+/// slots — no staggered face, so not CT-evolved (reduced-dimension MHD; docs/design/30). the
+/// in-plane components are re-derived by `bcell_from_bface = interp(bface)` and must NOT be
+/// flux-evolved here: their transient predictor value poisons the FOFC/c2p recoverability probe once
+/// the magnetic-energy patch is gone (spec §6 / oop_predictor_spec.md). a fully-gridded chart (3D)
+/// has no out-of-plane component and yields an EMPTY kernel — its dispatch is elided at `ndim==ncomp`.
 pub fn rmhd_bcell_godunov_euler_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1094,19 +1112,21 @@ pub fn rmhd_bcell_godunov_euler_gv(
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let bc: Vec<Gv> = (0..ncomp).map(|c| Gv::field(&format!("bc_{c}"), FieldRef::BCell(c as u8))).collect();
-    // pin the ndim*ncomp induction-flux inputs in d-outer/c-inner order (the positional dispatch
-    // order [bf_0_0, bf_0_1, .., bf_1_0, ..]) before bcell_flux_div_gv reads them (it loops d).
+    let oop = oop_components(ncomp, axes);
+    let bc: Vec<Gv> = oop.iter().map(|&c| Gv::field(&format!("bc_{c}"), FieldRef::BCell(c as u8))).collect();
+    // pin the ndim*|oop| induction-flux inputs in d-outer/c-inner order (the positional dispatch
+    // order [bf_0_c, bf_1_c, ..]) before bcell_flux_div_gv reads them (it loops d).
     for d in 0..ndim {
-        for c in 0..ncomp {
+        for &c in &oop {
             gv_register_field(&format!("bf_{d}_{c}"), &format!("bf_{d}_{c}"));
         }
     }
     let dt = Gv::scalar("dt");
-    let divs = bcell_flux_divs_gv(coords, spacetime, spacing, ndim, ncomp, axes);
-    let writes = (0..ncomp)
-        .map(|c| {
-            let bnew = bc[c] - dt * divs[c];
+    let divs = bcell_flux_divs_gv(coords, spacetime, spacing, ndim, &oop, ncomp, axes);
+    let writes = (0..oop.len())
+        .map(|i| {
+            let c = oop[i];
+            let bnew = bc[i] - dt * divs[i];
             (format!("bc_{c}_new"), format!("bc_{c}").into(), bnew.node())
         })
         .collect();
@@ -1115,7 +1135,8 @@ pub fn rmhd_bcell_godunov_euler_gv(
 
 
 /// the RMHD cell-B FLUX PREDICTOR (RK2 stage 2): `bcell[c] = 0.5*(bcell_n[c] + (bcell[c] -
-/// dt*div(bflux_c)))`, in-place. mirror of `rmhd::rmhd_bcell_godunov_rk2`.
+/// dt*div(bflux_c)))`, in-place, for the OUT-OF-PLANE components ONLY (`oop_components`; see the
+/// Euler predictor). a fully-gridded chart (3D) yields an EMPTY kernel (dispatch elided).
 pub fn rmhd_bcell_godunov_rk2_gv(
     coords: Coords,
     spacetime: Spacetime,
@@ -1125,20 +1146,22 @@ pub fn rmhd_bcell_godunov_rk2_gv(
     axes: &[usize],
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
-    let bcn: Vec<Gv> = (0..ncomp).map(|c| Gv::field(&format!("bcn_{c}"), FieldRef::BCellN(c as u8))).collect();
-    let bc: Vec<Gv> = (0..ncomp).map(|c| Gv::field(&format!("bc_{c}"), FieldRef::BCell(c as u8))).collect();
+    let oop = oop_components(ncomp, axes);
+    let bcn: Vec<Gv> = oop.iter().map(|&c| Gv::field(&format!("bcn_{c}"), FieldRef::BCellN(c as u8))).collect();
+    let bc: Vec<Gv> = oop.iter().map(|&c| Gv::field(&format!("bc_{c}"), FieldRef::BCell(c as u8))).collect();
     for d in 0..ndim {
-        for c in 0..ncomp {
+        for &c in &oop {
             gv_register_field(&format!("bf_{d}_{c}"), &format!("bf_{d}_{c}"));
         }
     }
     let dt = Gv::scalar("dt");
     let half = Gv::from_f64(0.5);
-    let divs = bcell_flux_divs_gv(coords, spacetime, spacing, ndim, ncomp, axes);
-    let writes = (0..ncomp)
-        .map(|c| {
-            let bc_star = bc[c] - dt * divs[c];
-            let bnew = half * (bcn[c] + bc_star);
+    let divs = bcell_flux_divs_gv(coords, spacetime, spacing, ndim, &oop, ncomp, axes);
+    let writes = (0..oop.len())
+        .map(|i| {
+            let c = oop[i];
+            let bc_star = bc[i] - dt * divs[i];
+            let bnew = half * (bcn[i] + bc_star);
             (format!("bc_{c}_new"), format!("bc_{c}").into(), bnew.node())
         })
         .collect();

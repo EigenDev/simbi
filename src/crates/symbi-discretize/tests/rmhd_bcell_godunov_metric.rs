@@ -1,9 +1,11 @@
 // =============================================================================
 // rmhd_bcell_godunov_metric.rs
 //
-// metric-consistency regressions for the cell-B flux predictor (rmhd_bcell_godunov_euler),
-// which evolves each cell B component as a flux divergence. the divergence operator depends
-// on the chart, the gridded plane, and the component storage:
+// metric-consistency regressions for the cell-B flux predictor (rmhd_bcell_godunov_euler), which
+// evolves the OUT-OF-PLANE (non-CT) cell B components as a flux divergence — the in-plane
+// components live on faces and are re-derived by bcell_from_bface, so the predictor leaves them
+// alone (oop_predictor_spec.md). the out-of-plane divergence operator depends on the chart, the
+// gridded plane, and the component storage:
 //
 // flat (PHYSICAL components), out-of-plane curl per plane:
 //   - cyl r-z (axes [0,2]): (curl E)_phi = d_z E_r - d_r E_z is METRIC-FREE; the gas
@@ -12,15 +14,16 @@
 //     weights (r, 1) on the r dr dtheta measure; the gas r^2 sin(theta) measure would inject
 //     spurious -F^r/r - cot(theta) F^theta/r sources.
 //
-// curved (CONTRAVARIANT components), every component is the densitized conservation law
-// d_t(sqrt(gamma) B^i) + d_j(alpha sqrt(gamma) G^j) = 0: the covariant area-weighted
-// divergence times the cell lapse alpha (the face kernel writes G = F - (beta^n/alpha) U,
-// deferring one alpha to the divergence — the same contract the gas godunov honors). the
-// lapse witness is measure-free: the det-g-flat covariant measure is M-independent, so
-// update(M)/update(0) must equal alpha(centroid) exactly.
+// curved (CONTRAVARIANT components), the out-of-plane component obeys the densitized conservation
+// law d_t(sqrt(gamma) B^i) + d_j(alpha sqrt(gamma) G^j) = 0: the covariant area-weighted divergence
+// times the cell lapse alpha (the face kernel writes G = F - (beta^n/alpha) U, deferring one alpha
+// to the divergence — the same contract the gas godunov honors), with NO flat out-of-plane shortcut
+// (B is contravariant). the lapse witness is measure-free: the det-g-flat covariant measure is
+// M-independent, so update(M)/update(0) must equal alpha(centroid) exactly.
 //
-// the IN-PLANE flat components and the r-phi disk (out-of-plane z, where the area-weighting
-// IS the correct z-curl) are exercised by the rotor + GPU gates in the symbi crate.
+// the IN-PLANE components (CT-evolved, not written by the predictor) and the r-phi disk (out-of-plane
+// z, where the area-weighting IS the correct z-curl) are exercised by the rotor + GPU gates in the
+// symbi crate.
 // =============================================================================
 
 mod harness;
@@ -94,8 +97,16 @@ fn cyl_rz_out_of_plane_bphi_uses_metric_free_divergence() {
 }
 
 
+/// the out-of-plane component set for a chart: the B-vector slots whose coordinate is NOT a grid
+/// axis. the predictor writes ONLY these (the in-plane components are CT / interp(bface)).
+fn oop_comps(axes: &[usize]) -> Vec<usize> {
+    (0..3usize).filter(|c| !axes.contains(c)).collect()
+}
+
 /// run the euler cell-B predictor on an 8x8 grid with uniform B0 in every component and the
-/// uniform induction flux `bflux(d, c)`; returns the three `bc_c_new` component grids.
+/// uniform induction flux `bflux(d, c)`; returns the `bc_c_new` grid per component, `Some` for the
+/// OUT-OF-PLANE components the predictor writes and `None` for the in-plane (CT) components it
+/// leaves untouched.
 fn run_bcell_euler(
     coords: Coords,
     spacetime: Spacetime,
@@ -103,7 +114,7 @@ fn run_bcell_euler(
     scalars: &[(&str, f64)],
     bflux: impl Fn(usize, usize) -> f64,
     b0: f64,
-) -> Vec<Vec<f64>> {
+) -> Vec<Option<Vec<f64>>> {
     let mut run = KernelRun::new(rmhd_bcell_godunov_euler_gv(
         coords, spacetime, &[Spacing::Uniform; 2], 2, 3, axes,
     ))
@@ -119,7 +130,10 @@ fn run_bcell_euler(
         }
     }
     let out = run.scalars(scalars).run();
-    (0..3).map(|c| out.values(&format!("bc_{c}_new")).to_vec()).collect()
+    let oop = oop_comps(axes);
+    (0..3)
+        .map(|c| oop.contains(&c).then(|| out.values(&format!("bc_{c}_new")).to_vec()))
+        .collect()
 }
 
 
@@ -142,17 +156,20 @@ fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
     let ang = run_bcell_euler(Coords::Spherical, Spacetime::Minkowski, &[0, 1], scalars,
         |d, c| if d == 1 && c == 2 { CFLUX } else { 0.0 }, B0);
 
+    // sph r-theta out-of-plane = B_phi (comp 2); the predictor writes only that slot.
+    let rad2 = rad[2].as_ref().expect("sph r-theta oop = B_phi (comp 2)");
+    let ang2 = ang[2].as_ref().expect("sph r-theta oop = B_phi (comp 2)");
     for i in 0..MR - 1 {
         let r_c = R0 + (i as f64 + 0.5) * DR;
         let expected = B0 - DT * CFLUX / r_c;
         for j in 0..MZ - 1 {
-            let got = rad[2][i + j * MR];
+            let got = rad2[i + j * MR];
             assert!(
                 (got - expected).abs() < 1e-13,
                 "sph r-theta B_phi radial-flux update wrong at ({i},{j}): got {got}, want \
                  {expected} (B0 - dt*C/r_c) — the gas r^2 sin(theta) divergence injects -C/r"
             );
-            let dev = (ang[2][i + j * MR] - B0).abs();
+            let dev = (ang2[i + j * MR] - B0).abs();
             assert!(
                 dev < 1e-13,
                 "sph r-theta B_phi changed under a UNIFORM theta flux at ({i},{j}) \
@@ -163,13 +180,14 @@ fn sph_rtheta_out_of_plane_bphi_uses_curl_weighted_divergence() {
 }
 
 
-/// per-cell covariant radial divergence + centroid lapse checks shared by the GR charts:
-/// with a uniform radial flux C on every component, each component's update must be the SAME
-/// covariant divergence (no flat out-of-plane shortcut on curved charts — B is contravariant),
-/// must match `div_formula(i)` at M = 0, and must scale by `alpha(i, j)` at M > 0.
+/// per-cell covariant radial divergence + centroid lapse checks shared by the GR charts, applied to
+/// the OUT-OF-PLANE component the predictor writes (the in-plane slots are `None`). with a uniform
+/// radial flux C, that component's update must be the covariant divergence (NO flat out-of-plane
+/// shortcut on curved charts — B is contravariant), matching `div_formula(i)` at M = 0 and scaling
+/// by `alpha(i, j)` at M > 0.
 fn assert_gr_bcell_updates(
-    upd0: &[Vec<f64>],
-    upd_m: &[Vec<f64>],
+    upd0: &[Option<Vec<f64>>],
+    upd_m: &[Option<Vec<f64>>],
     div_formula: impl Fn(usize) -> f64,
     alpha: impl Fn(usize, usize) -> f64,
     chart: &str,
@@ -179,19 +197,20 @@ fn assert_gr_bcell_updates(
         for j in 0..MZ - 1 {
             let k = i + j * MR;
             for c in 0..3 {
+                let (Some(u0), Some(um)) = (&upd0[c], &upd_m[c]) else { continue };
                 assert!(
-                    (upd0[c][k] - want0).abs() < 1e-12 * want0.abs().max(1.0),
+                    (u0[k] - want0).abs() < 1e-12 * want0.abs().max(1.0),
                     "{chart} comp {c} M=0 update at ({i},{j}): got {}, want {want0} (the \
                      covariant divergence; a flat out-of-plane shortcut on a curved chart \
                      mis-evolves the contravariant component)",
-                    upd0[c][k]
+                    u0[k]
                 );
                 let want_m = alpha(i, j) * want0;
                 assert!(
-                    (upd_m[c][k] - want_m).abs() < 1e-12 * want_m.abs().max(1.0),
+                    (um[k] - want_m).abs() < 1e-12 * want_m.abs().max(1.0),
                     "{chart} comp {c} M>0 update at ({i},{j}): got {}, want {want_m} = \
                      alpha*update(M=0) — the divergence is missing the lapse weight",
-                    upd_m[c][k]
+                    um[k]
                 );
             }
         }
@@ -201,8 +220,8 @@ fn assert_gr_bcell_updates(
 
 #[test]
 fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
-    // schwarzschild (r,theta), contravariant B: every component obeys the densitized law with
-    // the covariant r^2 sin(theta) measure (M-independent), lapse-weighted by
+    // schwarzschild (r,theta), contravariant B: the out-of-plane B^phi (comp 2) obeys the densitized
+    // law with the covariant r^2 sin(theta) measure (M-independent), lapse-weighted by
     // alpha = sqrt(1 - 2M/r_cen) at the volume-weighted radial centroid.
     let mass = 0.2;
     let th0 = 0.4;
@@ -216,7 +235,7 @@ fn schwarzschild_sph_bcell_predictor_applies_lapse_weight() {
         s.push(("schwarzschild_mass", m));
         let b = run_bcell_euler(Coords::Spherical, Spacetime::Schwarzschild, &[0, 1], &s, uniform_radial, B0);
         // per-component UPDATE (B0 - bnew), the divergence signal itself.
-        b.into_iter().map(|g| g.iter().map(|v| B0 - v).collect::<Vec<f64>>()).collect::<Vec<_>>()
+        b.into_iter().map(|g| g.map(|grid| grid.iter().map(|v| B0 - v).collect::<Vec<f64>>())).collect::<Vec<Option<Vec<f64>>>>()
     };
     let upd0 = run(0.0);
     let upd_m = run(mass);
@@ -253,7 +272,7 @@ fn kerr_schild_cyl_rz_bcell_oop_uses_covariant_divergence_and_lapse() {
         let mut s = base.clone();
         s.push(("schwarzschild_mass", m));
         let b = run_bcell_euler(Coords::Cylindrical, Spacetime::KerrSchild, &[0, 2], &s, uniform_radial, B0);
-        b.into_iter().map(|g| g.iter().map(|v| B0 - v).collect::<Vec<f64>>()).collect::<Vec<_>>()
+        b.into_iter().map(|g| g.map(|grid| grid.iter().map(|v| B0 - v).collect::<Vec<f64>>())).collect::<Vec<Option<Vec<f64>>>>()
     };
     let upd0 = run(0.0);
     let upd_m = run(mass);
