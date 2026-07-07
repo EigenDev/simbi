@@ -801,6 +801,11 @@ where
     let start = std::time::Instant::now();
     let mut last_inst = start;
     let mut last_iter = hier.levels[0].state.iteration;
+    // FOFC observability: zero the deliberate-fallback counters at run start, track the last-seen
+    // totals so the benchmark cadence can post the per-window delta (a limiter that fired is shown,
+    // never silent). cumulative totals also close out the run summary.
+    symbi::regimes::fofc::fofc_reset_stats();
+    let mut last_fofc: (u64, u64) = (0, 0);
 
     // graceful-interrupt trap: a caught signal (Ctrl-C, scheduler eviction)
     // flips `stop_requested`; we then snapshot a restart checkpoint and break.
@@ -1040,6 +1045,20 @@ where
             // live tabbed-dashboard metrics + per-level interior cell counts (the
             // amr hierarchy may have regridded since the last update).
             table.push_metrics(iter, time, dt, rate);
+            // FOFC observable: surface the deliberate fallbacks that fired since the last window so a
+            // limiter is visible rather than silent (a bounded, high-order-preserving first-order
+            // correction is expected; a freeze — where neither order recovered a cell — is rarer and
+            // worth flagging). only posts when something fired, so a clean run stays quiet.
+            let (fb_total, fz_total) = symbi::regimes::fofc::fofc_stats();
+            let (d_fb, d_fz) = (fb_total - last_fofc.0, fz_total - last_fofc.1);
+            if d_fb > 0 || d_fz > 0 {
+                table.post_diagnostic(&format!(
+                    "FOFC: {d_fb} first-order fallback cell-steps{} since last window",
+                    if d_fz > 0 { format!(", {d_fz} freezes") } else { String::new() },
+                ));
+                last_fofc = (fb_total, fz_total);
+                dirty = true;
+            }
             let blocks: Vec<u64> = h
                 .levels
                 .iter()
@@ -1185,8 +1204,39 @@ where
         humanize_rate(avg),
     );
     table.post_success(&summary);
+    // FOFC run total: report the deliberate fallbacks over the whole run (a quiet run shows nothing).
+    let (fb_total, fz_total) = symbi::regimes::fofc::fofc_stats();
+    if fb_total > 0 || fz_total > 0 {
+        table.post_diagnostic(&format!(
+            "FOFC total: {fb_total} first-order fallback cell-steps, {fz_total} freezes"
+        ));
+    }
     table.exit_frame(ExitKind::Success, &summary);
+    dump_profile_if_enabled(root.iteration, n_zones);
     Ok(())
+}
+
+/// dump the accumulated per-phase wall-time profile to stderr when `SYMBI_PROFILE` is set (the
+/// `prof()` accumulator is otherwise a no-op). mirrors the zone-cycle bench: per phase the wall ms,
+/// its share of the instrumented total, and ns/zone-cycle (normalized by steps * interior zones),
+/// slowest first. empty (no-op) when profiling is off.
+fn dump_profile_if_enabled(steps: u64, n_zones: u64) {
+    let mut rows = symbi::sim::evolve::report_profile();
+    if rows.is_empty() {
+        return;
+    }
+    rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let total: f64 = rows.iter().map(|(_, ms)| ms).sum();
+    let zc = (steps as f64) * (n_zones as f64);
+    eprintln!("\n--- per-phase wall time over {steps} steps (SYMBI_PROFILE) ---");
+    for (name, ms) in &rows {
+        let ns_zc = if zc > 0.0 { ms * 1e6 / zc } else { 0.0 };
+        eprintln!(
+            "  {name:<18} {ms:>8.1} ms  ({:>4.1}%)   {ns_zc:.0} ns/zone-cycle",
+            100.0 * ms / total
+        );
+    }
+    eprintln!("  {:<18} {total:>8.1} ms  (sum of instrumented phases)\n", "TOTAL");
 }
 
 /// set the live monitor's benchmark row + progress bar WITHOUT rendering — the

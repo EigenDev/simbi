@@ -18,11 +18,36 @@ use symbi_algebra::OrderedNumeric;
 use symbi_xpu::MemorySpace;
 use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::regimes::substrate_kernels::{dispatch_fields_each, dispatch_named, kernel_field_binds};
-use crate::regimes::substrate_gpu::field_max_reduce;
+use crate::regimes::substrate_gpu::field_reduce;
 use crate::kernels::support::FaceDomain;
+use symbi_ir::emit::ReductionOp;
+
+// FOFC observability counters — the running totals of DELIBERATE fallback events over a run, so a
+// run can surface how often/where the first-order flux correction and the last-resort freeze fired
+// (a limiter is fine as long as it is visible, not silent). `FALLBACK_CELLS` counts flagged-cell x
+// substage events (a cell whose high-order c2p was unphysical and took the first-order redo);
+// `FREEZE_CELLS` counts the frozen-cell x substage events (neither order recovered it -> held at the
+// stage input). read + reset by the driver at its benchmark cadence to show a per-window delta.
+static FOFC_FALLBACK_CELLS: AtomicU64 = AtomicU64::new(0);
+static FOFC_FREEZE_CELLS: AtomicU64 = AtomicU64::new(0);
+
+/// the cumulative (fallback-cell, freeze-cell) FOFC event totals since the last `fofc_reset_stats`.
+/// each is a sum over substages of the per-substage flagged/frozen interior-cell count.
+pub fn fofc_stats() -> (u64, u64) {
+    (
+        FOFC_FALLBACK_CELLS.load(Ordering::Relaxed),
+        FOFC_FREEZE_CELLS.load(Ordering::Relaxed),
+    )
+}
+
+/// zero the FOFC event counters (call at run start / after reading a window delta).
+pub fn fofc_reset_stats() {
+    FOFC_FALLBACK_CELLS.store(0, Ordering::Relaxed);
+    FOFC_FREEZE_CELLS.store(0, Ordering::Relaxed);
+}
 
 /// consecutive substages the FOFC freeze tier may fire before the run halts. the freeze is the
 /// last-resort MOOD parachute (neither high- nor first-order recovered a zone); it deploys rarely
@@ -200,7 +225,9 @@ where
         if *is_out { outputs.push(fld); } else { inputs.push(fld); }
     }
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
-    field_max_reduce(scratch, &sim.geom.interior)
+    // SUM: the freeze flag is 0/1, so this is the COUNT of frozen zones (> 0 iff any froze — the
+    // caller's streak test and the observability tally both read it).
+    field_reduce(scratch, &sim.geom.interior, ReductionOp::Add)
 }
 
 
@@ -257,9 +284,14 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // costs one pointwise probe + a reduction, not the flux sweep + two extra c2p passes.
     let probe = format!("{prefix}_fofc_probe{dof_sfx}_{D}d");
     dispatch_named(sim, pre_bind, Some(flag), 0, &probe, &sim.geom.interior, &[], &[]);
-    if field_max_reduce(flag, &sim.geom.interior) <= 0.5 {
+    // SUM (not max): the flag is 0/1, so the reduction is the COUNT of flagged cells — it doubles as
+    // the fire/skip decision (count == 0 iff every high-order c2p was physical) AND the observability
+    // tally. no extra pass: this replaces the former max-reduce.
+    let fallback_cells = field_reduce(flag, &sim.geom.interior, ReductionOp::Add);
+    if fallback_cells < 0.5 {
         return;
     }
+    FOFC_FALLBACK_CELLS.fetch_add(fallback_cells as u64, Ordering::Relaxed);
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
     // must take ONE first-order decision from both of its cells, else the splice re-creates the very
     // non-conservation it exists to remove.
@@ -296,6 +328,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // persists.
     let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, cons, prim);
     if froze > 0.5 {
+        FOFC_FREEZE_CELLS.fetch_add(froze as u64, Ordering::Relaxed);
         let streak = freeze_streak.fetch_add(1, Ordering::Relaxed) + 1;
         assert!(
             streak < FOFC_FREEZE_HALT_STREAK,
