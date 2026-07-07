@@ -1800,3 +1800,31 @@ pub fn rmhd_average_efield_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) 
     let e_new = Gv::from_f64(0.5) * (e + en);
     (end_trace(), vec![("e_new".to_string(), "e".into(), e_new.node())])
 }
+
+
+/// the FOFC EDGE-EMF SPLICE for an edge whose two transverse GRID axes are `g1`, `g2`: choose the
+/// FIRST-ORDER edge EMF (`e_fo`, the live `efield` just recomputed by the Contact/HLL corner kernel)
+/// on edges touching a flagged cell, else the saved HIGH-ORDER EMF (`e_ho`, `efield_ho`). the edge at
+/// `coord` is incident to the four corner cells `coord`, `coord - e_g1`, `coord - e_g2`,
+/// `coord - e_g1 - e_g2` — the EXACT gather of the edge-EMF kernel (`rmhd_edge_emf_gv`), so the flag
+/// is read at the same offsets and the edge is first-order iff ANY of the four incident cells is
+/// flagged. `e_fo` is read+write IN PLACE. after the splice the curl of this single-valued edge EMF
+/// gives flagged cells first-order (diffused, recoverable) B while leaving non-flagged faces at the
+/// high-order value (I5) and staying divergence-free (I2).
+pub fn fofc_emf_splice_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let zero = vec![0i32; ndim];
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let flag_gt0 = |o: &[i32]| gv_field_at("flag", "flag", ndim, o).cmp_gt(Gv::ZERO);
+    let edge_fo = flag_gt0(&zero) | flag_gt0(&cm(&[g1])) | flag_gt0(&cm(&[g2])) | flag_gt0(&cm(&[g1, g2]));
+    let e_fo = Gv::field("e_fo", "e_fo");
+    let e_ho = Gv::field("e_ho", "e_ho");
+    let chosen = Gv::select(edge_fo, e_fo, e_ho);
+    (end_trace(), vec![("e_fo".to_string(), "e_fo".into(), chosen.node())])
+}

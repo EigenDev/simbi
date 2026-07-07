@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_splice_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_splice_gv, fofc_bflux_splice_gv, fofc_emf_splice_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -1006,6 +1006,11 @@ fn gen_rmhd_face_flux_3d(out_dir: &str, dir: u8) {
 fn gen_rmhd_edge_emf(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2: usize) {
     let (k, writes) = rmhd_edge_emf_gv(ndim as usize, g1, g2);
     emit_gv(out_dir, &format!("rmhd_edge_emf_{ndim}d_{name_k}"), ndim, &k, &writes);
+    // the FOFC edge-EMF splice for this edge (regime-agnostic: it only selects E_FO vs E_HO by the
+    // corner cell flag, so ONE bake per (ndim, edge) serves every MHD regime). same `name_k`/g1/g2
+    // as the edge EMF so the dispatch keys line up.
+    let (k, writes) = fofc_emf_splice_gv(ndim as usize, g1, g2);
+    emit_gv(out_dir, &format!("fofc_emf_splice_{ndim}d_{name_k}"), ndim, &k, &writes);
 }
 
 // the UCT-HLL edge EMF twin (Del Zanna 2007 / Mignone & Del Zanna 2021). geometry-agnostic, like
@@ -2102,6 +2107,15 @@ fn main() {
         gen_fofc(&out_dir, ndim, "adiabatic", ndim as usize, true);
         gen_fofc(&out_dir, ndim, "iso", ndim as usize, false);
         gen_state_finite(&out_dir, ndim);
+        // the FOFC induction-flux splice (MHD only, ncomp = 3 B-components): per axis, splice the
+        // FO/HO bflux by the SAME face flag as the gas splice, so the cell-B predictor + the Contact
+        // FO edge EMF are HO off the fallback region and FO on it.
+        for prefix in ["rmhd", "nmhd", "imhd"] {
+            for dir in 0..ndim as usize {
+                let (k, w) = fofc_bflux_splice_gv(ndim as usize, dir, 3);
+                emit_gv(&out_dir, &format!("{prefix}_fofc_bflux_splice_{ndim}d_{dir}"), ndim, &k, &w);
+            }
+        }
     }
     // the DOF-lift GR-hydro charts (D = 2 grid, DOF = 3 momentum with an out-of-plane component):
     // the ncomp = 3 fofc triple, tagged by geom_suffix to distinguish from the ncomp = 2 (DOF == D)

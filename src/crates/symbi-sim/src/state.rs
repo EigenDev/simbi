@@ -451,11 +451,23 @@ pub struct MhdStaggeredFields<const D: usize, const DOF: usize, M: MemorySpace =
     /// the b_old the magnetic-energy correction reads before CT overwrites bcell.
     pub bcell_n: BcellFields<D, DOF, M, Sc>,
 
+    /// FOFC: the STAGE-INPUT cell B (snapshot in `snapshot_stage`, alongside `u_stage`). the
+    /// face-based CT redo restores `bcell <- bcell_stage` before re-running the stage from the
+    /// spliced fluxes, so the recomputed edge EMF reads the stage-input B and the cell-B predictor
+    /// combines from the correct base. only touched on a firing MHD substage.
+    pub bcell_stage: BcellFields<D, DOF, M, Sc>,
+
     /// face-centered B: bface[d] on interior.extend(d, 0, 1) with ±1 transverse
     /// halo on each axis tt != d (the MHD/RMHD face domains).
     /// this is the CT "truth" — evolved by discrete curl of E.
     /// only used in 2D/3D.
     pub bface: BfaceFields<D, M, Sc>,
+
+    /// FOFC: snapshot of `bface` taken in `post_godunov` immediately BEFORE the corrector/euler curl
+    /// (bface is untouched until then, so this is `bface^n`). the C2 CT redo restores `bface <-
+    /// bface_n` and re-applies the curl from the SPLICED edge EMF (HO off the fallback region, FO on
+    /// it), so the curl is applied exactly ONCE. only used in 2D/3D, only touched on a firing substage.
+    pub bface_n: BfaceFields<D, M, Sc>,
 
     /// edge-centered E: efield[d] on edge_domain(d).
     /// transient — recomputed each stage from fluxes and prims.
@@ -464,12 +476,24 @@ pub struct MhdStaggeredFields<const D: usize, const DOF: usize, M: MemorySpace =
     /// saved E from RK2 stage 1 (for time-averaging).
     pub efield_n: EfieldFields<D, M, Sc>,
 
+    /// FOFC: save of the HIGH-ORDER edge EMF (`= efield` at FOFC entry). the C2 CT redo splices the
+    /// edge EMF `edge_flag ? E_FO(Contact) : E_HO`, keeping the saved HO EMF here on edges touching no
+    /// flagged cell so their face field is bit-unchanged (I5). only touched on a firing substage.
+    pub efield_ho: EfieldFields<D, M, Sc>,
+
     /// B-field flux: bflux[d] is the per-axis BfluxFields group; bflux[d][k]
     /// is the k-th B-component flux at d-perpendicular faces.
     /// used in 1D to update B via flux divergence (no CT).
     /// in 2D/3D, the induction flux is used to compute E at faces.
     /// inner length DOF: each face carries all DOF B-component fluxes.
     pub bflux: [BfluxFields<D, DOF, M, Sc>; D],
+
+    /// FOFC: the HIGH-ORDER induction flux save (mirror of the gas `flux_ho`). the face-based CT
+    /// redo saves `bflux -> bflux_ho` before the first-order redo overwrites `bflux`, then splices
+    /// FO-on-flagged faces from `bflux_ho` (HO) and the live `bflux` (FO) so the recomputed edge EMF
+    /// and cell-B predictor are HO off the fallback region, FO on it. only touched on a firing
+    /// MHD substage.
+    pub bflux_ho: [BfluxFields<D, DOF, M, Sc>; D],
 
     /// per-face wave speeds from the Riemann solver.
     /// wave_speed_l[d] and wave_speed_r[d] store the left (negative) and
@@ -502,6 +526,8 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         let bcell = BcellFields { b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? };
         // RK2 snapshot of bcell (same domain).
         let bcell_n = BcellFields { b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? };
+        // FOFC stage-input cell-B snapshot (same domain).
+        let bcell_stage = BcellFields { b: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? };
 
         // face-centered B: one extra in normal direction; for MHD the CT
         // stencil needs a TRANSVERSE halo. ±2 (not ±1): the faithful UCT edge EMF
@@ -511,6 +537,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         // layer is filled by the same owned→alloc ghost-fill driver and is harmless
         // to the narrower readers. on-disk checkpoint is interior-only, unaffected.
         let mut bface_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
+        let mut bface_n_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         for dd in 0..D {
             let mut face_dom = interior.extend(dd, 0, 1);
             for tt in 0..D {
@@ -519,14 +546,17 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
                 }
             }
             bface_vec.push(Field::zeros(&face_dom)?);
+            bface_n_vec.push(Field::zeros(&face_dom)?); // FOFC bface^n snapshot (same face domain)
         }
         let bface = BfaceFields { b: bface_vec.try_into().unwrap_or_else(|_| unreachable!()) };
+        let bface_n = BfaceFields { b: bface_n_vec.try_into().unwrap_or_else(|_| unreachable!()) };
 
         // edge-centered E: extra in both transverse directions.
         // for D=2, all efield slots use the corner domain (extend in both
         // directions) because the only physical E-field is Ez at corners.
         let mut efield_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         let mut efield_n_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
+        let mut efield_ho_vec: Vec<Field<Sc, D, M>> = Vec::with_capacity(D);
         for dd in 0..D {
             let mut edge_dom = interior.clone();
             for ax in 0..D {
@@ -534,17 +564,23 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
             }
             efield_vec.push(Field::zeros(&edge_dom)?);
             efield_n_vec.push(Field::zeros(&edge_dom)?);
+            efield_ho_vec.push(Field::zeros(&edge_dom)?); // FOFC HO-EMF save (same edge domain)
         }
         let efield = EfieldFields { e: efield_vec.try_into().unwrap_or_else(|_| unreachable!()) };
         let efield_n = EfieldFields { e: efield_n_vec.try_into().unwrap_or_else(|_| unreachable!()) };
+        let efield_ho = EfieldFields { e: efield_ho_vec.try_into().unwrap_or_else(|_| unreachable!()) };
 
         // B-field flux arrays: per-axis group, same domain as hydro flux[d];
         // inner length DOF (one flux field per B-component).
         let mut bflux_outer: Vec<BfluxFields<D, DOF, M, Sc>> = Vec::with_capacity(D);
+        let mut bflux_ho_outer: Vec<BfluxFields<D, DOF, M, Sc>> = Vec::with_capacity(D);
         for _dd in 0..D {
             bflux_outer.push(BfluxFields { f: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? });
+            // FOFC HO induction-flux save: same per-axis DOF-component layout as bflux.
+            bflux_ho_outer.push(BfluxFields { f: array_field_zeros::<D, DOF, M, Cell, Sc>(allocated)? });
         }
         let bflux = bflux_outer.try_into().unwrap_or_else(|_| unreachable!());
+        let bflux_ho = bflux_ho_outer.try_into().unwrap_or_else(|_| unreachable!());
 
         // per-face wave speeds and upwind transverse velocities
         let wave_speed_l = array_field_zeros(allocated)?;
@@ -557,10 +593,14 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
         Ok(MhdStaggeredFields {
             bcell,
             bcell_n,
+            bcell_stage,
             bface,
+            bface_n,
             efield,
             efield_n,
+            efield_ho,
             bflux,
+            bflux_ho,
             wave_speed_l,
             wave_speed_r,
             v_upwind: v_upwind_outer.try_into().unwrap_or_else(|_| unreachable!()),

@@ -521,6 +521,13 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
             u.nrg_field().expect("u_stage with energy requires nrg"),
         ));
     }
+    // the stage-input cell B -> bcell_stage: the face-based FOFC CT redo restores bcell from it so
+    // the recomputed edge EMF reads the stage-input field and the cell-B predictor combines from the
+    // correct base (the DOF-vector cell B lives on the same allocated domain as the gas cons).
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    for k in 0..DOF {
+        pairs.push((&mhd.bcell[k], &mhd.bcell_stage[k]));
+    }
 
     if Mem::IS_DEVICE_ACCESSIBLE {
         let sname = format!("rmhd_save_efield_{D}d");
@@ -537,6 +544,152 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
         }
     } else {
         fused_save_buffers(&pairs);
+    }
+}
+
+/// copy a list of (src, dst) field pairs (host memcpy / device pointwise-copy), each by its OWN
+/// layout — so it serves cell-centered (bcell/bflux) AND staggered (bface/efield) fields.
+fn fofc_copy_fields<const D: usize, Sc, Mem>(
+    pairs: &[(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)],
+) where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        let sname = format!("rmhd_save_efield_{D}d");
+        let (sf, sir) = expect_kernel::<Sc>(&sname);
+        for (src, dst) in pairs {
+            let (l, ext, v) = field_layout(*src);
+            let inv = KernelInvocation {
+                buffers: vec![
+                    Buf { handle: BufHandle::Host(unsafe { std::slice::from_raw_parts(src.as_ptr(), v) }), lo: &l, extent: &ext },
+                    Buf { handle: BufHandle::HostMut(unsafe { std::slice::from_raw_parts_mut(dst.as_mut_ptr(), v) }), lo: &l, extent: &ext },
+                ],
+                grid: &ext,
+                dom_lo: &l,
+                ints: &[],
+                scalars: &[],
+            };
+            invoke::<Sc, Mem, _>(inv, sir, &sname, sf);
+        }
+    } else {
+        fused_save_buffers(pairs);
+    }
+}
+
+/// FOFC C2 CT save: `bflux -> bflux_ho` (the HO induction flux) + `efield -> efield_ho` (the HO edge
+/// EMF), before the first-order redo overwrites them. paired with the bflux splice + emf splice.
+pub(crate) fn fofc_ct_save<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let mut pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> = Vec::with_capacity(D * DOF + D);
+    for d in 0..D {
+        for c in 0..DOF {
+            pairs.push((&mhd.bflux[d][c], &mhd.bflux_ho[d][c]));
+        }
+    }
+    for e in 0..D {
+        pairs.push((&mhd.efield[e], &mhd.efield_ho[e]));
+    }
+    fofc_copy_fields(&pairs);
+}
+
+/// FOFC: restore the stage-input cell B `bcell <- bcell_stage`, so the cell-B predictor + the
+/// recomputed edge EMF read the correct base (matching the high-order stage).
+pub(crate) fn fofc_restore_bcell_stage<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
+        (0..DOF).map(|c| (&mhd.bcell_stage[c], &mhd.bcell[c])).collect();
+    fofc_copy_fields(&pairs);
+}
+
+/// FOFC: restore the pre-curl face field `bface <- bface_n`, so the C2 CT redo re-applies the curl
+/// exactly once from the spliced edge EMF.
+pub(crate) fn fofc_restore_bface_n<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
+        (0..D).map(|d| (&mhd.bface_n[d], &mhd.bface[d])).collect();
+    fofc_copy_fields(&pairs);
+}
+
+/// FOFC: splice the induction flux `bflux[d][c] = face_flag ? FO : HO` per axis / B-component, over
+/// the axis-`d` interior face domain — the induction mirror of the gas flux splice. FO-on-flagged
+/// faces feed the cell-B predictor + the Contact FO edge EMF; HO off the fallback region.
+pub(crate) fn fofc_splice_induction<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    flag: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use crate::kernels::support::FaceDomain;
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    for dir in 0..D {
+        let name = format!("{prefix}_fofc_bflux_splice_{D}d_{dir}");
+        let slot = |s: &str| -> &Field<Sc, D, Mem> {
+            if s == "flag" {
+                flag
+            } else if let Some(c) = s.strip_prefix("fo_bflux_") {
+                &mhd.bflux[dir][c.parse::<usize>().expect("fo_bflux idx")]
+            } else if let Some(c) = s.strip_prefix("ho_bflux_") {
+                &mhd.bflux_ho[dir][c.parse::<usize>().expect("ho_bflux idx")]
+            } else {
+                panic!("fofc_splice_induction: unknown slot '{s}'")
+            }
+        };
+        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        for (bind, is_out) in kernel_field_binds(&name).iter() {
+            let fld = slot(&bind.name());
+            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        }
+        dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior.face_domain(dir), &inputs, &outputs, &[], &[]);
+    }
+}
+
+/// FOFC: splice the edge EMF `efield[edge] = edge_flag ? E_FO : E_HO` per CT edge, over the edge
+/// domain — E_FO is the live Contact/HLL EMF (just recomputed), E_HO the saved `efield_ho`. the edge
+/// flag ORs the cell flag over the edge's four incident corner cells (matching the edge-EMF gather).
+pub(crate) fn fofc_emf_splice<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    flag: &Field<Sc, D, Mem>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    for edge in ct_edges(&sim.geom.axes) {
+        let name = format!("fofc_emf_splice_{D}d_{}", edge.name_k);
+        let slot = |s: &str| -> &Field<Sc, D, Mem> {
+            match s {
+                "flag" => flag,
+                "e_fo" => &mhd.efield[edge.slot],
+                "e_ho" => &mhd.efield_ho[edge.slot],
+                o => panic!("fofc_emf_splice: unknown slot '{o}'"),
+            }
+        };
+        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        for (bind, is_out) in kernel_field_binds(&name).iter() {
+            let fld = slot(&bind.name());
+            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        }
+        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &[]);
     }
 }
 
@@ -765,9 +918,6 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-    // iso (no energy) skips the 1/2|B|^2 magnetic-energy correction in bcell_from_bface.
-    let cnrg = sim.fields.cons.nrg_field();
-    let interior = &sim.geom.interior;
     let axes = sim.geom.axes;
     let edges = ct_edges(&axes);
 
@@ -816,10 +966,38 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         }
     }
 
-    // the curl bface update: per IN-PLANE face axis dir (0..D), dB_dir/dt = -(curl E)_dir
-    // from its incident edges. cartesian binds the transverse inverse-widths; curvilinear
-    // the per-cell geom weights (3D for now). a face with no incident edges (e.g., Bx in
-    // 1.5D) is simply not updated — it stays at its constant IC.
+    // FOFC: snapshot bface -> bface_n BEFORE the curl. only the CURLING stages reach here (the
+    // predictor returned above after saving its EMF), so this captures `bface^n` — the value the
+    // C2 CT redo restores before re-applying the curl exactly once from the spliced edge EMF.
+    {
+        let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
+            (0..D).map(|d| (&mhd.bface[d], &mhd.bface_n[d])).collect();
+        fofc_copy_fields(&pairs);
+    }
+
+    // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
+    ct_curl::<D, DOF, Mem, Sc>(sim, dt);
+
+    // face->cell B interpolation + the magnetic-energy correction on cons.nrg, in place.
+    bcell_from_bface::<D, DOF, Mem, Sc>(sim, has_energy);
+}
+
+/// the CT curl `bface -= dt*curl(efield)` per IN-PLANE face axis (`dir`), from that face's incident
+/// edge EMFs. cartesian binds the transverse inverse-widths; curvilinear the per-cell geom weights;
+/// GR the densitized coordinate lengths + metric scalars. a face with no incident edges (e.g. Bx in
+/// 1.5D) is not updated. reads `efield` (whatever is currently there — the HO averaged EMF in the HO
+/// path, or the FOFC-spliced EMF in the C2 redo), writes `bface` in place. extracted from
+/// `post_godunov` so the FOFC redo can curl the restored `bface_n` from the spliced EMF.
+pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let interior = &sim.geom.interior;
+    let axes = sim.geom.axes;
     let curvilinear = sim.geom.coords != symbi_geometry::Geometry::Cartesian;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = spacetime_slug(sim.geom.spacetime);
@@ -875,9 +1053,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             s
         };
         // bind BY MANIFEST: slot `b` (the in-place bface) + the incident edges (`e_p1`/`e_p2` in
-        // 3D, `ez` in 2.5D) -> this face's actual fields, ordered by the recorded manifest so the
-        // bind cannot drift from the producer's slot sequence. `b` is read+write (deduped to one
-        // output binding); per-buffer layout (Field::domain()) handles the staggered face/edge.
+        // 3D, `ez` in 2.5D) -> this face's actual fields, ordered by the recorded manifest.
         let slot = |s: &str| -> &Field<Sc, D, Mem> {
             match s {
                 "b" => &mhd.bface[dir],
@@ -895,13 +1071,35 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         }
         dispatch_fields_each::<Sc, Mem, D>(&ct_name, &interior.extend(dir, 0, 1), &inputs, &outputs, &[], &scalars);
     }
+}
 
-    // face->cell B interpolation (the D in-plane components) + magnetic-energy correction, in-place
-    // on bcell + cons.nrg over the interior. bind BY MANIFEST: this kernel is component-agnostic
-    // (positional), so map each slot to its actual field, axis-role'd, and order by the recorded
-    // manifest: `bf_{c}` (grid face c) -> bface[c]; `bc_{c}` (in-place cell, grid face c carries
-    // physical component axes[c]) -> bcell[axes[c]]; `nrg` -> cons.nrg. no hand-ordered list.
-    let bname = if !st.is_empty() {
+/// face->cell B interpolation (the D in-plane components) + magnetic-energy correction, in place on
+/// bcell + cons.nrg over the interior. `bcell = interp(bface)` and `nrg += (1/2)(gamma_ij B^i B^j |
+/// interp - | bcell_old)` keeps the cell B and the total energy consistent with the CT-updated face
+/// field. bind BY MANIFEST: the kernel is component-agnostic (positional), each slot mapped to its
+/// actual field, axis-role'd, ordered by the recorded manifest: `bf_{c}` (grid face c) -> bface[c];
+/// `bc_{c}` (in-place cell, grid face c carries physical component axes[c]) -> bcell[axes[c]]; `nrg`
+/// -> cons.nrg. IDEMPOTENT: once `bcell == interp(bface)` a second call adds a zero energy patch, so
+/// the gas-only FOFC redo re-runs it to re-attach the consistent cell B + patch onto the FOFC'd gas
+/// (the redo feeds the cell-B predictor the HIGH-ORDER induction flux, so `bcell_old` is the HO
+/// predictor and the patch is the small HO reconciliation, not a shock — see the C2 fix / §3').
+pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    has_energy: bool,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let cnrg = sim.fields.cons.nrg_field();
+    let interior = &sim.geom.interior;
+    let axes = sim.geom.axes;
+    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+    let st = spacetime_slug(sim.geom.spacetime);
+    let sp = spacing_suffix(&sim.geom.maps);
+    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let gr = !st.is_empty();
+    let bname = if gr {
         // the GR interpolation: the energy patch contracts through the spatial metric, and the
         // kernel's bc_ indices are PHYSICAL components (all three enter the contraction).
         format!("rmhd_bcell_from_bface{sfx}{sp}{st}_{D}d")
@@ -910,7 +1108,6 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     } else {
         format!("imhd_bcell_from_bface_{D}d")
     };
-    let gr = !st.is_empty();
     let slot = |s: &str| -> &Field<Sc, D, Mem> {
         if let Some(c) = s.strip_prefix("bf_") {
             return &mhd.bface[c.parse::<usize>().expect("bcell_from_bface: bad bf_ slot index")];

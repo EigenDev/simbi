@@ -261,17 +261,24 @@ where
         dispatch_named(sim, pre_bind, None, dir, &flux_name, &face, &[], &scalars);
     }
 
-    /// FIRST-ORDER FLUX CORRECTION for the MHD regimes: the shared FOFC orchestration with the
-    /// first-order flux = the light-cone Lax-Friedrichs (Rusanov) fan (`_rusanov`, theta = 0 -> the
-    /// admissibility-preserving PCM update). B / CT are untouched (the gas conserved is corrected,
-    /// div(B) preserved). v1 runs unconditionally; the host-gate on a failure reduction is a perf
-    /// overlay added on top.
-    fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
+    /// FIRST-ORDER FLUX CORRECTION for the MHD regimes: the shared face-based gas redo (first-order
+    /// flux = the light-cone Lax-Friedrichs / Rusanov fan) PLUS the C2 constrained-transport re-sync
+    /// (§3'). the induction/CT subsystem is INVARIANT under a gas FOFC — B evolves by curl-of-EMF,
+    /// independent of the gas c2p — so the face field, EMF, and curl stay HIGH-ORDER; the redo only
+    /// (a) restores the HO induction flux for the cell-B predictor so its magnetic-energy patch is
+    /// the small HO reconciliation (not the FO-vs-HO shock), and (b) re-runs `bcell_from_bface` on the
+    /// patch stages to re-attach `bcell = interp(bface_HO)` + the patch onto the corrected gas.
+    fn fofc_impl(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) {
         let pre_bind = if R::SPEC.has_energy {
             sim.fields.prim.pre_field().expect("MHD energy regime requires prim.pre")
         } else {
             &sim.fields.cons.den
         };
+        // `bcell_from_bface` (the face->cell interp + magnetic-energy patch) runs on the SINGLE
+        // (Euler, tag 0) and CORRECTOR (rk2, tag 2) stages, never the predictor (tag 1, which leaves
+        // bcell flux-predicted). re-sync exactly there.
+        let patch_stage = stage == 0 || stage == 2;
+        let has_energy = R::SPEC.has_energy;
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             Self::kernel_prefix(),
@@ -284,6 +291,31 @@ where
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
+            || crate::regimes::mhd_substrate::fofc_ct_save(sim),
+            || crate::regimes::mhd_substrate::fofc_restore_bcell_stage(sim),
+            || {
+                use crate::regimes::mhd_substrate as ct;
+                let prefix = Self::kernel_prefix();
+                let flag = &sim.workspace.fofc_flag;
+                // splice the induction flux at EVERY firing stage (the cell-B predictor reads it);
+                ct::fofc_splice_induction(sim, prefix, flag);
+                // the CT curl runs only on the patch stages (euler / corrector). there the redo
+                // recomputes the FIRST-ORDER edge EMF (Contact/HLL — no UCT per-face wave-speed
+                // dependency), splices it by the edge flag (HO off the fallback region, FO on it),
+                // restores the pre-curl face field, and re-curls -> flagged cells get diffused,
+                // recoverable B; non-flagged faces are unchanged; div(B) stays zero.
+                if patch_stage {
+                    ct::efield(sim, CtMethod::Contact, self.solver, prefix, self.eos_param, 0.0);
+                    ct::fofc_emf_splice(sim, flag);
+                    ct::fofc_restore_bface_n(sim);
+                    ct::ct_curl(sim, dt);
+                }
+            },
+            || {
+                if patch_stage {
+                    crate::regimes::mhd_substrate::bcell_from_bface(sim, has_energy);
+                }
+            },
         );
     }
 }
@@ -301,8 +333,8 @@ where
         self.flux_impl(sim, dir, self.solver.kernel_suffix(), gr_solver, self.theta);
     }
 
-    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
-        self.fofc_impl(sim, dt, a0, ac);
+    fn fofc(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, a0: f64, ac: f64, stage: u8) {
+        self.fofc_impl(sim, dt, a0, ac, stage);
     }
 
     fn fofc_active(&self) -> bool {

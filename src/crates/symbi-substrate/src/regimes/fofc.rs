@@ -229,6 +229,22 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     c2p: impl Fn(),
     godunov: impl Fn(),
     source_apply: impl Fn(),
+    // MHD-only constrained-transport hooks (no-ops for hydro; see the C2 fix / §3''). a flagged cell
+    // needs FIRST-ORDER (diffused) B to recover, so the redo re-runs the CT with the edge EMF SPLICED
+    // (HO off the fallback region, FO on it):
+    //  - `ct_save`        : bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF),
+    //    before the FO flux redo overwrites them.
+    //  - `ct_restore`     : bcell <- bcell_stage (the stage-input cell B, so the recomputed EMF + the
+    //    cell-B predictor read the correct base).
+    //  - `ct_flux_and_curl`: AFTER the FO flux + gas splice, BEFORE the godunov — splice bflux, recompute
+    //    the FO edge EMF (Contact/HLL), splice the edge EMF (HO on non-flagged edges, FO on flagged),
+    //    restore bface <- bface_n and re-curl. gives flagged cells FO B, leaves non-flagged B unchanged.
+    //  - `ct_resync`      : bcell_from_bface (the patch-applying stages only) — re-interp `bcell` from
+    //    the re-curled face field + the small (FO-vs-FO) energy patch.
+    ct_save: impl Fn(),
+    ct_restore: impl Fn(),
+    ct_flux_and_curl: impl Fn(),
+    ct_resync: impl Fn(),
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -256,7 +272,9 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     for dir in 0..D {
         fofc_copy(sim, prefix, dof_sfx, "restore", (&sim.fields.flux[dir], prim), (&ws.flux_ho[dir], prim));
     }
+    ct_save(); // MHD: bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF)
     fofc_copy(sim, prefix, dof_sfx, "restore", (&ws.u_stage, prim), (cons, prim));
+    ct_restore(); // MHD: bcell <- bcell_stage (stage-input cell B, the correct EMF/predictor base)
     c2p();
     for dir in 0..D {
         first_order_flux(dir);
@@ -264,7 +282,9 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     for dir in 0..D {
         fofc_splice(sim, prefix, dof_sfx, dir, flag, &ws.flux_ho[dir]);
     }
+    ct_flux_and_curl(); // MHD: splice bflux, recompute + splice the edge EMF, re-curl bface_n -> FO B on flagged
     godunov();
+    ct_resync(); // MHD: bcell_from_bface (patch stages) — re-interp bcell + the small FO-vs-FO patch
     if has_additive {
         source_apply();
     }

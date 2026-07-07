@@ -195,6 +195,33 @@ pub fn fofc_splice_gv(ndim: usize, dir: usize, ncomp: usize, has_energy: bool) -
 }
 
 
+/// the FOFC FACE-BASED INDUCTION-FLUX SPLICE for axis `dir`: the magnetic mirror of
+/// `fofc_splice_gv`. per B-component `c` in `0..ncomp`, choose the FIRST-ORDER induction flux
+/// (`fo_bflux_{c}`, the redone flux in the live `bflux[dir][c]`) on faces adjacent to a flagged cell,
+/// else the HIGH-ORDER flux (`ho_bflux_{c}`, saved in `bflux_ho[dir][c]`). the axis-`dir` induction
+/// flux shares the gas flux's face indexing (stored at cell `c` on the low face of `c`), so the face
+/// is first-order iff `flag[c] > 0 OR flag[c - e_dir] > 0` — the identical mask to the gas splice.
+/// `fo_bflux_{c}` is read+write IN PLACE; the spliced induction flux feeds the cell-B predictor (HO
+/// off the fallback region, FO on it) and the Contact FO edge EMF.
+pub fn fofc_bflux_splice_gv(ndim: usize, dir: usize, ncomp: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let nd = ndim as u8;
+    let d = dir as u8;
+    let flag_c = Gv::field("flag", "flag");
+    let flag_lo = Gv::field_shifted("flag", "flag", nd, d, -1);
+    let face_fo = flag_c.cmp_gt(Gv::ZERO) | flag_lo.cmp_gt(Gv::ZERO);
+    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    for c in 0..ncomp {
+        let fo_name = format!("fo_bflux_{c}");
+        let fo = Gv::field(&fo_name, &fo_name);
+        let ho = Gv::field(&format!("ho_bflux_{c}"), &format!("ho_bflux_{c}"));
+        let chosen = Gv::select(face_fo, fo, ho);
+        writes.push((fo_name.clone(), fo_name.into(), chosen.node()));
+    }
+    (end_trace(), writes)
+}
+
+
 /// the single mass-law godunov step to a SEPARATE output buffer (the P2.2 demo):
 /// `rho_new = rho - dt*div(mass_flux)`. cartesian-uniform OR curvilinear (area-weighted).
 /// write -> `cons.den_new`.
