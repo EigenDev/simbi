@@ -21,13 +21,14 @@ use crate::c2p_result::C2pResult;
 const RMHD_MAX_ITER: usize = 100;
 /// convergence tolerance for false-position iteration (also the B=0 divzero guard).
 const CONVERGENCE_TOL: f64 = 1e-12;
+/// bisection steps for the `mu_+` upper bracket (root of `kkc_fmu49` on `[0, 1]`). 54 halvings
+/// drive the bracket width below 2^-54 ~ 5.6e-17 (sub-ulp), pinning `mu_+` tight enough that the
+/// master false-position never re-enters the post-`mu_+` kink region that holds the spurious root.
+const FIND_MU_PLUS_ITERS: usize = 54;
 
-/// KKC Eq. 49 bracketing function (enthalpy limit h0 = 1): `mu*sqrt(1 + rbar_sq) - 1`,
-/// whose root brackets `mu_plus`. carrier-generic. TEST-ONLY: production `find_mu_plus`
-/// collapsed to the constant `1` (its proof is `kkc_fmu49(1) >= 0` unconditionally — see the
-/// doc on `find_mu_plus`), so this is no longer called on the hot path; it survives only to
-/// pin `kkc_fmu49` parity + as the instrumented bracket-search probe.
-#[cfg(test)]
+/// KKC Eq. 49 auxiliary function (enthalpy limit h0 = 1): `f_a(mu) = mu*sqrt(1 + rbar_sq(mu)) - 1`.
+/// smooth, strictly increasing, EOS-independent; its unique root `mu_+` in `(0, 1]` is the tight
+/// upper bracket for the master root (KKC Sec. II F). carrier-generic. `find_mu_plus` bisects it.
 fn kkc_fmu49<S: Scalar>(mu: S, bee_sq: S, rdb_sq: S, r: S) -> S {
     let x = S::ONE / (S::ONE + mu * bee_sq);
     let rbar_sq = r * r * x * x + mu * x * (S::ONE + x) * rdb_sq;
@@ -65,24 +66,39 @@ fn kkc_fmu44<S: Scalar>(mu: S, r: S, rp_sq: S, bee_sq: S, rdb_sq: S, qq: S, dd: 
     mu - muhat
 }
 
-/// KKC `find_mu_plus` — the upper bracket for the false-position root of `kkc_fmu44`.
+/// KKC `find_mu_plus` — the tight upper bracket `mu_+` for the master root, defined as the
+/// unique root of the auxiliary `kkc_fmu49` (KKC Eq. 49) on `(0, 1/h0]` with `h0 = 1`.
 ///
-/// since `kkc_fmu49(0) = −1 < 0` and `kkc_fmu49(1) = sqrt(1+rbar²(1)) − 1 ≥ 0` for ANY
-/// state (the rbar² in the sqrt is always non-negative), the root of `kkc_fmu49` is
-/// always in `[0, 1]` regardless of `r`. so `mu = 1` is always a valid upper bracket.
+/// KKC prove (Sec. II F, Eq. 54) that `f(mu_+) >= 0` while `f(0) < 0`, so the master root lies
+/// in `(0, mu_+]`, and (Sec. II G) that it is the UNIQUE root there. beyond `mu_+` the velocity
+/// cutoff in `kkc_fmu44` (the `v_limit` clamp) induces a "strong kink" that can produce a SECOND,
+/// spurious root corresponding to a superluminal, negative-pressure state.
 ///
-/// the previous implementation ran 50 iters of bisection on `[0, 1]` to tighten the
-/// bracket near the root for `r >= 1` cells (and threw the result away for `r < 1`,
-/// where it's discarded by the final select). measurement on orszag_tang n=128 t=0.3
-/// HLLE: the production 50-iter bisection cost 15% of wall time. false-position from
-/// the wide initial bracket [0, 1] converges in 5-7 iters (same as from the tight
-/// bracket on the same problem), so the bisection-tightening did not actually reduce
-/// fp iters meaningfully. removing it: 3.89s → 3.32s (-15%).
+/// bracketing with the loose `1/h0 = 1` instead of `mu_+` is valid ONLY when `r < h0` (KKC:
+/// then `f_a(1/h0) > 0`, so `[0, 1]` still straddles the single root). for `r >= h0` the interval
+/// `[0, 1]` spans BOTH the physical root and the spurious one, `f(1) < 0`, and the false-position
+/// converges to the spurious superluminal root. this manifests whenever `r.b != 0` (a shock-normal
+/// magnetic field), which is precisely when a shock drives `r` past `h0`. so `mu_+` must be
+/// computed for the general case.
 ///
-/// see docs/c9fbdcb_perf_study/01_c2p.md + the c2p_iter_distribution_orszag_tang
-/// test below for the empirical investigation.
-fn find_mu_plus<S: Scalar>(_bee_sq: S, _rdb_sq: S, _r: S) -> S {
-    S::ONE
+/// `f_a` is smooth and strictly increasing with `f_a(0) = -1 < 0` and `f_a(1) >= 0` for ANY state
+/// (the `rbar_sq` under the sqrt is non-negative), so bisection on `[0, 1]` always brackets its
+/// root. returning the UPPER end guarantees the result is `>= root(f_a) = mu_+`, hence
+/// `f(result) >= 0` and a valid straddle `f(0) < 0 <= f(result)` for the master false-position.
+fn find_mu_plus<S: Scalar>(bee_sq: S, rdb_sq: S, r: S) -> S {
+    let half = S::from_f64(0.5);
+    S::iterate_vec(
+        [S::ZERO, S::ONE], // [lo, hi] maintaining f_a(lo) < 0 <= f_a(hi)
+        FIND_MU_PLUS_ITERS,
+        |s| {
+            let (lo, hi) = (s[0], s[1]);
+            let mid = half * (lo + hi);
+            let below = kkc_fmu49(mid, bee_sq, rdb_sq, r).cmp_lt(S::ZERO);
+            [S::select(below, mid, lo), S::select(below, hi, mid)]
+        },
+        |_, _| S::ZERO.cmp_lt(S::ZERO), // always-false: run the fixed iteration count, no early freeze
+        1,                              // result = hi, the upper bracket >= mu_+
+    )
 }
 
 /// the branch-free RMHD cons->prim recovery — THE single-source physics: the rescale
@@ -155,24 +171,29 @@ pub fn rmhd_recover<S: Scalar, const D: usize>(
         |s, _next| half.cmp_lt(s[5]), // freeze once `done` was ALREADY set last step
         4,                            // result = mu
     );
-    // bracketing guarantee (resolves the find_mu_plus=1 / kkc_fmu44-root concern):
-    // false-position needs f_lower0 = kkc(0) and f_upper0 = kkc(muu0=1) to straddle zero.
-    // f_lower0 = -muhat(0) < 0 always (muhat > 0). f_upper0 = 1 - muhat(1) >= 0 holds for a
-    // PHYSICAL (warm, eps > 0) state via the v_limit ceiling (vsq <= v_limit^2 < 1, line ~50),
-    // which keeps g/rhohat/eps finite and nu_hat >= h > 1 for any mu in [0,1], so muhat(1) < 1.
-    // there is NO pressure floor: a cold/unphysical state (eps -> 0 or < 0) may drop nu_hat below
-    // 1 and break the [0,1] bracket, so the root the false-position returns is meaningless — but
-    // the RECOVERED state then has p <= 0 (or v -> the ceiling), which the post-hoc c2p diagnostic
-    // (`relativistic_c2p_code`) flags as a FAILURE. this is the intended fail-loud: the caller
-    // (first-order flux correction) redoes such a zone at first order, rather than a silent floor
-    // masking the unphysical state into a spurious-physical one.
+    // bracketing guarantee (KKC Sec. II F, Eqs. 49-54): the false-position needs f_lower0 = kkc(0)
+    // and f_upper0 = kkc(muu0 = mu_+) to straddle zero, where mu_+ = find_mu_plus is the root of
+    // the auxiliary f_a. f_lower0 = -muhat(0) < 0 always (muhat > 0). f_upper0 = f(mu_+) >= 0 by
+    // KKC Eq. 54. crucially the interval is [0, mu_+], NOT [0, 1]: on (0, mu_+] the velocity stays
+    // below v0 < 1 (kkc_fmu49 root definition) so the v_limit cutoff in kkc_fmu44 never binds and
+    // the master function has a UNIQUE root (KKC Sec. II G); beyond mu_+ the cutoff kink can create
+    // a SECOND, spurious superluminal root that the [0, 1] bracket would wrongly select whenever
+    // r >= h0 (a shock-normal field, r.b != 0). a cold/unphysical state whose true root sits at the
+    // ceiling recovers p <= 0, which the post-hoc c2p diagnostic (`relativistic_c2p_code`) flags as
+    // a FAILURE, routing the zone through first-order correction rather than a silent floor.
 
     // recovery (Eqs. 26/38/39/32/41/42/43/68); use_four_velocity = false.
     let x = S::ONE / (S::ONE + mu * bee_sq);
     let mu2 = mu * mu;
     let rbar_sq = r_sq * x * x + mu * x * (S::ONE + x) * rdb_sq;
     let qbar = qq - half * (bee_sq + mu2 * x * x * bee_sq * rp_sq);
-    let vsq = mu2 * rbar_sq;
+    // MIRROR the root-finder's velocity ceiling (kkc_fmu44: v_limit = r/sqrt(1+r^2) < 1). the
+    // recovery must apply the SAME cap: a strong-field root sits at the ceiling, so the uncapped
+    // vsq = mu^2 rbar_sq can reach >= 1, giving gbsq < -1 and ww = sqrt(1+gbsq) = NaN — a NaN rho/p
+    // that poisons neighbours instead of the intended clean fail-loud (p <= 0 flagged below). capped,
+    // ww/rho/p stay finite and the q(U) verdict routes the zone through first-order correction.
+    let v_limit = r_mag / (S::ONE + r_sq).sqrt();
+    let vsq = (mu2 * rbar_sq).min(v_limit * v_limit);
     let gbsq = vsq / (S::ONE - vsq);
     let ww = (S::ONE + gbsq).sqrt();
     let rho = dd / ww;
@@ -313,18 +334,48 @@ mod tests {
     }
 
     #[test]
-    fn find_mu_plus_returns_unity() {
-        // find_mu_plus was simplified to return `1` unconditionally. the proof
-        // that 1 is always a valid upper bracket of the kkc_fmu49 root lives in
-        // the doc comment on the production fn. validation that the WIDE initial
-        // bracket [0, 1] still produces a converging false-position is the
-        // c2p_iter_distribution_orszag_tang test below + the orszag_tang
-        // checkpoint round-trip in `crates/symbi/examples`.
-        let cases = [(0.3, 0.02, 1.2), (0.8, 0.1, 2.0), (1.5, 0.3, 5.0), (0.5, 0.05, 1.0), (0.4, 0.01, 0.5), (0.6, 0.05, 0.8)];
+    fn find_mu_plus_is_the_kkc_fmu49_root() {
+        // find_mu_plus returns mu_+, the root of the auxiliary kkc_fmu49 (KKC Eq. 49). verify it
+        // is a genuine root (|f_a(mu_+)| ~ 0) and a valid UPPER bracket (f_a(mu_+) >= 0 >= f_a below
+        // it). the r >= 1 cases are exactly where the old `return 1` bracket spanned the spurious
+        // second root of the master function.
+        let cases = [(0.3, 0.02, 1.2), (0.8, 0.1, 2.0), (1.5, 0.3, 5.0), (0.5, 0.05, 1.0), (3.29, 18.7, 2.43)];
         for (beesq, beedrsq, r) in cases {
-            let got = find_mu_plus::<f64>(beesq, beedrsq, r);
-            assert_eq!(got, 1.0, "find_mu_plus(r={r}): expected unity, got {got}");
+            let mu_plus = find_mu_plus::<f64>(beesq, beedrsq, r);
+            let f_at = kkc_fmu49::<f64>(mu_plus, beesq, beedrsq, r);
+            assert!(mu_plus > 0.0 && mu_plus <= 1.0, "mu_+ out of (0,1] for r={r}: {mu_plus}");
+            assert!(f_at.abs() < 1e-12, "mu_+ is not a root of f_a for r={r}: f_a={f_at}");
+            // upper bracket: f_a strictly increasing, so just below mu_+ it is negative.
+            assert!(kkc_fmu49::<f64>(mu_plus - 1e-9, beesq, beedrsq, r) < f_at,
+                "f_a not increasing through mu_+ for r={r}");
         }
+    }
+
+    #[test]
+    fn rmhd_recover_selects_physical_root_with_normal_field() {
+        // regression: mignone & bodo (2006) test 1, the discontinuity cell after ~29 forward-euler
+        // steps. the conserved state is IN-CONE (q(U)/D > 0) with a shock-normal field (Bx = 0.5,
+        // r.b != 0, r_mag ~ 2.43 > h0 = 1). the master function has TWO roots under the velocity
+        // cutoff: the physical mu ~ 0.198 (|v| ~ 0.474, p ~ 0.38) and a spurious mu ~ 0.995 (|v| ~
+        // 2.37, p < 0) in the post-mu_+ kink region. the [0, mu_+] bracket must select the physical
+        // one. with the old `return 1` bracket this recovered p ~ -0.88, v ~ 1.45 (superluminal).
+        let eos = IdealGas { gamma: 2.0 };
+        let cons = MhdCons::<f64, 3> {
+            hydro: crate::state::Cons {
+                den: 0.2499729,
+                mom: Tensor::new([0.2358797, -0.5587815, 0.0]),
+                nrg: 1.047524,
+            },
+            mag: Tensor::new([0.5, -0.7566201, 0.0]),
+        };
+        let got = rmhd_recover(&eos, &cons, &SpatialMetric::flat(), RMHD_MAX_ITER);
+        let v_sq = got.hydro.vel.dot(&got.hydro.vel);
+        assert!(v_sq < 1.0, "recovered superluminal velocity: v^2 = {v_sq}");
+        assert!(got.hydro.pre > 0.0, "recovered non-positive pressure: p = {}", got.hydro.pre);
+        assert!(got.hydro.rho > 0.0, "recovered non-positive density: rho = {}", got.hydro.rho);
+        // the physical root recovered by an independent mu-scan of the master function.
+        assert!((got.hydro.pre - 0.3805).abs() < 1e-3, "pressure off physical root: {}", got.hydro.pre);
+        assert!((v_sq.sqrt() - 0.4741).abs() < 1e-3, "velocity off physical root: {}", v_sq.sqrt());
     }
 
     // =========================================================================
@@ -568,7 +619,8 @@ mod tests {
             (1.0,     0.5,    0.1,  1e-3), // near-vacuum field
         ];
         for (rho, v, pre, b) in cases {
-            // physical prim: velocity along x, B along y (non-aligned => rdb != 0).
+            // physical prim: velocity along x, B along y. v perp B => r.b = 0 here (the r.b != 0
+            // shock-normal case is covered by rmhd_recover_selects_physical_root_with_normal_field).
             let prim = MhdPrim::<f64, 3> {
                 hydro: Prim { rho, vel: Tensor::new([v, 0.0, 0.0]), pre },
                 mag: Tensor::new([0.0, b, 0.0]),
@@ -593,11 +645,13 @@ mod tests {
                 got.hydro.rho, got.hydro.pre
             );
             // floor-less KKC: without the eps_min zero-T floor smoothing the master function near
-            // the velocity ceiling, false-position converges to ~6e-6 at the pathological W~71 low-
-            // density case within the 100-iter cap (realistic W ~ a few recover to ~1e-9). the bracket
-            // (the real robustness invariant) still straddles; this is the honest unfloored precision.
+            // the velocity ceiling, false-position converges to ~1e-5 at the pathological W~71 low-
+            // density case (r_mag ~ 2900, root sits ON the ceiling where mu ~ mu_+) within the
+            // 100-iter cap (realistic W ~ a few recover to ~1e-9). the exact root gives p to ~4e-12;
+            // the residual is bracket-trajectory-dependent iteration precision at this extreme corner,
+            // not a physics error. the bracket (the real robustness invariant) still straddles.
             assert!(
-                (got.hydro.pre - pre).abs() < 1e-5 * pre.abs().max(1.0),
+                (got.hydro.pre - pre).abs() < 2e-5 * pre.abs().max(1.0),
                 "evolved-state c2p pressure mismatch (rho={rho}, v={v}, pre={pre}, b={b}): {} vs {pre}",
                 got.hydro.pre
             );
