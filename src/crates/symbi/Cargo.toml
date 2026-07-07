@@ -61,5 +61,9 @@ harness = false
 name = "mhd_2p5d_bench"
 harness = false
 
+[[bench]]
+name = "adiabatic_zone_cycle_bench"
+harness = false
+
 [lints]
 workspace = true
