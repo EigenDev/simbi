@@ -2912,8 +2912,8 @@ mod tests {
         );
         // need an output node; just return the param via an identity einsum-like op.
         // simplest: use the param node directly as the output even though it's rank-1.
-        // since our output extraction expects Concrete, we wrap in a no-op einsum that
-        // reduces it to rank-0... actually, easiest: try to use the param itself as output.
+        // the output extraction expects Concrete, so a no-op einsum reduces the rank-1 param to
+        // rank-0; the param itself serves as the output.
         // it'll panic with the "Array binding output" message — which is OK for V1.
         // for testing, instead build a 1-param dot product to validate the array path.
         let _ = v;

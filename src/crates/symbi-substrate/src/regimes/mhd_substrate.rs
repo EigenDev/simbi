@@ -803,7 +803,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
         let p_out = 3 - p1 - p2;
         // UCT swaps the contact's mass-flux soft-sign blend for the master-formula edge EMF; the
         // coefficient family follows the gas Riemann solver. HLL is regime-generic; HLLC needs the
-        // classical ideal-gas lambda* kernel (NMHD only for now). the kernel manifest declares the
+        // classical ideal-gas lambda* kernel (NMHD only). the kernel manifest declares the
         // slots it reads (bface_a/b, wsr/wsl, + rho/pre/bcell for HLLC), bound below.
         let name = match ct_method {
             // GR-UCT: the densitized master-form corner EMF. HLLD gas -> the ORTHONORMAL-frame
@@ -820,7 +820,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             }
             CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k),
             // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
-            // less-diffusive one, classical NMHD for now); everything else -> the regime-generic HLL
+            // less-diffusive one, classical NMHD only); everything else -> the regime-generic HLL
             // EMF (which IS the EMF's HLLC for B_x != 0 — the contact doesn't resolve B_t, p.11).
             CtMethod::Uct => match (solver, prefix) {
                 (Solver::Hlld, "nmhd") => format!("nmhd_edge_emf_uct_hlld_{D}d_{}", edge.name_k),

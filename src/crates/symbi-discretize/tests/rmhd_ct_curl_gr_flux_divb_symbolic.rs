@@ -10,7 +10,7 @@
 //
 // EXTRACT-THE-WEIGHT method. the GR curls are the FLUX form
 //   b_new = b -+ dt (Etilde[+corner] - Etilde) / w,   w = sqrt(gamma)(face) * dtransverse
-// so the edge-emf coefficient on the near corner `ez[0,0]` is exactly `-+ dt / w`. we RECOVER the
+// so the edge-emf coefficient on the near corner `ez[0,0]` is exactly `-+ dt / w`. the proof RECOVERS the
 // face area `w = dt / coeff(ez[0,0])` straight from the traced curl and scale it back out — the
 // (possibly nested / transcendental) metric atom cancels LOCALLY (num/den, same face), leaving the
 // metric-free bare EMF difference `-+ dt (ez[+corner] - ez)`. the area-weighted divergence of the

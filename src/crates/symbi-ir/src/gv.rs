@@ -297,7 +297,7 @@ impl GvKernel {
     /// are actual `field_inputs` (a LoadAt always names a registered field, so
     /// the restriction is a safety net, not a filter). this is the smem-tile
     /// candidate set: only stencil-read fields have reusable neighbor data worth
-    /// prefetching; a field read pointwise stays on gmem. (docs/design/22 step B.)
+    /// prefetching; a field read pointwise stays on gmem. (docs/design/22.)
     pub fn stencil_read_field_keys(&self) -> Vec<String> {
         let manifest: std::collections::HashSet<&str> =
             self.field_inputs.iter().map(|(k, _)| k.as_str()).collect();

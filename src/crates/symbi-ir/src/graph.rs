@@ -596,7 +596,7 @@ pub enum Op {
         /// this turns ~92 dead bodies/cell into a real break — measurable.
         break_when: Option<NodeId>,
     },
-    /// **docs/design/23 step 3b**: a bounded-pressure phase scope. `body`
+    /// docs/design/23: a bounded-pressure phase scope. `body`
     /// lists the NodeIds CREATED inside a `Gv::scope` closure (in insertion
     /// order); they are temporaries that the lowered emit will surround
     /// with `{ ... }` braces so the codegen sees their lifetimes end at
@@ -741,7 +741,7 @@ impl Op {
                 Ok(())
             }
 
-            // **docs/design/23 step 3b**: `body` is a Vec<NodeId> of scope-local
+            // docs/design/23: `body` is a Vec<NodeId> of scope-local
             // temps, `result` is the value the scope returns. both get remapped.
             Op::Scope { body, result } => {
                 for n in body.iter_mut() {
@@ -847,7 +847,7 @@ impl Op {
                 result,
                 break_when,
             } => target.iterate_inline(accs, inits, steps, count, result, break_when, span),
-            // **docs/design/23 step 3b**: Op::Scope rebuilt by direct push
+            // docs/design/23: Op::Scope rebuilt by direct push
             // through the `scope_op` builder (which derives ty from result
             // and bypasses hash-cons).
             Op::Scope { body, result } => target.scope_op(body, result, span),
@@ -2402,7 +2402,7 @@ impl Graph {
         self.push(Op::IterAcc(idx), TensorTy::scalar(ElementTy::F64), span)
     }
 
-    /// **docs/design/23 step 3b**: build an `Op::Scope` node. `body` lists
+    /// docs/design/23: build an `Op::Scope` node. `body` lists
     /// the NodeIds created inside the scope's closure (in insertion order —
     /// `Gv::scope` populates this via the `(snapshot..)` range of newly-
     /// pushed NodeIds). `result` is the value the scope returns; the
@@ -2668,7 +2668,7 @@ impl Graph {
         // the Apply call sites. Op::Apply still hash-conses.
         // IterAcc: each placeholder is a distinct loop accumulator — sharing two
         // would alias unrelated loops. bypass hash-cons like Param/Lambda.
-        // **docs/design/23 step 3b**: `Op::Scope` bypasses hash-cons too. each
+        // docs/design/23: `Op::Scope` bypasses hash-cons too. each
         // `Gv::scope` call site is a distinct lexical region; deduping two
         // scopes with identical body+result vectors would collapse them into
         // one, but they could be CALLED from different outer contexts where

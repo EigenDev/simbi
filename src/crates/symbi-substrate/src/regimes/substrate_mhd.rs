@@ -120,7 +120,7 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     pub solver: Solver,
     /// constrained-transport edge-EMF scheme: Contact (Gardiner-Stone, default) or Uct (Del Zanna
     /// 2007 / Mignone-Del Zanna 2021 HLL-weighted, kills the odd-even checkerboard). Uct needs the
-    /// per-cell Riemann wave speeds materialized (RMHD only for now).
+    /// per-cell Riemann wave speeds materialized (RMHD only).
     pub ct_method: CtMethod,
     /// a runtime user source (python -> json `SourceConfig` -> `build_user_source`),
     /// applied two-pass via the regime-agnostic `dispatch_runtime_source`. nmhd/imhd

@@ -284,7 +284,7 @@ struct RegimeBuild {
     has_energy: bool,
 }
 
-/// every regime we AOT-bake fused-source kernels for. RHD + RMHD slot in
+/// every regime with AOT-baked fused-source kernels. RHD + RMHD slot in
 /// as additional rows once their fused-source path validates on the GPU.
 const REGIMES: &[RegimeBuild] = &[
     RegimeBuild { prefix: "iso",       has_energy: false },
@@ -322,7 +322,7 @@ impl FamilyKind {
     }
 }
 
-/// every fused-source family we AOT-bake. adding a family (accretion sink,
+/// every AOT-baked fused-source family. adding a family (accretion sink,
 /// immersed-body gravity, ...) is one row here once the corresponding
 /// `*_sources` factory + `FusedSourceFamily` variant exist.
 const FUSED_FAMILIES: &[FamilyKind] = &[
@@ -1585,7 +1585,7 @@ fn gen_body_feedback_iso(out_dir: &str, ndim: u8, coords: Coords) {
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     gen_godunov_mass_1d(&out_dir);
-    // amr field transfer (docs/design/22 phase 2): the refinement-lattice
+    // amr field transfer (docs/design/22): the refinement-lattice
     // pullbacks at ratio 2, every dimension.
     for ndim in 1u8..=3 {
         gen_refine_transfer(&out_dir, ndim);
@@ -1647,7 +1647,7 @@ fn main() {
     // (flat cartesian face measure + the covariant geodesic source), the state-independent light-cone
     // CFL (the diagonal Banyuls-Font form does not apply to a non-diagonal metric), and the
     // metric-aware c2p / per-sweep flux (the shift rides every sweep's fan). tagged `_ks` (cartesian
-    // suffix is empty). 2D only for now (the equatorial slice; 3D is a later dimension lift).
+    // suffix is empty). 2D only (the equatorial slice; the 3D lift is unbaked).
     {
         let ks = Geom::cart(2).kerr_schild();
         gen_godunov_stage(&out_dir, 2, "rhd", true, ks.clone(), None);
@@ -1657,7 +1657,7 @@ fn main() {
             gen_rhd_face_flux_gr(&out_dir, 2, dir, ks.clone());
         }
     }
-    // GR CYLINDRICAL kerr-schild (design 45 phase 2): the natural chart for AXISYMMETRIC relativistic
+    // GR CYLINDRICAL kerr-schild (design 45): the natural chart for AXISYMMETRIC relativistic
     // jets / disks around a hole. r = sqrt(R^2 + z^2) (the spherical radius) drives the KS block +
     // lapse; the cylindrical R drives the measure (alpha sqrt(gamma) = R). the kerr-schild structure
     // is the NON-diagonal POLOIDAL (R, z) block; phi decouples (gamma_phi-phi = R^2, beta^phi = 0), so
@@ -1722,7 +1722,7 @@ fn main() {
     // lattice pullbacks over the lifted component set): one instance each.
     gen_snapshot(&out_dir, 2, "rhd", true, Geom::sph_swirl());
     gen_iso_ghost_fill(&out_dir, 2, Geom::sph_swirl());
-    // GRMHD (design 44 phase A): the schwarzschild 1D radial row — the magnetized-michel
+    // GRMHD (design 44): the schwarzschild 1D radial row — the magnetized-michel
     // monopole gate's kernel family. gas godunov (the ideal-MHD stress in the covariant
     // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
     // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
@@ -1746,7 +1746,7 @@ fn main() {
     }
     // GRMHD phase B: the 2D (r, theta) schwarzschild row — the gas/flux/c2p/map gens are
     // ndim-generic; the CT trio (densitized EMF + curl + interpolation) is the curved-CT
-    // machinery (docs/design/44 phase B). ghost fill reuses the flat rmhd_ghost_fill_2d
+    // machinery (docs/design/44). ghost fill reuses the flat rmhd_ghost_fill_2d
     // (a spacetime-free lattice pullback).
     for geom in [Geom::sph(2).schwarzschild()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
@@ -1825,7 +1825,7 @@ fn main() {
     // GRMHD phase C: the spinning-kerr 2D SWIRL row (sph_swirl -> DOF = 3 momentum for the frame
     // dragging). the flux runs the tetrad HLLD (non-diagonal gamma_{r phi}) + the moving-interface
     // shift; the covariant EM-stress source, the c2p, and the contact / UCT-HLL edge EMF are all
-    // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only for now (its kerr arm is a
+    // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only (the kerr arm is a
     // follow-on), so kerr runs the contact or UCT-HLL CT.
     for geom in [Geom::sph_swirl().kerr()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
@@ -1885,7 +1885,7 @@ fn main() {
             gen_rhd_face_flux(&out_dir, ndim, dir);
             // HLLC variants — contact-resolving 3-wave solver, available on every
             // regime that has a contact wave. iso is HLLE-only by physics. cartesian
-            // only for now (curvilinear HLLC = follow-up).
+            // only (curvilinear HLLC is unbaked).
             gen_adiabatic_hllc_face_flux(&out_dir, ndim, dir);
             gen_adiabatic_hllc_lm_face_flux(&out_dir, ndim, dir);
             gen_rhd_hllc_face_flux(&out_dir, ndim, dir);
@@ -1931,7 +1931,7 @@ fn main() {
                     Geom::cart(ndim), family.slug(), &refs,
                 );
             }
-            // the immersed-body source, fused (Cartesian for now; cyl/sph below).
+            // the immersed-body source, fused (Cartesian; cyl/sph below).
             gen_godunov_with_body_source(
                 &out_dir, ndim, regime.prefix, regime.has_energy, Geom::cart(ndim),
             );

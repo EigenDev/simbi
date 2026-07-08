@@ -119,7 +119,7 @@ struct Config {
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
     motion_json: Option<String>,
     // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
-    // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path for now.
+    // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path only.
     driven_exprs: Vec<String>,
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
@@ -808,11 +808,11 @@ where
     let mut last_fofc: (u64, u64) = (0, 0);
 
     // graceful-interrupt trap: a caught signal (Ctrl-C, scheduler eviction)
-    // flips `stop_requested`; we then snapshot a restart checkpoint and break.
+    // flips `stop_requested`; the loop then snapshots a restart checkpoint and breaks.
     // Drop restores python's handlers + the cursor no matter how the run ends.
     let guard = SignalGuard::install();
     // btop-style live TUI: draw the dashboard in the alternate screen so it
-    // leaves no scrollback trail; on exit we restore the primary buffer and
+    // leaves no scrollback trail; on exit the primary buffer is restored and
     // re-render one static final frame so the result persists.
     let mut screen = ScreenGuard::enter();
     // tier 2a: a render thread owns the terminal + input and draws at ~30 fps, so
@@ -2211,7 +2211,7 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 /// full-size sim written by the EXISTING single-grid checkpoint path. v1 is single-level hydro:
 /// refinement uses the decomposed-hierarchy path above; immersed bodies / user sources are wired.
 /// checkpoint cadence is the LINEAR `checkpoint_interval`; the log cadence + live display are
-/// single-grid only for now. correctness is the same oracle contract (decomposed == monolithic).
+/// single-grid only. correctness is the same oracle contract (decomposed == monolithic).
 macro_rules! build_and_run_hydro_decomposed {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty, $d:literal, $geom:expr, $geom_ty:ty) => {{
         use symbi::sim::decomp::{decompose_grid, unflatten};
@@ -3227,12 +3227,12 @@ macro_rules! mhd_dispatch {
                 SchwarzschildKS { mass: $cfg.schwarzschild_mass }, SchwarzschildKS<f64>
             ),
             // the 2D (r, theta) GRMHD row: the curved-CT machinery (densitized corner EMF +
-            // curl + metric-contracted interpolation; contact EMF only — design 44 phase B).
+            // curl + metric-contracted interpolation; contact EMF only — design 44).
             (2, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
                 Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>
             ),
-            // the 2D (r, theta) SPINNING-KERR GRMHD row (design 44 phase C): the non-diagonal
+            // the 2D (r, theta) SPINNING-KERR GRMHD row (design 44): the non-diagonal
             // gamma_{r phi} rides the tetrad HLLD, the radial shift the moving-interface fan, and
             // the azimuthal (swirl) momentum the frame dragging. requires the 5-tuple swirl gas rows.
             (2, "spherical") if $cfg.spacetime == "kerr" => {

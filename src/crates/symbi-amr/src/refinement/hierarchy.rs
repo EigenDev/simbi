@@ -1,7 +1,7 @@
 // =============================================================================
 // hierarchy.rs
 //
-// the static-mesh-refinement (SMR) hierarchy (docs/design/22 phases 0+2). each
+// the static-mesh-refinement (SMR) hierarchy (docs/design/22). each
 // level is a complete SimStateGeneric + its KernelSet; the hierarchy adds only
 // inter-level coordination: recursive berger-oliger subcycling with
 // time-interpolated coarse-fine ghost prolongation, conservative restriction,

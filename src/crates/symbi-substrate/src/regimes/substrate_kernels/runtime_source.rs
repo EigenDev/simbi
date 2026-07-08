@@ -298,11 +298,11 @@ fn build_fused_cpu_kernel<const D: usize>(
 ) -> Option<FusedCpuKernel> {
     let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
-        // B3.1: thread the real spacetime here for runtime GR sources; flat (Minkowski) for now.
+        // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
         coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false,
     );
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). NOT
-    // an error: the gate is "compile when we can, else interpret", never miscompile.
+    // an error: the gate is "compile when possible, else interpret", never miscompile.
     let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
     // reads AND writes are born-typed FieldBind; a `Raw` reaching the fused-source path is a
     // wiring bug (these kernels are closed-vocabulary), so demand `Ref` loudly.

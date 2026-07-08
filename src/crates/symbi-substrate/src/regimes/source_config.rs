@@ -1,7 +1,7 @@
 // =============================================================================
 // source_config.rs
 //
-// the Overlay -> KernelSet source dispatch (DISTILLED step 3c). an `Overlay`
+// the Overlay -> KernelSet source dispatch. an `Overlay`
 // (symbi_hydro's source-monoid value: point_mass(gm,xm) + uniform_accel(g) + ..)
 // is the user's declaration of WHAT sources act; this module decides HOW each
 // runs and binds it into a substrate kernel set:

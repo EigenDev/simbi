@@ -70,9 +70,9 @@ pub(crate) fn gv_divergence(base: &str, ndim: u8, geo: &Option<CellGeometryGv>) 
 /// (`sqrt(-g) = alpha sqrt(gamma)`; the Schwarzschild coordinate gift `sqrt(-g) = sqrt(gamma_flat)`
 /// leaves the face areas flat and folds `1/sqrt(gamma) = alpha/sqrt(gamma_flat)` into a single
 /// `alpha` on the RHS). flat spacetimes (EVERY realized metric today) have `alpha = 1` -> `None`,
-/// so the RHS is untouched and BIT-IDENTICAL — the de-risk seam. a GR metric (Schwarzschild, B3.1)
+/// so the RHS is untouched and BIT-IDENTICAL on a flat metric. a GR metric (Schwarzschild)
 /// returns `Some(alpha)` dispatched `Coords -> concrete Metric -> metric.lapse(centroid)` as a
-/// traced Gv expression in the cell coordinate (the established B1 source-dispatch pattern).
+/// traced Gv expression in the cell coordinate (the coordinate-dispatch pattern).
 pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centroid: &[Gv]) -> Option<Gv> {
     match (spacetime, coords) {
         // flat (Minkowski) lapse alpha = 1: no densitization -> the weight is ELIDED from the graph

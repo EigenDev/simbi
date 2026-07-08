@@ -87,7 +87,7 @@ impl FieldEnergy for symbi_hydro::energy::IsoModel {
     type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> = FieldZero;
 }
 
-// NOTE (docs/design/34, step 2 deferred): `alloc_slot` + the `ConsFields`/`PrimFields` `E::Slot`
+// NOTE (docs/design/34): `alloc_slot` + the `ConsFields`/`PrimFields` `E::Slot`
 // flip were reverted — the field-layer flip is a far wider sweep than estimated (~180 access sites
 // across ~55 files, + the foreign-`Field` trait-scope friction). the additive foundation above
 // (`FieldEnergy`/`EnergyFieldSlot`/`FieldZero` + `Regime::Energy`) is retained, ready for the flip
