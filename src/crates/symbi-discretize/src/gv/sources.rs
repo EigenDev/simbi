@@ -107,8 +107,13 @@ fn geometric_momentum_sources_gv(
     vel: &[Gv],
     bmu: Option<&[Gv]>,
 ) -> Vec<Gv> {
-    // COORDINATE-indexed centroid (r at [0], theta at [1]); symmetry slots stay 0 (never read).
-    let mut coord_centroid = vec![Gv::ZERO; 3];
+    // COORDINATE-indexed centroid (r at [0], theta at [1]). ungridded slots take the chart symmetry
+    // default (spherical polar -> pi/2), NOT zero: a reduced-dimension spherical grid (a 1.5D radial
+    // chart with ungridded theta, or a 2.5D r-phi chart) still evaluates the angular Christoffels
+    // cot(theta)/sin(theta) in the inertial source, and theta = 0 diverges cot(theta) and NaNs the
+    // state. `gv_ungridded_slot` is the single chart authority for these fills (spherical theta ->
+    // pi/2, every other suppressed axis -> 0, so cartesian / cylindrical are unchanged).
+    let mut coord_centroid: Vec<Gv> = (0..3).map(|k| gv_ungridded_slot(coords, k)).collect();
     for d in 0..ndim {
         coord_centroid[axes[d]] = geo.centroid[d];
     }

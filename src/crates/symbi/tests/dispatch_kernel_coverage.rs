@@ -34,12 +34,13 @@ use symbi_geometry::Geometry;
 const UNIFORM: &str = "";
 const LOGR: &str = "_logr";
 
-// known-unbaked flat combos the dispatch can request that are DELIBERATELY not baked (rejected
-// C4-style at dispatch, not silently run). empty: the flat gaps this gate first surfaced — 1D
-// curvilinear MHD (`{r,n,i}mhd_*_{sph,cyl}_1d` + bcell), cylindrical hydro on a log-radial grid
-// (`*_cyl_logr_*`), and the 2D spherical nmhd/imhd wave-speed (`{n,i}mhd_wave_speed_map_sph_2d`,
-// a slug asymmetry that baked the dead `_sph_swirl_2d` instead) — are now all BAKED, so the two
-// tests below assert their presence directly. a NEW gap fails the test until it is baked or listed.
+// known-unbaked flat combos the dispatch can request that are DELIBERATELY not baked (they fail
+// loud at dispatch rather than running silently). empty: every flat gap this gate surfaced — 1D
+// curvilinear MHD (spherical + cylindrical), cylindrical hydro log-radial, the 2D spherical
+// nmhd/imhd wave-speed slug bug, and the log-radial curvilinear MHD charts — is now BAKED and
+// asserted present below (the 1D-spherical reduced-dim geometric-source NaN was fixed by filling
+// the ungridded polar slot with pi/2, matching the GR path). a NEW gap fails the test until it is
+// baked or listed here.
 const KNOWN_UNBAKED: &[&str] = &[];
 
 fn assert_family(missing: &mut Vec<String>, name: String) {
@@ -89,37 +90,53 @@ fn every_hydro_stage_and_cfl_kernel_is_emitted() {
 
 // the mhd gas godunov + wave-speed + out-of-plane bcell predictor. the geometry suffix keys on the
 // grid-axis set (`mhd_geom_suffix`): 1D radial [0] -> "_cyl"/"_sph", 2D cyl r-z [0,2] ->
-// "_cyl_rz" / r-phi [0,1] -> "_cyl_rphi", 3D [0,1,2] -> "_cyl". flat mhd does NOT append the
-// spacing tag (only the GR branch does), so a log-radial flat mhd run silently reuses the uniform
-// kernel — a wrong-geometry latent a kernel-existence probe cannot see; only uniform is asserted.
-// the bcell predictor runs where an out-of-plane B component exists (D < DOF, DOF = 3), i.e. every
-// 1D / 2D chart; it is always the regime-agnostic rmhd_* kernel.
+// "_cyl_rz" / r-phi [0,1] -> "_cyl_rphi", 3D [0,1,2] -> "_cyl". flat mhd appends the spacing tag
+// like the GR path, so a log-radial curvilinear grid selects the `_logr` godunov / wave-speed /
+// bcell (baked for the 1D + 2D curvilinear charts). the bcell predictor runs where an out-of-plane
+// B component exists (D < DOF, DOF = 3), i.e. every 1D / 2D chart; it is always the rmhd_* kernel.
+// log-radial is enumerated only on the curvilinear charts (a cartesian axis has no radial log);
+// 3D fully-gridded log-radial MHD is not a realized target (fails loud, unbaked) and is not asserted.
 #[test]
 fn every_mhd_stage_cfl_and_bcell_kernel_is_emitted() {
-    // (coords, dims, grid-axis set) for every flat mhd dispatch arm (mhd_dispatch! in
-    // symbi-py/src/lib.rs): cartesian / spherical 1-3D + cylindrical 1D, 2D r-z, 2D r-phi, 3D.
-    let arms: &[(Geometry, usize, &[usize])] = &[
-        (Geometry::Cartesian, 1, &[0]),
-        (Geometry::Cartesian, 2, &[0, 1]),
-        (Geometry::Cartesian, 3, &[0, 1, 2]),
-        (Geometry::Spherical, 1, &[0]),
-        (Geometry::Spherical, 2, &[0, 1]),
-        (Geometry::Spherical, 3, &[0, 1, 2]),
-        (Geometry::Cylindrical, 1, &[0]),
-        (Geometry::Cylindrical, 2, &[0, 2]),
-        (Geometry::Cylindrical, 2, &[0, 1]),
-        (Geometry::Cylindrical, 3, &[0, 1, 2]),
+    // (coords, dims, grid-axis set, logr-realizable) for every flat mhd dispatch arm (mhd_dispatch!
+    // in symbi-py/src/lib.rs): cartesian / spherical 1-3D + cylindrical 1D, 2D r-z, 2D r-phi, 3D.
+    let arms: &[(Geometry, usize, &[usize], bool)] = &[
+        (Geometry::Cartesian, 1, &[0], false),
+        (Geometry::Cartesian, 2, &[0, 1], false),
+        (Geometry::Cartesian, 3, &[0, 1, 2], false),
+        (Geometry::Spherical, 1, &[0], true),
+        (Geometry::Spherical, 2, &[0, 1], true),
+        (Geometry::Spherical, 3, &[0, 1, 2], false),
+        (Geometry::Cylindrical, 1, &[0], true),
+        (Geometry::Cylindrical, 2, &[0, 2], true),
+        (Geometry::Cylindrical, 2, &[0, 1], true),
+        (Geometry::Cylindrical, 3, &[0, 1, 2], false),
     ];
     let mut missing = Vec::new();
     for prefix in ["rmhd", "nmhd", "imhd"] {
-        for &(coords, d, axes) in arms {
+        for &(coords, d, axes, logr) in arms {
             let geom = mhd_geom_suffix(coords, axes);
-            assert_family(&mut missing, format!("{prefix}_godunov_stage{geom}_{d}d"));
-            assert_family(&mut missing, format!("{prefix}_wave_speed_map{geom}_{d}d"));
-            // the out-of-plane predictor exists only where D < DOF (DOF = 3): the 1D / 2D charts.
-            if d < 3 {
-                assert_family(&mut missing, format!("rmhd_bcell_godunov_euler{geom}_{d}d"));
-                assert_family(&mut missing, format!("rmhd_bcell_godunov_rk2{geom}_{d}d"));
+            let mut spacings = vec![UNIFORM];
+            if logr {
+                spacings.push(LOGR);
+            }
+            for sp in spacings {
+                assert_family(&mut missing, format!("{prefix}_godunov_stage{geom}{sp}_{d}d"));
+                assert_family(&mut missing, format!("{prefix}_wave_speed_map{geom}{sp}_{d}d"));
+                // the out-of-plane predictor exists only where D < DOF (DOF = 3): the 1D / 2D charts.
+                if d < 3 {
+                    assert_family(&mut missing, format!("rmhd_bcell_godunov_euler{geom}{sp}_{d}d"));
+                    assert_family(&mut missing, format!("rmhd_bcell_godunov_rk2{geom}{sp}_{d}d"));
+                }
+                // the in-plane CT curl is a 2D-CURVILINEAR-only, regime-agnostic (rmhd_*) kernel:
+                // the metric 1/r curl reads the face radii, so it carries the geometry + spacing
+                // slugs (`rmhd_ct_curl_2d_{dir}{geom}{sp}`, one per in-plane face axis). cartesian's
+                // curl is metric-free and 1D/3D take a different CT structure, so skip those.
+                if d == 2 && prefix == "rmhd" && coords != Geometry::Cartesian {
+                    for dir in 0..2 {
+                        assert_family(&mut missing, format!("rmhd_ct_curl_2d_{dir}{geom}{sp}"));
+                    }
+                }
             }
         }
     }
