@@ -378,9 +378,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || if sim.immersed.is_some() { self.body_source(sim, ac * dt) },
-            // iso has no _with_body freeze-select kernel yet; a frozen iso cell keeps the pre-body
-            // stage input (the adiabatic path closes this via the with-body select).
-            None,
+            // freeze parachute evolves by the iso body source (eos param = cs, no energy field).
+            sim.immersed.is_some().then(|| (ac * dt, self.cs)),
             || {}, // hydro: no induction flux
             || {}, // hydro: no cell B to restore
             || {}, // hydro: no induction flux

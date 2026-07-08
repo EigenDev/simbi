@@ -239,7 +239,9 @@ where
         };
         let v: f64 = match *sref {
             ScalarRef::Dt => dt,
-            ScalarRef::Gamma => gamma,
+            // `gamma` carries the regime EOS parameter: the adiabatic index for `Gamma`, the
+            // isothermal sound speed for `Cs` (the iso freeze-select-with-body kernel).
+            ScalarRef::Gamma | ScalarRef::Cs => gamma,
             ScalarRef::Body { idx, field } => body_scalar::<D>(bodies, idx, field),
             other => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),

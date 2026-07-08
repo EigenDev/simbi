@@ -441,15 +441,41 @@ pub fn body_source_iso_gv(
 ) -> (GvKernel, Writes) {
     begin_trace();
     let dt = Gv::scalar("dt");
-    let inv_dt = Gv::ONE / dt;
     let den = Gv::field("den", FieldRef::cons_den());
     let mom: Vec<Gv> = (0..ncomp)
         .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
         .collect();
     let pre = Gv::field("pre", FieldRef::PrimPre);
+    let (den_new, mom_new) =
+        body_evolved_iso_gv(den, &mom, pre, dt, n_bodies, coords, ndim, ncomp, axes);
+
+    let mut writes = vec![("den_new".to_string(), FieldRef::cons_den().into(), den_new.node())];
+    for (comp, m) in mom_new.iter().enumerate() {
+        writes.push((format!("mom_{comp}_new"), FieldRef::cons_mom(comp as u8).into(), m.node()));
+    }
+    (end_trace(), writes)
+}
+
+/// the isothermal immersed-body evolution as a PURE per-cell function (no field reads): the
+/// energy-free twin of `body_evolved_gv`. given the cell's conserved (den, mom) and its isothermal
+/// pressure `pre` (which sets the sound speed), returns the state advanced by `dt` of softened
+/// Newtonian gravity + Bondi-Hoyle accretion from `n_bodies` point masses. shared by the standalone
+/// iso body source and the FOFC freeze-select-with-body composition.
+pub(crate) fn body_evolved_iso_gv(
+    den: Gv,
+    mom: &[Gv],
+    pre: Gv,
+    dt: Gv,
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (Gv, Vec<Gv>) {
+    let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, vel_cart, min_w, cs) =
-        cell_scaffold_iso(coords, ndim, ncomp, axes, den, &mom, pre);
+        cell_scaffold_iso(coords, ndim, ncomp, axes, den, mom, pre);
 
     let mut d_den = Gv::ZERO;
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
@@ -466,12 +492,7 @@ pub fn body_source_iso_gv(
 
     let den_new = den + dt * d_den;
     let mom_new: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] + dt * d_mom[comp]).collect();
-
-    let mut writes = vec![("den_new".to_string(), FieldRef::cons_den().into(), den_new.node())];
-    for (comp, m) in mom_new.iter().enumerate() {
-        writes.push((format!("mom_{comp}_new"), FieldRef::cons_mom(comp as u8).into(), m.node()));
-    }
-    (end_trace(), writes)
+    (den_new, mom_new)
 }
 
 /// BACKWARD iso feedback: identical force/torque/mass writes as the adiabatic

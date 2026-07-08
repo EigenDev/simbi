@@ -247,6 +247,105 @@ fn fofc_freeze_preserves_body_gravity() {
     );
 }
 
+// -----------------------------------------------------------------------------
+// ISOTHERMAL freeze-tier body source (thin-disk sims): the energy-free twin of the gate above. the
+// iso freeze parachute uses the isothermal EOS (p = cs^2 * rho, always positive with the density) so
+// only the density guard applies, and the eos param is cs rather than gamma. same A/B on the two
+// select kernels: `with_body` must add the inward gravity impulse to every frozen cell.
+// -----------------------------------------------------------------------------
+#[test]
+fn fofc_freeze_preserves_body_gravity_iso() {
+    use symbi::regimes::fofc::{fofc_select, fofc_select_with_body};
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::eos::Isothermal;
+    use symbi_hydro::isothermal::IsoNewtonian;
+    use symbi_hydro::state::PrimG;
+    type Sim = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let dt = 0.01;
+    let cs = 0.5;
+    const KEPT_MARKER: f64 = 7.0;
+    let frozen_band = |r: f64| (0.30..0.60).contains(&r);
+    let kept_band = |r: f64| (0.70..0.90).contains(&r);
+
+    // physical uniform stage input (v = 0) + a first-order result whose prim DENSITY is unphysical in
+    // the frozen band. iso keeps pressure in a separate cs^2 buffer (no sim prim pre), so its select
+    // — like the plain iso `fofc_select` — gates freeze on the density alone; a negative x_rho fires it.
+    let build = || -> Sim {
+        let s = Sim::build(IsoNewtonian, Isothermal { cs }, Cartesian)
+            .cells([N, N])
+            .origin([-L, -L])
+            .spacing([dx, dx])
+            .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+            .allocate()
+            .expect("sim")
+            .set_initial(|_| PrimG::<f64, 2, IsoModel> {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: Default::default(),
+            })
+            .build()
+            .with_bodies(central_mass());
+        let us = &s.workspace.u_stage;
+        let cons = &s.fields.cons;
+        let prim = &s.fields.prim;
+        for c in s.geom.interior.iter() {
+            let x = -L + (c[0] as f64 + 0.5) * dx;
+            let y = -L + (c[1] as f64 + 0.5) * dx;
+            let r = (x * x + y * y).sqrt();
+            us.den.view_mut().set(c, 1.0);
+            us.mom[0].view_mut().set(c, 0.0);
+            us.mom[1].view_mut().set(c, 0.0);
+            cons.den.view_mut().set(c, 1.0);
+            cons.mom[0].view_mut().set(c, KEPT_MARKER);
+            cons.mom[1].view_mut().set(c, 0.0);
+            // negative first-order density in the frozen band -> select freezes; physical elsewhere.
+            prim.rho.view_mut().set(c, if frozen_band(r) { -1.0 } else { 1.0 });
+        }
+        s
+    };
+
+    let sb = build();
+    fofc_select_with_body(&sb, "iso", dt, cs);
+    let sp = build();
+    fofc_select(&sp, "iso", "", &sp.workspace.u_stage, &sp.fields.cons, &sp.fields.prim);
+
+    let mut frozen = 0usize;
+    let mut got_body = 0usize;
+    let mut kept_ok = 0usize;
+    let mut worst_outward = 0.0_f64;
+    for c in sb.geom.interior.iter() {
+        let x = -L + (c[0] as f64 + 0.5) * dx;
+        let y = -L + (c[1] as f64 + 0.5) * dx;
+        let r = (x * x + y * y).sqrt();
+        let bx = *sb.fields.cons.mom[0].view().at(c);
+        let by = *sb.fields.cons.mom[1].view().at(c);
+        let px = *sp.fields.cons.mom[0].view().at(c);
+        let py = *sp.fields.cons.mom[1].view().at(c);
+        if frozen_band(r) {
+            let inward = -((bx - px) * x + (by - py) * y) / r;
+            if inward > 1e-6 {
+                got_body += 1;
+            }
+            worst_outward = worst_outward.min(inward);
+            frozen += 1;
+        } else if kept_band(r) && (bx - KEPT_MARKER).abs() < 1e-12 && (px - KEPT_MARKER).abs() < 1e-12 {
+            kept_ok += 1;
+        }
+    }
+    assert!(frozen > 8, "too few frozen cells to test ({frozen})");
+    assert!(kept_ok > 8, "physical cells must be kept unchanged by the iso freeze select ({kept_ok})");
+    assert!(
+        got_body == frozen,
+        "the iso with-body freeze select dropped the body source: only {got_body}/{frozen} frozen \
+         cells got the inward gravity kick (0 for the plain freeze select)",
+    );
+    assert!(
+        worst_outward > -1e-9,
+        "an iso frozen cell got a spurious OUTWARD body kick: {worst_outward:e}",
+    );
+}
+
 #[test]
 fn central_gravity_pulls_fluid_inward_through_evolve() {
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;

@@ -1542,15 +1542,17 @@ fn gen_body_source(out_dir: &str, ndim: u8, coords: Coords) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// the FOFC freeze-tier select WITH the immersed-body source composed INLINE (adiabatic `has_bodies`
-// variant): `adiabatic_fofc_select_with_body{coords}_{ndim}d`. baked per coord system since the body
-// gravity is projected onto the physical momentum components; the freeze parachute becomes the
-// body-evolved (guarded) stage input instead of the bare one. dispatched in place of the plain
-// `adiabatic_fofc_select` whenever the sim carries immersed bodies.
-fn gen_adiabatic_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords) {
+// the FOFC freeze-tier select WITH the immersed-body source composed INLINE (`has_bodies` variant):
+// `{prefix}_fofc_select_with_body{coords}_{ndim}d`. baked per coord system since the body gravity is
+// projected onto the physical momentum components; the freeze parachute becomes the body-evolved
+// (guarded) stage input instead of the bare one. dispatched in place of the plain
+// `{prefix}_fofc_select` whenever the sim carries immersed bodies. `has_energy` picks the adiabatic
+// (gamma, energy) vs isothermal (cs, no energy) body evolution.
+fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, has_energy: bool) {
     let g = Geom::identity(coords, ndim);
-    let (k, w) = fofc_select_with_body_gv(g.ncomp as usize, MAX_BODIES, coords, ndim as usize, &g.axes);
-    emit_gv(out_dir, &format!("adiabatic_fofc_select_with_body{}_{ndim}d", coords_suffix(coords)), ndim, &k, &w);
+    let (k, w) =
+        fofc_select_with_body_gv(g.ncomp as usize, MAX_BODIES, coords, ndim as usize, &g.axes, has_energy);
+    emit_gv(out_dir, &format!("{prefix}_fofc_select_with_body{}_{ndim}d", coords_suffix(coords)), ndim, &k, &w);
 }
 
 // immersed-body BACKWARD feedback (docs/design/19 P3): per cell, per body, the force /
@@ -1977,15 +1979,18 @@ fn main() {
     gen_body_source(&out_dir, 3, Coords::Cylindrical);
     gen_body_source(&out_dir, 2, Coords::Spherical);
     gen_body_source(&out_dir, 3, Coords::Spherical);
-    // the FOFC freeze-select-with-body twin, per body-bearing (regime=adiabatic, coord) — so a
-    // frozen cell near a body keeps its gravity/accretion (composed inline, no extra buffer).
-    for ndim in 1u8..=3 {
-        gen_adiabatic_fofc_body_select(&out_dir, ndim, Coords::Cartesian);
+    // the FOFC freeze-select-with-body twin, per body-bearing regime (adiabatic + isothermal for
+    // thin-disk sims) x coord — so a frozen cell near a body keeps its gravity/accretion (composed
+    // inline, no extra buffer). isothermal drops the energy field and uses cs instead of gamma.
+    for (prefix, has_energy) in [("adiabatic", true), ("iso", false)] {
+        for ndim in 1u8..=3 {
+            gen_fofc_body_select(&out_dir, ndim, Coords::Cartesian, prefix, has_energy);
+        }
+        gen_fofc_body_select(&out_dir, 2, Coords::Cylindrical, prefix, has_energy);
+        gen_fofc_body_select(&out_dir, 3, Coords::Cylindrical, prefix, has_energy);
+        gen_fofc_body_select(&out_dir, 2, Coords::Spherical, prefix, has_energy);
+        gen_fofc_body_select(&out_dir, 3, Coords::Spherical, prefix, has_energy);
     }
-    gen_adiabatic_fofc_body_select(&out_dir, 2, Coords::Cylindrical);
-    gen_adiabatic_fofc_body_select(&out_dir, 3, Coords::Cylindrical);
-    gen_adiabatic_fofc_body_select(&out_dir, 2, Coords::Spherical);
-    gen_adiabatic_fofc_body_select(&out_dir, 3, Coords::Spherical);
     // backward feedback (force[ndim] + 3D torque + mass), per geometry, ndim >= 2.
     for &cc in &[Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
         gen_body_feedback(&out_dir, 2, cc);
