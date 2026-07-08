@@ -23,7 +23,7 @@ use symbi_sim::state::FieldStore;
 
 use super::binding::{bind_manifest, kernel_bindings, resolve_path};
 use super::exec::dispatch_fields;
-use super::layout::geom_suffix;
+use super::layout::{geom_suffix, gr_chart_dof_tag, spacetime_slug};
 use super::params::{
     ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom, resolve_body_scalars,
     scalars_for,
@@ -56,15 +56,8 @@ where
 {
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
-    // the spacetime tag (matches the bake): Schwarzschild -> "_schw" (the GR coordinate-speed map).
-    let st_sfx = match geom.spacetime {
-        symbi_geometry::Spacetime::Minkowski => "",
-        symbi_geometry::Spacetime::Schwarzschild => "_schw",
-        symbi_geometry::Spacetime::KerrSchild => "_ks",
-        symbi_geometry::Spacetime::Kerr => "_kerr",
-    };
-    // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
-    // geometric-mean curvilinear wave-speed map; uniform -> "". ORTHOGONAL to sfx and st_sfx.
+    // the spacetime tag: Schwarzschild -> "_schw" (the GR coordinate-speed map). ORTHOGONAL to sfx.
+    let st_sfx = spacetime_slug(geom.spacetime);
     let name = format!("{prefix}_wave_speed_map{sfx}{st_sfx}_{D}d");
     // scalars BY NAME: gamma + the per-axis CFL widths. the kernel's declared set drives it
     // (cartesian declares `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`) — no geometry branch here.
@@ -432,42 +425,19 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     let face = sim.geom.interior.face_domain(dir);
     // the flux is geometry-independent EXCEPT for the axis-role velocity layout (DOF>NDIM,
     // spherical swirl / cyl-axisymmetric) AND the cartesian GR chart (`_cart`, a NON-diagonal metric
-    // with shift on every axis, distinct from the implicit spherical GR default) — mirroring the
-    // bake's gr_chart_dof_tag. flat cartesian + spherical GR stay unsuffixed.
-    let geom_sfx = if DOF != D {
-        geom_suffix(sim.geom.coords, DOF, D)
-    } else if sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
-        // GR chart tag (mirror the bake's gr_chart_dof_tag): cartesian / cylindrical carry an
-        // explicit tag; spherical stays untagged (the validated spherical GR kernel names).
-        match sim.geom.coords {
-            symbi_geometry::Geometry::Cartesian => "_cart",
-            symbi_geometry::Geometry::Cylindrical => "_cyl",
-            symbi_geometry::Geometry::Spherical => "",
-        }
-    } else {
-        ""
-    };
+    // with shift on every axis, distinct from the implicit spherical GR default). flat cartesian +
+    // spherical GR stay unsuffixed. `DOF != D` is the flux-path spelling of `dof > ndim` (the flux
+    // never lowers the momentum DOF below the grid dimension).
+    let geom_sfx = gr_chart_dof_tag(sim.geom.coords, sim.geom.spacetime, DOF, D);
     // the FOFC first-order redo on a CURVED background runs the light-cone Lax-Friedrichs (rusanov)
     // fan — a distinct baked kernel (`_rusanov`), the provably admissibility-preserving low-order
     // scheme. rusanov is GR-only (a curved-spacetime kernel); the flat first-order redo is HLLE at
     // theta = 0 through the normal solver suffix.
     let solver_sfx = if rusanov { "_rusanov" } else { solver.kernel_suffix() };
-    // the GR path selects the metric-aware Valencia flux (`RhdGr`): its name carries the spacing +
-    // spacetime slug (`rhd_face_flux[_logr]{_schw|_ks}_{D}d_{dir}`), baked only for a curved
-    // spacetime. flat (Minkowski) — INCLUDING a flat log-radial run — keeps the unsuffixed flux, so
-    // the slug is appended ONLY off-Minkowski (matching the bake gate).
-    let sp_st_sfx = match sim.geom.spacetime {
-        symbi_geometry::Spacetime::Minkowski => String::new(),
-        st => {
-            let s = match st {
-                symbi_geometry::Spacetime::Schwarzschild => "_schw",
-                symbi_geometry::Spacetime::KerrSchild => "_ks",
-        symbi_geometry::Spacetime::Kerr => "_kerr",
-                symbi_geometry::Spacetime::Minkowski => unreachable!(),
-            };
-            format!("{s}")
-        }
-    };
+    // the GR path selects the metric-aware Valencia flux (`RhdGr`): its name carries the spacetime
+    // slug (`rhd_face_flux{_schw|_ks}_{D}d_{dir}`), baked only for a curved spacetime. flat
+    // (Minkowski) keeps the unsuffixed flux, so the slug is appended ONLY off-Minkowski.
+    let sp_st_sfx = spacetime_slug(sim.geom.spacetime);
     let name = format!("{prefix}_face_flux{solver_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
     // scalars BY NAME: the regime's `primary` (bound to `gamma`; iso passes ISO_GAMMA) + the
     // regime-generic `theta` (the theta-MC limiter compression; theta == 1 -> plain minmod).
@@ -551,16 +521,9 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
-    // the spacetime tag (matches the bake `Geom::spacetime_suffix`): flat -> "", Schwarzschild ->
-    // "_schw" (the lapse-densitized GR kernel). ORTHOGONAL to the spatial `sfx`.
-    let st_sfx = match geom.spacetime {
-        symbi_geometry::Spacetime::Minkowski => "",
-        symbi_geometry::Spacetime::Schwarzschild => "_schw",
-        symbi_geometry::Spacetime::KerrSchild => "_ks",
-        symbi_geometry::Spacetime::Kerr => "_kerr",
-    };
-    // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
-    // geometric-mean curvilinear godunov stage; uniform -> "". ORTHOGONAL to sfx and st_sfx.
+    // the spacetime tag: flat -> "", Schwarzschild -> "_schw" (the lapse-densitized GR kernel).
+    // ORTHOGONAL to the spatial `sfx`.
+    let st_sfx = spacetime_slug(geom.spacetime);
     let name = format!("{prefix}_godunov_stage{sfx}{st_sfx}_{D}d");
     // scalars BY NAME: dt + the SSP Shu-Osher convex coefficients (a0, ac) + the per-axis grid
     // scalars. the single stage kernel `cons = a0*u_n + ac*fe` serves every explicit SSP scheme

@@ -23,6 +23,7 @@
 // =============================================================================
 
 pub mod coords;
+pub mod kernel_slug;
 pub mod gv;
 pub mod gv_refinement;
 pub mod gv_immersed;

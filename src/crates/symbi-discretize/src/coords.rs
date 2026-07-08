@@ -55,3 +55,29 @@ pub enum Spacetime {
     /// `schwarzschild_mass` / `kerr_spin` kernel scalars. mirrors `symbi_geometry::Spacetime::Kerr`.
     Kerr,
 }
+
+impl Coords {
+    /// project the codegen-time mirror onto the runtime `symbi_geometry::Geometry` — so the ONE
+    /// shared kernel-name suffix protocol (`kernel_slug`) takes a single enum family for both the
+    /// AOT bake (which speaks this mirror) and the runtime dispatch (which speaks `Geometry`).
+    pub fn to_geometry(self) -> symbi_geometry::Geometry {
+        match self {
+            Coords::Cartesian => symbi_geometry::Geometry::Cartesian,
+            Coords::Spherical => symbi_geometry::Geometry::Spherical,
+            Coords::Cylindrical => symbi_geometry::Geometry::Cylindrical,
+        }
+    }
+}
+
+impl Spacetime {
+    /// project the codegen-time mirror onto the runtime `symbi_geometry::Spacetime` (see
+    /// [`Coords::to_geometry`]).
+    pub fn to_spacetime(self) -> symbi_geometry::Spacetime {
+        match self {
+            Spacetime::Minkowski => symbi_geometry::Spacetime::Minkowski,
+            Spacetime::Schwarzschild => symbi_geometry::Spacetime::Schwarzschild,
+            Spacetime::KerrSchild => symbi_geometry::Spacetime::KerrSchild,
+            Spacetime::Kerr => symbi_geometry::Spacetime::Kerr,
+        }
+    }
+}

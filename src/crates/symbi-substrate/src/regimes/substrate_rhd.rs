@@ -36,7 +36,7 @@ use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries, dispatch_fields,
     dispatch_flux, dispatch_godunov, dispatch_runtime_source, geom_scalar,
-    geom_suffix, kernel_geom, resolve_params, scalars_for,
+    geom_suffix, gr_chart_dof_tag, kernel_geom, resolve_params, scalars_for, spacetime_slug,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
@@ -155,30 +155,15 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         outputs.push(pre);
 
         // the GR path uses the metric-aware Valencia recovery (`|S|^2 = gamma^{ij} S_i S_j`,
-        // contravariant `v^i`); its name carries the spacing + spacetime slug and it reads the lapse
+        // contravariant `v^i`); its name carries the spacetime slug and it reads the lapse
         // mass M + the LOG-AWARE radial grid scalars (the metric is evaluated at the cell centroid).
         // flat keeps the plain `rhd_c2p_{D}d` (gamma only), bit-identical. the DOF-lift tag
         // (spherical swirl) selects the instance whose manifest carries the extra momentum.
-        // the chart/DOF tag mirrors the bake's gr_chart_dof_tag: the spherical swirl (DOF != D)
-        // rides geom_suffix; the cartesian GR chart rides `_cart` (distinct from the implicit
-        // spherical GR default); flat + spherical GR stay untagged here.
-        let geom_sfx = if DOF != D {
-            geom_suffix(sim.geom.coords, DOF, D)
-        } else if sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski {
-            match sim.geom.coords {
-                symbi_geometry::Geometry::Cartesian => "_cart",
-                symbi_geometry::Geometry::Cylindrical => "_cyl",
-                symbi_geometry::Geometry::Spherical => "",
-            }
-        } else {
-            ""
-        };
-        let st_sfx = match sim.geom.spacetime {
-            symbi_geometry::Spacetime::Minkowski => "",
-            symbi_geometry::Spacetime::Schwarzschild => "_schw",
-            symbi_geometry::Spacetime::KerrSchild => "_ks",
-        symbi_geometry::Spacetime::Kerr => "_kerr",
-        };
+        // the chart/DOF tag: the spherical swirl (DOF != D) rides geom_suffix; the cartesian GR
+        // chart rides `_cart` (distinct from the implicit spherical GR default); flat + spherical GR
+        // stay untagged here.
+        let geom_sfx = gr_chart_dof_tag(sim.geom.coords, sim.geom.spacetime, DOF, D);
+        let st_sfx = spacetime_slug(sim.geom.spacetime);
         let (name, scalars) = if st_sfx.is_empty() {
             let name = format!("rhd_c2p{geom_sfx}_{D}d");
             let scalars = scalars_for(&name, |bind| match bind {
@@ -254,12 +239,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         let source_cfl = (sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski)
             .then(|| {
                 let sfx = geom_suffix(sim.geom.coords, DOF, D);
-                let st = match sim.geom.spacetime {
-                    symbi_geometry::Spacetime::Schwarzschild => "_schw",
-                    symbi_geometry::Spacetime::KerrSchild => "_ks",
-                    symbi_geometry::Spacetime::Kerr => "_kerr",
-                    symbi_geometry::Spacetime::Minkowski => unreachable!(),
-                };
+                let st = spacetime_slug(sim.geom.spacetime);
                 format!("rhd_source_cfl{sfx}{st}_{D}d")
             });
         cfl_wave_speed(

@@ -10,7 +10,6 @@
 
 use symbi_algebra::OrderedNumeric;
 use symbi_ir::algebra::Scalar;
-use symbi_geometry::Geometry;
 
 use symbi_aot::kernel_by_name;
 
@@ -19,71 +18,12 @@ use symbi_aot::kernel_by_name;
 // `super::layout::{alloc_layout, exec_layout, expect_kernel}` paths resolve.
 pub use symbi_exec::layout::{alloc_layout, exec_layout, expect_kernel};
 
-// the curvilinear kernel-name suffix for a coordinate system: Cartesian kernels are
-// unsuffixed; spherical / cylindrical select the `_sph` / `_cyl` instance (which carries
-// the area-weighted divergence + geometric source + per-cell physical CFL widths).
-pub fn coord_suffix(coords: Geometry) -> &'static str {
-    match coords {
-        Geometry::Cartesian => "",
-        Geometry::Spherical => "_sph",
-        Geometry::Cylindrical => "_cyl",
-    }
-}
-
-// the DOF-aware suffix: a 2D plane with a lifted out-of-plane momentum needs its own
-// kernel instances (the extra conserved law changes the manifest). cylindrical — r-phi
-// (the disk, DOF == ndim, in-plane v_r/v_phi) vs r-z (axisymmetric, DOF > ndim, the
-// swirl v_phi out of the gridded r-z plane) -> "_cyl" / "_cyl_rz". spherical — the
-// axisymmetric (r, theta) grid with the azimuthal momentum DOF (DOF > ndim, rotating
-// GR flows) -> "_sph_swirl"; DOF == ndim -> "_sph". matches build.rs's Geom::suffix
-// (ncomp vs naxes). use this wherever a kernel's geometry depends on the DOF lift.
-pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
-    match coords {
-        Geometry::Cartesian => "",
-        Geometry::Spherical => {
-            if dof > ndim { "_sph_swirl" } else { "_sph" }
-        }
-        Geometry::Cylindrical => {
-            if dof > ndim { "_cyl_rz" } else { "_cyl" }
-        }
-    }
-}
-
-// the MHD kernel suffix keyed on the GRID-AXIS SET (not DOF-vs-ndim, which can't tell the two
-// cylindrical 2D MHD planes apart since both carry a 3-vector B). r-z axisymmetric grids (r, z)
-// = axes [0,2] (out-of-plane phi); r-phi disk grids (r, phi) = axes [0,1] (out-of-plane z).
-// cartesian/spherical/1D-radial/3D collapse to the coord suffix. drives gas godunov / wave-speed
-// / CT curl / bcell dispatch — anything whose metric depends on which cyl plane is gridded.
-/// the spacetime tag a GR kernel name carries (matches the bake `Geom::spacetime_suffix`):
-/// flat -> "" (the unsuffixed kernel), curved -> the chart slug.
-pub fn spacetime_slug(spacetime: symbi_geometry::Spacetime) -> &'static str {
-    match spacetime {
-        symbi_geometry::Spacetime::Minkowski => "",
-        symbi_geometry::Spacetime::Schwarzschild => "_schw",
-        symbi_geometry::Spacetime::KerrSchild => "_ks",
-        symbi_geometry::Spacetime::Kerr => "_kerr",
-    }
-}
-
-pub fn mhd_geom_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
-    match coords {
-        Geometry::Cartesian => "",
-        Geometry::Spherical => "_sph",
-        Geometry::Cylindrical => match axes {
-            [0, 2] => "_cyl_rz",
-            [0, 1] => "_cyl_rphi",
-            _ => "_cyl", // 1D radial [0] / 3D [0,1,2]
-        },
-    }
-}
-
-// the MHD FLUX kernel is the normal-direction Riemann flux: geometry-INDEPENDENT wherever the
-// normal component coord_n == dir (every IDENTITY-axis grid — cart/sph/3d-cyl AND the r-phi disk
-// [0,1], which is identity). those reuse the suffix-free flux family. ONLY r-z ([0,2]) lifts grid
-// axis 1 onto the z component (coord_n=2 != 1), so its normal flux differs and needs "_cyl_rz".
-pub fn mhd_flux_suffix(coords: Geometry, axes: &[usize]) -> &'static str {
-    if matches!(coords, Geometry::Cylindrical) && axes == [0, 2] { "_cyl_rz" } else { "" }
-}
+// the kernel-name suffix protocol is defined ONCE in symbi-discretize::kernel_slug and shared with
+// the AOT bake (build.rs), so bake and dispatch cannot drift. re-exported here so the substrate's
+// `super::layout::{coord_suffix, geom_suffix, ...}` paths resolve unchanged.
+pub use symbi_discretize::kernel_slug::{
+    coord_suffix, geom_suffix, gr_chart_dof_tag, mhd_flux_suffix, mhd_geom_suffix, spacetime_slug,
+};
 
 // the per-axis geometry scalars a CURVILINEAR kernel expects, in the order cell_geometry
 // interns them: interleaved (x_lo_ax, dx_ax) per axis. Cartesian kernels take dx (or

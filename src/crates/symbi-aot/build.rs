@@ -258,11 +258,7 @@ fn gen_godunov_mass_1d(out_dir: &str) {
 // regimes/substrate_kernels.rs): Cartesian is unsuffixed, spherical/cylindrical get
 // `_sph`/`_cyl` (the area-weighted divergence + geometric source + per-cell CFL widths).
 fn coords_suffix(coords: Coords) -> &'static str {
-    match coords {
-        Coords::Cartesian => "",
-        Coords::Spherical => "_sph",
-        Coords::Cylindrical => "_cyl",
-    }
+    symbi_discretize::kernel_slug::coord_suffix(coords.to_geometry())
 }
 
 // =============================================================================
@@ -383,18 +379,9 @@ impl Geom {
     // the spacetime slug tag appended to the kernel name (after the spatial geom suffix), so the
     // bake name matches the runtime select. flat -> "" (existing kernels unchanged).
     fn spacetime_suffix(&self) -> &'static str {
-        match self.spacetime {
-            Spacetime::Minkowski => "",
-            Spacetime::Schwarzschild => "_schw",
-            Spacetime::KerrSchild => "_ks",
-            Spacetime::Kerr => "_kerr",
-        }
+        symbi_discretize::kernel_slug::spacetime_slug(self.spacetime.to_spacetime())
     }
 
-    // the spacing slug tag appended to the kernel name (after the spatial geom suffix). the radial
-    // grid axis (index 0) carries the log-spaced zones (geometric-mean cell centers); angular axes
-    // stay uniform. all-uniform -> "" (existing kernels unchanged), log radial -> "_logr". the
-    // runtime dispatch appends the same tag from the grid's per-axis spacing, so name matches select.
     fn cart(ndim: u8) -> Self {
         Self::make(Coords::Cartesian, ndim, (0..ndim as usize).collect())
     }
@@ -449,19 +436,11 @@ impl Geom {
     // and 1D/3D stay "_cyl" (DOF==ndim, matching the hydro geom_suffix). both 2D MHD planes are
     // DOF=3, so ncomp-vs-naxes alone can't tell them apart — the axes do.
     fn suffix(&self) -> &'static str {
-        match self.coords {
-            Coords::Cartesian => "",
-            // the spherical DOF lift (azimuthal swirl on an (r, theta) grid) needs its own
-            // instances (the extra momentum law changes the manifest) — mirrors the runtime
-            // geom_suffix.
-            Coords::Spherical if self.ncomp as usize > self.axes.len() => "_sph_swirl",
-            Coords::Spherical => "_sph",
-            Coords::Cylindrical => match self.axes.as_slice() {
-                [0, 2] => "_cyl_rz",
-                [0, 1] if self.ncomp as usize > self.axes.len() => "_cyl_rphi",
-                _ => "_cyl",
-            },
-        }
+        symbi_discretize::kernel_slug::geom_suffix(
+            self.coords.to_geometry(),
+            self.ncomp as usize,
+            self.axes.len(),
+        )
     }
 }
 
@@ -471,15 +450,7 @@ impl Geom {
 // the GR HYDRO swirl (rhd prefix) uses "_sph_swirl". keeps the flat 2D spherical MHD bake+dispatch
 // consistent (cartesian/cylindrical/3D-spherical are identical to geom.suffix()).
 fn mhd_geom_slug(geom: &Geom) -> &'static str {
-    match geom.coords {
-        Coords::Cartesian => "",
-        Coords::Spherical => "_sph",
-        Coords::Cylindrical => match geom.axes.as_slice() {
-            [0, 2] => "_cyl_rz",
-            [0, 1] => "_cyl_rphi",
-            _ => "_cyl",
-        },
-    }
+    symbi_discretize::kernel_slug::mhd_geom_suffix(geom.coords.to_geometry(), &geom.axes)
 }
 
 // every gen_* emits a GV-traced kernel through `emit_gv` — Gv is the sole IR front end.
@@ -801,28 +772,22 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 // the RHD cons->prim on a curved SPATIAL metric — the Valencia covariant recovery (`|S|^2 =
 // gamma^{ij} S_i S_j`, contravariant `v^i = gamma^{ij} S_j/(...)`) with gamma(r) evaluated at the
 // cell centroid. baked per (spacetime, spacing) on the GR path; 1D radial (angular GR is task 9).
-// name carries the spacing + spacetime slug (`rhd_c2p[_logr]{_schw|_ks}_1d`) so the runtime select
-// matches. depends on the radial grid (centroid), so it carries the same schwarzschild_mass +
-// x_lo_0/dx_0 scalars the GR wavespeed/godunov use.
+// name carries the spacetime slug (`rhd_c2p{_schw|_ks}_1d`) so the runtime select matches; the
+// radial spacing is a runtime `map_kind` scalar, not a name axis. depends on the radial grid
+// (centroid), so it carries the same schwarzschild_mass + x_lo_0/dx_0 scalars the GR wavespeed/
+// godunov use.
 /// the chart/DOF tag for the GR c2p + face-flux kernel names, which historically encoded the
 /// coordinate chart ONLY through the spherical-swirl DOF lift. the spherical swirl (ncomp > naxes)
 /// rides `geom.suffix()` (`_sph_swirl`); the cartesian GR chart rides an explicit `_cart` (distinct
 /// from the implicit spherical default, which stays untagged so the validated spherical GR kernels
 /// keep their names + dispatch); every other case is untagged. the runtime dispatch mirrors this.
 fn gr_chart_dof_tag(geom: &Geom) -> &'static str {
-    if geom.ncomp as usize > geom.axes.len() {
-        geom.suffix() // swirl (ncomp > naxes): _sph_swirl / _cyl_rz
-    } else if geom.spacetime != Spacetime::Minkowski {
-        // GR non-swirl chart tag: cartesian / cylindrical carry an explicit tag; spherical stays the
-        // implicit default (untagged) so the validated spherical GR kernels keep their names.
-        match geom.coords {
-            Coords::Cartesian => "_cart",
-            Coords::Cylindrical => "_cyl",
-            Coords::Spherical => "",
-        }
-    } else {
-        ""
-    }
+    symbi_discretize::kernel_slug::gr_chart_dof_tag(
+        geom.coords.to_geometry(),
+        geom.spacetime.to_spacetime(),
+        geom.ncomp as usize,
+        geom.axes.len(),
+    )
 }
 
 fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
@@ -844,8 +809,8 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 // the RHD face flux on a curved SPATIAL metric — the Valencia covariant U/F + Banyuls-Font
 // coordinate wave speeds (`rhd_flux_gr_gv` at the `RhdGr` regime). REPLACES the flat flux on the GR
 // path (the flat kernel stayed cartesian-agnostic and bolted GR on as post-processing; the covariant
-// storage needs the metric-aware flux). name carries the spacing + spacetime slug + sweep dir. 1D
-// radial (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
+// storage needs the metric-aware flux). name carries the spacetime slug + sweep dir. 1D radial
+// (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
 fn gen_rhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
     gen_rhd_face_flux_gr_mode(out_dir, ndim, dir, geom.clone(), false);
     // the light-cone rusanov FOFC fallback rides every GR-hydro flux bake (DOF == D + the swirl
@@ -1034,7 +999,7 @@ fn gen_rmhd_edge_emf_uct_hlld(out_dir: &str, name_k: u8, ndim: u8, g1: usize, g2
 // max(|lambda_-|,|lambda_+|). host folds max + cfl_from_smax.
 fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // curved spacetime: the generic coordinate light-cone bound (state-independent, safe for
-    // any matter); the name gains the spacing + spacetime slugs like every GR kernel.
+    // any matter); the name gains the spacetime slug like every GR kernel.
     if geom.spacetime != Spacetime::Minkowski {
         let name = format!(
             "rmhd_wave_speed_map{}{}_{ndim}d",
@@ -1048,8 +1013,8 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
         gen_rmhd_source_cfl_gr(out_dir, ndim, geom);
         return;
     }
-    // the spacing slug rides the flat name too (uniform -> ""): a log-radial grid selects the
-    // geometric-mean CFL-width map, matching the runtime dispatch.
+    // flat: the radial spacing is a runtime `map_kind` scalar (a log-radial grid selects the
+    // geometric-mean CFL-width map in-kernel), not a name axis.
     let name = format!("rmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         rmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
@@ -1073,8 +1038,8 @@ fn gen_rmhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
 }
 
 // the GRMHD gas godunov: ncomp = 3 (B is always a 3-vector) with the mhd-style geometry
-// slug (the runtime's mhd_geom_suffix — "_sph", never the hydro DOF-lift "_sph_swirl"),
-// spacing + spacetime tags like every GR kernel. GeoSource::Rmhd selects the ideal-MHD
+// slug (the runtime's mhd_geom_suffix — "_sph", never the hydro DOF-lift "_sph_swirl") and the
+// spacetime tag like every GR kernel. GeoSource::Rmhd selects the ideal-MHD
 // stress in the covariant contraction; unfused (the geo source reads prim.mag).
 fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
@@ -1090,7 +1055,7 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
 }
 
 // the GRMHD cons->prim: the metric-aware KKC recovery at the volume-weighted centroid.
-// name mirrors the rhd GR c2p (`rmhd_c2p[_logr]{_schw|_ks}_{ndim}d`).
+// name mirrors the rhd GR c2p (`rmhd_c2p{_schw|_ks}_{ndim}d`).
 fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
     let name = format!(
         "rmhd_c2p{}{}_{ndim}d",
@@ -1274,8 +1239,8 @@ fn gen_rmhd_ct_curl_3d_dir(out_dir: &str, dir: u8, geom: Geom) {
 // (1/r) d_r(r E_phi) metric; dir=0 is flat. name matches the geom_suffix dispatch "_cyl_rz".
 fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_cyl_rz_gv(dir as usize, &geom.spacing);
-    // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
-    // curl that reads the true face radii, matching the runtime ct_curl dispatch.
+    // the radial spacing is a runtime `map_kind` scalar, not a name axis: a log-radial grid
+    // selects the geometric-mean curl (true face radii) in-kernel, matching the runtime ct_curl.
     emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rz"), 2, &k, &writes);
 }
 
@@ -1285,8 +1250,8 @@ fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
 // geom_suffix dispatch "_sph".
 fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_2d_sph_gv(dir as usize, &geom.spacing);
-    // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
-    // curl that reads the true face radii, matching the runtime ct_curl dispatch.
+    // the radial spacing is a runtime `map_kind` scalar, not a name axis: a log-radial grid
+    // selects the geometric-mean curl (true face radii) in-kernel, matching the runtime ct_curl.
     emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph"), 2, &k, &writes);
 }
 
@@ -1365,8 +1330,8 @@ fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
 // (mirror of r-z's dir=1); dir=1 is flat. name matches the geom_suffix dispatch "_cyl_rphi".
 fn gen_rmhd_ct_curl_cyl_rphi(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_cyl_rphi_gv(dir as usize, &geom.spacing);
-    // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
-    // curl that reads the true face radii, matching the runtime ct_curl dispatch.
+    // the radial spacing is a runtime `map_kind` scalar, not a name axis: a log-radial grid
+    // selects the geometric-mean curl (true face radii) in-kernel, matching the runtime ct_curl.
     emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rphi"), 2, &k, &writes);
 }
 
@@ -1462,7 +1427,7 @@ fn gen_rhd_kerr_ghost_fill(out_dir: &str, geom: Geom) {
 
 // the spinning-kerr RMHD ghost fill: the velocity w = v^phi + q v^r copy PLUS the cell-B, whose
 // out-of-plane B^phi rides the same dragging manifold via w_B = B^phi + q B^r. no geom-suffix (the
-// MHD ghost dispatch keys on spacing + spacetime only). kerr-only.
+// MHD ghost dispatch keys on the spacetime tag only). kerr-only.
 fn gen_rmhd_kerr_ghost_fill(out_dir: &str, geom: &Geom) {
     assert!(geom.spacetime == Spacetime::Kerr, "the rmhd kerr ghost fill is kerr-only");
     let name = format!("rmhd_ghost_fill{}_2d", geom.spacetime_suffix());
@@ -1631,7 +1596,8 @@ fn main() {
     // GR (ingoing Kerr-Schild) RHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
     // densitized godunov + KS coordinate wave speeds (the radial shift rides the flux fan). 1D radial
     // (the through-horizon accretion target); the inner boundary can sit BELOW 2M where the flow is
-    // unconditionally ingoing. uniform + log-radial grids, tagged `_sph[_logr]_ks`.
+    // unconditionally ingoing. uniform + log-radial grids share one kernel tagged `_sph_ks` (the
+    // radial spacing is a runtime `map_kind` scalar, not a name axis).
     for ndim in 1u8..=2 {
         let ks = Geom::sph(ndim).kerr_schild();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
