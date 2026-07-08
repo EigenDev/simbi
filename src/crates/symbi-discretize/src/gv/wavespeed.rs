@@ -114,6 +114,21 @@ fn wave_speed_map_writes(root: NodeId) -> Vec<(String, FieldBind, NodeId)> {
     vec![("lambda".to_string(), FieldRef::Scratch.into(), root)]
 }
 
+/// the gridded cell-CENTER coordinate on axis `d`, SPACING-AWARE: the geometric mean of the bounding
+/// faces on a `Log` axis, the arithmetic midpoint on a `Uniform` one. every GR wave-speed map MUST
+/// evaluate the metric (lapse alpha, shift beta^r, the h_c = sqrt(gamma_cc) scale factors) at this
+/// radius — the uniform `x_lo + (i + 1/2) dx` formula evaluates the metric at ~r_min for EVERY cell
+/// on a log grid (alpha^2/beta^r/scale factors suppressed by f(r_min)/f(r)), overestimating dt into a
+/// silent CFL violation. bit-identical to the old uniform formula on a `Uniform` axis
+/// (`face_at(0) + 1/2 dx = x_lo + (i + 1/2) dx`). single source shared by every wave-speed map.
+fn gv_cell_center(d: usize, spacing: &[Spacing]) -> Gv {
+    let half = Gv::from_f64(0.5);
+    match spacing[d] {
+        Spacing::Uniform => gv_axis_face_at(d, spacing[d], 0) + half * Gv::scalar(&format!("dx_{d}")),
+        Spacing::Log => (gv_axis_face_at(d, spacing[d], 0) * gv_axis_face_at(d, spacing[d], 1)).sqrt(),
+    }
+}
+
 
 /// trace the COMPLETE ideal-gas Euler CFL wave-speed map at `S = Gv` — the Newtonian regime
 /// (which also drives the isothermal CFL at gamma->1) or `Rhd`. reads rho/pre + the gridded
@@ -137,13 +152,11 @@ where
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
     // the gridded normal velocities only; the non-gridded slots (cyl r-z's v_phi) stay ZERO and
     // never enter the graph — `wave_speeds_axis` reads only the normal velocity `vel[axes[d]]`.
-    let half_c = Gv::from_f64(0.5);
-    // the cell-centroid coordinate on the grid axis carrying COORDINATE `target` (radial = 0, polar =
-    // 1), for the physical-velocity scale factors below. `None` if that coordinate is not a grid axis.
+    // the cell-CENTER coordinate on the grid axis carrying COORDINATE `target` (radial = 0, polar =
+    // 1), for the physical-velocity scale factors below. spacing-aware (log grids evaluate the metric
+    // scale factors at the geometric-mean radius, not ~r_min). `None` if `target` is not a grid axis.
     let coord_at = |target: usize| -> Option<Gv> {
-        axes.iter().position(|&c| c == target).map(|d| {
-            Gv::scalar(&format!("x_lo_{d}")) + (Gv::coord(d as u8) + half_c) * Gv::scalar(&format!("dx_{d}"))
-        })
+        axes.iter().position(|&c| c == target).map(|d| gv_cell_center(d, spacing))
     };
     let mut vel = [Gv::ZERO; 3];
     for d in 0..ndim {
@@ -192,8 +205,9 @@ where
         Spacetime::Minkowski => None,
         _ => {
             let d_r = axes.iter().position(|&c| c == 0).expect("GR wave-speed map needs a radial axis");
-            Some(Gv::scalar(&format!("x_lo_{d_r}"))
-                + (Gv::coord(d_r as u8) + half) * Gv::scalar(&format!("dx_{d_r}")))
+            // spacing-aware: the lapse/shift are evaluated at the geometric-mean radius on a log grid,
+            // not the uniform ~r_min the old `x_lo + (i+1/2) dx` gave (silent CFL violation on log GR).
+            Some(gv_cell_center(d_r, spacing))
         }
     };
     let mut lambda = Gv::ZERO;
@@ -256,18 +270,11 @@ pub fn gr_light_cone_wave_speed_map_gv(
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
-    // gridded cell-center positions (log-aware via the face map: the geometric mean of the
-    // bounding faces on a log axis, the midpoint on a uniform one).
-    let half = Gv::from_f64(0.5);
-    let center = |d: usize| -> Gv {
-        match spacing[d] {
-            Spacing::Uniform => gv_axis_face_at(d, spacing[d], 0) + half * Gv::scalar(&format!("dx_{d}")),
-            Spacing::Log => (gv_axis_face_at(d, spacing[d], 0) * gv_axis_face_at(d, spacing[d], 1)).sqrt(),
-        }
-    };
+    // gridded cell-center positions, spacing-aware (log = geometric mean of faces, uniform = midpoint)
+    // via the shared `gv_cell_center`; ungridded slots take the exact equatorial/azimuthal constant.
     let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
         match axes.iter().position(|&a| a == c) {
-            Some(d) => center(d),
+            Some(d) => gv_cell_center(d, spacing),
             None => gv_ungridded_slot(coords, c),
         }
     }));
@@ -351,9 +358,11 @@ pub fn kerr_wave_speed_map_gv(
     );
     begin_trace();
     let inv_w = cfl_inv_widths_gv(coords, spacing, axes, ndim);
-    let half = Gv::from_f64(0.5);
-    let r = Gv::scalar("x_lo_0") + (Gv::coord(0) + half) * Gv::scalar("dx_0");
-    let th = Gv::scalar("x_lo_1") + (Gv::coord(1) + half) * Gv::scalar("dx_1");
+    // spacing-aware cell centers: the radial axis may be LOG (kerr log-radial is baked), so the
+    // metric (lapse, shift, gamma^{cc}) must evaluate at the geometric-mean radius, not the uniform
+    // ~r_min. theta is uniform -> bit-identical to the old midpoint.
+    let r = gv_cell_center(0, spacing);
+    let th = gv_cell_center(1, spacing);
     let mass = Gv::scalar("schwarzschild_mass");
     let spin = Gv::scalar("kerr_spin");
     let g = KerrKS { mass, spin };
@@ -830,4 +839,66 @@ pub fn imhd_wave_speeds_cell_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
         writes.push((format!("ws_r_{d}"), format!("wave_speed_r[{d}]").into(), lmax.node()));
     }
     (end_trace(), writes)
+}
+
+
+#[cfg(test)]
+mod m1_log_radius_tests {
+    // M1 regression: the GR wave-speed maps must evaluate the metric at the SPACING-AWARE cell
+    // center. on a log axis that is the geometric mean of the bounding faces (r_min * 10^((i+1/2)
+    // slope)); the old uniform `x_lo + (i+1/2) dx` formula put every cell at ~r_min, suppressing
+    // alpha^2 / beta^r / the scale factors and overestimating dt (a silent CFL violation).
+    use super::*;
+    use symbi_ir::gv::{begin_trace, end_trace, with_trace};
+    use symbi_ir::graph::NodeId;
+
+    fn eval(out: NodeId, values: &[(&str, f64)]) -> f64 {
+        use symbi_ir::backends::interp::{Backend, Cpu};
+        use symbi_ir::passes::scalarize::scalarize;
+        let (lowered, param_order) = with_trace(|t| {
+            let lowered = scalarize(t.graph(), out, "m1_center");
+            let params: Vec<String> = lowered.params.iter().map(|p| p.name.clone()).collect();
+            (lowered, params)
+        });
+        let inputs: Vec<f64> = param_order
+            .iter()
+            .map(|pn| {
+                values
+                    .iter()
+                    .find(|(n, _)| *n == pn.as_str())
+                    .map(|(_, v)| *v)
+                    .unwrap_or_else(|| panic!("eval: missing param '{pn}'"))
+            })
+            .collect();
+        Cpu.eval_elemental(&lowered, &inputs)[0]
+    }
+
+    #[test]
+    fn cell_center_is_geometric_mean_on_log_axis() {
+        begin_trace();
+        let node = gv_cell_center(0, &[Spacing::Log]).node();
+        let (r_min, slope, i) = (3.0_f64, 0.02_f64, 10.0_f64);
+        let got = eval(node, &[("x_lo_0", r_min), ("dx_0", slope), ("_coord_0", i)]);
+        end_trace();
+        let geomean = r_min * 10f64.powf((i + 0.5) * slope); // sqrt(face_i * face_{i+1})
+        let old_uniform_bug = r_min + (i + 0.5) * slope;
+        assert!(
+            (got - geomean).abs() < 1e-10,
+            "log cell center {got} != geometric mean {geomean} (metric radius wrong on log grid)"
+        );
+        assert!(
+            (got - old_uniform_bug).abs() > 1e-3,
+            "M1 fix is a no-op: still the uniform x_lo + (i+1/2) dx radius"
+        );
+    }
+
+    #[test]
+    fn cell_center_is_bit_identical_on_uniform_axis() {
+        begin_trace();
+        let node = gv_cell_center(0, &[Spacing::Uniform]).node();
+        let (x_lo, dx, i) = (2.0_f64, 0.5_f64, 7.0_f64);
+        let got = eval(node, &[("x_lo_0", x_lo), ("dx_0", dx), ("_coord_0", i)]);
+        end_trace();
+        assert_eq!(got, x_lo + (i + 0.5) * dx, "uniform center must equal the old formula bit-for-bit");
+    }
 }
