@@ -519,7 +519,7 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
         }
         (Spacetime::Minkowski, _) => unreachable!("the GR cell wave speeds are baked only for a curved spacetime"),
     };
-    let regime = RmhdGr { metric: SpatialMetric { gamma: gm, gamma_inv: gm_inv }, alpha };
+    let regime = RmhdGr { metric: SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv)), alpha };
     let mut writes = Vec::with_capacity(2 * ndim);
     for d in 0..ndim {
         let nhat = Tensor::<Gv, 3>::unit(axes[d]);

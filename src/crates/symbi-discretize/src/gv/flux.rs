@@ -7,7 +7,7 @@
 use super::*;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::RmhdGr;
-use symbi_hydro::spatial_metric::SpatialMetric;
+use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 
@@ -437,7 +437,7 @@ where
     } else {
         (left, right)
     };
-    let regime = RhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
+    let regime = RhdGr { metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)), alpha };
     let coord_n = axes[dir as usize];
     // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
     // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
@@ -445,7 +445,7 @@ where
     // it cannot under-bound near the boundary of the physical set; the low-order update keeps the
     // conserved state inside the physical cone.
     let (s_l, s_r) = if rusanov {
-        let lam = alpha * regime.metric.gamma_inv[(coord_n, coord_n)].sqrt();
+        let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
         (Gv::ZERO - lam, lam)
     } else {
         regime.extremal_speeds(&eos, &left, &right, &nhat)
@@ -839,14 +839,14 @@ pub fn rmhd_flux_gr_gv(
     } else {
         (left, right)
     };
-    let regime = RmhdGr { metric: SpatialMetric { gamma, gamma_inv }, alpha };
+    let regime = RmhdGr { metric: SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv)), alpha };
     // RUSANOV / local Lax-Friedrichs mode (the FOFC first-order fallback): the LIGHT-CONE speeds
     // s = +/- alpha sqrt(gamma^{nn}) — the STATE-INDEPENDENT maximal signal bound (the shift is
     // applied by the has_shift fan below). this is the provably admissibility-preserving low-order
     // scheme: unlike the state-dependent extremal speeds, it cannot under-bound near the boundary of
     // the physical set, so the update keeps the conserved state inside the physical cone.
     let (s_l, s_r) = if rusanov {
-        let lam = alpha * regime.metric.gamma_inv[(coord_n, coord_n)].sqrt();
+        let lam = alpha * regime.metric.gamma_inv.diag(coord_n).sqrt();
         (Gv::ZERO - lam, lam)
     } else {
         regime.extremal_speeds(&eos, &left, &right, &nhat)

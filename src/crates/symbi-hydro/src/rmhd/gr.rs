@@ -176,6 +176,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
 mod tests {
     use super::*;
     use crate::eos::IdealGas;
+    use crate::spatial_metric::{Gamma, GammaInv};
     use symbi_algebra::Matrix;
 
     fn approx(a: f64, b: f64) -> bool {
@@ -195,7 +196,7 @@ mod tests {
                 [0.3 / det, 0.0, 1.5 / det],
             ],
         };
-        SpatialMetric { gamma, gamma_inv }
+        SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma_inv))
     }
 
     #[test]

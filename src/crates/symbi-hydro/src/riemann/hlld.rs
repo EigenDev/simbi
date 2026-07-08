@@ -1033,6 +1033,7 @@ pub fn hlld_isothermal<S: Scalar, const D: usize>(
 mod tests {
     use super::*;
     use crate::rmhd::{Rmhd, RmhdGr};
+    use crate::spatial_metric::{Gamma, GammaInv};
     use crate::state::{Prim, PrimG};
     use crate::eos::{IdealGas, Isothermal};
 
@@ -1215,10 +1216,10 @@ mod tests {
     // contraction in the HLLD fan WITHOUT the r^2 blow-up that would map coordinate B to an
     // unphysical ultra-low-beta physical field.
     fn mild_curved_metric() -> SpatialMetric<f64, 3> {
-        SpatialMetric {
-            gamma: symbi_algebra::Matrix::diag(Tensor::new([1.3, 1.15, 1.15])),
-            gamma_inv: symbi_algebra::Matrix::diag(Tensor::new([1.0 / 1.3, 1.0 / 1.15, 1.0 / 1.15])),
-        }
+        SpatialMetric::new(
+            Gamma::new(symbi_algebra::Matrix::diag(Tensor::new([1.3, 1.15, 1.15]))),
+            GammaInv::new(symbi_algebra::Matrix::diag(Tensor::new([1.0 / 1.3, 1.0 / 1.15, 1.0 / 1.15]))),
+        )
     }
 
     // a MILD NON-DIAGONAL SPD spatial metric (the kerr-class case: off-diagonal gamma_r_phi-type
@@ -1230,7 +1231,7 @@ mod tests {
             [0.2, 1.15, 0.1],
             [0.05, 0.1, 1.15],
         ]);
-        SpatialMetric { gamma, gamma_inv: gamma.inv() }
+        SpatialMetric::new(Gamma::new(gamma), GammaInv::new(gamma.inv()))
     }
 
     #[test]

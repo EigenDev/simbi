@@ -122,6 +122,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
 mod tests {
     use super::*;
     use crate::eos::IdealGas;
+    use crate::spatial_metric::{Gamma, GammaInv};
     use symbi_algebra::Matrix;
 
     fn approx(a: f64, b: f64) -> bool {
@@ -154,10 +155,10 @@ mod tests {
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let (f, vr) = (0.8_f64, 0.2_f64);
         let grr = 1.0 / f;
-        let metric = SpatialMetric::<f64, 1> {
-            gamma: Matrix::diag(Tensor::new([grr])),
-            gamma_inv: Matrix::diag(Tensor::new([f])),
-        };
+        let metric = SpatialMetric::<f64, 1>::new(
+            Gamma::new(Matrix::diag(Tensor::new([grr]))),
+            GammaInv::new(Matrix::diag(Tensor::new([f]))),
+        );
         let gr = RhdGr { metric, alpha: f.sqrt() };
         let prim = Prim { rho: 1.0, vel: Tensor::new([vr]), pre: 0.1 };
         let c = gr.to_conserved(&eos, &prim);

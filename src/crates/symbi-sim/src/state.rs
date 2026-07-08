@@ -1552,7 +1552,7 @@ where
     /// is exact per cell. flat (Minkowski) keeps the orthonormal `to_conserved`.
     pub fn seed_cell(&self, coord: [isize; D], prim: &<R as Regime<Sc, DOF>>::Prim) {
         use symbi_hydro::state::SeedableCons;
-        use symbi_hydro::spatial_metric::SpatialMetric;
+        use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
         let cons = if matches!(self.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
             <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim)
         } else {
@@ -1580,10 +1580,10 @@ where
                     Sc::ZERO
                 }
             }));
-            let sm = SpatialMetric {
-                gamma: <M as Metric<Sc, DOF>>::spatial_metric(&self.physics.metric, x_dof),
-                gamma_inv: <M as Metric<Sc, DOF>>::spatial_metric_inv(&self.physics.metric, x_dof),
-            };
+            let sm = SpatialMetric::new(
+                Gamma::new(<M as Metric<Sc, DOF>>::spatial_metric(&self.physics.metric, x_dof)),
+                GammaInv::new(<M as Metric<Sc, DOF>>::spatial_metric_inv(&self.physics.metric, x_dof)),
+            );
             let alpha = <M as Metric<Sc, DOF>>::lapse(&self.physics.metric, x_dof);
             <R as Regime<Sc, DOF>>::to_conserved_covariant(
                 &self.physics.regime, &self.physics.eos, prim, &sm, alpha,

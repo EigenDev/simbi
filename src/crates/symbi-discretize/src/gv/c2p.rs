@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_hydro::spatial_metric::SpatialMetric;
+use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
 use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
@@ -186,7 +186,7 @@ where
         }
         (Spacetime::Minkowski, _) => unreachable!("the GR c2p is baked only for a curved spacetime"),
     };
-    let metric = SpatialMetric::<Gv, D> { gamma: gm, gamma_inv: gm_inv };
+    let metric = SpatialMetric::<Gv, D>::new(Gamma::new(gm), GammaInv::new(gm_inv));
 
     let cons = Cons::<Gv, D> { den, mom: Tensor::new(mom), nrg };
     let prim = rhd_recover(&IdealGas { gamma }, &cons, &metric, max_iters);
@@ -296,7 +296,7 @@ pub fn rmhd_c2p_gr_gv(
         }
         (Spacetime::Minkowski, _) => unreachable!("the GRMHD c2p is baked only for a curved spacetime"),
     };
-    let metric = SpatialMetric { gamma: gm, gamma_inv: gm_inv };
+    let metric = SpatialMetric::new(Gamma::new(gm), GammaInv::new(gm_inv));
 
     let cons = MhdCons::<Gv, 3> {
         hydro: Cons { den, mom: Tensor::new(mom), nrg },

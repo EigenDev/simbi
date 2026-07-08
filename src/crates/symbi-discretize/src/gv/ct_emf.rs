@@ -60,10 +60,10 @@ fn gr_spatial_metric_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) 
     macro_rules! sm {
         ($m:expr, $ty:ty) => {{
             let m = $m;
-            SpatialMetric {
-                gamma: <$ty as Metric<Gv, 3>>::spatial_metric(&m, x),
-                gamma_inv: <$ty as Metric<Gv, 3>>::spatial_metric_inv(&m, x),
-            }
+            SpatialMetric::new(
+                Gamma::new(<$ty as Metric<Gv, 3>>::spatial_metric(&m, x)),
+                GammaInv::new(<$ty as Metric<Gv, 3>>::spatial_metric_inv(&m, x)),
+            )
         }};
     }
     match (spacetime, coords) {
