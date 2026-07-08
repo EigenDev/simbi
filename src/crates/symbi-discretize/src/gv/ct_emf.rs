@@ -971,9 +971,11 @@ fn uct_master_emf(cx: &UctDir, cy: &UctDir, vbar_x: Gv, vbar_y: Gv, by_e: Gv, by
 /// composition is LINEAR in the faces (all the wave-speed nonlinearity lives UPSTREAM, in cx/cy),
 /// `symbi_ir::proof::LinForm` reads off each face's exact coefficient polynomial, and the upwind
 /// invariant — a^L weights the UPWIND face (by_w for +x, bx_s for +y) — becomes a coefficient
-/// check at graph-build time. instant, and it covers ALL uct emf kernels at once: every one of
-/// them composes through `uct_master_emf`. `swap` passes by_w/by_e in each other's argument slots
-/// to inject the ct_emf.rs anti-upwind bug, for the negative control.
+/// check at graph-build time. instant, and it covers every emf kernel built on the MASTER form
+/// (`uct_master_emf`: nmhd/imhd HLL + HLLD, rmhd HLL, GR ortho). it does NOT cover the wave-sum HLLD
+/// EMF (`rmhd_edge_emf_uct_hlld_gv` / `_gr_gv`, M&DZ Eq. 39), which does not route through this form.
+/// `swap` passes by_w/by_e in each other's argument slots to inject the ct_emf.rs anti-upwind bug,
+/// for the negative control.
 #[doc(hidden)]
 pub fn uct_master_emf_proof_kernel(swap: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();

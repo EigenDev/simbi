@@ -7,12 +7,15 @@
 // loop for N steps and watching the magnetic energy, it reads the invariant
 // straight off the traced DAG at graph-build time.
 //
-// every uct emf kernel (rmhd / nmhd-hllc / nmhd-hlld / imhd-hlld / rmhd-hlld)
-// composes through the SAME `uct_master_emf`. `uct_master_emf_proof_kernel` traces
-// it in isolation with symbolic param leaves, so the result is LINEAR in the four
-// staggered face reads {by_w, by_e, bx_n, bx_s} (all the wave-speed nonlinearity
-// lives upstream in cx/cy, which here are opaque scalars al/ar/dl/dr). the master
-// form is
+// the MASTER-FORM uct emf kernels — the solver-agnostic `eq:emf2D` composition (nmhd/imhd HLL +
+// HLLD, rmhd HLL, and the GR ortho path) — all compose through the SAME `uct_master_emf`; THIS proof
+// covers exactly those. it does NOT cover the wave-sum HLLD EMF kernels `rmhd_edge_emf_uct_hlld_gv` /
+// `rmhd_edge_emf_uct_hlld_gr_gv`, which assemble centered advection + a dissipative Phi (M&DZ Eq. 39)
+// rather than the master coefficient form; their dissipation-sign pairing is NOT proven here (M8 —
+// open). `uct_master_emf_proof_kernel` traces the master form in isolation with symbolic param
+// leaves, so the result is LINEAR in the four staggered face reads {by_w, by_e, bx_n, bx_s} (all the
+// wave-speed nonlinearity lives upstream in cx/cy, which here are opaque scalars al/ar/dl/dr). the
+// master form is
 //   emf = -vbar_x (a^L by_w + a^R by_e) + (d^R by_e - d^L by_w)
 //       + vbar_y (a^L by_s + a^R by_n) - (d^R by_n - d^L by_s).
 // `LinForm` extracts each face's coefficient polynomial; the upwind invariant is

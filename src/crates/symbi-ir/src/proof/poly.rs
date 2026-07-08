@@ -184,6 +184,22 @@ impl Poly {
         p
     }
 
+    /// the opaque `sqrt(f(r))` metric-lapse symbol at RADIAL half-unit offset `two_m` — the GR
+    /// analog of `sin_sym`, keyed by the radial (axis 0) offset the sqrt argument resolves to (a
+    /// face has two_m = 2*offset, a cell center two_m = 2*c + 1). the GR curl's `sqrt(gamma)` weight
+    /// (Schwarzschild r/sqrt(f), Kerr-Schild r*sqrt(h)) carries this factor at each radial face;
+    /// keying by the global radial edge lets the div-weight `sqrt(f)@<2m>` cancel the curl's
+    /// `1/sqrt(f)@<2m>` at the SAME face (a rational num/den cancellation), and lets `shift_poly_coords`
+    /// remap it across the divergence stencil so adjacent faces stay distinct. distinct offsets have
+    /// no polynomial relation (sqrt(f) at r vs r+dr do not simplify), so an opaque symbol is exact.
+    pub fn sqrt_f_sym(two_m: i64) -> Poly {
+        let mut p = Poly::zero();
+        let mut mono = BTreeMap::new();
+        mono.insert(format!("sqrt_f@{two_m}"), 1u32);
+        p.terms.insert(mono, 1);
+        p
+    }
+
     /// rename one variable to another in-place across all monomials (used to remap
     /// an opaque `sin@m` symbol to `sin@(m + delta)` under a theta shift).
     pub(crate) fn rename_one(&self, from: &str, to: &str) -> Poly {
@@ -314,27 +330,36 @@ pub(crate) fn shift_poly_coords(p: &Poly, delta: &[i64]) -> Poly {
             out = out.subst_shift(&format!("c_{ax}"), d);
         }
     }
-    // remap sin/cos symbols by the theta shift (axis 1).
-    let dth = *delta.get(1).unwrap_or(&0);
-    if dth != 0 {
-        // collect the theta-keyed trig symbols present, then rename each by +2*dth half-units.
-        for prefix in ["sin_th@", "cos_th@"] {
-            let mut syms: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-            for mono in out.terms.keys() {
-                for name in mono.keys() {
-                    if name.starts_with(prefix) {
-                        syms.insert(name.clone());
-                    }
+    // remap the opaque metric symbols by the shift along their axis: the trig sin_th@/cos_th@ track
+    // theta (axis 1); the GR lapse sqrt_f@ tracks the radius (axis 0). each symbol at half-unit
+    // offset <2m> moves to <2m + 2*delta[ax]> so a shifted contribution's edge symbol aligns with
+    // the neighbor it telescopes against.
+    remap_edge_symbols(&mut out, &["sin_th@", "cos_th@"], *delta.get(1).unwrap_or(&0));
+    remap_edge_symbols(&mut out, &["sqrt_f@"], *delta.first().unwrap_or(&0));
+    out
+}
+
+/// rename every opaque edge symbol with one of `prefixes` from `@<2m>` to `@<2m + 2*shift>` (a
+/// half-unit-keyed translation along one axis). a zero shift leaves them untouched.
+fn remap_edge_symbols(p: &mut Poly, prefixes: &[&str], shift: i64) {
+    if shift == 0 {
+        return;
+    }
+    for prefix in prefixes {
+        let mut syms: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for mono in p.terms.keys() {
+            for name in mono.keys() {
+                if name.starts_with(prefix) {
+                    syms.insert(name.clone());
                 }
             }
-            for s in syms {
-                let half_units: i64 = s[prefix.len()..].parse().expect("malformed trig symbol");
-                let to = format!("{}{}", prefix, half_units + 2 * dth);
-                out = out.rename_one(&s, &to);
-            }
+        }
+        for s in syms {
+            let half_units: i64 = s[prefix.len()..].parse().expect("malformed edge symbol");
+            let to = format!("{}{}", prefix, half_units + 2 * shift);
+            *p = p.rename_one(&s, &to);
         }
     }
-    out
 }
 
 /// a field read at a known integer stencil offset — the LEAF of a curl DAG. the

@@ -137,6 +137,16 @@ fn eval_rat_elementwise(
             RValue::Scalar(p) => RValue::Scalar(p.neg()),
             RValue::Lin(lf) => RValue::Lin(lf.neg_form()),
         },
+        ElementWiseOp::Abs => {
+            // the ONLY abs in a metric volume factor is |sin(theta)| (sqrt_det_gamma's angular
+            // measure); the CT domain theta in (0, pi) has sin >= 0, so |sin| = sin. the opaque
+            // sin_th@ symbol already denotes that non-negative quantity, hence abs is the identity
+            // here. (a field-linear argument would be a nonlinear |B|, which no curl weight contains.)
+            match eval_rat(graph, ins[0], fields, scalars) {
+                RValue::Scalar(r) => RValue::Scalar(r),
+                RValue::Lin(_) => panic!("proof(rat): abs of a field-dependent argument — nonlinear"),
+            }
+        }
         ElementWiseOp::Cast(_) => {
             // the I32->F64 promotion of a `_coord_N` (the only Cast the curl emits);
             // a no-op for the symbolic value (c_N is already a poly var).
@@ -171,6 +181,17 @@ fn eval_rat_elementwise(
                 RValue::Lin(_) => panic!("proof(rat): cos of a field-dependent argument — nonlinear"),
             };
             RValue::Scalar(RatFun::from_poly(cos_symbol(&arg)))
+        }
+        ElementWiseOp::Sqrt => {
+            // sqrt of a radial metric factor f(r) (Schwarzschild f = 1 - 2M/r, Kerr-Schild h =
+            // 1 + 2M/r) -> the opaque `sqrt_f@<2m>` symbol keyed by the radial offset the argument's
+            // r = x_lo_0 + (c_0 + m) dx_0 resolves to. sqrt of a field-linear form would be nonlinear
+            // (a curl weight is never sqrt of a field).
+            let arg = match eval_rat(graph, ins[0], fields, scalars) {
+                RValue::Scalar(r) => r,
+                RValue::Lin(_) => panic!("proof(rat): sqrt of a field-dependent argument — nonlinear"),
+            };
+            RValue::Scalar(RatFun::from_poly(Poly::sqrt_f_sym(radial_offset_two_m(&arg))))
         }
         other => panic!("proof(rat): unsupported element-wise op in curvilinear curl DAG: {other:?}"),
     }
@@ -214,6 +235,24 @@ fn theta_offset_two_m(arg: &RatFun, trig: &str) -> i64 {
     // 2m = 2 * (D*m) / D, must be integral.
     let twice = 2 * dx1_offset;
     assert!(twice % d == 0, "proof(rat): theta offset 2m = {twice}/{d} is not a half-integer multiple of dx_1");
+    twice / d
+}
+
+/// resolve the RADIAL half-unit offset 2m off a `sqrt(f(r))` argument. the argument is a radial
+/// metric factor f(r) = (r +- 2M)/r, whose DENOMINATOR is the radius r = x_lo_0 + (c_0 + m)*dx_0
+/// (affine in c_0; a cell center clears to a /2 denominator, so the coefficients scale by D). read
+/// the offset off the denominator exactly as `theta_offset_two_m` reads it off the trig argument:
+/// D is the x_lo_0 coefficient (1 for a face, 2 for a cleared /2 center), the c_0*dx_0 coefficient
+/// must also be D, and the bare dx_0 coefficient is D*m, so 2m = 2*(D*m)/D. (M rides only in the
+/// numerator, so the denominator is a clean radius — the offset is unambiguous.)
+fn radial_offset_two_m(arg: &RatFun) -> i64 {
+    let d = arg.den.coefficient_of(&["x_lo_0"]);
+    assert!(d != 0, "proof(rat): sqrt(f) argument denominator has no x_lo_0 term — not a radial metric factor");
+    let c0dx0 = arg.den.coefficient_of(&["c_0", "dx_0"]);
+    assert!(c0dx0 == d, "proof(rat): sqrt(f) arg radius has c_0*dx_0 coeff {c0dx0} != x_lo_0 coeff {d}");
+    let dx0_offset = arg.den.coefficient_of(&["dx_0"]);
+    let twice = 2 * dx0_offset;
+    assert!(twice % d == 0, "proof(rat): radial offset 2m = {twice}/{d} is not a half-integer multiple of dx_0");
     twice / d
 }
 
@@ -467,5 +506,28 @@ mod tests {
         cnum.add_assign(&Poly::var("dx_1"));
         let sc = sin_symbol(&RatFun::new(cnum, Poly::constant(2)));
         assert!(sc.terms.keys().next().unwrap().contains_key("sin_th@1"));
+    }
+
+    #[test]
+    fn sqrt_f_symbol_keys_radial_offset_and_shifts() {
+        // f(r) = (r +- 2M)/r; only the DENOMINATOR r = x_lo_0 + (c_0 + m) dx_0 carries the radial
+        // offset, so the numerator is immaterial. face offset 0 -> sqrt_f@0.
+        let mut r0 = Poly::var("x_lo_0");
+        r0.add_assign(&Poly::var("c_0").mul(&Poly::var("dx_0")));
+        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r0.clone())), 0);
+        // face offset +1 -> sqrt_f@2.
+        let mut r1 = r0.clone();
+        r1.add_assign(&Poly::var("dx_0"));
+        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r1)), 2);
+        // cell center (2 x_lo_0 + (2 c_0 + 1) dx_0)/2 -> sqrt_f@1.
+        let mut rc = Poly::var("x_lo_0").mul(&Poly::constant(2));
+        rc.add_assign(&Poly::var("c_0").mul(&Poly::var("dx_0")).mul(&Poly::constant(2)));
+        rc.add_assign(&Poly::var("dx_0"));
+        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), rc)), 1);
+        // the atom remaps under a RADIAL (axis 0) shift — sqrt_f@0 -> sqrt_f@2 (one cell = +2
+        // half-units) — and is UNTOUCHED by a theta (axis 1) shift, so it telescopes only radially.
+        let atom = RatFun::from_poly(Poly::sqrt_f_sym(0));
+        assert!(atom.shift_coords(&[1, 0]).num.terms.keys().next().unwrap().contains_key("sqrt_f@2"));
+        assert!(atom.shift_coords(&[0, 1]).num.terms.keys().next().unwrap().contains_key("sqrt_f@0"));
     }
 }
