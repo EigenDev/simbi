@@ -707,9 +707,9 @@ fn gen_fofc_tagged(out_dir: &str, ndim: u8, prefix: &str, dof_sfx: &str, ncomp: 
     emit_gv(out_dir, &format!("{prefix}_fofc_restore{dof_sfx}_{ndim}d"), ndim, &k, &w);
     let (k, w) = fofc_select_gv(ncomp, has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_select{dof_sfx}_{ndim}d"), ndim, &k, &w);
-    let (k, w) = fofc_probe_gv(has_energy);
+    let (k, w) = fofc_probe_gv(ncomp, has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_probe{dof_sfx}_{ndim}d"), ndim, &k, &w);
-    let (k, w) = fofc_freeze_probe_gv(has_energy);
+    let (k, w) = fofc_freeze_probe_gv(ncomp, has_energy);
     emit_gv(out_dir, &format!("{prefix}_fofc_freeze{dof_sfx}_{ndim}d"), ndim, &k, &w);
     // the face-based flux splice, one kernel per sweep axis: choose FO on faces adjacent to a flagged
     // cell, else HO, so the single re-godunov telescopes conservatively across every fallback boundary.

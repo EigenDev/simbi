@@ -10,6 +10,12 @@
 # flip its spacetime to one that is UNBAKED for that (dims, coords). the IC stays
 # valid (still spherical, r-based), so the run reaches the dispatch and must raise
 # rather than run flat.
+#
+# ALSO covers the sibling loud-rejection guard the review flagged as test-asserted
+# nowhere: a curved spacetime on a NON-relativistic regime (the non-relativistic
+# kernel rows are never baked with a spacetime slug) must be rejected before
+# dispatch — a refactor dropping that guard would silently run flat gravity-free
+# physics on a config that asked for GR.
 # =============================================================================
 import pytest
 
@@ -22,6 +28,7 @@ needs_backend = pytest.mark.skipif(
 )
 
 from simbi_configs.examples.grhd.gr_michel import GrMichel
+from simbi_configs.examples.newtonian.sod import SodProblem
 
 
 class _UnbakedKerrMichel(GrMichel):
@@ -50,3 +57,17 @@ def test_baked_gr_spacetime_still_dispatches():
         assert "no baked GR" not in str(e) and "refusing to run silently" not in str(e), (
             f"the C4 guard wrongly rejected a BAKED GR combo: {e}"
         )
+
+
+class _NewtonianOnSchwarzschild(SodProblem):
+    # a NON-relativistic regime (newtonian) with a curved spacetime: the non-relativistic kernel rows
+    # are never baked with a spacetime slug, so the regime-vs-spacetime guard must reject this before
+    # dispatch rather than run flat gravity-free physics.
+    spacetime: Spacetime = Spacetime.SCHWARZSCHILD
+
+
+@needs_backend
+def test_dispatch_rejects_gr_spacetime_on_nonrelativistic_regime():
+    p = _NewtonianOnSchwarzschild.from_cli(["--resolution", "16"])
+    with pytest.raises(Exception, match="requires a relativistic regime"):
+        runner.run(p, compute_mode="cpu")

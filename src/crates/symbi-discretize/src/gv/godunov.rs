@@ -69,16 +69,24 @@ pub fn fofc_copy_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, F
 /// or, for an energy regime, pressure non-finite or non-positive), else 0. a max-reduce over the
 /// interior is > 0 exactly when some zone needs correcting; a clean substage reduces to 0 and skips
 /// the whole FOFC pass (which would keep the high-order everywhere anyway — bit-identical to skip).
-pub fn fofc_probe_gv(has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn fofc_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
+    let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
     let rho = Gv::field("prim_rho", FieldRef::PrimRho);
-    let physical = if has_energy {
+    let mut physical = if has_energy {
         let pre = Gv::field("prim_pre", FieldRef::PrimPre);
         finite_pos(rho) & finite_pos(pre)
     } else {
         finite_pos(rho)
     };
+    // the full state vector: each velocity component must be FINITE (its SIGN is physical, so no
+    // positivity test). catches a non-finite momentum the density/pressure test misses — notably for
+    // iso, whose only other guard is the density, so a NaN momentum would otherwise ride through the
+    // FOFC gate until the next flux divergence poisons the density one step later.
+    for k in 0..ncomp {
+        physical = physical & finite(Gv::field(&format!("prim_vel_{k}"), FieldRef::PrimVel(k as u8)));
+    }
     let flag = Gv::select(physical, Gv::ZERO, Gv::ONE);
     (end_trace(), vec![("flag".to_string(), FieldRef::Scratch.into(), flag.node())])
 }
@@ -105,16 +113,24 @@ pub fn state_finite_probe_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
 /// physical-constraint-preserving low-order scheme recovers every flagged cell (full first-order
 /// fluxes on all its faces), driving this to zero, so a nonzero count localizes where a PCP
 /// assumption leaks and the run trades a cell's conservation for finiteness.
-pub fn fofc_freeze_probe_gv(has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+pub fn fofc_freeze_probe_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
+    let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
     let x_rho = Gv::field("x_rho", "x_rho");
-    let physical = if has_energy {
+    let mut physical = if has_energy {
         let x_pre = Gv::field("x_pre", "x_pre");
         finite_pos(x_rho) & finite_pos(x_pre)
     } else {
         finite_pos(x_rho)
     };
+    // the freeze count mirrors the select's physicality: each spliced velocity must be FINITE too
+    // (sign is physical), so a non-finite momentum the density/pressure test misses is still counted
+    // (and, in the select, frozen to the stage input) rather than propagated.
+    for k in 0..ncomp {
+        let p = format!("x_vel_{k}");
+        physical = physical & finite(Gv::field(&p, &p));
+    }
     let frozen = Gv::select(physical, Gv::ZERO, Gv::ONE);
     (end_trace(), vec![("freeze".to_string(), "freeze".into(), frozen.node())])
 }
@@ -134,13 +150,21 @@ pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String,
     // NaN), so cmp_eq(0) rejects every non-finite value; the > 0 rejects a vacuum/negative one. a
     // "physical" cell is one whose density (and pressure, when modelled) passes both.
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
+    let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
     let x_rho = Gv::field("x_rho", "x_rho");
-    let physical = if has_energy {
+    let mut physical = if has_energy {
         let x_pre = Gv::field("x_pre", "x_pre");
         finite_pos(x_rho) & finite_pos(x_pre)
     } else {
         finite_pos(x_rho)
     };
+    // the full state vector: each spliced velocity must be FINITE (its sign is physical) — else a
+    // non-finite momentum with a finite density/pressure would be kept and propagated instead of
+    // frozen to the admissible stage input.
+    for k in 0..ncomp {
+        let p = format!("x_vel_{k}");
+        physical = physical & finite(Gv::field(&p, &p));
+    }
     let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
     // the live cons (`x_*`) is read+write IN PLACE: it holds the spliced first-order result and is
     // overwritten with the chosen tier. one slot per component (read path == write path) so the IR
@@ -181,15 +205,20 @@ pub fn fofc_select_with_body_gv(
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
+    let finite = |v: Gv| (v - v).cmp_eq(Gv::ZERO);
     // the spliced first-order result's physicality, IDENTICAL to `fofc_select_gv`: density always,
     // pressure only when the energy is modelled (iso keeps p in a separate cs^2 buffer, not in the
-    // sim prim, so its select gates on the density alone).
+    // sim prim, so its select gates on the density alone), plus finiteness of every velocity component.
     let x_rho = Gv::field("x_rho", "x_rho");
-    let physical_fo = if has_energy {
+    let mut physical_fo = if has_energy {
         finite_pos(x_rho) & finite_pos(Gv::field("x_pre", "x_pre"))
     } else {
         finite_pos(x_rho)
     };
+    for k in 0..ncomp {
+        let p = format!("x_vel_{k}");
+        physical_fo = physical_fo & finite(Gv::field(&p, &p));
+    }
     // the stage input evolved by the body source, INLINE (no buffer, no separate pass).
     let dt = Gv::scalar("dt");
     let us_den = Gv::field("us_den", "us_den");
