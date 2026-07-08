@@ -403,7 +403,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
             ScalarRef::UserParam(i) => *rs.params.get(i as usize)
                 .unwrap_or_else(|| panic!("fused runtime source: param p{i} not provided")),
             other => motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
+                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
                 .unwrap_or_else(|| panic!(
                     "fused runtime source: unresolved scalar {other:?} (dt|a0|ac|mesh_hdil|dx_k|x_lo_k|t|p{{i}})"
                 )),
@@ -483,7 +483,7 @@ fn apply_runtime_source_gpu<const D: usize, const DOF: usize, Mem, Sc>(
                     .get(i as usize)
                     .unwrap_or_else(|| panic!("runtime source gpu: param p{i} not provided")),
             ),
-            other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, other)
+            other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| panic!(
                     "runtime source gpu: unresolved scalar {other:?} (dt | t | x_lo_k | dx_k | p{{i}})"

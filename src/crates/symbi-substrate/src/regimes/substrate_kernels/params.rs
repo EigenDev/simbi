@@ -62,15 +62,26 @@ pub(crate) fn scalars_for<Sc: Scalar + OrderedNumeric>(
 }
 
 /// resolve a GEOMETRY scalar ref to its grid value: `InvDx(ax)` (1/dx, the cartesian CFL width),
-/// `XLo(ax)` (axis origin), `Dx(ax)` (axis step / log-slope). `None` for a non-geometry ref — the
-/// caller's resolver then handles the regime scalars (gamma/theta/dt). because the kernel's declared
-/// refs drive resolution, the SAME resolver serves cartesian (`inv_dx`) and curvilinear
-/// (`x_lo`/`dx`) kernels with no per-geometry branch at the call site.
-pub(crate) fn geom_scalar<const D: usize>(x_lo: &[f64; D], dx: &[f64; D], sref: ScalarRef) -> Option<f64> {
+/// `XLo(ax)` (axis origin), `Dx(ax)` (axis step / log-slope), `MapKind(ax)` (the per-axis spacing
+/// selector the in-kernel face map branches on: 0 = uniform, 1 = log). `None` for a non-geometry
+/// ref — the caller's resolver then handles the regime scalars (gamma/theta/dt). because the
+/// kernel's declared refs drive resolution, the SAME resolver serves cartesian (`inv_dx`) and
+/// curvilinear (`x_lo`/`dx`/`map_kind`) kernels with no per-geometry branch at the call site.
+pub(crate) fn geom_scalar<const D: usize>(
+    x_lo: &[f64; D],
+    dx: &[f64; D],
+    maps: &Option<[symbi_geometry::AxisMap; D]>,
+    sref: ScalarRef,
+) -> Option<f64> {
     match sref {
         ScalarRef::InvDx(ax) => Some(dx[ax as usize].recip()),
         ScalarRef::XLo(ax) => Some(x_lo[ax as usize]),
         ScalarRef::Dx(ax) => Some(dx[ax as usize]),
+        // a Log axis map -> 1.0, else uniform -> 0.0; a None maps is a fully uniform grid.
+        ScalarRef::MapKind(ax) => Some(match maps {
+            Some(m) if !m[ax as usize].is_uniform() => 1.0,
+            _ => 0.0,
+        }),
         _ => None,
     }
 }
@@ -114,14 +125,12 @@ pub(crate) fn physical_geom<const D: usize>(
     )
 }
 
-/// the spacing slug tag, matching the bake-side `Geom::spacing_suffix`: a log-spaced radial axis
-/// (grid index 0) selects the `_logr` curvilinear kernel variant; all-uniform -> "". angular axes
-/// stay uniform. without per-axis coordinate maps the grid is uniform and the tag is empty.
-pub(crate) fn spacing_suffix<const D: usize>(maps: &Option<[symbi_geometry::AxisMap; D]>) -> &'static str {
-    match maps {
-        Some(m) if !m[0].is_uniform() => "_logr",
-        _ => "",
-    }
+/// spacing is now a RUNTIME per-axis value (the `map_kind_{ax}` kernel scalar the in-kernel face map
+/// branches on), NOT a codegen name axis, so ONE kernel per (regime, geometry) serves every spacing
+/// (log-r, log-theta, ...). the name suffix is retired — always "". (retained as a no-op so the
+/// `{sp}` interpolations at the dispatch name sites keep resolving during the transition.)
+pub(crate) fn spacing_suffix<const D: usize>(_maps: &Option<[symbi_geometry::AxisMap; D]>) -> &'static str {
+    ""
 }
 
 /// the per-axis (x_lo, dx) the CURVILINEAR kernel reads as its `x_lo_{ax}` / `dx_{ax}` geom scalars.
@@ -240,7 +249,7 @@ where
             ScalarRef::Dt => dt,
             ScalarRef::Gamma => gamma,
             ScalarRef::Body { idx, field } => body_scalar::<D>(bodies, idx, field),
-            other => geom_scalar(&geom.x_lo, &geom.dx, other)
+            other => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         };
         Sc::from_f64(v)

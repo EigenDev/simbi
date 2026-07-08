@@ -115,6 +115,12 @@ pub enum ScalarRef {
     XLo(u8),
     /// the axis step / log-slope `dx_{ax}`.
     Dx(u8),
+    /// the per-axis SPACING KIND `map_kind_{ax}` — the runtime selector the in-kernel face-position
+    /// map branches on: 0 = uniform (`face = x_lo + i*dx`), 1 = log (`face = x_lo * 10^(i*dx)`).
+    /// makes spacing a per-axis runtime value (log-r, log-theta, ...) instead of a baked codegen
+    /// axis, so one kernel per (regime, geometry) serves every spacing; a moving mesh updates the
+    /// `x_lo`/`dx` scalars on the fly while `map_kind` stays fixed.
+    MapKind(u8),
     /// a moving-mesh rate (`mesh_hdil`, `mesh_adot_{ax}`, `mesh_vtrans_{ax}`).
     Mesh(MeshScalar),
     /// a user-source tunable knob `p{i}`.
@@ -146,6 +152,7 @@ impl ScalarRef {
             ScalarRef::InvDx(ax) => format!("inv_dx_{ax}"),
             ScalarRef::XLo(ax) => format!("x_lo_{ax}"),
             ScalarRef::Dx(ax) => format!("dx_{ax}"),
+            ScalarRef::MapKind(ax) => format!("map_kind_{ax}"),
             ScalarRef::Mesh(m) => m.name(),
             ScalarRef::UserParam(i) => format!("p{i}"),
             ScalarRef::Body { idx, field } => format!("body_{idx}_{}", field.name()),
@@ -179,12 +186,16 @@ impl ScalarRef {
             return Some(ScalarRef::Mesh(m));
         }
 
-        // per-axis geometry. `inv_dx_` must be tried before `dx_` (prefix overlap).
+        // per-axis geometry. `inv_dx_` must be tried before `dx_` (prefix overlap); `map_kind_`
+        // before `map_type_` share only the `map_` stem (exact strip, no overlap).
         if let Some(ax) = name.strip_prefix("inv_dx_") {
             return ax.parse().ok().map(ScalarRef::InvDx);
         }
         if let Some(ax) = name.strip_prefix("x_lo_") {
             return ax.parse().ok().map(ScalarRef::XLo);
+        }
+        if let Some(ax) = name.strip_prefix("map_kind_") {
+            return ax.parse().ok().map(ScalarRef::MapKind);
         }
         if let Some(ax) = name.strip_prefix("dx_") {
             return ax.parse().ok().map(ScalarRef::Dx);

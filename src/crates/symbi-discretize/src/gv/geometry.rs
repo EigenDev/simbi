@@ -199,13 +199,19 @@ pub(crate) fn gv_axis_face_at(ax: usize, spacing: Spacing, offset: i64) -> Gv {
 /// grid axis `ax` — the index-general form of [`gv_axis_face_at`] (which passes the thread
 /// coord). the lattice-map ghost fill evaluates metric coefficients at the SOURCE cell,
 /// whose index is a runtime map expression, not a thread-relative constant offset.
-pub(crate) fn gv_axis_face_at_index(ax: usize, spacing: Spacing, i: Gv) -> Gv {
+pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     let start = Gv::scalar(&format!("x_lo_{ax}"));
     let param = Gv::scalar(&format!("dx_{ax}"));
-    match spacing {
-        Spacing::Uniform => start + i * param,                      // start + i*dx
-        Spacing::Log => start * Gv::from_f64(10.0).powf(i * param), // start * 10^(i*slope)
-    }
+    // spacing is a RUNTIME per-axis value, not a codegen axis: `map_kind_{ax}` selects the face-
+    // position map (0 = uniform `start + i*dx`, 1 = log `start * 10^(i*slope)`), so ONE kernel per
+    // (regime, geometry) serves every spacing (log-r, log-theta, ...) and a moving mesh updates
+    // `x_lo`/`dx` on the fly while the map kind stays fixed. the bake-time `spacing` enum is no
+    // longer read here (kept in the signature during the transition; both branches are traced and
+    // the select discards the unused one, so `map_kind = 0` reproduces the uniform value exactly).
+    let uniform = start + i * param;
+    let log = start * Gv::from_f64(10.0).powf(i * param);
+    let map_kind = Gv::scalar(&format!("map_kind_{ax}"));
+    Gv::select(map_kind.cmp_gt(Gv::from_f64(0.5)), log, uniform)
 }
 
 

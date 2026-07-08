@@ -248,7 +248,7 @@ where
                     .map(|(_, v)| *v).expect("GR MHD flux needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, *other)
+                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
                     .unwrap_or_else(|| panic!("{} flux: unexpected scalar {other:?}", Self::kernel_prefix())),
             ),
             o => panic!("{} flux: unexpected scalar {o:?}", Self::kernel_prefix()),
@@ -371,7 +371,7 @@ where
                     .expect("GR MHD c2p needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, *other)
+                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
                     .unwrap_or_else(|| panic!("{} c2p: unexpected scalar {other:?}", Self::kernel_prefix())),
             ),
             o => panic!("{} c2p: unexpected scalar {o:?}", Self::kernel_prefix()),
@@ -414,7 +414,7 @@ where
                         .map(|(_, v)| *v).expect("GR UCT wave speeds need kerr_spin"),
                 ),
                 ScalarBind::Ref(other) => Sc::from_f64(
-                    geom_scalar(&x_lo_k, &dx_k, *other)
+                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
                         .unwrap_or_else(|| panic!("{} wave_speeds: unexpected scalar {other:?}", Self::kernel_prefix())),
                 ),
                 o => panic!("{} wave_speeds: unexpected scalar {o:?}", Self::kernel_prefix()),
@@ -483,7 +483,7 @@ where
                 ),
                 other => Sc::from_f64(
                     motion_scalar(&sim.motion, geom.coords, D, other)
-                        .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
+                        .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
                         .unwrap_or_else(|| panic!("{} cfl: unexpected scalar {other:?}", Self::kernel_prefix())),
                 ),
             }

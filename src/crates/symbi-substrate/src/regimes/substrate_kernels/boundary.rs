@@ -154,7 +154,7 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarRef::UserParam(i) => Sc::from_f64(
                 *dag.params.get(i as usize).unwrap_or_else(|| panic!("boundary gpu: param p{i} not provided")),
             ),
-            other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, other)
+            other => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, other)
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| panic!("boundary gpu: unresolved scalar {other:?} (t | x_lo_k | dx_k | p{{i}})")),
         }

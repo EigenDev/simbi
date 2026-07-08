@@ -395,11 +395,10 @@ impl Geom {
     // grid axis (index 0) carries the log-spaced zones (geometric-mean cell centers); angular axes
     // stay uniform. all-uniform -> "" (existing kernels unchanged), log radial -> "_logr". the
     // runtime dispatch appends the same tag from the grid's per-axis spacing, so name matches select.
+    // spacing is a RUNTIME per-axis kernel scalar (`map_kind_{ax}`), not a codegen name axis, so a
+    // uniform and a log grid share ONE baked kernel per (regime, geometry); the suffix is retired.
     fn spacing_suffix(&self) -> &'static str {
-        match self.spacing.first() {
-            Some(Spacing::Log) => "_logr",
-            _ => "",
-        }
+        ""
     }
     fn cart(ndim: u8) -> Self {
         Self::make(Coords::Cartesian, ndim, (0..ndim as usize).collect())
@@ -447,14 +446,6 @@ impl Geom {
     // override the default all-uniform spacing (e.g., a log-radial spherical grid).
     fn with_spacing(mut self, spacing: Vec<Spacing>) -> Self {
         self.spacing = spacing;
-        self
-    }
-    // log-spaced radial zones on grid axis 0 (angular axes stay uniform): the curvilinear log
-    // variant of a uniform spherical/cylindrical grid.
-    fn log_radial(mut self) -> Self {
-        if let Some(s) = self.spacing.first_mut() {
-            *s = Spacing::Log;
-        }
         self
     }
     // the cylindrical 2D plane is keyed on the AXIS SET (matching the runtime mhd_geom_suffix):
@@ -1387,34 +1378,6 @@ fn gen_rmhd_ct_curl_cyl_rphi(out_dir: &str, dir: u8, geom: &Geom) {
     emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rphi{}", geom.spacing_suffix()), 2, &k, &writes);
 }
 
-// the SPACING-DEPENDENT flat MHD kernels for a curvilinear chart on a LOG-RADIAL grid (the `_logr`
-// variants: the geometric-mean cell geometry from gv_axis_face_at's Log branch). the normal face
-// flux, edge EMF, c2p, per-cell wave_speeds_cell, snapshot, and ghost fill are spacing-INDEPENDENT
-// and REUSE the uniform instances; only the gas godunov (area-weighted radial divergence +
-// geometric source), the CFL wave-speed map, the out-of-plane bcell predictor, and the 2D in-plane
-// CT curl read the face radii. `geom` must already carry the log-radial spacing. 1D has no CT; 3D
-// (fully gridded, D == DOF) has no out-of-plane bcell and is not emitted here.
-fn gen_curvilinear_mhd_logr(out_dir: &str, ndim: u8, geom: Geom) {
-    gen_rmhd_wave_speed_map(out_dir, ndim, geom.clone());
-    gen_godunov_stage(out_dir, ndim, "rmhd", true, geom.clone(), None);
-    gen_nmhd_wave_speed_map(out_dir, ndim, geom.clone());
-    gen_godunov_stage(out_dir, ndim, "nmhd", true, geom.clone(), None);
-    gen_imhd_wave_speed_map(out_dir, ndim, geom.clone());
-    gen_godunov_stage(out_dir, ndim, "imhd", false, geom.clone(), None);
-    gen_rmhd_bcell_godunov_euler(out_dir, geom.clone(), ndim);
-    gen_rmhd_bcell_godunov_rk2(out_dir, geom.clone(), ndim);
-    if ndim == 2 {
-        for dir in 0..2u8 {
-            match (geom.coords, geom.axes.as_slice()) {
-                (Coords::Spherical, _) => gen_rmhd_ct_curl_2d_sph(out_dir, dir, &geom),
-                (Coords::Cylindrical, [0, 2]) => gen_rmhd_ct_curl_cyl_rz(out_dir, dir, &geom),
-                (Coords::Cylindrical, [0, 1]) => gen_rmhd_ct_curl_cyl_rphi(out_dir, dir, &geom),
-                _ => {}
-            }
-        }
-    }
-}
-
 // the RMHD lattice-map ghost fill (3D): pulls back prim rho/vel/pre + mhd.bcell at the per-axis
 // source coord, with vel_sign flips on vel + B. in-place. the gv multi-axis pullback stencil.
 fn gen_rmhd_ghost_fill(out_dir: &str) {
@@ -1637,12 +1600,11 @@ fn main() {
     // builders as Cartesian with set_geometry(Spherical): area-weighted divergence +
     // geometric pressure source (+ inertial for ndim>=2) + per-cell CFL widths. the
     // adiabatic CFL shares the iso wave-speed map.
-    // both the uniform and the log-radial spherical grid: the log variant bakes the geometric-mean
-    // cell geometry (gv_axis_face_at's Log branch) into the same godunov + wave-speed stages, tagged
-    // `_logr`. the runtime selects between them from the grid's radial spacing.
+    // ONE spherical curvilinear hydro kernel per ndim serves both uniform and log-radial grids: the
+    // in-kernel face map branches on the per-axis `map_kind` runtime scalar, so no separate `_logr`
+    // bake. (the same collapse applies to every curvilinear + GR family below.)
     for ndim in 1u8..=3 {
         gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim));
-        gen_curvilinear_hydro(&out_dir, ndim, Geom::sph(ndim).log_radial());
     }
     // GR (Schwarzschild) RHD godunov stage — the lapse-densitized relativistic gas update on a
     // spherically-symmetric BH background (`rhd_godunov_stage_sph_schw_{1,2}d`). only the
@@ -1660,16 +1622,6 @@ fn main() {
         for dir in 0..ndim {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, bh.clone());
         }
-        // the log-radial Schwarzschild grid (the bondi accretion zones span many decades in r):
-        // same lapse-densitized stage + GR wave speeds on geometric-mean cell geometry, tagged
-        // `_sph_logr_schw`.
-        let bh_log = Geom::sph(ndim).schwarzschild().log_radial();
-        gen_godunov_stage(&out_dir, ndim, "rhd", true, bh_log.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, ndim, bh_log.clone());
-        gen_rhd_c2p_gr(&out_dir, ndim, 20, bh_log.clone());
-        for dir in 0..ndim {
-            gen_rhd_face_flux_gr(&out_dir, ndim, dir, bh_log.clone());
-        }
     }
     // GR (ingoing Kerr-Schild) RHD — the HORIZON-PENETRATING chart (regular across r = 2M): the KS
     // densitized godunov + KS coordinate wave speeds (the radial shift rides the flux fan). 1D radial
@@ -1682,13 +1634,6 @@ fn main() {
         gen_rhd_c2p_gr(&out_dir, ndim, 20, ks.clone());
         for dir in 0..ndim {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks.clone());
-        }
-        let ks_log = Geom::sph(ndim).kerr_schild().log_radial();
-        gen_godunov_stage(&out_dir, ndim, "rhd", true, ks_log.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, ndim, ks_log.clone());
-        gen_rhd_c2p_gr(&out_dir, ndim, 20, ks_log.clone());
-        for dir in 0..ndim {
-            gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks_log.clone());
         }
     }
     // GR CARTESIAN kerr-schild (design 45): the (x, y) equatorial slice of the horizon-penetrating
@@ -1746,7 +1691,7 @@ fn main() {
     // blocks. per (spacetime, spacing): godunov + wave-speed + c2p + per-sweep flux + snapshot
     // + ghost fill.
     for base in [Geom::sph_swirl().schwarzschild(), Geom::sph_swirl().kerr_schild()] {
-        for geom in [base.clone(), base.clone().log_radial()] {
+        for geom in [base.clone()] {
             gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
             gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
             gen_rhd_c2p_gr(&out_dir, 2, 20, geom.clone());
@@ -1759,7 +1704,7 @@ fn main() {
     // gamma_{r phi} needs the azimuthal momentum DOF. godunov (covariant Sigma-measure
     // geometry + the kerr covariant source) + the light-cone wave-speed map + the
     // metric-aware c2p/flux (the radial shift rides the flux fan).
-    for geom in [Geom::sph_swirl().kerr(), Geom::sph_swirl().kerr().log_radial()] {
+    for geom in [Geom::sph_swirl().kerr()] {
         gen_godunov_stage(&out_dir, 2, "rhd", true, geom.clone(), None);
         gen_rhd_wave_speed_map(&out_dir, 2, geom.clone());
         gen_rhd_c2p_gr(&out_dir, 2, 20, geom.clone());
@@ -1779,9 +1724,7 @@ fn main() {
     // zero — the transverse-B curved measures land with the phase-B densitized CT).
     for geom in [
         Geom::sph(1).schwarzschild(),
-        Geom::sph(1).schwarzschild().log_radial(),
         Geom::sph(1).kerr_schild(),
-        Geom::sph(1).kerr_schild().log_radial(),
     ] {
         gen_rmhd_godunov_gr(&out_dir, 1, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 1, geom.clone());
@@ -1800,7 +1743,7 @@ fn main() {
     // ndim-generic; the CT trio (densitized EMF + curl + interpolation) is the curved-CT
     // machinery (docs/design/44 phase B). ghost fill reuses the flat rmhd_ghost_fill_2d
     // (a spacetime-free lattice pullback).
-    for geom in [Geom::sph(2).schwarzschild(), Geom::sph(2).schwarzschild().log_radial()] {
+    for geom in [Geom::sph(2).schwarzschild()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
@@ -1879,7 +1822,7 @@ fn main() {
     // shift; the covariant EM-stress source, the c2p, and the contact / UCT-HLL edge EMF are all
     // kerr-wired. the sharp UCT-HLLD edge EMF is schwarzschild-only for now (its kerr arm is a
     // follow-on), so kerr runs the contact or UCT-HLL CT.
-    for geom in [Geom::sph_swirl().kerr(), Geom::sph_swirl().kerr().log_radial()] {
+    for geom in [Geom::sph_swirl().kerr()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
         gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
         gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
@@ -2016,12 +1959,6 @@ fn main() {
     gen_curvilinear_hydro(&out_dir, 1, Geom::cyl_1d());
     gen_curvilinear_hydro(&out_dir, 2, Geom::cyl_rphi());
     gen_curvilinear_hydro(&out_dir, 3, Geom::cyl_3d());
-    // the log-radial cylindrical grid (mirrors the spherical `_logr` cells): the geometric-mean
-    // cell geometry (gv_axis_face_at's Log branch) baked into the same godunov + wave-speed stages,
-    // tagged `_cyl_logr`. the runtime selects it from a log-spaced radial axis on a cylindrical grid.
-    gen_curvilinear_hydro(&out_dir, 1, Geom::cyl_1d().log_radial());
-    gen_curvilinear_hydro(&out_dir, 2, Geom::cyl_rphi().log_radial());
-    gen_curvilinear_hydro(&out_dir, 3, Geom::cyl_3d().log_radial());
     // immersed-body forward source (gravity + accretion, docs/design/19 P1/P2/P4): the cons->cons
     // kernel, emitted per grid dimension (regime-agnostic) + the curvilinear variants (generic
     // physical-basis gravity, docs/design/19 P4). cylindrical 2D = the r-phi disk plane (natural
@@ -2453,19 +2390,9 @@ fn main() {
         gen_godunov_stage(&out_dir, 1, "imhd", false, g1c.clone(), None);
     }
 
-    // =========================================================================
-    // LOG-RADIAL CURVILINEAR MHD (the `_logr` variants): the geometric-mean cell geometry for a
-    // radial axis spanning many decades (magnetar / PWN winds, accretion disks). the runtime name
-    // build appends the spacing slug on flat MHD exactly like the GR path, so a log-radial grid
-    // selects these instead of silently reusing the uniform-geometry kernel. 1D (sph, cyl) + 2D
-    // (r-theta, cyl r-z, cyl r-phi); 3D fully-gridded log-radial MHD is not a realized target and
-    // fails loud (unbaked `_logr`) if requested.
-    // =========================================================================
-    gen_curvilinear_mhd_logr(&out_dir, 1, Geom::make(Coords::Spherical, 3, vec![0]).log_radial());
-    gen_curvilinear_mhd_logr(&out_dir, 1, Geom::make(Coords::Cylindrical, 3, vec![0]).log_radial());
-    gen_curvilinear_mhd_logr(&out_dir, 2, Geom::make(Coords::Spherical, 3, vec![0, 1]).log_radial());
-    gen_curvilinear_mhd_logr(&out_dir, 2, Geom::cyl_rz().log_radial());
-    gen_curvilinear_mhd_logr(&out_dir, 2, Geom::cyl_rphi_mhd().log_radial());
+    // log-radial curvilinear MHD needs no separate bake: the uniform curvilinear MHD kernels above
+    // (1D sph/cyl, 2D r-theta / cyl r-z / cyl r-phi) branch on the per-axis `map_kind` runtime
+    // scalar, so a log-radial grid selects the log face map in the SAME kernel.
 
     // emit the single registry from everything generated above — replaces the
     // hand-maintained include!/const lines in lib.rs (docs/design/15 §3).

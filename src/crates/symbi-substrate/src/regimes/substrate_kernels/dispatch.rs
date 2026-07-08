@@ -94,7 +94,7 @@ where
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
                     .unwrap_or_else(|| panic!("cfl_wave_speed: unexpected scalar {other:?}")),
             ),
         }
@@ -395,7 +395,7 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
                 body_scalar::<D>(bodies, *idx, *field)
             }
             ScalarBind::Ref(sref) => motion_scalar(&sim.motion, geom.coords, D, *sref)
-                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, *sref))
+                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref))
                 .unwrap_or_else(|| {
                     panic!(
                         "dispatch_godunov_with_body_source: unexpected scalar {sref:?} for '{name}'"
@@ -515,7 +515,7 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
                     .unwrap_or_else(|| panic!("dispatch_flux: unexpected scalar {other:?}")),
             ),
         }
@@ -600,7 +600,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
             ),
             other => Sc::from_f64(
                 motion_scalar(&sim.motion, sim.geom.coords, D, other)
-                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, other))
+                    .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
                     .unwrap_or_else(|| panic!("dispatch_godunov: unexpected scalar {other:?}")),
             ),
         }
@@ -639,7 +639,7 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
             // the NAME is `dt` but the VALUE is the SSP stage weight ac*dt at this call site.
             ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(weight),
             // lazily-declared centroid params (x_lo_k, dx_k).
-            ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, *sref)
+            ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, *sref)
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| {
                     panic!("dispatch_source_apply: unexpected scalar {sref:?} for kernel '{name}'")
@@ -778,7 +778,7 @@ pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
             ScalarBind::Ref(ScalarRef::A0) => Sc::from_f64(a0),
             ScalarBind::Ref(ScalarRef::Ac) => Sc::from_f64(ac),
             ScalarBind::Ref(sref) => motion_scalar(&sim.motion, sim.geom.coords, D, *sref)
-                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, *sref))
+                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref))
                 .map(Sc::from_f64)
                 .unwrap_or_else(|| panic!(
                     "dispatch_godunov_with_sources: unexpected scalar {sref:?} (not dt, not geom) for kernel '{name}'"

@@ -30,7 +30,7 @@ use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use symbi_algebra::Domain;
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
-use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, push_curvilinear_geom, scalars_for, spacetime_slug, spacing_suffix, ScalarBind, Solver};
+use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug, spacing_suffix, ScalarBind, Solver};
 use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
 
@@ -244,7 +244,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
                 crate::regimes::substrate_kernels::motion_scalar(
                     &sim.motion, sim.geom.coords, sim.geom.dx.len(), other,
                 )
-                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, other))
+                    .or_else(|| geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other))
                     .unwrap_or_else(|| panic!("mhd godunov_stage: unexpected scalar {other:?}")),
             ),
         }
@@ -340,7 +340,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
                         sim.geom.spacetime_scalars.iter().find(|(n, _)| n == "kerr_spin").map(|(_, v)| *v).expect("kerr ghost fill needs kerr_spin"),
                     ),
                     ScalarBind::Ref(other) => Sc::from_f64(
-                        geom_scalar(&x_lo_g, &dx_g, *other).unwrap_or_else(|| panic!("mhd kerr ghost: unexpected scalar {other:?}")),
+                        geom_scalar(&x_lo_g, &dx_g, &sim.geom.maps, *other).unwrap_or_else(|| panic!("mhd kerr ghost: unexpected scalar {other:?}")),
                     ),
                     o => panic!("mhd kerr ghost: unexpected scalar {o:?}"),
                 },
@@ -792,7 +792,7 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
                     .expect("GR edge EMF needs kerr_spin"),
             ),
             ScalarBind::Ref(other) => Sc::from_f64(
-                geom_scalar(&x_lo_k, &dx_k, *other)
+                geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *other)
                     .unwrap_or_else(|| panic!("mhd efield: unexpected scalar {other:?}")),
             ),
             o => panic!("mhd efield: unexpected scalar {o:?}"),
@@ -992,8 +992,11 @@ pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         // log-radial grid selects the geometric-mean curl (`_logr`); a curved background adds the
         // densitized-space curl (coordinate lengths + the per-face sqrt(gamma) weight).
         let ct_name = format!("rmhd_ct_curl_{D}d_{dir}{sfx}{sp}{st}");
-        let scalars: Vec<Sc> = if !st.is_empty() {
-            // by MANIFEST (dt + the log-aware grid scalars + the metric mass/spin).
+        let scalars: Vec<Sc> = if !st.is_empty() || curvilinear {
+            // by MANIFEST (dt + the log-aware grid scalars incl. the per-axis map_kind + the metric
+            // mass/spin on GR). manifest-driven so a curvilinear kernel that grew the `map_kind`
+            // spacing selector is resolved by name, not a fixed hand-built order; the mass/spin arms
+            // are simply never requested by a flat curvilinear kernel's manifest.
             scalars_for(&ct_name, |bind| {
                 let ScalarBind::Ref(sref) = bind else {
                     panic!("gr ct curl: unexpected spec scalar {bind:?}");
@@ -1013,19 +1016,14 @@ pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
                             .expect("gr ct curl needs kerr_spin"),
                     ),
                     other => Sc::from_f64(
-                        geom_scalar(&x_lo_k, &dx_k, other)
+                        geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other)
                             .unwrap_or_else(|| panic!("gr ct curl: unexpected scalar {other:?}")),
                     ),
                 }
             })
-        } else if curvilinear {
-            // the log-aware kernel scalars (face-0 start + decade-slope on a Log axis; bit-identical
-            // to the raw linear (x_lo, dx) on a uniform axis) so the geometric-mean curl reads the
-            // true face radii.
-            let mut s = vec![Sc::from_f64(dt)];
-            push_curvilinear_geom(&mut s, &x_lo_k, &dx_k);
-            s
         } else {
+            // flat CARTESIAN curl: metric-free, so no face-position map (no x_lo/dx/map_kind) — just
+            // dt + the per-in-plane-axis inverse width.
             let mut s = vec![Sc::from_f64(dt)];
             for &a in &id_axes {
                 s.push(Sc::from_f64(id[a]));
@@ -1126,7 +1124,7 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
                         .expect("gr bcell_from_bface needs kerr_spin"),
                 ),
                 other => Sc::from_f64(
-                    geom_scalar(&x_lo_k, &dx_k, other)
+                    geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, other)
                         .unwrap_or_else(|| panic!("gr bcell_from_bface: unexpected scalar {other:?}")),
                 ),
             }
