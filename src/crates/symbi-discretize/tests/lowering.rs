@@ -139,7 +139,7 @@ fn wave_speed_kernels_lower() {
 // -----------------------------------------------------------------------------
 #[test]
 fn godunov_kernels_lower() {
-    // P2.2: single mass law, separate output buffer. cartesian + spherical area-weighted.
+    // single mass law, separate output buffer. cartesian + spherical area-weighted.
     KernelRun::new(godunov_mass_gv(Coords::Cartesian, &[Spacing::Uniform], &[0], 1))
         .grid([8])
         .assert_lowers();

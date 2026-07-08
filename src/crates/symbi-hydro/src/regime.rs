@@ -40,7 +40,7 @@ use symbi_ir::algebra::{Scalar, Selectable};
 /// this enables one solver implementation for all directions.
 pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// the declarative metadata bundle for this regime — name, field layout,
-    /// flag consts, c2p flavor. B4-i (docs/design/09 §2.3): the physics
+    /// flag consts, c2p flavor (docs/design/09 §2.3): the physics
     /// regime as a FIRST-CLASS DATA VALUE. callers prefer
     /// `<Self as Regime<S, D>>::SPEC.is_relativistic` over the
     /// `self.is_relativistic()` accessor; the bool methods below default to
@@ -185,7 +185,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
         Self::SPEC.has_energy
     }
 
-    // NOTE (B3, 2026-05-30): `Regime::hllc` was dropped. the default fell
+    // `Regime::hllc` was dropped. the default fell
     // back silently to HLLE — a lie in code that masked "this regime does
     // not implement a three-wave star solver." HLLC is now an explicit free
     // function per regime: `crate::riemann::hllc` (newtonian),

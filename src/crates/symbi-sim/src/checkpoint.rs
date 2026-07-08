@@ -1,11 +1,10 @@
 // =============================================================================
 // checkpoint.rs
 //
-// HDF5 checkpoint API for SimState. **B8 — Phase 1/2 refactor**: this file
-// is now a thin builder that maps SimState onto a `symbi_io::Tree` schema
-// and hands off to `symbi_io::Hdf5Backend`. the I/O concerns (file format,
-// field naming, error handling) live in the symbi-io crate; here we only
-// describe WHAT SimState contributes to the schema.
+// HDF5 checkpoint API for SimState. a thin builder that maps SimState onto a
+// `symbi_io::Tree` schema and hands off to `symbi_io::Hdf5Backend`. the I/O
+// concerns (file format, field naming, error handling) live in the symbi-io
+// crate; this module only describes WHAT SimState contributes to the schema.
 //
 // the on-disk layout is preserved bit-for-bit (existing `scripts/plot_*.py`
 // readers + every existing checkpoint file continue to work). public API
@@ -159,7 +158,7 @@ fn extract_field<const D: usize, Mem: MemorySpace>(
 }
 
 /// drive the canonical iteration of one bucket's `FieldSpec` list. for each
-/// (FieldSpec × component-idx), the closure dispatches to the right struct
+/// (FieldSpec \times component-idx), the closure dispatches to the right struct
 /// member or returns `None` when the field isn't allocated for this regime
 /// (e.g., iso has no cons.nrg, non-MHD has no mhd.bcell). returns the
 /// `(name, data)` vec the snapshot uses. each cell-centered field is gathered
@@ -198,7 +197,7 @@ where
     S: ExecutionSpace,
     Mem: MemorySpace,
 {
-    // **B12** — before READING fields here, sync the device so the host sees the
+    // before READING fields here, sync the device so the host sees the
     // committed state from the last RK2 stage (removing the per-launch `ctx_sync()`
     // was a production pipelining win). gate on `IS_DEVICE_ACCESSIBLE`, NOT just the
     // cuda feature: a HOST-memory sim in a cuda-feature build has no CUDA context, so
@@ -477,7 +476,7 @@ where
         .with_group(geometry);
 
     // declare shape in REVERSED axis order so it matches the on-disk layout
-    // `extract_field` produces (axis-0-fastest in memory → axis-0 is the LAST
+    // `extract_field` produces (axis-0-fastest in memory -> axis-0 is the LAST
     // dim of the numpy shape). numpy/matplotlib then put physical x on the
     // horizontal screen axis. for 2D OT: shape = [Ny, Nx]; for 3D: [Nz, Ny, Nx].
     // cell datasets carry the PADDED extent (interior + 2*ng); the reader trims
@@ -577,7 +576,7 @@ where
 // public API: write_checkpoint / load_checkpoint / read_checkpoint_meta
 // =============================================================================
 
-/// **B8 — write a checkpoint.** typed `Metadata` carries naked typed values
+/// write a checkpoint. typed `Metadata` carries naked typed values
 /// rather than a `&[(&str, &str)]` slice — no `to_string()` boilerplate at call sites:
 ///
 /// ```ignore
@@ -711,7 +710,7 @@ pub fn read_checkpoint_meta(path: &str) -> Result<CheckpointMeta> {
     read_meta_from(&tree)
 }
 
-/// **B8 — load a checkpoint into an existing SimState.** restores cons (and
+/// load a checkpoint into an existing SimState. restores cons (and
 /// prim if present, and bface if present) from disk; returns the typed
 /// `CheckpointMeta` for the caller to consume time/iteration/etc.
 pub fn load_checkpoint<R, const D: usize, const DOF: usize, M, E, S, Mem>(

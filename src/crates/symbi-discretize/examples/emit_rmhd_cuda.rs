@@ -1,8 +1,8 @@
 // =============================================================================
 // emit_rmhd_cuda.rs
 //
-// emit the substrate RMHD kernels as CUDA source — the GPU portability gate for
-// P1/P2/P3. the three production builders cover every RMHD-specific feature:
+// emit the substrate RMHD kernels as CUDA source — the GPU portability gate.
+// the three production builders cover every RMHD-specific feature:
 //   - rmhd_c2p:        the KKC false-position (inline iterate loop) + recovery
 //   - rmhd_hlle_flux:  the quartic wave speeds (sinh/asinh/cosh/acosh/cos/acos/pow
 //                      + (double)INFINITY / nan("") sentinels) + RMHD U/F + HLLE

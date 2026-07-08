@@ -1,7 +1,7 @@
 // =============================================================================
 // engine.rs
 //
-// the GPU mapping of the structured kernel ABI (docs/design/15 §5, step 3c). the
+// the GPU mapping of the structured kernel ABI (docs/design/15 §5). the
 // substrate KernelSet builds ONE backend-neutral `KernelInvocation` per kernel
 // (ordered buffer handles + packed params); `symbi-aot::run_cpu` maps it to the
 // generated CPU fn, and `run_gpu` here maps the SAME invocation to a GPU launch:
@@ -25,7 +25,7 @@ use symbi_xpu::MemorySpace;
 /// host-side POD that matches the CUDA `__symbi_View` struct emitted by
 /// `crate::backends::kernel::CRenderer::preamble` — 8-byte ptr + 16 bytes lo +
 /// 16 bytes strides + 16 bytes extent = 56 bytes, naturally 8-byte aligned. one
-/// of these is passed by value per buffer to every GPU kernel (Phase 1B-3). cfg-gated to
+/// of these is passed by value per buffer to every GPU kernel. cfg-gated to
 /// the `cuda` feature: cpu-only builds never construct one.
 #[cfg(feature = "gpu")]
 #[repr(C)]
@@ -353,7 +353,7 @@ fn field_reduce_device<
         let module_key = format!("{name}#{}", if is_f64 { "f64" } else { "f32" });
         let kernel = B::dispatcher().jit_kernel_keyed(&desc.source, &module_key, &name);
 
-        // pack args in the reduction ABI (Phase 1B-3): View struct, total_cells,
+        // pack args in the reduction ABI: View struct, total_cells,
         // grid, dom_lo, partials. `KernelArgs` copies each value into stable storage,
         // so the field view packed by `B::push_field` is sound for the launch.
         let partials_arg = partials_ptr as *const u8;
@@ -442,7 +442,7 @@ static RENDER_CACHE: std::sync::LazyLock<
     std::sync::RwLock<std::collections::HashMap<(String, bool), std::sync::Arc<CachedDesc>>>,
 > = std::sync::LazyLock::new(|| std::sync::RwLock::new(std::collections::HashMap::new()));
 
-/// the per-block dynamic-smem budget we size tiled launches against. Turing (sm_75,
+/// the per-block dynamic-smem budget tiled launches are sized against. Turing (sm_75,
 /// the RTX 2070 dev part) allows 48 KB of dynamic `__shared__` without the
 /// `cudaFuncSetAttribute` opt-in; staying under it keeps the launch portable.
 #[cfg(feature = "gpu")]

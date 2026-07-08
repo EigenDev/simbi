@@ -77,7 +77,7 @@ fn no_legacy_scalar_imports_in_workspace() {
         for (line_idx, line) in content.lines().enumerate() {
             let trimmed = line.trim_start();
             // skip comments (the historical-note comment in symbi-algebra's
-            // algebra.rs is the deliberate one of these we ignore).
+            // algebra.rs is the deliberate exclusion).
             if trimmed.starts_with("//") || trimmed.starts_with("///") {
                 continue;
             }

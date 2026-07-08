@@ -1,13 +1,13 @@
 // =============================================================================
 // decomp_refine_equivalence.rs
 //
-// REFINEMENT x DECOMPOSITION, phase 1 (tile-local static refinement, euler root). a 2-level
+// REFINEMENT x DECOMPOSITION (tile-local static refinement, euler root). a 2-level
 // hierarchy whose ROOT is split into tiles must reproduce the monolithic hierarchy run, when each
 // refined patch lives entirely inside ONE root tile's interior. each tile then owns a complete
 // sub-hierarchy that the EXISTING recursive advance drives unchanged (all prolong / restrict /
 // reflux stay local to the owning tile); the only cross-tile coupling is the root-level halo
 // exchange, done between root steps (euler root = single stage, so a between-step exchange is
-// correct -- the rk2-root between-stage case is phase 2).
+// correct -- the rk2-root between-stage case is covered separately).
 //
 // the decomposed driver lockstep-advances N per-tile hierarchies: global dt = min over tiles of
 // `root_cfl_dt()`, then `evolve(t + dt)` drives each tile by exactly that dt (the global min
@@ -230,9 +230,9 @@ fn refine_euler_quad_tile_2d_grid() {
     assert_refine_matches([2, 2], Timestepping::Euler);
 }
 
-// RK2 root (phase 2): the root halo MUST be exchanged between the two root stages -- the corrector
+// RK2 root: the root halo MUST be exchanged between the two root stages -- the corrector
 // reads each neighbor's stage-1 update. a between-step-only exchange would diverge here. driven by
-// the extracted level_step_begin / level_stage / level_step_tail seam.
+// the level_step_begin / level_stage / level_step_tail interface.
 #[test]
 fn refine_rk2_two_tile_x_cut() {
     assert_refine_matches([2, 1], Timestepping::Rk2);

@@ -224,7 +224,7 @@ pub fn fofc_bflux_splice_gv(ndim: usize, dir: usize, ncomp: usize) -> (GvKernel,
 }
 
 
-/// the single mass-law godunov step to a SEPARATE output buffer (the P2.2 demo):
+/// the single mass-law godunov step to a SEPARATE output buffer:
 /// `rho_new = rho - dt*div(mass_flux)`. cartesian-uniform OR curvilinear (area-weighted).
 /// write -> `cons.den_new`.
 pub fn godunov_mass_gv(
@@ -297,7 +297,7 @@ struct FusedContribs {
 }
 
 
-/// **B6-iv Phase 4c/2c — fused-source splice helper**. requires an ACTIVE Gv trace
+/// fused-source splice helper. requires an ACTIVE Gv trace
 /// (the caller holds `begin_trace` / `end_trace`). builds the shared primitive
 /// vocabulary (`rho`, `vel_k`, lazy `x_k` ↔ centroid), then splices every
 /// spec into the trace and buckets the outputs by `target_field`. with no overlays it
@@ -347,7 +347,7 @@ fn splice_fused_sources_to_contribs(
             shared_params.insert("pre".to_string(), Gv::field("pre", FieldRef::PrimPre).node());
         }
     }
-    // **Phase 2c — LAZY centroid binding**. `x_k` ↔ cell centroid for specs
+    // LAZY centroid binding. `x_k` ↔ cell centroid for specs
     // that declare position params (gravity, immersed bodies). walk the
     // spec params FIRST to detect which axes are needed, then call
     // `cell_geometry_gv` (which declares `x_lo_k` / `dx_k` scalars in the
@@ -427,7 +427,7 @@ fn splice_fused_sources_to_contribs(
 /// the SSP Shu-Osher stage update WITH a fused list of spec sources — the
 /// `godunov_stage_gv` body (runtime `(a0, ac)` convex coefficients, `cons = a0*u_n + ac*fe`)
 /// with the spec contributions spliced into the forward-Euler operator:
-/// `fe(u, div, src) = u - dt*div + dt*(geo_src + Σ spec_src)`. one launch folds flux
+/// `fe(u, div, src) = u - dt*div + dt*(geo_src + \sum spec_src)`. one launch folds flux
 /// divergence + geometric source + every user overlay + the integrator combine. the dispatch
 /// `{prefix}_godunov_stage_with_{slug}_{D}d` resolves here.
 ///
@@ -675,7 +675,7 @@ pub fn godunov_stage_gv_with_fused_built(
         r
     };
     let combine = |un: Gv, fe: Gv| a0 * un + ac * fe;
-    // the USER sources ride as a SEPARATE additive term after the combine: `+ Σ ac*dt*contrib`,
+    // the USER sources ride as a SEPARATE additive term after the combine: `+ \sum ac*dt*contrib`,
     // accumulated exactly as `source_apply_gv` accumulates it (start from the combine result,
     // `+= ac_dt*contrib` per spec). so the fused kernel IS `plain godunov + the additive pass`,
     // bit-for-bit, fused into one launch (proven by the fused-equivalence test).
@@ -730,7 +730,7 @@ pub fn godunov_stage_gv_with_fused_built(
 }
 
 
-/// the standalone ADDITIVE source pass: `cons += dt * Σ S(prim, x; params)`, in place, per
+/// the standalone ADDITIVE source pass: `cons += dt * \sum S(prim, x; params)`, in place, per
 /// conserved slot, for a list of spec sources. the GENERAL source executor — it runs ANY composed
 /// source as a SEPARATE per-stage kernel (the `body_source_gv` mechanism, generalized to
 /// `SourceSpec`s), as opposed to FUSING the source into the godunov stage.
@@ -755,7 +755,7 @@ pub fn godunov_stage_gv_with_fused_built(
 // =============================================================================
 
 /// the state vocabulary the DAG reads `rho`/`vel_k` from. `Stage` binds them from the SSP stage
-/// snapshot `u_stage` (an interior source evaluates at its stage input — the S2 invariant); `Coord`
+/// snapshot `u_stage` (an interior source evaluates at its stage input — the stage-input invariant); `Coord`
 /// binds NOTHING from state (a pure coordinate prescription — a driven boundary, whose DAG OUTPUTS
 /// the state). `x_k` (centroid) + scalar params bind regardless of this.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -766,7 +766,7 @@ pub enum StateEnv {
 
 
 /// how the DAG result lands in the target field. `Accumulate` is the RHS form `target = read(target)
-/// + dt * Σ contrib` (in place; the `dt` scalar is the SSP stage weight) — sources. `Assign` is the
+/// + dt * \sum contrib` (in place; the `dt` scalar is the SSP stage weight) — sources. `Assign` is the
 /// prescription `target = expr` (write-only, no base, no weight) — driven boundaries. doc 32's
 /// `combine`: add + relax both map to `Accumulate`, overwrite to `Assign`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -817,7 +817,7 @@ fn apply_dag_core_gv(
 
     let writes = match mode {
         WriteMode::Accumulate => {
-            // RHS in place: `cons_slot = cons_slot + Σ dt*contrib`, accumulated exactly as the fused
+            // RHS in place: `cons_slot = cons_slot + \sum dt*contrib`, accumulated exactly as the fused
             // stage's `with_sources` — so fused and (plain godunov + this pass) agree bit-for-bit.
             let dt = Gv::scalar("dt"); // the driver fills this with ac*dt (the SSP stage weight)
             let cons_den = Gv::field("cons_den", FieldRef::cons_den());

@@ -7,21 +7,21 @@
 // consolidated IR, identity folding, or view-struct buffer ABIs will surface here
 // as drift in a conserved global.
 //
-// IC: Marti-Mueller relativistic Sod (γ = 5/3): (ρ, p) = (1, 1) | (0.125, 0.1),
+// IC: Marti-Mueller relativistic Sod (\gamma = 5/3): (\rho, p) = (1, 1) | (0.125, 0.1),
 // v = 0. reflective walls keep the integral diagnostics fully closed (no
 // boundary flux of mass / energy) — the test asserts ABSOLUTE conservation up to
 // floating drift (1e-9 mass, 1e-8 energy).
 //
-// step count: t_final chosen so the cfl-driven loop runs ≈ 200 steps. waves
-// stay interior up to ≈ t=0.5 at the chosen tube length; the test sets
+// step count: t_final chosen so the cfl-driven loop runs \approx 200 steps. waves
+// stay interior up to \approx t=0.5 at the chosen tube length; the test sets
 // t_final = 0.4 to avoid the first reflection arriving at the wall (mass /
 // energy stay strict-conserved without reflective-wall flux subtleties).
 //
 // invariants checked every SAMPLE_EVERY steps:
-//   total_mass    = sum_c (cons.den[c]   * dx)   ≡  mass_0    (rel < 1e-9)
-//   total_energy  = sum_c (cons.nrg[c]   * dx)   ≡  energy_0  (rel < 1e-8)
-//   CFL bound:    dt_next * max_λ / dx          ≤   CFL_used + 1e-12
-//   ρ > 0, p > 0, |v| < 1 at every interior cell every checkpoint
+//   total_mass    = sum_c (cons.den[c]   * dx)   \equiv  mass_0    (rel < 1e-9)
+//   total_energy  = sum_c (cons.nrg[c]   * dx)   \equiv  energy_0  (rel < 1e-8)
+//   CFL bound:    dt_next * max_\lambda / dx          <=   CFL_used + 1e-12
+//   \rho > 0, p > 0, |v| < 1 at every interior cell every checkpoint
 // =============================================================================
 
 use symbi::regimes::substrate_rhd::RhdSubstrateKernelSet;
@@ -40,13 +40,13 @@ const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.4;
 const N: usize = 128;
 const SAMPLE_EVERY: u64 = 25;
-// t_final = 0.4 keeps the leading shock interior at n=128 (shock speed ≲ 0.7,
+// t_final = 0.4 keeps the leading shock interior at n=128 (shock speed \lesssim 0.7,
 // distance from x=0.5 to either wall is 0.5) and yields ~200 CFL-bounded steps.
 const T_FINAL: f64 = 0.4;
 
 // the RHD 1D wave-speed bound used by the kernel cfl: davis estimate on the
-// principal axis. cs² = γ p / (ρ h) with h = 1 + γ p / (ρ (γ-1)) (ideal gas).
-// |λ|_max = (|v| + cs) / (1 + |v| cs) on v, cs ∈ [0,1).
+// principal axis. cs^2 = \gamma p / (\rho h) with h = 1 + \gamma p / (\rho (\gamma-1)) (ideal gas).
+// |\lambda|_max = (|v| + cs) / (1 + |v| cs) on v, cs \in [0,1).
 fn max_wavespeed_estimate(rho: f64, p: f64, v: f64) -> f64 {
     let h = 1.0 + GAMMA * p / (rho * (GAMMA - 1.0));
     let cs2 = (GAMMA * p) / (rho * h);
@@ -132,7 +132,7 @@ fn rhd_sod_conserves_mass_energy_and_respects_cfl() {
             }
 
             // CFL bound: the kernel's NEXT dt — same call evolve uses — must
-            // respect dt * max|λ| / dx ≤ CFL. if the kernel returns a dt that
+            // respect dt * max|\lambda| / dx <= CFL. if the kernel returns a dt that
             // violates the CFL on the actual state, this fires.
             let dt_next = sub.cfl(s);
             assert!(

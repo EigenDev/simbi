@@ -1,7 +1,7 @@
 // =============================================================================
 // transfer.rs
 //
-// the inter-level field-transfer driver (docs/design/22 phase 2): selects the
+// the inter-level field-transfer driver (docs/design/22): selects the
 // regions and dispatches the aot amr kernels (refine_restrict_{D}d /
 // refine_prolong_{order}_{D}d, built in symbi-discretize gv_refinement.rs) per field
 // component through `dispatch_fields_each` — each buffer resolves the ABSOLUTE
@@ -475,8 +475,8 @@ mod tests {
         let new_vol: usize = new.iter().map(|d| d.volume()).sum();
         assert_eq!(new_vol, allocated.volume() - interior.volume());
 
-        // the overlapping oracle sums to MORE cells than the disjoint shell —
-        // that gap is the redundant edge/corner prolongation we removed.
+        // the overlapping-slab decomposition sums to MORE cells than the disjoint shell —
+        // that gap is the redundant edge/corner prolongation the disjoint shell avoids.
         let old_vol: usize = old_overlapping_slabs(&allocated, &interior, &b)
             .iter()
             .map(|d| d.volume())

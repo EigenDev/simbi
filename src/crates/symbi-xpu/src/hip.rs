@@ -37,7 +37,7 @@ type hipDeviceptr_t = *mut c_void;
 
 const HIP_SUCCESS: hipError_t = 0;
 const HIP_ERROR_NOT_READY: hipError_t = 600;
-// re-enabling peer access that is already enabled is success for our purposes. value mirrors
+// re-enabling already-enabled peer access counts as success. value mirrors
 // the cuda numbering; verify against hip_runtime_api.h on the cluster if peer-enable misreports
 // (it is best-effort -- hipMemcpyPeer works without it, so a wrong code never breaks correctness).
 const HIP_ERROR_PEER_ACCESS_ALREADY_ENABLED: hipError_t = 704;
@@ -113,7 +113,7 @@ fn check(res: hipError_t, op: &'static str) -> error::Result<()> {
 // device binding: hipSetDevice (no context api, docs/design/38)
 // =============================================================================
 
-/// max gpus per node we bind. mirrors the cuda path; a fixed array avoids hot-path locking.
+/// max gpus per node bound. mirrors the cuda path; a fixed array avoids hot-path locking.
 pub const MAX_GPUS: usize = 16;
 
 static HIP_INIT: OnceLock<()> = OnceLock::new();
@@ -184,7 +184,7 @@ fn ensure_init() -> error::Result<()> {
 
 /// run `f` with device `ord` bound on this thread, restoring the previous device after. binds a
 /// tile's kernels to its gpu (docs/design/37): launch / alloc / sync target "the current
-/// device", so we make the right one current rather than threading a device id through.
+/// device", so the right one is made current rather than threading a device id through.
 pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
     let prev = current_device();
     ensure_init_device(ord).expect("with_device: hipSetDevice");
@@ -484,7 +484,7 @@ impl ExecutionSpace for HipSpace {
 
 /// HIP managed (unified) memory. accessible from both host and device. the amd analog of
 /// `UnifiedMemory`; the same managed-thrash caveat applies (docs/design/37) -- a device-local
-/// space is the perf follow-up.
+/// space is not yet implemented.
 pub struct HipManaged;
 
 impl MemorySpace for HipManaged {

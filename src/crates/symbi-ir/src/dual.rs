@@ -43,7 +43,7 @@ impl<S: Scalar> Dual<S> {
         Self { value, tangent: S::ZERO }
     }
 
-    /// the SEEDED variable (derivative one): the single input we differentiate with respect to.
+    /// the SEEDED variable (derivative one): the single input differentiated with respect to.
     #[inline]
     pub fn variable(value: S) -> Self {
         Self { value, tangent: S::ONE }

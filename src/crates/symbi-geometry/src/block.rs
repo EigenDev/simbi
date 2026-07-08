@@ -183,7 +183,7 @@ where
         // 2-point Gauss-Legendre: points at +/- 1/sqrt(3), weights = 1
         let offset = S::from_f64(0.5 / 3.0_f64.sqrt());
 
-        // for D dimensions, we have 2^D quadrature points.
+        // for D dimensions there are 2^D quadrature points.
         // iterate over all combinations via bit mask.
         let n_quad = 1_usize << D;
         let mut vol = S::ZERO;

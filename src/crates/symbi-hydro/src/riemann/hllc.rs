@@ -371,7 +371,7 @@ fn hllc_rhd_body<S: Scalar, const D: usize>(
 ) -> Cons<S, D> {
     let regime = crate::rhd::Rhd;
     // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
-    // metric threads in here once the flux path carries it (B3).
+    // metric threads in once the flux path carries it.
     let metric = SpatialMetric::flat();
     let u_l = regime.to_conserved(eos, prim_l);
     let u_r = regime.to_conserved(eos, prim_r);
@@ -444,7 +444,7 @@ fn hllc_rmhd_body<S: Scalar, const D: usize>(
     vface: S,
 ) -> MhdCons<S, D> {
     // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR face
-    // metric threads in here once the flux path carries it (B3).
+    // metric threads in once the flux path carries it.
     let metric = SpatialMetric::flat();
     let u_l = regime.to_conserved(eos, prim_l);
     let u_r = regime.to_conserved(eos, prim_r);

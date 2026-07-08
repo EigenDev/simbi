@@ -1,26 +1,26 @@
 // =============================================================================
 // fused_source_full_stack.rs
 //
-// **B6-iv (Phase 4c + 3b + 2c) end-to-end**: SimulationLaws declares a
+// end-to-end: SimulationLaws declares a
 // `FusedSourceFamily`, derives the substrate `FusedSourceBinding`, the
 // kernel-set routes the production `evolve()` loop through the AOT-baked
-// fused godunov. Phase 3b extended the AOT bake matrix to 1D/2D/3D
-// cartesian × {uniform_accel, point_mass_grav}; Phase 2c bound the spec's
+// fused godunov. the AOT bake matrix spans 1D/2D/3D
+// cartesian \times {uniform_accel, point_mass_grav}; the spec's
 // `x_k` Params to in-kernel cell centroids, so position-dependent overlays
 // (point-mass gravity) fuse the same way as uniform accel.
 //
 // **what this validates** as a single layered claim:
 //
 //   1. `SimulationLaws::new(&NEWTONIAN_SPEC).with_fused_family(uniform_accel)`
-//      → `derive_fused_binding()` → `FusedSourceBinding::from_pair()` →
+//      -> `derive_fused_binding()` -> `FusedSourceBinding::from_pair()` ->
 //      `AdiabaticSubstrateKernelSet::with_fused_source()` produces a kernel
 //      set whose evolve loop accelerates an initially-stationary gas in 2D
-//      (the Phase 3b 2D AOT kernel exists + the data-driven derivation
+//      (the 2D AOT kernel exists + the data-driven derivation
 //      reaches it through the substrate).
 //
 //   2. `FusedSourceFamily::PointMassGravity` with a body at the origin
 //      produces a kernel whose Param manifest includes `xm_k` and `gm`
-//      (NOT `x_k` — those bind to the in-kernel centroid via Phase 2c), so
+//      (NOT `x_k` — those bind to the in-kernel centroid), so
 //      the position-dependent overlay actually fuses with the godunov.
 //
 //   3. backwards-compat — a `SimulationLaws` with no families derives None,
@@ -47,11 +47,11 @@ const GAMMA: f64 = 1.4;
 
 #[test]
 fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
-    // **Phase 4c + Phase 3b layered claim**: declare `uniform_accel` at the
+    // layered claim: declare `uniform_accel` at the
     // SimulationLaws layer, derive the binding, wire it through a 2D kernel
     // set, march evolve(). gas accelerates in +x, density stays stable, no
     // manual kernel-name spelling or scalar binding at the call site —
-    // every part of the pipeline (laws → binding → AOT kernel) is data-
+    // every part of the pipeline (laws -> binding -> AOT kernel) is data-
     // driven.
     let n = 16usize;
     let dx = 1.0 / n as f64;
@@ -65,7 +65,7 @@ fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
         .set_initial(|_x| Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 })
         .build();
 
-    // **Phase 4c**: declare the family, derive the binding from the data layer.
+    // declare the family, derive the binding from the data layer.
     let g_ext = vec![0.4_f64, 0.0]; // accelerate in +x only
     let laws = SimulationLaws::new(&NEWTONIAN_SPEC)
         .with_fused_family(
@@ -82,7 +82,7 @@ fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
     let t_final = 0.05_f64;
     evolve(&mut sim, &sub, t_final).expect("2D evolve with fused source failed");
 
-    // gas accelerated in +x to ≈ g·t; +y stayed at rest.
+    // gas accelerated in +x to \approx g\cdot t; +y stayed at rest.
     let cells: Vec<[isize; 2]> = sim.geom.interior.iter().collect();
     let cnt = cells.len() as f64;
     let mean_vx: f64 = cells.iter()
@@ -102,10 +102,10 @@ fn simulation_laws_drives_2d_evolve_via_uniform_accel_family() {
 
 #[test]
 fn point_mass_gravity_aot_kernel_binds_x_to_centroid_not_scalar() {
-    // **Phase 2c structural claim**: the `point_mass_grav` 2D AOT kernel
+    // structural claim: the `point_mass_grav` 2D AOT kernel
     // declares `xm_k` + `gm` as scalar params (body parameters, runtime-
     // bound), but DOES NOT declare `x_k` (cell position) — those Params
-    // were bound to the in-kernel centroid via Phase 2c, computed from
+    // were bound to the in-kernel centroid, computed from
     // `x_lo + i*dx`. proves the position-dependent overlay actually fused
     // (the spec's `x_k` Params resolved INSIDE the trace, not as runtime
     // scalars).
@@ -149,9 +149,9 @@ fn empty_simulation_laws_derives_no_binding() {
 
 #[test]
 fn fused_source_family_round_trip_uniform_accel() {
-    // **Phase 4c contract test**: the family's `into_binding_pair` produces
+    // contract test: the family's `into_binding_pair` produces
     // exactly the scalar pairs the AOT kernel manifest expects, for every
-    // dimension we've baked.
+    // baked dimension.
     for ndim in 1usize..=3 {
         let g_ext: Vec<f64> = (0..ndim).map(|k| 0.5 * (k as f64 + 1.0)).collect();
         let family = FusedSourceFamily::UniformAcceleration { g_ext: g_ext.clone() };
@@ -173,7 +173,7 @@ fn fused_source_family_round_trip_uniform_accel() {
 
 #[test]
 fn fused_source_family_round_trip_point_mass_grav() {
-    // same contract for point-mass gravity (Phase 2c position-dependent).
+    // same contract for point-mass gravity (position-dependent).
     for ndim in 1usize..=3 {
         let xm: Vec<f64> = vec![0.5; ndim];
         let gm = 1.0_f64;

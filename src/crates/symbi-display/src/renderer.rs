@@ -118,7 +118,7 @@ impl Renderer {
         self.layout.padding = terminal::padding_for_width(term_width);
         self.layout.widths = vec![0; n_cols];
 
-        // step 1: minimum widths = max(header_len, data_len). measure DISPLAY
+        // minimum widths = max(header_len, data_len). measure DISPLAY
         // columns (char count), not bytes — cells may carry multibyte glyphs
         // (em-dash, unicode paths) and a byte count would over-reserve width.
         for ii in 0..n_cols {
@@ -127,19 +127,19 @@ impl Renderer {
             self.layout.widths[ii] = header_len.max(data_len);
         }
 
-        // step 2: overhead = borders (n+1) + padding (2 * pad * n)
+        // overhead = borders (n+1) + padding (2 * pad * n)
         let borders_overhead = n_cols + 1;
         let padding_overhead = self.layout.padding * 2 * n_cols;
         let total_overhead = borders_overhead + padding_overhead;
 
-        // step 3: available space
+        // available space
         if term_width <= total_overhead {
             self.layout.total_width = term_width;
             return;
         }
         let available = term_width - total_overhead;
 
-        // step 4: proportional scaling
+        // proportional scaling
         let current_content_width: usize = self.layout.widths.iter().sum();
         if current_content_width == 0 {
             self.layout.total_width = term_width;
@@ -152,7 +152,7 @@ impl Renderer {
             self.layout.widths[ii] = self.layout.widths[ii].clamp(6, 40);
         }
 
-        // step 5: redistribute leftover
+        // redistribute leftover
         let allocated: usize = self.layout.widths.iter().sum();
         let mut leftover = available.saturating_sub(allocated);
 

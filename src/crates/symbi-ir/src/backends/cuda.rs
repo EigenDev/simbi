@@ -147,8 +147,8 @@ fn emit_struct(out: &mut String, f: &LoweredFn) {
 
 fn emit_signature(out: &mut String, f: &LoweredFn, needs_struct: bool) {
     // collect const-generic identifiers used by array params; CUDA
-    // doesn't have const-generic functions natively, so we emit a
-    // C++ template<int D, ...> prefix.
+    // doesn't have const-generic functions natively, so a
+    // C++ template<int D, ...> prefix is emitted.
     let mut generics: Vec<String> = Vec::new();
     for p in &f.params {
         if let Some(crate::DimExpr::Generic(sym)) = &p.array_len {
@@ -188,7 +188,7 @@ fn emit_signature(out: &mut String, f: &LoweredFn, needs_struct: bool) {
             }
             Some(_) => {
                 // arrays as `const <ty> (&name)[<len>]` for type-safe pass-by-reference;
-                // since C++ template arrays decay to pointers easily, we emit by ref.
+                // since C++ template arrays decay to pointers easily, they are emitted by ref.
                 out.push_str("const ");
                 out.push_str(cuda_type_name(p.element));
                 out.push_str(" (&");
@@ -234,7 +234,7 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             out.push(';');
         }
         ScalarStmt::Assign { name, value } => {
-            // F2.F: plain assignment (Fold body's accumulator update).
+            // plain assignment (Fold body's accumulator update).
             out.push_str(name);
             out.push_str(" = ");
             emit_expr(out, value);
@@ -615,8 +615,8 @@ fn powi_product(receiver: &ScalarExpr, n: i32) -> String {
 
 fn cuda_method_to_fn(method: &str) -> &str {
     match method {
-        // float-only math functions take the `f` suffix? we don't track
-        // precision here per-call; emit the double-prec name. nvcc selects
+        // float-only math functions take the `f` suffix? precision is not
+        // tracked here per-call; emit the double-prec name. nvcc selects
         // overloads based on argument type at compile time, so this works
         // for both double and float inputs.
         // NOTE: `abs`, `min`, `max` are handled inline (ternary form) in
@@ -1045,7 +1045,7 @@ mod tests {
         assert_eq!(src.matches('{').count(), src.matches('}').count(), "{src}");
     }
 
-    // ----- docs/design/23 step 1: ScalarStmt::Scope CUDA tests -----
+    // ----- docs/design/23: ScalarStmt::Scope CUDA tests -----
 
     /// CUDA has no block-expression syntax, so a `Scope` lowers to:
     ///   `<ty> <name>; { <body>; <name> = <result>; }`

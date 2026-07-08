@@ -114,7 +114,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> RegimeSubstr
 
 /// `sim.substrate()` builds the matched substrate `KernelSet` from the sim alone — the EOS param
 /// (gamma for ideal-gas regimes, cs for isothermal), CFL, and allocated domain are pulled off the
-/// sim, so you skip hand-matching the long `*SubstrateKernelSet::<Mem, Sc, D>::new(..)` to the
+/// sim, so the long `*SubstrateKernelSet::<Mem, Sc, D>::new(..)` need not be hand-matched to the
 /// regime. theta defaults to 1.0 (minmod) — tune with the returned set's `.theta(..)`.
 ///
 /// an extension trait (not an inherent method) because `SimStateGeneric` lives in `symbi-sim`:

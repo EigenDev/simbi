@@ -109,7 +109,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RmhdGr<S, D> {
             return C2pResult::err(floored, code);
         }
         // the metric-aware KKC recovery: the invariants r^2/B^2/r.B form with gamma, the
-        // recovered v^i is contravariant. the SR->GR seam is the metric VALUE.
+        // recovered v^i is contravariant. the SR->GR difference is the metric VALUE.
         let prim = rmhd_recover(eos, cons, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);

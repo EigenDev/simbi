@@ -11,7 +11,7 @@
 // shared body of let-bindings across all outputs. the kernel surface
 // (signature, thread indexing, bounds check, per-buffer loads/stores)
 // is target-parameterized via `TargetConfig`; CUDA, HIP, and Metal
-// share the same shape today via `header()` / `global_qualifier()`
+// share the same shape via `header()` / `global_qualifier()`
 // in `symbi_ir::emit`. SYCL/FPGA would slot in as sibling emitters
 // (the IR is target-agnostic; only the source text shifts).
 //
@@ -121,7 +121,7 @@ impl KernelRenderer for CRenderer {
         s
     }
     fn buffer_param(&self, idx: u32, _is_output: bool) -> String {
-        // Phase 1B-3: every buffer is a View struct (data + lo + strides). drops
+        // every buffer is a View struct (data + lo + strides). drops
         // the matching `buf_lo_*` / `buf_extent_*` scalar args (see
         // `skip_scattered_buffer_layout_args`).
         format!("    __symbi_View field{idx}")
@@ -363,7 +363,7 @@ pub fn prepared_from_ir(ir: &str) -> Prepared {
 /// into the name — adding HIP/Metal is a new match arm here, never a new `*_cuda`
 /// function (doc 15 §8 invariant 3). one blob renders every backend AND both
 /// precisions (precision is a render-algebra parameter, doc 15 §4); the source then
-/// feeds the backend's runtime compiler (NVRTC/hiprtc/Metal, step 3c). the
+/// feeds the backend's runtime compiler (NVRTC/hiprtc/Metal). the
 /// accelerator renders source at runtime rather than shipping pre-rendered text.
 pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelDescriptor {
     let prepared = prepared_from_ir(ir);
@@ -440,7 +440,7 @@ pub fn render_field_reduction(
     ));
 
     // ---- signature ----
-    // Phase 1B-3: reduce kernel also takes its input buffer as a `__symbi_View`
+    // reduce kernel also takes its input buffer as a `__symbi_View`
     // struct (data + lo + strides bundled), matching the main kernel ABI. the
     // host packs an identical layout.
     let mut params: Vec<String> = vec![
@@ -579,7 +579,7 @@ mod tests {
         });
         assert!(desc.source.contains("__symbi_View field0"));
         assert!(desc.source.contains("__symbi_View field1"));
-        // strides come from `field{N}.strides[..]` now (Phase 1B-3) — no per-buffer
+        // strides come from `field{N}.strides[..]` — no per-buffer
         // `_ny_<N>` lets needed; the View struct carries pre-multiplied strides.
         assert!(desc.source.contains("field0.strides[0]"));
         assert!(desc.source.contains("int jj = (int)_i1 + dom_lo_1;"));

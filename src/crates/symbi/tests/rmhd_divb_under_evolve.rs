@@ -3,13 +3,13 @@
 //
 // the FULL-EVOLVE divergence-cleaning gate (T3). rmhd_ct_curl_divb (in
 // symbi-discretize) covers the CT operator in ISOLATION — one step, one EMF.
-// this test runs the entire production RMHD substrate (c2p → ghost_fill → flux
-// per dir → cfl → snapshot → godunov_euler → post_godunov[CT] → rk2) for
+// this test runs the entire production RMHD substrate (c2p -> ghost_fill -> flux
+// per dir -> cfl -> snapshot -> godunov_euler -> post_godunov[CT] -> rk2) for
 // STEPS_TARGET steps with periodic BCs and asserts the discrete staggered
 // divergence stays at machine zero.
 //
-// IC: Orszag-Tang vortex — analytically div-free B (Bx = -B0·sin(2πy), By =
-// B0·sin(4πx), Bz = 0) on a small 8³ grid (nz=1 logical 2D extruded one cell).
+// IC: Orszag-Tang vortex — analytically div-free B (Bx = -B0\cdot sin(2\pi y), By =
+// B0\cdot sin(4\pi x), Bz = 0) on a small 8^3 grid (nz=1 logical 2D extruded one cell).
 // face-staggered storage matches examples/rmhd_orszag_tang.rs; the discrete div on
 // the CT mesh is identically zero at t=0 by telescoping, and CT preserves that
 // to machine epsilon every step.
@@ -47,8 +47,8 @@ const GAMMA: f64 = 5.0 / 3.0;
 const CFL: f64 = 0.3;
 const V0: f64 = 0.5;
 const B0: f64 = 1.0;
-// t_final sized to span ≳ 10 cfl-bounded steps on dx=1/8, λ_max ~1 (dt ≈ 0.0375).
-// stays well before the OT turbulent regime (≳ 0.5/cs ~ 0.75 in the example), so
+// t_final sized to span \gtrsim 10 cfl-bounded steps on dx=1/8, \lambda_max ~1 (dt \approx 0.0375).
+// stays well before the OT turbulent regime (\gtrsim 0.5/cs ~ 0.75 in the example), so
 // the divB invariant is exercised under the smooth-and-developing flow phase.
 const T_FINAL: f64 = 0.5;
 const DIVB_TOL: f64 = 1e-12;
@@ -62,7 +62,7 @@ fn make_sim() -> Sim {
 
     // analytically div-free staggered B. seed_faces reads face_coord (on the d-face,
     // cell-CENTERED transverse) — no hand-written half-cell offset.
-    //   Bx on x-faces: Bx = -B0·sin(2π y),  By on y-faces: By = B0·sin(4π x),  Bz = 0
+    //   Bx on x-faces: Bx = -B0\cdot sin(2\pi y),  By on y-faces: By = B0\cdot sin(4\pi x),  Bz = 0
     // cell-centered B from analytic eval at cell centers (consistent with bface); hydro:
     // v from the OT velocity field.
     Sim::build(Rmhd, IdealGas { gamma: GAMMA }, Cartesian)

@@ -53,7 +53,7 @@ fn rmhd_face_flux_1d(
     gamma: f64, theta: f64,
 ) {
     // the refactored flux reads the per-cell Davis fan speeds (ws_l/ws_r), produced in
-    // the live solver by rmhd_wave_speeds_cell (the exact quartic). here we bind the
+    // the live solver by rmhd_wave_speeds_cell (the exact quartic). this test binds the
     // global relativistic LIGHT-SPEED bound ws_l = -1, ws_r = +1 — valid because |lambda|
     // <= c = 1, giving the (more diffusive) Rusanov/LLF member of the HLLE family. still
     // physical, still develops the shock; the exact-quartic profile is the longer run.

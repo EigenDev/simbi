@@ -96,7 +96,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for IsoNewtonian {
         prim.rho
     }
 
-    // has_energy now derives from SPEC (B4-i; ISO_NEWTONIAN_SPEC.has_energy = false).
+    // has_energy derives from SPEC (ISO_NEWTONIAN_SPEC.has_energy = false).
 }
 
 // =============================================================================

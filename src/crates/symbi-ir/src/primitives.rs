@@ -16,7 +16,7 @@
 //                             same-variance arithmetic compiles, mixed is a
 //                             compile error; metric-free contraction.
 //   - Scope + Scoped        — per-rank vs cross-rank value discipline (DORMANT
-//                             until multi-rank code arrives; spec'd now so the
+//                             until multi-rank code arrives; retained so the
 //                             eventual MPI lift is a non-breaking add).
 //   - LinearSpace           — types that declare additive + scalar-multiplicative
 //                             structure (Cons + Cons OK; Prim + Prim won't compile
@@ -26,9 +26,8 @@
 //                             and Spherical are forward placeholders until the
 //                             Regime-trait geometry lift forces them.
 //
-// status: DRAFT (2026-05-30). these traits don't yet have downstream consumers
-// (physics still uses the legacy `symbi_algebra::Scalar` + ad-hoc trait bounds).
-// migration is a separate task once the spine is ratified end-to-end.
+// these traits have no downstream consumers (physics uses the legacy
+// `symbi_algebra::Scalar` + ad-hoc trait bounds).
 //
 // references:
 //   - crate::algebra        — the new `Scalar` / `Mask` these traits build on
@@ -62,8 +61,8 @@ pub use symbi_algebra::{contract, Contravariant, Covariant, Indexed, Lower, Uppe
 // → Global, triggers communication when ranks > 1) or `localize` (Global
 // → Local, trivial — every rank already agrees).
 //
-// dormant today (no multi-rank code yet). spec'd now so the MPI lift later
-// is a non-breaking type-discipline addition rather than a refactor.
+// dormant: no multi-rank consumer; retained for the MPI lift as a
+// non-breaking type-discipline addition rather than a refactor.
 // =============================================================================
 
 pub trait Scope: 'static + Copy + Default {}
@@ -179,9 +178,9 @@ impl<S: Scalar> LinearSpace for S {
 // identity metric — the optimizer eliminates every method call through
 // monomorphization. Cylindrical/Spherical/KerrSchild add non-trivial metric.
 //
-// NOT yet wired into the Regime trait in symbi-hydro — physics still handles
+// NOT wired into the Regime trait in symbi-hydro — physics handles
 // curvilinear cases ad-hoc. lifting Geometry into Regime (so flux/wave_speed
-// take `&G`) is a downstream task; this trait is its contract.
+// take `&G`) is the contract this trait defines.
 // =============================================================================
 
 pub trait Geometry<S: Scalar, const D: usize>: 'static + Copy + Default {

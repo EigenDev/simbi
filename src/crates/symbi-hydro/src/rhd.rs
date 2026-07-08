@@ -104,7 +104,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rhd {
     // extremal_speeds (clamped) + max_wave_speed (axis fold) are the Regime defaults; rhd
     // sets CLAMP_EXTREMAL_TO_ZERO = true and reuses them — no per-regime copy.
 
-    // is_relativistic now derives from SPEC (B4-i).
+    // is_relativistic derives from SPEC.
 
     #[inline]
     fn effective_inertia(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> S {

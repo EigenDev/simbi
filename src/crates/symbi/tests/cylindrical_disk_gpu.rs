@@ -8,7 +8,7 @@
 // AdiabaticSubstrateKernelSet on each, and diffs every kernel the disk dispatches
 // GPU == CPU to rel < 1e-9. the geometry-dependent "_cyl" instances here are the
 // godunov (area-weighted r-phi divergence + centrifugal/coriolis source + hoop p/r)
-// and the CFL wave-speed map (physical r·dphi widths); the flux / c2p / snapshot /
+// and the CFL wave-speed map (physical r\cdot dphi widths); the flux / c2p / snapshot /
 // ghost reuse the cartesian ncomp=2 instances (DOF == NDIM), confirmed to dispatch
 // correctly for an r-phi sim. proves the disk-evolve hydro runs on device.
 //
@@ -54,7 +54,7 @@ fn cmp<MH: MemorySpace, MD: MemorySpace>(
 // a rotating disk (r in [0.5,1.5], phi in [0,2*pi)) with an azimuthal density/pressure
 // gaussian + a sheared rotation profile and a small v_r — so the phi-flux, the
 // area-weighted r-phi divergence, and the centrifugal/coriolis source are all exercised
-// non-trivially (no exact equilibrium; we diff CPU vs GPU, not against a steady state).
+// non-trivially (no exact equilibrium; diffs CPU vs GPU, not against a steady state).
 fn build_disk<S: ExecutionSpace, Mem: MemorySpace>(
 ) -> SimStateGeneric<Newtonian, 2, 2, Cylindrical, IdealGas<f64>, S, Mem> {
     let (r_lo, r_hi) = (0.5_f64, 1.5_f64);
@@ -123,7 +123,7 @@ fn cyl_disk_gpu_matches_cpu() {
         cmp(alloc, &host.fields.prim.vel[k], &dev.fields.prim.vel[k], "prim.vel (ghosts)");
     }
 
-    // cfl (iso_wave_speed_map_cyl_2d, ncomp=2): physical r·dphi widths + device reduce.
+    // cfl (iso_wave_speed_map_cyl_2d, ncomp=2): physical r\cdot dphi widths + device reduce.
     let (hdt, ddt) = (hset.cfl(&host), dset.cfl(&dev));
     assert!(hdt > 0.0 && hdt.is_finite() && ddt.is_finite(), "bad dt: cpu {hdt} gpu {ddt}");
     assert!((hdt - ddt).abs() / hdt < 1e-9, "cfl dt: cpu {hdt} != gpu {ddt}");

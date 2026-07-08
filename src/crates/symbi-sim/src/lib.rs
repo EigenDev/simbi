@@ -1,15 +1,15 @@
 // =============================================================================
 // symbi-sim/src/lib.rs
 //
-// the simulation-state core crate (docs/design/41 step 2): the `FieldStore` /
+// the simulation-state core crate (docs/design/41): the `FieldStore` /
 // `SimState` SoA containers, the sim<->substrate seam (KernelSet / RegimeSubstrate
 // traits + the Solver/RegimeKind classification enums), config, the free field
 // helpers, checkpoint I/O, and example CLI parsing.
 //
 // this is the HUB the whole orchestration revolves around, lifted below the
 // substrate (`regimes`) and the integrator (`evolve`) so they depend DOWN on it
-// — the cycle-break of docs/design/41 step 1 made `state.rs` free of any upward
-// edge into `regimes`, which is what lets the hub be its own crate.
+// — `state.rs` carries no upward edge into `regimes`, which is what lets the
+// hub be its own crate.
 //
 // dependency floor only: algebra / grid / ir / hydro / geometry / xpu / io. it
 // names NO concrete kernelset and NO executor — those live above it.

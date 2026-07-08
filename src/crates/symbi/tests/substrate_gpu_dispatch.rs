@@ -1,7 +1,7 @@
 // =============================================================================
 // substrate_gpu_dispatch.rs
 //
-// proof of the structured-ABI GPU mapping (docs/design/15 §5, step 3c-2) AND its
+// proof of the structured-ABI GPU mapping (docs/design/15 §5) AND its
 // precision-genericity (§4): build the SAME `KernelInvocation` the substrate
 // KernelSet hands `run_cpu`, back it with unified memory, and route it through
 // `substrate_gpu::dispatch`. with a device-accessible `Mem`, dispatch renders the
@@ -90,7 +90,7 @@ fn iso_c2p_gpu_matches_cpu<S: Scalar + OrderedNumeric>(tol: f64) {
     // S's precision + NVRTC). the cpu fn is the (unused here) host fallback.
     dispatch::<S, DeviceMemory, _>(inv, ISO_C2P_1D_IR, "iso_c2p_1d", iso_c2p_1d);
     // launches are asynchronous: drain the device queue before the host reads
-    // the unified buffers (the B12 host-read barrier).
+    // the unified buffers (the host-read barrier).
     symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
 
     let read = |p: *mut S| (0..n).map(|j| unsafe { (*p.add(j)).to_f64() }).collect::<Vec<f64>>();

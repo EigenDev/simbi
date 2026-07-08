@@ -2,7 +2,7 @@
 // spatial_metric.rs
 //
 // the spatial metric as a CARRIER-GENERIC VALUE the physics contracts with — the
-// vehicle for the SR->GR pivot (B2). the carrier homomorphism transports it exactly
+// vehicle for the SR->GR generalization. the carrier homomorphism transports it exactly
 // like `eos`: at S=f64 it is concrete matrices, at S=Gv it traces into the kernel.
 //
 // holds gamma_{ij} (lowers a contravariant vector) and its inverse gamma^{ij}

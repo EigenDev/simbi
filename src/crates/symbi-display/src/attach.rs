@@ -43,7 +43,7 @@ pub fn run_attach(rundir: &Path, poll_ms: u64) -> io::Result<()> {
     let path = snapshot_path(rundir);
     let poll = Duration::from_millis(poll_ms.max(1));
 
-    // own Ctrl-C before the wait loop so it aborts cleanly while we watch for the
+    // own Ctrl-C before the wait loop so it aborts cleanly while awaiting the
     // first snapshot (the run may not have reached its first cadence yet).
     let _sig = SignalGuard::install();
     eprintln!("attach: waiting for {} …", path.display());

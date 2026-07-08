@@ -219,7 +219,7 @@ pub fn rmhd_ct_curl_2d_dir_gv(dir: usize) -> (GvKernel, Vec<(String, FieldBind, 
 ///   dir=0 (B_r, r-face):  dB_r/dt = +d_z E_phi            (z = grid axis 1; flat, no metric)
 ///   dir=1 (B_z, z-face):  dB_z/dt = -(1/r) d_r(r E_phi)   (r = grid axis 0; cylindrical metric)
 /// r is computed per-cell from gv_axis_face_at(0, ..) (the geom scalars x_lo_0/dx_0). E_phi is
-/// the corner field at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d∘d.
+/// the corner field at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d-of-d.
 pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let b = Gv::field("b", "b");
@@ -262,7 +262,7 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec
 ///   dir=0 (B_r, r-face):   dB_r/dt   = -(1/r) d_phi E_z   (phi = grid axis 1; 1/r metric, r = the r-face radius)
 ///   dir=1 (B_phi, phi-face): dB_phi/dt = +d_r E_z         (r = grid axis 0; flat, NO metric — mirror of r-z)
 /// r is the r-FACE radius (where B_r lives) via gv_axis_face_at(0, .., 0). E_z is the corner field
-/// at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d∘d (mixed partials cancel).
+/// at offsets [0,0]/[+grid]. div(B)=0 preserved by the discrete d-of-d (mixed partials cancel).
 pub fn rmhd_ct_curl_cyl_rphi_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let b = Gv::field("b", "b");
@@ -283,7 +283,7 @@ pub fn rmhd_ct_curl_cyl_rphi_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, V
         b - dt * (Gv::ONE / r_face) * inv_dphi * (ez_phip - ez)
     } else {
         // dB_phi/dt = +d_r E_z : finite difference along grid axis 0 (r). NO metric (the phi-comp
-        // of the cyl curl is metric-free; the discrete d∘d still cancels — proven).
+        // of the cyl curl is metric-free; the discrete d-of-d still cancels — proven).
         let inv_dr = Gv::ONE / (gv_axis_face_at(0, spacing[0], 1) - gv_axis_face_at(0, spacing[0], 0));
         let ez_rp = gv_field_at("ez", "ez", 2, &[1, 0]);
         b + dt * inv_dr * (ez_rp - ez)
@@ -1134,7 +1134,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 /// combine: MAX on the diffusion `d` (paper-sanctioned, "maximizing the diffusion terms"), AVERAGE
 /// on the advective `a` (eq:dEW). upwind transverse velocity `vbar` (eq:vt), shared with UCT-HLL.
 /// NO floor on rho^{*s}: physical states give rho^{*s} > 0; the degenerate guard (nu* = 0 when the
-/// rotational waves collapse, eps = 1e-9) is the ONLY safeguard. zeroth order = R± reconstruction
+/// rotational waves collapse, eps = 1e-9) is the ONLY safeguard. zeroth order = R+/- reconstruction
 /// is identity (theta = 0). spec: literature/uct_algorithm.md §3.4 + mignone_delzanna/method2.tex.
 pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
@@ -1255,7 +1255,7 @@ pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     // upwind transverse velocity (eq:vt): alpha^+ carries the West/South state.
     let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
     let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
-    // staggered face B reconstructed to the EDGE (R±; theta=0 => identity = zeroth order). these are the
+    // staggered face B reconstructed to the EDGE (R+/-; theta=0 => identity = zeroth order). these are the
     // DISSIPATED transverse fields in the master composition (Eq. 16).
     let by_e = recon_face_to_edge(ndim, theta, "h_bface_b", "bface_b", &zero, g1, -1.0);
     let by_w = recon_face_to_edge(ndim, theta, "h_bface_b", "bface_b", &nw, g1, 1.0);

@@ -1,7 +1,7 @@
 // =============================================================================
 // meta_table.rs
 //
-// **B9 Phase 3** — pretty-print `symbi_io::Metadata` and `symbi_io::TreeBuf`
+// pretty-print `symbi_io::Metadata` and `symbi_io::TreeBuf`
 // as box-drawn terminal tables. one Schema feeds:
 //   • `symbi_io::Hdf5Backend` (production checkpoint)
 //   • `symbi_io::JsonBackend` (introspection)

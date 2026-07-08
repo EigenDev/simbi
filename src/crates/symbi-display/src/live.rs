@@ -290,7 +290,7 @@ fn render_hero(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     }
 }
 
-/// the hero panel — reserved for the live field view (tier 2); for now it holds
+/// the hero panel — reserved for the live field view (tier 2); holds
 /// the throughput trace.
 fn render_throughput_hero(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let block = Block::new()

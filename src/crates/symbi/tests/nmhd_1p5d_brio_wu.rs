@@ -10,8 +10,8 @@
 //   - the gas (rho, v, p) shocks via the HLLE flux.
 // asserts: Bx const (machine), physicality, the unshocked end states survive at the
 // boundaries, and the characteristic Brio-Wu structure (By sign change = the compound
-// wave; a compressed intermediate density) appears. exact-reference comparison is a
-// follow-up; this gate pins the 1.5D machinery end-to-end.
+// wave; a compressed intermediate density) appears. exact-reference comparison is
+// out of scope; this gate pins the 1.5D machinery end-to-end.
 //
 // IC (gamma=2, x0=0.5): left rho=1, p=1, B=(0.75, 1, 0); right rho=0.125, p=0.1,
 // B=(0.75, -1, 0); v=0 both sides.

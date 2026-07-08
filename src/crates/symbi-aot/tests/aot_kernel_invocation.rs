@@ -1,12 +1,12 @@
 // =============================================================================
 // aot_kernel_invocation.rs
 //
-// the structured binding ABI (docs/design/15 §5, step 3a) — proof that routing a
+// the structured binding ABI (docs/design/15 §5) — proof that routing a
 // generated kernel through `KernelInvocation::run_cpu` produces BYTE-IDENTICAL
 // output to calling the descriptor wrapper directly with `&[CpuField]` /
-// `&mut [CpuFieldMut]`. the invocation is the backend-NEUTRAL seam (handle +
+// `&mut [CpuFieldMut]`. the invocation is the backend-NEUTRAL boundary (handle +
 // layout + params); the CPU mapping just splits the buffers back into the
-// generated fn's args. (the device-pointer handle + GPU launch arrive in 3c.)
+// generated fn's args. (the device-pointer handle + GPU launch are not covered here.)
 // =============================================================================
 
 use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation, godunov_mass_1d};
@@ -60,7 +60,7 @@ fn kernel_invocation_run_cpu_matches_direct_descriptor_call() {
     };
     inv.run_cpu(godunov_mass_1d);
 
-    // byte-identical: the seam is a pure re-binding of the same args.
+    // byte-identical: the invocation is a pure re-binding of the same args.
     assert_eq!(rho_new_inv, rho_new_direct, "invocation seam diverged from the direct call");
     // and the kernel actually ran (not a no-op).
     assert!(rho_new_direct.iter().zip(&rho).any(|(a, b)| a != b), "godunov was a no-op");

@@ -1,7 +1,7 @@
 // =============================================================================
 // refine_conservation.rs
 //
-// phase 2 gate (docs/design/22): 2-level STATIC nesting with subcycling +
+// 2-level STATIC nesting gate (docs/design/22): subcycling +
 // refluxing conserves the composite-grid totals (coarse cells outside the
 // coverage + fine cells inside) to machine precision while waves cross the
 // coarse-fine interface, the restriction keeps coarse == average(fine

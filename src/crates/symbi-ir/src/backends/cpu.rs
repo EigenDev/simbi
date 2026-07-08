@@ -156,7 +156,7 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
             out.push(';');
         }
         ScalarStmt::Assign { name, value } => {
-            // F2.F: plain assignment (Fold body's accumulator update).
+            // plain assignment (Fold body's accumulator update).
             out.push_str(name);
             out.push_str(" = ");
             emit_expr(out, value, generic);
@@ -674,7 +674,7 @@ mod tests {
         assert!(src.contains("((M_0_0 * N_0_0) + (M_0_1 * N_1_0))"));
     }
 
-    // ----- docs/design/23 step 1: ScalarStmt::Scope tests -----
+    // ----- docs/design/23: ScalarStmt::Scope tests -----
 
     /// build a `LoweredFn` by hand whose body contains a `Scope` statement,
     /// emit it, and verify the Rust output is the canonical block-expression

@@ -61,16 +61,16 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// the interior (= cs2*rho), ghost_fill the ghosts; flux + cfl reconstruct/read it.
     pub pre: Field<Sc, D, Mem>,
     pub cfl_scratch: Field<Sc, D, Mem>,
-    /// **B6-iv Phase 4b**: declarative routing to the AOT-baked fused godunov
+    /// declarative routing to the AOT-baked fused godunov
     /// (`iso_godunov_euler_with_{source_id}_{D}d`). `None` => the unfused kernel
     /// (the original default; bit-identical behavior for all existing callers).
     /// `Some(...)` => `godunov_euler` / `godunov_rk2` route to the fused variant
     /// in ONE launch with the binding's `scalars` filled into the kernel.
     pub fused_source: Option<FusedSourceBinding>,
-    /// **S3b**: the NON-fused (additive) source overlay. `Some` => the step loop
+    /// the NON-fused (additive) source overlay. `Some` => the step loop
     /// snapshots `u_stage` + runs the standalone `iso_source_with_{slug}_{D}d`
     /// pass after each godunov stage (`cons += ac*dt*S`). proven bit-for-bit
-    /// equal to `fused_source` with the same binding (S2 + the evolve-level
+    /// equal to `fused_source` with the same binding (proven at the evolve level by
     /// `additive_source_matches_fused_trajectory`). mutually exclusive with
     /// `fused_source` in practice — the same physics, two execution strategies.
     pub additive_source: Option<FusedSourceBinding>,
@@ -153,7 +153,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// **B6-iv Phase 4b**: bind a fused-source AOT kernel for this kernel-set.
+    /// bind a fused-source AOT kernel for this kernel-set.
     /// fluent builder, intended to chain off `new(..)`:
     /// `IsoSubstrateKernelSet::new(cs, cfl, alloc).with_fused_source(binding)`. one
     /// AOT-baked kernel covers `div(F) + spec source(s) + integrator` per step.
@@ -162,10 +162,10 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// **S3b**: bind the SAME source as a NON-fused additive pass (plain godunov +
+    /// bind the SAME source as a NON-fused additive pass (plain godunov +
     /// per-stage `source_apply`) instead of fusing it into the godunov kernel.
     /// the general execution path; bit-for-bit equal to `with_fused_source` for a
-    /// baked family (the dispatch in step 4 prefers fused-when-baked, falls back
+    /// baked family (the dispatch prefers fused-when-baked, falls back
     /// here). fluent builder; chain off `new(..)`.
     pub fn with_additive_source(mut self, binding: FusedSourceBinding) -> Self {
         self.additive_source = Some(binding);
@@ -242,7 +242,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         // (one launch, additive convention), so `body_source` is a no-op. cs feeds
         // the accretion rate cap (iso passes the constant self.cs). the fused kernel
         // is baked for Cartesian; curvilinear falls back to the separate body_source
-        // pass (the fused cyl/sph bake is a follow-up).
+        // pass (no fused cyl/sph bake exists).
         if sim.immersed.is_some() && sim.geom.coords == Geometry::Cartesian {
             dispatch_godunov_with_body_source(sim, &self.pre, "iso", dt, a0, ac, self.cs);
             return;

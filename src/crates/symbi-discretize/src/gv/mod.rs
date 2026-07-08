@@ -1448,7 +1448,7 @@ mod tests {
         // the per-cell wave-speed kernel: the EXACT Mignone & Del Zanna quartic per cell, one
         // (lambda_min, lambda_max) pair per direction -> wave_speed_l[d] / wave_speed_r[d].
         // proves it reads the full prim + gamma, writes 6, and DOES carry the resolvent-cubic
-        // transcendentals (it IS the exact quartic — the cost we're lifting off the flux).
+        // transcendentals (it IS the exact quartic — the cost lifted off the flux).
         let (k, writes) = rmhd_wave_speeds_cell_gv(3);
         assert_eq!(writes.len(), 6, "lambda_min/max per 3 directions");
         let out_paths: Vec<String> = writes.iter().map(|(_, p, _)| p.name()).collect();
@@ -1536,10 +1536,10 @@ mod tests {
 
     #[test]
     fn schwarzschild_stage_wires_the_lapse_mass_scalar() {
-        // the GR lapse wiring (B3.1 step B): a Schwarzschild-spacetime stage threads the lapse
+        // the GR lapse wiring: a Schwarzschild-spacetime stage threads the lapse
         // alpha = sqrt(1 - 2M/r) into the DAG, so the host scalar `schwarzschild_mass` appears in
         // the kernel manifest. the flat (Minkowski) stage on the SAME spherical grid does NOT — it
-        // stays bit-identical to pre-B3. proves the (Spherical, Schwarzschild) -> metric.lapse path.
+        // stays bit-identical to the lapse-free flat result. proves the (Spherical, Schwarzschild) -> metric.lapse path.
         let (k_gr, _) = godunov_stage_gv(
             Coords::Spherical, Spacetime::Schwarzschild,
             &[Spacing::Uniform], &[0], 1, 1, true,

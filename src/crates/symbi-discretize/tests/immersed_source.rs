@@ -1,7 +1,7 @@
 // =============================================================================
 // immersed_source.rs
 //
-// validates the substrate body_source builder (docs/design/19 P1/P2) against an
+// validates the substrate body_source builder (docs/design/19) against an
 // independent inline implementation of the same spec: an interpreter run on a known
 // state with one ACTIVE body + one INACTIVE body (mass=0, sink=0) to prove the
 // branch-free MAX_BODIES loop contributes exactly zero for inactive slots.

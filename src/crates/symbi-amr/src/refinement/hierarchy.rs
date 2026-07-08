@@ -12,7 +12,7 @@
 // level-pair. the refined region is fixed at setup, not re-flagged from the
 // solution; there is no patch graph and no berger-rigoutsos clustering.
 // multi-patch adaptive refinement (a level as a disjoint cover of Domains) is
-// future work — see docs/design/21_amr.md and findings/ADVERSARIAL_REVIEW_2026-06-16.md §5.
+// not implemented — see docs/design/21_amr.md and findings/ADVERSARIAL_REVIEW_2026-06-16.md §5.
 //
 // advance_level re-sequences the SSP stage loop (sim/evolve.rs::step) so the
 // register accumulation slots between flux() and the stage update.
@@ -1276,8 +1276,8 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 /// the sub-grid of tiles that carry the first fine level. for SMR (one refined box per level) the
 /// refined tiles form a contiguous rectangle; `order[k]` is the tile index at fine-flatten position
 /// `k`, and `devices[k]`/`counts` give that sub-grid's device map + shape for `exchange_grid`. when
-/// the patch is TILE-LOCAL the sub-grid is 1x1, so the fine exchange is a no-op (phases 1-2); when
-/// the patch SPANS cuts the sub-grid has internal cuts and the fine halos are exchanged (phase 3).
+/// the patch is TILE-LOCAL the sub-grid is 1x1, so the fine exchange is a no-op; when
+/// the patch SPANS cuts the sub-grid has internal cuts and the fine halos are exchanged.
 pub struct FineSubgrid<const NDIM: usize> {
     pub counts: [usize; NDIM],
     pub order: Vec<usize>,
@@ -1365,18 +1365,18 @@ fn exchange_level_halos<R, const NDIM: usize, const DOF: usize, M, E, S, Mem, K,
     }
 }
 
-/// the DECOMPOSED hierarchy driver (refinement x decomposition, phases 1-3): lockstep-advance N
+/// the DECOMPOSED hierarchy driver (refinement x decomposition): lockstep-advance N
 /// per-tile hierarchies, decomposing the ROOT and the FIRST FINE level. the root stages run with a
 /// root halo exchange BETWEEN them (rk2 corrector reads each neighbor's stage-1 update); the fine
 /// subcycle is driven here so its stages can exchange the FINE halos between fine tiles when a patch
-/// SPANS a tile cut (phase 3). for a TILE-LOCAL patch the fine sub-grid is 1x1, so the fine exchange
-/// is a no-op and this reduces to phases 1-2 exactly. the flux/emf reflux registers stay TILE-LOCAL
+/// SPANS a tile cut. for a TILE-LOCAL patch the fine sub-grid is 1x1, so the fine exchange
+/// is a no-op and this reduces to the tile-local case exactly. the flux/emf reflux registers stay TILE-LOCAL
 /// (a coarse cell + the fine cells at its face are co-located; any register write to a cut-adjacent
 /// GHOST is overwritten by the next root exchange). global dt = min over tiles of `root_cfl_dt()`.
-/// proven `decomposed == monolithic` by `decomp_refine_equivalence.rs` (1-2) + `..._p3_..` (3).
+/// proven `decomposed == monolithic` by `decomp_refine_equivalence.rs` + its spanning-cut variant.
 ///
 /// LEVELS 2+ are advanced TILE-LOCALLY (inside the level-1 fine tile, via the recursive
-/// `level_step_tail(1)`); decomposing a patch that spans a cut on a level >= 2 is future work.
+/// `level_step_tail(1)`); decomposing a patch that spans a cut on a level >= 2 is not supported.
 /// hydro only in the root post-step (mesh motion / immersed bodies + refinement-decomp deferred;
 /// the root clock is advanced directly). `on_checkpoint(iteration, time, &tiles)` fires every
 /// `interval` root steps and once at the end (devices drained first).

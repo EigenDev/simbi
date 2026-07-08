@@ -74,7 +74,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for RhdGr<S, D> {
             return C2pResult::err(floored, code);
         }
         // the metric-aware recovery: |S|^2 = gamma^{ij} S_i S_j, then the raised v^i (`rhd_recover`
-        // already contracts with `self.metric`). the SR->GR seam is the metric VALUE, not new code.
+        // already contracts with `self.metric`). the SR->GR difference is the metric VALUE, not new code.
         let prim = rhd_recover(eos, cons, &self.metric, MAX_ITER);
         let v_sq = self.metric.norm_sq_contra(&prim.vel);
         let code = crate::c2p_result::relativistic_c2p_code(prim.rho, prim.pre, v_sq);

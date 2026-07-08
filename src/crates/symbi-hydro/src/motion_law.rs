@@ -5,7 +5,7 @@
 // expression (python `CompiledExpr.serialize_motion` -> the SourceConfig wire), lowered to the
 // symbi-ir Graph and scalarized ONCE; evaluated EXACTLY in the time loop per (sub)stage — no
 // linearization, no python in the loop. a_dot is autodiff'd from a in python (`a.diff(t)`); at
-// construction we finite-difference-check a_dot against a over the run's time window, so an
+// construction a_dot is finite-difference-checked against a over the run's time window, so an
 // inconsistent OR non-smooth derivative fails loudly before any stepping.
 //
 // usage:
@@ -79,7 +79,7 @@ impl MotionLaw {
 
     /// the strict-correctness guard: a_dot MUST equal da/dt. central finite difference at five times
     /// spanning the run; a wrong autodiff rule OR a non-smooth a(t) (a kink, a t-dependent branch)
-    /// makes AD and FD disagree past a relative tolerance and we refuse to run.
+    /// makes AD and FD disagree past a relative tolerance and the run is refused.
     fn fd_check(&self, t0: f64, t_end: f64) -> Result<(), String> {
         let (lo, hi) = if t_end > t0 { (t0, t_end) } else { (t0, t0 + 1.0) };
         for k in 0..5 {

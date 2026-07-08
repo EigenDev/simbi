@@ -1,7 +1,7 @@
 // =============================================================================
 // builder_typestate_smoke.rs
 //
-// phase 0+1 of the safe-path-only frontend: the typestate SimBuilder reaches a
+// the safe-path-only frontend: the typestate SimBuilder reaches a
 // usable SimState only through the NeedsGrid -> NeedsCells -> Ready path, with
 // `build()` callable solely at Ready. these smokes prove the happy paths
 // compile and produce a seeded sim:

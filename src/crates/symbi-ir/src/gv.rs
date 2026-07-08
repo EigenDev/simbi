@@ -5,9 +5,8 @@
 // `Gv` is a `symbi_algebra::Scalar` whose operations RECORD into this crate's
 // tensor graph instead of computing; instantiating carrier-generic physics
 // (written over `S: Scalar`) at `S = Gv` traces it into the stencil IR — the
-// foundational "code -> graph" seam. graph and carrier live in the SAME crate
-// (consolidated 2026-05-30; symbi-core was folded in here so the IR machine
-// is one layer, not two).
+// foundational "code -> graph" boundary. graph and carrier live in the SAME
+// crate so the IR machine is one layer, not two.
 //
 // arena pattern: a thread-local graph holds the active trace; `Gv` is a Copy
 // handle. `begin_trace()` opens it, ops push nodes, `end_trace()` takes the
@@ -52,11 +51,10 @@ pub struct GvKernel {
     /// redirect that field's stencil `LoadAt` reads to smem. when `None`, the
     /// emit produces the prior gmem-per-thread pattern.
     ///
-    /// **STATUS** (2026-06-04): the type carries the spec; the CUDA emit and
-    /// LoadAt rewriting paths are **not yet implemented** — see
-    /// `docs/design/22_smem_tiling.md` for the full implementation plan.
-    /// for now the field exists so builders, fusion, and the runtime can be
-    /// extended without further enum-shape changes.
+    /// the type carries the spec; the CUDA emit and LoadAt rewriting paths are
+    /// **not implemented** — see `docs/design/22_smem_tiling.md`. the field
+    /// exists so builders, fusion, and the runtime can be extended without
+    /// further enum-shape changes.
     pub tile_spec: Option<TileSpec>,
 }
 
@@ -508,7 +506,7 @@ pub fn try_fuse(
         coord_components,
         grade: a.grade,
         // tile_spec is preserved across fusion: the pre-check guaranteed
-        // a.tile_spec == b.tile_spec, so we can take either side's value.
+        // a.tile_spec == b.tile_spec, so either side's value serves.
         tile_spec: a.tile_spec,
     };
 
@@ -590,7 +588,7 @@ enum GvVal {
 /// records a node into the thread-local trace graph.
 ///
 /// a traced graph value has no physical order or equality — `Scalar` does not
-/// require `PartialOrd`/`PartialEq`, and we deliberately do NOT implement them.
+/// require `PartialOrd`/`PartialEq`, which are deliberately NOT implemented.
 /// physics decides with the traceable `cmp_lt` / `cmp_gt` / `select`, never with
 /// native `<` / `==` (which would silently compare node indices, not values).
 /// the type system enforces this — native ordering does not compile:
@@ -851,7 +849,7 @@ impl crate::algebra::Scalar for Gv {
         Gv::of(with_trace(|t| t.graph.select(c, y, n, None)))
     }
 
-    // docs/design/23 step 3b: scope frame at S = Gv.
+    // docs/design/23: scope frame at S = Gv.
     //
     // semantics: snapshot the graph's node count BEFORE running `body`; all
     // NodeIds pushed during the closure (the lexical region of this scope)
@@ -1072,11 +1070,11 @@ impl crate::algebra::Scalar for Gv {
 //   - operation = try_fuse, partial (fails on mismatched grade, shared writes,
 //     or inter-dependency)
 //
-// the tests are SYNTHETIC (no physics): we build small traces with two
-// independent fields, declare their writes manually, and assert the algebraic
-// properties hold structurally. once these pass, consumer code (godunov +
-// bcell_godunov, snapshot + bcell_snapshot, c2p + wave_speed_map) can fuse via
-// `try_fuse` knowing the primitive is sound.
+// the tests are SYNTHETIC (no physics): small traces with two independent
+// fields, writes declared manually, asserting the algebraic properties hold
+// structurally. these properties are what let consumer code (godunov +
+// bcell_godunov, snapshot + bcell_snapshot, c2p + wave_speed_map) fuse via
+// `try_fuse` soundly.
 // =============================================================================
 
 #[cfg(test)]
@@ -1118,7 +1116,7 @@ mod fusion_laws {
     // structural-equality helper: two manifests are "the same" iff their
     // field-input sets, scalar-param sets, and write-path sets coincide. node
     // counts may differ across orderings (CSE inside splice can collapse
-    // duplicates), so we compare semantic sets, not raw vectors.
+    // duplicates), so the comparison is over semantic sets, not raw vectors.
     fn manifest_sets(
         k: &GvKernel,
         w: &Writes,
@@ -1334,8 +1332,8 @@ mod fusion_laws {
 
     /// fusion preserves the tile_spec when BOTH sides match. directly sets
     /// `tile_spec` on each kernel (bypassing the `with_tile_spec` builder's
-    /// manifest check, which is tested separately) so we can declare a single
-    /// shared spec on both halves regardless of their disjoint inputs.
+    /// manifest check, which is tested separately) so a single shared spec sits
+    /// on both halves regardless of their disjoint inputs.
     #[test]
     fn law_tile_spec_preserved_when_both_match() {
         let g = interior_grade();
@@ -1446,7 +1444,7 @@ mod fusion_laws {
 }
 
 // =============================================================================
-// docs/design/23 step 3b: Scalar::scope at S = Gv — emits a real frame.
+// docs/design/23: Scalar::scope at S = Gv — emits a real frame.
 //
 // at f64 the default `Scalar::scope` impl is identity (the closure runs
 // inline). at Gv the override above snapshots the trace, runs the closure,

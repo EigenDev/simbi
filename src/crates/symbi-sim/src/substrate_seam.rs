@@ -110,7 +110,7 @@ where
     /// execution; default: no-op.
     fn source_apply(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _weight: f64) {}
 
-    /// backward immersed-body feedback (docs/design/19 P3): reduce the per-body force/torque/
+    /// backward immersed-body feedback (docs/design/19): reduce the per-body force/torque/
     /// accreted-mass from the fluid into the side-car diagnostics, once per step. default: no-op.
     fn body_feedback(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 }
@@ -147,8 +147,7 @@ impl Solver {
     /// whether this solver is physically valid for `regime`. ENCODES the runtime `dispatch_flux`
     /// assert as a checkable predicate: HLLE is universal; HLLC resolves a contact wave but no
     /// magnetic structure (non-MHD only); HLLD is the MHD 5-wave solver (MHD only). this is the
-    /// matrix `valid_for` validation reads BEFORE building a substrate (the with_solver wiring is
-    /// phase 2 — this phase only defines + tests the matrix).
+    /// matrix `valid_for` validation reads BEFORE building a substrate.
     pub fn valid_for(self, regime: RegimeKind) -> bool {
         match self {
             Solver::Hlle => true,

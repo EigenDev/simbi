@@ -44,7 +44,7 @@ impl Geometry {
 /// [`Geometry`] and the physics regime: GR is not a regime, it is a curved spacetime, so a single
 /// SR regime (Rhd / Rmhd) composes with any spacetime here without duplication. flat `Minkowski`
 /// (lapse = 1, shift = 0, gamma = identity in physical components) is the default — every realized
-/// run today. drives the lapse / sqrt(gamma) densitization selector in the kernel (B3). integer
+/// run. drives the lapse / sqrt(gamma) densitization selector in the kernel. integer
 /// repr matches the GPU kernel convention (mirrors `Geometry`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(i32)]
@@ -93,7 +93,7 @@ impl Spacetime {
 /// [`DiagonalMetric`] subtrait. a non-diagonal (Kerr-class) metric impls `Metric` but NOT
 /// `DiagonalMetric`, so the compiler forbids orthogonal quadrature on it until the non-diagonal
 /// forms are written — the "GRMHD-forward" claim is type-enforced, not asserted. (the realized
-/// physics today is all diagonal: flat + orthogonal-curvilinear.)
+/// physics is all diagonal: flat + orthogonal-curvilinear.)
 ///
 /// implementations: Cartesian, Spherical, Cylindrical (all `DiagonalMetric`),
 /// and (future) Schwarzschild, Kerr, etc. (`Metric` only, until their quadrature lands).
@@ -103,7 +103,7 @@ pub trait Metric<S: Scalar, const D: usize> {
 
     /// the spacetime background (flat vs curved). ORTHOGONAL to `geometry()`: `Minkowski` for every
     /// flat metric, a curved variant (Schwarzschild, ...) for GR. selects the lapse / sqrt(gamma)
-    /// densitization path in the kernel (B3); flat -> the densitization is a no-op.
+    /// densitization path in the kernel; flat -> the densitization is a no-op.
     fn spacetime(&self) -> Spacetime { Spacetime::Minkowski }
 
     /// the spacetime's runtime scalar PARAMETERS as `(wire-name, value)` pairs — the kernel-dispatch
@@ -656,18 +656,18 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
 //   lapse  alpha    = sqrt(f),  shift beta = 0
 //   gamma_{ij}      = diag(1/f, r^2, r^2 sin^2 theta)   (DIAGONAL -> DiagonalMetric)
 //   sqrt(gamma)     = r^2 sin(theta) / sqrt(f)
-//   sqrt(-g)        = alpha sqrt(gamma) = r^2 sin(theta)   (the flat spherical area: the B3 gift)
+//   sqrt(-g)        = alpha sqrt(gamma) = r^2 sin(theta)   (the flat spherical area)
 //
 //   the SPATIAL coordinate geometry is spherical (geometry() = Spherical); the CURVATURE lives in
 //   the radial stretch 1/f and the lapse. this coordinate gamma feeds densitization / lower-raise /
-//   (B4) the christoffel gravity source — NOT the hydro's physical-frame metric, which stays
+//   the christoffel gravity source — NOT the hydro's physical-frame metric, which stays
 //   identity in the orthonormal convention (the lapse enters the kernel via `gv_lapse_weight`).
 //
 //   reduced dims mirror Spherical: 1D (r) radial, 2D (r, theta). valid OUTSIDE the horizon r > 2M
 //   (f > 0); r <= 2M makes sqrt(f) imaginary — the coordinate singularity, physical.
 //
-//   the momentum source (geodesic gravity) is the connection of the FULL 4-metric -> B4; left at
-//   the trait default (zero) here. step A is the metric geometry + lapse only.
+//   the momentum source (geodesic gravity) is the connection of the FULL 4-metric; left at
+//   the trait default (zero) here — only the metric geometry + lapse are provided.
 // ============================================================
 
 /// the Schwarzschild (static spherically-symmetric vacuum) metric in standard coordinates. `mass`
@@ -2541,7 +2541,7 @@ mod tests {
 
     #[test]
     fn test_schwarzschild_sqrt_minus_g_is_flat_spherical_area() {
-        // the B3 densitization GIFT: sqrt(-g) = alpha * sqrt(gamma) = r^2 sin(theta), the FLAT
+        // the densitization identity: sqrt(-g) = alpha * sqrt(gamma) = r^2 sin(theta), the FLAT
         // spherical area element — so GR flux face areas are unchanged; only the time-volume
         // (1/sqrt(f)) and the source pick up the lapse.
         let bh = Schwarzschild { mass: 0.7_f64 };
@@ -2723,7 +2723,7 @@ mod tests {
         // tangent IS d/dr. this is the SINGLE source of metric derivatives (the hand-written analytic
         // forms are retired) — so it must equal a central finite difference of the metric's OWN
         // lapse/shift/spatial_metric. checked for schwarzschild + KS, INCLUDING inside the KS horizon
-        // (r < 2M). the mass is a CONSTANT dual (we differentiate w.r.t. r, not M).
+        // (r < 2M). the mass is a CONSTANT dual (differentiation is w.r.t. r, not M).
         use symbi_ir::dual::Dual;
         // dr balances central-diff truncation (O(dr^2)) against subtractive roundoff (O(eps/dr)):
         // 1e-4 keeps both ~1e-8, so an FD-appropriate relative tolerance of 1e-5 is safe.

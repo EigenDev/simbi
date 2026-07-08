@@ -79,8 +79,8 @@ fn build_newton_sqrt2(with_break: bool, max_steps: usize) -> LoweredFn {
 
     let kernel = end_trace();
     // scalarize_kernel handles IterateInline (cone-partitioned lowering into
-    // a `for` with the body inside); plain `scalarize` doesn't, so we lift
-    // the kernel-scalarized output to a LoweredFn here.
+    // a `for` with the body inside); plain `scalarize` doesn't, so the
+    // kernel-scalarized output is lifted to a LoweredFn here.
     let ks = scalarize_kernel(&kernel.graph, &[root]);
     LoweredFn {
         name: "newton_sqrt2".to_string(),

@@ -84,7 +84,7 @@ impl Hdf5Backend {
     }
 }
 
-// ----- adapter so we can write attrs/datasets to either a File or a Group --
+// ----- adapter for writing attrs/datasets to either a File or a Group --
 
 #[allow(dead_code)] // `create_group` reserved for future per-write group helper
 enum FileOrGroup<'a> {

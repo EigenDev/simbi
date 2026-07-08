@@ -302,9 +302,8 @@ mod tests {
 
     // the FULL find_mu_plus (doubling + bisection + break) that the carrier-generic
     // bisection elides; agreement to ~1e-9 proves the elision.
-    // ORPHANED: kept as the analytic reference, but no test currently asserts against it
-    // (the comparison was lost). allow(dead_code) preserves the reference until it is
-    // re-wired into an elision-equivalence test or removed.
+    // UNUSED: kept as the analytic reference; no test asserts against it.
+    // allow(dead_code) preserves the reference.
     #[allow(dead_code)]
     fn ref_find_mu_plus(beesq: f64, beedrsq: f64, r: f64) -> f64 {
         if r < 1.0 { return 1.0; }

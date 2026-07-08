@@ -27,7 +27,7 @@ pub trait IoBackend {
 
     /// read the full file into a TreeBuf. for HDF5 this is straightforward;
     /// for backends that support lazy reads, this materializes everything
-    /// (fine for our checkpoint sizes; revisit if/when we ship multi-GB
+    /// (fine for typical checkpoint sizes; revisit for multi-GB
     /// snapshots).
     fn read(&self, path: &Path) -> Result<TreeBuf>;
 }

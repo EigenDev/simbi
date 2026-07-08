@@ -647,7 +647,7 @@ pub enum Op {
         else_body: Vec<NodeId>,
         else_results: Vec<NodeId>,
     },
-    /// extract component `index` of a MULTI-OUTPUT node (today: an `Op::IfElse`
+    /// extract component `index` of a MULTI-OUTPUT node (the only such node: an `Op::IfElse`
     /// with N results, from `S::cond_vec`). the scalarizer binds the multi-
     /// output node to an N-component `Concrete` binding and `Proj` selects one
     /// component — the lightweight projection that lets `cond_vec` return N
@@ -657,20 +657,16 @@ pub enum Op {
 }
 
 // =============================================================================
-// PHASE 3 — the SINGLE SOURCE OF TRUTH for Op's NodeId-field topology.
+// the SINGLE SOURCE OF TRUTH for Op's NodeId-field topology.
 //
 // every pass that walks operand edges (splice's remap, scalarize's cone /
-// in-degree / `inputs()`, future const-folder / SSA-rewrite passes) needs the
-// same answer: "for THIS variant, which fields are NodeIds?". before Phase 3
-// that question was answered TWICE — once in `passes/scalarize.rs::op_inputs`
-// (read-only), once in `passes/splice.rs` (with side-effecting remap). adding
-// a NodeId field to a variant meant touching both, and forgetting one was a
-// silent miscompile-class bug.
-//
-// after Phase 3 the single source of truth is `Op::try_map_inputs` — a
-// fallible, in-place per-variant traversal of every NodeId field. the
-// read-only `inputs()` view is DERIVED from it (a noop map that collects the
-// visited ids). adding a NodeId field to a variant is one match-arm edit.
+// in-degree / `inputs()`, const-folder / SSA-rewrite passes) needs the same
+// answer: "for THIS variant, which fields are NodeIds?". that answer lives in
+// exactly one place — `Op::try_map_inputs`, a fallible, in-place per-variant
+// traversal of every NodeId field. the read-only `inputs()` view is DERIVED
+// from it (a noop map that collects the visited ids). adding a NodeId field to
+// a variant is one match-arm edit; splitting the answer across passes risks a
+// silent miscompile-class bug when one copy is updated and the other is not.
 // =============================================================================
 impl Op {
     /// visit every NodeId field of this op, applying `f` to each in declared
@@ -903,8 +899,8 @@ pub struct FnId(pub u32);
 ///
 /// every parameter name in `params` matches an `Op::Param(sym)` in
 /// `body` — at apply time the parameter NodeId is substituted with
-/// the caller's argument NodeId. for V1 we don't physically splice
-/// at apply time: scalarize/emit walk the FnDef.body once per FnId
+/// the caller's argument NodeId. the FnDef.body is not physically
+/// spliced at apply time: scalarize/emit walk it once per FnId
 /// and produce one device function; Apply sites emit a call.
 #[derive(Clone, Debug)]
 pub struct FnDef {
@@ -1364,7 +1360,7 @@ impl Graph {
         };
 
         // Cast(to) always produces the TARGET element — the input type is what
-        // we're casting FROM. for every other op the output element follows
+        // is being cast FROM. for every other op the output element follows
         // the (homogeneous) input element. returns_bool ops always produce
         // Bool. without this Cast case, an external caller that re-inserts a
         // standalone Cast (splice / import_subgraph going through
@@ -1387,7 +1383,7 @@ impl Graph {
             variance: out_variance,
             class: out_class,
         };
-        // Phase 4: arithmetic-identity smart-constructor fold. catches the
+        // arithmetic-identity smart-constructor fold. catches the
         // patterns the IR is most prone to emit when contracting against unit
         // vectors / one-hot tensors: `x + 0`, `x * 1`, `x - 0`, `x / 1`. these
         // never enter the graph — `self.push` is never reached for them, so
@@ -2236,7 +2232,7 @@ impl Graph {
                 );
             }
         };
-        // clone the FnDef summary out before we borrow `self` mutably.
+        // clone the FnDef summary out before borrowing `self` mutably.
         let (param_count, expected_tys, result_ty) = {
             let fn_def = &self.lambdas[fn_id.0 as usize];
             let result_ty = fn_def.body.ty(fn_def.output).clone();
@@ -2639,9 +2635,9 @@ impl Graph {
             // every dispatchable variant — same contract as splice.rs.
             mut generic => {
                 // first pass: populate `memo` for every child. this resolves
-                // ALL recursive imports before we mutate `generic`'s NodeId
-                // fields, sidestepping the `&mut self` aliasing the previous
-                // per-variant scatter avoided by hand.
+                // ALL recursive imports before mutating `generic`'s NodeId
+                // fields, sidestepping the `&mut self` aliasing a per-variant
+                // scatter would otherwise require.
                 let mut children: Vec<NodeId> = Vec::new();
                 let _: Result<(), std::convert::Infallible> =
                     generic.clone().try_map_inputs(|id| {
@@ -3146,8 +3142,8 @@ mod tests {
 
     #[test]
     fn index_against_generic_dim_skips_bounds_check() {
-        // we can't bounds-check Literal(0) against Generic("D") at IR
-        // build time; the macro-time check should accept and rely on
+        // Literal(0) cannot be bounds-checked against Generic("D") at IR
+        // build time; the macro-time check accepts and relies on
         // the const-generic loop bound to enforce at monomorph time.
         let mut g = Graph::new();
         let v = g.add_param(
@@ -3273,7 +3269,7 @@ mod tests {
     fn elementwise_arity_error() {
         let mut g = Graph::new();
         let a = scalar_f64(&mut g, "a");
-        // Add wants 2, we pass 1
+        // Add wants 2, pass 1
         let _ = g.element_wise(ElementWiseOp::Add, vec![a], None);
         let err = g.errors()[0].summary();
         assert!(err.contains("Add"), "{}", err);
@@ -3412,7 +3408,7 @@ mod tests {
     fn transcendental_pow_arity_error() {
         let mut g = Graph::new();
         let b = scalar_f64(&mut g, "b");
-        // Pow wants 2, we pass 1
+        // Pow wants 2, pass 1
         let _ = g.transcendental(TranscendentalOp::Pow, vec![b], None);
         let err = g.errors()[0].summary();
         assert!(err.contains("Pow"), "{}", err);
@@ -4136,7 +4132,7 @@ mod tests {
         let s1 = g.element_wise(ElementWiseOp::Add, vec![a, b], None);
         let s2 = g.element_wise(ElementWiseOp::Add, vec![a, b], None);
         assert_eq!(s1, s2);
-        // 2 params + 1 add = 3 nodes total. without hash-cons we'd have 4.
+        // 2 params + 1 add = 3 nodes total. without hash-cons this would be 4.
         assert_eq!(g.len(), 3);
     }
 
@@ -4144,8 +4140,8 @@ mod tests {
     fn hashcons_input_order_matters() {
         // (a + b) is structurally different from (b + a) at the IR
         // level (the inputs vec is ordered). hash-cons must NOT merge
-        // them — that would be an algebraic-equivalence claim we
-        // haven't proven. simple operand-swap normalization belongs
+        // them — that would be an unproven algebraic-equivalence claim.
+        // simple operand-swap normalization belongs
         // in a separate canonicalization pass.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);

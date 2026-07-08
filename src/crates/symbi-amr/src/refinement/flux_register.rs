@@ -1,7 +1,7 @@
 // =============================================================================
 // flux_register.rs
 //
-// flux correction (refluxing, docs/design/22 phase 2) for static mesh refinement
+// flux correction (refluxing, docs/design/22) for static mesh refinement
 // (SMR). single-coverage cap: ONE register per coarse-fine level-pair, sized to
 // the level's single refined box (`coverage`) — there is no per-patch register
 // fan-out, because a level refines exactly one box (this is SMR, not multi-patch

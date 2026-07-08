@@ -74,7 +74,7 @@ fn axisymmetric_swirl_centrifugal_source() {
     let pre = sim.fields.prim.pre_field().expect("prim.pre");
 
     // sample the interior away from the r-walls (the BC perturbation can reach a few cells
-    // in over t_final; the centrifugal signature is what we test, not the wall response).
+    // in over t_final; the centrifugal signature is under test, not the wall response).
     let mut vr_times_r: Vec<f64> = Vec::new();
     for c in sim.geom.interior.iter() {
         if c[0] < 4 || c[0] >= nr as isize - 4 {

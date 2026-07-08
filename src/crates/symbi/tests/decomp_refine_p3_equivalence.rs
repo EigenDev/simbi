@@ -1,11 +1,11 @@
 // =============================================================================
 // decomp_refine_p3_equivalence.rs
 //
-// REFINEMENT x DECOMPOSITION, phase 3: a refined patch that SPANS a tile cut. now the FINE level is
-// itself split across tiles, so on top of the root halo exchange (P1/P2) the driver must exchange
+// REFINEMENT x DECOMPOSITION: a refined patch that SPANS a tile cut. the FINE level is
+// itself split across tiles, so on top of the root halo exchange the driver must exchange
 // the FINE-level halos between the fine tiles at the shared cut. the flux/emf reflux registers stay
 // TILE-LOCAL (a coarse cell + the fine cells at its face are co-located), so the only new coupling
-// is the fine-level exchange -- P3 = P2 + fine exchange.
+// is the fine-level exchange.
 //
 // the patch [0.375,0.625]^2 straddles the x-cut at x=0.5: tile 0 refines its left half, tile 1 its
 // right half; the two fine grids share the cut (each inherits a CoarseFine boundary there from its
@@ -120,9 +120,9 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
 }
 
 // drive the tiles through the PRODUCTION decomposed-hierarchy loop (symbi-amr). the SAME lib fn
-// `evolve_hierarchy_decomposed` handles P1-2 (tile-local, fine sub-grid 1x1) and P3 (the patch spans
-// the cut, so the fine sub-grid has an internal cut and the FINE halos are exchanged) -- this oracle
-// proves the P3 path. host: all tiles on "device 0".
+// `evolve_hierarchy_decomposed` handles the tile-local case (fine sub-grid 1x1) and the spanning case
+// (the patch spans the cut, so the fine sub-grid has an internal cut and the FINE halos are exchanged)
+// -- this test proves the spanning-patch path. host: all tiles on "device 0".
 fn run_p3(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping) {
     let devices: Vec<i32> = vec![0; tiles.len()];
     evolve_hierarchy_decomposed(

@@ -1,14 +1,14 @@
 // =============================================================================
 // aot_godunov_fused_source.rs
 //
-// **B6-iii (Phase 3) proof**: the FUSED-source godunov AOT-compiles to a single
+// the FUSED-source godunov AOT-compiles to a single
 // Rust kernel that applies `div(F) + Σ spec_source + integrator` in ONE call.
 //
 //   - `iso_godunov_stage_with_uniform_accel_1d` — iso (mass + mom) + uniform
 //     external acceleration overlay (mom only; iso has no energy law).
 //   - `adiabatic_godunov_stage_with_uniform_accel_1d` — adiabatic + uniform
 //     accel overlays for BOTH momentum (S_mom = ρ·g_ext) AND energy
-//     (S_nrg = ρ·v·g_ext). proves Phase 2b's multi-source fusion baked at
+//     (S_nrg = ρ·v·g_ext). proves the multi-source fusion baked at
 //     build time, not just at trace time.
 //
 // **what's validated**:
@@ -248,7 +248,7 @@ fn iso_aot_fused_runs_at_f32() {
 
 #[test]
 fn bake_matrix_emits_every_regime_family_ndim_cell() {
-    // **B6-v restructure structural fingerprint**: the data-driven bake
+    // **structural fingerprint**: the data-driven bake
     // matrix in build.rs (REGIMES × FUSED_FAMILIES × ndim) must emit a
     // kernel at every cell of the cube. asserts the loop walked the table
     // — adding a row to REGIMES or FUSED_FAMILIES MUST surface here as a

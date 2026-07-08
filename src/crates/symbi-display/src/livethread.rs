@@ -65,7 +65,7 @@ pub struct Controls {
 }
 
 impl Controls {
-    /// the currently-selected field index (`f`-key cycle).
+    /// the selected field index (`f`-key cycle).
     pub fn field_kind(&self) -> usize {
         self.field_kind.load(Ordering::SeqCst)
     }
@@ -167,7 +167,7 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
     let mut frame = 0u64;
     let mut cmap_idx = 0usize; // `c`-key colormap, applied render-side (no solver)
 
-    // exit on shutdown OR a caught signal (so we never draw into a terminal the
+    // exit on shutdown OR a caught signal (so drawing never targets a terminal the
     // async-signal-safe handler has already restored).
     while running.load(Ordering::SeqCst) && !signal_guard::stop_requested() {
         while let Ok(v) = rx.try_recv() {

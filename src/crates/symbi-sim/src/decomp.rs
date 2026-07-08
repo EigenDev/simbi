@@ -5,9 +5,9 @@
 // grid, behind a transport seam.
 //
 // the exchange LOGIC (which cells move where) is fixed and proven by the in-process
-// oracle `symbi/tests/decomp_equivalence.rs`. the TRANSPORT (how the bytes move) varies
-// behind `HaloTransport`: a local memory copy today, a gpu peer copy and an mpi
-// pack/send/unpack later. swapping the transport never touches the decomposition.
+// equivalence test `symbi/tests/decomp_equivalence.rs`. the TRANSPORT (how the bytes move) varies
+// behind `HaloTransport`: a local memory copy, a gpu peer copy, or an mpi
+// pack/send/unpack. swapping the transport never touches the decomposition.
 //
 // the exchange is a two-pass scheme: the caller processes axes in order, and a cut
 // face's transverse extent is the interior for cut axes not yet exchanged, the full
@@ -220,7 +220,7 @@ fn ghost_strip<const D: usize>(
 /// (the checkpoint writer reads it for both the `mag` conserved slot and the `bcell` primitive).
 /// used by `gather_interiors` to reassemble a decomposed run into one global store for output --
 /// the gathered global then writes through the existing single-grid checkpoint path unchanged
-/// (docs/design/37 M4). the STAGGERED `bface` lives on a face domain, so it is gathered separately
+/// (docs/design/37). the STAGGERED `bface` lives on a face domain, so it is gathered separately
 /// by `gather_faces`. hydro/iso stores have no `mhd`, so the bcell tail is empty there; global and
 /// tiles share a regime, so both data_fields lists align component-for-component.
 fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
@@ -242,7 +242,7 @@ fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
 }
 
 /// reassemble a decomposed run into one full-size `global` store: copy each tile's INTERIOR
-/// (cons + prim) into the matching sub-box of `global` (docs/design/37 M4). the inverse of the
+/// (cons + prim) into the matching sub-box of `global` (docs/design/37). the inverse of the
 /// tile build's IC scatter; the gathered `global` is then written by the existing single-grid
 /// checkpoint writer, so decomposed output is byte-identical in format to a single-device run.
 ///
@@ -552,7 +552,7 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
 
 // drain every UNIQUE tile device's context so async writes are visible to a consumer running
 // in another context (the cross-device read barrier). no-op on a host backend. mirrors the
-// oracle's `sync_devices` (docs/design/37 M2).
+// oracle's `sync_devices` (docs/design/37).
 #[cfg(feature = "gpu")]
 pub fn drain_devices<M: MemorySpace>(devices: &[i32]) {
     if !M::IS_DEVICE_ACCESSIBLE {
@@ -573,7 +573,7 @@ pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 /// drive a decomposed simulation: `stores.len()` tiles evolved in LOCKSTEP at a shared dt,
 /// with a same-level halo exchange after each ssp stage. this IS the proven oracle loop
 /// (`symbi/tests/decomp_equivalence.rs::run`), lifted into production so the multi-gpu python
-/// entry and the oracle share ONE tested path (docs/design/37 M4).
+/// entry and the oracle share ONE tested path (docs/design/37).
 ///
 /// - `stores[i]` / `kernels[i]`: tile i's field store + kernel set, in flat tile order
 ///   (matching `flatten(tile_coord, counts)`).
@@ -1000,7 +1000,7 @@ pub fn enable_peer_mesh(devices: &[i32]) {
 #[cfg(not(feature = "gpu"))]
 pub fn enable_peer_mesh(_devices: &[i32]) {}
 
-/// the cross-device halo transport (docs/design/37 M3): gather the strip into the source
+/// the cross-device halo transport (docs/design/37): gather the strip into the source
 /// device's contiguous buffer, `cuMemcpyPeer` it to the destination device's buffer over the
 /// link (nvlink intra-node), then scatter it into the destination strip. the gather and
 /// scatter ARE `StagedCopy`'s proven halves; only the peer move in the middle is new. when

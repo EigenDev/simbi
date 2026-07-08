@@ -4,7 +4,7 @@
 // unit + carrier-equivalence coverage for the adaptive-dissipation detectors in
 // `symbi_hydro::dissipation` (quirk_strong_shock, detect_shock, detect_interface,
 // detect_alignment, adaptive_phi, local_mach). these are carrier-generic over
-// `S: Scalar`, wired into the HLLC riemann path, and the carrier gate (CLAUDE.md
+// `S: Scalar`, used in the HLLC riemann path, and the carrier gate (CLAUDE.md
 // 4.3) demands a Gv-equivalence test that ALSO renders.
 //
 // two layers:
@@ -121,7 +121,7 @@ fn close(a: f64, b: f64, what: &str) {
 
 // =============================================================================
 // quirk_strong_shock — fires when |pr - pl| / min(pl, pr) > QUIRK_THRESHOLD.
-// returns S::Mask; at f64 that is bool. we exercise BOTH sides of the threshold
+// returns S::Mask; at f64 that is bool. BOTH sides of the threshold are exercised
 // (1e-4) plus the symmetry pr<->pl, the boundary, and the smooth no-fire case.
 // =============================================================================
 

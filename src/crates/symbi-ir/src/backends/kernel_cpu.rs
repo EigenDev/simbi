@@ -21,7 +21,7 @@
 // indices stay integer. the ONLY conversion is the `as usize` at the slice-index
 // site, which Rust's `Index<usize>` requires. (32-bit indices match the existing
 // CUDA `(int)` flat-index ABI.) data-dependent gather indexing (a float field
-// value used as an index) is NOT yet supported here and panics loudly rather than
+// value used as an index) is NOT supported here and panics loudly rather than
 // silently routing integers through float.
 //
 // signature shape (1D; 2D/3D add stride extents and nested loops):
@@ -125,7 +125,7 @@ use crate::{ElementTy, Graph};
 /// resolves to the `Scalar` trait. one kernel, every precision — no monomorphized
 /// duplication, no dispatch.
 ///
-/// **B11 — rayon-parallel outer cell loop**. the renderer tracks which buffer
+/// rayon-parallel outer cell loop. the renderer tracks which buffer
 /// indices are MUTABLE (outputs / in-place fields) as they're emitted via
 /// `buffer_param`. `cell_prelude` then emits a `rayon::IntoParallelIterator`
 /// fan-out over the outermost grid axis, with each mutable buffer's pointer
@@ -199,10 +199,10 @@ impl KernelRenderer for RustRenderer {
     }
     fn open_signature(&self, name: &str) -> String {
         // (no ledger reset here — `buffer_param` is called by the driver
-        // BEFORE this point, so a clear here would wipe what we just collected.
+        // BEFORE this point, so a clear here would wipe the already-collected ledger.
         // each emission constructs a fresh `RustRenderer::new()` so the state
         // is naturally per-emission.)
-        // **B11 — `+ Send + Sync`** so rayon par_iter can capture &[S] inputs +
+        // `+ Send + Sync` so rayon par_iter can capture &[S] inputs +
         // S scalar params, and so the unsafe raw-ptr Send wrapper for mut
         // buffers compiles (the bound on T inside `unsafe impl Send`).
         // `__raw` is the positional ABI core — codegen-internal. its arity changes
@@ -222,7 +222,7 @@ impl KernelRenderer for RustRenderer {
         ",\n) {\n" // Rust allows the trailing comma
     }
     fn cell_prelude(&self, ndim: usize, _n_buffers: u32) -> Vec<String> {
-        // Phase 1B-4: kernel signature now takes the view structs DIRECTLY:
+        // the kernel signature takes the view structs DIRECTLY:
         // `field0: &CpuField<S>, …, field_n: &mut CpuFieldMut<S>`. no per-cell
         // reconstruction needed — input fields capture by ref into the closure,
         // outputs use the standard mut-ptr-rebind dance.
@@ -251,7 +251,7 @@ impl KernelRenderer for RustRenderer {
 
         // for mut buffers: hoist `lo` + `strides` arrays (Copy `[i32; 4]`) so
         // the par_iter closure captures them BY VALUE; capture data ptr in
-        // `__MutBufPtr`. inside the closure we rebuild the CpuFieldMut.
+        // `__MutBufPtr`. inside the closure the CpuFieldMut is rebuilt.
         for &bi in mut_buf.iter() {
             v.push(format!("    let __field{bi}_lo: [i32; 4] = field{bi}.lo;"));
             v.push(format!(
@@ -259,7 +259,7 @@ impl KernelRenderer for RustRenderer {
             ));
         }
 
-        // --- B11 rayon-parallel outer loop scaffold ---
+        // --- rayon-parallel outer loop scaffold ---
         v.push("    #[allow(non_camel_case_types)]".to_string());
         v.push("    struct __MutBufPtr<T>(*mut T, usize);".to_string());
         v.push("    unsafe impl<T: Send> Send for __MutBufPtr<T> {}".to_string());
@@ -582,7 +582,7 @@ fn descriptor_wrapper(
     scalars: &[String],
     scalar_is_int: &[bool],
 ) -> String {
-    // Phase 1B-4: `__raw` takes the view-struct refs DIRECTLY. the wrapper just
+    // `__raw` takes the view-struct refs DIRECTLY. the wrapper just
     // splits outputs into disjoint `&mut` and passes refs through — no more
     // per-axis `lo` / `extent` unpacking, no more 7-args-per-buffer fanout.
     let mut binds: Vec<&crate::emit::FieldBinding> = bindings.iter().collect();
@@ -1092,7 +1092,7 @@ mod tests {
                 tile_spec: None,
             },
         );
-        // Phase 1B-4: field0 is the input — it's a `&CpuField<S>` kernel arg.
+        // field0 is the input — it's a `&CpuField<S>` kernel arg.
         // body indexes via `field0.lo[..]` / `field0.strides[..]` / `field0.data`.
         assert!(desc.source.contains("field0: &CpuField<S>"));
         assert!(desc.source.contains("field0.strides[0]"));

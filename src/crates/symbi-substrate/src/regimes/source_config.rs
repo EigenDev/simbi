@@ -9,7 +9,7 @@
 //   - prefer FUSED when the AOT layer baked a fused godunov for the family
 //     (one launch covers div(F) + source + integrator).
 //   - else fall back to the standalone ADDITIVE pass — proven bit-for-bit equal
-//     to fused (godunov_with_fused_source S2 + additive_source_equals_fused_evolve).
+//     to fused (godunov_with_fused_source + additive_source_equals_fused_evolve).
 //
 // so the execution strategy is a property of what's BAKED, not a user choice;
 // the same Overlay runs fused on a baked family and additive on an unbaked one,
@@ -17,7 +17,7 @@
 //
 // scope: external source families (point_mass, uniform_accel) — baked cartesian.
 // the in-godunov metric/geometric source is separate (always fused, never an
-// Overlay). today the substrate binds the FIRST fused family (the documented
+// Overlay). the substrate binds the FIRST fused family (the documented
 // single-family limit, simulation_laws::derive_fused_binding).
 //
 // usage:

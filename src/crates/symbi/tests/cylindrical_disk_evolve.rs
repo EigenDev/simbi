@@ -9,7 +9,7 @@
 //
 // because DOF == NDIM the flux / c2p / snapshot / ghost reuse the cartesian ncomp=2
 // instances; only the godunov (area-weighted r-phi divergence + centrifugal/coriolis
-// inertial source) and the CFL wave-speed map (physical r·dphi widths) are the "_cyl"
+// inertial source) and the CFL wave-speed map (physical r\cdot dphi widths) are the "_cyl"
 // instances. this is the disk-evolve hydro the immersed bodies ride.
 //
 // three checks, increasing in what they exercise:
@@ -40,8 +40,8 @@ const TWO_PI: f64 = std::f64::consts::TAU;
 // a 2-component velocity (v_r, v_phi) on a 2-axis (r, phi) grid: DOF == NDIM == 2.
 type DiskSim = SimStateGeneric<Newtonian, 2, 2, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
 
-// softened-Keplerian rotation: v_phi balancing |g| = mass·r/(r²+soft²)^1.5 against the
-// centrifugal v_phi²/r -> v_phi = r·sqrt(mass)/(r²+soft²)^0.75. soft=0 gives sqrt(mass/r).
+// softened-Keplerian rotation: v_phi balancing |g| = mass\cdot r/(r^2+soft^2)^1.5 against the
+// centrifugal v_phi^2/r -> v_phi = r\cdot sqrt(mass)/(r^2+soft^2)^0.75. soft=0 gives sqrt(mass/r).
 fn v_kepler(r: f64, mass: f64, soft: f64) -> f64 {
     r * mass.sqrt() / (r * r + soft * soft).powf(0.75)
 }
@@ -68,8 +68,8 @@ fn disk_sim(nr: usize, nphi: usize, r_lo: f64, r_hi: f64) -> (DiskSim, f64, f64)
 #[test]
 fn rphi_centrifugal_source_holds_1_over_r() {
     // uniform swirl: rho=1, p=1, v_phi=v0 const, v_r=0. axisymmetric (phi-uniform), so the
-    // phi-fluxes vanish and the only radial force is centrifugal: d v_r/dt = v_phi²/r ->
-    // v_r·r = v0²·t constant across r. a cartesian (no-source) scheme leaves v_r=0.
+    // phi-fluxes vanish and the only radial force is centrifugal: d v_r/dt = v_phi^2/r ->
+    // v_r\cdot r = v0^2\cdot t constant across r. a cartesian (no-source) scheme leaves v_r=0.
     let (nr, nphi) = (48usize, 16usize);
     let (r_lo, r_hi) = (1.0_f64, 2.0_f64);
     let (mut sim, dr, _dphi) = disk_sim(nr, nphi, r_lo, r_hi);
@@ -108,13 +108,13 @@ fn rphi_centrifugal_source_holds_1_over_r() {
     }
     assert!(vr_times_r.len() > 8, "too few interior samples");
 
-    // the 1/r signature: v_r·r is radius-constant.
+    // the 1/r signature: v_r\cdot r is radius-constant.
     let mean = vr_times_r.iter().sum::<f64>() / vr_times_r.len() as f64;
     let (lo, hi) = vr_times_r.iter().fold((f64::MAX, f64::MIN), |(l, h), &x| (l.min(x), h.max(x)));
     assert!((hi - lo) / mean < 0.15,
         "v_r·r not radius-constant (1/r centrifugal signature): spread {:.1}% (lo={lo:.4e} hi={hi:.4e})",
         100.0 * (hi - lo) / mean);
-    // magnitude v_r·r ~ v0²·t.
+    // magnitude v_r\cdot r ~ v0^2\cdot t.
     let expected = v0 * v0 * t_final;
     assert!(mean > 0.5 * expected && mean < 1.4 * expected,
         "centrifugal magnitude off: v_r·r mean = {mean:.4e}, expected ~ v0²·t = {expected:.4e}");

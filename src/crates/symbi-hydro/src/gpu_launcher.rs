@@ -116,9 +116,8 @@ pub fn launch_source_kernel(
 
     // JIT-compile the kernel via NVRTC. the dispatcher dedups by
     // `(cache_key, hash(source))` internally — distinct sources with the
-    // same `cache_key` never collide. so we can pass a plain diagnostic
-    // name here and let the dispatcher enforce content-addressed
-    // correctness.
+    // same `cache_key` never collide. a plain diagnostic name suffices
+    // here; the dispatcher enforces content-addressed correctness.
     let cache_key = format!("hydro/source/{entry_name}");
     let jit_kernel = current_dispatcher().jit_kernel_keyed(source, &cache_key, entry_name);
 

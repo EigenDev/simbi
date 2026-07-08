@@ -8,7 +8,7 @@
 // for RMHD quartic, infinity/nan/is_nan, branch default for state-typed
 // conditionals, FieldLoad/IterateInline payload pinned in doc). still NOT
 // wired into the workspace as the active `Scalar` trait — the Tier 1 atomic
-// cutover from `symbi_algebra::Scalar` is the next step (see TODO_2026-05-30.md).
+// cutover from `symbi_algebra::Scalar` remains pending.
 //
 // constitution voice: this file preserves UPPERCASE EMPHASIS on load-bearing
 // invariants (A1, FREEZE LAW, NEVER USE) and lowercase for narration. that's
@@ -382,12 +382,9 @@ pub trait Scalar:
     /// **semantics:**
     /// - at `S = f64`: identity. the closure executes immediately; locals
     ///   die at the brace per normal Rust rules. zero overhead, no IR.
-    /// - at `S = Gv` (step 3a, this session): identity, same as `f64`. the
-    ///   closure traces nodes into the parent frame; no new `ScalarStmt::Scope`
-    ///   is emitted yet. **step 3b** (separate sub-step) wires the Gv
-    ///   override to open/close a frame on the trace and emit an `Op::Scope`
-    ///   that scalarize lowers into a `ScalarStmt::Scope`. once step 3b
-    ///   lands, all consumers that use this method get the perf win
+    /// - at `S = Gv`: the Gv override snapshots the trace, runs the closure,
+    ///   and emits an `Op::Scope` (body + result) that scalarize lowers into a
+    ///   `ScalarStmt::Scope`. consumers that use this method get the perf win
     ///   automatically — no call-site changes.
     /// - any future carrier (smid/avx) can override per its own discipline.
     ///
@@ -565,14 +562,14 @@ pub enum RenderPolicy {
     /// for inspection; not the build path.
     Audit,
     /// RESERVED — not implemented. graph -> LaTeX is a non-trivial pretty-
-    /// printer with no documentation-pipeline consumer today. emit returns
+    /// printer with no documentation-pipeline consumer. emit returns
     /// `Err(RenderPolicyNotImplemented)` for this variant until a consumer
     /// earns it (rent test). do NOT thread this in production paths.
     Latex,
 }
 
 /// returned by an emitter when the caller selects a `RenderPolicy` whose
-/// implementation does not yet exist (today: `RenderPolicy::Latex`).
+/// implementation does not exist (`RenderPolicy::Latex`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct RenderPolicyNotImplemented {
     pub policy: RenderPolicy,
@@ -1191,19 +1188,19 @@ mod tests {
         assert_eq!(r, 7.0);
     }
 
-    // ----- docs/design/23 step 3a: Scalar::scope at S = f64 -----
+    // ----- docs/design/23: Scalar::scope at S = f64 -----
 
     /// at `S = f64`, `scope` is identity — the closure runs immediately and
-    /// returns its value. This is the FOUNDATION for step 3b: physics
-    /// authors can use `S::scope(|| ...)` blocks today, even before the Gv
-    /// override emits real `ScalarStmt::Scope`s.
+    /// returns its value. this is the FOUNDATION for the Gv override: physics
+    /// authors use `S::scope(|| ...)` blocks even before the Gv override emits
+    /// real `ScalarStmt::Scope`s.
     #[test]
     fn f64_scope_runs_closure_identity() {
         let r: f64 = <f64 as Scalar>::scope(|| 3.14_f64 * 2.0);
         assert_eq!(r, 6.28);
 
         // the closure can return any Scalar — it's not tied to f64 specifically.
-        // here R is inferred as f64; later if we add tensor returns it works the same.
+        // here R is inferred as f64; a tensor return type works the same.
         let inputs = (2.0_f64, 5.0_f64);
         let r: f64 = <f64 as Scalar>::scope(|| {
             // simulate a small phase: locals die at brace.

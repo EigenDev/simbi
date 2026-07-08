@@ -537,7 +537,7 @@ mod tests {
         assert!(err.contains("energy"), "expected nrg-needs-energy rejection, got: {err}");
     }
 
-    // ---- region axis (docs/design/32 step 2) ----------------------------------------------
+    // ---- region axis (docs/design/32) ----------------------------------------------
 
     #[test]
     fn region_masks_the_contribution() {
@@ -558,7 +558,7 @@ mod tests {
         assert!((s_at(0.5) - 0.5).abs() < 1e-12, "linear in chi: got {}", s_at(0.5));
     }
 
-    // ---- relax combine (docs/design/32 step 3) --------------------------------------------
+    // ---- relax combine (docs/design/32) --------------------------------------------
 
     #[test]
     fn relax_damps_toward_reference_velocity() {

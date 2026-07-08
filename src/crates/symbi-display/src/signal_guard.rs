@@ -38,7 +38,7 @@ const SHOW_CURSOR: &[u8] = b"\x1b[?25h";
 //   ?7l     disable auto-wrap (a glyph at the right margin overwrites, never
 //           wraps+scrolls — otherwise a too-wide row smears the redraw)
 //   ?25l    hide the cursor; then clear + home.
-// we deliberately do NOT enable mouse tracking (?1002h/?1006h). it would "pin"
+// mouse tracking (?1002h/?1006h) is deliberately NOT enabled. it would "pin"
 // the wheel, but it also makes iTerm2 nag ("mouse reporting was left on…") and
 // turns clicks/scrolls into input bytes. instead: ECHO is disabled in termios
 // (so typed/forwarded bytes never print), and each frame repaints from a cleared
@@ -50,13 +50,13 @@ const ENTER_ALT_STR: &str = "\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J\x1b[H";
 const LEAVE_ALT_STR: &str = "\x1b[?7h\x1b[?25h\x1b[?1049l";
 const LEAVE_ALT_BYTES: &[u8] = b"\x1b[?7h\x1b[?25h\x1b[?1049l";
 
-// whether the alternate screen is currently active, so the signal handler knows
+// whether the alternate screen is active, so the signal handler knows
 // to leave it (not merely show the cursor) on an interrupt.
 static IN_ALT: AtomicBool = AtomicBool::new(false);
 
 // terminal line-discipline control. the alternate screen + mouse tracking PIN
 // the view, but with the tty's default ECHO on, every keystroke and every mouse
-// /scroll report (which `?1002h` forwards to us as input) is ECHOED onto the
+// /scroll report (which `?1002h` forwards as input) is ECHOED onto the
 // live dashboard as ascii garbage. disabling ECHO + ICANON on stdin suppresses
 // that echo for both keys and mouse reports; ISIG is LEFT SET so Ctrl-C still
 // raises SIGINT for the graceful-interrupt path. the original discipline is
@@ -124,7 +124,7 @@ pub fn stop_requested() -> bool {
 /// observes `STOP` and exits gracefully; a second signal hits SIG_DFL).
 unsafe extern "C" fn handler(signum: i32) {
     unsafe {
-        // restore the terminal: leave the alternate screen if we entered it
+        // restore the terminal: leave the alternate screen if it was entered
         // (the sequence also shows the cursor), else just show the cursor. this
         // runs even for the SECOND signal's SIG_DFL kill window — the buffer is
         // already restored, so a hard kill never strands the shell in alt mode.
@@ -135,12 +135,12 @@ unsafe extern "C" fn handler(signum: i32) {
                 LEAVE_ALT_BYTES.len(),
             );
             // drop any queued mouse/scroll reports so they don't surface at the
-            // shell prompt after we exit (tcflush is async-signal-safe).
+            // shell prompt after exit (tcflush is async-signal-safe).
             libc::tcflush(0, libc::TCIFLUSH);
         } else {
             libc::write(2, SHOW_CURSOR.as_ptr() as *const _, SHOW_CURSOR.len());
         }
-        // re-enable echo no matter how we leave, so a hard-kill never strands the
+        // re-enable echo on every exit path, so a hard-kill never strands the
         // shell with a silent (no-echo) prompt.
         restore_input_echo();
         libc::signal(signum, libc::SIG_DFL);

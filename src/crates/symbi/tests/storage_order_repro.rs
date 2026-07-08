@@ -4,10 +4,10 @@
 // **diagnostic reproducer** — pin down which axis is the fastest-varying
 // in memory, then derive what that means for CUDA coalescing and for the
 // numpy/plotting convention. NOT a regression check (no assertions about
-// "the right convention"); the asserts pin the CURRENT behaviour so we can
-// see it at a glance.
+// "the right convention"); the asserts pin the observed behaviour for
+// inspection at a glance.
 //
-// what we're verifying:
+// what this verifies:
 //   1. for a `Domain<3>([Nx, Ny, Nz])`, what stride does each axis get?
 //   2. for a known coord `[i, j, k]`, what flat index does `Domain::flat_index`
 //      and `View::flat_index` produce?
@@ -44,7 +44,7 @@ fn part1_stride_per_axis() {
     println!("  → axis 1 (physical y) has stride {} cells", s[1]);
     println!("  → axis 2 (physical z) has stride {} cells", s[2]);
 
-    // physical-x-fastest convention: axis 0 → stride 1, axis 2 → stride Nx*Ny.
+    // physical-x-fastest convention: axis 0 -> stride 1, axis 2 -> stride Nx*Ny.
     assert_eq!(s[0], 1,       "axis 0 (x) stride — must be 1 (fastest)");
     assert_eq!(s[1], NX,      "axis 1 (y) stride — must be Nx");
     assert_eq!(s[2], NX * NY, "axis 2 (z) stride — must be Nx*Ny (slowest)");
@@ -96,9 +96,9 @@ fn part2_flat_index_for_known_coords() {
 #[test]
 fn part3_what_a_cuda_warp_actually_reads() {
     // CUDA emit at crates/symbi-ir/src/backends/kernel.rs:142 does:
-    //   _i0 = blockIdx.x*blockDim.x + threadIdx.x  → cell axis 0 (= x)
-    //   _i1 = blockIdx.y*blockDim.y + threadIdx.y  → cell axis 1 (= y)
-    //   _i2 = blockIdx.z*blockDim.z + threadIdx.z  → cell axis 2 (= z)
+    //   _i0 = blockIdx.x*blockDim.x + threadIdx.x  -> cell axis 0 (= x)
+    //   _i1 = blockIdx.y*blockDim.y + threadIdx.y  -> cell axis 1 (= y)
+    //   _i2 = blockIdx.z*blockDim.z + threadIdx.z  -> cell axis 2 (= z)
     //
     // a single warp is 32 consecutive `threadIdx` values, so consecutive
     // threads in a warp map to consecutive ii (= cell.x) values.
@@ -115,7 +115,7 @@ fn part3_what_a_cuda_warp_actually_reads() {
         println!("    thread {warp_lane}: cell ({i}, 0, 0) → flat = {flat}");
     }
 
-    // pin: adjacent warp threads now access ADJACENT memory (stride 1) →
+    // pin: adjacent warp threads now access ADJACENT memory (stride 1) ->
     // coalesced reads. this is the load-bearing assertion.
     if NX >= 2 {
         let stride_between_threads = addrs[1] - addrs[0];
@@ -133,13 +133,13 @@ fn part3_what_a_cuda_warp_actually_reads() {
 #[test]
 fn part4_what_numpy_imshow_sees() {
     // saved data file is a flat buffer of size Nx*Ny*Nz. for OT-style 2D
-    // (Nz=1) the user reshapes to `(Ny, Nx)` in numpy (last-axis fastest →
-    // matches our axis-0 = x = fastest convention).
+    // (Nz=1) the user reshapes to `(Ny, Nx)` in numpy (last-axis fastest ->
+    // matches the axis-0 = x = fastest convention).
     //
     // matplotlib `imshow(arr)` puts numpy axis 0 as ROWS (vertical) and
     // axis 1 as COLUMNS (horizontal). with reshape (Ny, Nx):
-    //   - numpy axis 0 = Ny → vertical screen axis = physical y ✓
-    //   - numpy axis 1 = Nx → horizontal screen axis = physical x ✓
+    //   - numpy axis 0 = Ny -> vertical screen axis = physical y ✓
+    //   - numpy axis 1 = Nx -> horizontal screen axis = physical x ✓
     // standard physics orientation. NO rotation.
 
     let nx = NX;

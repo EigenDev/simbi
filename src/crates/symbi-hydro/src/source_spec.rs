@@ -4,7 +4,7 @@
 // `SourceSpec` — additive RHS contributions as DATA. mirrors `LawSpec` but for
 // the `+ Σ S(U)` half of the conservation form `∂U/∂t = -div(F(U)) + Σ S(U)`.
 //
-// **the discipline (the 5 strictness clauses we committed to):**
+// **the discipline (5 strictness clauses):**
 //   1. carrier-uniform — every source MUST be an `algebra::Op` graph. no host
 //      escape, no native `if`. the totality lint gates this.
 //   2. typed `target_field` — a source can only contribute to a field the
@@ -19,13 +19,13 @@
 //      momentum source automatically from its scale factors / Christoffels;
 //      a regime that "forgot" its centrifugal term cannot exist.
 //
-// **scope of B5-i (this file's first landing):** SourceSpec types + spherical
+// **spherical source scope:** SourceSpec types + spherical
 // 1D / 2D momentum source builders, cross-validated against the existing
 // `Spherical::momentum_source` trait method at f64. cartesian remains
 // empty (the canary that proves the discipline: no fake geometric sources).
-// 3D + cylindrical + the metric-trace path are B5-ii.
+// 3D, cylindrical, and the metric-trace path live elsewhere.
 //
-// usage (B5-ii / runtime composition):
+// usage (runtime composition):
 //   let intrinsic = NEWTONIAN_SPEC.laws;
 //   let geometric = spherical_geometric_sources(d);
 //   let total_rhs = compose(intrinsic, geometric);  // additive at A1
@@ -45,11 +45,11 @@ pub enum SourceKind {
     /// curvilinear-coordinate source: centrifugal, coriolis, suppressed-
     /// dimension pressure. **derived from the metric, never declared.**
     Geometric,
-    /// external gravitational potential or N-body acceleration. B5-iii.
+    /// external gravitational potential or N-body acceleration.
     Gravity,
-    /// immersed-body forcing (penalty, sink, rigid). B5-iv.
+    /// immersed-body forcing (penalty, sink, rigid).
     ImmersedBody,
-    /// user-formulated source term (e.g., heating, radiation cooling). B5-v.
+    /// user-formulated source term (e.g., heating, radiation cooling).
     UserDefined,
 }
 
@@ -109,7 +109,7 @@ pub mod source_params {
 }
 
 // =============================================================================
-// section 1.5 — splicing into an external Graph (B6-i).
+// section 1.5 — splicing into an external Graph.
 //
 // the source builders produce a self-contained `BuiltSource { graph, params,
 // outputs }`. but a downstream codegen path (the substrate's godunov kernel
@@ -135,7 +135,7 @@ pub mod source_params {
 //      `built.outputs[k]`. callers wrap these as `Gv::of(node)` when working
 //      in a Gv trace.
 //
-// supports the same Op subset as `BuiltSource` builders use today (Const,
+// supports the same Op subset the `BuiltSource` builders use (Const,
 // Param, ElementWise, Transcendental, Select). higher-order Ops (FieldLoad,
 // IterateInline) and tensor structural ops are out of scope — the source
 // builders don't emit them.
@@ -167,7 +167,7 @@ pub fn splice_built_source_into(
 }
 
 // =============================================================================
-// section 2 — spherical geometric sources (B5-i).
+// section 2 — spherical geometric sources.
 //
 // the metric's analytical source forms (from
 // `symbi-geometry/src/metric.rs:297-389`):
@@ -181,7 +181,7 @@ pub fn splice_built_source_into(
 // these are the CONTINUOUS analytical formulas. the existing trait method's
 // docstring notes the discrete scheme should split the pressure part into
 // face-area differences for exact discrete equilibrium — that variant
-// (`momentum_source_inertial` + discrete pressure) is B5-iii's job.
+// combines `momentum_source_inertial` with discrete pressure.
 // =============================================================================
 
 /// helper: declare a source builder's standard parameter set at dimension D.
@@ -344,7 +344,7 @@ pub fn spherical_geometric_sources(d: usize) -> Vec<SourceSpec> {
     }
 }
 
-// ---- cylindrical metric (B5-ii) ---------------------------------------------
+// ---- cylindrical metric -----------------------------------------------------
 //
 // the cylindrical geometric source is PURELY ALGEBRAIC — no trig functions
 // appear (in contrast to spherical, where cot(theta) carries the cosine /
@@ -437,7 +437,7 @@ pub fn cartesian_geometric_sources(_d: usize) -> Vec<SourceSpec> {
 }
 
 // =============================================================================
-// section 3 — gravity overlay (B5-iii).
+// section 3 — gravity overlay.
 //
 // the FIRST non-geometric `SourceKind` — proves the abstraction extends
 // elegantly to sources that come from OUTSIDE the metric. point-mass
@@ -456,10 +456,10 @@ pub fn cartesian_geometric_sources(_d: usize) -> Vec<SourceSpec> {
 // runtime parameter slot.)
 //
 // each `SourceSpec` instance is a TEMPLATE; the runtime supplies (gm,
-// xm) per-mass. for a binary BH you'd add TWO instances of the momentum
-// source (one per body) and the runtime would fill different (gm, xm)
-// for each. (multi-instance dispatch is the next layer — runtime
-// composition; not in this turn's scope.)
+// xm) per-mass. a binary BH adds TWO instances of the momentum
+// source (one per body), and the runtime fills different (gm, xm)
+// for each. multi-instance dispatch is a separate runtime-composition
+// layer.
 // =============================================================================
 
 /// gravity-specific parameter names. extends `law_params` + `source_params`
@@ -520,7 +520,7 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 }
 
 // =============================================================================
-// section 4 — immersed body overlay (B5-iv).
+// section 4 — immersed body overlay.
 //
 // the FIRST region-localized source kind — proves clause 3 of the discipline
 // (branchless conditionals) at runtime. an immersed-body source is non-zero
@@ -540,7 +540,7 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 // the native-`<` alternative a compile error in `S: Scalar`-bound code, so
 // the discipline is structurally enforced before this layer ever runs.
 //
-// two source builders this turn:
+// two source builders:
 //   - `rigid_body_penalty_source` (target = "mom"): localized velocity-
 //     relaxation forcing inside the body. S_mom_k = mask * (-k * rho * (v - v_body)_k).
 //   - `accretion_mass_sink_source` (target = "den"): localized mass removal.
@@ -680,7 +680,7 @@ fn accretion_mass_sink_source(d: usize) -> BuiltSource {
 
 /// the rigid-body penalty source spec — a single localized momentum source.
 /// suitable for one rigid immersed body; multi-body sims compose multiple
-/// instances (one per body) at simulation construction (B5-vi).
+/// instances (one per body) at simulation construction.
 pub fn rigid_body_penalty_sources(_d: usize) -> Vec<SourceSpec> {
     vec![SourceSpec {
         kind: SourceKind::ImmersedBody,
@@ -702,7 +702,7 @@ pub fn accretion_sink_sources(_d: usize) -> Vec<SourceSpec> {
 }
 
 // =============================================================================
-// section 5 — user-defined sources (B5-v).
+// section 5 — user-defined sources.
 //
 // **the openness proof.** the abstraction is genuinely OPEN along the
 // SourceKind axis: a user can add their own source physics by providing
@@ -713,17 +713,17 @@ pub fn accretion_sink_sources(_d: usize) -> Vec<SourceSpec> {
 //             use `algebra::Op` primitives because that's what the Graph
 //             builder API exposes.
 //   clause 2 (typed target_field) — `SimulationLaws::validate` enforces
-//             this against the regime's fields array (B5-vi-i).
+//             this against the regime's fields array.
 //   clause 3 (branchless conditionals) — compile-enforced (Tier 1.7's
 //             Numeric ≠ OrderedNumeric closure).
-//   clause 4 (provenance) — preserved via `NodeAnnotation` (B2).
+//   clause 4 (provenance) — preserved via `NodeAnnotation`.
 //   clause 5 (geometric derived, not declared) — not applicable to user
 //             sources (they're external physics by definition).
 //
 // any user source obeying the algebra::Op vocabulary slots in. no
-// framework changes needed. this is what the user articulated as the
-// goal: "extensible to gravity, immersed bodies, user-formulated source
-// terms, etc. as long as we remain strict in our program."
+// framework changes needed. the abstraction is extensible to gravity,
+// immersed bodies, and user-formulated source terms while staying
+// strict in the carrier-uniform program.
 //
 // the example below — uniform external acceleration — covers the
 // canonical "user wants constant gravity" case. it doubles as the test
@@ -1082,7 +1082,7 @@ mod tests {
 
         // pick a theta well away from 0 / pi to keep sin(theta) safely
         // nonzero — the cot(theta) division is undefined at the poles
-        // (a discrete-scheme concern; our continuous-form test stays
+        // (a discrete-scheme concern; the continuous-form test stays
         // in the analytical-validity range).
         let r = 3.0_f64;
         let theta = 1.0; // ~57 degrees
@@ -1124,7 +1124,7 @@ mod tests {
         }
     }
 
-    // ----- spherical 3D (B5-ii): vector source (S_r, S_t, S_p) -----
+    // ----- spherical 3D: vector source (S_r, S_t, S_p) -----
 
     #[test]
     fn spherical_3d_momentum_source_matches_metric_method() {
@@ -1306,11 +1306,11 @@ mod tests {
                    "3D cyl S_z must be exactly 0");
     }
 
-    // ----- canary extension: cartesian still empty after B5-ii ------------
+    // ----- canary extension: cartesian remains empty -----------------------
 
     #[test]
     fn cartesian_remains_empty_after_cyl_sph_land() {
-        // **the discipline canary** survives the B5-ii landing. adding
+        // **the discipline canary**: adding
         // curvilinear sources MUST NOT introduce a "default" geometric
         // source for cartesian — that would be clause-5 drift.
         for d in [1usize, 2, 3] {
@@ -1321,7 +1321,7 @@ mod tests {
         }
     }
 
-    // ----- gravity overlay (B5-iii) --------------------------------------
+    // ----- gravity overlay -----------------------------------------------
     //
     // the cross-validation here goes against the analytical formula
     // directly (not against a `Metric` method — gravity is non-metric).
@@ -1514,7 +1514,7 @@ mod tests {
 
     // ----- discipline canary extended to non-geometric source kinds ------
 
-    // ----- immersed body overlay (B5-iv) ----------------------------------
+    // ----- immersed body overlay ------------------------------------------
     //
     // these are the load-bearing clause-3 tests. each builder is exercised
     // both INSIDE the body (where the mask fires, full source emitted) AND
@@ -1769,7 +1769,7 @@ mod tests {
         );
     }
 
-    // ----- user-defined source kind (B5-v) --------------------------------
+    // ----- user-defined source kind ---------------------------------------
     //
     // the openness proof. a user-supplied builder slots into the abstraction
     // with exactly the same discipline + diagnostics as the framework's own

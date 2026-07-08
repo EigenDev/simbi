@@ -11,7 +11,7 @@
 // of return values. this is enough for V1 literal-dim lowering.
 //
 // const-generic dim support (loops that survive into target source)
-// lands in a later phase; for now generic dims trigger a panic.
+// is unimplemented; generic dims trigger a panic.
 // =============================================================================
 
 use std::collections::{HashMap, HashSet};
@@ -69,7 +69,7 @@ pub enum UnaryKind {
     Neg,
     /// bitwise complement on int, logical NOT on bool. Rust's `!` operator
     /// covers both (CUDA's `!` is the bool form; `~` would be the int form,
-    /// but the substrate only uses this op for Bool today — Mask's `Not`).
+    /// but the substrate uses this op only for Bool — Mask's `Not`).
     Not,
 }
 
@@ -152,7 +152,7 @@ pub enum ScalarExpr {
 
 impl ScalarExpr {
     /// the immediate sub-expressions this node owns, in evaluation order. THE single source for
-    /// "which children do I have" (docs/design/38 P3b) — every WALK / TRANSFORM pass (cse var
+    /// "which children do I have" (docs/design/38) — every WALK / TRANSFORM pass (cse var
     /// collect, free-call scan, var-use test, FieldLoadAt rewrite) recurses through this instead
     /// of re-matching all 10 variants inline. the EMIT backends (cpu/cuda/interp/jit) still match
     /// per-variant — producing target source/IR is the irreducible part — exactly the split the
@@ -264,18 +264,17 @@ pub enum ScalarStmt {
     ///     (Rust block expressions are first-class; the body executes and
     ///     the final expression is the block's value.)
     ///   - **CUDA**: `<ty> <name>; { <body>; <name> = <result>; }`
-    ///     (C/C++ doesn't have block expressions; we declare in the outer
-    ///     scope, write inside the inner, and the inner-scope locals die
+    ///     (C/C++ doesn't have block expressions; the declaration is in the outer
+    ///     scope, the write inside the inner, and the inner-scope locals die
     ///     at the closing brace.)
     ///
-    /// the CSE pass treats the scope as a **hoisting barrier** (step 2 of
-    /// docs/design/23): CSE candidates whose uses are all inside the
+    /// the CSE pass treats the scope as a **hoisting barrier**
+    /// (docs/design/23): CSE candidates whose uses are all inside the
     /// scope stay inside; candidates whose uses cross the boundary get
     /// hoisted to the LCA scope of all use sites.
     ///
-    /// step-1-of-23 NOTE: in this initial step, the CSE pass passes scopes
-    /// through unchanged (treats them as ordinary statement containers).
-    /// step 2 will add the LCA-aware placement rule.
+    /// the CSE pass passes scopes through unchanged (treats them as ordinary
+    /// statement containers); LCA-aware placement is not applied.
     Scope {
         name: String,
         element: ElementTy,
@@ -303,7 +302,7 @@ pub enum ScalarStmt {
 }
 
 // =============================================================================
-// PHASE 2 — the SINGLE SOURCE OF TRUTH for ScalarStmt structural walks.
+// the SINGLE SOURCE OF TRUTH for ScalarStmt structural walks.
 //
 // every transformation pass (cse, FieldLoadAt rewrite, uses-var detection, the
 // fresh-name index scan) walks scalar statements the same way: visit the
@@ -733,7 +732,7 @@ impl Scalarizer {
             Op::IterateInline { .. } => {
                 unreachable!("IterateInline is lowered in scalarize_kernel, not lower_node",)
             }
-            // **docs/design/23 step 3b**: Op::Scope is body-partitioned like
+            // docs/design/23: Op::Scope is body-partitioned like
             // IterateInline. scalarize_kernel collects scope-owned NodeIds,
             // skips them in the main pass, then lowers each Scope via
             // `lower_scope` which emits a ScalarStmt::Scope wrapping the
@@ -795,7 +794,7 @@ impl Scalarizer {
             ScalarExpr::Const(ConstValue::U32(n)) => DimExpr::Literal(n as usize),
             // for non-literal counts the existing ScalarStmt::For's
             // DimExpr can't carry a runtime expression — that's an
-            // emit-layer extension. for V1 we require literal counts.
+            // emit-layer extension. literal counts required.
             other => panic!(
                 "lower_fold V1: count must be a literal integer Const; got {:?}",
                 other
@@ -818,7 +817,7 @@ impl Scalarizer {
     /// loop-INVARIANT inputs are already lowered before the loop. the N assigns
     /// come AFTER the whole cone, so the update is SIMULTANEOUS (Jacobi): every
     /// `steps[j]` reads the OLD `acc_*`. binds the node to `Var(acc_result)`.
-    /// **docs/design/23 step 3b**: lower an `Op::Scope` node into a
+    /// docs/design/23: lower an `Op::Scope` node into a
     /// `ScalarStmt::Scope` brace-block. body NodeIds are lowered IN ORDER into
     /// a fresh sub-body that becomes the scope's inner statements; `result`'s
     /// expression becomes the scope's trailing tail value.
@@ -846,15 +845,15 @@ impl Scalarizer {
         let mark = self.body.len();
         // lower body NodeIds IN ORDER. for each:
         //   - if it belongs to a DEEPER scope (scope_owner maps it to !=
-        //     scope_id), skip — it'll be lowered when we recurse into that
+        //     scope_id), skip — it is lowered on recursion into that
         //     nested scope.
         //   - if it IS a nested `Op::Scope`, dispatch to `lower_scope`
         //     recursively so its body lands inside ITS brace block.
-        //   - otherwise, lower normally and the resulting Let lands in our
+        //   - otherwise, lower normally and the resulting Let lands in the
         //     inner body (it'll be captured by `split_off` below).
         for &bid in body {
-            // skip NodeIds owned by a deeper scope. they were added to OUR
-            // body list because they were created during OUR closure's
+            // skip NodeIds owned by a deeper scope. they were added to the
+            // body list because they were created during the closure's
             // execution, but they're actually scope-local to a nested
             // `Op::Scope` and will be lowered there.
             if scope_owner.get(&bid) != Some(&scope_id) {
@@ -886,7 +885,7 @@ impl Scalarizer {
             self.maybe_hoist_to_let(bid, in_degrees, &bty);
         }
         // resolve the result's expression NOW — bindings are populated and
-        // we want this expression to be evaluated AS THE SCOPE'S TAIL VALUE
+        // this expression is evaluated AS THE SCOPE'S TAIL VALUE
         // (i.e., inside the brace block, after all the inner Lets, before the
         // closing brace).
         let result_expr = self.require_concrete(result, "Op::Scope result")[0].clone();
@@ -1076,7 +1075,7 @@ impl Scalarizer {
             .map(|&s| self.require_concrete(s, "IterateInline step")[0].clone())
             .collect();
         // resolve the break predicate, if any. it's part of the cone (above) so
-        // its `Let`s are already in `loop_body`; here we just read its binding.
+        // its `Let`s are already in `loop_body`; its binding is read here.
         let break_expr: Option<ScalarExpr> =
             break_when.map(|bw| self.require_concrete(bw, "IterateInline break_when")[0].clone());
         self.iter_acc = None;
@@ -1286,7 +1285,7 @@ impl Scalarizer {
     fn lower_index(&mut self, tensor: NodeId, idxs: &[DimIndex], graph: &Graph) -> Vec<ScalarExpr> {
         // V1: only literal indices into a literal-dim tensor produce a
         // determinate flat index. Generic indices require loop emission
-        // (R.3.h); panic for now.
+        // (R.3.h); panics.
         let in_shape = resolve_literal_dims(&graph.ty(tensor).shape);
         let mut flat = Vec::with_capacity(idxs.len());
         for d in idxs {
@@ -1578,7 +1577,7 @@ impl Scalarizer {
 
         // pull each contracted-axis label and find its dim. for V1, the
         // simplest case: spec "i,i->" with both inputs sharing axis 'i'.
-        // we walk the spec's first input's atoms; for each Label, find the
+        // walk the spec's first input's atoms; for each Label, find the
         // binding's dim and emit a loop.
         let atoms_first = &spec.inputs[0];
         let mut contracted_labels: Vec<(char, DimExpr)> = Vec::new();
@@ -1599,9 +1598,9 @@ impl Scalarizer {
         });
 
         // emit nested For loops, one per contracted label.
-        // since we only support rank-1 inputs in V1, every label is a
-        // single-axis dim and we emit one for-loop per distinct label.
-        // for V1's "i,i->" case there's one label.
+        // rank-1 inputs only, so every label is a
+        // single-axis dim and one for-loop is emitted per distinct label.
+        // the "i,i->" case has one label.
         let iter_name = self.fresh("ii");
         let dim = contracted_labels[0].1.clone();
 
@@ -1677,8 +1676,8 @@ impl Scalarizer {
 /// kernel function name).
 ///
 /// V1 limitation: every dim in every tensor type must be Literal.
-/// Generic dims trigger a panic (const-generic loop support lands in
-/// a follow-up phase).
+/// Generic dims trigger a panic; const-generic loop support is
+/// unimplemented.
 pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
     let mut sc = Scalarizer::new();
     let in_degrees = Scalarizer::compute_in_degrees(graph);
@@ -1745,7 +1744,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     // sub-DAG's acc-dependent cone must be lowered INSIDE the loop, not in the
     // main pass — collect those nodes to skip, and the cone per iterate node.
     //
-    // docs/design/23 step 3b: Op::Scope body NodeIds are similarly partitioned —
+    // docs/design/23: Op::Scope body NodeIds are similarly partitioned —
     // they belong to the Scope's lexical region and are lowered INSIDE a
     // `ScalarStmt::Scope` brace block, not at function root.
     //
@@ -1757,13 +1756,13 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     let mut skip: HashSet<NodeId> = HashSet::new();
     let mut iter_cones: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     let mut scope_owner: HashMap<NodeId, NodeId> = HashMap::new();
-    // **docs/design/23 step 6 bugfix**: a NodeId can appear in a scope's
+    // docs/design/23: a NodeId can appear in a scope's
     // body list yet ALSO be referenced from outside the scope, because the
     // graph is hash-consed — a closure may compute `bn * bn` (pushed inside
     // the scope) and later outer code may produce a structurally-identical
     // `bn * bn` that hash-conses to the SAME NodeId. lowering it inside the
-    // scope's brace breaks the outer reference. so we collect scope body
-    // bookkeeping first, then SECOND pass evicts shared NodeIds from
+    // scope's brace breaks the outer reference. so scope-body
+    // bookkeeping is collected first; a SECOND pass evicts shared NodeIds from
     // scope_owner so the main pass lowers them at the outer level.
     let mut scope_body: HashMap<NodeId, HashSet<NodeId>> = HashMap::new();
     let mut scope_result: HashMap<NodeId, NodeId> = HashMap::new();
@@ -1935,7 +1934,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
         }
     }
     // mixed scope/branch nesting (a Scope inside a cond arm, or vice versa) is
-    // not supported in this increment — both containers would try to lower the
+    // not supported — both containers would try to lower the
     // shared node. assert disjointness so it fails loudly, never silently
     // miscompiles. (the cubic-resolvent cond chain uses no scopes.)
     debug_assert!(
@@ -2035,7 +2034,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
 
 // `op_inputs` has been replaced by `Op::inputs()` — see `graph.rs`. the rule
 // "which fields of this variant are NodeIds" lives in `Op::try_map_inputs`
-// (single source of truth, Phase 3). callers now invoke `node.op.inputs()`
+// (single source of truth). callers invoke `node.op.inputs()`
 // directly; this stub is kept only as a documentation anchor.
 fn op_inputs(op: &Op) -> Vec<NodeId> {
     op.inputs()
@@ -2247,8 +2246,8 @@ fn binop_box(kind: BinaryKind, inputs: &mut Vec<ScalarExpr>) -> ScalarExpr {
 
 /// recognize the exact constants `0` and `1` (across numeric types) so the
 /// arithmetic-identity peephole can fire on them. returns `None` for any
-/// non-constant or non-{0,1} constant — we never fold runtime values that
-/// happen to round to these.
+/// non-constant or non-{0,1} constant — runtime values that
+/// happen to round to these are never folded.
 fn const_zero_or_one(e: &ScalarExpr) -> Option<f64> {
     let ScalarExpr::Const(c) = e else { return None };
     let v = match c {
@@ -2282,7 +2281,7 @@ fn const_zero_or_one(e: &ScalarExpr) -> Option<f64> {
 /// silently. removed pre-emptively rather than left as a tripwire.
 ///
 /// the safe set MUST stay in sync with `Graph::fold_arith_identity` in
-/// `graph.rs` (Phase 4's graph-layer fold) — both layers fold exactly
+/// `graph.rs` (the graph-layer fold) — both layers fold exactly
 /// `{ Add[0], Sub[0], Mul[1], Div[1] }`, nothing more.
 ///
 /// comparison / bitwise kinds fall through to construction unchanged.
@@ -2918,7 +2917,7 @@ mod tests {
         // it'll panic with the "Array binding output" message — which is OK for V1.
         // for testing, instead build a 1-param dot product to validate the array path.
         let _ = v;
-        // we test the actual loop-form path via dot_product_with_generic_dim below.
+        // the actual loop-form path is tested via dot_product_with_generic_dim below.
     }
 
     #[test]
@@ -3226,7 +3225,7 @@ mod tests {
 
     #[test]
     fn transcendental_log_emits_ln_method() {
-        // Rust f64::log is base-N; ::ln is natural log. our Log variant
+        // Rust f64::log is base-N; ::ln is natural log. the Log variant
         // maps to .ln per convention.
         let mut g = Graph::new();
         let v = g.add_scalar_param("v", ElementTy::F64);
@@ -3547,7 +3546,7 @@ mod tests {
         let l = scalarize(&g, r, "f");
         assert_eq!(l.results.len(), 3);
         // result[2] should be a chain of .min over M_2_0..M_2_3.
-        // we verify by walking down the chain and collecting the args.
+        // verify by walking down the chain and collecting the args.
         let mut visited: Vec<String> = vec![];
         let mut cur = &l.results[2];
         while let ScalarExpr::MethodCall {

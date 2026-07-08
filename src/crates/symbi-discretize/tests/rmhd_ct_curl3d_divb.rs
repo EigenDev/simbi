@@ -3,7 +3,7 @@
 //
 // proves the 3D constrained-transport curl update (rmhd_ct_curl_3d_dir, run once
 // per face axis) PRESERVES div(B) = 0 to machine precision — the defining CT
-// property, in three dimensions (the P3-b 2D result generalized). B is
+// property, in three dimensions (the 2D result generalized). B is
 // initialized divergence-free from a 3D discrete vector potential A (B = curl A,
 // so the discrete div telescopes to 0), then evolved one step by the curl of an
 // ARBITRARY edge EMF E = (Ex, Ey, Ez). the discrete curl + discrete divergence

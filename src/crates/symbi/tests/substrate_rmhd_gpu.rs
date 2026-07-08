@@ -122,7 +122,7 @@ fn substrate_rmhd_flux_gpu_matches_cpu() {
     dset.ghost_fill(&dev);
 
     // materialize the per-cell wave speeds the HLLE flux now reads (else it reads zeroed
-    // fields → degenerate s_l=s_r=0 → the f_l branch, exercising nothing). this is the same
+    // fields -> degenerate s_l=s_r=0 -> the f_l branch, exercising nothing). this is the same
     // ordering the evolve loop uses (wave_speeds before flux).
     hset.wave_speeds(&host);
     dset.wave_speeds(&dev);
@@ -130,7 +130,7 @@ fn substrate_rmhd_flux_gpu_matches_cpu() {
     for dir in 0..3 {
         hset.flux(&host, dir);
         dset.flux(&dev, dir);
-        // run_gpu does NOT ctx_sync per-launch (B12); a host read of device-written buffers
+        // run_gpu does NOT ctx_sync per-launch; a host read of device-written buffers
         // races with the in-flight kernel. unified memory makes already-resident pages (the
         // interior) look correct while freshly-written ghost pages read stale zero-init —
         // exactly the corner-ghost mismatch this test hit. sync before the host comparison.

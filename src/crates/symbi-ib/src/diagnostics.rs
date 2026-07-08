@@ -10,7 +10,7 @@
 //   merge. thread-local accumulation followed by a consolidate step.
 //
 // gpu: per-cell delta field, reduced after the step.
-//   (future — for now, CPU-only accumulation via unified memory sync)
+//   (CPU-only accumulation via unified memory sync)
 //
 // usage:
 //   let mut acc = DiagnosticAccumulator::<2>::new(2);  // 2 bodies

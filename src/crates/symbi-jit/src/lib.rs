@@ -775,7 +775,7 @@ fn translate_stmts(
 }
 
 // =============================================================================
-// stencil KERNELS (v2 increment 1): JIT a scalarized kernel — cell loads + `FieldLoadAt`
+// stencil KERNELS: JIT a scalarized kernel — cell loads + `FieldLoadAt`
 // stencil reads + scalars -> multi-output, mapped over a domain. the v1-kernel subset is
 // `Let` bodies (no `For`/reductions yet). all buffers share one `(lo, extent)` layout.
 // =============================================================================
@@ -1317,7 +1317,7 @@ mod tests {
         assert!(matches!(compile(&lowered), Err(JitError::Unsupported(_))));
     }
 
-    // ---- v2 increment 1: stencil-kernel JIT, gated against `Cpu::run_kernel` ----
+    // ---- stencil-kernel JIT, gated against `Cpu::run_kernel` ----
 
     #[test]
     fn kernel_stencil_matches_interp() {
@@ -1328,7 +1328,7 @@ mod tests {
 
         // a 1D stencil kernel: out[c] = in[c] + 2 * in[c+1] - sqrt(in[c]).
         // exercises the cell load (`Var("in")`), the stencil read (`FieldLoadAt` at `_coord_0 + 1`),
-        // a const, arithmetic, and a native method — the whole increment-1 path.
+        // a const, arithmetic, and a native method — the whole stencil-kernel lowering path.
         let mut g = Graph::new();
         let in_cell = g.add_scalar_param("in", ElementTy::F64); // cell load at the current coord
         let c0 = g.add_scalar_param("_coord_0", ElementTy::I32);
@@ -1409,7 +1409,7 @@ mod tests {
 
     #[test]
     fn kernel_iterate_loop_matches_interp() {
-        // v2 increment 2: control flow. an IterateInline Newton-sqrt — 8 iterations of
+        // control flow. an IterateInline Newton-sqrt — 8 iterations of
         // acc = 0.5*(acc + N/acc) per cell, N = in[c]. exercises LetMut/For/Assign (and the
         // CLIF loop + Variable phi) against the interpreter, bit-for-bit.
         use symbi_ir::backends::interp::{CpuField, CpuFieldMut};
@@ -1490,7 +1490,7 @@ mod tests {
         }
     }
 
-    // ---- v2 increment 3 (step 1): the parallel driver, gated `run_parallel == run == interp` ----
+    // ---- the parallel driver, gated `run_parallel == run == interp` ----
 
     #[test]
     fn kernel_run_parallel_matches_serial_and_interp() {

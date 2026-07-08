@@ -187,7 +187,7 @@ impl Sim {
     }
 
     // max fast-magnetosonic signal speed over the interior (for the CFL dt). uniform
-    // gas + weak B -> this is ~constant, but we recompute honestly each step.
+    // gas + weak B -> this is ~constant, but it is recomputed honestly each step.
     fn smax(&self) -> f64 {
         let mut s = 0.0_f64;
         for i in NG..NG + NX {

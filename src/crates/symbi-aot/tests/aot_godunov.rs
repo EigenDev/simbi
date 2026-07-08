@@ -3,7 +3,7 @@
 //
 // run the BUILD-TIME-GENERATED godunov kernel (compiled into this crate from a
 // substrate RegimeSpec via emit_kernel_cpu) and diff against the hand-written
-// reference. since P1 proved the SAME kernel matches hand-written via the #4
+// reference. since the SAME kernel matches hand-written via the #4
 // interpreter, this transitively proves the AOT-compiled Rust ≡ the interpreter
 // — and, more importantly, that the generated Rust COMPILES and RUNS.
 //

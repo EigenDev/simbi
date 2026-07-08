@@ -55,7 +55,7 @@ pub struct PrimG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
 
 /// decompose a regime's conserved state into the hydro `ConsG` (mass / momentum /
 /// energy, scattered to the cons FieldGroup) plus the optional magnetic 3-vector
-/// (scattered to the MHD bcell). this is the ONE seam that lets a single IC entry
+/// (scattered to the MHD bcell). this is the ONE join that lets a single IC entry
 /// point (`SimState::seed_cell`) seed every regime — energy-bearing or not (the
 /// `EnergyModel` slot abstracts pressure/energy presence), MHD or pure hydro — via
 /// `to_conserved` + `scatter_from`, with no per-regime hand-built `Cons { .. }`.

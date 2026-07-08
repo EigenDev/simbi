@@ -1,9 +1,9 @@
 // =============================================================================
 // substrate_fused_source_dispatch.rs
 //
-// **B6-iv (Phase 4) proof**: the substrate dispatch entry
+// the substrate dispatch entry
 // `dispatch_godunov_with_sources` selects the AOT-baked FUSED kernel
-// (`{prefix}_godunov_euler_with_{source_id}_{ndim}d`, B6-iii) by composing the
+// (`{prefix}_godunov_euler_with_{source_id}_{ndim}d`) by composing the
 // runtime name + packing the spec source's scalar params alongside `dt` + the
 // per-axis grid scalars. one substrate call now runs `div(F) + spec source +
 // integrator` in ONE kernel launch — replacing the prior two-kernel (godunov +
@@ -17,8 +17,8 @@
 //      type-sorted scalar manifest accepts them);
 //   3. invoked on a SimState with constant flux buffers (zero divergence) and
 //      the `uniform_accel` overlay, the per-cell cons.mom is updated exactly by
-//      the analytical `mom + dt·ρ·g_ext_0` — bit-close at f64;
-//   4. cons.nrg picks up the energy-overlay contribution too (`v·g_ext`); cons.den
+//      the analytical `mom + dt\cdot\rho\cdot g_ext_0` — bit-close at f64;
+//   4. cons.nrg picks up the energy-overlay contribution too (`v\cdot g_ext`); cons.den
 //      stays invariant — proves the multi-source binding routes to the right
 //      conservation laws.
 //
@@ -42,10 +42,10 @@ const GAMMA: f64 = 1.4;
 
 #[test]
 fn substrate_routes_to_adiabatic_fused_uniform_accel() {
-    // **end-to-end Phase 4 claim**: the substrate dispatch composes the fused
+    // end-to-end: the substrate dispatch composes the fused
     // kernel name, packs the spec source's `g_ext_0` scalar, AOT-registry
     // resolves the kernel, and one launch applies BOTH mom + nrg overlays of
-    // `uniform_acceleration` (Phase 2b multi-source) to the SimState in-place.
+    // `uniform_acceleration` (multi-source) to the SimState in-place.
     let n = 8usize;
     let dx = 1.0 / n as f64;
     // trivial seed to reach a Ready sim; the EXACT conserved literals this test asserts are
@@ -83,8 +83,8 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
 
     // pre-populate the per-axis flux buffers as CONSTANTS — uniform fluxes give
     // zero divergence on the interior, so the output IS the source contribution.
-    // (the production evolve() path computes these via the flux kernel; we stub
-    // them so the test isolates the godunov + fused-source step.)
+    // (the production evolve() path computes these via the flux kernel; stubbed
+    // here so the test isolates the godunov + fused-source step.)
     let face = sim.fields.flux[0].den.domain().clone();
     for c in face.iter() {
         sim.fields.flux[0].den.view_mut().set(c, 0.7);
@@ -103,7 +103,7 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
     // convention.
     let pre = sim.fields.prim.pre_field().expect("prim.pre").clone();
 
-    // **the Phase 4 entry point**: one substrate call binds buffers + scalars
+    // the fused-dispatch entry point: one substrate call binds buffers + scalars
     // by name through the AOT-registered fused kernel.
     let mut source_scalars: HashMap<String, f64> = HashMap::new();
     source_scalars.insert("g_ext_0".to_string(), g_ext_0);
@@ -127,7 +127,7 @@ fn substrate_routes_to_adiabatic_fused_uniform_accel() {
         let nrg_out = *cnrg.view().at(*c);
 
         let mom_expected = mom_v + dt * rho_v * g_ext_0;
-        // v = mom / rho (Newtonian); S_nrg = ρ · v · g_ext_0
+        // v = mom / rho (Newtonian); S_nrg = \rho \cdot v \cdot g_ext_0
         let v_in = mom_v / rho_v;
         let nrg_expected = nrg_v + dt * rho_v * v_in * g_ext_0;
 

@@ -3,9 +3,9 @@
 //
 // the CARRIER ORACLE: a kernel test whose reference is the SAME carrier-generic
 // physics run natively at S = f64 — never hand-derived algebra. the adiabatic c2p
-// builder traces symbi-hydro's `Cons::to_primitive` at S = Gv; here we run that one
-// physics source at S = f64 and assert the Gv kernel (traced -> lowered -> CPU
-// interpreted) reproduces it. it catches any trace/lower/interp divergence AND
+// builder traces symbi-hydro's `Cons::to_primitive` at S = Gv; that one
+// physics source runs at S = f64 and the Gv kernel (traced -> lowered -> CPU
+// interpreted) must reproduce it. it catches any trace/lower/interp divergence AND
 // deletes the duplicated expected-value math the hand-written tests carry.
 //
 // two flavours:
@@ -343,7 +343,7 @@ fn rmhd_c2p_round_trips_against_native_physics() {
 
 // the cartesian euler flux `adiabatic_flux_gv::<D>` / `rhd_flux_gv::<D>` is an `ndim == D`
 // stencil kernel swept along axis `dir`. recon reads i-2..i+1 along `dir`, so the buffer needs
-// >= 4 cells on `dir` and we compute the SINGLE interior cell at `dir == 2` (indices 0..3
+// >= 4 cells on `dir` and the SINGLE interior cell at `dir == 2` is computed (indices 0..3
 // uniform -> HLLE returns the physical flux). the non-swept axes are length 1.
 const NSWEEP: usize = 4; // recon stencil width: i-2..i+1 around i=2 reads 0..3
 const FCELL: usize = 2; // the interior cell along the sweep axis
@@ -510,10 +510,10 @@ fn rmhd_flux_matches_native_physics() {
 // the output is physics*geometry and the geometry factor is NOT carrier-generic. BUT for a
 // CARTESIAN-UNIFORM 1D grid the inverse width is the trivial known constant `inv_dx_0`; binding
 // `inv_dx_0 = 1` (dx = 1) collapses the geometry to the identity, leaving `lambda = max(|sl|,
-// |sr|)` — the PURE carrier-generic physics. that is a clean f64 reference, so we oracle the
-// cartesian-uniform case. (curvilinear / non-uniform maps couple an in-kernel metric width
+// |sr|)` — the PURE carrier-generic physics. that is a clean f64 reference, so the
+// cartesian-uniform case is oracled. (curvilinear / non-uniform maps couple an in-kernel metric width
 // with no carrier-generic f64 reference; their physics is already covered by the flux oracles
-// + the rmhd_wave_speeds test, so we do NOT invent a geometry reference for them.)
+// + the rmhd_wave_speeds test, so no geometry reference is invented for them.)
 // =============================================================================
 
 const CART_1D: [Spacing; 1] = [Spacing::Uniform];
@@ -523,7 +523,7 @@ const AXES_1D: [usize; 1] = [0];
 fn iso_wave_speed_map_matches_native_physics() {
     // gamma=1.4 here drives the adiabatic Newtonian speed |v_0| + cs; with dx=1 the map IS
     // `max(|sl|,|sr|)` from `Newtonian::wave_speeds_axis`. (the same builder drives the iso CFL
-    // at gamma=1; here we exercise it carrier-generically against the Newtonian f64 reference.)
+    // at gamma=1; it is exercised carrier-generically against the Newtonian f64 reference.)
     let (rho, v0, pre) = (1.3_f64, 0.4_f64, 0.7_f64);
     let eos = IdealGas { gamma: GAMMA };
     let prim = Prim::<f64, 3> { rho, vel: Tensor::new([v0, 0.0, 0.0]), pre };
@@ -1015,7 +1015,7 @@ fn hllc_hlld_builders_render_to_cpu_and_cuda() {
 // =============================================================================
 // NON-UNIFORM reconstruction oracle — every other flux oracle uses a UNIFORM state,
 // so the PLM/theta-MC slope is zero and the limiter's select-branches are NEVER
-// numerically exercised. here we drive a 4-cell stencil with SIGN-CHANGING,
+// numerically exercised. this drives a 4-cell stencil with SIGN-CHANGING,
 // ASYMMETRIC slopes (a local extremum + a steep one-sided gradient) so minmod3's
 // all_pos / all_neg / clamp-to-zero arms are all taken. the reference is the SAME
 // theta-MC formula at f64 (the single source the substrate `plm_reconstruct_theta`

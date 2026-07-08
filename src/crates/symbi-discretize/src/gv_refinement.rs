@@ -1,7 +1,7 @@
 // =============================================================================
 // gv_refinement.rs
 //
-// the amr field-transfer kernels (docs/design/21, 22 phase 1): restriction
+// the amr field-transfer kernels (docs/design/21, 22): restriction
 // (fine -> coarse conservative child average) and prolongation (coarse -> fine
 // limited interpolation, time-interpolated between two coarse snapshots) as
 // gv-traced pullbacks over the refinement lattice maps (lattice.rs
@@ -355,7 +355,7 @@ fn acc_face_sum(scaled: &[NodeId], ratio: i64, axis: usize, ax: isize, off: &mut
 
 // =============================================================================
 // face restriction: thread over the coarse coverage FACE domain, read the
-// ratio^(D-1) coincident fine faces (staggered fields — amr phase 3)
+// ratio^(D-1) coincident fine faces (staggered fields)
 // =============================================================================
 
 /// trace the fine -> coarse FACE restriction for a face-normal staggered field
@@ -551,7 +551,7 @@ pub fn refine_prolong_multi_gv(
 // =============================================================================
 // face prolongation: thread over a fine FACE region (a bface transverse-halo
 // slab at a coarse-fine boundary), read the time-interpolated coarse face
-// field — amr phase 3 follow-up (the fine boundary-edge EMF quality fix)
+// field — the fine boundary-edge EMF at the coarse-fine interface
 // =============================================================================
 
 /// trace the coarse -> fine FACE prolongation for a face-normal staggered

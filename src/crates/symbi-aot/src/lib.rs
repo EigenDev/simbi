@@ -208,12 +208,12 @@ impl<'a, T> CpuFieldMut<'a, T> {
 // CPU-specific `&[CpuField]` / `&mut [CpuFieldMut]` host slices directly (a host-
 // memory-ism), it builds ONE `KernelInvocation`: an ordered buffer list (each a
 // data HANDLE + its layout) + the packed params. the same invocation maps to a CPU
-// call (`run_cpu`, below) or — in 3c — a GPU launch, by interpreting the handle. the
-// device-pointer handle variant arrives with the runtime GPU render (step 3c).
+// call (`run_cpu`, below) or a GPU launch, by interpreting the handle. the
+// device-pointer handle variant for the runtime GPU render is not yet present.
 
 /// where a buffer's data lives. the variant encodes the kernel role: `Host` is a
 /// read-only input, `HostMut` an output (incl. in-place — the kernel reads + writes
-/// it). a `Device` variant joins in 3c for GPU launches.
+/// it). a `Device` variant for GPU launches is not yet present.
 pub enum BufHandle<'a, T> {
     Host(&'a [T]),
     HostMut(&'a mut [T]),

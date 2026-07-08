@@ -16,12 +16,12 @@
 //     an evaluatable `LoweredFn`, and there is exactly one path from spec
 //     data to runtime numbers.
 //   - ISN'T: the GPU path. CUDA NVRTC compilation needs hardware (covered
-//     structurally by B5-vi-iii's emit tests). the CPU interpreter path
+//     structurally by the emit tests). the CPU interpreter path
 //     here is the analogous workflow at `S = f64` — same `BuiltSource`
 //     graph, different lowering target.
 //   - ISN'T: the substrate codegen-driver. AOT-baking spec compositions
 //     into the binary (extending `symbi-aot/build.rs`) is a separate
-//     layer (B5-viii / B6) that needs compile-time spec definitions.
+//     layer that needs compile-time spec definitions.
 //
 // usage:
 //   use symbi_hydro::{NEWTONIAN_SPEC, spherical_geometric_sources,

@@ -56,8 +56,8 @@ pub fn grav_source<S: Scalar, const D: usize>(
 
     // convert to the PHYSICAL (orthonormal) frame the momentum lives in (Cart -> Ortho).
     // vector_from_cartesian yields the orthonormal frame, not the coordinate basis; the frame
-    // types enforce this. `.into_raw()` unwraps at the cons.mom boundary (a Tensor until step 3
-    // retypes the conserved fields as `Physical`).
+    // types enforce this. `.into_raw()` unwraps at the cons.mom boundary (a Tensor until the
+    // conserved fields are retyped as `Physical`).
     let g_phys = metric.vector_from_cartesian(cell.position, Embedded::new(g_cart));
 
     let density = prim.rho;

@@ -1,7 +1,7 @@
 // =============================================================================
 // refine_transfer_oracle.rs
 //
-// phase 1 gate (docs/design/22): the gv-traced amr transfer kernels
+// gate (docs/design/22): the gv-traced amr transfer kernels
 // (refine_restrict_gv / refine_prolong_gv) BIT-MATCH the recovered gen-1 f64
 // reference (symbi-amr prolong_nd / restrict_nd at git 3bfc5b9, vendored
 // below) on pseudo-random data, across 1d/2d/3d, all prolongation orders,
@@ -515,7 +515,7 @@ fn prolong_ppm_bit_matches_reference() {
 }
 
 // =============================================================================
-// face restriction bit-match (staggered fields, phase 3): the coarse face is
+// face restriction bit-match (staggered fields): the coarse face is
 // the transverse sweep-average of its ratio^(D-1) fine faces; the normal index
 // scales exactly. the oracle mirrors the sweep inline (axis 0 innermost among
 // transverse axes, (a + b) * 0.5 per pass).
@@ -599,7 +599,7 @@ fn restrict_face_bit_matches_reference() {
 }
 
 // =============================================================================
-// face prolongation bit-match (staggered fields, phase 3 follow-up): the
+// face prolongation bit-match (staggered fields): the
 // normal axis pair-averages the time-interpolated coarse face lattice (exact
 // on coincident even faces), transverse axes apply the van-leer plm sweep
 // (axis 0 innermost among them, operating on the pair-averaged leaf values).

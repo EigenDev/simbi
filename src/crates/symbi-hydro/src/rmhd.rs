@@ -54,7 +54,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
     #[inline]
     fn to_conserved(&self, eos: &impl Eos<S>, prim: &Self::Prim) -> Self::Cons {
         // flat/orthonormal frame -> identity metric (bit-identical to euclidean .dot); the GR
-        // metric threads in here once the flux path carries it (B3).
+        // metric threads in once the flux path carries it.
         let metric = SpatialMetric::flat();
         let vsq = metric.norm_sq_contra(&prim.vel);
         let ww = rhd::lorentz_factor(vsq);
@@ -148,7 +148,7 @@ impl<S: Scalar, const D: usize> Regime<S, D> for Rmhd {
         prim.rho * hh * w_sq + bsq
     }
 
-    // is_relativistic / is_mhd now derive from SPEC (B4-i).
+    // is_relativistic / is_mhd derive from SPEC.
 }
 
 #[cfg(test)]

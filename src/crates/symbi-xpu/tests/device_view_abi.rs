@@ -32,8 +32,8 @@ use symbi_xpu::runtime::{cuda_runtime::current_dispatcher, GpuRuntime};
 use symbi_xpu::{KernelArgs, LaunchConfig, MemoryBlock};
 
 // host-side mirror of the CUDA `__symbi_View` struct. MUST match the
-// substrate's `DeviceView` (substrate_gpu.rs) in layout. we redeclare it
-// here rather than importing because `DeviceView` is private to the symbi
+// substrate's `DeviceView` (substrate_gpu.rs) in layout. redeclared
+// here rather than imported because `DeviceView` is private to the symbi
 // crate; the static asserts on that side + this round-trip lock both ends.
 #[repr(C)]
 #[derive(Clone, Copy)]

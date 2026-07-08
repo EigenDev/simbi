@@ -1,8 +1,8 @@
 // =============================================================================
 // driver.rs
 //
-// shared timestep-driver primitives that operate on `SimStateGeneric` (docs/design/41
-// step 4). these are NOT specific to the single-grid integrator — both the top-level
+// shared timestep-driver primitives that operate on `SimStateGeneric` (docs/design/41).
+// these are NOT specific to the single-grid integrator — both the top-level
 // `evolve` loop (symbi) and the AMR hierarchy driver (symbi-amr) need them, so they
 // live in the sim-state core below both drivers:
 // - check_dt / check_dt_or_panic — dt-livelock guard (NaN/Inf/non-positive)

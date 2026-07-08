@@ -1,9 +1,9 @@
 // =============================================================================
 // substrate_fused_source_gpu.rs
 //
-// **B6-iv GPU validation**: every fused-source godunov kernel must run on
+// GPU validation: every fused-source godunov kernel must run on
 // the GPU and match the CPU result modulo nvcc FMA fusion. proves that
-// the spec → AOT → substrate pipeline closes on-device for BOTH position-
+// the spec -> AOT -> substrate pipeline closes on-device for BOTH position-
 // independent overlays (uniform_accel) AND position-dependent overlays
 // (point_mass_grav — the more interesting case, since `cell_geometry_gv`'s
 // in-kernel centroid arithmetic from `x_lo + i*dx` has to compile and
@@ -47,7 +47,7 @@ const GAMMA: f64 = 1.4;
 const CS: f64 = 1.0;
 
 // per-cell GPU-vs-CPU diff in relative units. ULP-bounded modulo nvcc FMA.
-// **B12**: host reads of UnifiedMemory aren't ordered against pending device
+// host reads of UnifiedMemory aren't ordered against pending device
 // kernels by stream semantics alone (per-launch `ctx_sync` was removed for
 // the production pipelining win). cmp() syncs once before reading.
 fn cmp<const D: usize, MH: MemorySpace, MD: MemorySpace>(
@@ -229,11 +229,11 @@ fn accel_binding<const D: usize>(g: &[f64]) -> FusedSourceBinding {
 
 // ----- point_mass_grav: POSITION-DEPENDENT fused source ---------------------
 //
-// **the harder test**. the spec source declares `xm_k` + `gm` scalars and `x_k`
-// Params — and the Phase 2c binding ties `x_k` to in-kernel cell centroids
+// the harder case: the spec source declares `xm_k` + `gm` scalars and `x_k`
+// Params — and the position-dependent binding ties `x_k` to in-kernel cell centroids
 // computed from `x_lo_k + i*dx_k`. that arithmetic must compile and execute
 // CORRECTLY on the GPU; otherwise position-dependent overlays are broken
-// on-device. body offset slightly from the grid center so |x - xm| ≠ 0
+// on-device. body offset slightly from the grid center so |x - xm| != 0
 // everywhere (avoids the singularity in 1/|x-xm|^3).
 
 fn grav_binding<const D: usize>(gm: f64, xm: &[f64]) -> FusedSourceBinding {

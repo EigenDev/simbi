@@ -87,7 +87,7 @@ impl KernelArgs {
     /// build the void** array for cuLaunchKernel. valid until the next `push`
     /// or `clear` — i.e., valid through the launch call. callers MUST NOT push
     /// after this without re-calling `as_mut_slice`: a subsequent push could
-    /// realloc the arena and invalidate the pointers we just handed out.
+    /// realloc the arena and invalidate the previously handed-out pointers.
     pub fn as_mut_slice(&mut self) -> &mut [*mut std::ffi::c_void] {
         self.ptrs.clear();
         let base = self.storage.as_mut_ptr();
@@ -124,7 +124,7 @@ impl Default for KernelArgs {
 // pool one arena per worker, no shared state, no lock.
 //
 // initial sizing covers the widest substrate kernel comfortably: rmhd face_flux
-// is ~30 buffers × 40-byte DeviceView + ~15 i32/f64 scalars ≈ 1.3 KB; we round
+// is ~30 buffers \times 40-byte DeviceView + ~15 i32/f64 scalars \approx 1.3 KB, rounded
 // up to 4 KB so the first launch doesn't grow.
 
 thread_local! {
@@ -162,7 +162,7 @@ mod tests {
         a.push(&y);
         let s = a.as_mut_slice();
         assert_eq!(s.len(), 2);
-        // SAFETY: pointers point into our arena's stable bytes.
+        // SAFETY: pointers point into the arena's stable bytes.
         unsafe {
             assert_eq!(*(s[0] as *const i32), 42);
             assert!((*(s[1] as *const f64) - std::f64::consts::PI).abs() < 1e-15);

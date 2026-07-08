@@ -7,7 +7,7 @@
 //
 // the load-bearing claim: when the data layer drives real time-stepping,
 // the result matches the analytical answer for cases where one's known.
-// covers what the Sod test (B5-ix) didn't — the source-RHS integration.
+// covers what the Sod test didn't — the source-RHS integration.
 //
 // **tests in this file** (each isolates one layer interaction):
 //
@@ -245,7 +245,7 @@ fn iso_regime_with_momentum_only_overlay_evolves_correctly() {
     );
 
     // initial: uniform iso state at rest. ρ is constant (no mass source) so
-    // we don't need `mut` on it — just bind the constant.
+    // no `mut` is needed — just bind the constant.
     let rho = RHO_0;
     let mut vx = 0.0_f64;
     for _step in 0..N_STEPS {

@@ -51,7 +51,7 @@ pub struct MhdConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
 impl<S: Scalar, const D: usize, E: EnergyModel> crate::state::Magnetic for MhdConsG<S, D, E> {}
 
 // MHD conserved state decomposes into its hydro ConsG + the magnetic 3-vector — the
-// uniform IC-seeding seam (see crate::state::SeedableCons).
+// uniform IC-seeding join (see crate::state::SeedableCons).
 impl<S: Scalar, const D: usize, E: EnergyModel> crate::state::SeedableCons<S, D> for MhdConsG<S, D, E> {
     type Energy = E;
     #[inline]

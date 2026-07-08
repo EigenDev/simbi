@@ -590,8 +590,8 @@ where
 }
 
 // helper: mask-on-mask select. `Mask: BitAnd + BitOr + Not` from `algebra.rs`,
-// but the carrier doesn't ship a `select_mask` on Mask itself — we synthesize
-// it as `(on_left & a) | (!on_left & b)` so the `at_contact` per-side flag
+// but the carrier doesn't ship a `select_mask` on Mask itself — it is synthesized
+// as `(on_left & a) | (!on_left & b)` so the `at_contact` per-side flag
 // stays branchless.
 trait MaskSelect: Sized + Copy {
     fn select_mask(c: Self, a: Self, b: Self) -> Self;

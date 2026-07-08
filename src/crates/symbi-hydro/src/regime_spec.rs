@@ -16,9 +16,9 @@
 //      newtonian, Newton-iterate for rhd, KKC false-position for rmhd
 //      (carrier-generic but each with distinct internal physics).
 //
-// laws-as-OpNode (the physics-as-data piece — conservation laws encoded
-// as `algebra::Op` graphs) is `B4-ii`. this module ships the metadata
-// skeleton + the proof that the per-regime divergence is consts + one hook.
+// laws-as-OpNode encodes conservation laws as `algebra::Op` graphs; this
+// module ships the metadata skeleton + the proof that the per-regime
+// divergence is consts + one hook.
 //
 // usage:
 //   use symbi_hydro::{Regime, Newtonian, RegimeSpec};
@@ -87,7 +87,7 @@ pub struct RegimeSpec {
     /// kernel-binding manifest preserves this order; tests assert it
     /// matches what `Cons` / `MhdCons` actually expose.
     pub fields: &'static [FieldSpec],
-    /// **B9 — primitive-side field manifest** (rho / vel / pre / bcell …).
+    /// **primitive-side field manifest** (rho / vel / pre / bcell …).
     /// drives the I/O writer and reader's primitive-group iteration. without
     /// this, the names were hand-spelled in two places (`write_level_fields`
     /// and `read_level_fields`); now `symbi-io::iter_components` consumes it
@@ -666,7 +666,7 @@ mod tests {
         check::<_, f64, 1>(IsoNewtonian, &ISO_NEWTONIAN_SPEC);
     }
 
-    // ----- laws as data (B4-ii) ------------------------------------------
+    // ----- laws as data --------------------------------------------------
 
     #[test]
     fn newtonian_laws_match_the_field_layout() {
@@ -687,8 +687,8 @@ mod tests {
 
     #[test]
     fn rhd_iso_laws_unchanged_by_b4iv() {
-        // sanity check that adding RMHD laws didn't accidentally touch
-        // the RHD / ISO law tables. preserved across B4-iv and B4-iv-2.
+        // sanity check that adding RMHD laws didn't touch
+        // the RHD / ISO law tables.
         assert_eq!(RHD_LAWS.len(), 3);
         assert_eq!(ISO_NEWTONIAN_LAWS.len(), 2);
     }

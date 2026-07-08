@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn control_bytes_are_not_keys() {
-        // Ctrl-C (0x03) never reaches us — ISIG turns it into SIGINT — but even if
+        // Ctrl-C (0x03) never reaches the parser — ISIG turns it into SIGINT — but even if
         // it did it must not decode as a printable key.
         assert_eq!(parse_key(&[0x03]), None);
         assert_eq!(parse_key(&[]), None);

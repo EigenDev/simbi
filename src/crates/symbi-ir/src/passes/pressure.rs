@@ -1,7 +1,7 @@
 // =============================================================================
 // pressure.rs
 //
-// **docs/design/23 step 5**: peak-register-pressure analysis over the lowered
+// docs/design/23: peak-register-pressure analysis over the lowered
 // scope tree. counts the maximum number of simultaneously-live let bindings
 // along any program point. Scope's `{ body; result }` is a hoisting barrier
 // — bindings declared inside die at the closing brace; only `name` (the

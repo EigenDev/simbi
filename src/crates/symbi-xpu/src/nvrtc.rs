@@ -8,7 +8,7 @@
 // JIT + run a substrate kernel on the GPU without the nvcc toolchain (the host
 // gcc-16 breaks nvcc; NVRTC ships its own front-end, so it does not care).
 //
-// the driver still JITs the PTX to SASS at module load, so we target the device's
+// the driver still JITs the PTX to SASS at module load, so compilation targets the device's
 // VIRTUAL arch (`compute_<major><minor>`, queried from the driver) and let the
 // driver finish the lowering for whatever GPU is present.
 //

@@ -1,7 +1,7 @@
 // =============================================================================
 // symbi-amr/src/lib.rs
 //
-// the static mesh refinement (SMR) crate (docs/design/41 step 4): the per-level
+// the static mesh refinement (SMR) crate (docs/design/41): the per-level
 // `SimStateGeneric` + `KernelSet` hierarchy, the coarse-fine flux/EMF registers,
 // and the conservative restriction/prolongation transfer operators.
 //

@@ -152,7 +152,7 @@ fn ref_wave_speeds(rho: f64, vel: [f64; 3], p: f64, mag: [f64; 3], gamma: f64, d
 
 // run the rmhd_wave_speed_map builder over the given prim buffers + gamma. RMHD is
 // intrinsically 3D (3-velocity), and the map goes through the shared wave_speed_map,
-// so it is built at ndim=3 and returns lambda = max_d (s_d * inv_dx_d). we pass inv_dx = 1
+// so it is built at ndim=3 and returns lambda = max_d (s_d * inv_dx_d). inv_dx = 1 is passed
 // on each axis (a [n,1,1] grid), so the output is max over the 3 axes of the quartic speed.
 fn run_map(inputs: &[(&str, Vec<f64>)], gamma: f64) -> Vec<f64> {
     let n = inputs[0].1.len();
@@ -182,7 +182,7 @@ fn rmhd_wave_speed_map_bounds_cpp_quartic() {
     // exact Mignone & Del Zanna quartic — the quartic stays on the Riemann/flux path. so the
     // contract is not EQUALITY with the exact quartic but CFL-SAFETY: the bound must never
     // UNDER-estimate the exact characteristic speed (an under-estimate would make dt too large
-    // and the scheme unstable), and it must stay subluminal. we validate both per state.
+    // and the scheme unstable), and it must stay subluminal. both are validated per state.
     let g = 5.0 / 3.0;
     let states = [
         ([1.0, 0.1, 0.0, 0.0], 1.0, [0.5, 0.3, 0.2]),

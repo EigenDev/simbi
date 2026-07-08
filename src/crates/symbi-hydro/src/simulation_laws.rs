@@ -23,10 +23,9 @@
 // **what this layer is and isn't:**
 //   - IS: a structural validator + a runtime-ready additive iterator. proves
 //     that the spec-as-data tables compose correctly under the 5 clauses.
-//   - ISN'T: the substrate kernel emitter. that's the next layer
-//     (`B5-vii`), which walks `sources_for(field)` to build the per-field
-//     flux + source kernel. this file ships the *contract* the emitter
-//     consumes.
+//   - ISN'T: the substrate kernel emitter. that separate layer walks
+//     `sources_for(field)` to build the per-field flux + source kernel.
+//     this file ships the *contract* the emitter consumes.
 //
 // usage:
 //   use symbi_hydro::{NEWTONIAN_SPEC, spherical_geometric_sources,
@@ -48,7 +47,7 @@ use symbi_ir::{Symbol, splice_graph};
 use crate::regime_spec::RegimeSpec;
 use crate::source_spec::{BuiltSource, SourceKind, SourceSpec};
 
-/// **B6-iv (Phase 4c) — fused-source family**: a runtime declaration of a
+/// **fused-source family**: a runtime declaration of a
 /// FAMILY of `SourceSpec` overlays that has a SINGLE corresponding AOT-baked
 /// fused godunov kernel (see `symbi-aot/build.rs::gen_godunov_euler_fused`).
 /// the family knows three things: which AOT slug it maps to (`source_id`),
@@ -60,7 +59,7 @@ use crate::source_spec::{BuiltSource, SourceKind, SourceSpec};
 /// `(source_id, scalar_pairs)` tuple the substrate's `FusedSourceBinding`
 /// constructor accepts. when SimulationLaws holds zero fused families the
 /// derivation yields `None` and the substrate routes to the unfused kernel.
-/// **B6-iv Phase 4c**: a fused-source FAMILY — the PHYSICS identity of an
+/// a fused-source FAMILY captures the PHYSICS identity of an
 /// overlay (uniform external acceleration, point-mass gravity, ...) without
 /// regime-specific concerns. `has_energy` is determined by the regime the
 /// family composes with (`SimulationLaws::with_fused_family` reads it off
@@ -76,7 +75,7 @@ pub enum FusedSourceFamily {
     /// from a single Plummer-softened point mass at fixed position `xm`. AOT slug:
     /// `"point_mass_grav"`. declares `gm` + per-axis `xm_k` + the softening length
     /// `eps` scalars; the spec's `x_k` Params bind to the in-kernel cell centroid
-    /// (Phase 2c). `eps = 0` recovers the bare `1/r^3` point particle.
+    /// `eps = 0` recovers the bare `1/r^3` point particle.
     PointMassGravity { gm: f64, xm: Vec<f64>, eps: f64 },
 }
 
@@ -151,13 +150,13 @@ impl FusedSourceFamily {
 ///     bit-for-bit equivalent to the additive pass (see
 ///     `godunov_with_fused_source::fused_stage_equals_plain_plus_additive_pass`).
 ///   - `specs`: non-fused additive sources, run through the per-stage
-///     `source_apply` pass. (none ship as built-ins today; the channel exists
+///     `source_apply` pass. (none ship as built-ins; the channel exists
 ///     for the general path + user-defined expression sources.)
 ///
 /// `a + b` concatenates both payloads — purely additive, so the source SET is
-/// order-independent. CAVEAT: today's substrate consumes only the FIRST fused
+/// order-independent. CAVEAT: the substrate consumes only the FIRST fused
 /// family (`derive_fused_binding`); composing two fused families needs either a
-/// composite AOT slug or the additive pass for the 2nd+ — until then the order
+/// composite AOT slug or the additive pass for the 2nd+ — without that, the order
 /// of two fused families is observable. one fused family + N additive specs is
 /// fully general.
 #[derive(Clone, Debug, Default)]
@@ -207,7 +206,7 @@ pub fn uniform_accel(g_ext: Vec<f64>) -> Overlay {
 /// and add overlays via the `with_*` builders. validation runs separately
 /// so the structural composition can be inspected before the cross-checks.
 ///
-/// **Phase 4c extension**: `fused_families` declares which AOT-baked fused
+/// `fused_families` declares which AOT-baked fused
 /// kernel families this simulation wants the substrate to use. each family
 /// resolves to a `FusedSourceBinding` via `derive_fused_binding(d)`.
 #[derive(Clone, Debug)]
@@ -217,10 +216,10 @@ pub struct SimulationLaws<'a> {
     pub gravity: Vec<SourceSpec>,
     pub ib: Vec<SourceSpec>,
     pub user: Vec<SourceSpec>,
-    /// **B6-iv Phase 4c**: the AOT-fused source families bound for this
+    /// the AOT-fused source families bound for this
     /// simulation. typically ONE family (e.g., uniform_accel) — but the
-    /// derivation accepts more for future composite slugs (e.g.
-    /// `"uniform_accel_pointmass"`). today's substrate consumes the FIRST
+    /// derivation accepts more for composite slugs (e.g.
+    /// `"uniform_accel_pointmass"`). the substrate consumes the FIRST
     /// family via `derive_fused_binding(d)`.
     pub fused_families: Vec<FusedSourceFamily>,
 }
@@ -256,7 +255,7 @@ impl<'a> SimulationLaws<'a> {
         self
     }
 
-    /// **B6-iv Phase 4c**: append a fused-source family to this simulation's
+    /// append a fused-source family to this simulation's
     /// runtime declaration. `has_energy` is taken from `self.regime.has_energy` —
     /// the family is a regime-independent physics declaration, the regime
     /// determines whether the energy-side overlay applies. the substrate picks
@@ -304,15 +303,15 @@ impl<'a> SimulationLaws<'a> {
         self
     }
 
-    /// **B6-iv Phase 4c**: derive the canonical (source_id, scalar_pairs)
+    /// derive the canonical (source_id, scalar_pairs)
     /// bundle the substrate's `FusedSourceBinding::new(source_id, &pairs)`
     /// consumes — or `None` when no family is configured (the substrate
     /// then routes through the unfused godunov, the prior default).
     ///
-    /// today this picks the FIRST family in `fused_families`; multi-family
-    /// composite slugs (e.g., `"uniform_accel_pointmass"`) are a future
-    /// extension once the AOT bake-matrix grows. a SimulationLaws with two
-    /// families currently logs a `debug_assert` so silent dropping never
+    /// this picks the FIRST family in `fused_families`; multi-family
+    /// composite slugs (e.g., `"uniform_accel_pointmass"`) require a larger
+    /// AOT bake-matrix. a SimulationLaws with two
+    /// families logs a `debug_assert` so silent dropping never
     /// goes unnoticed.
     pub fn derive_fused_binding(&self) -> Option<(&'static str, Vec<(String, f64)>)> {
         debug_assert!(
@@ -366,14 +365,13 @@ impl<'a> SimulationLaws<'a> {
     ///     across sources;
     ///   - the result's `outputs.len()` equals the field-component count
     ///     of the first overlay (every overlay targeting one field MUST
-    ///     emit the same component count — the validator's job to enforce
-    ///     in a later increment, B5-vi-iii).
+    ///     emit the same component count — the validator enforces this).
     ///
-    /// the splice currently supports the algebraic Op subset the source
-    /// builders use today (`Const`, `Param`, `ElementWise`, `Transcendental`,
+    /// the splice supports the algebraic Op subset the source
+    /// builders use (`Const`, `Param`, `ElementWise`, `Transcendental`,
     /// `Select`). it panics on tensor / higher-order Ops — by design: the
-    /// source layer doesn't lower through them, and a future source that
-    /// did would need the splice extended in lockstep.
+    /// source layer doesn't lower through them; a source that
+    /// did would need the splice extended to match.
     pub fn build_total_source(&self, field: &str, d: usize) -> Option<BuiltSource> {
         let sources: Vec<&SourceSpec> = self.sources_for(field).collect();
         if sources.is_empty() {
@@ -974,9 +972,9 @@ mod tests {
         assert_eq!(rho_count, 1, "shared `rho` param must appear exactly once");
     }
 
-    // ----- user-defined source composition (B5-v + B5-vi-ii) --------------
+    // ----- user-defined source composition --------------------------------
 
-    // ----- end-to-end emit: spec data drives codegen (B5-vi-iii) ----------
+    // ----- end-to-end emit: spec data drives codegen ----------------------
 
     #[test]
     fn spec_data_drives_primary_cuda_emit_end_to_end() {

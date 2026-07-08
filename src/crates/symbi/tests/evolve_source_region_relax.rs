@@ -1,7 +1,7 @@
 // =============================================================================
 // evolve_source_region_relax.rs
 //
-// docs/design/32 steps 2 (region) + 3 (relax), END-TO-END through the live evolve loop (the runtime
+// docs/design/32 region + relax axes, END-TO-END through the live evolve loop (the runtime
 // user-source path: json -> build_user_source -> SourceEvaluator -> source_apply). proves the two
 // new axes are real physics, not just graph construction:
 //

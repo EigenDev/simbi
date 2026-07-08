@@ -49,12 +49,12 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
     pub cfl_scratch: Field<Sc, D, Mem>,
-    /// **B6-iv Phase 4b**: declarative routing to the AOT-baked fused godunov
+    /// declarative routing to the AOT-baked fused godunov
     /// (`adiabatic_godunov_euler_with_{source_id}_{D}d`). `None` => the unfused
     /// kernel (the original default; bit-identical for existing callers). `Some`
     /// => `godunov_euler` / `godunov_rk2` route through the fused variant.
     pub fused_source: Option<FusedSourceBinding>,
-    /// **S3b**: the NON-fused (additive) source overlay — plain godunov + a
+    /// the NON-fused (additive) source overlay — plain godunov + a
     /// per-stage `adiabatic_source_with_{slug}_{D}d` pass. proven bit-for-bit
     /// equal to `fused_source` with the same binding. see the iso analogue.
     pub additive_source: Option<FusedSourceBinding>,
@@ -129,7 +129,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         (self, id)
     }
 
-    /// **B6-iv Phase 4b**: bind a fused-source AOT kernel for this kernel-set.
+    /// bind a fused-source AOT kernel for this kernel-set.
     /// fluent builder; chain off `new(..)`:
     /// `AdiabaticSubstrateKernelSet::new(gamma, cfl, alloc).with_fused_source(b)`.
     pub fn with_fused_source(mut self, binding: FusedSourceBinding) -> Self {
@@ -137,7 +137,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         self
     }
 
-    /// **S3b**: bind the SAME source as a NON-fused additive pass instead of
+    /// bind the SAME source as a NON-fused additive pass instead of
     /// fusing it into godunov. bit-for-bit equal to `with_fused_source` for a
     /// baked family. fluent builder; chain off `new(..)`.
     pub fn with_additive_source(mut self, binding: FusedSourceBinding) -> Self {
@@ -337,7 +337,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn body_feedback(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
-        // backward feedback (docs/design/19 P3): reduce per-body force/torque/mass -> diagnostics.
+        // backward feedback (docs/design/19): reduce per-body force/torque/mass -> diagnostics.
         dispatch_body_feedback(sim, dt, self.gamma);
     }
 }

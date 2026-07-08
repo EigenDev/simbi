@@ -332,7 +332,7 @@ mod tests {
 
     // trace rmhd_wave_speeds at S=Gv (axis 0), scalarize through the same
     // pipeline the real kernel emit takes, run CSE, and return the peak
-    // register-pressure report. used by step 6 to measure the scoping win.
+    // register-pressure report used to measure the scoping win.
     fn trace_and_measure_pressure() -> pressure::PressureReport {
         begin_trace();
         let rho = Gv::field("prim_rho", "prim.rho");
@@ -356,9 +356,9 @@ mod tests {
         pressure::peak_pressure_kernel(&k)
     }
 
-    /// **docs/design/23 step 6 regression bound**. pins the
-    /// `peak_pressure` metric on rmhd_wave_speeds at its current measured
-    /// value (87, post-step-4 cost-model CSE, no `S::scope` in the kernel).
+    /// **docs/design/23 regression bound**. pins the
+    /// `peak_pressure` metric on rmhd_wave_speeds at its measured
+    /// value (87, post cost-model CSE, no `S::scope` in the kernel).
     ///
     /// the bound exists to catch FUTURE REGRESSIONS — if a future edit
     /// pushes the metric above 87, the reviewer must either lower it back
@@ -367,12 +367,12 @@ mod tests {
     /// the metric is a conservative UPPER bound (it counts every ancestor-
     /// scope Let as live, ignoring true liveness), so 87 is not the SASS
     /// register count nvcc will pick — that depends on the structural
-    /// scope info we give it. step 6 LANDS the infrastructure
+    /// scope info provided. the infrastructure supplies
     /// (`assert_peak_pressure!` macro, scope_owner eviction so hash-consed
     /// inner-and-outer-used NodeIds get lowered at the LCA scope rather
-    /// than breaking inner-scope references); the kernel-side migration is
-    /// deferred to a follow-up that adds a multi-output scope combinator
-    /// (today `S::scope` returns one S, so a 2-output path like the path-2
+    /// than breaking inner-scope references); the kernel-side migration
+    /// needs a multi-output scope combinator
+    /// (`S::scope` returns one S, so a 2-output path like the path-2
     /// quadratic or the (sl_3, sr_3) pair can't be wrapped without
     /// duplicating the prep+quartic-solve — measured 87 → 172 in that
     /// shape, a net loss).
@@ -393,8 +393,8 @@ mod tests {
     /// branch; the lazy branch only DELETES work on the fast paths. the REAL
     /// evidence of the win is the emitted kernel (quartic inside the else arm)
     /// + the `cubic_resolvent_select_tax_wallclock` bench (2.16x -> 0.97x), not
-    /// this number. a liveness-aware metric (the deferred follow-up) would
-    /// report a value near the old ~90; until then the bound just catches a
+    /// this number. a liveness-aware metric would
+    /// report a value near the old ~90; the bound just catches a
     /// gross >2x blow-up.
     #[test]
     fn rmhd_wave_speeds_under_pressure_bound() {

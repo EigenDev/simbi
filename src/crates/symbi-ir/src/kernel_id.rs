@@ -18,8 +18,8 @@
 // on-disk registry ABI cannot silently shift under a refactor.
 //
 // scope: the AMR-transfer + field-op family (the hot, drift-prone path). other
-// kernel families (flux, c2p, godunov, ...) stay stringly for now — they mint
-// once per step, not in a tight inner loop, and earn the type later.
+// kernel families (flux, c2p, godunov, ...) stay stringly — they mint
+// once per step, not in a tight inner loop.
 //
 // usage:
 //  // producer (build.rs): emit_gv(out, KernelId::RefineRestrict { ndim }.name(), ..)

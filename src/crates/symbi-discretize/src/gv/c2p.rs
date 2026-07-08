@@ -104,7 +104,7 @@ pub fn rhd_c2p_gv<const D: usize>(max_iters: usize) -> (GvKernel, Vec<(String, F
     let mom_arr: [Gv; D] = mom.try_into().expect("D momentum components");
     let cons = Cons::<Gv, D> { den, mom: Tensor::new(mom_arr), nrg };
     // flat-frame spatial metric = identity (constant-folds to the euclidean norm, so the
-    // traced/compiled kernel is bit-identical). the GR metric threads in here at B3.
+    // traced/compiled kernel is bit-identical). the GR metric threads in here.
     let prim = rhd_recover(&IdealGas { gamma }, &cons, &SpatialMetric::flat(), max_iters);
 
     let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), prim.rho.node())];

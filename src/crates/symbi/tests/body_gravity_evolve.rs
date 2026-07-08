@@ -197,7 +197,7 @@ fn body_gravity_gpu_matches_cpu() {
     hset.body_source(&host, 0.01);
     dset.body_source(&dev, 0.01);
     // launches are asynchronous: drain the device queue before the host reads
-    // the unified buffers (the B12 host-read barrier).
+    // the unified buffers (the host-read barrier).
     symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
 
     let interior = &host.geom.interior;
@@ -228,7 +228,7 @@ fn black_hole_records_accretion_without_changing_mass() {
     // a black hole (gravity + accretion) embedded in dense fluid: the fluid is removed by the
     // sink + the accretion RECORDED into the diagnostic (total_accreted_mass), but the BH's
     // GRAVITATING mass is held FIXED (fixed-potential sink — the central potential must not
-    // drift). docs/design/19 P3.
+    // drift). docs/design/19.
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     let m_init = 1.0;
@@ -415,7 +415,7 @@ fn body_feedback_gpu_matches_cpu() {
 }
 
 // -----------------------------------------------------------------------------
-// curvilinear (polar r-phi) body gravity (docs/design/19 P4): a central mass must
+// curvilinear (polar r-phi) body gravity (docs/design/19): a central mass must
 // produce PURELY RADIAL gravity in the physical (r, phi) momentum components.
 // -----------------------------------------------------------------------------
 #[test]
@@ -542,7 +542,7 @@ fn curvilinear_body_source_gpu_matches_cpu() {
     hset.body_source(&host, 0.01);
     dset.body_source(&dev, 0.01);
     // launches are asynchronous: drain the device queue before the host reads
-    // the unified buffers (the B12 host-read barrier).
+    // the unified buffers (the host-read barrier).
     symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
 
     let interior = &host.geom.interior;
@@ -576,7 +576,7 @@ fn curvilinear_body_source_gpu_matches_cpu() {
 }
 
 // -----------------------------------------------------------------------------
-// 3D spherical body gravity (docs/design/19 P4 closing): a central mass must produce
+// 3D spherical body gravity (docs/design/19): a central mass must produce
 // PURELY RADIAL gravity in the physical (r, theta, phi) components.
 // -----------------------------------------------------------------------------
 #[test]
@@ -692,7 +692,7 @@ fn spherical_3d_body_gpu_matches_cpu() {
     hset.body_source(&host, 0.01);
     dset.body_source(&dev, 0.01);
     // launches are asynchronous: drain the device queue before the host reads
-    // the unified buffers (the B12 host-read barrier).
+    // the unified buffers (the host-read barrier).
     symbi::regimes::substrate_gpu::device_sync::<DeviceMemory>();
     let interior = &host.geom.interior;
     let rel = |a: f64, b: f64| (a - b).abs() / a.abs().max(1.0);

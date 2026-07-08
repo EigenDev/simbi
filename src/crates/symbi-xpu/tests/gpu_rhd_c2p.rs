@@ -6,7 +6,7 @@
 // SAME substrate IR graph is emitted to two backends: the CPU Rust fn
 // `symbi_aot::rhd_c2p_1d` and the neutral IR blob `symbi_aot::RHD_C2P_1D_IR`,
 // rendered to CUDA source at test time via `render_from_ir` (docs/design/15 §3).
-// here we nvcc-compile the CUDA to PTX, launch it on the GPU, and assert the
+// the CUDA is nvcc-compiled to PTX, launched on the GPU; the test asserts the
 // device output matches BOTH the CPU kernel AND the analytic primitives the
 // conserved states were built from. proves the iterative kernel (20-step masked
 // Newton, lowered to nested SELECT) computes correct physics ON THE DEVICE.
@@ -102,7 +102,7 @@ fn rhd_c2p_gpu_matches_cpu_and_analytic() {
     // ---- CPU backend (the AOT Rust kernel) ----
     // the __raw kernel takes view-wrapped buffers (CpuField/CpuFieldMut) + grid +
     // dom_lo + gamma. scope the field wrappers so their borrows of the output Vecs
-    // end before we read the results back.
+    // end before the results are read back.
     let (mut rho_cpu, mut vel_cpu, mut pre_cpu) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
     {
         let lo = [0i32];

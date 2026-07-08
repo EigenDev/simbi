@@ -22,7 +22,7 @@ use crate::sim::state::*;
 // `sim::evolve::KernelSet` path resolves for downstream callers.
 pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
-// sim-state core (docs/design/41 step 4) so the AMR driver shares them DRY. the public profiler
+// sim-state core (docs/design/41) so the AMR driver shares them DRY. the public profiler
 // API is re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{evolve_bodies, prof, stage_tag, stage_time_fractions};
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
@@ -125,8 +125,8 @@ where
 
     // every c2p step is a
     // sum-reduction over per-cell error codes; nonzero means at least one
-    // cell failed inversion. on failure we
-    // panic with the decoded error code. without this check, NaN cons
+    // cell failed inversion. on failure, panic with the decoded error code.
+    // without this check, NaN cons
     // silently propagates and the runner marches to t_final with garbage,
     // forcing checkpoints with invalid state.
     let initial_err = crate::sim::hydro_ops::scan_c2p_errors(sim);
@@ -165,7 +165,7 @@ where
     while sim.time < t_final {
         let dt = prof("cfl", || kernels.cfl(sim)).min(t_final - sim.time);
         if !(dt.is_finite() && dt > 0.0) {
-            // terminal NaN/inf cascade only: name the first bad cell before we panic. one-time
+            // terminal NaN/inf cascade only: name the first bad cell before the panic. one-time
             // host scan at the failure boundary — never on the happy path (see report fn).
             crate::regimes::substrate_gpu::device_sync::<Mem>();
             let _ = report_first_nonfinite_cell(sim);
@@ -207,7 +207,7 @@ where
 
         if sim.has_bodies() {
             // backward feedback: reduce per-body force/torque/accreted-mass from the fluid into
-            // the side-car diagnostics (docs/design/19 P3), then evolve_bodies consolidates + applies it
+            // the side-car diagnostics (docs/design/19), then evolve_bodies consolidates + applies it
             // + advances the (prescribed) binary, and resets the accumulator for the next step.
             kernels.body_feedback(sim, sim.dt);
             evolve_bodies(sim);
@@ -216,7 +216,7 @@ where
         if sim.iteration - last_cb >= interval {
             last_cb = sim.iteration;
             // the callback reads fields from the host: drain the device queue
-            // first (the B12 host-read barrier; no-op on a host backend).
+            // first (the host-read barrier; no-op on a host backend).
             crate::regimes::substrate_gpu::device_sync::<Mem>();
             callback(sim);
         }
@@ -230,7 +230,7 @@ where
 /// energy, or cell-centered B) is non-finite and report its index + physical coordinate + the
 /// offending values. called ONCE, only when the cfl `dt` has already gone non-finite (the terminal
 /// cascade, right before `check_dt_or_panic`) — NEVER in the happy path — so the one-time host-read
-/// page-fault cost is irrelevant (we are about to panic anyway). this is the deliberate exception to
+/// page-fault cost is irrelevant (the process is about to panic anyway). this is the deliberate exception to
 /// the "no per-cell host scans" rule: it converts the bare "state went NaN/inf" into "cell [i,j,k]
 /// at x = .. went NaN, den=.. nrg=..", which is where a no-silent-floors debug session starts.
 fn report_first_nonfinite_cell<R, const D: usize, const DOF: usize, M, E, S, Mem>(
@@ -430,7 +430,7 @@ where
 /// combine `u^{k+1} = a0*u^n + ac*(u^k + dt*L)` places it at
 
 // emit a 3-wide-on-each-axis neighborhood of trace lines around `center`.
-// for D=2 → 9 lines; for D=3 → 27 lines. each line is tagged with its
+// for D=2 -> 9 lines; for D=3 -> 27 lines. each line is tagged with its
 // offset from center so diff'd output shows which neighbor first
 // diverges between CPU and GPU.
 fn emit_trace_neighborhood<R, const D: usize, const DOF: usize, M, E, S, Mem>(
@@ -462,8 +462,8 @@ where
             for a in 0..D { c[a] += offset[a]; }
             emit_trace_line(sim, c, &offset);
         } else {
-            // SYMBI_TRACE_RADIUS env var sets the half-width; default 1 → 3x3.
-            // 2 → 5x5 covers PLM stencil reach (radius-2 along each axis).
+            // SYMBI_TRACE_RADIUS env var sets the half-width; default 1 -> 3x3.
+            // 2 -> 5x5 covers PLM stencil reach (radius-2 along each axis).
             let r: isize = std::env::var("SYMBI_TRACE_RADIUS").ok()
                 .and_then(|s| s.parse().ok()).unwrap_or(1);
             for d in -r..=r {
@@ -496,7 +496,7 @@ where
         return;
     }
     // print as both decimal (human-readable) and bit pattern (exact compare)
-    // so we can both eyeball values and `diff` runs to find the first iter
+    // so both value inspection and a `diff` across runs can find the first iter
     // where any bit changes.
     let fmt = |x: f64| format!("{:.16e}({:016x})", x, x.to_bits());
     // tag with offset so multiple cells per iter are distinguishable in diff

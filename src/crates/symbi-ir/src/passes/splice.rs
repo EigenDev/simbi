@@ -104,8 +104,8 @@ pub fn splice_graph(
         // cloning) — handle them specially. every OTHER variant is "pure":
         // clone the op, remap its NodeId fields ONCE via the canonical
         // `Op::try_map_inputs`, then dispatch to the matching builder. the
-        // remap+dispatch is now read like the IR shape, not duplicated per
-        // variant (Phase 3).
+        // remap+dispatch reads like the IR shape, not duplicated per
+        // variant.
         let new_id = match &node.op {
             Op::Param(sym) => {
                 let target_id = param_subst.get(sym).copied().ok_or_else(|| {
@@ -123,8 +123,8 @@ pub fn splice_graph(
                 }
                 target_id
             }
-            // F2.C: Lambda — clone the FnDef into target. the FnDef's body
-            // lives in its own sub-graph; we copy it verbatim.
+            // Lambda — clone the FnDef into target. the FnDef's body
+            // lives in its own sub-graph; copied verbatim.
             Op::Lambda(fn_id) => {
                 let fn_def = source.fn_defs()[fn_id.0 as usize].clone();
                 target.add_lambda(fn_def, node.span)
@@ -137,7 +137,7 @@ pub fn splice_graph(
                 op.try_map_inputs(|id| {
                     remap[id.0 as usize].ok_or(SpliceError::OutputOutOfRange)
                 })?;
-                // Phase 3 (continued): dispatch via `Op::dispatch_builder` —
+                // dispatch via `Op::dispatch_builder` —
                 // the SINGLE per-variant Op->target-builder dispatcher in
                 // graph.rs (alongside `try_map_inputs`). adding a new variant
                 // touches `try_map_inputs` + `dispatch_builder` and nothing
@@ -156,10 +156,10 @@ pub fn splice_graph(
         .collect())
 }
 
-// `remap_one` / `remap_inputs` are gone — Phase 3's `Op::try_map_inputs`
-// applies the same remap closure to every NodeId field in one call. forward
-// references remain impossible (graph is bottom-up, we walk in NodeId order)
-// so a missing entry still surfaces as `OutputOutOfRange` from the closure.
+// `Op::try_map_inputs` applies the same remap closure to every NodeId field in
+// one call. forward references are impossible (graph is bottom-up, walked in
+// NodeId order) so a missing entry surfaces as `OutputOutOfRange` from the
+// closure.
 
 // reconstruct an einsum spec string from a parsed EinsumSpec. the
 // grammar (einsum.rs) is closed: each atom is a single label char or

@@ -1,11 +1,11 @@
 // =============================================================================
 // decomp_mhd_equivalence.rs
 //
-// the MHD correctness contract for multi-gpu domain decomposition (docs/design/37 M4): a 2d
+// the MHD correctness contract for multi-gpu domain decomposition (docs/design/37): a 2d
 // RMHD grid split into a 2x2 tile grid, evolved in lockstep with the same-level halo exchange,
 // must reproduce the monolithic run to round-off AND keep div(B) at machine zero across the
 // tile cuts. the second check is the MHD-specific one: a wrong staggered `bface` exchange
-// compiles fine and runs, but silently creates a magnetic monopole at the seam.
+// compiles fine and runs, but silently creates a magnetic monopole at the tile boundary.
 //
 // cpu-only + 2d on purpose: 2d is the minimal constrained-transport case (one E_z edge), and a
 // host run exercises the SAME exchange index math (`exchange_faces`/`face_ghost_strip`) as the
@@ -136,7 +136,7 @@ fn global_den(tiles: &[(Sim, Kern)], counts: [usize; 2]) -> Vec<f64> {
 }
 
 // max |div(B)| over a tile's interior cells: div(B)[c] = sum_d (bface[d](c + e_d) - bface[d](c)) / dx.
-// the staggered CT update keeps this at machine zero; a broken seam exchange makes it spike at
+// the staggered CT update keeps this at machine zero; a broken tile-boundary exchange makes it spike at
 // the cut-adjacent cells.
 fn div_b_max(sim: &Sim) -> f64 {
     let mhd = sim.fields.mhd.as_ref().expect("rmhd has mhd fields");

@@ -6,8 +6,8 @@
 // hyperbolics, NaN). this test PROMOTES that prose to executable properties: each law
 // is swept over a deterministic sample grid (no rng — the determinism mandate) on BOTH
 // concrete carriers (f64 + f32, the precision axis of "carrier-generic"). the Gv carrier's
-// homomorphism (f64 == traced-Gv) is covered separately in `carrier_oracle_new.rs`; here
-// we pin that the concrete carriers are honest models of the documented algebra.
+// homomorphism (f64 == traced-Gv) is covered separately in `carrier_oracle_new.rs`; the
+// concrete carriers are pinned as honest models of the documented algebra.
 //
 // exact laws (IEEE-exact: identity, commutativity, involution, sub-via-neg, select,
 // comparison structure) assert `==`; floating laws (associativity, distributivity, the

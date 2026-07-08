@@ -108,7 +108,7 @@ pub struct GhostMapParams<const D: usize> {
 ///   covers x-halo positions whose `axis`-halo will be filled now (this is
 ///   what fills the corners/edges via successive sweeps)
 /// - other axes (not yet swept): INTERIOR extent — their halos haven't been
-///   filled yet, so we shouldn't read from them
+///   filled yet, so must not be read from
 fn sweep_domain<const D: usize>(
     allocated: &Domain<D>,
     interior: &Domain<D>,
@@ -163,7 +163,7 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
     /// 26-box scheme: classifies `allocated.difference(interior)`
     /// into up to `3^D - 1` axis-aligned regions (faces + edges + corners)
     /// and dispatches once per non-skip box. correct, but pays per-launch
-    /// overhead × 26 per step AND launches with shapes the dispatcher's
+    /// overhead x 26 per step AND launches with shapes the dispatcher's
     /// block-picker handles poorly (tiny corners, axis-thin edges). prefer
     /// `drive_sweep` for hot paths — same semantics, 6 launches max.
     pub fn drive<F>(&self, mut dispatch: F)
@@ -181,7 +181,7 @@ impl<'a, const D: usize> GhostFillDriver<'a, D> {
         }
     }
 
-    /// **axis-sequential sweep**: fill the halo in 3 axis passes (×2 sides per
+    /// **axis-sequential sweep**: fill the halo in 3 axis passes (x2 sides per
     /// axis = up to `2*D` launches), each pass a single thick slab. produces
     /// the SAME result as `drive` for periodic / reflect / outflow / skip BCs,
     /// but with `2*D` launches in place of `3^D - 1` AND each launch is a
@@ -500,7 +500,7 @@ mod tests {
     // ----- drive_sweep tests -----
 
     /// in 2D with all-periodic BCs, drive_sweep should dispatch exactly 4 times
-    /// (2 axes × 2 sides) — replacing the 8-region `drive` (4 faces + 4 corners).
+    /// (2 axes x 2 sides) — replacing the 8-region `drive` (4 faces + 4 corners).
     #[test]
     fn drive_sweep_2d_dispatches_four_times() {
         let alloc = Domain::new([

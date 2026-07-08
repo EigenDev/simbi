@@ -2,7 +2,7 @@
 // interp.rs
 //
 // the CPU backend: an in-process interpreter for the scalarized IR
-// (`09_core_abstractions` abstraction #4 — the device-agnostic execution seam).
+// (`09_core_abstractions` abstraction #4 — the device-agnostic execution boundary).
 //
 // emit_cpu / emit_cuda / emit_kernel render a `LoweredFn` to SOURCE that is
 // compiled later; this RUNS it directly. that closes the device-agnosticism
@@ -10,8 +10,8 @@
 // generated computation on the host. `Cpu` is the first `Backend` instance;
 // the source-emitting GPU path (emit_cuda / emit_kernel + the `symbi` runtime's
 // JIT + dispatch) is the other. the cross-device kernel-over-field-buffers
-// method is the widening of this seam (a follow-on; needs the buffer / domain
-// model that lives in `symbi-grid` / `symbi`).
+// method extends this boundary — it needs the buffer / domain
+// model that lives in `symbi-grid` / `symbi`.
 //
 // scope (slice 1): elemental `LoweredFn` over SCALAR params — the `scalarize`
 // output for pointwise / elemental graphs (arithmetic, transcendentals,
@@ -583,7 +583,7 @@ mod tests {
         assert_eq!(Cpu.eval_elemental(&f, &[ 2.0]), vec![2.0]);
     }
 
-    // ----- docs/design/23 step 1: Scope interpreter semantics test -----
+    // ----- docs/design/23: Scope interpreter semantics test -----
 
     /// the interpreter must execute a `ScalarStmt::Scope` correctly: run the
     /// inner body, evaluate `result`, bind `result`'s value to the outer name.
@@ -595,9 +595,9 @@ mod tests {
     fn scope_is_semantically_transparent_in_interpreter() {
         use crate::passes::scalarize::{LoweredFn, LoweredParam, ScalarExpr, ScalarStmt, BinaryKind};
 
-        // build a tiny LoweredFn BY HAND using a Scope so we get a controlled
+        // build a tiny LoweredFn BY HAND using a Scope for a controlled
         // test of the Scope arm in exec_stmt — independent of whatever the
-        // scalarize pass might or might not produce in step 1.
+        // scalarize pass might or might not produce.
         //
         // semantics: out = (a + b) * a  computed via a Scope binding `__t1 = a + b`
         // then returning `__t1 * a`.

@@ -345,7 +345,7 @@ pub fn kernel_scalar_params_typed_from_ir(ir: &str) -> Vec<(ScalarBind, bool)> {
 /// spell a `Prepared` kernel in `R`'s backend: rewrite FieldLoadAt to the backend's
 /// flat-index form (the one renderer-dependent step, so it lives HERE not in
 /// `prepare`), then emit the source. `render(deserialize(serialize(prepare(g))), r)`
-/// equals `render(prepare(g), r)` — the round-trip is the seam's correctness proof.
+/// equals `render(prepare(g), r)` — the round-trip is the correctness proof.
 pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescriptor {
     // buf-index lookups, rederived from the bindings (consistent by construction):
     // field-bind -> buffer, and IR key -> buffer (via the field-input path). the join
@@ -694,7 +694,7 @@ mod tests {
     use crate::morphism::MorphismKind;
     use crate::{ConstValue, ElementTy, ElementWiseOp, Symbol, TensorTy, TranscendentalOp};
 
-    // the seam's correctness proof (docs/design/15 §3): the serialized `Prepared`
+    // the correctness proof (docs/design/15 §3): the serialized `Prepared`
     // IR is the durable artifact, so `render(deserialize(serialize(prepare(g))))`
     // MUST equal `render(prepare(g))` for EVERY backend. a representative kernel
     // exercises the serde-sensitive shapes: a shifted FieldLoadAt (rewrite deferred

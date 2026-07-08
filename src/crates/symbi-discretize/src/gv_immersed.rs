@@ -7,7 +7,7 @@
 //   - body_feedback_gv (BACKWARD, fluid -> bodies): per-cell per-body force / torque / accreted
 //     mass -> scratch fields a device reduction sums into each body's BodyDelta.
 //
-// GENERIC over coordinate system (docs/design/19 P4): the physics is done in CARTESIAN
+// GENERIC over coordinate system (docs/design/19): the physics is done in CARTESIAN
 // (coord-free) — `cell_scaffold` supplies the cell's cartesian position + gas velocity via the
 // gv to_cartesian / vector_to_cartesian transforms; the forward source PROJECTS gravity + sink
 // velocity onto the physical momentum frame (vector_from_cartesian), the feedback keeps the
@@ -53,7 +53,7 @@ struct BodyContributionGv {
 }
 
 /// the CARTESIAN axes (0=x,1=y,2=z) a body's ndim-D position/velocity components map to — the
-/// grid-plane convention (docs/design/19 P4). identical to `immersed::body_cart_axes`.
+/// grid-plane convention (docs/design/19). identical to `immersed::body_cart_axes`.
 fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec<usize> {
     match coords {
         Coords::Cartesian => (0..ndim).collect(),

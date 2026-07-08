@@ -39,7 +39,7 @@ pub fn rhd_recover<S: Scalar, const D: usize>(
     let tau = cons.nrg;
     // the conserved-momentum norm |S|^2 = gamma^{ij} S_i S_j (S_i is COVARIANT -> contract with
     // the inverse spatial metric). flat/orthonormal -> identity -> bit-identical to euclidean S.S.
-    // THIS is the SR->GR seam (B2): the metric is a carrier-generic value the physics contracts
+    // THIS is the SR->GR distinction: the metric is a carrier-generic value the physics contracts
     // with, transported by the homomorphism like `eos`.
     let s_mag = metric.norm_sq_cov(&cons.mom).sqrt();
     // the rescaled conserved-momentum norm r^2 = |S|^2 / D^2 and the shared c2p velocity ceiling
@@ -127,7 +127,7 @@ pub(crate) fn rhd_to_primitive<S: Scalar + OrderedNumeric, const D: usize>(
     }
 
     // flat/orthonormal frame -> the spatial metric is identity (bit-identical to euclidean norms);
-    // a genuine GR metric is threaded here once B3 densitizes the conserved state.
+    // a genuine GR metric is threaded here once the conserved state is densitized.
     let prim = rhd_recover(eos, cons, &SpatialMetric::flat(), MAX_ITER);
 
     // post-hoc diagnostics on the raw recovered state (shared RHD/RMHD contract; tier-1 #5).

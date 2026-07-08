@@ -46,7 +46,7 @@ const GAMMA_RHD: f64 = 5.0 / 3.0;
 const CS: f64 = 1.0; // isothermal sound speed
 
 // GPU vs CPU agree modulo nvcc FMA fusion: ULP-bounded drift, per single kernel.
-// **B12** — sync once before reading device fields back to host (the per-launch
+// sync once before reading device fields back to host (the per-launch
 // `ctx_sync` removal means stream ordering alone doesn't make device writes
 // host-visible).
 fn cmp<const D: usize, MH: MemorySpace, MD: MemorySpace>(

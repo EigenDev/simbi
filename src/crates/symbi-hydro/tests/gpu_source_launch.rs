@@ -2,7 +2,7 @@
 // gpu_source_launch.rs
 //
 // **end-to-end GPU launch test for spec-driven sources** — the
-// load-bearing claim of B5-viii / B5-x:
+// load-bearing claim:
 //
 //   the SAME spec data, lowered through `Homomorphism<Cuda>`, NVRTC-
 //   compiled, and launched on actual GPU hardware, produces ULP-equivalent

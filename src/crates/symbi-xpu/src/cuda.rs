@@ -4,7 +4,7 @@
 // CUDA execution space and unified memory space. raw driver API bindings.
 // no external crate dependencies — just extern "C" to libcuda.so.
 //
-// binds only what we need:
+// binds only the required subset:
 //   cuInit, cuDeviceGet, cuCtxCreate, cuCtxGetCurrent,
 //   cuStreamCreate, cuStreamDestroy, cuStreamSynchronize, cuStreamQuery,
 //   cuEventCreate, cuEventDestroy, cuEventRecord, cuEventQuery,
@@ -41,7 +41,7 @@ const CUDA_SUCCESS: CUresult = 0;
 const CU_MEM_ATTACH_GLOBAL: c_uint = 1;
 const CU_EVENT_DISABLE_TIMING: c_uint = 2;
 const CU_STREAM_NON_BLOCKING: c_uint = 1;
-// re-enabling peer access that is already enabled is success for our purposes.
+// re-enabling already-enabled peer access counts as success.
 const CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED: CUresult = 704;
 
 // =============================================================================
@@ -220,7 +220,7 @@ struct SyncCtx(CUcontext);
 unsafe impl Send for SyncCtx {}
 unsafe impl Sync for SyncCtx {}
 
-/// max gpus per node we bind. gpu counts are tiny; a fixed array avoids locking on the
+/// max gpus per node bound. gpu counts are tiny; a fixed array avoids locking on the
 /// hot path. raise if a node ever has more.
 pub const MAX_GPUS: usize = 16;
 
@@ -301,7 +301,7 @@ fn ensure_init() -> error::Result<()> {
 
 /// run `f` with device `ord`'s context current on this thread, restoring the previous
 /// device afterward. this binds a tile's kernels to its gpu (docs/design/37): the launch /
-/// alloc / sync code targets "the current context", so we make the right one current rather
+/// alloc / sync code targets "the current context", so the right one is made current rather
 /// than threading a device id through every signature.
 pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
     let prev = current_device();

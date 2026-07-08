@@ -1,7 +1,7 @@
 // =============================================================================
 // godunov_with_fused_source.rs
 //
-// **B6-ii / Phase 2 proof**: `godunov_euler_gv_with_fused_source` produces a
+// proves `godunov_euler_gv_with_fused_source` produces a
 // SINGLE kernel that combines the flux-divergence integrator + a spec-driven
 // user momentum source (e.g., `uniform_acceleration_sources`). validates:
 //
@@ -13,9 +13,9 @@
 //      Newtonian under uniform external force. proves the spliced spec
 //      contribution is wired at the right register-resident state.
 //
-// **why this matters for PERF**: today a Newtonian + external-acceleration
-// problem runs TWO kernels per RK stage (godunov + body_source). this proof
-// shows the spec source can ride INSIDE godunov — one launch, one set of
+// PERF motivation: a Newtonian + external-acceleration
+// problem runs TWO kernels per RK stage (godunov + body_source). the spec
+// source can instead ride INSIDE godunov — one launch, one set of
 // register-resident `cons` reads, one fused CSE pass over the divergence +
 // source expressions. zero added kernel dispatch overhead.
 //
@@ -50,8 +50,8 @@ use symbi_hydro::source_spec::uniform_acceleration_sources;
 fn user_source_none_matches_writes_of_plain_godunov() {
     // **structural backwards-compat**: passing `None` for `user_source`
     // produces a kernel with the SAME Writes shape as the plain godunov
-    // builder. callers that don't use spec sources today see no behavior
-    // change. (we don't check NodeId identity — the trace IDs differ
+    // builder. callers that don't use spec sources see no behavior
+    // change. (NodeId identity is NOT checked — the trace IDs differ
     // between two `begin_trace` sessions — but Writes-shape equivalence is
     // the contract the runtime binds against.)
     let coords = Coords::Cartesian;
@@ -162,8 +162,8 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
             ("mom_2", mom_v[2] + dt * rho_v * g_ext[2]),
             // energy unchanged: the energy-side of uniform_acceleration is a
             // separate SourceSpec (`[1]` in the returned Vec) not wired into
-            // this momentum-targeting fusion. Phase 2b extends to per-field
-            // overlay lists.
+            // this momentum-targeting fusion. a per-field overlay list
+            // extends to it.
             ("nrg", nrg_v),
         ],
         tol,
@@ -223,21 +223,21 @@ fn fused_source_kernel_includes_spec_param_in_signature() {
 }
 
 // =============================================================================
-// Phase 2b — MULTI-source overlay (mom + nrg simultaneously fused)
+// MULTI-source overlay (mom + nrg simultaneously fused)
 // =============================================================================
 
 #[test]
 fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
-    // **the Phase 2b load-bearing claim**: `uniform_acceleration_sources(D, true)`
-    // returns TWO SourceSpecs — `[0]` targeting "mom" (S_mom_k = ρ·g_ext_k) and
-    // `[1]` targeting "nrg" (S_nrg = ρ·v·g_ext). passing both to
+    // the load-bearing claim: `uniform_acceleration_sources(D, true)`
+    // returns TWO SourceSpecs — `[0]` targeting "mom" (S_mom_k = rho*g_ext_k) and
+    // `[1]` targeting "nrg" (S_nrg = rho*(v dot g_ext)). passing both to
     // `godunov_stage_gv_with_fused_sources` produces a SINGLE kernel that
     // applies BOTH contributions at the right per-field update sites.
     //
     // for a UNIFORM state (zero flux divergence), the analytical update is:
     //     rho_new   = rho
     //     mom_k_new = mom_k + dt * rho * g_ext_k
-    //     nrg_new   = nrg   + dt * rho * (v · g_ext)
+    //     nrg_new   = nrg   + dt * rho * (v dot g_ext)
     //
     // proving this in ONE kernel proves the per-spec target_field dispatch
     // wires each spliced output to the right conservation-law update site.
@@ -262,7 +262,7 @@ fn multi_source_fuses_mom_and_nrg_overlays_in_one_kernel() {
     let g_ext = [-0.1_f64, -0.2, -9.81];
     let dt = 0.01_f64;
 
-    // primitive velocity = mom / rho; v·g_ext = sum_k v_k * g_ext_k.
+    // primitive velocity = mom / rho; v dot g_ext = sum_k v_k * g_ext_k.
     let vel_v: [f64; D] = [mom_v[0] / rho_v, mom_v[1] / rho_v, mom_v[2] / rho_v];
     let v_dot_g = vel_v[0] * g_ext[0] + vel_v[1] * g_ext[1] + vel_v[2] * g_ext[2];
 
@@ -438,10 +438,10 @@ fn unsupported_target_field_panics_loudly() {
 
 #[test]
 fn source_apply_pass_adds_dt_times_source() {
-    // the standalone ADDITIVE source pass `cons += dt * Σ S` — the general source executor.
+    // the standalone ADDITIVE source pass `cons += dt * \sum S` — the general source executor.
     // uniform state (no divergence here, it's source-only), uniform_accel (mom + nrg). assert the
     // in-place conserved update is EXACTLY the analytical source contribution times dt:
-    //   mom_k += dt * rho * g_ext_k ;  nrg += dt * rho * (v · g_ext) ;  rho unchanged.
+    //   mom_k += dt * rho * g_ext_k ;  nrg += dt * rho * (v dot g_ext) ;  rho unchanged.
     // the driver passes dt = ac*dt, so this is the additive half of the fused stage.
     const D: usize = 3;
     let specs = uniform_acceleration_sources(D, true); // [mom, nrg]
@@ -486,10 +486,10 @@ fn source_apply_pass_adds_dt_times_source() {
 
 #[test]
 fn fused_stage_equals_plain_plus_additive_pass() {
-    // BULLETPROOFING the fusion (the S2 proof): the fused godunov stage computes BIT-FOR-BIT the
+    // the fused godunov stage computes BIT-FOR-BIT the
     // same conserved update as (plain godunov stage) followed by (the standalone additive source
     // pass) — because the fused builder adds the user source as the SAME post-combine term
-    // `+ Σ ac*dt*contrib` the pass adds, evaluated at the SAME stage-input state. tested at the
+    // `+ \sum ac*dt*contrib` the pass adds, evaluated at the SAME stage-input state. tested at the
     // SSP-RK2 corrector (a0=ac=0.5 — the FP-distribution-sensitive case) with u_n != u.
     // uniform state + uniform fluxes => div == 0 (the flux is identical in both paths anyway).
     const D: usize = 3;

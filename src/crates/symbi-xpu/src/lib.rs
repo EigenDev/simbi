@@ -3,7 +3,7 @@
 //
 // execution and memory abstraction for heterogeneous computing.
 // answers three questions: where does data live, how does work execute,
-// how do you wait for work.
+// how to wait for work.
 //
 // all fallible operations return Result<T, XpuError>. no panics in
 // production paths — errors propagate to the caller.

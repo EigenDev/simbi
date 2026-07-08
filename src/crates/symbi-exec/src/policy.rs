@@ -80,7 +80,7 @@ where
     // `layouts` carries one `(lo, extent, vol)` per field, in `inputs ++ outputs` order — a SHARED
     // cell layout (replicated) for `dispatch_fields`, or each field's own `Field::domain()` layout
     // for `dispatch_fields_each` (staggered / mixed-domain binds). ONE constructor, ONE distinctness
-    // check (release-active) — the P2 "DisjointBufferSet" SSOT (docs/design/38).
+    // check (release-active) — the "DisjointBufferSet" SSOT (docs/design/38).
     debug_assert_eq!(
         layouts.len(), inputs.len() + outputs.len(),
         "disjoint_host_buffers('{name}'): one layout per field required",

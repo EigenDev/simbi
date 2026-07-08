@@ -20,7 +20,7 @@ const MHD_REGIMES: &[(&str, &[Solver])] = &[
 
 // the hydro regimes (kernel prefix from each `flux()` dispatch) and their solvers. hydro flux is
 // geometry-free except for the DOF-lifted cyl-swirl (DOF != D), so cartesian + spherical share
-// these names. iso is HLLE-only (no contact wave); curvilinear-swirl HLLC is a documented follow-up
+// these names. iso is HLLE-only (no contact wave); curvilinear-swirl HLLC is unsupported
 // and is intentionally NOT asserted here.
 const HYDRO_REGIMES: &[(&str, &[Solver])] = &[
     ("adiabatic", &[Solver::Hlle, Solver::Hllc]),

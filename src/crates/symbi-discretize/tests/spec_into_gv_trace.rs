@@ -1,21 +1,21 @@
 // =============================================================================
 // spec_into_gv_trace.rs
 //
-// **B6-i — Phase 1 proof**: the mechanism for fusing spec-driven sources into
+// proves the mechanism for fusing spec-driven sources into
 // the active Gv trace. validates that `splice_built_source_into` correctly
 // recreates a `BuiltSource` graph inside the discretize crate's tracing
 // session, with param leaves replaced by Gv-trace-native NodeIds.
 //
-// **why this matters**: the substrate's godunov kernel builders (`gv.rs`)
-// trace physics at `S = Gv` into a graph; today the geometric source is
+// motivation: the substrate's godunov kernel builders (`gv.rs`)
+// trace physics at `S = Gv` into a graph; the geometric source is
 // hand-coded inline (`gv_geometric_source` at gv.rs:664) and the body
 // source is a SEPARATE kernel pass (`body_source_gv` at gv_immersed.rs:240).
 // the perf-correct architecture is to FUSE spec-driven sources INTO godunov
 // so flux div + source contribution + integrator run in ONE launch, ONE
 // register-resident state, ONE round of CSE.
 //
-// the splice mechanism (B6-i) is the prerequisite for that fusion. Phase 2
-// uses it to wire spec-driven body sources into `godunov_euler_gv`; Phase 3
+// the splice mechanism is the prerequisite for that fusion. the fused
+// godunov wires spec-driven body sources into `godunov_euler_gv`, then
 // AOT-bakes the fused kernels via `symbi-aot/build.rs`.
 //
 // **what this test asserts**:
@@ -64,8 +64,8 @@ fn eval_in_trace(out: NodeId, values: &[(&str, f64)]) -> f64 {
 
 #[test]
 fn splice_produces_valid_gv_node_ids() {
-    // basic structural check: the splice mechanism returns NodeIds we can
-    // wrap as Gv values inside the active trace. no semantic claim yet.
+    // basic structural check: the splice mechanism returns NodeIds that
+    // wrap as Gv values inside the active trace. no semantic claim here.
     begin_trace();
 
     // declare the leaves the spec needs as Gv-trace nodes. these stand in

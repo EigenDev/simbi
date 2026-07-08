@@ -1,7 +1,7 @@
 // =============================================================================
 // nmhd_divb_under_evolve.rs
 //
-// Step 5 validation of the Newtonian-MHD substrate (docs/design/29): run the ENTIRE
+// validation of the Newtonian-MHD substrate (docs/design/29): run the ENTIRE
 // production NMHD KernelSet (c2p -> ghost_fill -> flux per dir -> cfl -> snapshot ->
 // godunov_euler -> post_godunov[CT] -> rk2) for ~10 steps with periodic BCs and assert
 //   (a) the discrete staggered div(B) stays at machine zero (the CT stack — reused
@@ -9,8 +9,8 @@
 //   (b) the state stays PHYSICAL (rho > 0, p > 0, finite) — the algebraic NMHD c2p
 //       cannot fail the way RMHD's iterative inversion does.
 //
-// IC: Orszag-Tang vortex — analytically div-free B (Bx = -B0·sin(2πy), By =
-// B0·sin(4πx), Bz = 0) on an 8³ grid (nz=1 extruded 2D), matching the RMHD divB gate.
+// IC: Orszag-Tang vortex — analytically div-free B (Bx = -B0\cdot sin(2\pi y), By =
+// B0\cdot sin(4\pi x), Bz = 0) on an 8^3 grid (nz=1 extruded 2D), matching the RMHD divB gate.
 // the shared CT path is regime-agnostic (Faraday + the 1/2|B|^2 Newtonian magnetic-
 // energy correction), so div(B) must hold to machine epsilon exactly as for RMHD.
 // =============================================================================

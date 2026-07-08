@@ -30,7 +30,7 @@
 // the `decomp_harness!` macro emits a concrete harness per dimension: a generic-over-D
 // harness drowns in `Cartesian: Metric<f64,D>` / `Regime` / KernelSet bounds.
 //
-// device binding (docs/design/37 M2): each tile is bound to a LOGICAL device, round-robin
+// device binding (docs/design/37): each tile is bound to a LOGICAL device, round-robin
 // over `NDEV`. on the one physical card those logical ordinals fold onto distinct cuda
 // contexts (the modulo map in cuda.rs), so a tile's allocation + every physics kernel run
 // in their own context while the host-orchestrated exchange runs on device 0 over the
@@ -153,7 +153,7 @@ macro_rules! decomp_harness {
 
             // drive the PRODUCTION decomposed evolve loop (symbi-sim::decomp) over this
             // harness's tiles. the oracle now TESTS the same function the multi-gpu python entry
-            // runs (docs/design/37 M4) -- the hand-rolled loop is gone, so a divergence between
+            // runs (docs/design/37) -- the hand-rolled loop is gone, so a divergence between
             // proof and production is impossible. interval = u64::MAX: no mid-run callback, the
             // equivalence check reads the final state via `global_den`.
             fn run(tiles: &mut [(Sim, Kern)], counts: [usize; $d], ts: Timestepping) {
@@ -226,7 +226,7 @@ macro_rules! decomp_harness {
                 );
 
                 // ALSO exercise `gather_interiors` -- the production checkpoint gather the python
-                // multi-gpu path runs (docs/design/37 M4). reassemble the decomposed tiles into a
+                // multi-gpu path runs (docs/design/37). reassemble the decomposed tiles into a
                 // full-size global sim and confirm its density equals the direct read. this covers
                 // the gather index arithmetic (mirror of the IC scatter) across every topology
                 // here -- the one piece the python path uses that `evolve_decomposed` does not.

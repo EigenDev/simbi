@@ -1,7 +1,7 @@
 // =============================================================================
 // emf_register.rs
 //
-// the edge-EMF reflux register (docs/design/22 phase 3) — the constrained-
+// the edge-EMF reflux register (docs/design/22) — the constrained-
 // transport analogue of the flux register. the CT curl applies, per coarse
 // face bface_a(c) with (p1, p2) cyclic of a:
 //   bface_a(c) += dt * ( (E_p1(c+e_p2) - E_p1(c)) / dx_p2

@@ -207,8 +207,8 @@ where
     let dset = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, D>::new(GAMMA, CFL, &dev.geom.allocated)
         .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).expect("wrap"), cfg.params.clone());
 
-    // capture a pre-evolve momentum sample so we can prove the run actually moved
-    // the gas (else the oracle would compare two static states and pass vacuously).
+    // capture a pre-evolve momentum sample to prove the run actually moved
+    // the gas (else the test would compare two static states and pass vacuously).
     let probe = host.geom.interior.iter().next().expect("nonempty interior");
     let mom0_before = *host.fields.cons.mom[0].view().at(probe);
 

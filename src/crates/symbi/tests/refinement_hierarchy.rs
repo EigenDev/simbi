@@ -1,9 +1,9 @@
 // =============================================================================
 // refine_hierarchy.rs
 //
-// phase 0 gate (docs/design/22): a 1-level Hierarchy must reproduce evolve()
+// 1-level Hierarchy gate (docs/design/22): a 1-level Hierarchy must reproduce evolve()
 // BIT-FOR-BIT. the hierarchy's advance_level re-sequences the single-level SSP
-// stage loop so later phases can hook flux registers into it; this test pins
+// stage loop so flux registers can hook into it; this test pins
 // the two loops in lockstep — any drift (a reordered kernel call, a missed
 // stage hook) shows up as a bit mismatch, not a subtle conservation leak.
 //
