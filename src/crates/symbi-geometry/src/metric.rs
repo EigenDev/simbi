@@ -171,9 +171,14 @@ pub trait Metric<S: Scalar, const D: usize> {
     ///   spherical 2D: r^2 sin(theta)  (not r = sqrt_det_gamma of 2x2 metric)
     ///   cylindrical 1D: r  (not 1)
     ///   cylindrical 2D: r  (not 1)
-    fn volume_factor(&self, x: Tensor<S, D>) -> S {
-        self.sqrt_det_gamma(x)
-    }
+    ///
+    /// REQUIRED, no default (M6 / D4): the natural default `= sqrt_det_gamma` is WRONG for every
+    /// REDUCED-dimension metric — it drops the jacobian of the suppressed angular directions (a
+    /// spherical-1D cell volume is r^2 dr, not the 1x1 `sqrt_det_gamma = 1`). a silent default there
+    /// bakes the wrong face area / cell volume with no error. forcing it means a full-rank metric
+    /// spells the (trivial) `self.sqrt_det_gamma(x)` delegation and a reduced-D metric CANNOT forget
+    /// the proper measure: it fails to COMPILE instead.
+    fn volume_factor(&self, x: Tensor<S, D>) -> S;
 
     /// transform from this coordinate system to cartesian.
     fn to_cartesian(&self, x: Tensor<S, D>) -> Tensor<S, D>;
@@ -337,6 +342,7 @@ impl<S: Scalar> Metric<S, 1> for Cartesian {
 
     fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
     fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn volume_factor(&self, x: Tensor<S, 1>) -> S { self.sqrt_det_gamma(x) }
 }
 
 impl<S: Scalar> Metric<S, 2> for Cartesian {
@@ -358,6 +364,7 @@ impl<S: Scalar> Metric<S, 2> for Cartesian {
 
     fn to_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
     fn from_cartesian(&self, x: Tensor<S, 2>) -> Tensor<S, 2> { x }
+    fn volume_factor(&self, x: Tensor<S, 2>) -> S { self.sqrt_det_gamma(x) }
 }
 
 impl<S: Scalar> Metric<S, 3> for Cartesian {
@@ -379,6 +386,7 @@ impl<S: Scalar> Metric<S, 3> for Cartesian {
 
     fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> { x }
     fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> { x }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
 }
 
 // ============================================================
@@ -556,6 +564,8 @@ impl<S: Scalar> Metric<S, 3> for Spherical {
         let st = x[1].sin();
         r * r * st.abs()
     }
+    // full-rank spherical chart: the proper measure is sqrt_det_gamma.
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
 
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let r = x[0];
@@ -795,6 +805,8 @@ impl<S: Scalar> Metric<S, 3> for Schwarzschild<S> {
         let r = x[0];
         r * r * x[1].sin().abs() / self.f(r).sqrt() // sqrt((1/f) r^2 r^2 sin^2)
     }
+    // full-rank spherical chart: the proper measure is sqrt_det_gamma.
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let r = x[0];
         let st = x[1].sin();
@@ -988,6 +1000,8 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKS<S> {
         let r = x[0];
         r * r * x[1].sin().abs() * self.h(r).sqrt() // sqrt(h * r^2 * r^2 sin^2)
     }
+    // full-rank spherical chart: the proper measure is sqrt_det_gamma.
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let r = x[0];
         let st = x[1].sin();
@@ -1116,6 +1130,8 @@ macro_rules! impl_schwarzschild_ks_cartesian {
                 let (_r, two_h) = self.radius_two_h(x);
                 (S::ONE + two_h).sqrt()
             }
+            // full-rank cartesian chart (D == physical dim): the proper measure is sqrt_det_gamma.
+            fn volume_factor(&self, x: Tensor<S, $d>) -> S { self.sqrt_det_gamma(x) }
 
             fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
             fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
@@ -1144,6 +1160,9 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
         unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
     }
     fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
+    }
+    fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
         unreachable!("cartesian kerr-schild is degenerate in 1D: it needs at least the (x, y) plane (D >= 2)")
     }
 }
@@ -1251,6 +1270,8 @@ impl<S: Scalar> Metric<S, 3> for SchwarzschildKSCylindrical<S> {
         let (_r, two_h) = self.radius_two_h(big_r, z);
         big_r.abs() * (S::ONE + two_h).sqrt()
     }
+    // full-rank cylindrical chart (R, phi, z): the proper measure is sqrt_det_gamma.
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
 
     fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         let (big_r, phi, z) = (x[0], x[1], x[2]);
@@ -1277,6 +1298,9 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCylindrical<S> {
         unreachable!("cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)")
     }
     fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)")
+    }
+    fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
         unreachable!("cylindrical kerr-schild needs the poloidal (R, z) block + azimuthal DOF (D = 3)")
     }
 }
@@ -1464,6 +1488,9 @@ impl<S: Scalar> Metric<S, 1> for KerrKS<S> {
     fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
         unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
     }
+    fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("kerr carries the frame-dragging gamma_r-phi: it requires the azimuthal momentum DOF (D = 3)")
+    }
 }
 
 impl<S: Scalar> Metric<S, 2> for KerrKS<S> {
@@ -1622,6 +1649,8 @@ impl<S: Scalar> Metric<S, 3> for Cylindrical {
     fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
         x[0] // r
     }
+    // full-rank cylindrical chart (r, phi, z): the proper measure is sqrt_det_gamma = r.
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
 
     fn scale_factors(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
         Tensor::new([S::ONE, x[0], S::ONE])
