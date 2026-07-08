@@ -200,6 +200,15 @@ impl Poly {
         p
     }
 
+    /// a STABLE canonical string of this polynomial — the `terms` map is a `BTreeMap` (sorted by
+    /// monomial then var), so the debug form is deterministic. used to key an OPAQUE metric symbol by
+    /// its argument's exact structure when the argument is NOT the affine radius the offset reader
+    /// handles (a nested `sqrt(R^2 + z^2)`, Kerr's `Sigma`, ...): two occurrences of the same argument
+    /// expression at the same face produce the SAME key, so they cancel locally (num/den).
+    pub fn canonical(&self) -> String {
+        format!("{:?}", self.terms)
+    }
+
     /// rename one variable to another in-place across all monomials (used to remap
     /// an opaque `sin@m` symbol to `sin@(m + delta)` under a theta shift).
     pub(crate) fn rename_one(&self, from: &str, to: &str) -> Poly {
@@ -252,6 +261,20 @@ pub struct RatFun {
 impl RatFun {
     pub(crate) fn from_poly(p: Poly) -> Self {
         RatFun { num: p, den: Poly::constant(1) }
+    }
+
+    /// a STABLE canonical string of this rational function (num + den), for keying an opaque metric
+    /// symbol by its exact argument. see [`Poly::canonical`].
+    pub fn canonical(&self) -> String {
+        format!("{}//{}", self.num.canonical(), self.den.canonical())
+    }
+
+    /// the reciprocal `den/num` (swap). lets a proof recover the FACE AREA `w` from a flux-form GR
+    /// curl whose edge-emf coefficient is `dt/w`: `w = dt * coeff.reciprocal()`. panics on a zero
+    /// numerator (the reciprocal would divide by zero).
+    pub fn reciprocal(&self) -> RatFun {
+        assert!(!self.num.is_zero(), "proof: reciprocal of a zero rational function");
+        RatFun { num: self.den.clone(), den: self.num.clone() }
     }
 
     /// public num/den constructor (for tests building the area weights). `den` must

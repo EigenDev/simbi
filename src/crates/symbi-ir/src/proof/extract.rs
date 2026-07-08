@@ -191,7 +191,17 @@ fn eval_rat_elementwise(
                 RValue::Scalar(r) => r,
                 RValue::Lin(_) => panic!("proof(rat): sqrt of a field-dependent argument — nonlinear"),
             };
-            RValue::Scalar(RatFun::from_poly(Poly::sqrt_f_sym(radial_offset_two_m(&arg))))
+            // an AFFINE radial argument keys by its radial offset (`sqrt_f@<2m>`, shift-remappable —
+            // the spherical Schwarzschild/Kerr-Schild path). a NON-affine one (nested sqrt(R^2+z^2),
+            // Kerr Sigma) keys by its exact canonical form: two occurrences of the same argument at
+            // the same face share the atom, so the div-weight's `1/sqrt` cancels the curl's `sqrt`
+            // LOCALLY (num/den) with no shift-remap needed (the caller cancels the metric before any
+            // divergence shift).
+            let atom = match radial_offset_two_m(&arg) {
+                Some(two_m) => Poly::sqrt_f_sym(two_m),
+                None => Poly::var(&format!("sqrt[{}]", arg.canonical())),
+            };
+            RValue::Scalar(RatFun::from_poly(atom))
         }
         other => panic!("proof(rat): unsupported element-wise op in curvilinear curl DAG: {other:?}"),
     }
@@ -245,15 +255,24 @@ fn theta_offset_two_m(arg: &RatFun, trig: &str) -> i64 {
 /// D is the x_lo_0 coefficient (1 for a face, 2 for a cleared /2 center), the c_0*dx_0 coefficient
 /// must also be D, and the bare dx_0 coefficient is D*m, so 2m = 2*(D*m)/D. (M rides only in the
 /// numerator, so the denominator is a clean radius — the offset is unambiguous.)
-fn radial_offset_two_m(arg: &RatFun) -> i64 {
+fn radial_offset_two_m(arg: &RatFun) -> Option<i64> {
+    // affine radial factor f(r) = (r +- 2M)/r with r = x_lo_0 + (c_0 + m) dx_0: the denominator is
+    // that AFFINE radius, so `x_lo_0` and `c_0*dx_0` both appear with the same nonzero coefficient D.
+    // a NON-affine argument (a nested sqrt(R^2+z^2), Kerr's Sigma, ...) has no linear x_lo_0 term in
+    // its denominator -> D = 0 -> None (the caller falls back to a canonical-argument atom).
     let d = arg.den.coefficient_of(&["x_lo_0"]);
-    assert!(d != 0, "proof(rat): sqrt(f) argument denominator has no x_lo_0 term — not a radial metric factor");
+    if d == 0 {
+        return None;
+    }
     let c0dx0 = arg.den.coefficient_of(&["c_0", "dx_0"]);
-    assert!(c0dx0 == d, "proof(rat): sqrt(f) arg radius has c_0*dx_0 coeff {c0dx0} != x_lo_0 coeff {d}");
-    let dx0_offset = arg.den.coefficient_of(&["dx_0"]);
-    let twice = 2 * dx0_offset;
-    assert!(twice % d == 0, "proof(rat): radial offset 2m = {twice}/{d} is not a half-integer multiple of dx_0");
-    twice / d
+    if c0dx0 != d {
+        return None;
+    }
+    let twice = 2 * arg.den.coefficient_of(&["dx_0"]);
+    if twice % d != 0 {
+        return None;
+    }
+    Some(twice / d)
 }
 
 /// the integer value of a constant polynomial (the empty monomial's coefficient if
@@ -514,16 +533,18 @@ mod tests {
         // offset, so the numerator is immaterial. face offset 0 -> sqrt_f@0.
         let mut r0 = Poly::var("x_lo_0");
         r0.add_assign(&Poly::var("c_0").mul(&Poly::var("dx_0")));
-        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r0.clone())), 0);
+        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r0.clone())), Some(0));
         // face offset +1 -> sqrt_f@2.
         let mut r1 = r0.clone();
         r1.add_assign(&Poly::var("dx_0"));
-        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r1)), 2);
+        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), r1)), Some(2));
         // cell center (2 x_lo_0 + (2 c_0 + 1) dx_0)/2 -> sqrt_f@1.
         let mut rc = Poly::var("x_lo_0").mul(&Poly::constant(2));
         rc.add_assign(&Poly::var("c_0").mul(&Poly::var("dx_0")).mul(&Poly::constant(2)));
         rc.add_assign(&Poly::var("dx_0"));
-        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), rc)), 1);
+        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), rc)), Some(1));
+        // a NON-affine denominator (an opaque atom, no linear x_lo_0) -> None (canonical-key path).
+        assert_eq!(radial_offset_two_m(&RatFun::new(Poly::constant(1), Poly::var("sqrt[inner]"))), None);
         // the atom remaps under a RADIAL (axis 0) shift — sqrt_f@0 -> sqrt_f@2 (one cell = +2
         // half-units) — and is UNTOUCHED by a theta (axis 1) shift, so it telescopes only radially.
         let atom = RatFun::from_poly(Poly::sqrt_f_sym(0));

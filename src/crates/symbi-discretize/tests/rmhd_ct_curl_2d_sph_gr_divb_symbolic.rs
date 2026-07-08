@@ -1,20 +1,21 @@
 // =============================================================================
 // rmhd_ct_curl_2d_sph_gr_divb_symbolic.rs
 //
-// the SYMBOLIC proof that the 2D SPHERICAL GR (Schwarzschild) constrained-transport curl
+// the SYMBOLIC proof that the 2D SPHERICAL GR constrained-transport curl
 // (rmhd_ct_curl_2d_sph_gr_gv) preserves the AREA-WEIGHTED div(B) = 0 EXACTLY — by
 // rational-function cancellation on the traced IR DAG, NOT the numeric 1e-12 evolve gate
-// (rmhd_ct_curl_2d_sph_gr_divb.rs is that one). this closes the M10 gap: the GR curls had NO
-// symbolic proof because the extractor could not represent the lapse `sqrt(f)`.
+// (rmhd_ct_curl_2d_sph_gr_divb.rs). closes the M10 gap for the spherical GR charts: the curls had NO
+// symbolic proof because the extractor could not represent the lapse `sqrt(f)` / `sqrt(h)`.
 //
-// the GR densitized weight is the FLAT spherical area divided by the lapse:
-//   sqrt(gamma)_Schw = r^2 sin(theta) / sqrt(f),   f = 1 - 2M/r
-// the `sqrt(f)` is an OPAQUE, radially-keyed symbol `sqrt_f@<2m>` (proof/extract.rs): identical at
-// a shared radial face (so the div-weight's 1/sqrt(f) cancels the curl's sqrt(f) there — a rational
+// the GR densitized weight is the flat spherical area times the lapse factor:
+//   Schwarzschild: sqrt(gamma) = r^2 sin(theta) / sqrt(f),   f = 1 - 2M/r   (lapse in the DENOMINATOR)
+//   Kerr-Schild:   sqrt(gamma) = r^2 sin(theta) * sqrt(h),   h = 1 + 2M/r   (lapse in the NUMERATOR)
+// the lapse is an OPAQUE, radially-keyed symbol `sqrt_f@<2m>` (proof/extract.rs): identical at a
+// shared radial face (so the div-weight's lapse cancels the curl's inverse lapse there — a rational
 // num/den cancellation), distinct across faces, and REMAPPED by the divergence's radial shift. once
 // it cancels, the residual is the SAME flat r^2 sin(theta) telescoping as the Minkowski proof.
 //
-// the 2D poloidal curl from the single densitized corner EMF Etilde (`ez`):
+// the 2D poloidal curl from the single densitized corner EMF Etilde (`ez`), flux form:
 //   dir=0 (B_r,   r-face):    dB_r/dt  = -(1/w_r)  d_th(Etilde),  w_r  = sqrt(gamma)(r_f, th_c) dth
 //   dir=1 (B_th, theta-face): dB_th/dt = +(1/w_th) d_r(Etilde),   w_th = sqrt(gamma)(r_c, th_f) dr
 // weighting each curl by its face area w (= the SAME expression) collapses the metric — the lapse
@@ -25,7 +26,6 @@ use symbi_discretize::{rmhd_ct_curl_2d_sph_gr_gv, Coords, Spacetime, Spacing};
 use symbi_ir::proof::{LinFormR, Poly, RatFun};
 
 const FIELDS: &[&str] = &["ez", "b"];
-// the GR curl adds the lapse mass parameter `schwarzschild_mass` to the flat grid scalars.
 const SCALARS: &[&str] =
     &["dt", "x_lo_0", "dx_0", "x_lo_1", "dx_1", "schwarzschild_mass"];
 
@@ -61,16 +61,22 @@ fn dx(ax: usize) -> Poly {
     Poly::var(&format!("dx_{ax}"))
 }
 
-// 1/sqrt(f) at the radial half-unit offset `two_m` — the reciprocal lapse factor the densitized
-// GR area carries; it cancels the extracted curl's sqrt(f) at the SAME radial offset.
-fn inv_sqrt_f(two_m: i64) -> RatFun {
-    RatFun::new(Poly::constant(1), Poly::sqrt_f_sym(two_m))
+/// the radial lapse factor of `sqrt(gamma)` at the radial half-unit offset `two_m`. Schwarzschild
+/// carries `1/sqrt(f)` (lapse in the DENOMINATOR); Kerr-Schild carries `sqrt(h)` (NUMERATOR). the
+/// same opaque `sqrt_f@<2m>` atom either way — it cancels the extracted curl's reciprocal factor at
+/// the same radial offset.
+fn lapse(two_m: i64, in_numerator: bool) -> RatFun {
+    if in_numerator {
+        RatFun::new(Poly::sqrt_f_sym(two_m), Poly::constant(1))
+    } else {
+        RatFun::new(Poly::constant(1), Poly::sqrt_f_sym(two_m))
+    }
 }
 
-fn curl(dir: usize) -> LinFormR {
+fn curl(dir: usize, spacetime: Spacetime) -> LinFormR {
     let (kernel, writes) = rmhd_ct_curl_2d_sph_gr_gv(
         dir,
-        Spacetime::Schwarzschild,
+        spacetime,
         Coords::Spherical,
         &[Spacing::Uniform; 2],
         &[0, 1],
@@ -81,85 +87,98 @@ fn curl(dir: usize) -> LinFormR {
     lf
 }
 
-#[test]
-fn divb_2d_sph_gr_symbolic_telescoping() {
-    let curl_r = curl(0); // B_r update
-    let curl_th = curl(1); // B_theta update
+/// build the point-form area-weighted divergence of the 2D poloidal GR curl and return it. the flat
+/// r^2 sin area is multiplied by the chart's radial lapse factor at the SAME face the curl uses:
+///   r-face:     lapse at the r-FACE (offset 0 / +1 -> sqrt_f@0 / sqrt_f@2)
+///   theta-face: lapse at the r-CENTER (sqrt_f@1) for BOTH theta faces (same radius, theta-shift inert)
+fn div(spacetime: Spacetime, lapse_in_numerator: bool) -> LinFormR {
+    let curl_r = curl(0, spacetime);
+    let curl_th = curl(1, spacetime);
+    let l = |two_m| lapse(two_m, lapse_in_numerator);
 
-    // r-face area = r_f^2 sin_c dth / sqrt(f(r_f)): flat area / lapse at the r-FACE (offset 0 / +1,
-    // so sqrt_f@0 / sqrt_f@2). the reciprocal-lapse factor cancels the curl's sqrt(f) at that face.
     let w_r_hi = RatFun::new(
         r_at(1).times(&r_at(1)).times(&sin_center()).times(&dx(1)),
         Poly::constant(1),
     )
-    .mul(&inv_sqrt_f(2));
+    .mul(&l(2));
     let w_r_lo = RatFun::new(
         r_at(0).times(&r_at(0)).times(&sin_center()).times(&dx(1)),
         Poly::constant(1),
     )
-    .mul(&inv_sqrt_f(0));
-    // theta-face area = r_c^2 sin_f dr / sqrt(f(r_c)) = the FULL sqrt(gamma)(r_c, th_f) dr (the GR
-    // curl is the flux form (1/area) d(Etilde), so the weight is the whole densitized area, r^2 sin
-    // NOT the flat scale-factor r). the lapse is at the r-CENTER (offset +1/2 -> sqrt_f@1) for BOTH
-    // theta faces (same radial position), untouched by the theta shift.
+    .mul(&l(0));
     let r_c_sq = r_center().mul(&r_center());
     let w_th_hi = r_c_sq
         .mul(&RatFun::new(sin_face(1).times(&dx(0)), Poly::constant(1)))
-        .mul(&inv_sqrt_f(1));
+        .mul(&l(1));
     let w_th_lo = r_c_sq
         .mul(&RatFun::new(sin_face(0).times(&dx(0)), Poly::constant(1)))
-        .mul(&inv_sqrt_f(1));
+        .mul(&l(1));
 
-    // div(B) = (area_r(+r) B_r[+r] - area_r B_r) + (area_th(+th) B_th[+th] - area_th B_th).
-    let mut div = LinFormR::default();
-    div.add(&curl_r.shifted(&[1, 0]).scale_rat(&w_r_hi));
-    div.add(&curl_r.scale_rat(&w_r_lo).neg_form());
-    div.add(&curl_th.shifted(&[0, 1]).scale_rat(&w_th_hi));
-    div.add(&curl_th.scale_rat(&w_th_lo).neg_form());
+    let mut d = LinFormR::default();
+    d.add(&curl_r.shifted(&[1, 0]).scale_rat(&w_r_hi));
+    d.add(&curl_r.scale_rat(&w_r_lo).neg_form());
+    d.add(&curl_th.shifted(&[0, 1]).scale_rat(&w_th_hi));
+    d.add(&curl_th.scale_rat(&w_th_lo).neg_form());
+    d
+}
 
+#[test]
+fn divb_2d_sph_schwarzschild_symbolic_telescoping() {
+    // Schwarzschild: sqrt(gamma) = r^2 sin / sqrt(f) -> the lapse is in the DENOMINATOR.
+    let d = div(Spacetime::Schwarzschild, false);
     assert!(
-        div.is_zero(),
-        "2d spherical GR (Schwarzschild) div(curl B) != 0 symbolically — residual edge-emf \
-         numerators (a nonzero here means the lapse or the r^2 sin weight did not cancel):\n{:#?}",
-        div.residual()
+        d.is_zero(),
+        "2d sph Schwarzschild div(curl B) != 0 symbolically — residual:\n{:#?}",
+        d.residual()
     );
 }
 
-// bug-injection: a WRONG lapse offset (using the reciprocal lapse at the r-face +1 for the LOW
-// r-face weight, i.e. sqrt_f@2 where sqrt_f@0 belongs) must NOT cancel — the sqrt_f atoms no longer
-// match at the shared face, so the residual survives. proves the proof is sensitive to the lapse.
+#[test]
+fn divb_2d_sph_kerr_schild_symbolic_telescoping() {
+    // Kerr-Schild: sqrt(gamma) = r^2 sin * sqrt(h) -> the lapse is in the NUMERATOR.
+    let d = div(Spacetime::KerrSchild, true);
+    assert!(
+        d.is_zero(),
+        "2d sph Kerr-Schild div(curl B) != 0 symbolically — residual:\n{:#?}",
+        d.residual()
+    );
+}
+
+// bug-injection: a WRONG lapse radial offset on the low r-face weight must NOT cancel — the sqrt_f
+// atoms no longer match at the shared face, so the residual survives. proves the proof is lapse-aware
+// (Schwarzschild chart; the Kerr-Schild control is identical up to the numerator/denominator side).
 #[test]
 fn divb_2d_sph_gr_symbolic_detects_wrong_lapse_offset() {
-    let curl_r = curl(0);
-    let curl_th = curl(1);
+    let curl_r = curl(0, Spacetime::Schwarzschild);
+    let curl_th = curl(1, Spacetime::Schwarzschild);
 
     let w_r_hi = RatFun::new(
         r_at(1).times(&r_at(1)).times(&sin_center()).times(&dx(1)),
         Poly::constant(1),
     )
-    .mul(&inv_sqrt_f(2));
+    .mul(&lapse(2, false));
     // INJECTED BUG: the low r-face weight uses the lapse at the WRONG radial offset (2 instead of 0).
     let w_r_lo_bug = RatFun::new(
         r_at(0).times(&r_at(0)).times(&sin_center()).times(&dx(1)),
         Poly::constant(1),
     )
-    .mul(&inv_sqrt_f(2));
+    .mul(&lapse(2, false));
     let r_c_sq = r_center().mul(&r_center());
     let w_th_hi = r_c_sq
         .mul(&RatFun::new(sin_face(1).times(&dx(0)), Poly::constant(1)))
-        .mul(&inv_sqrt_f(1));
+        .mul(&lapse(1, false));
     let w_th_lo = r_c_sq
         .mul(&RatFun::new(sin_face(0).times(&dx(0)), Poly::constant(1)))
-        .mul(&inv_sqrt_f(1));
+        .mul(&lapse(1, false));
 
-    let mut div = LinFormR::default();
-    div.add(&curl_r.shifted(&[1, 0]).scale_rat(&w_r_hi));
-    div.add(&curl_r.scale_rat(&w_r_lo_bug).neg_form());
-    div.add(&curl_th.shifted(&[0, 1]).scale_rat(&w_th_hi));
-    div.add(&curl_th.scale_rat(&w_th_lo).neg_form());
+    let mut d = LinFormR::default();
+    d.add(&curl_r.shifted(&[1, 0]).scale_rat(&w_r_hi));
+    d.add(&curl_r.scale_rat(&w_r_lo_bug).neg_form());
+    d.add(&curl_th.shifted(&[0, 1]).scale_rat(&w_th_hi));
+    d.add(&curl_th.scale_rat(&w_th_lo).neg_form());
 
     assert!(
-        !div.is_zero(),
+        !d.is_zero(),
         "the wrong-lapse-offset weight must leave a nonzero residual — the proof is lapse-blind"
     );
 }
