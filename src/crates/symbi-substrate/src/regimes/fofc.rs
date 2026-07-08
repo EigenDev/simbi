@@ -20,7 +20,9 @@ use symbi_sim::state::{ConsFieldsGeneric, FieldStore, PrimFieldsGeneric};
 
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-use crate::regimes::substrate_kernels::{dispatch_fields_each, dispatch_named, kernel_field_binds};
+use crate::regimes::substrate_kernels::{
+    coord_suffix, dispatch_fields_each, dispatch_named, kernel_field_binds, resolve_body_scalars,
+};
 use crate::regimes::substrate_gpu::field_reduce;
 use crate::kernels::support::FaceDomain;
 use symbi_ir::emit::ReductionOp;
@@ -117,7 +119,7 @@ pub(crate) fn fofc_copy<const D: usize, const DOF: usize, Mem, Sc>(
 /// conservative; this handles only the rare cell no flux can update admissibly (the documented
 /// single-cell conservation waiver). only the conserved is chosen; the primitive is re-derived by the
 /// c2p after the select.
-pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
+pub fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     prefix: &str,
     dof_sfx: &str,
@@ -148,6 +150,47 @@ pub(crate) fn fofc_select<const D: usize, const DOF: usize, Mem, Sc>(
         if *is_out { outputs.push(fld); } else { inputs.push(fld); }
     }
     dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &[]);
+}
+
+/// the FREEZE-tier select with the immersed-body source composed INLINE: the `has_bodies` twin of
+/// `fofc_select`. dispatches `{prefix}_fofc_select_with_body{coords}_{D}d`, whose freeze parachute is
+/// the stage input EVOLVED by the body source (gravity + accretion) over `dt`, guarded to a physical
+/// state — so a frozen cell near a body keeps its gravity instead of the pre-body `u_stage`. field
+/// binding is identical to `fofc_select` (us_* stage input, x_* live cons/prim); the body + grid
+/// scalars are resolved by the kernel manifest exactly as for the standalone body source.
+pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    prefix: &str,
+    dt: f64,
+    gamma: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let name = format!(
+        "{prefix}_fofc_select_with_body{}_{D}d",
+        coord_suffix(sim.geom.coords)
+    );
+    let scalars = resolve_body_scalars(sim, dt, gamma, &name);
+    let u_stage = &sim.workspace.u_stage;
+    let cons = &sim.fields.cons;
+    let prim = &sim.fields.prim;
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        if let Some(c) = s.strip_prefix("us_") {
+            fofc_comp(u_stage, prim, c)
+        } else if let Some(c) = s.strip_prefix("x_") {
+            fofc_comp(cons, prim, c)
+        } else {
+            panic!("fofc_select_with_body: unknown slot '{s}'")
+        }
+    };
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    for (bind, is_out) in kernel_field_binds(&name).iter() {
+        let fld = slot(&bind.name());
+        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+    }
+    dispatch_fields_each::<Sc, Mem, D>(&name, &sim.geom.interior, &inputs, &outputs, &[], &scalars);
 }
 
 
@@ -263,6 +306,12 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     // the cells where fallback is most likely. self-gating (no-op when the sim has no bodies); a
     // no-op where the godunov already fuses the body (iso cartesian), so it never double-applies.
     body_apply: impl Fn(),
+    // the FREEZE-tier body parachute: `Some((dt_eff, gamma))` when the sim carries immersed bodies AND
+    // the regime has a `_with_body` freeze-select kernel (adiabatic only). a frozen cell holds the
+    // stage input `u_stage` (pre-body), so `body_apply` above — which targets the LIVE cons — never
+    // reaches it; the with-body select instead evolves the parachute by the body source inline. `None`
+    // falls back to the plain `fofc_select` (regimes without the kernel keep the pre-body freeze).
+    body_freeze: Option<(f64, f64)>,
     // MHD-only constrained-transport hooks (no-ops for hydro; see the C2 fix / §3''). a flagged cell
     // needs FIRST-ORDER (diffused) B to recover, so the redo re-runs the CT with the edge EMF SPLICED
     // (HO off the fallback region, FO on it):
@@ -347,6 +396,9 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     } else {
         freeze_streak.store(0, Ordering::Relaxed);
     }
-    fofc_select(sim, prefix, dof_sfx, &ws.u_stage, cons, prim);
+    match body_freeze {
+        Some((dt_eff, gamma)) => fofc_select_with_body(sim, prefix, dt_eff, gamma),
+        None => fofc_select(sim, prefix, dof_sfx, &ws.u_stage, cons, prim),
+    }
     c2p();
 }

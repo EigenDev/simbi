@@ -44,7 +44,7 @@ use symbi_discretize::{
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
-    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_splice_gv, fofc_bflux_splice_gv, fofc_emf_splice_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
+    snapshot_gv, fofc_copy_gv, fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv, fofc_bflux_splice_gv, fofc_emf_splice_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv, rhd_wave_speed_map_gv, Coords, GeoSource, Spacing, Spacetime,
 };
 use symbi_discretize::GvKernel;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
@@ -1542,6 +1542,17 @@ fn gen_body_source(out_dir: &str, ndim: u8, coords: Coords) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the FOFC freeze-tier select WITH the immersed-body source composed INLINE (adiabatic `has_bodies`
+// variant): `adiabatic_fofc_select_with_body{coords}_{ndim}d`. baked per coord system since the body
+// gravity is projected onto the physical momentum components; the freeze parachute becomes the
+// body-evolved (guarded) stage input instead of the bare one. dispatched in place of the plain
+// `adiabatic_fofc_select` whenever the sim carries immersed bodies.
+fn gen_adiabatic_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords) {
+    let g = Geom::identity(coords, ndim);
+    let (k, w) = fofc_select_with_body_gv(g.ncomp as usize, MAX_BODIES, coords, ndim as usize, &g.axes);
+    emit_gv(out_dir, &format!("adiabatic_fofc_select_with_body{}_{ndim}d", coords_suffix(coords)), ndim, &k, &w);
+}
+
 // immersed-body BACKWARD feedback (docs/design/19 P3): per cell, per body, the force /
 // torque / accreted-mass contributions -> scratch fields a device reduction sums into
 // each body's BodyDelta. reads cons (pure); writes MAX_BODIES*(ndim+4) scratch outputs.
@@ -1966,6 +1977,15 @@ fn main() {
     gen_body_source(&out_dir, 3, Coords::Cylindrical);
     gen_body_source(&out_dir, 2, Coords::Spherical);
     gen_body_source(&out_dir, 3, Coords::Spherical);
+    // the FOFC freeze-select-with-body twin, per body-bearing (regime=adiabatic, coord) — so a
+    // frozen cell near a body keeps its gravity/accretion (composed inline, no extra buffer).
+    for ndim in 1u8..=3 {
+        gen_adiabatic_fofc_body_select(&out_dir, ndim, Coords::Cartesian);
+    }
+    gen_adiabatic_fofc_body_select(&out_dir, 2, Coords::Cylindrical);
+    gen_adiabatic_fofc_body_select(&out_dir, 3, Coords::Cylindrical);
+    gen_adiabatic_fofc_body_select(&out_dir, 2, Coords::Spherical);
+    gen_adiabatic_fofc_body_select(&out_dir, 3, Coords::Spherical);
     // backward feedback (force[ndim] + 3D torque + mass), per geometry, ndim >= 2.
     for &cc in &[Coords::Cartesian, Coords::Cylindrical, Coords::Spherical] {
         gen_body_feedback(&out_dir, 2, cc);

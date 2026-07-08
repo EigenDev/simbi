@@ -286,6 +286,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || if sim.immersed.is_some() { self.body_source(sim, ac * dt) },
+            // freeze parachute evolves by the body source (adiabatic has the _with_body kernel).
+            sim.immersed.is_some().then(|| (ac * dt, self.gamma)),
             || {}, // hydro: no induction flux
             || {}, // hydro: no cell B to restore
             || {}, // hydro: no induction flux

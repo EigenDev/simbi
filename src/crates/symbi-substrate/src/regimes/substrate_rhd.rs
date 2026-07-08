@@ -433,6 +433,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
             || {}, // rhd has no immersed-body source (trait-default no-op)
+            None,  // no body-evolved freeze parachute (no rhd body source)
             || {}, // hydro: no induction flux
             || {}, // hydro: no cell B to restore
             || {}, // hydro: no induction flux

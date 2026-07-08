@@ -161,6 +161,64 @@ pub fn fofc_select_gv(ncomp: usize, has_energy: bool) -> (GvKernel, Vec<(String,
     (end_trace(), writes)
 }
 
+/// the FREEZE-tier select WITH the immersed-body source composed INLINE — the LAZY, buffer-free
+/// answer to "a frozen cell must not lose its body gravity/accretion". identical to `fofc_select_gv`
+/// except the freeze parachute is the stage input EVOLVED by the body source in registers,
+/// `u_stage + dt*body(u_stage)` (via `body_evolved_gv`), rather than the bare `u_stage`. no buffer is
+/// materialized: the body delta AND the c2p pressure used to GUARD it are closed forms of `us_*`. the
+/// guard preserves the freeze tier's physical-parachute invariant — a body kick that would drive the
+/// parachute unphysical (a strong pull on a low-internal-energy cell) falls back to the bare stage
+/// input. this variant serves the `has_bodies` adiabatic path; body-free regimes keep `fofc_select_gv`.
+pub fn fofc_select_with_body_gv(
+    ncomp: usize,
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let finite_pos = |v: Gv| (v - v).cmp_eq(Gv::ZERO) & v.cmp_gt(Gv::ZERO);
+    // the spliced first-order result's physicality (its prim `x_rho`/`x_pre`, computed by the c2p
+    // before the select).
+    let x_rho = Gv::field("x_rho", "x_rho");
+    let x_pre = Gv::field("x_pre", "x_pre");
+    let physical_fo = finite_pos(x_rho) & finite_pos(x_pre);
+    // the stage input evolved by the body source, INLINE (no buffer, no separate pass).
+    let dt = Gv::scalar("dt");
+    let gamma = Gv::scalar("gamma");
+    let us_den = Gv::field("us_den", "us_den");
+    let us_mom: Vec<Gv> = (0..ncomp)
+        .map(|k| Gv::field(&format!("us_mom_{k}"), &format!("us_mom_{k}")))
+        .collect();
+    let us_nrg = Gv::field("us_nrg", "us_nrg");
+    let (b_den, b_mom, b_nrg) =
+        crate::gv_immersed::body_evolved_gv(us_den, &us_mom, us_nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes);
+    // GUARD: the body-evolved parachute must itself be physical. rho = den (Newtonian, W = 1); the
+    // adiabatic pressure p = (gamma-1)(nrg - 0.5|mom|^2/den) is a closed form of the evolved cons.
+    let mut ke = Gv::ZERO;
+    for m in &b_mom {
+        ke = ke + *m * *m;
+    }
+    let b_pre = (gamma - Gv::ONE) * (b_nrg - Gv::from_f64(0.5) * ke / b_den);
+    let usb_ok = finite_pos(b_den) & finite_pos(b_pre);
+    let parachute = |ub: Gv, us: Gv| Gv::select(usb_ok, ub, us);
+    // main select IN PLACE: `x_*` (the spliced first-order cons) is kept where physical, else FROZEN
+    // to the guarded body-evolved stage input.
+    let mut writes: Vec<(String, FieldBind, NodeId)> = Vec::new();
+    let mut sel = |comp: &str, par: Gv| {
+        let path = format!("x_{comp}");
+        let x = Gv::field(&path, &path);
+        let chosen = Gv::select(physical_fo, x, par);
+        writes.push((path.clone(), path.into(), chosen.node()));
+    };
+    sel("den", parachute(b_den, us_den));
+    for k in 0..ncomp {
+        sel(&format!("mom_{k}"), parachute(b_mom[k], us_mom[k]));
+    }
+    sel("nrg", parachute(b_nrg, us_nrg));
+    (end_trace(), writes)
+}
+
 
 /// the FOFC FACE-BASED FLUX SPLICE for axis `dir`: choose, per interior face, the FIRST-ORDER flux
 /// (`fo_*`, the redone HLLE/rusanov flux held in the live `fields.flux[dir]`) where either adjacent

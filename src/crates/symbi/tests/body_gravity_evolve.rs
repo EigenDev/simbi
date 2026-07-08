@@ -97,9 +97,10 @@ fn fofc_redo_preserves_body_gravity() {
     // (D . (-r_hat) > 0). the flux is identical in A and B over one step, so D is purely the body
     // source. WITHOUT the fix, the redo restores u_stage + re-runs the godunov and never re-applies
     // the body source, so EVERY cell has D == 0 exactly; a single cell with an inward kick is
-    // therefore impossible without the fix. (the rare FOFC-freeze cells hold the pre-body stage
-    // input, so they too show D == 0 — tolerated: the freeze tier is a last-resort conservation
-    // waiver.) no cell may get a spurious OUTWARD kick.
+    // therefore impossible without the fix. the majority bound (not all) tolerates the far cells
+    // whose softened kick falls below the 1e-6 test floor; the freeze tier is covered by the
+    // dedicated `fofc_freeze_preserves_body_gravity` gate below. no cell may get a spurious OUTWARD
+    // kick.
     let mut checked = 0usize;
     let mut got_body = 0usize;
     let mut worst_outward = 0.0_f64;
@@ -128,6 +129,121 @@ fn fofc_redo_preserves_body_gravity() {
     assert!(
         worst_outward > -1e-6,
         "a cell got a spurious OUTWARD kick from the FOFC redo: {worst_outward:e}",
+    );
+}
+
+// -----------------------------------------------------------------------------
+// FOFC FREEZE-tier body source: the last-resort freeze holds the stage input `u_stage` (pre-body)
+// on a cell no first-order flux can update admissibly. the plain `fofc_select` leaves that cell with
+// ZERO body impulse; the `_with_body` freeze-select instead evolves the parachute by the body source
+// (gravity + accretion) over the substage, guarded to a physical state.
+//
+// this is an A/B on the SELECT KERNEL itself, isolated from the flux dynamics: the freeze set in a
+// live run is body-dependent (the redo's body_apply can rescue a cell from the freeze) and cannot be
+// cleanly separated at the sim output, so the kernel is driven directly. a hand-built state gives a
+// PHYSICAL uniform stage input (u_stage: rho=1, v=0, p=1) and a first-order result whose PRIM is
+// unphysical (p < 0) in an inner band (so the select FREEZES there) and physical in an outer band
+// (so the select KEEPS the marker there). the only difference between the two kernels is the body
+// source, so `with_body - plain` on the frozen cells is exactly the inward gravity impulse; without
+// the with-body select it is identically zero and got_body collapses.
+// -----------------------------------------------------------------------------
+#[test]
+fn fofc_freeze_preserves_body_gravity() {
+    use symbi::regimes::fofc::{fofc_select, fofc_select_with_body};
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let dt = 0.01;
+    let e_int = 1.0 / (GAMMA - 1.0); // internal energy of rho=1, v=0, p=1
+    const KEPT_MARKER: f64 = 7.0; // a kept (physical) cell retains this first-order momentum
+    let frozen_band = |r: f64| (0.30..0.60).contains(&r);
+    let kept_band = |r: f64| (0.70..0.90).contains(&r);
+
+    // build a sim carrying the central body and impose the hand-built select inputs: a physical
+    // uniform u_stage everywhere, a first-order cons whose prim is unphysical in the frozen band.
+    // the select is pointwise (no stencil), so only the interior needs filling.
+    let build = || -> Sim {
+        let s = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([N, N])
+            .origin([-L, -L])
+            .spacing([dx, dx])
+            .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+            .allocate()
+            .expect("sim")
+            .set_initial(|_| Prim {
+                rho: 1.0,
+                vel: Tensor::new([0.0, 0.0]),
+                pre: 1.0,
+            })
+            .build()
+            .with_bodies(central_mass());
+        let us = &s.workspace.u_stage;
+        let us_nrg = us.nrg_field().expect("u_stage nrg");
+        let cons = &s.fields.cons;
+        let c_nrg = cons.nrg_field().expect("cons nrg");
+        let prim = &s.fields.prim;
+        let p_pre = prim.pre_field().expect("prim pre");
+        for c in s.geom.interior.iter() {
+            let x = -L + (c[0] as f64 + 0.5) * dx;
+            let y = -L + (c[1] as f64 + 0.5) * dx;
+            let r = (x * x + y * y).sqrt();
+            us.den.view_mut().set(c, 1.0);
+            us.mom[0].view_mut().set(c, 0.0);
+            us.mom[1].view_mut().set(c, 0.0);
+            us_nrg.view_mut().set(c, e_int);
+            cons.den.view_mut().set(c, 1.0);
+            cons.mom[0].view_mut().set(c, KEPT_MARKER);
+            cons.mom[1].view_mut().set(c, 0.0);
+            c_nrg.view_mut().set(c, e_int);
+            prim.rho.view_mut().set(c, 1.0);
+            // unphysical first-order pressure in the frozen band forces the select to freeze there.
+            p_pre.view_mut().set(c, if frozen_band(r) { -1.0 } else { 1.0 });
+        }
+        s
+    };
+
+    let sb = build();
+    fofc_select_with_body(&sb, "adiabatic", dt, GAMMA);
+    let sp = build();
+    fofc_select(&sp, "adiabatic", "", &sp.workspace.u_stage, &sp.fields.cons, &sp.fields.prim);
+
+    let mut frozen = 0usize;
+    let mut got_body = 0usize;
+    let mut kept_ok = 0usize;
+    let mut worst_outward = 0.0_f64;
+    for c in sb.geom.interior.iter() {
+        let x = -L + (c[0] as f64 + 0.5) * dx;
+        let y = -L + (c[1] as f64 + 0.5) * dx;
+        let r = (x * x + y * y).sqrt();
+        let bx = *sb.fields.cons.mom[0].view().at(c);
+        let by = *sb.fields.cons.mom[1].view().at(c);
+        let px = *sp.fields.cons.mom[0].view().at(c);
+        let py = *sp.fields.cons.mom[1].view().at(c);
+        if frozen_band(r) {
+            // the difference is the body impulse (both selects freeze to u_stage; only with_body
+            // adds gravity). u_stage is at rest, so the impulse is pure inward gravity.
+            let inward = -((bx - px) * x + (by - py) * y) / r;
+            if inward > 1e-6 {
+                got_body += 1;
+            }
+            worst_outward = worst_outward.min(inward);
+            frozen += 1;
+        } else if kept_band(r) {
+            // a physical first-order cell is KEPT by both selects: momentum stays the marker exactly.
+            if (bx - KEPT_MARKER).abs() < 1e-12 && (px - KEPT_MARKER).abs() < 1e-12 {
+                kept_ok += 1;
+            }
+        }
+    }
+    assert!(frozen > 8, "too few frozen cells to test ({frozen})");
+    assert!(kept_ok > 8, "physical cells must be kept unchanged by the freeze select ({kept_ok})");
+    assert!(
+        got_body == frozen,
+        "the with-body freeze select dropped the body source: only {got_body}/{frozen} frozen \
+         cells got the inward gravity kick (0 for the plain freeze select)",
+    );
+    assert!(
+        worst_outward > -1e-9,
+        "a frozen cell got a spurious OUTWARD body kick: {worst_outward:e}",
     );
 }
 

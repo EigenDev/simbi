@@ -40,7 +40,7 @@ pub use gv::{
     adiabatic_c2p_gv, adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, adiabatic_hllc_flux_gv,
     geometric_momentum_source_probe_gv,
     geometry_probe_gv, godunov_mass_gv, godunov_stage_gv, inertial_momentum_probe_gv,
-    fofc_select_gv, fofc_splice_gv, fofc_bflux_splice_gv, fofc_copy_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv,
+    fofc_select_gv, fofc_select_with_body_gv, fofc_splice_gv, fofc_bflux_splice_gv, fofc_copy_gv, fofc_probe_gv, fofc_freeze_probe_gv, state_finite_probe_gv,
     point_mass_gravity_probe_gv, source_apply_gv, source_apply_from_built_gv, boundary_fill_from_built_gv,
     splice_user_source_gv, uniform_accel_probe_gv,
     iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,

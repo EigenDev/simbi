@@ -245,25 +245,28 @@ fn body_contribution(
 /// FORWARD source: `cons += dt * (S_grav + S_accretion)`, generic over coordinate system.
 /// reads cons (den/mom/nrg) in place; declares dt/gamma + per-axis grid scalars + the MAX_BODIES
 /// body params (resolved by name at dispatch). returns the in-place conserved writes.
-pub fn body_source_gv(
+/// per-cell body-evolved ADIABATIC conserved state: `(den, mom, nrg)` -> the state after `dt *` the
+/// forward immersed-body source (gravity + accretion sink) over all `n_bodies` slots. a PURE
+/// function of the cell state in registers (NO field reads / writes), so it composes into ANY kernel
+/// that already holds the conserved state — the standalone body pass AND the FOFC freeze parachute
+/// — with no materialized buffer. declares `dt` / `gamma` + the per-body scalars via
+/// `body_contribution`; unused body slots contribute zero.
+pub(crate) fn body_evolved_gv(
+    den: Gv,
+    mom: &[Gv],
+    nrg: Gv,
+    dt: Gv,
+    gamma: Gv,
     n_bodies: usize,
     coords: Coords,
     ndim: usize,
     ncomp: usize,
     axes: &[usize],
-) -> (GvKernel, Writes) {
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let gamma = Gv::scalar("gamma");
+) -> (Gv, Vec<Gv>, Gv) {
     let inv_dt = Gv::ONE / dt;
-    let den = Gv::field("den", FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ncomp)
-        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
-        .collect();
-    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
     let cart_axes = body_cart_axes(coords, ndim, axes);
     let (coord3, cell_cart, vel_cart, min_w, cs, e_int) =
-        cell_scaffold(coords, ndim, ncomp, axes, gamma, den, &mom, nrg);
+        cell_scaffold(coords, ndim, ncomp, axes, gamma, den, mom, nrg);
 
     let mut d_den = Gv::ZERO;
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
@@ -288,6 +291,26 @@ pub fn body_source_gv(
     let den_new = den + dt * d_den;
     let mom_new: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] + dt * d_mom[comp]).collect();
     let nrg_new = nrg + dt * d_nrg;
+    (den_new, mom_new, nrg_new)
+}
+
+pub fn body_source_gv(
+    n_bodies: usize,
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let gamma = Gv::scalar("gamma");
+    let den = Gv::field("den", FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .collect();
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let (den_new, mom_new, nrg_new) =
+        body_evolved_gv(den, &mom, nrg, dt, gamma, n_bodies, coords, ndim, ncomp, axes);
 
     let mut writes = vec![("den_new".to_string(), FieldRef::cons_den().into(), den_new.node())];
     for (comp, m) in mom_new.iter().enumerate() {
