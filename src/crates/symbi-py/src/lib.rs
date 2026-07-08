@@ -2362,6 +2362,32 @@ macro_rules! build_and_run_hydro_decomposed {
 macro_rules! hydro_dispatch {
     ($cfg:expr, $prims:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
+            // C4/M9 fail-loud guard: a non-minkowski spacetime that is NOT one of the baked GR
+            // combinations below would otherwise fall through to a flat `(dims, coords)` arm and run
+            // SILENTLY on a Minkowski metric (wrong physics, zero warning). the matches! set is the
+            // single source of truth for the baked GR-hydro arms; `test_dispatch_rejects_unbaked_gr`
+            // asserts it stays in lockstep with the actual arms (guarded-arm-or-Err, never silent-flat).
+            (d, c)
+                if $cfg.spacetime != "minkowski"
+                    && !matches!(
+                        (d, c, $cfg.spacetime.as_str()),
+                        (2, "cartesian", "kerr_schild")
+                            | (1, "spherical", "schwarzschild")
+                            | (2, "spherical", "schwarzschild")
+                            | (1, "spherical", "kerr_schild")
+                            | (2, "spherical", "kerr")
+                            | (2, "spherical", "kerr_schild")
+                            | (2, "cylindrical", "kerr_schild")
+                            | (3, "cylindrical", "kerr_schild")
+                    ) =>
+            {
+                Err(format!(
+                    "no baked GR-hydro kernel for (dims={d}, coords={c}, spacetime={}): refusing to \
+                     run silently on a flat Minkowski metric. add the (dims, coords, spacetime) arm \
+                     + kernel, or use spacetime=minkowski.",
+                    $cfg.spacetime
+                ))
+            }
             (1, "cartesian") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 1, 1, Cartesian, Cartesian)
             }
@@ -3164,6 +3190,28 @@ macro_rules! build_and_run_imhd_decomposed {
 macro_rules! mhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr, $regime:expr, $regime_ty:ty) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
+            // C4/M9 fail-loud guard (see hydro_dispatch): reject a non-minkowski spacetime that is
+            // not a baked GR-MHD arm rather than silently running it on Minkowski. the matches! set
+            // mirrors the baked GR-MHD arms; test_dispatch_rejects_unbaked_gr keeps them in lockstep.
+            (d, c)
+                if $cfg.spacetime != "minkowski"
+                    && !matches!(
+                        (d, c, $cfg.spacetime.as_str()),
+                        (1, "spherical", "schwarzschild")
+                            | (1, "spherical", "kerr_schild")
+                            | (2, "spherical", "schwarzschild")
+                            | (2, "spherical", "kerr")
+                            | (2, "cartesian", "kerr_schild")
+                            | (2, "cylindrical", "kerr_schild")
+                    ) =>
+            {
+                Err(format!(
+                    "no baked GR-MHD kernel for (dims={d}, coords={c}, spacetime={}): refusing to \
+                     run silently on a flat Minkowski metric. add the (dims, coords, spacetime) arm \
+                     + kernel, or use spacetime=minkowski.",
+                    $cfg.spacetime
+                ))
+            }
             // GR (Schwarzschild) spherical MHD: the metric type selects the `_schw` GRMHD
             // kernel row (RmhdGr valencia flux + metric-aware KKC c2p + the ideal-MHD stress
             // in the covariant source). baked 1D radial (the magnetized-michel target).
@@ -3275,6 +3323,13 @@ macro_rules! mhd_dispatch {
 macro_rules! imhd_dispatch {
     ($cfg:expr, $prims:expr, $bufs:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
+            // C4/M9 fail-loud guard: isothermal MHD has NO baked GR kernels, so any non-minkowski
+            // spacetime must fail loud rather than silently run flat.
+            (d, c) if $cfg.spacetime != "minkowski" => Err(format!(
+                "isothermal MHD has no GR kernels; (dims={d}, coords={c}, spacetime={}) is unsupported \
+                 — refusing to run silently on a flat Minkowski metric. use spacetime=minkowski.",
+                $cfg.spacetime
+            )),
             (1, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 1, Cartesian, Cartesian),
             (2, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 2, Cartesian, Cartesian),
             (3, "cartesian") => build_and_run_imhd!($cfg, $prims, $bufs, 3, Cartesian, Cartesian),
@@ -3584,6 +3639,13 @@ macro_rules! build_and_run_iso {
 macro_rules! iso_dispatch {
     ($cfg:expr, $prims:expr) => {
         match ($cfg.dims, $cfg.coord_system.as_str()) {
+            // C4/M9 fail-loud guard: isothermal hydro has NO baked GR kernels, so any non-minkowski
+            // spacetime must fail loud rather than silently run flat.
+            (d, c) if $cfg.spacetime != "minkowski" => Err(format!(
+                "isothermal hydro has no GR kernels; (dims={d}, coords={c}, spacetime={}) is unsupported \
+                 — refusing to run silently on a flat Minkowski metric. use spacetime=minkowski.",
+                $cfg.spacetime
+            )),
             (1, "cartesian") => build_and_run_iso!($cfg, $prims, 1, Cartesian, Cartesian),
             (2, "cartesian") => build_and_run_iso!($cfg, $prims, 2, Cartesian, Cartesian),
             (3, "cartesian") => build_and_run_iso!($cfg, $prims, 3, Cartesian, Cartesian),
