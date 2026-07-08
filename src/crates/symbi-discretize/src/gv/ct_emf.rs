@@ -972,8 +972,9 @@ fn uct_master_emf(cx: &UctDir, cy: &UctDir, vbar_x: Gv, vbar_y: Gv, by_e: Gv, by
 /// `symbi_ir::proof::LinForm` reads off each face's exact coefficient polynomial, and the upwind
 /// invariant — a^L weights the UPWIND face (by_w for +x, bx_s for +y) — becomes a coefficient
 /// check at graph-build time. instant, and it covers every emf kernel built on the MASTER form
-/// (`uct_master_emf`: nmhd/imhd HLL + HLLD, rmhd HLL, GR ortho). it does NOT cover the wave-sum HLLD
-/// EMF (`rmhd_edge_emf_uct_hlld_gv` / `_gr_gv`, M&DZ Eq. 39), which does not route through this form.
+/// (`uct_master_emf`: nmhd/imhd HLL + HLLD, rmhd HLL, GR ortho). the wave-sum HLLD EMF
+/// (`rmhd_edge_emf_uct_hlld_gv` / `_gr_gv`, M&DZ Eq. 39) does not route through this form; its
+/// dissipation-sign pairing is proven by `hlld_wave_sum_proof_kernel` (see `hlld_wave_sum_terms`).
 /// `swap` passes by_w/by_e in each other's argument slots to inject the ct_emf.rs anti-upwind bug,
 /// for the negative control.
 #[doc(hidden)]
@@ -1007,6 +1008,59 @@ pub fn uct_master_emf_proof_kernel(swap: bool) -> (GvKernel, Vec<(String, FieldB
     (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
 }
 
+/// the UN-halved HLLD wave-sum dissipation for one transverse B component across the 4-wave fan
+/// (M&DZ Eq. 39): `sum_k |wave speed_k| * (jump across wave k)`. the DISSIPATION-SIGN PAIRING is the
+/// load-bearing invariant — the wave-sum analog of the upwind pairing: the LEFT staggered endpoint
+/// `bt_l` is diffused by the LEFT fast wave `alam_l` (it enters as `- alam_l * bt_l`), the RIGHT
+/// endpoint `bt_r` by the RIGHT fast wave `alam_r` (`+ alam_r * bt_r`); the star / central states
+/// telescope. mispairing an endpoint with the OPPOSITE fast wave flips the dissipation sign
+/// (anti-diffusion — the invisible-subsonically failure history). the 1/2 is applied by the CALLER
+/// (kept out here so the pairing coefficients stay integral for the symbolic proof). the speeds are
+/// the ABSOLUTE (>= 0) fan speeds; the states are the reconstructed transverse-field values.
+pub(crate) fn hlld_wave_sum_terms(
+    alam_l: Gv,
+    aalf_l: Gv,
+    aalf_r: Gv,
+    alam_r: Gv,
+    bt_l: Gv,
+    bstar_l: Gv,
+    bc: Gv,
+    bstar_r: Gv,
+    bt_r: Gv,
+) -> Gv {
+    alam_l * (bstar_l - bt_l)
+        + aalf_l * (bc - bstar_l)
+        + aalf_r * (bstar_r - bc)
+        + alam_r * (bt_r - bstar_r)
+}
+
+/// proof entry point for the HLLD wave-sum dissipation-sign pairing (M8). traces `hlld_wave_sum_terms`
+/// in ISOLATION with symbolic leaves: the five staggered / star transverse fields
+/// {bt_l, bstar_l, bc, bstar_r, bt_r} are the LinForm "fields", the four ABSOLUTE fan speeds
+/// {alam_l, aalf_l, aalf_r, alam_r} the opaque scalars. because the wave-sum is LINEAR in the fields,
+/// `LinForm` reads each field's coefficient polynomial and the pairing is a coefficient check.
+/// `swap` mispairs the two fast-wave endpoints (`alam_l` <-> `alam_r`) to reproduce the anti-diffusive
+/// bug for the negative control. shared by `rmhd_edge_emf_uct_hlld_gv` (flat) and `_gr_gv` (both build
+/// the dissipative Phi through `hlld_wave_sum_terms`), so this one proof binds both.
+#[doc(hidden)]
+pub fn hlld_wave_sum_proof_kernel(swap: bool) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let alam_l = Gv::param("alam_l");
+    let aalf_l = Gv::param("aalf_l");
+    let aalf_r = Gv::param("aalf_r");
+    let alam_r = Gv::param("alam_r");
+    let bt_l = Gv::param("bt_l");
+    let bstar_l = Gv::param("bstar_l");
+    let bc = Gv::param("bc");
+    let bstar_r = Gv::param("bstar_r");
+    let bt_r = Gv::param("bt_r");
+    let phi = if swap {
+        hlld_wave_sum_terms(alam_r, aalf_l, aalf_r, alam_l, bt_l, bstar_l, bc, bstar_r, bt_r)
+    } else {
+        hlld_wave_sum_terms(alam_l, aalf_l, aalf_r, alam_r, bt_l, bstar_l, bc, bstar_r, bt_r)
+    };
+    (end_trace(), vec![("phi".to_string(), "phi".into(), phi.node())])
+}
 
 
 /// the UCT-HLLC edge EMF (master Eq. 33 + HLLC coefficients Eq. 37-38). same master formula as the
@@ -1509,10 +1563,17 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     // `success` -> HLL dissipation (NaN-safe true select; the HLL branch uses only the finite lam).
     let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv| -> Gv {
         let phi_hlld = half
-            * (st.lam[0].abs() * (st.bstar[0][t] - bt_l)
-                + st.alf[0].abs() * (st.bc[t] - st.bstar[0][t])
-                + st.alf[1].abs() * (st.bstar[1][t] - st.bc[t])
-                + st.lam[1].abs() * (bt_r - st.bstar[1][t]));
+            * hlld_wave_sum_terms(
+                st.lam[0].abs(),
+                st.alf[0].abs(),
+                st.alf[1].abs(),
+                st.lam[1].abs(),
+                bt_l,
+                st.bstar[0][t],
+                st.bc[t],
+                st.bstar[1][t],
+                bt_r,
+            );
         let ap = zero_g.max(st.lam[1]);
         let am = zero_g.max(zero_g - st.lam[0]);
         let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
@@ -1680,10 +1741,17 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
         let (l0, l1) = (st.lam[0] - vf, st.lam[1] - vf);
         let (a0, a1) = (st.alf[0] - vf, st.alf[1] - vf);
         let phi_hlld = half
-            * (l0.abs() * (st.bstar[0][t] - bt_l)
-                + a0.abs() * (st.bc[t] - st.bstar[0][t])
-                + a1.abs() * (st.bstar[1][t] - st.bc[t])
-                + l1.abs() * (bt_r - st.bstar[1][t]));
+            * hlld_wave_sum_terms(
+                l0.abs(),
+                a0.abs(),
+                a1.abs(),
+                l1.abs(),
+                bt_l,
+                st.bstar[0][t],
+                st.bc[t],
+                st.bstar[1][t],
+                bt_r,
+            );
         let ap = zero_g.max(l1);
         let am = zero_g.max(zero_g - l0);
         let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
