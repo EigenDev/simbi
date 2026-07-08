@@ -810,7 +810,7 @@ where
         self
     }
     /// the physical box `[lo, hi]` per axis — `dx` is derived as `(hi - lo) / cells` at `finish`
-    /// (so call `cells` too). the ergonomic common case: you know the domain, not the spacing.
+    /// (so call `cells` too). the ergonomic common case: the domain is known, not the spacing.
     pub fn bounds(mut self, lo: [f64; D], hi: [f64; D]) -> Self {
         self.x_lo = lo;
         self.bounds_hi = Some(hi);

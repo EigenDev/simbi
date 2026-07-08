@@ -550,7 +550,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         // user source expressions (force/cooling/relax/raw) -> the rust source
         // front door. `gravity_source_expressions` is the conventional force slot;
         // `hydro_source_expressions` is the generic self-describing source. one
-        // runtime source per run for now (the kernel set holds a single slot).
+        // one runtime source per run (the kernel set holds a single slot).
         source_json: get_source_json(dict, "gravity_source_expressions")?
             .or(get_source_json(dict, "hydro_source_expressions")?),
         motion_json: get_source_json(dict, "scale_factor_expressions")?,
@@ -2408,7 +2408,8 @@ macro_rules! hydro_dispatch {
             }
             // GR (Schwarzschild) spherical: select the Schwarzschild metric (lapse-densitized +
             // GR-wavespeed `_schw` kernels). baked for 1D/2D (the Michel accretion targets); 3D
-            // falls through to flat Spherical for now. ORTHOGONAL to the regime.
+            // spherical Schwarzschild has no baked kernel and is rejected by the fail-loud guard
+            // above (never silently run on a flat metric). the spacetime is orthogonal to the regime.
             (1, "spherical") if $cfg.spacetime == "schwarzschild" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 1, 1,
                 Schwarzschild { mass: $cfg.schwarzschild_mass }, Schwarzschild<f64>

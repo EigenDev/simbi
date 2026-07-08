@@ -1194,7 +1194,11 @@ fn gen_nmhd_hlld_face_flux(out_dir: &str, dir: u8) {
 // the NMHD CFL wave-speed map (3D): per-cell max over axes of the EXACT closed-form
 // magnetosonic max(|sl|,|sr|), folded with the geometry inverse-width. one per geometry.
 fn gen_nmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("nmhd_wave_speed_map{}_{ndim}d", geom.suffix());
+    // the MHD geometry slug (mirrors the runtime `mhd_geom_suffix`), NOT the hydro DOF-lift
+    // `geom.suffix()`: MHD B is always a 3-vector, so a 2D spherical MHD grid is named "_sph"
+    // (the dispatch's request) and never the hydro "_sph_swirl". the wave-speed map depends only on
+    // the grid-axis geometry, not the momentum DOF, so this is bit-identical to rmhd's map.
+    let name = format!("nmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         nmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1217,7 +1221,10 @@ fn gen_imhd_hlld_face_flux(out_dir: &str, dir: u8) {
     emit_gv(out_dir, &format!("imhd_face_flux_hlld_3d_{dir}"), 3, &k, &writes);
 }
 fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("imhd_wave_speed_map{}_{ndim}d", geom.suffix());
+    // the MHD geometry slug (mirrors the runtime `mhd_geom_suffix`), NOT the hydro DOF-lift
+    // `geom.suffix()`: a 2D spherical MHD grid is named "_sph" (the dispatch's request), never the
+    // hydro "_sph_swirl". bit-identical to rmhd's map for every chart.
+    let name = format!("imhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         symbi_discretize::gv::imhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1973,6 +1980,12 @@ fn main() {
     gen_curvilinear_hydro(&out_dir, 1, Geom::cyl_1d());
     gen_curvilinear_hydro(&out_dir, 2, Geom::cyl_rphi());
     gen_curvilinear_hydro(&out_dir, 3, Geom::cyl_3d());
+    // the log-radial cylindrical grid (mirrors the spherical `_logr` cells): the geometric-mean
+    // cell geometry (gv_axis_face_at's Log branch) baked into the same godunov + wave-speed stages,
+    // tagged `_cyl_logr`. the runtime selects it from a log-spaced radial axis on a cylindrical grid.
+    gen_curvilinear_hydro(&out_dir, 1, Geom::cyl_1d().log_radial());
+    gen_curvilinear_hydro(&out_dir, 2, Geom::cyl_rphi().log_radial());
+    gen_curvilinear_hydro(&out_dir, 3, Geom::cyl_3d().log_radial());
     // immersed-body forward source (gravity + accretion, docs/design/19 P1/P2/P4): the cons->cons
     // kernel, emitted per grid dimension (regime-agnostic) + the curvilinear variants (generic
     // physical-basis gravity, docs/design/19 P4). cylindrical 2D = the r-phi disk plane (natural
@@ -2378,6 +2391,30 @@ fn main() {
         gen_imhd_wave_speed_map(&out_dir, 1, g1.clone());
         gen_godunov_stage(&out_dir, 1, "imhd", false, g1.clone(), None);
         gen_snapshot(&out_dir, 1, "imhd", false, g1);
+    }
+
+    // =========================================================================
+    // 1.5D CURVILINEAR MHD (spatial D=1 radial, vector DOF=3) — spherical / cylindrical. SAME 1.5D
+    // structure as the cartesian block above (NO constrained transport: C(1,2)=0 edges), but the
+    // out-of-plane B predictor, the wave-speed map, and the gas godunov carry the curvilinear metric
+    // (area-weighted radial divergence + geometric momentum source). the normal face flux
+    // (mhd_flux_suffix = "" for a 1D radial axis), c2p, wave_speeds_cell, ghost fill,
+    // bcell_from_bface, and snapshot are geometry-free and REUSED from the cartesian 1.5D block.
+    // =========================================================================
+    for coords in [Coords::Spherical, Coords::Cylindrical] {
+        let g1c = Geom::make(coords, 3, vec![0]);
+        gen_rmhd_bcell_godunov_euler(&out_dir, g1c.clone(), 1);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, g1c.clone(), 1);
+        // RMHD (relativistic magnetar/PWN radial wind); the wave-speed map is the exact quartic
+        // folded with the radial CFL width, the gas godunov the curvilinear geometric source.
+        gen_rmhd_wave_speed_map(&out_dir, 1, g1c.clone());
+        gen_godunov_stage(&out_dir, 1, "rmhd", true, g1c.clone(), None);
+        // NMHD (closed-form magnetosonic) + IMHD (isothermal): only the wave-speed map + gas godunov
+        // are geometry-dependent; the flux + c2p are shared.
+        gen_nmhd_wave_speed_map(&out_dir, 1, g1c.clone());
+        gen_godunov_stage(&out_dir, 1, "nmhd", true, g1c.clone(), None);
+        gen_imhd_wave_speed_map(&out_dir, 1, g1c.clone());
+        gen_godunov_stage(&out_dir, 1, "imhd", false, g1c.clone(), None);
     }
 
     // emit the single registry from everything generated above — replaces the
