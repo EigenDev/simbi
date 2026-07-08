@@ -445,20 +445,20 @@ where
     fn cfl(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> f64 {
         let geom = &sim.geom;
         let st = spacetime_slug(geom.spacetime);
-        let wname = if st.is_empty() {
-            format!("{}_wave_speed_map{}_{D}d", Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes))
-        } else {
-            // curved background: the coordinate light-cone bound (state-independent).
-            let sp = spacing_suffix(&geom.maps);
-            format!("{}_wave_speed_map{}{sp}{st}_{D}d", Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes))
-        };
+        let sp = spacing_suffix(&geom.maps);
+        // the geometry / spacing / spacetime slugs all ride the name: a log-radial grid selects the
+        // geometric-mean CFL-width map (`_logr`); uniform grids get sp = "" so the name is unchanged.
+        let wname = format!(
+            "{}_wave_speed_map{}{sp}{st}_{D}d",
+            Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes)
+        );
         // scalars BY NAME (the kernel's declared set drives it): eos param + the per-axis CFL
         // widths (cartesian `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`); the mhd substrates run
-        // static, so the motion rates bind 0.
-        // the GR light-cone map builds positions through gv_axis_face_at, so it takes the
-        // LOG-AWARE kernel scalars; the flat maps keep the physical geometry (identical on a
-        // uniform static mesh).
-        let (x_lo_phys, dx_phys) = if st.is_empty() {
+        // static, so the motion rates bind 0. a non-uniform-spacing or curved map builds positions
+        // through gv_axis_face_at, so it takes the LOG-AWARE kernel scalars (face-0 start +
+        // decade-slope); a uniform flat grid keeps the physical geometry (bit-identical to
+        // kernel_geom on a uniform static mesh).
+        let (x_lo_phys, dx_phys) = if st.is_empty() && sp.is_empty() {
             physical_geom(&geom.x_lo, &geom.dx, geom.coords, sim.motion.a)
         } else {
             kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a)

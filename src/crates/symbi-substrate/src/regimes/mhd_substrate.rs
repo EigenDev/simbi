@@ -199,16 +199,17 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     let base_sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = crate::regimes::substrate_kernels::spacetime_slug(sim.geom.spacetime);
     let sp = crate::regimes::substrate_kernels::spacing_suffix(&sim.geom.maps);
-    let sfx = if st.is_empty() {
-        base_sfx.to_string()
-    } else {
-        format!("{base_sfx}{sp}{st}")
-    };
+    // the geometry / spacing / spacetime slugs ALL ride the name — a log-radial grid selects the
+    // geometric-mean cell geometry (`_logr`), exactly like the GR and hydro stages. uniform grids
+    // get sp = "" so the name is unchanged; a log-radial FLAT MHD run selects the `_logr` kernel
+    // (baked for the curvilinear charts) instead of silently reusing the uniform-geometry one.
+    let sfx = format!("{base_sfx}{sp}{st}");
 
     // the gas + bcell stages all bind BY MANIFEST (dispatch_named) — no hand-built buffer list.
-    // the GR godunov reads positions through gv_axis_face_at (log-aware kernel scalars);
-    // flat keeps the raw grid (identical for uniform spacing).
-    let (x_lo_k, dx_k) = if st.is_empty() {
+    // any non-uniform-spacing or curved-spacetime kernel reads positions through gv_axis_face_at
+    // (the log-aware kernel scalars: face-0 start + decade-slope); a uniform flat grid keeps the raw
+    // linear (x_lo, dx), which kernel_geom reproduces bit-identically.
+    let (x_lo_k, dx_k) = if st.is_empty() && sp.is_empty() {
         (sim.geom.x_lo.clone(), sim.geom.dx.clone())
     } else {
         crate::regimes::substrate_kernels::kernel_geom(
@@ -987,12 +988,10 @@ pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         if edge_slots.is_empty() {
             continue;
         }
-        let ct_name = if st.is_empty() {
-            format!("rmhd_ct_curl_{D}d_{dir}{sfx}")
-        } else {
-            // the densitized-space curl: coordinate lengths + the per-face sqrt(gamma) weight.
-            format!("rmhd_ct_curl_{D}d_{dir}{sfx}{sp}{st}")
-        };
+        // the spacing + spacetime slugs ride the name (uniform flat -> both empty, unchanged): a
+        // log-radial grid selects the geometric-mean curl (`_logr`); a curved background adds the
+        // densitized-space curl (coordinate lengths + the per-face sqrt(gamma) weight).
+        let ct_name = format!("rmhd_ct_curl_{D}d_{dir}{sfx}{sp}{st}");
         let scalars: Vec<Sc> = if !st.is_empty() {
             // by MANIFEST (dt + the log-aware grid scalars + the metric mass/spin).
             scalars_for(&ct_name, |bind| {
@@ -1020,8 +1019,11 @@ pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
                 }
             })
         } else if curvilinear {
+            // the log-aware kernel scalars (face-0 start + decade-slope on a Log axis; bit-identical
+            // to the raw linear (x_lo, dx) on a uniform axis) so the geometric-mean curl reads the
+            // true face radii.
             let mut s = vec![Sc::from_f64(dt)];
-            push_curvilinear_geom(&mut s, &sim.geom.x_lo, &sim.geom.dx);
+            push_curvilinear_geom(&mut s, &x_lo_k, &dx_k);
             s
         } else {
             let mut s = vec![Sc::from_f64(dt)];

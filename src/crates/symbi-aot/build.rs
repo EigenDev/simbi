@@ -1062,7 +1062,9 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
         gen_rmhd_source_cfl_gr(out_dir, ndim, geom);
         return;
     }
-    let name = format!("rmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
+    // the spacing slug rides the flat name too (uniform -> ""): a log-radial grid selects the
+    // geometric-mean CFL-width map, matching the runtime dispatch.
+    let name = format!("rmhd_wave_speed_map{}{}_{ndim}d", mhd_geom_slug(&geom), geom.spacing_suffix());
     let (k, writes) =
         rmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1198,7 +1200,7 @@ fn gen_nmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // `geom.suffix()`: MHD B is always a 3-vector, so a 2D spherical MHD grid is named "_sph"
     // (the dispatch's request) and never the hydro "_sph_swirl". the wave-speed map depends only on
     // the grid-axis geometry, not the momentum DOF, so this is bit-identical to rmhd's map.
-    let name = format!("nmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
+    let name = format!("nmhd_wave_speed_map{}{}_{ndim}d", mhd_geom_slug(&geom), geom.spacing_suffix());
     let (k, writes) =
         nmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1224,7 +1226,7 @@ fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // the MHD geometry slug (mirrors the runtime `mhd_geom_suffix`), NOT the hydro DOF-lift
     // `geom.suffix()`: a 2D spherical MHD grid is named "_sph" (the dispatch's request), never the
     // hydro "_sph_swirl". bit-identical to rmhd's map for every chart.
-    let name = format!("imhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
+    let name = format!("imhd_wave_speed_map{}{}_{ndim}d", mhd_geom_slug(&geom), geom.spacing_suffix());
     let (k, writes) =
         symbi_discretize::gv::imhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1286,7 +1288,9 @@ fn gen_rmhd_ct_curl_3d_dir(out_dir: &str, dir: u8, geom: Geom) {
 // (1/r) d_r(r E_phi) metric; dir=0 is flat. name matches the geom_suffix dispatch "_cyl_rz".
 fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_cyl_rz_gv(dir as usize, &geom.spacing);
-    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rz"), 2, &k, &writes);
+    // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
+    // curl that reads the true face radii, matching the runtime ct_curl dispatch.
+    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rz{}", geom.spacing_suffix()), 2, &k, &writes);
 }
 
 // the 2.5D SPHERICAL (r-theta plane) CT curl B-update along in-plane face axis `dir` (0 -> B_r,
@@ -1295,7 +1299,9 @@ fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
 // geom_suffix dispatch "_sph".
 fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_2d_sph_gv(dir as usize, &geom.spacing);
-    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph"), 2, &k, &writes);
+    // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
+    // curl that reads the true face radii, matching the runtime ct_curl dispatch.
+    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph{}", geom.spacing_suffix()), 2, &k, &writes);
 }
 
 // the CURVED-SPACETIME 2.5D (r, theta) CT trio: the densitized corner EMF (contact assembly
@@ -1376,7 +1382,37 @@ fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
 // (mirror of r-z's dir=1); dir=1 is flat. name matches the geom_suffix dispatch "_cyl_rphi".
 fn gen_rmhd_ct_curl_cyl_rphi(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_cyl_rphi_gv(dir as usize, &geom.spacing);
-    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rphi"), 2, &k, &writes);
+    // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
+    // curl that reads the true face radii, matching the runtime ct_curl dispatch.
+    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rphi{}", geom.spacing_suffix()), 2, &k, &writes);
+}
+
+// the SPACING-DEPENDENT flat MHD kernels for a curvilinear chart on a LOG-RADIAL grid (the `_logr`
+// variants: the geometric-mean cell geometry from gv_axis_face_at's Log branch). the normal face
+// flux, edge EMF, c2p, per-cell wave_speeds_cell, snapshot, and ghost fill are spacing-INDEPENDENT
+// and REUSE the uniform instances; only the gas godunov (area-weighted radial divergence +
+// geometric source), the CFL wave-speed map, the out-of-plane bcell predictor, and the 2D in-plane
+// CT curl read the face radii. `geom` must already carry the log-radial spacing. 1D has no CT; 3D
+// (fully gridded, D == DOF) has no out-of-plane bcell and is not emitted here.
+fn gen_curvilinear_mhd_logr(out_dir: &str, ndim: u8, geom: Geom) {
+    gen_rmhd_wave_speed_map(out_dir, ndim, geom.clone());
+    gen_godunov_stage(out_dir, ndim, "rmhd", true, geom.clone(), None);
+    gen_nmhd_wave_speed_map(out_dir, ndim, geom.clone());
+    gen_godunov_stage(out_dir, ndim, "nmhd", true, geom.clone(), None);
+    gen_imhd_wave_speed_map(out_dir, ndim, geom.clone());
+    gen_godunov_stage(out_dir, ndim, "imhd", false, geom.clone(), None);
+    gen_rmhd_bcell_godunov_euler(out_dir, geom.clone(), ndim);
+    gen_rmhd_bcell_godunov_rk2(out_dir, geom.clone(), ndim);
+    if ndim == 2 {
+        for dir in 0..2u8 {
+            match (geom.coords, geom.axes.as_slice()) {
+                (Coords::Spherical, _) => gen_rmhd_ct_curl_2d_sph(out_dir, dir, &geom),
+                (Coords::Cylindrical, [0, 2]) => gen_rmhd_ct_curl_cyl_rz(out_dir, dir, &geom),
+                (Coords::Cylindrical, [0, 1]) => gen_rmhd_ct_curl_cyl_rphi(out_dir, dir, &geom),
+                _ => {}
+            }
+        }
+    }
 }
 
 // the RMHD lattice-map ghost fill (3D): pulls back prim rho/vel/pre + mhd.bcell at the per-axis
@@ -2416,6 +2452,20 @@ fn main() {
         gen_imhd_wave_speed_map(&out_dir, 1, g1c.clone());
         gen_godunov_stage(&out_dir, 1, "imhd", false, g1c.clone(), None);
     }
+
+    // =========================================================================
+    // LOG-RADIAL CURVILINEAR MHD (the `_logr` variants): the geometric-mean cell geometry for a
+    // radial axis spanning many decades (magnetar / PWN winds, accretion disks). the runtime name
+    // build appends the spacing slug on flat MHD exactly like the GR path, so a log-radial grid
+    // selects these instead of silently reusing the uniform-geometry kernel. 1D (sph, cyl) + 2D
+    // (r-theta, cyl r-z, cyl r-phi); 3D fully-gridded log-radial MHD is not a realized target and
+    // fails loud (unbaked `_logr`) if requested.
+    // =========================================================================
+    gen_curvilinear_mhd_logr(&out_dir, 1, Geom::make(Coords::Spherical, 3, vec![0]).log_radial());
+    gen_curvilinear_mhd_logr(&out_dir, 1, Geom::make(Coords::Cylindrical, 3, vec![0]).log_radial());
+    gen_curvilinear_mhd_logr(&out_dir, 2, Geom::make(Coords::Spherical, 3, vec![0, 1]).log_radial());
+    gen_curvilinear_mhd_logr(&out_dir, 2, Geom::cyl_rz().log_radial());
+    gen_curvilinear_mhd_logr(&out_dir, 2, Geom::cyl_rphi_mhd().log_radial());
 
     // emit the single registry from everything generated above — replaces the
     // hand-maintained include!/const lines in lib.rs (docs/design/15 §3).
