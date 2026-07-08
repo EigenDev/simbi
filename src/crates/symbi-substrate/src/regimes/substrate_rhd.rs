@@ -432,6 +432,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             || self.c2p(sim),
             || self.godunov_stage(sim, dt, a0, ac),
             || self.source_apply(sim, ac * dt),
+            || {}, // rhd has no immersed-body source (trait-default no-op)
             || {}, // hydro: no induction flux
             || {}, // hydro: no cell B to restore
             || {}, // hydro: no induction flux

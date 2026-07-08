@@ -256,6 +256,13 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     c2p: impl Fn(),
     godunov: impl Fn(),
     source_apply: impl Fn(),
+    // the immersed-body source (gravity + accretion), re-applied in the redo exactly as the
+    // high-order substage does it (hierarchy.rs: godunov -> additive -> body). the redo restores
+    // `u_stage` (the stage input, BEFORE any source) and re-runs the godunov, so without this a
+    // FO/freeze-selected cell near a body would lose its body source for the substage — precisely
+    // the cells where fallback is most likely. self-gating (no-op when the sim has no bodies); a
+    // no-op where the godunov already fuses the body (iso cartesian), so it never double-applies.
+    body_apply: impl Fn(),
     // MHD-only constrained-transport hooks (no-ops for hydro; see the C2 fix / §3''). a flagged cell
     // needs FIRST-ORDER (diffused) B to recover, so the redo re-runs the CT with the edge EMF SPLICED
     // (HO off the fallback region, FO on it):
@@ -320,6 +327,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     if has_additive {
         source_apply();
     }
+    body_apply(); // re-apply the immersed-body source on the redo (mirrors the HO godunov->additive->body order)
     c2p();
     // PERSISTENT-FREEZE FAIL-LOUD: the freeze tier holds the stage input where even full first-order
     // fluxes leave a cell unphysical. it is the rare correct parachute for a genuinely hard cell

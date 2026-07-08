@@ -41,6 +41,96 @@ fn central_mass() -> BodyCollection<f64, 2> {
     ))
 }
 
+// -----------------------------------------------------------------------------
+// M2 regression: the FOFC redo must re-apply the immersed-body source. a FOFC-firing
+// substage RESTORES the stage-input state and re-runs the godunov + additive source; without
+// re-applying the body source there too, a FO/freeze-selected cell near a body loses its gravity
+// kick for that substage. discriminating A/B on ONE forward-Euler substage (so a flagged cell
+// cannot recover gravity on a later substage): identical FOFC-firing ICs, one run WITH the central
+// mass and one WITHOUT. the flux/godunov is bit-identical from identical ICs (the body source is
+// applied AFTER it), so mom_B - mom_A isolates the body impulse — which must be present and INWARD
+// at every checked cell, INCLUDING the ones that fired FOFC (where the bug drops it).
+// -----------------------------------------------------------------------------
+#[test]
+fn fofc_redo_preserves_body_gravity() {
+    use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};
+    use symbi::sim::refinement::Hierarchy;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    // two streams moving APART across x = 0.4 (a double rarefaction): a near-vacuum opens there, so
+    // the high-order c2p goes negative and FOFC fires along the strip (the redo restores + re-fluxes).
+    // gravity is velocity-independent, so the body impulse D = mom_B - mom_A is unaffected by the flow.
+    let ic = |[x, _y]: [f64; 2]| Prim {
+        rho: 1.0,
+        vel: Tensor::new([if x > 0.4 { 6.0 } else { -6.0 }, 0.0]),
+        pre: 1e-8, // near-zero internal energy -> the diverging flux over-removes it -> p < 0 -> FOFC
+    };
+    // FOFC runs only through the AMR hierarchy's level_stage (the uni-grid evolve() has no fofc
+    // phase), so drive the single-level hierarchy one Euler step (one substage -> a flagged cell
+    // cannot recover the body source on a later substage). returns the stepped state.
+    let run = |with_body: bool| -> Sim {
+        let s = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([N, N])
+            .origin([-L, -L])
+            .spacing([dx, dx])
+            .timestepping(Timestepping::Euler)
+            .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+            .allocate()
+            .expect("sim")
+            .set_initial(ic)
+            .build();
+        let s = if with_body { s.with_bodies(central_mass()) } else { s };
+        let kset = AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &s.geom.allocated);
+        let mut hier = Hierarchy::single(s, kset);
+        hier.evolve(1e-4).expect("hierarchy step"); // one Euler step (t_final < first dt)
+        assert_eq!(hier.levels[0].state.iteration, 1, "expected one step");
+        hier.levels.into_iter().next().unwrap().state
+    };
+
+    fofc_reset_stats();
+    let b = run(true); // central mass
+    let (fired, _) = fofc_stats();
+    assert!(fired > 0, "FOFC did not fire — the gate does not exercise the redo path");
+    let a = run(false); // no body
+
+    // the body pulls toward the origin: the impulse D = mom_B - mom_A must point INWARD
+    // (D . (-r_hat) > 0). the flux is identical in A and B over one step, so D is purely the body
+    // source. WITHOUT the fix, the redo restores u_stage + re-runs the godunov and never re-applies
+    // the body source, so EVERY cell has D == 0 exactly; a single cell with an inward kick is
+    // therefore impossible without the fix. (the rare FOFC-freeze cells hold the pre-body stage
+    // input, so they too show D == 0 — tolerated: the freeze tier is a last-resort conservation
+    // waiver.) no cell may get a spurious OUTWARD kick.
+    let mut checked = 0usize;
+    let mut got_body = 0usize;
+    let mut worst_outward = 0.0_f64;
+    for c in b.geom.interior.iter() {
+        let x = -L + (c[0] as f64 + 0.5) * dx;
+        let y = -L + (c[1] as f64 + 0.5) * dx;
+        let r = (x * x + y * y).sqrt();
+        if !(0.25..0.85).contains(&r) {
+            continue; // skip the softened core + the boundary rows
+        }
+        let dbx = *b.fields.cons.mom[0].view().at(c) - *a.fields.cons.mom[0].view().at(c);
+        let dby = *b.fields.cons.mom[1].view().at(c) - *a.fields.cons.mom[1].view().at(c);
+        let inward = -(dbx * x + dby * y) / r; // impulse projected inward (toward the mass)
+        if inward > 1e-6 {
+            got_body += 1;
+        }
+        worst_outward = worst_outward.min(inward);
+        checked += 1;
+    }
+    assert!(checked > 20, "too few cells checked ({checked})");
+    assert!(
+        got_body > checked / 2,
+        "the FOFC redo dropped the body source: only {got_body}/{checked} cells got the inward \
+         gravity kick in a FOFC-firing substage (0 without the fix)",
+    );
+    assert!(
+        worst_outward > -1e-6,
+        "a cell got a spurious OUTWARD kick from the FOFC redo: {worst_outward:e}",
+    );
+}
+
 #[test]
 fn central_gravity_pulls_fluid_inward_through_evolve() {
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
