@@ -36,7 +36,7 @@ use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries, dispatch_fields,
     dispatch_flux, dispatch_godunov, dispatch_runtime_source, geom_scalar,
-    geom_suffix, kernel_geom, resolve_params, scalars_for, spacing_suffix,
+    geom_suffix, kernel_geom, resolve_params, scalars_for,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
@@ -187,8 +187,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             });
             (name, scalars)
         } else {
-            let sp_sfx = spacing_suffix(&sim.geom.maps);
-            let name = format!("rhd_c2p{geom_sfx}{sp_sfx}{st_sfx}_{D}d");
+            let name = format!("rhd_c2p{geom_sfx}{st_sfx}_{D}d");
             let (x_lo, dx) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
             let scalars = scalars_for(&name, |bind| {
                 let ScalarBind::Ref(sref) = bind else {
@@ -255,14 +254,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         let source_cfl = (sim.geom.spacetime != symbi_geometry::Spacetime::Minkowski)
             .then(|| {
                 let sfx = geom_suffix(sim.geom.coords, DOF, D);
-                let sp = spacing_suffix(&sim.geom.maps);
                 let st = match sim.geom.spacetime {
                     symbi_geometry::Spacetime::Schwarzschild => "_schw",
                     symbi_geometry::Spacetime::KerrSchild => "_ks",
                     symbi_geometry::Spacetime::Kerr => "_kerr",
                     symbi_geometry::Spacetime::Minkowski => unreachable!(),
                 };
-                format!("rhd_source_cfl{sfx}{sp}{st}_{D}d")
+                format!("rhd_source_cfl{sfx}{st}_{D}d")
             });
         cfl_wave_speed(
             sim,
@@ -287,8 +285,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
         let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
         let name = if is_kerr {
-            let sp_sfx = spacing_suffix(&sim.geom.maps);
-            format!("rhd_ghost_fill{geom_sfx}{sp_sfx}_kerr_{D}d")
+            format!("rhd_ghost_fill{geom_sfx}_kerr_{D}d")
         } else {
             format!("iso_ghost_fill{geom_sfx}_{D}d")
         };

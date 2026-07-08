@@ -30,7 +30,7 @@ use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use symbi_algebra::Domain;
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
-use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug, spacing_suffix, ScalarBind, Solver};
+use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug, ScalarBind, Solver};
 use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
 
@@ -198,24 +198,19 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // predictor (each carries the covariant measure).
     let base_sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = crate::regimes::substrate_kernels::spacetime_slug(sim.geom.spacetime);
-    let sp = crate::regimes::substrate_kernels::spacing_suffix(&sim.geom.maps);
     // the geometry / spacing / spacetime slugs ALL ride the name — a log-radial grid selects the
     // geometric-mean cell geometry (`_logr`), exactly like the GR and hydro stages. uniform grids
     // get sp = "" so the name is unchanged; a log-radial FLAT MHD run selects the `_logr` kernel
     // (baked for the curvilinear charts) instead of silently reusing the uniform-geometry one.
-    let sfx = format!("{base_sfx}{sp}{st}");
+    let sfx = format!("{base_sfx}{st}");
 
     // the gas + bcell stages all bind BY MANIFEST (dispatch_named) — no hand-built buffer list.
-    // any non-uniform-spacing or curved-spacetime kernel reads positions through gv_axis_face_at
-    // (the log-aware kernel scalars: face-0 start + decade-slope); a uniform flat grid keeps the raw
-    // linear (x_lo, dx), which kernel_geom reproduces bit-identically.
-    let (x_lo_k, dx_k) = if st.is_empty() && sp.is_empty() {
-        (sim.geom.x_lo.clone(), sim.geom.dx.clone())
-    } else {
-        crate::regimes::substrate_kernels::kernel_geom(
-            &sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a,
-        )
-    };
+    // `kernel_geom` gives the log-aware per-axis scalars (face-0 start + linear width / log decade-
+    // slope keyed on each axis map), which the in-kernel `gv_axis_face_at` reads via `map_kind`; on a
+    // uniform static grid it reproduces the raw linear (x_lo, dx) bit-identically.
+    let (x_lo_k, dx_k) = crate::regimes::substrate_kernels::kernel_geom(
+        &sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a,
+    );
     let scalar = |bind: &ScalarBind| -> Sc {
         let ScalarBind::Ref(sref) = bind else {
             panic!("mhd godunov_stage: unexpected spec scalar {bind:?}");
@@ -313,7 +308,7 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
     // which reads the metric mass/spin + the radial grid map beyond the generic vel_sign reflect.
     let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
     let gname = if is_kerr {
-        format!("rmhd_ghost_fill{}{}_{D}d", spacing_suffix(&sim.geom.maps), spacetime_slug(sim.geom.spacetime))
+        format!("rmhd_ghost_fill{}_{D}d", spacetime_slug(sim.geom.spacetime))
     } else if has_energy {
         format!("rmhd_ghost_fill_{D}d")
     } else {
@@ -771,7 +766,6 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
     // slope limiter (theta, for the transverse R± reconstruction of the staggered fields); the rest
     // have an empty scalar manifest. resolve BY MANIFEST so one call serves all.
     let st = spacetime_slug(sim.geom.spacetime);
-    let sp = spacing_suffix(&sim.geom.maps);
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     // the GR EMF reads the metric mass (+ spin) and the LOG-AWARE face-position scalars.
     let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
@@ -816,13 +810,13 @@ pub(crate) fn efield<const D: usize, const DOF: usize, Mem, Sc>(
             // MUB09 wave-sum EMF (the sharp Alfven-resolving one, telescopes to the coordinate B_t
             // flux); everything else -> the regime-generic HLL corner EMF.
             CtMethod::Uct if !st.is_empty() && matches!(solver, Solver::Hlld) => {
-                format!("rmhd_edge_emf_uct_hlld{sfx}{sp}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf_uct_hlld{sfx}{st}_{D}d_{}", edge.name_k)
             }
             CtMethod::Uct if !st.is_empty() => {
-                format!("rmhd_edge_emf_uct{sfx}{sp}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf_uct{sfx}{st}_{D}d_{}", edge.name_k)
             }
             CtMethod::Contact if !st.is_empty() => {
-                format!("rmhd_edge_emf{sfx}{sp}{st}_{D}d_{}", edge.name_k)
+                format!("rmhd_edge_emf{sfx}{st}_{D}d_{}", edge.name_k)
             }
             CtMethod::Contact => format!("rmhd_edge_emf_{D}d_{}", edge.name_k),
             // UCT EMF family follows the gas solver: HLLD gas -> the five-wave HLLD EMF (the genuine
@@ -980,7 +974,6 @@ pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
     let curvilinear = sim.geom.coords != symbi_geometry::Geometry::Cartesian;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = spacetime_slug(sim.geom.spacetime);
-    let sp = spacing_suffix(&sim.geom.maps);
     let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
     for dir in 0..D {
@@ -991,7 +984,7 @@ pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
         // the spacing + spacetime slugs ride the name (uniform flat -> both empty, unchanged): a
         // log-radial grid selects the geometric-mean curl (`_logr`); a curved background adds the
         // densitized-space curl (coordinate lengths + the per-face sqrt(gamma) weight).
-        let ct_name = format!("rmhd_ct_curl_{D}d_{dir}{sfx}{sp}{st}");
+        let ct_name = format!("rmhd_ct_curl_{D}d_{dir}{sfx}{st}");
         let scalars: Vec<Sc> = if !st.is_empty() || curvilinear {
             // by MANIFEST (dt + the log-aware grid scalars incl. the per-axis map_kind + the metric
             // mass/spin on GR). manifest-driven so a curvilinear kernel that grew the `map_kind`
@@ -1074,13 +1067,12 @@ pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     let axes = sim.geom.axes;
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     let st = spacetime_slug(sim.geom.spacetime);
-    let sp = spacing_suffix(&sim.geom.maps);
     let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
     let gr = !st.is_empty();
     let bname = if gr {
         // the GR interpolation: the energy patch contracts through the spatial metric, and the
         // kernel's bc_ indices are PHYSICAL components (all three enter the contraction).
-        format!("rmhd_bcell_from_bface{sfx}{sp}{st}_{D}d")
+        format!("rmhd_bcell_from_bface{sfx}{st}_{D}d")
     } else if has_energy {
         format!("rmhd_bcell_from_bface_{D}d")
     } else {

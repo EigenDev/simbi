@@ -125,14 +125,6 @@ pub(crate) fn physical_geom<const D: usize>(
     )
 }
 
-/// spacing is now a RUNTIME per-axis value (the `map_kind_{ax}` kernel scalar the in-kernel face map
-/// branches on), NOT a codegen name axis, so ONE kernel per (regime, geometry) serves every spacing
-/// (log-r, log-theta, ...). the name suffix is retired — always "". (retained as a no-op so the
-/// `{sp}` interpolations at the dispatch name sites keep resolving during the transition.)
-pub(crate) fn spacing_suffix<const D: usize>(_maps: &Option<[symbi_geometry::AxisMap; D]>) -> &'static str {
-    ""
-}
-
 /// the per-axis (x_lo, dx) the CURVILINEAR kernel reads as its `x_lo_{ax}` / `dx_{ax}` geom scalars.
 /// uniform axes pass the face-0 position + the linear cell width; log axes pass the face-0 position
 /// + the log decade-slope, since the kernel's face map is `face(i) = start * 10^(i * dx_{ax})` (the

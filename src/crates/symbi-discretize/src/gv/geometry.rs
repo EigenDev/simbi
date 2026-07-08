@@ -206,12 +206,17 @@ pub(crate) fn gv_axis_face_at_index(ax: usize, _spacing: Spacing, i: Gv) -> Gv {
     // position map (0 = uniform `start + i*dx`, 1 = log `start * 10^(i*slope)`), so ONE kernel per
     // (regime, geometry) serves every spacing (log-r, log-theta, ...) and a moving mesh updates
     // `x_lo`/`dx` on the fly while the map kind stays fixed. the bake-time `spacing` enum is no
-    // longer read here (kept in the signature during the transition; both branches are traced and
-    // the select discards the unused one, so `map_kind = 0` reproduces the uniform value exactly).
-    let uniform = start + i * param;
-    let log = start * Gv::from_f64(10.0).powf(i * param);
+    // longer read here (kept in the signature during the transition).
+    //
+    // this is a REAL branch (`cond` -> `Op::IfElse`), NOT a `select`: the log `pow` is emitted
+    // inside the `if` arm and runs ONLY on a log axis — a uniform grid pays nothing for it.
+    // `map_kind` is per-launch-uniform (same for every cell/lane), so the branch never diverges.
     let map_kind = Gv::scalar(&format!("map_kind_{ax}"));
-    Gv::select(map_kind.cmp_gt(Gv::from_f64(0.5)), log, uniform)
+    Gv::cond(
+        map_kind.cmp_gt(Gv::from_f64(0.5)),
+        || start * Gv::from_f64(10.0).powf(i * param), // log:     face = x_lo * 10^(i*slope)
+        || start + i * param,                          // uniform: face = x_lo + i*dx
+    )
 }
 
 

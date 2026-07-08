@@ -25,7 +25,7 @@ use super::binding::{bind_manifest, kernel_bindings, resolve_path};
 use super::exec::dispatch_fields;
 use super::layout::geom_suffix;
 use super::params::{
-    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom, resolve_body_scalars, spacing_suffix,
+    ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom, resolve_body_scalars,
     scalars_for,
 };
 use super::types::Solver;
@@ -65,8 +65,7 @@ where
     };
     // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
     // geometric-mean curvilinear wave-speed map; uniform -> "". ORTHOGONAL to sfx and st_sfx.
-    let sp_sfx = spacing_suffix(&geom.maps);
-    let name = format!("{prefix}_wave_speed_map{sfx}{sp_sfx}{st_sfx}_{D}d");
+    let name = format!("{prefix}_wave_speed_map{sfx}{st_sfx}_{D}d");
     // scalars BY NAME: gamma + the per-axis CFL widths. the kernel's declared set drives it
     // (cartesian declares `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`) — no geometry branch here.
     // mesh motion: PHYSICAL geometry scalars (widths AND centroids — exact
@@ -460,14 +459,13 @@ pub fn dispatch_flux<const D: usize, const DOF: usize, Mem, Sc>(
     let sp_st_sfx = match sim.geom.spacetime {
         symbi_geometry::Spacetime::Minkowski => String::new(),
         st => {
-            let sp = spacing_suffix(&sim.geom.maps);
             let s = match st {
                 symbi_geometry::Spacetime::Schwarzschild => "_schw",
                 symbi_geometry::Spacetime::KerrSchild => "_ks",
         symbi_geometry::Spacetime::Kerr => "_kerr",
                 symbi_geometry::Spacetime::Minkowski => unreachable!(),
             };
-            format!("{sp}{s}")
+            format!("{s}")
         }
     };
     let name = format!("{prefix}_face_flux{solver_sfx}{geom_sfx}{sp_st_sfx}_{D}d_{dir}");
@@ -563,8 +561,7 @@ pub fn dispatch_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     };
     // the spacing tag (matches the bake `Geom::spacing_suffix`): log-radial -> "_logr" selects the
     // geometric-mean curvilinear godunov stage; uniform -> "". ORTHOGONAL to sfx and st_sfx.
-    let sp_sfx = spacing_suffix(&geom.maps);
-    let name = format!("{prefix}_godunov_stage{sfx}{sp_sfx}{st_sfx}_{D}d");
+    let name = format!("{prefix}_godunov_stage{sfx}{st_sfx}_{D}d");
     // scalars BY NAME: dt + the SSP Shu-Osher convex coefficients (a0, ac) + the per-axis grid
     // scalars. the single stage kernel `cons = a0*u_n + ac*fe` serves every explicit SSP scheme
     // — the driver feeds the per-stage (a0, ac); forward-Euler is (0, 1). the kernel's declared

@@ -395,11 +395,6 @@ impl Geom {
     // grid axis (index 0) carries the log-spaced zones (geometric-mean cell centers); angular axes
     // stay uniform. all-uniform -> "" (existing kernels unchanged), log radial -> "_logr". the
     // runtime dispatch appends the same tag from the grid's per-axis spacing, so name matches select.
-    // spacing is a RUNTIME per-axis kernel scalar (`map_kind_{ax}`), not a codegen name axis, so a
-    // uniform and a log grid share ONE baked kernel per (regime, geometry); the suffix is retired.
-    fn spacing_suffix(&self) -> &'static str {
-        ""
-    }
     fn cart(ndim: u8) -> Self {
         Self::make(Coords::Cartesian, ndim, (0..ndim as usize).collect())
     }
@@ -555,7 +550,7 @@ fn gen_godunov_stage(
     } else {
         geom.suffix()
     };
-    let name = format!("{prefix}_godunov_stage{suffix_with}{}{}{}_{ndim}d", geo_slug, geom.spacing_suffix(), geom.spacetime_suffix());
+    let name = format!("{prefix}_godunov_stage{suffix_with}{}{}_{ndim}d", geo_slug, geom.spacetime_suffix());
     let no_sources: [&symbi_hydro::source_spec::SourceSpec; 0] = [];
     let sources: &[&symbi_hydro::source_spec::SourceSpec] = match fused {
         Some((_, s)) => s,
@@ -673,7 +668,7 @@ fn gen_iso_c2p(out_dir: &str, ndim: u8) {
 // curvilinear coords it folds per-cell PHYSICAL widths (cell_inv_phys_widths) instead of
 // a uniform inv_dx; the iso map is shared by the adiabatic/Newton CFL too.
 fn gen_iso_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("iso_wave_speed_map{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix());
+    let name = format!("iso_wave_speed_map{}_{ndim}d", geom.suffix());
     let (k, writes) =
         iso_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -835,7 +830,7 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
     // chart rides an explicit `_cart` (distinct from the implicit spherical default, which stays
     // untagged so the validated spherical kernels keep their names); every other case is untagged.
     let lift = gr_chart_dof_tag(&geom);
-    let name = format!("rhd_c2p{lift}{}{}_{ndim}d", geom.spacing_suffix(), geom.spacetime_suffix());
+    let name = format!("rhd_c2p{lift}{}_{ndim}d", geom.spacetime_suffix());
     // the const parameter is the momentum DOF (geom.ncomp); the grid dimension rides geom.axes.
     let (k, writes) = match geom.ncomp {
         1 => symbi_discretize::gv::rhd_c2p_gr_gv::<1>(geom.coords, geom.spacetime, &geom.spacing, &geom.axes, max_iters),
@@ -866,7 +861,7 @@ fn gen_rhd_face_flux_gr_mode(out_dir: &str, ndim: u8, dir: u8, geom: Geom, rusan
     // `_cart`, else untagged — matching the runtime dispatch_flux.
     let lift = gr_chart_dof_tag(&geom);
     let solver = if rusanov { "_rusanov" } else { "" };
-    let name = format!("rhd_face_flux{solver}{lift}{}{}_{ndim}d_{dir}", geom.spacing_suffix(), geom.spacetime_suffix());
+    let name = format!("rhd_face_flux{solver}{lift}{}_{ndim}d_{dir}", geom.spacetime_suffix());
     // the const parameter is the momentum DOF (geom.ncomp); the reconstruction grid rides geom.axes.
     let (k, writes) = match geom.ncomp {
         1 => symbi_discretize::gv::rhd_flux_gr_gv::<1>(dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, rusanov),
@@ -882,7 +877,7 @@ fn gen_rhd_face_flux_gr_mode(out_dir: &str, ndim: u8, dir: u8, geom: Geom, rusan
 // wave-speed map so the runtime cfl builds the matching string.
 fn gen_rhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
-    let name = format!("rhd_source_cfl{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
+    let name = format!("rhd_source_cfl{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
     let (k, writes) = symbi_discretize::gv::rhd_source_cfl_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes, geom.ncomp as usize,
     );
@@ -1042,8 +1037,8 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // any matter); the name gains the spacing + spacetime slugs like every GR kernel.
     if geom.spacetime != Spacetime::Minkowski {
         let name = format!(
-            "rmhd_wave_speed_map{}{}{}_{ndim}d",
-            mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
+            "rmhd_wave_speed_map{}{}_{ndim}d",
+            mhd_geom_slug(&geom), geom.spacetime_suffix()
         );
         let (k, writes) = symbi_discretize::gv::gr_light_cone_wave_speed_map_gv(
             geom.spacetime, geom.coords, &geom.spacing, &geom.axes, ndim as usize,
@@ -1055,7 +1050,7 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     }
     // the spacing slug rides the flat name too (uniform -> ""): a log-radial grid selects the
     // geometric-mean CFL-width map, matching the runtime dispatch.
-    let name = format!("rmhd_wave_speed_map{}{}_{ndim}d", mhd_geom_slug(&geom), geom.spacing_suffix());
+    let name = format!("rmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         rmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1068,8 +1063,8 @@ fn gen_rmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 fn gen_rmhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
     let name = format!(
-        "rmhd_source_cfl{}{}{}_{ndim}d",
-        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_source_cfl{}{}_{ndim}d",
+        mhd_geom_slug(&geom), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rmhd_source_cfl_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes, /* mag_from_bcell = */ false,
@@ -1084,8 +1079,8 @@ fn gen_rmhd_source_cfl_gr(out_dir: &str, ndim: u8, geom: Geom) {
 fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
     assert!(geom.spacetime != Spacetime::Minkowski);
     let name = format!(
-        "rmhd_godunov_stage{}{}{}_{ndim}d",
-        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_godunov_stage{}{}_{ndim}d",
+        mhd_geom_slug(&geom), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_sources(
         geom.coords, geom.spacetime, &geom.spacing, &geom.axes, ndim, 3, true,
@@ -1098,8 +1093,8 @@ fn gen_rmhd_godunov_gr(out_dir: &str, ndim: u8, geom: Geom) {
 // name mirrors the rhd GR c2p (`rmhd_c2p[_logr]{_schw|_ks}_{ndim}d`).
 fn gen_rmhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
     let name = format!(
-        "rmhd_c2p{}{}{}_{ndim}d",
-        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_c2p{}{}_{ndim}d",
+        mhd_geom_slug(&geom), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rmhd_c2p_gr_gv(
         geom.coords, geom.spacetime, &geom.spacing, &geom.axes, max_iters,
@@ -1119,8 +1114,8 @@ fn gen_rmhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom, hlld: boo
 fn gen_rmhd_face_flux_gr_mode(out_dir: &str, ndim: u8, dir: u8, geom: Geom, hlld: bool, rusanov: bool) {
     let solver = if rusanov { "_rusanov" } else if hlld { "_hlld" } else { "" };
     let name = format!(
-        "rmhd_face_flux{solver}{}{}{}_{ndim}d_{dir}",
-        mhd_geom_slug(&geom), geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_face_flux{solver}{}{}_{ndim}d_{dir}",
+        mhd_geom_slug(&geom), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rmhd_flux_gr_gv(
         dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes, hlld, rusanov,
@@ -1191,7 +1186,7 @@ fn gen_nmhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // `geom.suffix()`: MHD B is always a 3-vector, so a 2D spherical MHD grid is named "_sph"
     // (the dispatch's request) and never the hydro "_sph_swirl". the wave-speed map depends only on
     // the grid-axis geometry, not the momentum DOF, so this is bit-identical to rmhd's map.
-    let name = format!("nmhd_wave_speed_map{}{}_{ndim}d", mhd_geom_slug(&geom), geom.spacing_suffix());
+    let name = format!("nmhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         nmhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1217,7 +1212,7 @@ fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     // the MHD geometry slug (mirrors the runtime `mhd_geom_suffix`), NOT the hydro DOF-lift
     // `geom.suffix()`: a 2D spherical MHD grid is named "_sph" (the dispatch's request), never the
     // hydro "_sph_swirl". bit-identical to rmhd's map for every chart.
-    let name = format!("imhd_wave_speed_map{}{}_{ndim}d", mhd_geom_slug(&geom), geom.spacing_suffix());
+    let name = format!("imhd_wave_speed_map{}_{ndim}d", mhd_geom_slug(&geom));
     let (k, writes) =
         symbi_discretize::gv::imhd_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1239,8 +1234,8 @@ fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
     // names are unchanged).
     let geo_slug = mhd_geom_slug(&geom); // MHD slug '_sph' for both flat and GR (swirl stays DOF=3 via the macro)
     let name = format!(
-        "rmhd_bcell_godunov_euler{}{}{}_{ndim}d",
-        geo_slug, geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_bcell_godunov_euler{}{}_{ndim}d",
+        geo_slug, geom.spacetime_suffix()
     );
     // ncomp = 3 (B is always a 3-vector); flux-divergence over ndim spatial directions.
     let (k, writes) = rmhd_bcell_godunov_euler_gv(geom.coords, geom.spacetime, &geom.spacing, ndim as usize, 3, &geom.axes);
@@ -1254,8 +1249,8 @@ fn gen_rmhd_bcell_godunov_rk2(out_dir: &str, geom: Geom, ndim: u8) {
     }
     let geo_slug = mhd_geom_slug(&geom); // MHD slug '_sph' for both flat and GR (swirl stays DOF=3 via the macro)
     let name = format!(
-        "rmhd_bcell_godunov_rk2{}{}{}_{ndim}d",
-        geo_slug, geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_bcell_godunov_rk2{}{}_{ndim}d",
+        geo_slug, geom.spacetime_suffix()
     );
     let (k, writes) = rmhd_bcell_godunov_rk2_gv(geom.coords, geom.spacetime, &geom.spacing, ndim as usize, 3, &geom.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
@@ -1281,7 +1276,7 @@ fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_cyl_rz_gv(dir as usize, &geom.spacing);
     // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
     // curl that reads the true face radii, matching the runtime ct_curl dispatch.
-    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rz{}", geom.spacing_suffix()), 2, &k, &writes);
+    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rz"), 2, &k, &writes);
 }
 
 // the 2.5D SPHERICAL (r-theta plane) CT curl B-update along in-plane face axis `dir` (0 -> B_r,
@@ -1292,7 +1287,7 @@ fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_2d_sph_gv(dir as usize, &geom.spacing);
     // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
     // curl that reads the true face radii, matching the runtime ct_curl dispatch.
-    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph{}", geom.spacing_suffix()), 2, &k, &writes);
+    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_sph"), 2, &k, &writes);
 }
 
 // the CURVED-SPACETIME 2.5D (r, theta) CT trio: the densitized corner EMF (contact assembly
@@ -1303,8 +1298,8 @@ fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
 // ANY dimension; the edge/curl kernels exist only where CT edges do).
 fn gen_rmhd_bcell_from_bface_gr(out_dir: &str, ndim: u8, geom: &Geom) {
     let name = format!(
-        "rmhd_bcell_from_bface{}{}{}_{ndim}d",
-        mhd_geom_slug(geom), geom.spacing_suffix(), geom.spacetime_suffix()
+        "rmhd_bcell_from_bface{}{}_{ndim}d",
+        mhd_geom_slug(geom), geom.spacetime_suffix()
     );
     let (k, w) = symbi_discretize::gv::rmhd_bcell_from_bface_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
@@ -1326,44 +1321,41 @@ fn gr_ct_out_of_plane(geom: &Geom) -> usize {
 
 fn gen_rmhd_gr_uct_hlld(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
-    let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
     let ok = gr_ct_out_of_plane(geom);
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
-    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{gs}{sp}{st}_2d_{ok}"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{gs}{st}_2d_{ok}"), 2, &k, &w);
 }
 
 fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
-    let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
     let ok = gr_ct_out_of_plane(geom);
     let (k, w) = symbi_discretize::gv::rmhd_wave_speeds_cell_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
-    emit_gv(out_dir, &format!("rmhd_wave_speeds_cell{gs}{sp}{st}_2d"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_wave_speeds_cell{gs}{st}_2d"), 2, &k, &w);
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
-    emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{sp}{st}_2d_{ok}"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{st}_2d_{ok}"), 2, &k, &w);
 }
 
 fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
-    let sp = geom.spacing_suffix();
     let st = geom.spacetime_suffix();
     let ok = gr_ct_out_of_plane(geom);
     let (k, w) = symbi_discretize::gv::rmhd_edge_emf_gr_gv(
         geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
     );
-    emit_gv(out_dir, &format!("rmhd_edge_emf{gs}{sp}{st}_2d_{ok}"), 2, &k, &w);
+    emit_gv(out_dir, &format!("rmhd_edge_emf{gs}{st}_2d_{ok}"), 2, &k, &w);
     for dir in 0..2usize {
         let (k, w) = symbi_discretize::gv::rmhd_ct_curl_2d_sph_gr_gv(
             dir, geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
         );
-        emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}{gs}{sp}{st}"), 2, &k, &w);
+        emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}{gs}{st}"), 2, &k, &w);
     }
     gen_rmhd_bcell_from_bface_gr(out_dir, 2, geom);
 }
@@ -1375,7 +1367,7 @@ fn gen_rmhd_ct_curl_cyl_rphi(out_dir: &str, dir: u8, geom: &Geom) {
     let (k, writes) = rmhd_ct_curl_cyl_rphi_gv(dir as usize, &geom.spacing);
     // the spacing slug rides the name (uniform -> ""): a log-radial grid selects the geometric-mean
     // curl that reads the true face radii, matching the runtime ct_curl dispatch.
-    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rphi{}", geom.spacing_suffix()), 2, &k, &writes);
+    emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rphi"), 2, &k, &writes);
 }
 
 // the RMHD lattice-map ghost fill (3D): pulls back prim rho/vel/pre + mhd.bcell at the per-axis
@@ -1422,7 +1414,7 @@ fn gen_rmhd_average_efield(out_dir: &str, ndim: u8) {
 // relativistic 1D characteristic speeds. like the iso map but the relativistic
 // closed form (no inv_dx baked); the host folds max + cfl_from_smax(s_max,cfl,dx).
 fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
-    let name = format!("rhd_wave_speed_map{}{}{}_{ndim}d", geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix());
+    let name = format!("rhd_wave_speed_map{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
     // spinning kerr uses the coordinate light-cone map (state-independent; the theta-dependent
     // lapse + non-diagonal gamma^{rr} break the radial-only backgrounds' factored BF form).
     let (k, writes) = if geom.spacetime == Spacetime::Kerr {
@@ -1461,8 +1453,8 @@ fn gen_iso_ghost_fill(out_dir: &str, ndim: u8, geom: Geom) {
 fn gen_rhd_kerr_ghost_fill(out_dir: &str, geom: Geom) {
     assert!(geom.spacetime == Spacetime::Kerr && geom.ncomp == 3, "the kerr ghost fill is swirl-only");
     let name = format!(
-        "rhd_ghost_fill{}{}{}_2d",
-        geom.suffix(), geom.spacing_suffix(), geom.spacetime_suffix()
+        "rhd_ghost_fill{}{}_2d",
+        geom.suffix(), geom.spacetime_suffix()
     );
     let (k, writes) = symbi_discretize::gv::rhd_kerr_ghost_fill_gv(&geom.spacing);
     emit_gv(out_dir, &name, 2, &k, &writes);
@@ -1473,7 +1465,7 @@ fn gen_rhd_kerr_ghost_fill(out_dir: &str, geom: Geom) {
 // MHD ghost dispatch keys on spacing + spacetime only). kerr-only.
 fn gen_rmhd_kerr_ghost_fill(out_dir: &str, geom: &Geom) {
     assert!(geom.spacetime == Spacetime::Kerr, "the rmhd kerr ghost fill is kerr-only");
-    let name = format!("rmhd_ghost_fill{}{}_2d", geom.spacing_suffix(), geom.spacetime_suffix());
+    let name = format!("rmhd_ghost_fill{}_2d", geom.spacetime_suffix());
     let (k, writes) = symbi_discretize::gv::rmhd_kerr_ghost_fill_gv(&geom.spacing);
     emit_gv(out_dir, &name, 2, &k, &writes);
 }

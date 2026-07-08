@@ -35,8 +35,8 @@ use std::sync::Arc;
 
 use crate::regimes::substrate_kernels::{
     dispatch_driven_boundaries, dispatch_named, dispatch_runtime_source, geom_scalar,
-    kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, physical_geom, scalars_for,
-    spacetime_slug, spacing_suffix, RegimeKind, RuntimeSource, ScalarBind, Solver,
+    kernel_geom, mhd_flux_suffix, mhd_geom_suffix, motion_scalar, scalars_for,
+    spacetime_slug, RegimeKind, RuntimeSource, ScalarBind, Solver,
 };
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::substrate_seam::KernelSet;
@@ -232,8 +232,7 @@ where
             // = the light-cone Lax-Friedrichs fan (the FOFC first-order fallback).
             let solver = gr_solver;
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-            let sp = spacing_suffix(&sim.geom.maps);
-            format!("{}_face_flux{solver}{gsfx}{sp}{st}_{D}d_{dir}", Self::kernel_prefix())
+            format!("{}_face_flux{solver}{gsfx}{st}_{D}d_{dir}", Self::kernel_prefix())
         };
         let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         let scalars = scalars_for(&flux_name, |bind| match bind {
@@ -349,8 +348,7 @@ where
             // the metric-aware KKC recovery: gamma at the volume-weighted centroid, so the name
             // carries the chart + spacing + spacetime slugs and the kernel reads mass + grid scalars.
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-            let sp = spacing_suffix(&sim.geom.maps);
-            format!("{}_c2p{gsfx}{sp}{st}_{D}d", Self::kernel_prefix())
+            format!("{}_c2p{gsfx}{st}_{D}d", Self::kernel_prefix())
         };
         let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
         // iso c2p declares no scalars -> scalars_for returns [] (resolver never called).
@@ -399,9 +397,8 @@ where
             if self.ct_method != CtMethod::Uct {
                 return;
             }
-            let sp = spacing_suffix(&sim.geom.maps);
             let gsfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
-            let wsname = format!("{}_wave_speeds_cell{gsfx}{sp}{st}_{D}d", Self::kernel_prefix());
+            let wsname = format!("{}_wave_speeds_cell{gsfx}{st}_{D}d", Self::kernel_prefix());
             let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
             let scalars = scalars_for(&wsname, |bind| match bind {
                 ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(self.eos_param),
@@ -445,24 +442,18 @@ where
     fn cfl(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> f64 {
         let geom = &sim.geom;
         let st = spacetime_slug(geom.spacetime);
-        let sp = spacing_suffix(&geom.maps);
         // the geometry / spacing / spacetime slugs all ride the name: a log-radial grid selects the
         // geometric-mean CFL-width map (`_logr`); uniform grids get sp = "" so the name is unchanged.
         let wname = format!(
-            "{}_wave_speed_map{}{sp}{st}_{D}d",
+            "{}_wave_speed_map{}{st}_{D}d",
             Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes)
         );
         // scalars BY NAME (the kernel's declared set drives it): eos param + the per-axis CFL
-        // widths (cartesian `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`); the mhd substrates run
-        // static, so the motion rates bind 0. a non-uniform-spacing or curved map builds positions
-        // through gv_axis_face_at, so it takes the LOG-AWARE kernel scalars (face-0 start +
-        // decade-slope); a uniform flat grid keeps the physical geometry (bit-identical to
-        // kernel_geom on a uniform static mesh).
-        let (x_lo_phys, dx_phys) = if st.is_empty() && sp.is_empty() {
-            physical_geom(&geom.x_lo, &geom.dx, geom.coords, sim.motion.a)
-        } else {
-            kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a)
-        };
+        // widths (cartesian `inv_dx_d`, curvilinear `x_lo_d`/`dx_d`); the mhd substrates run static,
+        // so the motion rates bind 0. `kernel_geom` gives the log-aware per-axis scalars the in-kernel
+        // `gv_axis_face_at` reads via `map_kind`; on a uniform static grid it is bit-identical to the
+        // physical geometry.
+        let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
         let resolve_scalar = |bind: &ScalarBind| -> Sc {
             let ScalarBind::Ref(sref) = bind else {
                 panic!("{} cfl: unexpected spec scalar {bind:?}", Self::kernel_prefix());
@@ -505,9 +496,8 @@ where
         // lambda_S = (|S_tau| + ||S_mom||_gamma)/q(U) in place, so the reduction sizes dt against
         // both (dt (lambda_flux + lambda_S) < 1). the source-CFL kernel is baked for GR-RMHD only.
         if !st.is_empty() {
-            let sp = spacing_suffix(&geom.maps);
             let sname = format!(
-                "{}_source_cfl{}{sp}{st}_{D}d",
+                "{}_source_cfl{}{st}_{D}d",
                 Self::kernel_prefix(), mhd_geom_suffix(geom.coords, &geom.axes)
             );
             let sscalars = scalars_for(&sname, &resolve_scalar);
