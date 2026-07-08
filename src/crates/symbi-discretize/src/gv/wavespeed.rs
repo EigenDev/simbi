@@ -854,20 +854,33 @@ mod m1_log_radius_tests {
 
     fn eval(out: NodeId, values: &[(&str, f64)]) -> f64 {
         use symbi_ir::backends::interp::{Backend, Cpu};
-        use symbi_ir::passes::scalarize::scalarize;
-        let (lowered, param_order) = with_trace(|t| {
-            let lowered = scalarize(t.graph(), out, "m1_center");
-            let params: Vec<String> = lowered.params.iter().map(|p| p.name.clone()).collect();
-            (lowered, params)
+        use symbi_ir::passes::scalarize::{scalarize_kernel, LoweredFn};
+        // the runtime spacing map emits `map_kind`'s cond as an `Op::IfElse`, which the single-output
+        // `scalarize` cannot lower (only `scalarize_kernel` handles it). lower the one output through
+        // `scalarize_kernel` and wrap it as a `LoweredFn` for the elemental interpreter.
+        let lowered = with_trace(|t| {
+            let sc = scalarize_kernel(t.graph(), &[out]);
+            let ty = t.graph().ty(out).clone();
+            LoweredFn {
+                name: "m1_center".to_string(),
+                params: sc.params,
+                body: sc.body,
+                results: vec![sc.outputs[0].clone()],
+                result_element: ty.element,
+                result_shape: ty.shape,
+            }
         });
-        let inputs: Vec<f64> = param_order
+        let inputs: Vec<f64> = lowered
+            .params
             .iter()
-            .map(|pn| {
+            .map(|p| {
                 values
                     .iter()
-                    .find(|(n, _)| *n == pn.as_str())
+                    .find(|(n, _)| *n == p.name.as_str())
                     .map(|(_, v)| *v)
-                    .unwrap_or_else(|| panic!("eval: missing param '{pn}'"))
+                    // an unbound spacing selector defaults to uniform (map_kind = 0).
+                    .or_else(|| p.name.starts_with("map_kind_").then_some(0.0))
+                    .unwrap_or_else(|| panic!("eval: missing param '{}'", p.name))
             })
             .collect();
         Cpu.eval_elemental(&lowered, &inputs)[0]
@@ -878,7 +891,9 @@ mod m1_log_radius_tests {
         begin_trace();
         let node = gv_cell_center(0, &[Spacing::Log]).node();
         let (r_min, slope, i) = (3.0_f64, 0.02_f64, 10.0_f64);
-        let got = eval(node, &[("x_lo_0", r_min), ("dx_0", slope), ("_coord_0", i)]);
+        // spacing is now a runtime scalar: select the log map (map_kind_0 = 1); the `Spacing::Log`
+        // builder arg is vestigial (the face map reads `map_kind`, not the codegen enum).
+        let got = eval(node, &[("x_lo_0", r_min), ("dx_0", slope), ("_coord_0", i), ("map_kind_0", 1.0)]);
         end_trace();
         let geomean = r_min * 10f64.powf((i + 0.5) * slope); // sqrt(face_i * face_{i+1})
         let old_uniform_bug = r_min + (i + 0.5) * slope;

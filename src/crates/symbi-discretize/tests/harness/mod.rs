@@ -140,10 +140,17 @@ impl KernelRun {
             .scalar_params
             .iter()
             .map(|name| {
-                *self
-                    .scalars
-                    .get(name)
-                    .unwrap_or_else(|| panic!("KernelRun: no value bound for scalar '{name}'"))
+                if let Some(&v) = self.scalars.get(name) {
+                    v
+                } else if name.starts_with("map_kind_") {
+                    // spacing is a per-axis RUNTIME scalar (0 = uniform, 1 = log); every kernel now
+                    // carries `map_kind_{ax}` even on a uniform grid. default the unbound ones to 0
+                    // (uniform) so a test that does not exercise log spacing needs no boilerplate; a
+                    // log-axis test binds it explicitly.
+                    0.0
+                } else {
+                    panic!("KernelRun: no value bound for scalar '{name}'")
+                }
             })
             .collect();
 

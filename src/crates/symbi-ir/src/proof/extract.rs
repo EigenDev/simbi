@@ -98,6 +98,13 @@ fn eval_rat(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> RVa
             RValue::Lin(lin_single((key.to_string(), off), RatFun::from_poly(Poly::constant(1))))
         }
         Op::ElementWise(op, ins) => eval_rat_elementwise(graph, *op, ins, fields, scalars),
+        // the spacing map's runtime `map_kind` cond (`map_kind > 0.5 ? log-face : uniform-face`) — a
+        // LEAF reparametrization of the cell/face position. the discrete curl telescopes to
+        // div(curl) = 0 INDEPENDENTLY of the face-position map: the two cells sharing a face use the
+        // SAME position (whichever arm), so the cancellation is structural, not positional. both arms
+        // carry the identical curl stencil; extract the uniform (else) arm — the canonical
+        // instantiation, and the exact DAG this proof verified before spacing became a runtime scalar.
+        Op::IfElse { else_results, .. } => eval_rat(graph, else_results[0], fields, scalars),
         other => panic!("proof(rat): unsupported op in curvilinear curl DAG: {other:?}"),
     }
 }
@@ -341,6 +348,9 @@ fn eval(graph: &Graph, id: NodeId, fields: &[&str], scalars: &[&str]) -> Value {
             Value::Lin(LinForm::from_term((key.to_string(), off), Poly::constant(1)))
         }
         Op::ElementWise(op, ins) => eval_elementwise(graph, *op, ins, fields, scalars),
+        // the spacing `map_kind` cond is a leaf face-position reparametrization; div(curl) = 0
+        // telescopes independently of it (see the eval_rat arm), so extract the uniform (else) arm.
+        Op::IfElse { else_results, .. } => eval(graph, else_results[0], fields, scalars),
         other => panic!("proof: unsupported op in curl DAG: {other:?}"),
     }
 }
