@@ -1981,6 +1981,109 @@ where
         })
     }
 
+    /// the well-posed uniform-scaling DRAIN pass (docs/ideas/accretor.md): post-godunov,
+    /// once per full step, BEFORE c2p. for each masked cell it scales the conserved vector
+    /// by `exp(-sum_b chi_b dt / tau_b)` -- the SAME factor on den, mom, AND nrg, so the
+    /// intensive primitive state is untouched (positivity-preserving for any dt, no acoustic
+    /// injection) -- and books the absorbed mass / momentum / energy on the bodies
+    /// (proportional to each body's local drain rate) into the diagnostics accumulator, which
+    /// the post-step `evolve_bodies` consolidates. the accretion rate is EMERGENT: the reduced
+    /// `U_old - U_new`, a functional of the solved flow, never a target. host-only (like
+    /// `conservation_diag`); the drain never restricts dt. `c_s` for the timescale comes from
+    /// the just-updated cons (prim is stale pre-c2p); isothermal carries the fixed
+    /// `c_s = sqrt(gamma_for_ops)`. DOF == D (the accretor domain; the swirl DOF-lift is
+    /// deferred).
+    pub fn apply_drain(&self, c_drain: f64) {
+        if !Mem::IS_HOST_ACCESSIBLE || DOF != D {
+            return;
+        }
+        let Some(im) = self.immersed.as_ref() else { return };
+        // only accreting bodies (black holes with a mask radius) drain; (index, center, r_mask).
+        let draining: Vec<(usize, Tensor<f64, D>, f64)> = im
+            .bodies
+            .bodies()
+            .iter()
+            .enumerate()
+            .filter_map(|(bi, b)| b.accretion_radius().map(|r| (bi, b.position, r)))
+            .collect();
+        if draining.is_empty() {
+            return;
+        }
+
+        let bg = self.geom.block_geometry(self.physics.metric);
+        let gamma = self.physics.eos.gamma_for_ops();
+        let dt = self.dt;
+        let den = &self.fields.cons.den;
+        let mom = &self.fields.cons.mom;
+        let nrg = self.fields.cons.nrg.as_ref();
+
+        let mut deltas: Vec<symbi_ib::BodyDelta<f64, D>> =
+            (0..im.bodies.len()).map(symbi_ib::BodyDelta::new).collect();
+
+        for c in self.geom.interior.iter() {
+            let x_cart = self.physics.metric.to_cartesian(bg.centroid(c));
+            let mut dx = f64::INFINITY;
+            for ax in 0..D {
+                dx = dx.min(bg.cell_width(c, ax));
+            }
+            // read the just-updated conserved state ONCE (needed for c_s and the exact delta).
+            let den_c = *den.view().at(c);
+            let mut mom_c = [0.0f64; DOF];
+            let mut mom_sq = 0.0;
+            for k in 0..DOF {
+                mom_c[k] = *mom[k].view().at(c);
+                mom_sq += mom_c[k] * mom_c[k];
+            }
+            let nrg_c = nrg.map(|f| *f.view().at(c)).unwrap_or(0.0);
+            let c_s = if nrg.is_some() {
+                symbi_ib::sound_speed_from_cons(den_c, mom_sq, nrg_c, gamma).max(1e-12)
+            } else {
+                gamma.sqrt().max(1e-12) // iso: gamma_for_ops = c_iso^2
+            };
+            let tau = symbi_ib::drain_timescale(dx, c_s, c_drain);
+
+            // per-body drain exponents chi_b dt / tau; the mask ramp width is one cell.
+            let mut total_exp = 0.0;
+            let mut exps = [0.0f64; symbi_ib::MAX_BODIES];
+            for (j, &(_, pos, r_mask)) in draining.iter().enumerate() {
+                let dist = (x_cart - pos).norm();
+                let e = symbi_ib::drain_mask(dist, r_mask, dx) * dt / tau;
+                exps[j] = e;
+                total_exp += e;
+            }
+            if total_exp < 1e-300 {
+                continue; // outside every mask: exact no-op
+            }
+            let f = (-total_exp).exp();
+            let absorbed = 1.0 - f;
+            let vol = bg.volume(c);
+
+            // uniform scale of every conserved component (the design invariant).
+            den.set(c, den_c * f);
+            for k in 0..DOF {
+                mom[k].set(c, mom_c[k] * f);
+            }
+            if let Some(nf) = nrg {
+                nf.set(c, nrg_c * f);
+            }
+
+            // attribute the exact U_old - U_new to each body by its share of the drain rate.
+            for (j, &(bi, _, _)) in draining.iter().enumerate() {
+                let frac = exps[j] / total_exp;
+                let d = &mut deltas[bi];
+                d.mass_delta += den_c * absorbed * frac * vol;
+                for k in 0..DOF {
+                    d.force_delta[k] += mom_c[k] * absorbed * frac * vol / dt;
+                }
+                d.energy_delta += nrg_c * absorbed * frac * vol;
+            }
+        }
+
+        for d in deltas {
+            im.diagnostics.accumulate(d);
+        }
+    }
+
     /// how many fields the live heatmap can cycle through (density + pressure /
     /// Lorentz W / |B| when the regime carries them). bounds the `f`-key cycle.
     pub fn field_count(&self) -> usize {

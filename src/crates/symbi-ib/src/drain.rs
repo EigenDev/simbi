@@ -82,6 +82,19 @@ pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
     (drained, delta)
 }
 
+/// the adiabatic sound speed recovered directly from the UPDATED conserved state. the
+/// drain runs post-godunov but BEFORE c2p (spec ordering: hydro -> drain -> c2p+floors),
+/// so the stored primitive is stale; the drain timescale's `c_s` must come from the
+/// just-updated `cons`. `e_int = (nrg - 0.5 |mom|^2 / den) / den`, then
+/// `c_s = sqrt(gamma (gamma - 1) e_int)`. a one-line inversion (no root-find: the sound
+/// speed needs only the internal energy, not the full primitive). regime-local; the caller
+/// supplies gamma. NOT used by the isothermal regime, which carries a fixed `c_s = c_iso`.
+#[inline]
+pub fn sound_speed_from_cons<S: Scalar>(den: S, mom_sq: S, nrg: S, gamma: S) -> S {
+    let e_int = (nrg - S::from_f64(0.5) * mom_sq / den) / den;
+    (gamma * (gamma - S::ONE) * e_int).sqrt()
+}
+
 /// the per-cell drain the post-godunov pass iterates: compose the mask (from the
 /// cell's coordinate distance `dist` to the mask center), the local timescale (from
 /// `dx` and the cell sound speed `c_s`), and the exact-exponential drain. `c_s` is
@@ -186,6 +199,20 @@ mod tests {
         assert_eq!(drained.den, cons.den);
         assert_eq!(drained.nrg, cons.nrg);
         assert_eq!(delta.mass_delta, 0.0);
+    }
+
+    // c_s recovered from cons matches the analytic sqrt(gamma p / rho) (option 1: the drain
+    // reads the just-updated cons, not the stale prim).
+    #[test]
+    fn sound_speed_from_cons_matches_analytic() {
+        let (gamma, rho, p) = (5.0f64 / 3.0, 2.5f64, 1.4f64);
+        let v = Tensor::new([0.3, -0.2, 0.1]);
+        let e_int = p / ((gamma - 1.0) * rho);
+        let nrg = rho * (e_int + 0.5 * v.dot(&v));
+        let mom_sq = v.scale(rho).dot(&v.scale(rho));
+        let cs = sound_speed_from_cons(rho, mom_sq, nrg, gamma);
+        let cs_analytic = (gamma * p / rho).sqrt();
+        assert!((cs - cs_analytic).abs() < 1e-13, "c_s {cs} != analytic {cs_analytic}");
     }
 
     // the mask limits: fully inside -> 1, fully outside -> 0, on the surface -> 1/2.
