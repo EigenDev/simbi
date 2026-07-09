@@ -246,7 +246,9 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
         built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
-        Ok(self.with_runtime_source(built, params))
+        // fused by default: the user source (and any immersed body) rides inside the godunov stage on
+        // host + f64; other carriers / device transparently fall back to the two-pass (bit-identical).
+        Ok(self.with_fused_runtime_source(built, params))
     }
 }
 
@@ -270,7 +272,9 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
         built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
-        Ok(self.with_runtime_source(built, params))
+        // fused by default on host + f64 (iso has no energy, so the body stays its own pass — the
+        // Cartesian body has its own baked fused kernel); device / non-f64 fall back to the two-pass.
+        Ok(self.with_fused_runtime_source(built, params))
     }
 }
 

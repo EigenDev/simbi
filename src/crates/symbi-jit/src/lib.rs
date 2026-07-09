@@ -542,9 +542,16 @@ fn translate_expr(
         }
         ScalarExpr::Cast { to, value } => {
             let v = translate_expr(b, value, vars, shims, stencil)?;
+            let vty = b.func.dfg.value_type(v);
             match to {
-                ElementTy::F64 | ElementTy::F32 => b.ins().fcvt_from_sint(types::F64, v),
-                ElementTy::I32 | ElementTy::U32 => b.ins().fcvt_to_sint(types::I32, v),
+                // no-op when the source already carries the target type: `_coord_N` is pre-converted
+                // to f64 in the kernel var seed, so an int->f64 cast of it would re-convert an f64.
+                ElementTy::F64 | ElementTy::F32 => {
+                    if vty == types::F64 { v } else { b.ins().fcvt_from_sint(types::F64, v) }
+                }
+                ElementTy::I32 | ElementTy::U32 => {
+                    if vty.is_int() { v } else { b.ins().fcvt_to_sint(types::I32, v) }
+                }
                 ElementTy::Bool => return Err(JitError::Unsupported("cast to bool".into())),
             }
         }
@@ -756,12 +763,39 @@ fn translate_stmts(
                 let v = translate_expr(b, result, vars, shims, Some(stencil))?;
                 vars.insert(name.clone(), LocalSlot::Val(v));
             }
-            ScalarStmt::IfElse { .. } => {
-                // a data-dependent branch (only the taken arm runs) with phi outputs — needs CLIF
-                // block params. not yet JIT'd; reject so the caller falls back to the interpreter.
-                return Err(JitError::Unsupported(
-                    "IfElse (data-dependent branch)".into(),
-                ));
+            ScalarStmt::IfElse { outs, cond, then_body, else_body } => {
+                // a data-dependent branch where ONLY the taken arm runs. each result slot is a mutable
+                // `Variable` declared BEFORE the branch; every arm ends with `Assign { outs[j], .. }`, so
+                // the slot is defined on both paths and live at the merge (Cranelift inserts the phi on
+                // seal). arm-internal lets die at the arm's block — only the taken arm's ops execute.
+                for (name, element) in outs {
+                    let var = Variable::from_u32(*next_var);
+                    *next_var += 1;
+                    b.declare_var(var, clif_ty(*element));
+                    vars.insert(name.clone(), LocalSlot::Var(var));
+                }
+                let c = translate_expr(b, cond, vars, shims, Some(stencil))?;
+                let then_blk = b.create_block();
+                let else_blk = b.create_block();
+                let merge = b.create_block();
+                b.ins().brif(c, then_blk, &[], else_blk, &[]);
+
+                b.seal_block(then_blk);
+                b.switch_to_block(then_blk);
+                let tflow = translate_stmts(b, then_body, vars, shims, stencil, next_var, loop_exit)?;
+                if tflow == Flow::Fallthrough {
+                    b.ins().jump(merge, &[]);
+                }
+
+                b.seal_block(else_blk);
+                b.switch_to_block(else_blk);
+                let eflow = translate_stmts(b, else_body, vars, shims, stencil, next_var, loop_exit)?;
+                if eflow == Flow::Fallthrough {
+                    b.ins().jump(merge, &[]);
+                }
+
+                b.seal_block(merge);
+                b.switch_to_block(merge);
             }
         }
     }

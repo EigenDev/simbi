@@ -36,7 +36,7 @@ use crate::regimes::substrate_kernels::{
     cfl_wave_speed, dispatch_body_feedback, dispatch_body_source, dispatch_fields, dispatch_flux,
     dispatch_driven_boundaries, dispatch_fused_runtime_cpu, dispatch_gradient_boundaries,
     dispatch_godunov_maybe_fused,
-    dispatch_named, dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel,
+    dispatch_named, dispatch_runtime_source, dispatch_source_apply, body_fused_in, fused_runtime_cpu_kernel,
     geom_suffix, resolve_params, scalars_for, FusedSourceBinding, GradientBc, RuntimeSource,
     ScalarBind, Solver,
 };
@@ -213,7 +213,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         if self.fuse_runtime {
             if let Some(rs) = &self.runtime_source {
                 if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }) {
-                    dispatch_fused_runtime_cpu(sim, pre, fk, rs, dt, a0, ac);
+                    dispatch_fused_runtime_cpu(sim, pre, fk, rs, dt, a0, ac, self.gamma);
                     return;
                 }
             }
@@ -357,6 +357,15 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn body_source(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        // when the fused stage carried the immersed body inside godunov (one launch), running the
+        // standalone pass here would double-apply it. same predicate + geo the godunov stage used.
+        if self.fuse_runtime {
+            if let Some(rs) = &self.runtime_source {
+                if body_fused_in(sim, rs, GeoSource::Hydro { inertial: true }) {
+                    return;
+                }
+            }
+        }
         // forward immersed-body source (gravity + accretion, docs/design/19): cons += dt*S, in-place.
         dispatch_body_source(sim, dt, self.gamma);
     }

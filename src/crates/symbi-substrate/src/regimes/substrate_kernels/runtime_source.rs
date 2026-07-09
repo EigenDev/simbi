@@ -26,7 +26,9 @@ use symbi_sim::state::FieldStore;
 
 use super::binding::{bind_manifest, parse_manifest, resolve_path};
 use super::layout::{alloc_layout, exec_layout};
-use super::params::{geom_scalar, motion_scalar, physical_geom, ScalarBind};
+use super::params::{body_scalar, geom_scalar, motion_scalar, physical_geom, ScalarBind};
+
+use symbi_ib::collection::MAX_BODIES;
 
 /// dispatch a RUNTIME-BUILT IR kernel — one whose neutral IR blob was produced at sim
 /// startup (not AOT-baked into the registry), e.g., a python-authored user source lowered
@@ -295,13 +297,14 @@ fn build_fused_cpu_kernel<const D: usize>(
     has_energy: bool,
     geo: symbi_discretize::gv::GeoSource,
     built: &[(String, BuiltSource)],
+    n_bodies: usize,
 ) -> Option<FusedCpuKernel> {
     let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
-        // n_bodies = 0: the immersed-body fold into this runtime fused kernel is piece 2 (build()
-        // resolution); today the body stays its own pass so this path is user-source-only.
-        coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false, 0,
+        // n_bodies > 0 folds the immersed-body source (gravity + accretion drain) into this stage,
+        // baked at MAX_BODIES to match the standalone `body_source` kernel (unused slots zero via mass = 0).
+        coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false, n_bodies,
     );
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). NOT
     // an error: the gate is "compile when possible, else interpret", never miscompile.
@@ -345,11 +348,33 @@ where
         return None;
     }
     let (coords, spacing, axes) = sim_gv_geom(sim);
+    // the immersed body folds into the fused stage only on an ENERGY regime (the `body_evolved_gv`
+    // wrap reads/writes `nrg`; the iso body — cs from prim.pre — is a separate pass). baked at
+    // MAX_BODIES to match the standalone `body_source` kernel; 0 leaves the body out (iso, or no bodies).
+    let n_bodies = if rs.has_energy && sim.immersed.is_some() { MAX_BODIES } else { 0 };
     rs.fused_cpu
         .get_or_init(|| {
-            build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, geo, &rs.built)
+            build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, geo, &rs.built, n_bodies)
         })
         .as_ref()
+}
+
+/// whether the fused stage ABSORBED the immersed-body source this run — the predicate the standalone
+/// `body_source` pass checks to avoid double-applying it. true only when the fused host kernel is live
+/// AND it was built with the body fold (energy regime + bodies present); false on iso, on device / non-f64
+/// (two-pass), and on any JIT-subset miss. same `geo` the caller's `godunov_stage` uses.
+pub(crate) fn body_fused_in<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    rs: &RuntimeSource,
+    geo: symbi_discretize::gv::GeoSource,
+) -> bool
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    rs.has_energy
+        && sim.immersed.is_some()
+        && fused_runtime_cpu_kernel(sim, rs, geo).is_some()
 }
 
 /// dispatch the FUSED godunov+source host kernel: bind each manifest path to the sim's `Field`
@@ -366,6 +391,9 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     dt: f64,
     a0: f64,
     ac: f64,
+    // the regime EOS parameter, bound to the fused body's `gamma`/`cs` scalar (Gamma for adiabatic).
+    // unused when the kernel carries no body fold (iso, or no bodies) — no `gamma` scalar to resolve.
+    gamma: f64,
 ) where
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
@@ -393,6 +421,10 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     let t = sim.time;
     let (x_lo_phys, dx_phys) =
         physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
+    // the immersed-body params (packed by the same side-car the standalone `body_source` reads), so the
+    // fused body wrap resolves `body_{idx}_{field}` identically to the two-pass. `None` -> body_scalar
+    // returns zero (an inert slot), matching the MAX_BODIES bake.
+    let bodies = sim.immersed.as_ref().map(|im| &im.bodies);
     let scalars: Vec<f64> = fk.scalar_params.iter().map(|bind| {
         let ScalarBind::Ref(sref) = bind else {
             panic!("fused runtime source: unexpected spec scalar {bind:?}");
@@ -404,10 +436,13 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
             ScalarRef::Time => t,
             ScalarRef::UserParam(i) => *rs.params.get(i as usize)
                 .unwrap_or_else(|| panic!("fused runtime source: param p{i} not provided")),
+            // the fused body fold declares these: the EOS parameter and the per-body params.
+            ScalarRef::Gamma | ScalarRef::Cs => gamma,
+            ScalarRef::Body { idx, field } => body_scalar::<D>(bodies, idx, field),
             other => motion_scalar(&sim.motion, sim.geom.coords, D, other)
                 .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
                 .unwrap_or_else(|| panic!(
-                    "fused runtime source: unresolved scalar {other:?} (dt|a0|ac|mesh_hdil|dx_k|x_lo_k|t|p{{i}})"
+                    "fused runtime source: unresolved scalar {other:?} (dt|a0|ac|mesh_hdil|dx_k|x_lo_k|t|gamma|body_*|p{{i}})"
                 )),
         }
     }).collect();

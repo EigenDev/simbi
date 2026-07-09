@@ -274,7 +274,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 if let Some(fk) =
                     fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true })
                 {
-                    dispatch_fused_runtime_cpu(sim, &self.pre, fk, rs, dt, a0, ac);
+                    // iso reaches this path body-free (the Cartesian-body case early-returns above),
+                    // so the fused kernel carries no body fold; self.cs is the inert `Cs` binding.
+                    dispatch_fused_runtime_cpu(sim, &self.pre, fk, rs, dt, a0, ac, self.cs);
                     return;
                 }
             }
