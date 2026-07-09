@@ -3654,6 +3654,24 @@ macro_rules! build_and_run_iso {
             None => sub,
         };
 
+        // register the Neumann/Robin gradient boundaries; iso re-derives pre = cs^2*rho at the ghost
+        // (the pressure coefficients are ignored — the substrate feeds cs^2 to the shared kernel).
+        let sub = {
+            let mut sub = sub;
+            for spec in &cfg.gradient_bcs {
+                use symbi::regimes::substrate_kernels::GradientBc;
+                let gbc = match spec.kind.as_str() {
+                    "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
+                    "robin" => GradientBc::Robin(
+                        spec.coeffs.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+                    ),
+                    other => return Err(format!("unknown gradient boundary kind '{other}'")),
+                };
+                sub = sub.with_gradient_boundary(gbc).0;
+            }
+            sub
+        };
+
         if cfg.locally_isothermal {
             // derive cs^2(x) = p(x)/rho(x) from the per-cell initial pressure, then HOLD it.
             let pre_ic = Field::<f64, $d, _>::zeros(&sim.geom.allocated)

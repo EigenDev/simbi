@@ -15,6 +15,7 @@
 use symbi::prelude::*;
 use symbi::regimes::substrate_kernels::GradientBc;
 use symbi::sim::evolve::KernelSet;
+use symbi_hydro::{IsoNewtonian, Isothermal};
 
 type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
 
@@ -76,6 +77,94 @@ fn neumann_boundary_extrapolates_from_the_edge_cell() {
         }
     }
     assert!(checked > 0, "no x_lo ghost-band cells found to check");
+}
+
+#[test]
+fn neumann_boundary_spherical_radial_uses_the_baked_cartesian_kernel() {
+    // plain spherical hydro (DOF == D) reuses the cart-baked neumann kernel; the geometry enters
+    // only through the runtime x_lo/dx/map_kind the dist reads. a radial Neumann on the OUTER (hi)
+    // r face therefore extrapolates with the true radial spacing dr (radial dist is exact).
+    type SimSph = SimCpu<Newtonian, 1, Spherical, IdealGas<f64>>;
+    let n = 16usize;
+    let (r0, r1) = (1.0, 2.0);
+    let dr = (r1 - r0) / n as f64;
+    let boundaries =
+        Boundaries::<1>::per_axis([[BoundaryType::Outflow, BoundaryType::Neumann(0)]]);
+    let sim = SimSph::build(Newtonian, IdealGas { gamma: 1.4 }, Spherical)
+        .cells([n])
+        .bounds([r0], [r1])
+        .boundaries(boundaries)
+        .finish()
+        .unwrap();
+    let pre_f = sim.fields.prim.pre_field().unwrap();
+    for c in sim.geom.interior.iter() {
+        sim.fields.prim.rho.view_mut().set(c, RHO);
+        sim.fields.prim.vel[0].view_mut().set(c, VX);
+        pre_f.view_mut().set(c, PRE);
+    }
+    // Neumann on the outer radial face: coeffs [rho, v_r, pre] (DOF = 1).
+    let q = [0.5, -0.3, 1.0];
+    let (sub, _id) = sim.substrate().with_gradient_boundary(GradientBc::Neumann(q.to_vec()));
+    sub.ghost_fill(&sim);
+
+    // outer edge = last interior cell centroid (arithmetic center, matching the kernel's face midpoint).
+    let r_edge = r1 - 0.5 * dr;
+    let mut checked = 0usize;
+    for c in sim.geom.allocated.iter() {
+        let r = sim.geom.cell_coord(c)[0];
+        if r > r1 {
+            let dist = (r - r_edge).abs();
+            let rho = *sim.fields.prim.rho.view().at(c);
+            let v0 = *sim.fields.prim.vel[0].view().at(c);
+            assert!((rho - (RHO + q[0] * dist)).abs() < 1e-12, "sph outer ghost rho at r={r}: {rho}");
+            assert!((v0 - (VX + q[1] * dist)).abs() < 1e-12, "sph outer ghost v_r at r={r}: {v0}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no outer radial ghost cells found");
+}
+
+#[test]
+fn neumann_boundary_iso_rederives_the_eos_pressure() {
+    // iso: the shared kernel is fed cs^2 so the ghost pressure honours pre = cs^2*rho (NOT a free
+    // gradient). rho/vel extrapolate; pre tracks the closure. the substrate owns `pre` (off the
+    // global prim ABI), so seed + read it directly.
+    type SimIso = SimCpu<IsoNewtonian, 1, Cartesian, Isothermal<f64>>;
+    let cs = 0.5;
+    let n = 16usize;
+    let dr = 1.0 / n as f64;
+    let boundaries =
+        Boundaries::<1>::per_axis([[BoundaryType::Outflow, BoundaryType::Neumann(0)]]);
+    let sim = SimIso::build(IsoNewtonian, Isothermal { cs }, Cartesian)
+        .cells([n])
+        .bounds([0.0], [1.0])
+        .boundaries(boundaries)
+        .finish()
+        .unwrap();
+    // Neumann coeffs [rho, v, pre]; the pre coeff is ignored (iso derives pre = cs^2*rho).
+    let (sub, _id) = sim.substrate().with_gradient_boundary(GradientBc::Neumann(vec![0.5, -0.3, 99.0]));
+    for c in sim.geom.interior.iter() {
+        sim.fields.prim.rho.view_mut().set(c, RHO);
+        sim.fields.prim.vel[0].view_mut().set(c, VX);
+        sub.pre.view_mut().set(c, cs * cs * RHO); // the iso c2p closure at the edge
+    }
+    sub.ghost_fill(&sim);
+
+    let x_edge = 1.0 - 0.5 * dr;
+    let mut checked = 0usize;
+    for c in sim.geom.allocated.iter() {
+        let x = sim.geom.cell_coord(c)[0];
+        if x > 1.0 {
+            let dist = (x - x_edge).abs();
+            let rho = *sim.fields.prim.rho.view().at(c);
+            let pre = *sub.pre.view().at(c);
+            assert!((rho - (RHO + 0.5 * dist)).abs() < 1e-12, "iso ghost rho at x={x}: {rho}");
+            // the EOS closure held at the ghost: pre = cs^2 * rho_ghost, exactly.
+            assert!((pre - cs * cs * rho).abs() < 1e-12, "iso ghost pre != cs^2*rho: {pre} vs {}", cs * cs * rho);
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no outer iso ghost cells found");
 }
 
 #[test]

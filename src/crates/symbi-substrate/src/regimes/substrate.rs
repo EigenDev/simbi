@@ -31,10 +31,11 @@ use symbi_hydro::source_spec::BuiltSource;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    FusedSourceBinding, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
+    FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
     dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source,
-    dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel, resolve_params,
+    dispatch_gradient_boundaries, dispatch_runtime_source, dispatch_source_apply,
+    fused_runtime_cpu_kernel, resolve_params,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Geometry;
@@ -83,6 +84,9 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// opt-in + gated (host + f64); falls back to the two-pass otherwise. proven bit-for-bit by
     /// `jit_fused_equals_two_pass`.
     pub fuse_runtime: bool,
+    /// gradient-boundary (Neumann / Robin) coefficients, indexed by the `BoundaryType::Neumann(id)` /
+    /// `Robin(id)` id. the shared fills, fed `cs^2` so the ghost honours `pre = cs^2*rho`.
+    pub gradient_bcs: Vec<GradientBc>,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
 }
@@ -114,8 +118,19 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             additive_source: None,
             runtime_source: None,
             fuse_runtime: false,
+            gradient_bcs: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
         }
+    }
+
+    /// register a NEUMANN / ROBIN gradient boundary (the convenience short-circuit). the id
+    /// (registration order) is what the sim's `Boundaries` carries as `BoundaryType::Neumann(id)` /
+    /// `Robin(id)`. `coeffs` are the per-variable coefficients in prim order `[rho, vel.., pre]` (the
+    /// pressure coefficient is ignored — iso re-derives pre = cs^2*rho at the ghost).
+    pub fn with_gradient_boundary(mut self, coeffs: GradientBc) -> (Self, u16) {
+        let id = self.gradient_bcs.len() as u16;
+        self.gradient_bcs.push(coeffs);
+        (self, id)
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source (the regime-agnostic mechanism). build it
@@ -329,6 +344,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 );
             },
         );
+        // the Neumann/Robin gradient faces (skipped by the pullback), filled from the edge cell over
+        // the substrate-owned pressure field; Some(cs^2) makes the shared kernel honour the
+        // isothermal closure pre = cs^2*rho at the ghost.
+        if !self.gradient_bcs.is_empty() {
+            dispatch_gradient_boundaries(sim, &self.pre, &self.gradient_bcs, Some(self.cs * self.cs));
+        }
     }
 
     fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {

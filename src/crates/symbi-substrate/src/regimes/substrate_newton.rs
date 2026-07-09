@@ -263,7 +263,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
         // and the Neumann/Robin gradient faces (also skipped above), filled from the edge cell.
         if !self.gradient_bcs.is_empty() {
-            dispatch_gradient_boundaries(sim, &self.gradient_bcs);
+            dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
         }
     }
 

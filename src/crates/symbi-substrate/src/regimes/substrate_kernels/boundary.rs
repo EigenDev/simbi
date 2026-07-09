@@ -187,7 +187,13 @@ pub enum GradientBc {
 /// the string-keyed spec-scalar map the baked kernel reads its per-variable coefficients from
 /// (`neu_q_{rho,v{k},pre}` / `rob_{a,b,c}_{rho,v{k},pre}`). the variable order matches the kernel's
 /// write order: rho, then the `DOF` velocity components, then pre.
-fn gradient_spec_map<const DOF: usize>(entry: &GradientBc) -> HashMap<String, f64> {
+///
+/// `iso_cs2 = Some(cs^2)` re-derives the PRESSURE coefficients from the DENSITY ones so the shared
+/// energy kernel reproduces the isothermal closure `pre = cs^2*rho` at the ghost: for Neumann the
+/// pre gradient is `cs^2 * q_rho`; for Robin the pre triple is `(a_rho, b_rho, cs^2*c_rho)` — both
+/// exact because the fills are linear in `u_edge` and `pre_edge = cs^2*rho_edge`. energy regimes
+/// (`None`) use the user's pressure coefficients directly.
+fn gradient_spec_map<const DOF: usize>(entry: &GradientBc, iso_cs2: Option<f64>) -> HashMap<String, f64> {
     let mut m = HashMap::new();
     match entry {
         GradientBc::Neumann(q) => {
@@ -196,7 +202,11 @@ fn gradient_spec_map<const DOF: usize>(entry: &GradientBc) -> HashMap<String, f6
             for k in 0..DOF {
                 m.insert(format!("neu_q_v{k}"), q[1 + k]);
             }
-            m.insert("neu_q_pre".to_string(), q[1 + DOF]);
+            let q_pre = match iso_cs2 {
+                Some(cs2) => cs2 * q[0],
+                None => q[1 + DOF],
+            };
+            m.insert("neu_q_pre".to_string(), q_pre);
         }
         GradientBc::Robin(abc) => {
             assert_eq!(abc.len(), DOF + 2, "robin needs {} (a,b,c) triples, got {}", DOF + 2, abc.len());
@@ -209,7 +219,11 @@ fn gradient_spec_map<const DOF: usize>(entry: &GradientBc) -> HashMap<String, f6
             for k in 0..DOF {
                 ins(&format!("v{k}"), &abc[1 + k]);
             }
-            ins("pre", &abc[1 + DOF]);
+            let pre_t = match iso_cs2 {
+                Some(cs2) => [abc[0][0], abc[0][1], cs2 * abc[0][2]],
+                None => abc[1 + DOF],
+            };
+            ins("pre", &pre_t);
         }
     }
     m
@@ -220,19 +234,19 @@ fn gradient_spec_map<const DOF: usize>(entry: &GradientBc) -> HashMap<String, f6
 /// ghost band, binding the outflow EDGE source (`map_type = 3`, `arg = the boundary-adjacent interior
 /// cell`) on the boundary axis, the spacing-aware geometry, and the per-variable coefficients (spec
 /// scalars). called at the tail of a regime's `ghost_fill`, after the standard pullback skipped these
-/// faces. energy regimes only (the rho/vel/pre 3-field kernel).
+/// faces. `iso_cs2 = Some(cs^2)` re-derives the pressure coefficients from the density ones so the
+/// shared kernel honours the isothermal closure `pre = cs^2*rho`; energy regimes pass `None`.
 pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
+    pre: &symbi_grid::Field<Sc, D, Mem>,
     coeffs: &[GradientBc],
+    iso_cs2: Option<f64>,
 ) where
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    let pre = sim
-        .fields
-        .prim
-        .pre_field()
-        .expect("gradient boundary needs prim.pre (energy regime)");
+    // `pre` is the regime's pressure field (energy: `sim.fields.prim.pre`; iso: the substrate-owned
+    // `cs2*rho` field, off the global ABI) — the `dispatch_named` "prim.pre" override.
     let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
     let (x_lo_phys, dx_phys) =
         physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
@@ -248,7 +262,7 @@ pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
             let entry = coeffs.get(id).unwrap_or_else(|| {
                 panic!("gradient boundary on axis {axis} side {side} references unregistered id {id}")
             });
-            let spec = gradient_spec_map::<DOF>(entry);
+            let spec = gradient_spec_map::<DOF>(entry, iso_cs2);
             let name = format!("{kind}_ghost_fill{sfx}_{D}d");
             let band = ghost_band_domain(&sim.geom.allocated, &sim.geom.interior, axis, side);
             // the outflow EDGE cell along the boundary axis: the first interior cell on the lo side,

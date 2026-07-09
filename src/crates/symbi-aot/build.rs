@@ -1707,6 +1707,10 @@ fn main() {
     // lattice pullbacks over the lifted component set): one instance each.
     gen_snapshot(&out_dir, 2, "rhd", true, Geom::sph_swirl());
     gen_iso_ghost_fill(&out_dir, 2, Geom::sph_swirl());
+    // the gradient (Neumann/Robin) fills for the swirl set (DOF > D): radial dist is exact, the
+    // angular dist is per-coordinate (not physical arc-length r*dtheta).
+    gen_neumann_ghost_fill(&out_dir, 2, Geom::sph_swirl());
+    gen_robin_ghost_fill(&out_dir, 2, Geom::sph_swirl());
     // GRMHD (design 44): the schwarzschild 1D radial row — the magnetized-michel
     // monopole gate's kernel family. gas godunov (the ideal-MHD stress in the covariant
     // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
@@ -1935,6 +1939,8 @@ fn main() {
     gen_adiabatic_c2p(&out_dir, 2, cyl.clone());
     gen_iso_wave_speed_map(&out_dir, 2, cyl.clone());
     gen_iso_ghost_fill(&out_dir, 2, cyl.clone());
+    gen_neumann_ghost_fill(&out_dir, 2, cyl.clone());
+    gen_robin_ghost_fill(&out_dir, 2, cyl.clone());
     gen_godunov_stage(&out_dir, 2, "adiabatic", true, cyl.clone(), None);
     gen_snapshot(&out_dir, 2, "adiabatic", true, cyl.clone());
     for dir in 0..2 {
