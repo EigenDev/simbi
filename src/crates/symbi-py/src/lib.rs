@@ -1953,9 +1953,14 @@ macro_rules! build_and_run_hydro {
                         <$regime_ty as Regime<f64, $dof>>::SPEC,
                     )
                     .expect("fine-level source lower");
-                    ks.with_runtime_source(built, scfg.params.clone())
+                    // fuse at the fine level too (mirrors the base attach) so a refined run does not
+                    // silently drop to the two-pass on its finest, most-cell-dense levels.
+                    ks.attach_runtime_source(built, scfg.params.clone())
+                        .expect("fine-level source attach")
                 }
-                None => ks,
+                // no user source: enable fusion so an immersed body folds into the fine-level godunov
+                // (adiabatic); a no-op otherwise.
+                None => ks.enable_source_fusion(),
             }
         });
         // a refined run attaches its immersed bodies to the hierarchy: the FINEST level owns the full
