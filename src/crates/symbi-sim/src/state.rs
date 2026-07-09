@@ -1993,7 +1993,7 @@ where
     /// the just-updated cons (prim is stale pre-c2p); isothermal carries the fixed
     /// `c_s = sqrt(gamma_for_ops)`. DOF == D (the accretor domain; the swirl DOF-lift is
     /// deferred).
-    pub fn apply_drain(&self, c_drain: f64) {
+    pub fn apply_drain(&self, c_drain: f64, dt: f64) {
         if !Mem::IS_HOST_ACCESSIBLE || DOF != D {
             return;
         }
@@ -2012,7 +2012,6 @@ where
 
         let bg = self.geom.block_geometry(self.physics.metric);
         let gamma = self.physics.eos.gamma_for_ops();
-        let dt = self.dt;
         let den = &self.fields.cons.den;
         let mom = &self.fields.cons.mom;
         let nrg = self.fields.cons.nrg.as_ref();
@@ -2042,12 +2041,18 @@ where
             };
             let tau = symbi_ib::drain_timescale(dx, c_s, c_drain);
 
-            // per-body drain exponents chi_b dt / tau; the mask ramp width is one cell.
+            // per-body drain exponents chi_b dt / tau; the mask ramp width is one cell. keep the
+            // cell->body offset for the accretion torque (r x dP), which -- gravity being central --
+            // is the body's ONLY angular-momentum feedback.
             let mut total_exp = 0.0;
             let mut exps = [0.0f64; symbi_ib::MAX_BODIES];
+            let mut rvecs = [[0.0f64; 3]; symbi_ib::MAX_BODIES];
             for (j, &(_, pos, r_mask)) in draining.iter().enumerate() {
-                let dist = (x_cart - pos).norm();
-                let e = symbi_ib::drain_mask(dist, r_mask, dx) * dt / tau;
+                let r = x_cart - pos;
+                for ax in 0..D {
+                    rvecs[j][ax] = r[ax];
+                }
+                let e = symbi_ib::drain_mask(r.norm(), r_mask, dx) * dt / tau;
                 exps[j] = e;
                 total_exp += e;
             }
@@ -2072,9 +2077,16 @@ where
                 let frac = exps[j] / total_exp;
                 let d = &mut deltas[bi];
                 d.mass_delta += den_c * absorbed * frac * vol;
+                // absorbed momentum (the drag) and its torque about the body (r x dP), embedded in 3D.
+                let mut dp = [0.0f64; 3];
                 for k in 0..DOF {
-                    d.force_delta[k] += mom_c[k] * absorbed * frac * vol / dt;
+                    dp[k] = mom_c[k] * absorbed * frac * vol;
+                    d.force_delta[k] += dp[k] / dt;
                 }
+                let r = &rvecs[j];
+                d.torque_delta[0] += r[1] * dp[2] - r[2] * dp[1];
+                d.torque_delta[1] += r[2] * dp[0] - r[0] * dp[2];
+                d.torque_delta[2] += r[0] * dp[1] - r[1] * dp[0];
                 d.energy_delta += nrg_c * absorbed * frac * vol;
             }
         }

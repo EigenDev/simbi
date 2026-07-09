@@ -96,7 +96,6 @@ fn body_source_accretion_matches_spec() {
     let ke = 0.5 * (m0_in * v[0] + m1_in * v[1]);
     let p = (GAMMA - 1.0) * (nrg_in - ke);
     let cs = (GAMMA * p / den_in).sqrt();
-    let e_int = (nrg_in - ke) / den_in;
     let min_w = DX.min(DY);
 
     for i in 0..NX {
@@ -108,40 +107,19 @@ fn body_source_accretion_matches_spec() {
             let r_eff3 = (r_dist2 + SOFT0 * SOFT0).powf(1.5);
             let r_mag = r_dist2.sqrt();
 
-            // gravity rates
+            // gravity is an additive momentum + energy source; the DRAIN then scales EVERY
+            // conserved component by f = exp(-drain_rate*dt) (docs/ideas/accretor.md).
             let g = [-M0 * rvec[0] / r_eff3, -M0 * rvec[1] / r_eff3];
-            let mut d_mom = [den_in * g[0], den_in * g[1]];
-            let mut d_nrg = m0_in * g[0] + m1_in * g[1];
-            let mut d_den = 0.0;
+            let mom_grav = [m0_in + DT * den_in * g[0], m1_in + DT * den_in * g[1]];
+            let nrg_grav = nrg_in + DT * (m0_in * g[0] + m1_in * g[1]);
+            let chi = 0.5 * (1.0 - ((r_mag - RACC0) / min_w).tanh());
+            let drain_rate = chi * SINK0.min(cs / min_w);
+            let f = (-drain_rate * DT).exp();
 
-            // accretion
-            let r_kernel = 0.5 * RACC0;
-            let weight = (-(r_mag / r_kernel).powi(2)).exp();
-            let sound_crossing = min_w / cs;
-            let t_ff = (r_mag.powi(3) / (2.0 * M0 + 1e-30)).sqrt();
-            let t_nat = sound_crossing.min(t_ff);
-            let nat_rate = 1.0 / (t_nat + 1e-30);
-            let sr_base = SINK0.min(nat_rate).min(1.0 / DT);
-            let den_dot = den_in * sr_base * weight;
-            let safe_r = (r_dist2 + 1e-24).sqrt();
-            let rhat = [rvec[0] / safe_r, rvec[1] / safe_r];
-            let vrel = [v[0], v[1]]; // body at rest
-            let vrad_comp = vrel[0] * rhat[0] + vrel[1] * rhat[1];
-            let mut vstar2 = 0.0;
-            for ax in 0..2 {
-                let vrad = vrad_comp * rhat[ax];
-                let vang = vrel[ax] - vrad;
-                let vstar = vrad + DELTA0 * vang; // + body_vel = 0
-                d_mom[ax] -= vstar * den_dot;
-                vstar2 += vstar * vstar;
-            }
-            d_den -= den_dot;
-            d_nrg -= (0.5 * vstar2 + e_int) * den_dot;
-
-            let want_den = den_in + DT * d_den;
-            let want_m0 = m0_in + DT * d_mom[0];
-            let want_m1 = m1_in + DT * d_mom[1];
-            let want_nrg = nrg_in + DT * d_nrg;
+            let want_den = den_in * f;
+            let want_m0 = mom_grav[0] * f;
+            let want_m1 = mom_grav[1] * f;
+            let want_nrg = nrg_grav * f;
 
             let c = [i, j];
             assert!(rel(out.get(c, "den_new"), want_den) < 1e-11, "den ({i},{j}): got {} want {want_den}", out.get(c, "den_new"));
@@ -184,23 +162,16 @@ fn body_feedback_matches_spec() {
             let r_eff3 = (r_dist2 + SOFT0 * SOFT0).powf(1.5);
             let r_mag = r_dist2.sqrt();
             let g = [-M0 * x / r_eff3, -M0 * y / r_eff3];
-            let weight = (-(r_mag / (0.5 * RACC0)).powi(2)).exp();
-            let t_ff = (r_mag.powi(3) / (2.0 * M0 + 1e-30)).sqrt();
-            let nat_rate = 1.0 / ((min_w / cs).min(t_ff) + 1e-30);
-            let sr = SINK0.min(nat_rate).min(1.0 / DT);
-            let den_dot = den_in * sr * weight;
-            let safe_r = (r_dist2 + 1e-24).sqrt();
-            let rhat = [x / safe_r, y / safe_r];
-            let vrad_comp = v[0] * rhat[0] + v[1] * rhat[1];
-            let vstar = [
-                vrad_comp * rhat[0] + DELTA0 * (v[0] - vrad_comp * rhat[0]),
-                vrad_comp * rhat[1] + DELTA0 * (v[1] - vrad_comp * rhat[1]),
-            ];
-            let want_fx = -(den_in * g[0] + vstar[0] * den_dot) * dv;
-            let want_fy = -(den_in * g[1] + vstar[1] * den_dot) * dv;
-            let fa = [-(vstar[0] * den_dot) * dv, -(vstar[1] * den_dot) * dv];
+            // the drain: this cell's absorbed fraction, drag force (absorbed momentum / dt), mass.
+            let chi = 0.5 * (1.0 - ((r_mag - RACC0) / min_w).tanh());
+            let drain_rate = chi * SINK0.min(cs / min_w);
+            let frac = 1.0 - (-drain_rate * DT).exp();
+            let mom_cart = [m0_in, m1_in]; // = den*v_cart (cartesian coords)
+            let fa = [mom_cart[0] * frac * dv / DT, mom_cart[1] * frac * dv / DT];
+            let want_fx = -(den_in * g[0]) * dv + fa[0]; // gravity reaction + drag
+            let want_fy = -(den_in * g[1]) * dv + fa[1];
             let want_tz = x * fa[1] - y * fa[0];
-            let want_m = den_dot * dv * DT;
+            let want_m = den_in * frac * dv;
 
             let c = [i, j];
             assert!(rel(out.get(c, "b0_f0"), want_fx) < 1e-11, "f0x ({i},{j}): {} vs {want_fx}", out.get(c, "b0_f0"));

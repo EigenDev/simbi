@@ -43,12 +43,15 @@ fn cube(a: Gv) -> Gv {
     a * a * a
 }
 
-/// per-cell, per-body physics in CARTESIAN (coord-free): softened gravity `g`, accretion rate
-/// `den_dot`, sink velocity `vstar`, and `rvec = cell - body` (all 3-vectors).
+/// per-cell, per-body physics in CARTESIAN (coord-free): softened gravity `g`, the well-posed
+/// DRAIN RATE `drain_rate` (1/time; the fluid in the mask relaxes by `exp(-drain_rate*dt)`), and
+/// `rvec = cell - body`. the drain (docs/ideas/accretor.md) replaces the KMK04 mass-only sink: a
+/// UNIFORM exponential scaling of every conserved component leaves the intensive primitive state
+/// invariant (no acoustic injection, positivity-preserving for any dt) and the accretion rate is
+/// EMERGENT (the reduced `U(1 - exp(-rate*dt))`).
 struct BodyContributionGv {
     g: [Gv; 3],
-    den_dot: Gv,
-    vstar: [Gv; 3],
+    drain_rate: Gv,
     rvec: [Gv; 3],
 }
 
@@ -215,31 +218,19 @@ fn body_contribution(
     let grav_fac = -mass / cube(r_eff);
     let g: [Gv; 3] = std::array::from_fn(|i| rvec[i] * grav_fac);
 
-    // accretion rate (scalar): den_dot = den*min(sink, 1/t_nat, 1/dt)*weight.
-    let r_acc = Gv::scalar(&format!("body_{b}_racc"));
+    // the well-posed DRAIN rate (accretor.md §2): drain_rate = chi / tau, with the mollified mask
+    // chi = 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) and the timescale capped at the
+    // sound-crossing rate cs/dx so the mask stays evacuated. `sink_rate` (per body) is the user
+    // dial: 0 for a non-accreting body (-> drain_rate = 0, exact no-op), large -> the full
+    // sound-crossing drain; the min gates + caps in one step (mirrors the retired KMK04 min).
+    let r_mask = Gv::scalar(&format!("body_{b}_racc"));
     let sink_rate = Gv::scalar(&format!("body_{b}_sink"));
-    let delta = Gv::scalar(&format!("body_{b}_delta"));
-    let r_norm = r_mag / (Gv::from_f64(0.5) * r_acc);
-    let weight = (-sq(r_norm)).exp();
-    let sound_crossing = min_w / cs;
-    let t_ff = (cube(r_mag) / (Gv::from_f64(2.0) * mass + tiny)).sqrt();
-    let nat_rate = Gv::ONE / (sound_crossing.min(t_ff) + tiny);
-    let sr_base = sink_rate.min(nat_rate).min(inv_dt);
-    let den_dot = den * sr_base * weight;
-
-    // sink velocity (cartesian): v_star = v_rad + delta*v_ang + v_body, v_rel = v_gas - v_body.
-    let bvel = body_vec3(b, ndim, cart_axes, "vel");
-    let inv_safe_r = Gv::ONE / (r_dist2 + eps_r).sqrt();
-    let rhat: [Gv; 3] = std::array::from_fn(|i| rvec[i] * inv_safe_r);
-    let vrel: [Gv; 3] = std::array::from_fn(|i| vel_cart[i] - bvel[i]);
-    let vrad_comp = vrel[0] * rhat[0] + vrel[1] * rhat[1] + vrel[2] * rhat[2];
-    let vstar: [Gv; 3] = std::array::from_fn(|i| {
-        let vrad = vrad_comp * rhat[i];
-        let vang = vrel[i] - vrad;
-        vrad + delta * vang + bvel[i]
-    });
-
-    BodyContributionGv { g, den_dot, vstar, rvec }
+    let z = (r_mag - r_mask) / min_w;
+    let chi = Gv::from_f64(0.5) * (Gv::ONE - z.tanh());
+    let sound_rate = cs / min_w; // = 1/tau at C_drain = 1
+    let drain_rate = chi * sink_rate.min(sound_rate);
+    let _ = (tiny, eps_r, inv_dt, vel_cart, den); // unused by the drain (kept for the shared signature)
+    BodyContributionGv { g, drain_rate, rvec }
 }
 
 /// FORWARD source: `cons += dt * (S_grav + S_accretion)`, generic over coordinate system.
@@ -265,32 +256,31 @@ pub(crate) fn body_evolved_gv(
 ) -> (Gv, Vec<Gv>, Gv) {
     let inv_dt = Gv::ONE / dt;
     let cart_axes = body_cart_axes(coords, ndim, axes);
-    let (coord3, cell_cart, vel_cart, min_w, cs, e_int) =
+    let (coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
         cell_scaffold(coords, ndim, ncomp, axes, gamma, den, mom, nrg);
 
-    let mut d_den = Gv::ZERO;
+    // gravity is an ADDITIVE momentum + energy source; the drain is the TOTAL rate over all bodies,
+    // applied as ONE uniform multiplicative factor (per accretor.md §2, the exact-exponential
+    // relaxation). the two operators split cleanly: gravity accelerates, then the mask drains.
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
     let mut d_nrg = Gv::ZERO;
+    let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
         let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
-        // project cartesian gravity + sink velocity onto the physical momentum components.
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
-        let vstar_phys = vector_from_cartesian_gv(coords, &coord3, &bc.vstar, ncomp);
-        d_den = d_den - bc.den_dot;
-        let mut vstar2 = Gv::ZERO;
         for comp in 0..ncomp {
-            d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity
-            d_nrg = d_nrg + mom[comp] * g_phys[comp];
-            d_mom[comp] = d_mom[comp] - vstar_phys[comp] * bc.den_dot; // accreted momentum
-            vstar2 = vstar2 + sq(vstar_phys[comp]);
+            d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity force
+            d_nrg = d_nrg + mom[comp] * g_phys[comp]; // gravity work
         }
-        let nrg_dot = Gv::from_f64(0.5) * vstar2 * bc.den_dot + e_int * bc.den_dot;
-        d_nrg = d_nrg - nrg_dot;
+        total_rate = total_rate + bc.drain_rate;
     }
 
-    let den_new = den + dt * d_den;
-    let mom_new: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] + dt * d_mom[comp]).collect();
-    let nrg_new = nrg + dt * d_nrg;
+    // f = exp(-total_rate * dt) in (0, 1]: uniform scaling of den, mom, nrg (intensive state
+    // invariant, positivity-preserving for any dt). f = 1 outside every mask -> exact no-op.
+    let f = (Gv::ZERO - total_rate * dt).exp();
+    let den_new = den * f;
+    let mom_new: Vec<Gv> = (0..ncomp).map(|comp| (mom[comp] + dt * d_mom[comp]) * f).collect();
+    let nrg_new = (nrg + dt * d_nrg) * f;
     (den_new, mom_new, nrg_new)
 }
 
@@ -348,29 +338,37 @@ pub fn body_feedback_gv(
     let dv = Gv::ONE / geo.inv_volume;
     let dv_dt = dv * dt;
 
+    let _ = dv_dt;
+    // the gas momentum in CARTESIAN (den * v_cart): what the uniform drain removes proportionally.
+    let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
+
     let mut writes: Writes = Vec::new();
     for b in 0..n_bodies {
         let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
-        // body force (cartesian, 3D) = -(den*g + v_star*den_dot)*dv. accretion force `fa` alone
-        // carries the torque (gravity is central -> no torque about the body).
+        // the fraction of this cell drained by body b this step: frac = 1 - exp(-rate*dt). exact for
+        // NON-overlapping masks (each cell in at most one mask -> matches the forward's total-rate
+        // factor); overlapping masks slightly over-attribute in this DIAGNOSTIC reduction.
+        let frac = Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp();
+        // body force (cartesian, 3D) = gravity reaction (-den*g*dv) + accretion drag
+        // (+ absorbed momentum / dt). the drag `fa` alone carries the torque (gravity is central).
         let mut force_cart = [Gv::ZERO; 3];
         let mut fa = [Gv::ZERO; 3];
         for i in 0..3 {
-            let vd = bc.vstar[i] * bc.den_dot;
-            force_cart[i] = -(den * bc.g[i] + vd) * dv;
-            fa[i] = -vd * dv;
+            fa[i] = mom_cart[i] * frac * dv * inv_dt; // absorbed momentum / dt = drag force
+            force_cart[i] = -(den * bc.g[i]) * dv + fa[i];
         }
         // the body's ndim force components live at its cartesian axes.
         for ax in 0..ndim {
             let fc = force_cart[cart_axes[ax]];
             writes.push((format!("b{b}_f{ax}"), format!("fb_{b}_force_{ax}").into(), fc.node()));
         }
-        // torque = r x F_accretion (full 3D cross; 2D yields (0,0,tz) automatically).
+        // torque = r x F_drag (full 3D cross; 2D yields (0,0,tz) automatically).
         let cross = |a: usize, bb: usize| bc.rvec[a] * fa[bb] - bc.rvec[bb] * fa[a];
         for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)].into_iter().enumerate() {
             writes.push((format!("b{b}_t{t}"), format!("fb_{b}_torque_{t}").into(), tc.node()));
         }
-        writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (bc.den_dot * dv_dt).node()));
+        // absorbed mass = den * frac * dv (the emergent accretion, a functional of the flow).
+        writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (den * frac * dv).node()));
     }
     (end_trace(), writes)
 }
@@ -477,21 +475,22 @@ pub(crate) fn body_evolved_iso_gv(
     let (coord3, cell_cart, vel_cart, min_w, cs) =
         cell_scaffold_iso(coords, ndim, ncomp, axes, den, mom, pre);
 
-    let mut d_den = Gv::ZERO;
+    // gravity additive, then the uniform drain (den + mom; no energy equation). see the adiabatic
+    // `body_evolved_gv` for the operator-split rationale.
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
+    let mut total_rate = Gv::ZERO;
     for b in 0..n_bodies {
         let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
         let g_phys = vector_from_cartesian_gv(coords, &coord3, &bc.g, ncomp);
-        let vstar_phys = vector_from_cartesian_gv(coords, &coord3, &bc.vstar, ncomp);
-        d_den = d_den - bc.den_dot;
         for comp in 0..ncomp {
-            d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity
-            d_mom[comp] = d_mom[comp] - vstar_phys[comp] * bc.den_dot; // accreted momentum
+            d_mom[comp] = d_mom[comp] + den * g_phys[comp]; // gravity force
         }
+        total_rate = total_rate + bc.drain_rate;
     }
 
-    let den_new = den + dt * d_den;
-    let mom_new: Vec<Gv> = (0..ncomp).map(|comp| mom[comp] + dt * d_mom[comp]).collect();
+    let f = (Gv::ZERO - total_rate * dt).exp();
+    let den_new = den * f;
+    let mom_new: Vec<Gv> = (0..ncomp).map(|comp| (mom[comp] + dt * d_mom[comp]) * f).collect();
     (den_new, mom_new)
 }
 
@@ -518,17 +517,17 @@ pub fn body_feedback_iso_gv(
 
     let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
     let dv = Gv::ONE / geo.inv_volume;
-    let dv_dt = dv * dt;
+    let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
 
     let mut writes: Writes = Vec::new();
     for b in 0..n_bodies {
         let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+        let frac = Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp();
         let mut force_cart = [Gv::ZERO; 3];
         let mut fa = [Gv::ZERO; 3];
         for i in 0..3 {
-            let vd = bc.vstar[i] * bc.den_dot;
-            force_cart[i] = -(den * bc.g[i] + vd) * dv;
-            fa[i] = -vd * dv;
+            fa[i] = mom_cart[i] * frac * dv * inv_dt; // drag = absorbed momentum / dt
+            force_cart[i] = -(den * bc.g[i]) * dv + fa[i];
         }
         for ax in 0..ndim {
             let fc = force_cart[cart_axes[ax]];
@@ -538,7 +537,7 @@ pub fn body_feedback_iso_gv(
         for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)].into_iter().enumerate() {
             writes.push((format!("b{b}_t{t}"), format!("fb_{b}_torque_{t}").into(), tc.node()));
         }
-        writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (bc.den_dot * dv_dt).node()));
+        writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (den * frac * dv).node()));
     }
     (end_trace(), writes)
 }

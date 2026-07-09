@@ -116,13 +116,16 @@ fn iso_source_gravity_only_matches_analytic() {
 
 #[test]
 fn iso_source_accretion_matches_spec() {
-    // gravity + Bondi-Hoyle accretion with cs = CS (constant, from prim.pre), no energy.
+    // gravity + the well-posed uniform-scaling DRAIN (docs/ideas/accretor.md), cs = CS from
+    // prim.pre, no energy. per cell: gravity is an additive momentum source, then EVERY conserved
+    // component is scaled by f = exp(-drain_rate*dt) -- so den and mom shrink by the SAME factor
+    // (the velocity is invariant, the design invariant).
     let (den, m0, m1) = (1.5, 0.4, -0.3);
     let out = run_iso(SINK0, den, m0, m1);
 
-    let v = [m0 / den, m1 / den];
     let cs = CS;
     let min_w = DX.min(DY);
+    let sound_rate = cs / min_w;
     for i in 0..NX {
         for j in 0..NY {
             let x = X0 + (i as f64 + 0.5) * DX;
@@ -131,31 +134,24 @@ fn iso_source_accretion_matches_spec() {
             let r_eff3 = (r_dist2 + SOFT0 * SOFT0).powf(1.5);
             let r_mag = r_dist2.sqrt();
             let g = [-M0 * x / r_eff3, -M0 * y / r_eff3];
-            let mut d_mom = [den * g[0], den * g[1]];
-            let mut d_den = 0.0;
-            let weight = (-(r_mag / (0.5 * RACC0)).powi(2)).exp();
-            let t_ff = (r_mag.powi(3) / (2.0 * M0 + 1e-30)).sqrt();
-            let nat_rate = 1.0 / ((min_w / cs).min(t_ff) + 1e-30);
-            let sr = SINK0.min(nat_rate).min(1.0 / DT);
-            let den_dot = den * sr * weight;
-            let safe_r = (r_dist2 + 1e-24).sqrt();
-            let rhat = [x / safe_r, y / safe_r];
-            let vrad_comp = v[0] * rhat[0] + v[1] * rhat[1];
-            for ax in 0..2 {
-                let vrad = vrad_comp * [rhat[0], rhat[1]][ax];
-                let vang = v[ax] - vrad;
-                let vstar = vrad + DELTA0 * vang;
-                d_mom[ax] -= vstar * den_dot;
-            }
-            d_den -= den_dot;
+            // gravity additive, then the uniform drain factor.
+            let mom_grav = [m0 + DT * den * g[0], m1 + DT * den * g[1]];
+            let chi = 0.5 * (1.0 - ((r_mag - RACC0) / min_w).tanh());
+            let drain_rate = chi * SINK0.min(sound_rate);
+            let f = (-drain_rate * DT).exp();
             let c = [i, j];
-            assert!(rel(out.get(c, "den_new"), den + DT * d_den) < 1e-11, "den ({i},{j})");
-            assert!(rel(out.get(c, "mom_0_new"), m0 + DT * d_mom[0]) < 1e-11, "mom0 ({i},{j})");
-            assert!(rel(out.get(c, "mom_1_new"), m1 + DT * d_mom[1]) < 1e-11, "mom1 ({i},{j})");
+            assert!(rel(out.get(c, "den_new"), den * f) < 1e-11, "den ({i},{j})");
+            assert!(rel(out.get(c, "mom_0_new"), mom_grav[0] * f) < 1e-11, "mom0 ({i},{j})");
+            assert!(rel(out.get(c, "mom_1_new"), mom_grav[1] * f) < 1e-11, "mom1 ({i},{j})");
+            // the design invariant: velocity (mom/den) is invariant under the drain (gravity aside).
+            // check the drained state's velocity equals the gravity-updated velocity.
+            let v_drained = out.get(c, "mom_0_new") / out.get(c, "den_new");
+            let v_grav = mom_grav[0] / den;
+            assert!((v_drained - v_grav).abs() < 1e-11, "velocity not drain-invariant ({i},{j})");
         }
     }
     let any_removed = out.values("den_new").iter().any(|&d| d < den - 1e-9);
-    assert!(any_removed, "accretion removed no mass");
+    assert!(any_removed, "the drain removed no mass");
 }
 
 #[test]
