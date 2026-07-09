@@ -172,14 +172,16 @@ fn body_feedback_matches_spec() {
             let want_fy = -(den_in * g[1]) * dv + fa[1];
             let want_tz = x * fa[1] - y * fa[0];
             let want_m = den_in * frac * dv;
+            let want_e = nrg_in * frac * dv; // absorbed total energy (accretion power * dt)
 
             let c = [i, j];
             assert!(rel(out.get(c, "b0_f0"), want_fx) < 1e-11, "f0x ({i},{j}): {} vs {want_fx}", out.get(c, "b0_f0"));
             assert!(rel(out.get(c, "b0_f1"), want_fy) < 1e-11, "f0y ({i},{j}): {} vs {want_fy}", out.get(c, "b0_f1"));
             assert!(rel(out.get(c, "b0_t2"), want_tz) < 1e-11, "t0z ({i},{j}): {} vs {want_tz}", out.get(c, "b0_t2"));
             assert!(rel(out.get(c, "b0_m"), want_m) < 1e-11, "m0 ({i},{j}): {} vs {want_m}", out.get(c, "b0_m"));
-            // inactive body 1 contributes nothing across all six of its writes.
-            for w in ["b1_f0", "b1_f1", "b1_t0", "b1_t1", "b1_t2", "b1_m"] {
+            assert!(rel(out.get(c, "b0_e"), want_e) < 1e-11, "e0 ({i},{j}): {} vs {want_e}", out.get(c, "b0_e"));
+            // inactive body 1 contributes nothing across all seven of its writes.
+            for w in ["b1_f0", "b1_f1", "b1_t0", "b1_t1", "b1_t2", "b1_m", "b1_e"] {
                 assert!(out.get(c, w).abs() < 1e-14, "inactive body 1 {w} ({i},{j}) = {}", out.get(c, w));
             }
         }

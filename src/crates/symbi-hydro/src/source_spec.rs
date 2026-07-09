@@ -540,11 +540,11 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 // the native-`<` alternative a compile error in `S: Scalar`-bound code, so
 // the discipline is structurally enforced before this layer ever runs.
 //
-// two source builders:
+// one source builder:
 //   - `rigid_body_penalty_source` (target = "mom"): localized velocity-
 //     relaxation forcing inside the body. S_mom_k = mask * (-k * rho * (v - v_body)_k).
-//   - `accretion_mass_sink_source` (target = "den"): localized mass removal.
-//     S_den = mask * (-sink_rate * rho).
+//   (the KMK04 mass-sink SourceSpec was reaped when the well-posed uniform-scaling drain
+//   kernel — `symbi_discretize::gv_immersed` — replaced it as the sole accretion mechanism.)
 //
 // (energy entrainment, torque-controlled sink velocity, mach-aware boundary
 // layers — the full IB physics from `symbi-ib::effects.rs` — are deferred.
@@ -655,29 +655,6 @@ fn rigid_body_penalty_source(d: usize) -> BuiltSource {
     BuiltSource { graph: g, params, outputs }
 }
 
-/// accretion mass sink source — mass removal inside the body.
-///   S_den = mask * (-sink_rate * rho).
-///
-/// the gas takes its own momentum / energy with it; pure mass removal here
-/// (entrainment terms compose as additional `SourceSpec`s on `mom`/`nrg`).
-fn accretion_mass_sink_source(d: usize) -> BuiltSource {
-    let mut g = Graph::new();
-    let (ctx, mut params) = declare_ib_ctx(&mut g, d);
-
-    let sink_rate = g.add_scalar_param(ib_params::SINK_RATE, ElementTy::F64);
-    params.push(ib_params::SINK_RATE.to_string());
-
-    let inside = build_inside_body_mask(&mut g, &ctx);
-    let zero = g.add_const(ConstValue::F64(0.0), None);
-
-    // -sink_rate * rho
-    let prod = g.element_wise(ElementWiseOp::Mul, vec![sink_rate, ctx.rho], None);
-    let full = g.element_wise(ElementWiseOp::Neg, vec![prod], None);
-    let s_den = g.select(inside, full, zero, None);
-
-    BuiltSource { graph: g, params, outputs: vec![s_den] }
-}
-
 /// the rigid-body penalty source spec — a single localized momentum source.
 /// suitable for one rigid immersed body; multi-body sims compose multiple
 /// instances (one per body) at simulation construction.
@@ -686,18 +663,6 @@ pub fn rigid_body_penalty_sources(_d: usize) -> Vec<SourceSpec> {
         kind: SourceKind::ImmersedBody,
         target_field: "mom",
         build_source: rigid_body_penalty_source,
-    }]
-}
-
-/// the accretion mass-sink source spec — a single localized density source.
-/// callers add this for each accreting body; multi-body sims have one
-/// SourceSpec per body, each with its own (body_xm, body_radius, sink_rate)
-/// at the runtime parameter slot.
-pub fn accretion_sink_sources(_d: usize) -> Vec<SourceSpec> {
-    vec![SourceSpec {
-        kind: SourceKind::ImmersedBody,
-        target_field: "den",
-        build_source: accretion_mass_sink_source,
     }]
 }
 
@@ -1634,60 +1599,13 @@ mod tests {
     }
 
     #[test]
-    fn accretion_sink_zero_outside_body() {
-        // mass sink: outside the body, S_den MUST be exactly 0.0.
-        let body_xm = [0.0_f64, 0.0, 0.0];
-        let body_radius = 0.5;
-        let x = [2.0_f64, 1.0, 1.0]; // distance ~2.45 — outside
-        let vel = [0.0_f64; 3];
-        let rho = 1.0;
-
-        let specs = accretion_sink_sources(3);
-        let built = (specs[0].build_source)(3);
-
-        let mut base = ib_values_3d(rho, vel, x, body_xm, body_radius);
-        base.push((ib_params::SINK_RATE.to_string(), 10.0));
-        let vals = refs(&base);
-
-        let s = eval_source(&built, built.outputs[0], &vals);
-        assert_eq!(s, 0.0, "outside body: accretion sink S_den must be EXACTLY 0.0");
-    }
-
-    #[test]
-    fn accretion_sink_active_inside_body() {
-        let body_xm = [1.0_f64, 1.0, 1.0];
-        let body_radius = 2.0;
-        let x = [1.5_f64, 1.0, 1.0]; // distance 0.5 — well inside
-        let vel = [0.3_f64, 0.2, 0.1];
-        let rho = 1.4;
-        let sink_rate = 8.0;
-
-        let specs = accretion_sink_sources(3);
-        let built = (specs[0].build_source)(3);
-
-        let mut base = ib_values_3d(rho, vel, x, body_xm, body_radius);
-        base.push((ib_params::SINK_RATE.to_string(), sink_rate));
-        let vals = refs(&base);
-
-        let s = eval_source(&built, built.outputs[0], &vals);
-        let s_expected = -sink_rate * rho;
-        assert!(
-            (s - s_expected).abs() < 1e-12,
-            "accretion sink inside body: data {s} != expected {s_expected}",
-        );
-    }
-
-    #[test]
     fn ib_sources_declare_kind_immersed_body() {
         // diagnostic axis: IB sources carry SourceKind::ImmersedBody so the
         // runtime / audit-mode distinguishes them from gravity / geometric
         // overlays.
         let rigid = rigid_body_penalty_sources(3);
-        let sink = accretion_sink_sources(3);
         assert_eq!(rigid[0].kind, SourceKind::ImmersedBody);
         assert_eq!(rigid[0].target_field, "mom");
-        assert_eq!(sink[0].kind, SourceKind::ImmersedBody);
-        assert_eq!(sink[0].target_field, "den");
         // distinct from gravity + geometric (the canary that the kind
         // discriminator stays meaningful).
         let grav = point_mass_gravity_sources(3, true);

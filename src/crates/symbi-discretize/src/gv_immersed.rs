@@ -310,9 +310,10 @@ pub fn body_source_gv(
     (end_trace(), writes)
 }
 
-/// BACKWARD feedback: per cell, per body, the CARTESIAN force / 3D torque / accreted mass each
-/// body receives -> the MAX_BODIES*(ndim+4) reduction-scratch writes (`fb_{b}_force_{ax}` /
-/// `fb_{b}_torque_{t}` / `fb_{b}_mass`, the order the runtime sums). generic over coord system.
+/// BACKWARD feedback: per cell, per body, the CARTESIAN force / 3D torque / absorbed mass / absorbed
+/// energy each body receives -> the MAX_BODIES*(ndim+5) reduction-scratch writes (`fb_{b}_force_{ax}`
+/// / `fb_{b}_torque_{t}` / `fb_{b}_mass` / `fb_{b}_energy`, the order the runtime sums). generic over
+/// coord system.
 pub fn body_feedback_gv(
     n_bodies: usize,
     coords: Coords,
@@ -369,6 +370,9 @@ pub fn body_feedback_gv(
         }
         // absorbed mass = den * frac * dv (the emergent accretion, a functional of the flow).
         writes.push((format!("b{b}_m"), format!("fb_{b}_mass").into(), (den * frac * dv).node()));
+        // absorbed total (internal + kinetic) energy = nrg * frac * dv -- the accretion power,
+        // closing the gas+body ENERGY ledger. adiabatic only (the iso kernel has no energy slot).
+        writes.push((format!("b{b}_e"), format!("fb_{b}_energy").into(), (nrg * frac * dv).node()));
     }
     (end_trace(), writes)
 }

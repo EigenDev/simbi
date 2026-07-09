@@ -51,7 +51,7 @@ pub use source_spec::{
     SourceSpec, BuiltSource, SourceKind,
     spherical_geometric_sources, cylindrical_geometric_sources,
     cartesian_geometric_sources, point_mass_gravity_sources,
-    rigid_body_penalty_sources, accretion_sink_sources,
+    rigid_body_penalty_sources,
     user_defined_source, uniform_acceleration_sources,
     user_force_momentum_source, user_force_energy_source, user_cooling_source,
 };

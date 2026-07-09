@@ -530,7 +530,7 @@ mod tests {
     use super::*;
     use crate::regime_spec::{ISO_NEWTONIAN_SPEC, NEWTONIAN_SPEC};
     use crate::source_spec::{
-        accretion_sink_sources, point_mass_gravity_sources, rigid_body_penalty_sources,
+        point_mass_gravity_sources, rigid_body_penalty_sources,
         spherical_geometric_sources,
     };
 
@@ -603,11 +603,11 @@ mod tests {
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(spherical_geometric_sources(3)) // mom
             .with_gravity(point_mass_gravity_sources(3, true)) // mom + nrg
-            .with_ib(accretion_sink_sources(3)); // den
+            .with_ib(rigid_body_penalty_sources(3)); // mom
 
+        // mom is targeted by THREE overlays (geometric + gravity + rigid) and must dedupe to one.
         let fields = sim.fields_with_overlays();
-        assert_eq!(fields.len(), 3, "den + mom + nrg are all targeted");
-        assert!(fields.contains("den"));
+        assert_eq!(fields.len(), 2, "mom + nrg are targeted (mom deduped across overlays)");
         assert!(fields.contains("mom"));
         assert!(fields.contains("nrg"));
     }
@@ -1073,14 +1073,14 @@ mod tests {
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
             .with_geometric(cylindrical_geometric_sources(3))
             .with_gravity(point_mass_gravity_sources(3, true))
-            .with_ib(accretion_sink_sources(3));
+            .with_ib(rigid_body_penalty_sources(3));
         sim.validate()
             .expect("canonical newtonian disk stack must validate");
 
-        // den has the accretion sink, mom has gravity + cyl geometric,
-        // nrg has gravity energy.
-        assert_eq!(sim.sources_for("den").count(), 1);
-        assert_eq!(sim.sources_for("mom").count(), 2);
+        // mom has gravity + cyl geometric + rigid penalty, nrg has gravity energy;
+        // den is untargeted (the accretion drain is a kernel, not a SourceSpec overlay).
+        assert_eq!(sim.sources_for("den").count(), 0);
+        assert_eq!(sim.sources_for("mom").count(), 3);
         assert_eq!(sim.sources_for("nrg").count(), 1);
     }
 

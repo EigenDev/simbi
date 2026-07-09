@@ -194,9 +194,10 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// dispatch the backward body FEEDBACK (`body_feedback_2d`): run the per-cell per-body
-/// force/torque/mass kernel into MAX_BODIES*4 scratch fields, reduce each (device sum over the
-/// interior — only MAX_BODIES*4 scalars cross), assemble each body's BodyDelta, and accumulate
-/// into the immersed side-car's diagnostics. 2D only (the torque is the z-component); no-op otherwise.
+/// force[ndim]/torque[3]/mass/energy kernel into MAX_BODIES*(D+5) scratch fields, reduce each
+/// (device sum over the interior), assemble each body's BodyDelta (the drag force, accretion
+/// torque, emergent mass, and accretion power), and accumulate into the immersed side-car's
+/// diagnostics. 2D only (the torque is the z-component); no-op otherwise.
 pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -212,8 +213,8 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     let sfx = geom_suffix(geom.coords, DOF, D);
     let name = format!("body_feedback{sfx}_{D}d");
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
-    // per body: force[ndim], torque[3], mass.
-    let per_body = D + 4;
+    // per body: force[ndim], torque[3], mass, energy (the adiabatic kernel carries the energy slot).
+    let per_body = D + 5;
     let n_out = symbi_ib::MAX_BODIES * per_body;
 
     // inputs in the manifest field_inputs order: cons.den, mom_0.., nrg (pure reads).
@@ -264,7 +265,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
                 torque_delta: torque,
                 mass_delta: sums[base + D + 3],
                 prev_mass_delta: 0.0,
-                energy_delta: 0.0,
+                energy_delta: sums[base + D + 4],
             });
         }
     }

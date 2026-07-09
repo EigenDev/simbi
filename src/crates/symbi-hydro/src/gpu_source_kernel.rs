@@ -279,26 +279,24 @@ mod tests {
 
     #[test]
     fn gpu_kernel_composed_overlays_emit_one_kernel_per_field() {
-        // composition: geometric + gravity on momentum, plus accretion on
-        // mass. should emit two kernels — `mom_source` and `den_source`.
-        // each kernel sums its respective overlay contributions internally.
-        use crate::source_spec::accretion_sink_sources;
+        // composition: geometric on momentum + gravity on momentum AND energy.
+        // should emit two kernels — `mom_source` and `nrg_source`. each kernel
+        // sums its respective overlay contributions internally.
         let sim = SimulationLaws::new(&NEWTONIAN_SPEC)
-            .with_geometric(cylindrical_geometric_sources(3))   // mom
-            .with_gravity(point_mass_gravity_sources(3, false)) // mom
-            .with_ib(accretion_sink_sources(3));                 // den
+            .with_geometric(cylindrical_geometric_sources(3))  // mom
+            .with_gravity(point_mass_gravity_sources(3, true)); // mom + nrg
         let k = GpuSourceKernel::new(&sim, 3).expect("composes");
 
         let fields: std::collections::HashSet<&str> = k.fields().collect();
         assert!(fields.contains("mom"));
-        assert!(fields.contains("den"));
-        assert!(!fields.contains("nrg"));
+        assert!(fields.contains("nrg"));
+        assert!(!fields.contains("den"));
 
         // each emitted source declares its OWN __global__ entry.
         let mom_src = k.cuda_source("mom").unwrap();
-        let den_src = k.cuda_source("den").unwrap();
+        let nrg_src = k.cuda_source("nrg").unwrap();
         assert!(mom_src.contains("__global__ void mom_source("));
-        assert!(den_src.contains("__global__ void den_source("));
+        assert!(nrg_src.contains("__global__ void nrg_source("));
     }
 
     #[test]
