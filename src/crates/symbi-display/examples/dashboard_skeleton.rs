@@ -223,6 +223,7 @@ impl App {
             wall_secs: self.start.elapsed().as_secs_f64(),
             throughput_mzcups: self.throughput.back().copied().unwrap_or(0.0),
             tab: 0,
+            config_scroll: 0,
             throughput_hist: self.throughput.iter().copied().collect(),
             dt_hist: self.dt_hist.iter().copied().collect(),
             mass_drift: Some(self.mass_drift.iter().copied().collect()),

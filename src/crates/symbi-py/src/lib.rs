@@ -1835,17 +1835,12 @@ macro_rules! build_and_run_hydro {
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?;
         // attach a user source expression (force/cooling/relax/raw) when present.
-        // lowered against THIS regime's spec via the source front door — the bridge
-        // rejects force/cooling/relax on relativistic regimes (use raw). single-grid
-        // only: fine levels would not see the source, so refuse the combination.
+        // lowered against THIS regime's spec via the source front door — the bridge rejects
+        // force/cooling/relax on relativistic regimes (use raw). the base level attaches it here;
+        // refined runs re-attach the same source to each fine level in the `into_hierarchy` `$make`
+        // closure below, so it acts on every level it overlaps.
         let sub = match &cfg.source_json {
             Some(json) => {
-                if cfg.refinement_enabled {
-                    return Err(
-                        "user source expressions are not yet supported with mesh refinement"
-                            .to_string(),
-                    );
-                }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
@@ -1889,11 +1884,29 @@ macro_rules! build_and_run_hydro {
             sub = sub.with_gradient_boundary(gbc).0;
         }
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
-            .substrate()
-            .theta(theta)
-            .with_solver(solver)
-            .expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
+            let ks = s
+                .substrate()
+                .theta(theta)
+                .with_solver(solver)
+                .expect("fine-level kernel set");
+            // attach the SAME user source to each fine level as the base level, so a source
+            // overlapping a refined region still acts there (a base-only attach would be restricted
+            // away by the fine solution). the source was already validated at the base attach.
+            match &cfg.source_json {
+                Some(json) => {
+                    let scfg = symbi_hydro::SourceConfig::from_json(json)
+                        .expect("fine-level source parse");
+                    let built = symbi_hydro::expr_bridge::build_user_source(
+                        &scfg,
+                        <$regime_ty as Regime<f64, $dof>>::SPEC,
+                    )
+                    .expect("fine-level source lower");
+                    ks.with_runtime_source(built, scfg.params.clone())
+                }
+                None => ks,
+            }
+        });
         // a refined run attaches its immersed bodies to the hierarchy: the FINEST level owns the full
         // (accreting) bodies, coarser levels carry a gravity-only proxy (finest-owns-bodies, so the
         // sink applies once). the sink sphere must lie inside the finest level (asserted there).

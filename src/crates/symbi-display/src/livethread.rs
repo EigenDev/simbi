@@ -166,6 +166,7 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
     let mut tab = 0usize;
     let mut frame = 0u64;
     let mut cmap_idx = 0usize; // `c`-key colormap, applied render-side (no solver)
+    let mut scroll = 0u16; // up/down scroll offset for a tall panel (the config listing); reset on tab
 
     // exit on shutdown OR a caught signal (so drawing never targets a terminal the
     // async-signal-safe handler has already restored).
@@ -182,8 +183,21 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
                 .unwrap_or(1)
                 .max(1);
             match key {
-                Key::Tab | Key::Right => tab = (tab + 1) % n,
-                Key::BackTab | Key::Left => tab = (tab + n - 1) % n,
+                Key::Tab | Key::Right => {
+                    tab = (tab + 1) % n;
+                    scroll = 0;
+                }
+                Key::BackTab | Key::Left => {
+                    tab = (tab + n - 1) % n;
+                    scroll = 0;
+                }
+                // scroll the active panel's listing (the config tab overflows). the renderer clamps
+                // to the exact overflow; cap the state loosely at the row count to avoid runaway.
+                Key::Up => scroll = scroll.saturating_sub(1),
+                Key::Down => {
+                    let cap = latest.as_ref().map(|f| f.view.config.len() as u16).unwrap_or(0);
+                    scroll = (scroll + 1).min(cap);
+                }
                 Key::Char(' ') => {
                     let p = controls.paused.load(Ordering::SeqCst);
                     controls.paused.store(!p, Ordering::SeqCst);
@@ -227,6 +241,7 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
             // colormap).
             let n = live::tab_names(v.blocks_per_level.len() > 1).len();
             v.tab = tab.min(n.saturating_sub(1));
+            v.config_scroll = scroll;
             v.frame = frame;
             v.paused = controls.paused.load(Ordering::SeqCst);
             if let Some(field) = v.field.as_mut() {

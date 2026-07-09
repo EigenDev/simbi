@@ -96,6 +96,7 @@ mod tests {
             wall_secs: 12.0,
             throughput_mzcups: 148.0,
             tab: 0,
+            config_scroll: 0,
             throughput_hist: vec![140.0, 148.0],
             dt_hist: vec![3.0e-4, 3.1e-4],
             mass_drift: Some(vec![2.4e-13]),

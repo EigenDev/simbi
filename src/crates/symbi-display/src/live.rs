@@ -73,6 +73,7 @@ pub struct DiagnosticView {
     pub throughput_mzcups: f64,
     // active tab
     pub tab: usize,
+    pub config_scroll: u16,
     // charts
     pub throughput_hist: Vec<f64>,
     pub dt_hist: Vec<f64>,
@@ -254,6 +255,7 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         ("space", "pause"),
         ("s", "step"),
         ("tab", "switch"),
+        ("\u{2191}\u{2193}", "scroll"),
         ("f", "field"),
         ("c", "cmap"),
         ("w", "checkpoint"),
@@ -795,27 +797,38 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let block = card("config");
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    // group the (section, property, value) rows into sections, each led by a full-width divider
-    // header (`SECTION ────────`); a blank line separates sections.
+    // render each section under a full-width divider header (`SECTION ────────`), blank line between.
+    // sections are taken in first-seen order, CASE-INSENSITIVELY merged — so a config's `physics`
+    // group folds into the core `Physics` section instead of printing a duplicate header. rows within
+    // a section keep input order.
     let width = inner.width as usize;
-    let mut lines: Vec<Line> = Vec::new();
-    let mut last: Option<&str> = None;
-    for (section, k, v) in &view.config {
-        if last != Some(section.as_str()) {
-            if last.is_some() {
-                lines.push(Line::from(""));
-            }
-            let head = format!("{} ", section.to_uppercase());
-            let rule = "\u{2500}".repeat(width.saturating_sub(head.chars().count()));
-            lines.push(Line::from(Span::styled(format!("{head}{rule}"), fgb(TEAL))));
-            last = Some(section.as_str());
+    let mut sections: Vec<&str> = Vec::new();
+    for (s, _, _) in &view.config {
+        if !sections.iter().any(|x| x.eq_ignore_ascii_case(s)) {
+            sections.push(s.as_str());
         }
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {k:<18}"), fg(DIM)),
-            Span::styled(v.clone(), fgb(VALUE)),
-        ]));
     }
-    frame.render_widget(Paragraph::new(lines), inner);
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, sec) in sections.iter().enumerate() {
+        if i > 0 {
+            lines.push(Line::from(""));
+        }
+        let head = format!("{} ", sec.to_uppercase());
+        let rule = "\u{2500}".repeat(width.saturating_sub(head.chars().count()));
+        lines.push(Line::from(Span::styled(format!("{head}{rule}"), fgb(TEAL))));
+        for (s, k, v) in view.config.iter().filter(|(s, _, _)| s.eq_ignore_ascii_case(sec)) {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {k:<18}"), fg(DIM)),
+                Span::styled(v.clone(), fgb(VALUE)),
+            ]));
+            let _ = s;
+        }
+    }
+    // clamp the scroll to the actual overflow, then apply it (the up/down arrows drive
+    // `config_scroll`); a panel that fits stays put.
+    let max_scroll = (lines.len() as u16).saturating_sub(inner.height);
+    let offset = view.config_scroll.min(max_scroll);
+    frame.render_widget(Paragraph::new(lines).scroll((offset, 0)), inner);
 }
 
 #[cfg(test)]
@@ -837,6 +850,7 @@ mod tests {
             wall_secs: 252.0,
             throughput_mzcups: 148.0,
             tab: 0,
+            config_scroll: 0,
             throughput_hist: vec![100.0, 120.0, 148.0, 150.0, 145.0, 148.0],
             dt_hist: vec![3.0e-4, 3.1e-4, 3.05e-4, 3.1e-4],
             mass_drift: Some(vec![2.0e-13, 2.4e-13, 2.2e-13]),

@@ -79,16 +79,18 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     """
     import warnings
 
-    # silence pydantic serialization warnings for numpy types crossing into the rust backend
-    warnings.filterwarnings(
-        "ignore",
-        message=".*Pydantic serializer warnings.*",
-        category=UserWarning,
-        module="pydantic.main",
-    )
-
-    # get all model fields
-    model_dict = problem.model_dump()
+    # silence the benign pydantic serialization warnings for numpy scalar types (e.g. np.uint64
+    # cell counts) crossing into the rust backend. the warning is emitted from
+    # `pydantic._internal._serializers`, NOT `pydantic.main`, so match by message across all modules
+    # and scope it to the dump so nothing else is suppressed.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r".*[Pp]ydantic serializer warnings.*",
+            category=UserWarning,
+        )
+        # get all model fields
+        model_dict = problem.model_dump()
 
     # the problem's class name — shown in the rust run dashboard header.
     model_dict["name"] = type(problem).__name__

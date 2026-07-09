@@ -80,6 +80,8 @@ pub struct Table {
     start: Instant,
     regime: String,
     tab: usize,
+    /// vertical scroll offset for the active tab (used by the tall config panel; reset on tab switch).
+    scroll: u16,
     paused: bool,
     frame: u64,
     m_step: u64,
@@ -159,6 +161,7 @@ impl Table {
             start: Instant::now(),
             regime: String::new(),
             tab: 0,
+            scroll: 0,
             paused: false,
             frame: 0,
             m_step: 0,
@@ -293,10 +296,22 @@ impl Table {
         match key {
             Key::Tab | Key::Right => {
                 self.tab = (self.tab + 1) % n;
+                self.scroll = 0;
                 true
             }
             Key::BackTab | Key::Left => {
                 self.tab = (self.tab + n - 1) % n;
+                self.scroll = 0;
+                true
+            }
+            Key::Up => {
+                self.scroll = self.scroll.saturating_sub(1);
+                true
+            }
+            Key::Down => {
+                // cap loosely at the config row count; the renderer clamps to the exact overflow.
+                let cap = self.problem_setup.len() as u16;
+                self.scroll = (self.scroll + 1).min(cap);
                 true
             }
             _ => false,
@@ -411,6 +426,7 @@ impl Table {
             wall_secs: self.start.elapsed().as_secs_f64(),
             throughput_mzcups: self.m_rate / 1e6,
             tab: self.tab,
+            config_scroll: self.scroll,
             throughput_hist: self.throughput.iter().map(|v| v / 1e6).collect(),
             dt_hist: self.dt_hist.iter().copied().collect(),
             mass_drift: opt_hist(&self.mass_drift),
