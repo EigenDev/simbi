@@ -29,7 +29,7 @@ use symbi_grid::Field;
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_xpu::MemorySpace;
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
 use crate::regimes::substrate_kernels::{
@@ -37,6 +37,7 @@ use crate::regimes::substrate_kernels::{
     dispatch_driven_boundaries, dispatch_fused_runtime_cpu, dispatch_gradient_boundaries,
     dispatch_godunov_maybe_fused,
     dispatch_named, dispatch_runtime_source, dispatch_source_apply, body_fused_in, fused_runtime_cpu_kernel,
+    resolve_body_only_fused, FusedCpuKernel,
     geom_suffix, resolve_params, scalars_for, FusedSourceBinding, GradientBc, RuntimeSource,
     ScalarBind, Solver,
 };
@@ -71,6 +72,11 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// to the two-pass on non-f64 carriers, device memory, or an out-of-JIT-subset source. the
     /// two-pass remains the default. proven bit-for-bit by `jit_fused_equals_two_pass`.
     pub fuse_runtime: bool,
+    /// the BODY-ONLY fused godunov kernel (godunov + geo + immersed-body wrap, no user source),
+    /// resolved once + cached here on the kernel-set — a gravity/accretion run with no runtime source
+    /// to carry the body. built lazily on first `godunov_stage` (geometry + bodies known then), gated
+    /// host+f64 + `fuse_runtime`. `Some(None)` = out-of-JIT-subset -> the two-pass body pass runs.
+    pub(crate) fused_rhs: OnceLock<Option<FusedCpuKernel>>,
     /// **docs/design/33** — driven-boundary DAGs, indexed by the `BoundaryType::Driven(id)` id the
     /// sim's `Boundaries` carries. each prescribes a face's ghost prim state. empty => no driven
     /// faces (the standard ghost-fill is the whole story). reuses `RuntimeSource` as the holder (same
@@ -92,7 +98,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate adiabatic CFL scratch field");
         // theta defaults to 1.0 (plain minmod) — exact prior behavior; set `theta` to tune.
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
+        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
@@ -120,6 +126,24 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
         self.fuse_runtime = true;
         self
+    }
+
+    /// enable source fusion WITHOUT a user source: an immersed body (gravity + accretion) folds into
+    /// the godunov stage on host+f64 instead of a separate `body_source` pass. the body-only twin of
+    /// `with_fused_runtime_source`; bit-identical to the two-pass, falls back off-host / non-f64 /
+    /// JIT-miss. the production (py) path sets this so a pure-gravity run fuses; the direct-construction
+    /// test path leaves it off (the two-pass body reference).
+    pub fn with_source_fusion(mut self) -> Self {
+        self.fuse_runtime = true;
+        self
+    }
+
+    /// the body-only fused-kernel build state, for the oracle: `None` = never attempted (no bodies /
+    /// fusion off / a user source carried the body instead); `Some(true)` = the body-only godunov+body
+    /// kernel JIT-compiled and is live; `Some(false)` = out-of-JIT-subset -> the two-pass body ran. the
+    /// oracle asserts `Some(true)` so a silent fallback can't make `fused == two-pass` pass vacuously.
+    pub fn body_only_fused_state(&self) -> Option<bool> {
+        self.fused_rhs.get().map(|o| o.is_some())
     }
 
     /// **docs/design/33**: register a DRIVEN boundary. the returned id (registration order, 0-based)
@@ -211,10 +235,20 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // own pass is skipped in `source_apply` under the SAME predicate. geo = Hydro{inertial:true}
         // matches the AOT `adiabatic` godunov (geo_source), so the two-pass fallback is exact.
         if self.fuse_runtime {
-            if let Some(rs) = &self.runtime_source {
-                if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }) {
-                    dispatch_fused_runtime_cpu(sim, pre, fk, rs, dt, a0, ac, self.gamma);
-                    return;
+            let geo = GeoSource::Hydro { inertial: true };
+            match &self.runtime_source {
+                Some(rs) => {
+                    if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, geo) {
+                        dispatch_fused_runtime_cpu(sim, pre, fk, Some(rs), dt, a0, ac, self.gamma);
+                        return;
+                    }
+                }
+                // no user source, but an immersed body still folds into godunov (gravity + drain).
+                None => {
+                    if let Some(fk) = resolve_body_only_fused(sim, &self.fused_rhs, true, geo) {
+                        dispatch_fused_runtime_cpu(sim, pre, fk, None, dt, a0, ac, self.gamma);
+                        return;
+                    }
                 }
             }
         }
@@ -358,12 +392,16 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn body_source(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
         // when the fused stage carried the immersed body inside godunov (one launch), running the
-        // standalone pass here would double-apply it. same predicate + geo the godunov stage used.
+        // standalone pass here would double-apply it. same predicate + geo the godunov stage used —
+        // via the user-source fused kernel, or the body-only fused kernel when there is no user source.
         if self.fuse_runtime {
-            if let Some(rs) = &self.runtime_source {
-                if body_fused_in(sim, rs, GeoSource::Hydro { inertial: true }) {
-                    return;
-                }
+            let geo = GeoSource::Hydro { inertial: true };
+            let absorbed = match &self.runtime_source {
+                Some(rs) => body_fused_in(sim, rs, geo),
+                None => resolve_body_only_fused(sim, &self.fused_rhs, true, geo).is_some(),
+            };
+            if absorbed {
+                return;
             }
         }
         // forward immersed-body source (gravity + accretion, docs/design/19): cons += dt*S, in-place.

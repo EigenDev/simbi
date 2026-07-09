@@ -377,6 +377,38 @@ where
         && fused_runtime_cpu_kernel(sim, rs, geo).is_some()
 }
 
+/// build+cache the BODY-ONLY fused godunov kernel: godunov + geo + the immersed-body wrap, with NO
+/// user source. this is the no-runtime-source path — a gravity/accretion run that would otherwise
+/// two-pass the body. cached on the KERNEL-SET (not a RuntimeSource, since there is none). host+f64 +
+/// energy regime + bodies present; `None` otherwise (nothing to fold, or the two-pass fallback). the
+/// body is baked at MAX_BODIES to match the standalone `body_source` (unused slots zero via mass = 0).
+pub(crate) fn resolve_body_only_fused<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    cache: &'a OnceLock<Option<FusedCpuKernel>>,
+    has_energy: bool,
+    geo: symbi_discretize::gv::GeoSource,
+) -> Option<&'a FusedCpuKernel>
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        return None;
+    }
+    if std::any::TypeId::of::<Sc>() != std::any::TypeId::of::<f64>() {
+        return None;
+    }
+    if !has_energy || sim.immersed.is_none() {
+        return None;
+    }
+    let (coords, spacing, axes) = sim_gv_geom(sim);
+    cache
+        .get_or_init(|| {
+            build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, has_energy, geo, &[], MAX_BODIES)
+        })
+        .as_ref()
+}
+
 /// dispatch the FUSED godunov+source host kernel: bind each manifest path to the sim's `Field`
 /// buffer (the in-place `cons.*` resolve to the SAME `Field` -> one base aliased into both the input
 /// and output lists — the read-before-write `run_parallel_raw` permits), resolve the scalars by
@@ -387,7 +419,8 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
     sim: &FieldStore<D, DOF, Mem, Sc>,
     pre: &Field<Sc, D, Mem>,
     fk: &FusedCpuKernel,
-    rs: &RuntimeSource,
+    // `None` for a body-only fused kernel (no user source, so no `p{i}` knobs to resolve).
+    rs: Option<&RuntimeSource>,
     dt: f64,
     a0: f64,
     ac: f64,
@@ -434,7 +467,7 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
             ScalarRef::A0 => a0,
             ScalarRef::Ac => ac,
             ScalarRef::Time => t,
-            ScalarRef::UserParam(i) => *rs.params.get(i as usize)
+            ScalarRef::UserParam(i) => rs.and_then(|r| r.params.get(i as usize).copied())
                 .unwrap_or_else(|| panic!("fused runtime source: param p{i} not provided")),
             // the fused body fold declares these: the EOS parameter and the per-body params.
             ScalarRef::Gamma | ScalarRef::Cs => gamma,

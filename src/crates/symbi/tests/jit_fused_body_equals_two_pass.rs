@@ -120,3 +120,52 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
     });
     assert!(body_changed, "the immersed body left the state unchanged — the oracle is vacuous");
 }
+
+#[test]
+fn adiabatic_body_only_fused_equals_two_pass_rk2() {
+    // the body-WITHOUT-a-user-source path: a pure gravity/accretion run. `with_source_fusion()` folds
+    // the immersed body into godunov (one launch, no user source to carry it) and must match the
+    // standalone `body_source` pass bit-for-bit. proves the fused path is not gated on a runtime source.
+    type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
+    const GAMMA: f64 = 1.4;
+    let n = 24usize;
+    let t_final = 0.04;
+
+    let build = || -> Sim {
+        let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([n, n])
+            .bounds([0.0, 0.0], [1.0, 1.0])
+            .boundaries(BoundaryType::Outflow)
+            .finish()
+            .unwrap();
+        sim.seed_cells(|p| {
+            let (x, y) = (p[0], p[1]);
+            let rho = 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
+            Prim { rho, vel: Tensor::new([0.1, -0.05]), pre: 1.0 }
+        });
+        sim.with_bodies(central_black_hole())
+    };
+
+    // TWO-PASS: plain godunov + the standalone body_source pass (no fusion flag).
+    let mut sim_two = build();
+    let sub_two = sim_two.substrate();
+    evolve(&mut sim_two, &sub_two, t_final).expect("two-pass evolve");
+
+    // FUSED: body folded into godunov via with_source_fusion (no user source).
+    let mut sim_fused = build();
+    let sub_fused = sim_fused.substrate().with_source_fusion();
+    evolve(&mut sim_fused, &sub_fused, t_final).expect("body-only fused evolve");
+
+    assert_eq!(
+        sub_fused.body_only_fused_state(), Some(true),
+        "body-only fused kernel did not compile — fell back to two-pass",
+    );
+
+    let interior = &sim_fused.geom.interior;
+    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_two.fields.cons.den, "cons.den");
+    for k in 0..2 {
+        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
+    }
+    let (nf, nt) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_two.fields.cons.nrg_field().unwrap());
+    assert_cons_bit_identical(interior, nf, nt, "cons.nrg");
+}

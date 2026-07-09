@@ -297,6 +297,50 @@ where
     }
 }
 
+/// enable pointwise-source fusion on a source-FREE substrate — a run with immersed bodies but no user
+/// source, so `attach_runtime_source` (which sets the fusion flag) is never called. real only for the
+/// adiabatic set (its energy-regime body folds into godunov); a no-op elsewhere (iso folds its body via
+/// its own baked kernel; rhd/mhd have no host fused seam yet). the fused path self-gates on host+f64.
+trait EnableSourceFusion: Sized {
+    fn enable_source_fusion(self) -> Self;
+}
+
+impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize>
+    EnableSourceFusion for AdiabaticSubstrateKernelSet<Mem, Sc, D>
+{
+    fn enable_source_fusion(self) -> Self {
+        self.with_source_fusion()
+    }
+}
+
+impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize>
+    EnableSourceFusion for RhdSubstrateKernelSet<Mem, Sc, D>
+{
+    fn enable_source_fusion(self) -> Self {
+        self
+    }
+}
+
+impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, const D: usize>
+    EnableSourceFusion for IsoSubstrateKernelSet<Mem, Sc, D>
+{
+    fn enable_source_fusion(self) -> Self {
+        self
+    }
+}
+
+impl<R, Mem, Sc, const D: usize> EnableSourceFusion
+    for symbi::regimes::substrate_mhd::MhdSubstrateKernelSet<R, Mem, Sc, D>
+where
+    R: Regime<Sc, D>,
+    Mem: MemorySpace,
+    Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric,
+{
+    fn enable_source_fusion(self) -> Self {
+        self
+    }
+}
+
 fn solver_from_str(s: &str) -> PyResult<Solver> {
     match s {
         "hlle" => Ok(Solver::Hlle),
@@ -1854,7 +1898,9 @@ macro_rules! build_and_run_hydro {
                 .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
-            None => sub,
+            // no user source: still enable fusion so an immersed body folds into godunov (adiabatic);
+            // a no-op for regimes without a host body fold.
+            None => sub.enable_source_fusion(),
         };
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]` — the complete prim prescription [rho, vel_0..DOF-1, pre]
@@ -2836,7 +2882,9 @@ macro_rules! build_and_run_mhd {
                 .map_err(|e| format!("source expression lower: {e}"))?;
                 sub.attach_runtime_source(built, scfg.params.clone())?
             }
-            None => sub,
+            // no user source: still enable fusion so an immersed body folds into godunov (adiabatic);
+            // a no-op for regimes without a host body fold.
+            None => sub.enable_source_fusion(),
         };
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
         // matches `driven_exprs[id]`. a complete prim prescription incl. the cell B (purely
