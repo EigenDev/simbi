@@ -549,7 +549,7 @@ fn gen_godunov_with_body_source(out_dir: &str, ndim: u8, prefix: &str, has_energ
         built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (k, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         geom.coords, symbi_discretize::Spacetime::Minkowski, &geom.spacing, &geom.axes, ndim, geom.ncomp as usize, has_energy,
-        geo_source(prefix), &refs, /* mag_from_bcell = */ false,
+        geo_source(prefix), &refs, /* mag_from_bcell = */ false, /* n_bodies = */ 0,
     );
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }

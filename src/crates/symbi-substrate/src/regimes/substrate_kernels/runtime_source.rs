@@ -299,7 +299,9 @@ fn build_fused_cpu_kernel<const D: usize>(
     let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
     let (gvk, writes) = symbi_discretize::gv::godunov_stage_gv_with_fused_built(
         // runtime GR sources would thread the real spacetime here; only flat (Minkowski) is wired.
-        coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false,
+        // n_bodies = 0: the immersed-body fold into this runtime fused kernel is piece 2 (build()
+        // resolution); today the body stays its own pass so this path is user-source-only.
+        coords, symbi_discretize::Spacetime::Minkowski, spacing, axes, D as u8, ncomp, has_energy, geo, &src_refs, false, 0,
     );
     // an out-of-JIT-subset node -> `None` -> the caller runs the two-pass (the safe fallback). NOT
     // an error: the gate is "compile when possible, else interpret", never miscompile.

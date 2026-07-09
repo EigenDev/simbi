@@ -1657,7 +1657,7 @@ mod tests {
         let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
             builts.iter().map(|(t, b)| (*t, b)).collect();
         let (k_built, w_built) = godunov_stage_gv_with_fused_built(
-            coords, Spacetime::Minkowski, &spacing, &axes, 2, 2, true, geo, &src_refs, false,
+            coords, Spacetime::Minkowski, &spacing, &axes, 2, 2, true, geo, &src_refs, false, 0,
         );
 
         // the ABI manifest + writes are identical (NodeIds match because both trace the SAME op

@@ -571,8 +571,10 @@ pub fn godunov_stage_gv_with_fused_sources(
         .collect();
     let src_refs: Vec<(&str, &symbi_hydro::source_spec::BuiltSource)> =
         builts.iter().map(|(t, b)| (*t, b)).collect();
+    // spec-overlay fusion (AOT `_with_{slug}` bakes) never carries an immersed body; that is the
+    // runtime-source path's job (build_fused_cpu_kernel threads the real count).
     godunov_stage_gv_with_fused_built(
-        coords, spacetime, spacing, axes, ndim, ncomp, has_energy, source, &src_refs, mag_from_bcell,
+        coords, spacetime, spacing, axes, ndim, ncomp, has_energy, source, &src_refs, mag_from_bcell, 0,
     )
 }
 
@@ -594,6 +596,10 @@ pub fn godunov_stage_gv_with_fused_built(
     source: GeoSource,
     sources: &[(&str, &symbi_hydro::source_spec::BuiltSource)],
     mag_from_bcell: bool,
+    // immersed-body count. > 0 wraps the post-combine cons with `body_evolved_gv` (gravity +
+    // accretion drain) at weight `ac*dt`, so the single fused sweep IS `plain godunov + source_apply
+    // + body_source`, in that order, bit-for-bit. 0 leaves the update body-free. adiabatic only.
+    n_bodies: usize,
 ) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -800,11 +806,11 @@ pub fn godunov_stage_gv_with_fused_built(
     };
 
     let u_n_rho = Gv::field("u_n_rho", FieldRef::un_den());
-    let rho_new = with_sources(
+    let rho_g = with_sources(
         combine(u_n_rho, fe(rho, gv_divergence("mass_flux", ndim, &geo), None)),
         &contribs.den,
     );
-    let mut writes = vec![("rho".to_string(), FieldRef::cons_den().into(), rho_new.node())];
+    let mut mom_g: Vec<Gv> = Vec::with_capacity(ncomp);
     for k in 0..ncomp {
         let u_n_mom = Gv::field(&format!("u_n_mom_{k}"), FieldRef::un_mom(k as u8));
         let div = gv_divergence(&format!("mom_flux_{k}"), ndim, &geo);
@@ -823,19 +829,45 @@ pub fn godunov_stage_gv_with_fused_built(
         // conserved law, supplied by the `fe` weight. no orthonormal alpha^2 asymmetry: the flux
         // kernel already carries the contravariant v^n (no V_rhat), and the metric coefficient
         // gamma_ij rides inside S_i, not the densitization.
-        let mom_new = with_sources(
+        mom_g.push(with_sources(
             combine(u_n_mom, fe(mom[k], div, mom_src)),
             &contribs.mom[k],
-        );
-        writes.push((format!("mom_{k}"), FieldRef::cons_mom(k as u8).into(), mom_new.node()));
+        ));
     }
-    if has_energy {
+    let nrg_g = has_energy.then(|| {
         let nrg = Gv::field("nrg", FieldRef::cons_nrg());
         let u_n_nrg = Gv::field("u_n_nrg", FieldRef::un_nrg());
-        let nrg_new = with_sources(
+        with_sources(
             combine(u_n_nrg, fe(nrg, gv_divergence("nrg_flux", ndim, &geo), nrg_gravity)),
             &contribs.nrg,
+        )
+    });
+
+    // immersed-body wrap. the body is a POST-combine operator `(cons_g + ac_dt*S_grav)*f` with
+    // `f = exp(-drain*ac_dt)`, reading the godunov+source-combined state. that is exactly the
+    // two-pass execution order (godunov -> source_apply -> body_source, every stage at weight
+    // ac*dt), so the fused sweep stays bit-identical to plain godunov followed by the standalone
+    // `body_source` pass: storing cons_g to an f64 buffer and reading it back is exact, so the
+    // register-resident cons_g the body reads here equals the memory value the two-pass body reads.
+    // gravity is additive but the accretion drain is multiplicative, so neither rides the additive
+    // `contribs` accumulation — the body wraps the final nodes. adiabatic (energy) only; the iso
+    // body (`body_source_iso_gv`, cs from prim.pre) is a follow-on.
+    let (rho_final, mom_final, nrg_final) = if n_bodies > 0 {
+        let nrg_in = nrg_g.expect("fused body source requires has_energy (iso body fusion pending)");
+        let gamma = Gv::scalar("gamma");
+        let (den_b, mom_b, nrg_b) = crate::gv_immersed::body_evolved_gv(
+            rho_g, &mom_g, nrg_in, ac_dt, gamma, n_bodies, coords, ndim as usize, ncomp, axes,
         );
+        (den_b, mom_b, Some(nrg_b))
+    } else {
+        (rho_g, mom_g, nrg_g)
+    };
+
+    let mut writes = vec![("rho".to_string(), FieldRef::cons_den().into(), rho_final.node())];
+    for (k, m) in mom_final.iter().enumerate() {
+        writes.push((format!("mom_{k}"), FieldRef::cons_mom(k as u8).into(), m.node()));
+    }
+    if let Some(nrg_new) = nrg_final {
         writes.push(("nrg".to_string(), FieldRef::cons_nrg().into(), nrg_new.node()));
     }
     (end_trace(), writes)

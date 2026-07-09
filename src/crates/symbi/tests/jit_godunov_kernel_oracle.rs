@@ -38,7 +38,7 @@ fn jit_fused_godunov_matches_interp_bitwise() {
 
     let (gvk, writes) = godunov_stage_gv_with_fused_built(
         Coords::Cartesian, Spacetime::Minkowski, &[Spacing::Uniform; 2], &[0, 1], 2, 2, true,
-        GeoSource::Hydro { inertial: true }, &src_refs, false,
+        GeoSource::Hydro { inertial: true }, &src_refs, false, 0,
     );
 
     // a small domain with a 1-cell upper ghost so the `c+e` stencil reads stay in bounds.
