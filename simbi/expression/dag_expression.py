@@ -10,11 +10,15 @@ class SourceKind(str, enum.Enum):
     typo-proof front for the `kind` string crossing into rust's `SourceConfig`
     (str subclass -> serializes to its `.value`). FORCE/COOLING/RELAX are the
     safe primitive-lifted constructors; RAW writes conserved components directly
-    (the regime-agnostic escape hatch — the only kind valid on relativistic/MHD)."""
+    (the regime-agnostic escape hatch — the only kind valid on relativistic/MHD).
+    SPONGE is the full conserved-state relaxation (buffer zone): it relaxes den,
+    mom, AND nrg toward a reference conserved state, where RELAX relaxes only the
+    velocity (density-preserving drag)."""
 
     FORCE = "force"
     COOLING = "cooling"
     RELAX = "relax"
+    SPONGE = "sponge"
     RAW = "raw"
 
 
@@ -1254,10 +1258,12 @@ class CompiledExpr:
         symbi-hydro's `build_user_source`. the node encoding is byte-identical
         to `serialize()`; this only re-wraps it with the source SEMANTICS the
         rust side needs:
-          kind   -- 'force' | 'cooling' | 'relax' | 'raw' (conservation-law wrap)
+          kind   -- 'force' | 'cooling' | 'relax' | 'sponge' | 'raw' (law wrap)
           dim    -- spatial dimensionality (force needs `dim` accel outputs,
-                    cooling 1, relax 1+dim)
-          params -- runtime scalar VALUES for the parameter() nodes (p0, p1, ...)
+                    cooling 1, relax 1+dim; sponge [kappa, den_ref, dim*mom_ref,
+                    nrg_ref] = 3+dim on energy regimes, 2+dim on iso)
+          params -- runtime scalar VALUES for the parameter() nodes (p0, p1, ...);
+                    for sponge on an energy regime, params=[inv_gm1] = 1/(gamma-1)
           region -- optional node index of a chi(x) mask folded into the source
           target -- for kind='raw' only: the conserved slot ('den'|'mom'|'nrg')
         the bare `serialize()` form is kept for local evaluation + back-compat.

@@ -20,6 +20,7 @@ pub mod regime;
 pub mod regime_spec;
 pub mod source_spec;
 pub mod source_term;
+pub mod boundary_term;
 pub mod expr_bridge;
 pub mod motion_law;
 pub mod simulation_laws;

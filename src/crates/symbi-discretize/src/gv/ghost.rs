@@ -37,6 +37,99 @@ pub fn iso_ghost_fill_gv(
 }
 
 
+/// the OUTWARD edge->ghost separation used by the prescribed-gradient fills: `sum_ax |centroid(ghost
+/// index) - centroid(source index)|`. the source index is the outflow EDGE (map_type >= 3), so a
+/// PASSTHROUGH axis (source == cell coord) contributes 0 and a single-axis face pass yields exactly
+/// that face's outward distance — a corner (multi-axis) composes the per-axis distances. the
+/// centroid is the midpoint of the cell's two faces (uniform or log, via `gv_axis_face_at_index`).
+fn gv_outward_dist(ndim: usize, spacing: &[Spacing], src: &[NodeId]) -> Gv {
+    let centroid = |ax: usize, i: Gv| -> Gv {
+        Gv::from_f64(0.5)
+            * (gv_axis_face_at_index(ax, spacing[ax], i)
+                + gv_axis_face_at_index(ax, spacing[ax], i + Gv::ONE))
+    };
+    let mut dist = Gv::ZERO;
+    for ax in 0..ndim {
+        let ghost = centroid(ax, Gv::coord(ax as u8));
+        let edge = centroid(ax, Gv::of(src[ax]));
+        dist = dist + (ghost - edge).abs();
+    }
+    dist
+}
+
+
+/// the NEUMANN lattice-map ghost fill: prescribe the OUTWARD normal derivative `dU/dn = q` per
+/// primitive variable. reuses the outflow EDGE source coord (map_type >= 3 -> arg), reads the
+/// boundary-adjacent interior value, and extrapolates `U_ghost = u_edge + q * dist` (per-variable
+/// coefficient `neu_q_*`, outward separation `dist`). `q = 0` recovers the plain outflow copy, so
+/// outflow is the homogeneous member of this family. `ncomp` velocity components, `ndim` gridded
+/// axes; the energy regime additionally prescribes `pre`.
+pub fn neumann_ghost_fill_gv(
+    ndim: usize,
+    ncomp: usize,
+    has_energy: bool,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let src = gv_lattice_source(ndim);
+    let dist = gv_outward_dist(ndim, spacing, &src);
+    let neumann = |u: Gv, q: &str| symbi_hydro::boundary_term::neumann_ghost(u, Gv::scalar(q), dist);
+    let rho = neumann(gv_load_at("prim_rho", "prim.rho", &src), "neu_q_rho");
+    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), rho.node())];
+    for k in 0..ncomp {
+        let v = neumann(
+            gv_load_at(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src),
+            &format!("neu_q_v{k}"),
+        );
+        writes.push((format!("prim_v{k}"), FieldRef::PrimVel(k as u8).into(), v.node()));
+    }
+    if has_energy {
+        let pre = neumann(gv_load_at("prim_pre", "prim.pre", &src), "neu_q_pre");
+        writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), pre.node()));
+    }
+    (end_trace(), writes)
+}
+
+
+/// the ROBIN lattice-map ghost fill: prescribe `a*U_face + b*(dU/dn) = c` per primitive variable at
+/// the boundary FACE, with the face midway between the edge cell and the ghost (separation `dist`).
+/// reuses the outflow EDGE source; the per-variable coefficients are `rob_{a,b,c}_*`. degenerates to
+/// Dirichlet (`b = 0`) and Neumann (`a = 0`) per `symbi_hydro::boundary_term::robin_ghost`.
+pub fn robin_ghost_fill_gv(
+    ndim: usize,
+    ncomp: usize,
+    has_energy: bool,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let src = gv_lattice_source(ndim);
+    let h = gv_outward_dist(ndim, spacing, &src);
+    let robin = |u: Gv, a: &str, b: &str, c: &str| {
+        symbi_hydro::boundary_term::robin_ghost(u, Gv::scalar(a), Gv::scalar(b), Gv::scalar(c), h)
+    };
+    let rho = robin(
+        gv_load_at("prim_rho", "prim.rho", &src),
+        "rob_a_rho", "rob_b_rho", "rob_c_rho",
+    );
+    let mut writes = vec![("prim_rho".to_string(), FieldRef::PrimRho.into(), rho.node())];
+    for k in 0..ncomp {
+        let v = robin(
+            gv_load_at(&format!("prim_v{k}"), FieldRef::PrimVel(k as u8), &src),
+            &format!("rob_a_v{k}"), &format!("rob_b_v{k}"), &format!("rob_c_v{k}"),
+        );
+        writes.push((format!("prim_v{k}"), FieldRef::PrimVel(k as u8).into(), v.node()));
+    }
+    if has_energy {
+        let pre = robin(
+            gv_load_at("prim_pre", "prim.pre", &src),
+            "rob_a_pre", "rob_b_pre", "rob_c_pre",
+        );
+        writes.push(("prim_pre".to_string(), FieldRef::PrimPre.into(), pre.node()));
+    }
+    (end_trace(), writes)
+}
+
+
 /// the SINGLE-SCALAR lattice-map ghost fill: pull back one field "f" at the per-axis
 /// integer source coord, times the runtime grade `sign` (+1 for a scalar copy or a
 /// tangential staggered component; -1 for a wall-normal component under a reflect

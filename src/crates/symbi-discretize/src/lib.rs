@@ -45,6 +45,7 @@ pub use gv::{
     point_mass_gravity_probe_gv, source_apply_gv, source_apply_from_built_gv, boundary_fill_from_built_gv,
     splice_user_source_gv, uniform_accel_probe_gv,
     iso_c2p_gv, iso_flux_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
+    neumann_ghost_fill_gv, robin_ghost_fill_gv,
     imhd_bcell_from_bface_gv, imhd_c2p_gv, imhd_flux_gv, imhd_ghost_fill_gv, imhd_hlld_flux_gv, imhd_wave_speed_map_gv,
     nmhd_c2p_gv, nmhd_flux_gv, nmhd_hllc_flux_gv, nmhd_hlld_flux_gv, nmhd_wave_speed_map_gv, rmhd_average_efield_gv,
     rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv, rmhd_bcell_godunov_rk2_gv, rmhd_c2p_gv,

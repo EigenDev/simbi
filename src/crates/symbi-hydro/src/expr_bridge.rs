@@ -320,6 +320,46 @@ pub fn build_user_source(
             }
             Ok(out)
         }
+        "sponge" => {
+            // full conserved-state relaxation (buffer zone): S_U = kappa*(U_ref - U) for den, mom
+            // (+ nrg on energy regimes). the reference conserved state U_ref is supplied per-cell.
+            reject_relativistic("sponge")?;
+            // adiabatic: [kappa, den_ref, mom_ref_0..mom_ref_{D-1}, nrg_ref] = 3+D; iso drops nrg_ref.
+            let want = if spec.has_energy { 3 + cfg.dim } else { 2 + cfg.dim };
+            if n_out != want {
+                return Err(format!(
+                    "'sponge' needs [kappa, den_ref, mom_ref_0..mom_ref_{}{}]: outputs.len() = {n_out}, expected {want}",
+                    cfg.dim.saturating_sub(1),
+                    if spec.has_energy { ", nrg_ref" } else { "" },
+                ));
+            }
+            // region masks ONLY the rate kappa (output 0), which factors into all three channels;
+            // masking the reference state would corrupt the target the flow relaxes toward.
+            mask_field(&mut field, region, 0..1);
+            let mut out = vec![
+                (
+                    "den".to_string(),
+                    crate::source_spec::user_sponge_density_source(&field, cfg.dim),
+                ),
+                (
+                    "mom".to_string(),
+                    crate::source_spec::user_sponge_momentum_source(&field, cfg.dim),
+                ),
+            ];
+            if spec.has_energy {
+                // inv_gm1 = 1/(gamma-1): the ideal-gas internal-energy coefficient, folded as a
+                // build-time constant so the energy channel reconstructs E from `pre` without a
+                // runtime gamma binding.
+                let inv_gm1 = *cfg.params.first().ok_or_else(|| {
+                    "'sponge' on an energy regime needs params=[inv_gm1] = 1/(gamma-1)".to_string()
+                })?;
+                out.push((
+                    "nrg".to_string(),
+                    crate::source_spec::user_sponge_energy_source(&field, cfg.dim, inv_gm1),
+                ));
+            }
+            Ok(out)
+        }
         "raw" => {
             let target = cfg
                 .target
@@ -340,7 +380,7 @@ pub fn build_user_source(
             Ok(vec![(target, field)])
         }
         other => {
-            Err(format!("unknown source kind '{other}' (expected force | cooling | relax | raw)"))
+            Err(format!("unknown source kind '{other}' (expected force | cooling | relax | sponge | raw)"))
         }
     }
 }
@@ -460,6 +500,38 @@ mod tests {
         assert_eq!(cfg.outputs, vec![0, 1]);
         let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python force config lowers");
         assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["mom", "nrg"]);
+    }
+
+    #[test]
+    fn python_sponge_json_loads_and_lowers() {
+        // the EXACT json python's serialize_source(SourceKind.SPONGE, dim=3, params=[inv_gm1]) emits.
+        // outputs = [kappa, den_ref, mom_ref_0..2, nrg_ref] mapped to node indices; here kappa=2,
+        // den_ref=1, mom_ref=(x_0,x_1,x_2) (reads position), nrg_ref=10, inv_gm1=2.5. pins the
+        // cross-language wire for the buffer-zone sponge.
+        let cfg = cfg_from(
+            r#"{"kind": "sponge", "dim": 3, "outputs": [3, 4, 0, 1, 2, 5], "params": [2.5],
+                "nodes": [{"op": "VARIABLE_X1"}, {"op": "VARIABLE_X2"}, {"op": "VARIABLE_X3"},
+                          {"op": "CONSTANT", "value": 2.0}, {"op": "CONSTANT", "value": 1.0},
+                          {"op": "CONSTANT", "value": 10.0}]}"#,
+        );
+        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("python sponge config lowers");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        // at x=(1,0,0), state rho=1.5, vel=(3,0,0), pre=2:
+        // S_mom_0 = kappa*(mom_ref_0 - rho*vel_0) = 2*(x_0 - 4.5) = 2*(1 - 4.5) = -7.
+        let (_, mom) = &built[1];
+        let s_mom0 = eval_lowered(mom, mom.outputs[0], &[
+            ("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("vel_2", 0.0),
+            ("x_0", 1.0), ("x_1", 0.0), ("x_2", 0.0),
+        ]);
+        assert!((s_mom0 - (-7.0)).abs() < 1e-12, "python sponge mom_0 wrong: {s_mom0}");
+        // S_nrg = kappa*(nrg_ref - (pre*inv_gm1 + 0.5*rho*|v|^2)) = 2*(10 - (5 + 6.75)) = -3.5.
+        // (the x_k leaves ride along in the spliced field — unused by the const nrg_ref, but present.)
+        let (_, nrg) = &built[2];
+        let s_nrg = eval_lowered(nrg, nrg.outputs[0], &[
+            ("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("vel_2", 0.0), ("pre", 2.0),
+            ("x_0", 1.0), ("x_1", 0.0), ("x_2", 0.0),
+        ]);
+        assert!((s_nrg - (-3.5)).abs() < 1e-12, "python sponge nrg wrong: {s_nrg}");
     }
 
     #[test]
@@ -597,6 +669,69 @@ mod tests {
         let s = eval_lowered(mom, mom.outputs[0],
             &[("rho", 1.0), ("vel_0", 7.0), ("p0", -5.0), ("p1", 0.0)]);
         assert!(s.abs() < 1e-12, "negative kappa must clamp to a no-op, got {s}");
+    }
+
+    // ---- sponge: full conserved-state relaxation (the buffer zone) -----------------
+
+    #[test]
+    fn sponge_relaxes_full_state_toward_reference() {
+        // outputs = [kappa, den_ref, mom_ref_0, mom_ref_1, nrg_ref] as CONSTANT nodes (the reference
+        // is a pure function of position, not a runtime param — params carries only inv_gm1). the
+        // three channels each relax toward the reference conserved value.
+        //   kappa=2, den_ref=1, mom_ref=[0.5,0], nrg_ref=10, inv_gm1=2.5 (gamma=1.4).
+        let cfg = cfg_from(
+            r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2,3,4], "params":[2.5],
+                 "nodes":[ {"op":"CONSTANT","value":2.0}, {"op":"CONSTANT","value":1.0},
+                           {"op":"CONSTANT","value":0.5}, {"op":"CONSTANT","value":0.0},
+                           {"op":"CONSTANT","value":10.0} ] }"#,
+        );
+        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("sponge newtonian");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+
+        // state: rho=1.5, vel=[3,0], pre=2 (each channel reads only what it needs from this).
+        let state = [("rho", 1.5), ("vel_0", 3.0), ("vel_1", 0.0), ("pre", 2.0)];
+        // S_den = kappa*(den_ref - rho) = 2*(1 - 1.5) = -1.0 (density relaxes DOWN toward the ref).
+        let (_, den) = &built[0];
+        let s_den = eval_lowered(den, den.outputs[0], &state);
+        assert!((s_den - (-1.0)).abs() < 1e-12, "sponge density wrong: {s_den}");
+        // S_mom_0 = kappa*(mom_ref_0 - rho*vel_0) = 2*(0.5 - 4.5) = -8.0 (opposes the momentum).
+        let (_, mom) = &built[1];
+        let s_mom0 = eval_lowered(mom, mom.outputs[0], &state);
+        assert!((s_mom0 - (-8.0)).abs() < 1e-12, "sponge mom_0 wrong: {s_mom0}");
+        // S_nrg = kappa*(nrg_ref - E), E = pre*inv_gm1 + 0.5*rho*|v|^2 = 2*2.5 + 0.5*1.5*9 = 11.75;
+        //   -> 2*(10 - 11.75) = -3.5 (total energy relaxes DOWN toward the ref).
+        let (_, nrg) = &built[2];
+        let s_nrg = eval_lowered(nrg, nrg.outputs[0], &state);
+        assert!((s_nrg - (-3.5)).abs() < 1e-12, "sponge nrg wrong: {s_nrg}");
+    }
+
+    #[test]
+    fn sponge_on_iso_drops_energy_channel() {
+        // iso has no energy: the reference is [kappa, den_ref, mom_ref_0] (2+D), and only den+mom
+        // channels are emitted (no nrg_ref, no inv_gm1 needed).
+        let cfg = cfg_from(
+            r#"{ "kind":"sponge", "dim":1, "outputs":[0,1,2], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
+                           {"op":"CONSTANT","value":0.0} ] }"#,
+        );
+        let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("sponge iso");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom"]);
+        // S_den = 1*(2 - rho); rho=0.5 -> 1.5 (density relaxes UP toward the ref).
+        let (_, den) = &built[0];
+        let s_den = eval_lowered(den, den.outputs[0], &[("rho", 0.5)]);
+        assert!((s_den - 1.5).abs() < 1e-12, "iso sponge density wrong: {s_den}");
+    }
+
+    #[test]
+    fn sponge_wrong_arity_is_rejected() {
+        // energy regime needs 3+D outputs (kappa, den_ref, D mom_ref, nrg_ref); a short list fails.
+        let cfg = cfg_from(
+            r#"{ "kind":"sponge", "dim":2, "outputs":[0,1,2], "params":[2.5],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":1.0},
+                           {"op":"CONSTANT","value":0.0} ] }"#,
+        );
+        let err = expect_err(&cfg, &NEWTONIAN_SPEC);
+        assert!(err.contains("nrg_ref"), "expected sponge arity rejection, got: {err}");
     }
 
     // ---- state variables: density + pressure in user source expressions -------------------

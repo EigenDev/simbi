@@ -879,6 +879,65 @@ pub fn user_relax_energy_source(field: &BuiltSource, d: usize) -> BuiltSource {
     })
 }
 
+// the full conserved-state relaxation (buffer zone) sources. `field` carries `outputs =
+// [kappa, den_ref, mom_ref_0..mom_ref_{D-1}, nrg_ref]` — the rate, then the reference CONSERVED
+// state; `nrg_ref` (output `2+D`) is present only when the regime has energy. all three sources
+// trace their lift over the SAME field so masking `kappa` (output 0) masks the whole relaxation.
+
+/// full-state relaxation MASS source: `S_den = max(kappa,0) * (den_ref - rho)`. reads outputs
+/// `[kappa, den_ref]`; the momentum/energy outputs are consumed by the sibling sources.
+pub fn user_sponge_density_source(field: &BuiltSource, d: usize) -> BuiltSource {
+    assert!(
+        field.outputs.len() >= 2 + d,
+        "user_sponge_density_source: field must be [kappa, den_ref, mom_ref_0..mom_ref_{}, ..], got {} outputs",
+        d.saturating_sub(1),
+        field.outputs.len(),
+    );
+    lift_to_built(|| {
+        let rho = Gv::scalar(law_params::RHO);
+        let f = splice_field_into_trace(field);
+        vec![crate::source_term::sponge_density(rho, f[0], f[1])]
+    })
+}
+
+/// full-state relaxation MOMENTUM source: `S_mom_k = max(kappa,0) * (mom_ref_k - rho*vel_k)`,
+/// relaxing the conserved momentum toward `mom_ref` (outputs `2..2+D`).
+pub fn user_sponge_momentum_source(field: &BuiltSource, d: usize) -> BuiltSource {
+    assert!(
+        field.outputs.len() >= 2 + d,
+        "user_sponge_momentum_source: field must be [kappa, den_ref, mom_ref_0..mom_ref_{}, ..], got {} outputs",
+        d.saturating_sub(1),
+        field.outputs.len(),
+    );
+    lift_to_built(|| {
+        let rho = Gv::scalar(law_params::RHO);
+        let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
+        let f = splice_field_into_trace(field);
+        crate::source_term::sponge_momentum(rho, &vel, f[0], &f[2..2 + d])
+    })
+}
+
+/// full-state relaxation ENERGY source: `S_nrg = max(kappa,0) * (nrg_ref - E)`, `E = pre*inv_gm1 +
+/// (1/2)*rho*|v|^2`. reads `nrg_ref` (output `2+D`); `inv_gm1 = 1/(gamma-1)` is folded in as a
+/// build-time constant (gamma is known at lower time). energy regimes only.
+pub fn user_sponge_energy_source(field: &BuiltSource, d: usize, inv_gm1: f64) -> BuiltSource {
+    assert_eq!(
+        field.outputs.len(),
+        3 + d,
+        "user_sponge_energy_source: field must be [kappa, den_ref, mom_ref_0..mom_ref_{}, nrg_ref], got {} outputs",
+        d.saturating_sub(1),
+        field.outputs.len(),
+    );
+    lift_to_built(|| {
+        let rho = Gv::scalar(law_params::RHO);
+        let vel: Vec<Gv> = (0..d).map(|k| Gv::scalar(&law_params::vel(k))).collect();
+        let pre = Gv::scalar(law_params::PRE);
+        let f = splice_field_into_trace(field);
+        let inv_gm1 = <Gv as symbi_algebra::Numeric>::from_f64(inv_gm1);
+        vec![crate::source_term::sponge_energy(rho, &vel, pre, f[0], f[2 + d], inv_gm1)]
+    })
+}
+
 // ---- example user source: uniform external acceleration ---------------------
 //
 //   S_mom_k = ρ * g_ext_k                  (D outputs)

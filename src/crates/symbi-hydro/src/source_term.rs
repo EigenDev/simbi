@@ -78,6 +78,43 @@ pub fn relax_energy<S: Scalar>(rho: S, vel: &[S], kappa: S, v_ref: &[S]) -> S {
     dot(vel, &relax_momentum(rho, vel, kappa, v_ref))
 }
 
+// ── full conserved-state relaxation (the buffer zone) ────────────────────────
+//
+// where `relax_*` relaxes the intensive VELOCITY toward `v_ref` at fixed density,
+// the `sponge_*` family relaxes EVERY conserved component toward a reference state
+// `U_ref = (den_ref, mom_ref, nrg_ref)`: `S_U = max(kappa,0) * (U_ref - U)`. this is
+// the well-posed sink of a buffer/damping zone that holds the flow at a known (e.g.
+// analytic ambient) solution — density included, so the zone cannot let the boundary
+// density drift. the three channels share the ONE `kappa`, so masking the rate masks
+// the whole relaxation, and `clamp_rate` keeps it a damping-only sink.
+
+/// full-state relaxation MASS lift: `S_den = max(kappa,0) * (den_ref - rho)`, the
+/// linear drag of density toward the reference `den_ref`.
+pub fn sponge_density<S: Scalar>(rho: S, kappa: S, den_ref: S) -> S {
+    clamp_rate(kappa) * (den_ref - rho)
+}
+
+/// full-state relaxation MOMENTUM lift: `S_mom_k = max(kappa,0) * (mom_ref_k - rho*vel_k)`,
+/// relaxing the CONSERVED momentum `rho*vel_k` toward a reference momentum `mom_ref_k`.
+/// distinct from `relax_momentum` (intensive velocity at fixed rho) — this composes with
+/// a simultaneous density relaxation without the two channels fighting.
+pub fn sponge_momentum<S: Scalar>(rho: S, vel: &[S], kappa: S, mom_ref: &[S]) -> Vec<S> {
+    let k = clamp_rate(kappa);
+    vel.iter()
+        .zip(mom_ref.iter())
+        .map(|(&v, &mr)| k * (mr - rho * v))
+        .collect()
+}
+
+/// full-state relaxation ENERGY lift: `S_nrg = max(kappa,0) * (nrg_ref - E)`, relaxing the
+/// CONSERVED total energy `E = pre*inv_gm1 + (1/2)*rho*|v|^2` toward `nrg_ref`. `inv_gm1 =
+/// 1/(gamma-1)` is the ideal-gas internal-energy coefficient — a build-time constant since
+/// gamma is known when the source is lowered, so the lift needs no runtime gamma binding.
+pub fn sponge_energy<S: Scalar>(rho: S, vel: &[S], pre: S, kappa: S, nrg_ref: S, inv_gm1: S) -> S {
+    let e = pre * inv_gm1 + S::from_f64(0.5) * rho * dot(vel, vel);
+    clamp_rate(kappa) * (nrg_ref - e)
+}
+
 /// the `kappa >= 0` stability clamp. a relaxation adds `kappa*(U_ref - U)`; a
 /// negative rate would anti-damp (inject energy / destabilize). clamping in the
 /// lift makes the unstable form UNEXPRESSIBLE — the stability invariant enforced
