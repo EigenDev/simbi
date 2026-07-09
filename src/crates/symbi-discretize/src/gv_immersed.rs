@@ -38,10 +38,6 @@ type Writes = Vec<(String, FieldBind, NodeId)>;
 fn sq(a: Gv) -> Gv {
     a * a
 }
-#[inline]
-fn cube(a: Gv) -> Gv {
-    a * a * a
-}
 
 /// per-cell, per-body physics in CARTESIAN (coord-free): softened gravity `g`, the well-posed
 /// DRAIN RATE `drain_rate` (1/time; the fluid in the mask relaxes by `exp(-drain_rate*dt)`), and
@@ -208,27 +204,21 @@ fn body_contribution(
     let soft = Gv::scalar(&format!("body_{b}_soft"));
     let bpos = body_vec3(b, ndim, cart_axes, "pos");
 
-    // r_vec = cell_cart - body_pos; r_dist2 = |r_vec|^2; r_eff = sqrt(.. + soft^2).
+    // r_vec = cell_cart - body_pos; r_mag = |r_vec| (for the drain mask).
     let rvec: [Gv; 3] = std::array::from_fn(|i| cell_cart[i] - bpos[i]);
-    let r_dist2 = sq(rvec[0]) + sq(rvec[1]) + sq(rvec[2]);
-    let r_eff = (r_dist2 + sq(soft)).sqrt();
-    let r_mag = r_dist2.sqrt();
+    let r_mag = (sq(rvec[0]) + sq(rvec[1]) + sq(rvec[2])).sqrt();
 
-    // gravity (cartesian): g = -mass * r_vec / r_eff^3.
-    let grav_fac = -mass / cube(r_eff);
-    let g: [Gv; 3] = std::array::from_fn(|i| rvec[i] * grav_fac);
+    // softened gravity g = -mass * r_vec / r_eff^3 — the carrier-generic form, proven conservative
+    // (g = -grad phi) + bounded in the well-posedness suite (`ibm.rs`).
+    let g = crate::ibm::softened_gravity(rvec, mass, soft);
 
-    // the well-posed DRAIN rate (accretor.md §2): drain_rate = chi / tau, with the mollified mask
-    // chi = 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) and the timescale capped at the
-    // sound-crossing rate cs/dx so the mask stays evacuated. `sink_rate` (per body) is the user
-    // dial: 0 for a non-accreting body (-> drain_rate = 0, exact no-op), large -> the full
-    // sound-crossing drain; the min gates + caps in one step (mirrors the retired KMK04 min).
+    // the well-posed DRAIN rate (accretor.md §2): chi * min(sink, cs/dx), the mollified mask chi =
+    // 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) times the sound-crossing-capped sink. `sink_rate`
+    // (per body) is the user dial: 0 for a non-accreting body (drain_rate = 0, exact no-op), large ->
+    // the full sound-crossing drain. carrier-generic form proven nonnegative -> f in (0,1] (`ibm.rs`).
     let r_mask = Gv::scalar(&format!("body_{b}_racc"));
     let sink_rate = Gv::scalar(&format!("body_{b}_sink"));
-    let z = (r_mag - r_mask) / min_w;
-    let chi = Gv::from_f64(0.5) * (Gv::ONE - z.tanh());
-    let sound_rate = cs / min_w; // = 1/tau at C_drain = 1
-    let drain_rate = chi * sink_rate.min(sound_rate);
+    let drain_rate = crate::ibm::drain_rate(r_mag, r_mask, min_w, sink_rate, cs);
     let _ = (tiny, eps_r, inv_dt, vel_cart, den); // unused by the drain (kept for the shared signature)
     BodyContributionGv { g, drain_rate, rvec }
 }
@@ -277,7 +267,7 @@ pub(crate) fn body_evolved_gv(
 
     // f = exp(-total_rate * dt) in (0, 1]: uniform scaling of den, mom, nrg (intensive state
     // invariant, positivity-preserving for any dt). f = 1 outside every mask -> exact no-op.
-    let f = (Gv::ZERO - total_rate * dt).exp();
+    let f = crate::ibm::drain_factor(total_rate, dt);
     let den_new = den * f;
     let mom_new: Vec<Gv> = (0..ncomp).map(|comp| (mom[comp] + dt * d_mom[comp]) * f).collect();
     let nrg_new = (nrg + dt * d_nrg) * f;

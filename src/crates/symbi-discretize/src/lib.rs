@@ -27,6 +27,7 @@ pub mod kernel_slug;
 pub mod gv;
 pub mod gv_refinement;
 pub mod gv_immersed;
+pub mod ibm;
 pub mod lattice;
 
 pub use coords::{Coords, Spacing, Spacetime};
