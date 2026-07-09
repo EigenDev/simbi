@@ -585,4 +585,4 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 ---
 
-> Porting this to rust benefitted greatly from the use of the Claude Code tool
+> Porting this to rust benefitted greatly from the use of the Claude Code tool. I will drink the koolaid until my bitter end, I suppose.
