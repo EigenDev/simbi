@@ -75,6 +75,7 @@ pub fn grav_source<S: Scalar, const D: usize>(
         torque_delta: Tensor::zeros(),
         mass_delta: S::ZERO,
         prev_mass_delta: S::ZERO,
+        energy_delta: S::ZERO, // gravity is a force exchange, not absorbed accretion energy
     };
     (source, delta)
 }
@@ -207,6 +208,7 @@ pub fn accretion_source<S: Scalar + OrderedNumeric, const D: usize>(
         torque_delta: torque,
         mass_delta: den_dot * dv * dt,
         prev_mass_delta: S::ZERO,
+        energy_delta: nrg_dot * dv * dt, // the energy removed alongside the mass (mirrors mass_delta)
     };
     (source, delta_body)
 }
@@ -306,6 +308,7 @@ pub fn rigid_source<S: Scalar + OrderedNumeric, const D: usize>(
         torque_delta: torque,
         mass_delta: S::ZERO,
         prev_mass_delta: S::ZERO,
+        energy_delta: S::ZERO, // rigid penalty is a momentum exchange; legacy path books no energy
     };
     (source, delta_body)
 }

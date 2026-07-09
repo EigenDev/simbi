@@ -28,6 +28,10 @@ pub struct BodyDelta<S: Scalar, const D: usize> {
     // accumulated quantities (summed across timesteps)
     pub mass_delta: S,
     pub prev_mass_delta: S,
+    /// total (internal + kinetic) energy absorbed from the fluid -- the accretion-power
+    /// budget `Edot = energy_delta / dt`. closes the gas+body ENERGY ledger: the fluid
+    /// loses exactly this (uniform-scaling drain), so it must be booked on the body side.
+    pub energy_delta: S,
 }
 
 impl<S: Scalar, const D: usize> BodyDelta<S, D> {
@@ -38,6 +42,7 @@ impl<S: Scalar, const D: usize> BodyDelta<S, D> {
             torque_delta: Tensor::zeros(),
             mass_delta: S::ZERO,
             prev_mass_delta: S::ZERO,
+            energy_delta: S::ZERO,
         }
     }
 
@@ -48,6 +53,7 @@ impl<S: Scalar, const D: usize> BodyDelta<S, D> {
         self.force_delta = timestep_totals.force_delta;
         self.torque_delta = timestep_totals.torque_delta;
         self.mass_delta = self.mass_delta + timestep_totals.mass_delta;
+        self.energy_delta = self.energy_delta + timestep_totals.energy_delta;
     }
 }
 
@@ -58,6 +64,7 @@ impl<S: Scalar, const D: usize> AddAssign for BodyDelta<S, D> {
         self.force_delta = self.force_delta + rhs.force_delta;
         self.torque_delta = self.torque_delta + rhs.torque_delta;
         self.mass_delta = self.mass_delta + rhs.mass_delta;
+        self.energy_delta = self.energy_delta + rhs.energy_delta;
     }
 }
 

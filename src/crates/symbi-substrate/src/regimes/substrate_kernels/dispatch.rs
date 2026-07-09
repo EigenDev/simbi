@@ -264,6 +264,7 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
                 torque_delta: torque,
                 mass_delta: sums[base + D + 3],
                 prev_mass_delta: 0.0,
+                energy_delta: 0.0,
             });
         }
     }
@@ -350,6 +351,7 @@ pub fn dispatch_body_feedback_iso<const D: usize, const DOF: usize, Mem, Sc>(
                 torque_delta: torque,
                 mass_delta: sums[base + D + 3],
                 prev_mass_delta: 0.0,
+                energy_delta: 0.0,
             });
         }
     }

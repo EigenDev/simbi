@@ -24,7 +24,7 @@
 //   let (drained, delta) = drain_cell(&cons, chi, tau, dt, volume, body_idx);
 // =============================================================================
 
-use symbi_hydro::energy::EnergyModel;
+use symbi_hydro::energy::{EnergyModel, EnergySlot};
 use symbi_hydro::state::ConsG;
 use symbi_ir::algebra::Scalar;
 
@@ -73,9 +73,12 @@ pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
     let drained = *cons * f; // UNIFORM scale of den, mom, AND the energy slot
     let absorbed = *cons - drained; // = cons * (1 - f): the body's exact gain
     let mut delta = BodyDelta::new(idx);
-    // cell-integrated absorbed mass (dM) and drag force (dP/dt = absorbed momentum / dt).
+    // cell-integrated absorbed mass (dM), drag force (dP/dt), and total energy (dE). the
+    // energy slot is zero for the isothermal regime (no energy channel). together these make
+    // gas+body conservation of mass, momentum, AND energy exact to machine precision.
     delta.mass_delta = absorbed.den * volume;
     delta.force_delta = absorbed.mom.scale(volume / dt);
+    delta.energy_delta = absorbed.nrg.value() * volume;
     (drained, delta)
 }
 
@@ -155,6 +158,9 @@ mod tests {
             let gas_mom_lost = (cons.mom[k] - drained.mom[k]) * vol;
             assert!((gas_mom_lost - delta.force_delta[k] * 0.5).abs() < 1e-15);
         }
+        // energy: gas lost (nrg_old - nrg_new)*V equals the body's absorbed energy_delta.
+        let gas_nrg_lost = (cons.nrg - drained.nrg) * vol;
+        assert!((gas_nrg_lost - delta.energy_delta).abs() < 1e-15);
     }
 
     // positivity for ANY dt (the whole reason for the exponential): f = exp(-x) in
