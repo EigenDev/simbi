@@ -35,10 +35,12 @@ use std::sync::Arc;
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
     GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries,
-    dispatch_fields, dispatch_flux, dispatch_godunov, dispatch_gradient_boundaries,
-    dispatch_runtime_source, geom_scalar,
+    dispatch_fields, dispatch_flux, dispatch_fused_runtime_cpu, dispatch_godunov,
+    dispatch_gradient_boundaries, dispatch_runtime_source, fused_runtime_cpu_kernel, geom_scalar,
     geom_suffix, gr_chart_dof_tag, kernel_geom, resolve_params, scalars_for, spacetime_slug,
 };
+use symbi_discretize::gv::GeoSource;
+use symbi_geometry::Spacetime;
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::KernelSet;
@@ -59,6 +61,11 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// increment directly and it is added in `source_apply` via the regime-agnostic
     /// `dispatch_runtime_source`. None for source-free runs.
     pub runtime_source: Option<Arc<RuntimeSource>>,
+    /// when true AND a `runtime_source` is attached on a FLAT (Minkowski) background, the raw user
+    /// source is FUSED into the godunov stage as one Cranelift-JIT'd host kernel instead of the
+    /// two-pass. host+f64 only; falls back to the two-pass off-host / non-f64 / JIT-miss / GR (the
+    /// fused builder traces the flat geo, so it cannot match a curved godunov kernel).
+    pub fuse_runtime: bool,
     /// DRIVEN (DYNAMIC) boundary prescriptions, indexed by `BoundaryType::Driven(id)` — the
     /// complete prim state [rho, vel_0..DOF-1, pre] as coordinate DAGs, evaluated over the
     /// face's ghost band after the standard pullback skips it. a rotating (theta-stratified)
@@ -85,6 +92,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             cfl_scratch,
             solver: Solver::Hlle,
             runtime_source: None,
+            fuse_runtime: false,
             boundary_dags: Vec::new(),
             gradient_bcs: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
@@ -121,6 +129,19 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         // has_energy = true (RHD carries tau); validation happened at
         // `build_user_source(cfg, &RHD_SPEC)`.
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
+        self
+    }
+
+    /// attach a runtime user source AND fuse it into the godunov stage (flat host+f64); the two-pass
+    /// twin `with_runtime_source` forces the separate pass. bit-identical (falls back off-host / non-f64
+    /// / GR). no immersed-body fold — RHD has no Newtonian body.
+    pub fn with_fused_runtime_source(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> Self {
+        self.runtime_source = Some(RuntimeSource::new(built, params, true));
+        self.fuse_runtime = true;
         self
     }
 
@@ -227,6 +248,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn godunov_stage(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64) {
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
+        // fuse the raw user source into godunov on a FLAT background, host+f64. the fused builder
+        // traces the flat geo (GeoSource::Hydro, matching the `rhd` AOT godunov's geo_source), so it
+        // matches ONLY the Minkowski kernel; GR (a spacetime suffix) keeps the two-pass. fold_body =
+        // false — RHD has no Newtonian immersed body.
+        if self.fuse_runtime && matches!(sim.geom.spacetime, Spacetime::Minkowski) {
+            if let Some(rs) = &self.runtime_source {
+                if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false) {
+                    dispatch_fused_runtime_cpu(sim, pre, fk, Some(rs), dt, a0, ac, self.gamma);
+                    return;
+                }
+            }
+        }
         dispatch_godunov(sim, pre, "rhd", dt, a0, ac);
     }
 
@@ -240,6 +273,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // the BuiltSource outputs to their target conserved slots), so no RHD-specific
         // source code — the relativistic conservation law lives in the godunov stage.
         if let Some(rs) = &self.runtime_source {
+            // when the fused stage rode the source inside godunov (same predicate godunov_stage used),
+            // the separate pass would double-count — skip it.
+            if self.fuse_runtime
+                && matches!(sim.geom.spacetime, Spacetime::Minkowski)
+                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false).is_some()
+            {
+                return;
+            }
             dispatch_runtime_source(sim, rs, weight);
         }
     }

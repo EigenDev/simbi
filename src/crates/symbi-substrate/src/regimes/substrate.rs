@@ -272,7 +272,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         if self.fuse_runtime {
             if let Some(rs) = &self.runtime_source {
                 if let Some(fk) =
-                    fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true })
+                    fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false)
                 {
                     // iso reaches this path body-free (the Cartesian-body case early-returns above),
                     // so the fused kernel carries no body fold; self.cs is the inert `Cs` binding.
@@ -440,7 +440,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
         if let Some(rs) = &self.runtime_source {
             if self.fuse_runtime
-                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }).is_some()
+                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, false).is_some()
             {
                 return; // already fused into the godunov stage
             }

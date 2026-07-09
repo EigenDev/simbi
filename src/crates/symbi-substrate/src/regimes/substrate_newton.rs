@@ -238,7 +238,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             let geo = GeoSource::Hydro { inertial: true };
             match &self.runtime_source {
                 Some(rs) => {
-                    if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, geo) {
+                    if let Some(fk) = fused_runtime_cpu_kernel(sim, rs, geo, true) {
                         dispatch_fused_runtime_cpu(sim, pre, fk, Some(rs), dt, a0, ac, self.gamma);
                         return;
                     }
@@ -382,7 +382,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             // when the fused path is live (same predicate godunov_stage used), the source already
             // rode inside the godunov launch — skip the separate pass to avoid double-counting.
             if self.fuse_runtime
-                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }).is_some()
+                && fused_runtime_cpu_kernel(sim, rs, GeoSource::Hydro { inertial: true }, true).is_some()
             {
                 return;
             }
@@ -397,7 +397,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         if self.fuse_runtime {
             let geo = GeoSource::Hydro { inertial: true };
             let absorbed = match &self.runtime_source {
-                Some(rs) => body_fused_in(sim, rs, geo),
+                Some(rs) => body_fused_in(sim, rs, geo, true),
                 None => resolve_body_only_fused(sim, &self.fused_rhs, true, geo).is_some(),
             };
             if absorbed {

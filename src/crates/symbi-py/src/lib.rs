@@ -260,7 +260,8 @@ impl<Mem: MemorySpace, Sc: symbi_hydro::Scalar + symbi_algebra::OrderedNumeric, 
         built: Vec<(String, symbi_hydro::source_spec::BuiltSource)>,
         params: Vec<f64>,
     ) -> Result<Self, String> {
-        Ok(self.with_runtime_source(built, params))
+        // fused by default on a flat host+f64 run; GR / device / non-f64 fall back to the two-pass.
+        Ok(self.with_fused_runtime_source(built, params))
     }
 }
 

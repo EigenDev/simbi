@@ -335,6 +335,11 @@ pub(crate) fn fused_runtime_cpu_kernel<'a, const D: usize, const DOF: usize, Mem
     sim: &FieldStore<D, DOF, Mem, Sc>,
     rs: &'a RuntimeSource,
     geo: symbi_discretize::gv::GeoSource,
+    // whether to fold the immersed body into the fused stage. TRUE only on the Newtonian (adiabatic)
+    // regime — `body_evolved_gv` is softened NEWTONIAN gravity + Bondi accretion, valid on the
+    // non-relativistic conserved state. iso (cs from prim.pre, separate baked path) and rhd (relativistic
+    // cons) pass FALSE; their bodies are handled elsewhere / unsupported.
+    fold_body: bool,
 ) -> Option<&'a FusedCpuKernel>
 where
     Sc: Scalar + OrderedNumeric,
@@ -348,10 +353,9 @@ where
         return None;
     }
     let (coords, spacing, axes) = sim_gv_geom(sim);
-    // the immersed body folds into the fused stage only on an ENERGY regime (the `body_evolved_gv`
-    // wrap reads/writes `nrg`; the iso body — cs from prim.pre — is a separate pass). baked at
-    // MAX_BODIES to match the standalone `body_source` kernel; 0 leaves the body out (iso, or no bodies).
-    let n_bodies = if rs.has_energy && sim.immersed.is_some() { MAX_BODIES } else { 0 };
+    // fold the immersed body only when the caller asks (Newtonian). baked at MAX_BODIES to match the
+    // standalone `body_source` kernel; 0 leaves the body out (iso, rhd, or no bodies).
+    let n_bodies = if fold_body && sim.immersed.is_some() { MAX_BODIES } else { 0 };
     rs.fused_cpu
         .get_or_init(|| {
             build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, geo, &rs.built, n_bodies)
@@ -367,14 +371,15 @@ pub(crate) fn body_fused_in<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     rs: &RuntimeSource,
     geo: symbi_discretize::gv::GeoSource,
+    fold_body: bool,
 ) -> bool
 where
     Sc: Scalar + OrderedNumeric,
     Mem: MemorySpace,
 {
-    rs.has_energy
+    fold_body
         && sim.immersed.is_some()
-        && fused_runtime_cpu_kernel(sim, rs, geo).is_some()
+        && fused_runtime_cpu_kernel(sim, rs, geo, fold_body).is_some()
 }
 
 /// build+cache the BODY-ONLY fused godunov kernel: godunov + geo + the immersed-body wrap, with NO
