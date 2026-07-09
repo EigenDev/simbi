@@ -1,0 +1,168 @@
+// =============================================================================
+// drain.rs
+//
+// the well-posed uniform-scaling volumetric drain (docs/ideas/accretor.md §2):
+// the exact-exponential relaxation `U -> U exp(-chi dt / tau)`, applied
+// post-hydro on the masked cells. scaling EVERY conserved component by the SAME
+// factor `f` leaves each intensive primitive (velocity, specific internal
+// energy, sound speed, temperature) pointwise invariant, so the drain is
+// positivity-preserving for ANY dt (no CFL tax), injects no acoustic/entropy
+// wave, and preserves the characteristic decomposition -- the no-reflection
+// property at `r_mask` inside the sonic surface. the accretion rate is
+// EMERGENT: the cell-integrated `U_old - U_new` reduced over the mask is a
+// functional of the solved flow, never a target rate fed in.
+//
+// this is the well-posed replacement for the mass-only KMK04 sink
+// (`effects::accretion_source`): a mass-only sink removes rho at fixed momentum,
+// so it CHANGES the velocity when it drains, re-couples the primitive channels,
+// injects a back-pressure artifact, and (in the property algebra) destroys the
+// exact three-exponential decoupling. uniform scaling does none of these.
+//
+// usage:
+//   let chi = drain_mask(dist, r_mask, w);
+//   let tau = drain_timescale(dx, c_s, c_drain);
+//   let (drained, delta) = drain_cell(&cons, chi, tau, dt, volume, body_idx);
+// =============================================================================
+
+use symbi_hydro::energy::EnergyModel;
+use symbi_hydro::state::ConsG;
+use symbi_ir::algebra::Scalar;
+
+use crate::body_delta::BodyDelta;
+
+/// the mollified spherical mask value at coordinate distance `dist` from the
+/// mask center: `chi = 0.5 (1 - tanh((dist - r_mask) / w))`. `chi -> 1` well
+/// inside `r_mask`, `-> 0` well outside, with a tanh ramp of width `w` across
+/// the surface. the mollification keeps the drain isotropic on a cartesian grid
+/// (no staircasing) and stops the mask edge from acting as a sharp reflecting
+/// wall.
+#[inline]
+pub fn drain_mask<S: Scalar>(dist: S, r_mask: S, w: S) -> S {
+    S::from_f64(0.5) * (S::ONE - ((dist - r_mask) / w).tanh())
+}
+
+/// the drain timescale `tau = c_drain * dx / c_s` (local sound speed). drains
+/// fast enough that the mask stays evacuated and never backs up; in the
+/// well-posed regime (`r_mask` inside the sonic surface) the emergent rate is
+/// INSENSITIVE to `c_drain` once it is small enough -- the sonic surface
+/// regulates the rate, not the drain. `c_drain` is a convergence-study dial,
+/// never tuned to hit a target rate.
+#[inline]
+pub fn drain_timescale<S: Scalar>(dx: S, c_s: S, c_drain: S) -> S {
+    c_drain * dx / c_s
+}
+
+/// the exact-exponential uniform-scaling drain on one masked cell's conserved
+/// vector. returns the DRAINED state `U exp(-chi dt/tau)` and the cell's exact
+/// contribution to the body -- the cell-integrated `U_old - U_new` (absorbed
+/// mass and drag force), which makes gas+body conservation exact to machine
+/// precision. the SAME scalar factor multiplies EVERY conserved component (the
+/// accretor.md §2.2 DESIGN INVARIANT), including the energy slot, so the
+/// intensive primitive state is untouched.
+#[inline]
+pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
+    cons: &ConsG<S, D, E>,
+    chi: S,
+    tau: S,
+    dt: S,
+    volume: S,
+    idx: usize,
+) -> (ConsG<S, D, E>, BodyDelta<S, D>) {
+    // f = exp(-chi dt / tau) in (0, 1]; f = 1 (exact no-op) where chi = 0.
+    let f = (-(chi * dt / tau)).exp();
+    let drained = *cons * f; // UNIFORM scale of den, mom, AND the energy slot
+    let absorbed = *cons - drained; // = cons * (1 - f): the body's exact gain
+    let mut delta = BodyDelta::new(idx);
+    // cell-integrated absorbed mass (dM) and drag force (dP/dt = absorbed momentum / dt).
+    delta.mass_delta = absorbed.den * volume;
+    delta.force_delta = absorbed.mom.scale(volume / dt);
+    (drained, delta)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use symbi_algebra::Tensor;
+    use symbi_hydro::energy::Adiabatic;
+
+    type Cons3 = ConsG<f64, 3, Adiabatic>;
+
+    fn sample_cons() -> Cons3 {
+        // a moving, pressurized cell: den, mom = den*v, nrg = total energy.
+        let den = 2.5;
+        let v = Tensor::new([0.3, -0.2, 0.1]);
+        let e_int = 1.7; // specific internal energy
+        let nrg = den * (e_int + 0.5 * v.dot(&v));
+        ConsG { den, mom: v.scale(den), nrg }
+    }
+
+    // the DESIGN INVARIANT (accretor.md §2.2): uniform scaling leaves the intensive
+    // primitive state pointwise invariant. a mass-only sink would change the velocity.
+    #[test]
+    fn uniform_scaling_leaves_intensive_primitives_invariant() {
+        let cons = sample_cons();
+        let (drained, _) = drain_cell(&cons, 0.8, 3.0, 0.4, 1.0, 0);
+        // velocity v = mom / den: unchanged.
+        for k in 0..3 {
+            let v0 = cons.mom[k] / cons.den;
+            let v1 = drained.mom[k] / drained.den;
+            assert!((v0 - v1).abs() < 1e-14, "velocity {k} changed: {v0} -> {v1}");
+        }
+        // specific internal energy e_int = nrg/den - 0.5|v|^2: unchanged.
+        let vsq0 = (0..3).map(|k| (cons.mom[k] / cons.den).powi(2)).sum::<f64>();
+        let vsq1 = (0..3).map(|k| (drained.mom[k] / drained.den).powi(2)).sum::<f64>();
+        let e0 = cons.nrg / cons.den - 0.5 * vsq0;
+        let e1 = drained.nrg / drained.den - 0.5 * vsq1;
+        assert!((e0 - e1).abs() < 1e-14, "specific internal energy changed: {e0} -> {e1}");
+    }
+
+    // exact gas+body conservation: the body's gain is exactly what the gas lost.
+    #[test]
+    fn conservation_is_exact() {
+        let cons = sample_cons();
+        let vol = 0.05;
+        let (drained, delta) = drain_cell(&cons, 1.0, 2.0, 0.5, vol, 0);
+        // mass: gas lost (den_old - den_new)*V equals the body's mass_delta.
+        let gas_mass_lost = (cons.den - drained.den) * vol;
+        assert!((gas_mass_lost - delta.mass_delta).abs() < 1e-15);
+        // momentum: gas lost (mom_old - mom_new)*V equals the body's absorbed momentum (= F*dt).
+        for k in 0..3 {
+            let gas_mom_lost = (cons.mom[k] - drained.mom[k]) * vol;
+            assert!((gas_mom_lost - delta.force_delta[k] * 0.5).abs() < 1e-15);
+        }
+    }
+
+    // positivity for ANY dt (the whole reason for the exponential): f = exp(-x) in
+    // [0, 1] for x >= 0, so drained density is in [0, den] -- NEVER negative, never
+    // NaN/Inf. an explicit stiff source would overshoot to negative density and need a
+    // floor. at extreme dt the exponential underflows cleanly to 0 (fully drained).
+    #[test]
+    fn positivity_preserved_for_any_dt() {
+        let cons = sample_cons();
+        for &dt in &[0.1, 10.0, 1e6, 1e12] {
+            let (drained, _) = drain_cell(&cons, 1.0, 1e-3, dt, 1.0, 0);
+            assert!(drained.den >= 0.0 && drained.den.is_finite(),
+                "density non-physical at dt={dt}: {}", drained.den);
+            assert!(drained.den <= cons.den, "drain must not increase density");
+        }
+    }
+
+    // chi = 0 (outside the mask) is an exact no-op: f = 1, nothing absorbed.
+    #[test]
+    fn zero_mask_is_exact_noop() {
+        let cons = sample_cons();
+        let (drained, delta) = drain_cell(&cons, 0.0, 1.0, 0.5, 1.0, 0);
+        assert_eq!(drained.den, cons.den);
+        assert_eq!(drained.nrg, cons.nrg);
+        assert_eq!(delta.mass_delta, 0.0);
+    }
+
+    // the mask limits: fully inside -> 1, fully outside -> 0, on the surface -> 1/2.
+    #[test]
+    fn mask_ramps_from_one_to_zero() {
+        let (r_mask, w) = (6.0f64, 1.0f64);
+        assert!(drain_mask(0.0, r_mask, w) > 1.0 - 1e-4, "deep interior should be ~1");
+        assert!(drain_mask(20.0, r_mask, w) < 1e-4, "far exterior should be ~0");
+        assert!((drain_mask(r_mask, r_mask, w) - 0.5).abs() < 1e-14, "surface should be 1/2");
+    }
+}
