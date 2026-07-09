@@ -14,6 +14,7 @@
 pub mod body;
 pub mod body_delta;
 pub mod collection;
+pub mod drain;
 pub mod effects;
 pub mod sink;
 pub mod motion;
@@ -21,6 +22,7 @@ pub mod diagnostics;
 
 pub use body::{Body, BodyKind};
 pub use body_delta::BodyDelta;
+pub use drain::{drain_body_cell, drain_cell, drain_mask, drain_timescale, sound_speed_from_cons};
 pub use collection::{BodyCollection, BinaryParams, ReferenceFrame, MAX_BODIES};
 pub use effects::{CellGeometry, grav_source, accretion_source, rigid_source};
 pub use sink::{accretion_coefficient, sink_weight, WeightedSums, SinkProperties, compute_sink_properties};
