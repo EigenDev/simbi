@@ -124,6 +124,9 @@ struct Config {
     // gradient (Neumann / Robin) boundary coefficients, in registry order (gradient_bcs[id] <-> the
     // face marked BoundaryType::Neumann(id) / Robin(id)). the convenience prescribed-gradient wall.
     gradient_bcs: Vec<GradientBcSpec>,
+    // the config author's OWN params (subclass fields), grouped, for the live dashboard's
+    // problem-setup panel: each is [group, label, value].
+    custom_params: Vec<[String; 3]>,
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
@@ -482,6 +485,23 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         CylPlane::Rz // axisymmetric (r, z), out-of-plane swirl B_phi (the default)
     };
 
+    // the config author's grouped custom params for the dashboard: a list of [group, label, value].
+    let custom_params: Vec<[String; 3]> = match dict.get_item("custom_params")? {
+        Some(obj) if !obj.is_none() => {
+            let mut v = Vec::new();
+            for row in obj.try_iter()? {
+                let row = row?;
+                v.push([
+                    row.get_item(0)?.extract()?,
+                    row.get_item(1)?.extract()?,
+                    row.get_item(2)?.extract()?,
+                ]);
+            }
+            v
+        }
+        _ => Vec::new(),
+    };
+
     Ok(Config {
         // the problem class name (preserve case); blank when not supplied.
         name: dict
@@ -607,6 +627,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         motion_json: get_source_json(dict, "scale_factor_expressions")?,
         driven_exprs,
         gradient_bcs,
+        custom_params,
     })
 }
 
@@ -1370,6 +1391,14 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
         "final only".to_string()
     };
     let t_final_disp = format!("{:.4}{suffix}", cfg.t_final / cfg.time_unit);
+    // physical domain extent per axis: [x_lo, x_lo + dx*n].
+    let domain = (0..cfg.dims)
+        .map(|ax| {
+            let hi = cfg.x_lo[ax] + cfg.dx[ax] * cfg.n_cells[ax] as f64;
+            format!("[{:.3}, {:.3}]", cfg.x_lo[ax], hi)
+        })
+        .collect::<Vec<_>>()
+        .join(" x ");
     let mut rows = vec![
         ["Regime".into(), "type".into(), cfg.regime.clone()],
         ["Regime".into(), "eos".into(), eos_label(cfg)],
@@ -1384,6 +1413,7 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
             "resolution".into(),
             format!("{res}  ({n_zones} zones)"),
         ],
+        ["Geometry".into(), "domain".into(), domain],
         ["Geometry".into(), "boundaries".into(), boundary_label(cfg)],
         ["Scheme".into(), "solver".into(), cfg.solver_name.clone()],
         [
@@ -1428,6 +1458,31 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
             format!("1 {unit} = {:.4} code", cfg.time_unit),
         ]);
     }
+    // active physics / sources the run actually engages -- shown only when present, so a plain run
+    // stays uncluttered.
+    let mut feats: Vec<(&str, String)> = Vec::new();
+    if !cfg.bodies.is_empty() {
+        feats.push(("immersed bodies", cfg.bodies.len().to_string()));
+    }
+    if cfg.source_json.is_some() {
+        feats.push(("source term", "active".into()));
+    }
+    if cfg.motion_json.is_some() {
+        feats.push(("mesh motion", "active".into()));
+    }
+    let n_bc = cfg.driven_exprs.len() + cfg.gradient_bcs.len();
+    if n_bc > 0 {
+        feats.push(("driven/gradient BCs", n_bc.to_string()));
+    }
+    if cfg.n_gpus > 1 {
+        feats.push(("gpus", cfg.n_gpus.to_string()));
+    }
+    for (k, v) in feats {
+        rows.push(["Physics".into(), k.into(), v]);
+    }
+    // the config author's OWN params, grouped by their ProblemParam(group=...); appended last so the
+    // core panel reads first, then each config's bespoke parameters.
+    rows.extend(cfg.custom_params.iter().cloned());
     rows
 }
 

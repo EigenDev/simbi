@@ -32,6 +32,45 @@ if TYPE_CHECKING:
 # =============================================================================
 # execution dict conversion
 # =============================================================================
+def _format_param_value(v: Any) -> Optional[str]:
+    """render a custom-param value for the dashboard, or None to skip (callables / complex objects)."""
+    if isinstance(v, bool):
+        return "yes" if v else "no"
+    if isinstance(v, float):
+        return f"{v:.4g}"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, str):
+        return v if len(v) <= 32 else v[:29] + "..."
+    if (
+        isinstance(v, (list, tuple))
+        and 0 < len(v) <= 4
+        and all(isinstance(x, (int, float, bool)) for x in v)
+    ):
+        return "[" + ", ".join(_format_param_value(x) or "?" for x in v) + "]"
+    return None
+
+
+def _collect_custom_params(problem: SimbiProblem) -> list[list[str]]:
+    """the config author's OWN params (subclass fields beyond the SimbiProblem base), for the live
+    dashboard's grouped 'problem setup' panel. each row is [group, humanized name, value]; the group
+    comes from `ProblemParam(group=...)` (default 'Parameters')."""
+    from .problem import SimbiProblem
+    from .param import get_param_metadata
+
+    base_fields = set(SimbiProblem.model_fields)
+    rows: list[list[str]] = []
+    for fname, finfo in type(problem).model_fields.items():
+        if fname in base_fields:
+            continue
+        formatted = _format_param_value(getattr(problem, fname, None))
+        if formatted is None:
+            continue
+        group = get_param_metadata(finfo).group or "Parameters"
+        rows.append([group, fname.replace("_", " "), formatted])
+    return rows
+
+
 def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     """
     convert problem config to dict for C++ backend.
@@ -80,6 +119,9 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     for field in computed_fields:
         if hasattr(problem, field):
             model_dict[field] = getattr(problem, field)
+
+    # the config author's own params, grouped, for the live dashboard's problem-setup panel.
+    model_dict["custom_params"] = _collect_custom_params(problem)
 
     # normalize regime to a lowercase string and put back into model_dict
     regime = model_dict.get("regime")
