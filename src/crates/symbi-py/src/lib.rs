@@ -1057,7 +1057,6 @@ where
                     if d_fz > 0 { format!(", {d_fz} freezes") } else { String::new() },
                 ));
                 last_fofc = (fb_total, fz_total);
-                dirty = true;
             }
             let blocks: Vec<u64> = h
                 .levels
@@ -4012,9 +4011,11 @@ fn cpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register(m)
 }
 
-// gpu build (cuda or hip) -> `simbi.libs.gpu_ext`. dev.py overrides maturin's module-name to
-// match (`--config tool.maturin.module-name="simbi.libs.gpu_ext"`), so the cpu and gpu
-// backends coexist instead of overwriting the same `cpu_ext` dylib.
+// gpu build (cuda or hip) -> `simbi.libs.gpu_ext`. maturin derives the expected init symbol
+// from the crate `[lib] name` (`cpu_ext`), so it warns that `PyInit_cpu_ext` is missing and
+// writes the dylib under the `cpu_ext` filename. dev.py's `_finalize_gpu_ext` renames the file
+// to `gpu_ext.<suffix>.so` afterward so name and `PyInit_gpu_ext` symbol agree, letting the cpu
+// and gpu backends coexist instead of overwriting the same `cpu_ext` dylib.
 #[cfg(feature = "gpu")]
 #[pymodule]
 fn gpu_ext(m: &Bound<'_, PyModule>) -> PyResult<()> {

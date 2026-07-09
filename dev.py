@@ -189,10 +189,21 @@ def install_command(args) -> None:
         cmd += ["--extras", ",".join(extras)]
     print("building + installing (maturin develop, editable)...")
     start = time.time()
+    gpu = _is_gpu_build(args)
+    # `--with-cpu` on a gpu build first compiles the plain cpu_ext (no gpu feature), so both
+    # backends coexist after one command. the fresh cpu_ext.so is picked up by the stash below
+    # and restored beside gpu_ext. no effect on a cpu-only build (cpu_ext is already the target).
+    # note: this recompiles the shared `symbi` crate under a second feature-set — full build cost,
+    # not incremental — so it is opt-in rather than default.
+    if gpu and getattr(args, "with_cpu", False):
+        print("companion cpu build (--with-cpu): building cpu_ext first...")
+        cpu_cmd = [*maturin(), "develop", "--release"]
+        if args.verbose:
+            cpu_cmd.append("-v")
+        run(cpu_cmd, env=venv_env(), verbose=args.verbose)
     # the cuda build writes to the cpu_ext filename before it is renamed to gpu_ext,
     # so stash an existing cpu_ext first and restore it after. this lets the cpu and
     # gpu extensions live side by side instead of the gpu build clobbering the cpu one.
-    gpu = _is_gpu_build(args)
     stashed = _stash_cpu_ext() if gpu else []
     try:
         run(cmd, env=venv_env(), verbose=args.verbose)
@@ -324,6 +335,12 @@ def main() -> None:
     )
     ip.add_argument(
         "--visual-extras", action="store_true", help="install visual extras"
+    )
+    ip.add_argument(
+        "--with-cpu",
+        action="store_true",
+        help="on a gpu build, also build cpu_ext so both backends coexist (recompiles the "
+        "shared crate under a second feature-set -> full build cost; no-op without --gpu/--hip)",
     )
     ip.set_defaults(func=install_command)
 
