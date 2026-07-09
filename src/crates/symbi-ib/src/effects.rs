@@ -80,139 +80,6 @@ pub fn grav_source<S: Scalar, const D: usize>(
     (source, delta)
 }
 
-/// mass accretion source terms (Bondi-Hoyle sink prescription).
-///
-/// `sr_param`: sink rate parameter. if > 0, rate-based accretion.
-///             if 0, mdot-target mode (uses `mdot_target` and `w_total`).
-/// `is_binary`: selects Dittmann & Ryan (2020) weight for 2D binary systems.
-/// `dt`: current timestep (for stability constraint).
-/// `gamma`: adiabatic index (for sound speed + internal energy).
-///
-/// returns: (conservative source, body delta).
-#[allow(clippy::too_many_arguments)]
-pub fn accretion_source<S: Scalar + OrderedNumeric, const D: usize>(
-    body: &Body<S, D>,
-    prim: &Prim<S, D>,
-    metric: &(impl Metric<S, D> + DiagonalMetric<S, D>),
-    cell: &CellGeometry<S, D>,
-    gamma: S,
-    dt: S,
-    is_binary: bool,
-    mdot_target: S,
-    w_total: S,
-) -> (Cons<S, D>, BodyDelta<S, D>) {
-    let zero_result = || (
-        Cons::zero(),
-        BodyDelta::new(body.idx),
-    );
-
-    let cell_cart = metric.to_cartesian(cell.position);
-    let r_vec = cell_cart - body.position;
-    let r_mag = r_vec.norm();
-    let r_acc = body.accretion_radius().expect("accretion_source requires an accreting body");
-    let sr_param = body.sink_rate().expect("accretion_source requires an accreting body");
-    let dv = cell.volume;
-
-    // quick exit outside accretion influence
-    let two = S::from_f64(2.0);
-    if r_mag > two * r_acc {
-        return zero_result();
-    }
-
-    let density = prim.rho;
-    let den_dot;
-
-    if sr_param.abs() > S::ZERO {
-        // rate-based accretion
-        let weight = if is_binary {
-            let r_norm = r_mag / r_acc;
-            let r4 = r_norm * r_norm * r_norm * r_norm;
-            (-S::from_f64(0.25) * r4).exp()
-        } else {
-            let r_kernel = S::from_f64(0.5) * r_acc;
-            let r_norm = r_mag / r_kernel;
-            (-r_norm * r_norm).exp()
-        };
-
-        let local_cs = sound_speed(prim, gamma);
-        let sound_crossing = cell.min_width / local_cs;
-        let t_ff = if r_mag > S::from_f64(1e-10) {
-            (r_mag * r_mag * r_mag / (two * body.mass)).sqrt()
-        } else {
-            sound_crossing
-        };
-        let t_natural = sound_crossing.min(t_ff);
-        let nat_rate = S::ONE / t_natural;
-        let stab_rate = S::ONE / dt;
-        let sr_base = sr_param.min(nat_rate).min(stab_rate);
-        den_dot = density * sr_base * weight;
-    } else {
-        // mdot-target mode
-        if w_total < S::from_f64(1e-15) {
-            return zero_result();
-        }
-        let r_kernel = S::from_f64(0.5) * r_acc;
-        let r_norm = r_mag / r_kernel;
-        let weight = (-r_norm * r_norm).exp();
-        let norm_weight = weight / w_total;
-        let mut dd = mdot_target * (norm_weight / dv);
-
-        // constrain to 25% density removal per timestep
-        if dd > S::ZERO {
-            let delta_rho_max = S::from_f64(0.25) * density;
-            let delta_rho = dd * dt;
-            if delta_rho > delta_rho_max {
-                dd = delta_rho_max / dt;
-            }
-        }
-        den_dot = dd;
-    }
-
-    // torque-controlled sink velocity (Dittmann & Ryan 2021)
-    let safe_r = r_mag.max(S::from_f64(1e-10));
-    let r_hat = r_vec.scale(S::ONE / safe_r);
-
-    // prim.vel is the physical (orthonormal) velocity -> lab frame for the relative-velocity sink.
-    let gas_vel_cart = metric.vector_to_cartesian(cell.position, Physical::new(prim.vel)).into_raw();
-    let v_rel = gas_vel_cart - body.velocity;
-    let v_rad_comp = v_rel.dot(&r_hat);
-    let v_rad = r_hat.scale(v_rad_comp);
-    let v_angular = v_rel - v_rad;
-    let delta_param = body.sink_delta().expect("accretion_source requires an accreting body");
-    let v_star_cart = v_rad + v_angular.scale(delta_param) + body.velocity;
-    // sink velocity Cart -> physical (orthonormal) frame for the conserved momentum.
-    let v_star_phys = metric.vector_from_cartesian(cell.position, Embedded::new(v_star_cart));
-
-    let mom_dot = v_star_phys.into_raw().scale(den_dot);
-
-    // energy
-    let ke_dot = S::from_f64(0.5) * den_dot * v_star_cart.dot(&v_star_cart);
-    let ie_dot = den_dot * specific_internal_energy(prim, gamma);
-    let nrg_dot = ke_dot + ie_dot;
-
-    // force and torque from momentum removal
-    let force_cart = mom_dot.scale(-dv);
-    // cross product needs 3D vectors
-    let force_3d = to_3d(force_cart);
-    let r_3d = to_3d(r_vec);
-    let torque = r_3d.cross(&force_3d);
-
-    let source = Cons {
-        den: -den_dot,
-        mom: mom_dot.scale(-S::ONE),
-        nrg: -nrg_dot,
-    };
-    let delta_body = BodyDelta {
-        idx: body.idx,
-        force_delta: force_cart,
-        torque_delta: torque,
-        mass_delta: den_dot * dv * dt,
-        prev_mass_delta: S::ZERO,
-        energy_delta: nrg_dot * dv * dt, // the energy removed alongside the mass (mirrors mass_delta)
-    };
-    (source, delta_body)
-}
-
 /// rigid body penalization forcing.
 ///
 /// applies a volume-penalization method: strong forcing inside the body,
@@ -319,10 +186,6 @@ fn sound_speed<S: Scalar, const D: usize>(prim: &Prim<S, D>, gamma: S) -> S {
     (gamma * prim.pre / prim.rho).sqrt()
 }
 
-fn specific_internal_energy<S: Scalar, const D: usize>(prim: &Prim<S, D>, gamma: S) -> S {
-    prim.pre / (prim.rho * (gamma - S::ONE))
-}
-
 /// embed a D-dimensional vector into 3D (zero-pad).
 fn to_3d<S: Scalar, const D: usize>(v: Tensor<S, D>) -> Tensor<S, 3> {
     let mut out = [S::ZERO; 3];
@@ -404,43 +267,6 @@ mod tests {
         let (src, _) = grav_source(&body, &prim, &metric, &cell_at(1.0, 0.0), 1.4);
         // v = 0 => dE/dt = v . F = 0
         assert!(approx(src.nrg, 0.0));
-    }
-
-    #[test]
-    fn accretion_outside_radius_is_zero() {
-        let body = Body::black_hole(
-            0, Tensor::new([0.0, 0.0]), Tensor::zeros(),
-            1.0, 0.1, 0.04, 10.0, 0.0, 0.2,
-        );
-        let prim = Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 };
-        let metric = Cartesian;
-
-        // cell far outside 2 * r_acc = 0.4
-        let (src, delta) = accretion_source(
-            &body, &prim, &metric, &cell_at(5.0, 0.0),
-            1.4, 0.001, false, 0.0, 0.0,
-        );
-        assert!(approx(src.den, 0.0));
-        assert!(approx(delta.mass_delta, 0.0));
-    }
-
-    #[test]
-    fn accretion_inside_radius_removes_mass() {
-        let body = Body::black_hole(
-            0, Tensor::new([0.0, 0.0]), Tensor::zeros(),
-            1.0, 0.1, 0.04, 10.0, 0.0, 0.2,
-        );
-        let prim = Prim { rho: 1.0, vel: Tensor::zeros(), pre: 1.0 };
-        let metric = Cartesian;
-
-        let (src, delta) = accretion_source(
-            &body, &prim, &metric, &cell_at(0.05, 0.0),
-            1.4, 0.001, false, 0.0, 0.0,
-        );
-        // density source should be negative (removing mass)
-        assert!(src.den < 0.0);
-        // body gains mass
-        assert!(delta.mass_delta > 0.0);
     }
 
     #[test]
