@@ -86,8 +86,8 @@ pub struct DiagnosticView {
     pub cfl_max: f64,
     pub blocks_per_level: Vec<u64>,
     // panels
-    pub log: Vec<(String, String)>,    // (timestamp, text)
-    pub config: Vec<(String, String)>, // config-tab rows
+    pub log: Vec<(String, String)>,          // (timestamp, text)
+    pub config: Vec<(String, String, String)>, // config-tab rows: (section, property, value)
     // a decimated 2D field slice for the overview hero heatmap; None -> the hero
     // falls back to the throughput chart.
     pub field: Option<FieldSlice>,
@@ -795,16 +795,26 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let block = card("config");
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let lines: Vec<Line> = view
-        .config
-        .iter()
-        .map(|(k, v)| {
-            Line::from(vec![
-                Span::styled(format!("{k:<16}"), fg(DIM)),
-                Span::styled(v.clone(), fgb(VALUE)),
-            ])
-        })
-        .collect();
+    // group the (section, property, value) rows into sections, each led by a full-width divider
+    // header (`SECTION ────────`); a blank line separates sections.
+    let width = inner.width as usize;
+    let mut lines: Vec<Line> = Vec::new();
+    let mut last: Option<&str> = None;
+    for (section, k, v) in &view.config {
+        if last != Some(section.as_str()) {
+            if last.is_some() {
+                lines.push(Line::from(""));
+            }
+            let head = format!("{} ", section.to_uppercase());
+            let rule = "\u{2500}".repeat(width.saturating_sub(head.chars().count()));
+            lines.push(Line::from(Span::styled(format!("{head}{rule}"), fgb(TEAL))));
+            last = Some(section.as_str());
+        }
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {k:<18}"), fg(DIM)),
+            Span::styled(v.clone(), fgb(VALUE)),
+        ]));
+    }
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -841,8 +851,8 @@ mod tests {
                 ("00:30".into(), "checkpoint written : chk.h5".into()),
             ],
             config: vec![
-                ("regime".into(), "rhd".into()),
-                ("resolution".into(), "256 x 256  (65536 zones)".into()),
+                ("Physics".into(), "regime".into(), "rhd".into()),
+                ("Geometry".into(), "resolution".into(), "256 x 256  (65536 zones)".into()),
             ],
             field: None,
             field_count: 1,

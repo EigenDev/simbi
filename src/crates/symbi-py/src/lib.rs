@@ -1399,87 +1399,57 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
         })
         .collect::<Vec<_>>()
         .join(" x ");
-    let mut rows = vec![
-        ["Regime".into(), "type".into(), cfg.regime.clone()],
-        ["Regime".into(), "eos".into(), eos_label(cfg)],
-        ["Geometry".into(), "coords".into(), cfg.coord_system.clone()],
-        [
-            "Geometry".into(),
-            "dimensions".into(),
-            format!("{}D", cfg.dims),
-        ],
-        [
-            "Geometry".into(),
-            "resolution".into(),
-            format!("{res}  ({n_zones} zones)"),
-        ],
-        ["Geometry".into(), "domain".into(), domain],
-        ["Geometry".into(), "boundaries".into(), boundary_label(cfg)],
-        ["Scheme".into(), "solver".into(), cfg.solver_name.clone()],
-        [
-            "Scheme".into(),
-            "reconstruction".into(),
-            cfg.reconstruction_name.clone(),
-        ],
-        [
-            "Scheme".into(),
-            "timestepping".into(),
-            timestepping_label(cfg.timestepping),
-        ],
-        ["Scheme".into(), "cfl".into(), format!("{:.3}", cfg.cfl)],
-        ["Run".into(), "t_final".into(), t_final_disp],
-        ["Run".into(), "checkpoint dt".into(), cp],
-        [
-            "Run".into(),
-            "est. memory".into(),
-            format!("{:.3} GB", est_memory_gb(cfg)),
-        ],
-        ["Run".into(), "output".into(), cfg.data_dir.clone()],
-    ];
-    // for PLM (2nd-order) runs, name the slope limiter (from plm_theta) under the reconstruction
-    // row. pcm (1st order) has no limiter, so the row is omitted there.
-    if cfg.reconstruction_name == "plm" {
-        if let Some(i) = rows.iter().position(|r| r[1] == "reconstruction") {
-            rows.insert(
-                i + 1,
-                [
-                    "Scheme".into(),
-                    "limiter".into(),
-                    limiter_label(cfg.plm_theta),
-                ],
-            );
-        }
-    }
-    // document the time unit only when it is not plain code units.
-    if custom_unit {
-        rows.push([
-            "Run".into(),
-            "time unit".into(),
-            format!("1 {unit} = {:.4} code", cfg.time_unit),
-        ]);
-    }
-    // active physics / sources the run actually engages -- shown only when present, so a plain run
-    // stays uncluttered.
-    let mut feats: Vec<(&str, String)> = Vec::new();
+    // build the panel section by section (the display renders each `[section, ..]` group under a
+    // divider header). ORDER = the section order shown. keep each section's rows contiguous.
+    let mut rows: Vec<[String; 3]> = Vec::new();
+    let mut push = |sec: &str, prop: &str, val: String| rows.push([sec.into(), prop.into(), val]);
+
+    // PHYSICS: the regime, EOS, and whatever physics the run actually engages (present-only).
+    push("Physics", "regime", cfg.regime.clone());
+    push("Physics", "eos", eos_label(cfg));
     if !cfg.bodies.is_empty() {
-        feats.push(("immersed bodies", cfg.bodies.len().to_string()));
+        push("Physics", "immersed bodies", cfg.bodies.len().to_string());
     }
     if cfg.source_json.is_some() {
-        feats.push(("source term", "active".into()));
+        push("Physics", "source term", "active".into());
     }
     if cfg.motion_json.is_some() {
-        feats.push(("mesh motion", "active".into()));
+        push("Physics", "mesh motion", "active".into());
     }
     let n_bc = cfg.driven_exprs.len() + cfg.gradient_bcs.len();
     if n_bc > 0 {
-        feats.push(("driven/gradient BCs", n_bc.to_string()));
+        push("Physics", "driven/gradient BCs", n_bc.to_string());
     }
+
+    // GEOMETRY
+    push("Geometry", "coords", cfg.coord_system.clone());
+    push("Geometry", "dimensions", format!("{}D", cfg.dims));
+    push("Geometry", "resolution", format!("{res}  ({n_zones} zones)"));
+    push("Geometry", "domain", domain);
+    push("Geometry", "boundaries", boundary_label(cfg));
+
+    // NUMERICS: the discretization + solver knobs.
+    push("Numerics", "solver", cfg.solver_name.clone());
+    push("Numerics", "reconstruction", cfg.reconstruction_name.clone());
+    if cfg.reconstruction_name == "plm" {
+        push("Numerics", "limiter", limiter_label(cfg.plm_theta));
+    }
+    push("Numerics", "timestepping", timestepping_label(cfg.timestepping));
+    push("Numerics", "cfl", format!("{:.3}", cfg.cfl));
     if cfg.n_gpus > 1 {
-        feats.push(("gpus", cfg.n_gpus.to_string()));
+        push("Numerics", "gpus", cfg.n_gpus.to_string());
     }
-    for (k, v) in feats {
-        rows.push(["Physics".into(), k.into(), v]);
+
+    // RUN: the schedule + outputs.
+    push("Run", "t_final", t_final_disp);
+    push("Run", "checkpoint dt", cp);
+    if custom_unit {
+        push("Run", "time unit", format!("1 {unit} = {:.4} code", cfg.time_unit));
     }
+    push("Run", "est. memory", format!("{:.3} GB", est_memory_gb(cfg)));
+    push("Run", "output", cfg.data_dir.clone());
+
+    drop(push);
     // the config author's OWN params, grouped by their ProblemParam(group=...); appended last so the
     // core panel reads first, then each config's bespoke parameters.
     rows.extend(cfg.custom_params.iter().cloned());
@@ -1850,9 +1820,10 @@ macro_rules! build_and_run_hydro {
             })
             .build();
 
-        // attach immersed bodies (gravity / accretion sinks) when the config
-        // declares any; body-free runs keep the original sim untouched.
-        let sim = if cfg.bodies.is_empty() {
+        // attach immersed bodies (gravity / accretion sinks) when the config declares any. a REFINED
+        // run attaches them to the HIERARCHY instead (finest level owns the sinks), so skip the
+        // sim-level attach here and defer to `hier.with_bodies` after `into_hierarchy`.
+        let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
@@ -1923,6 +1894,12 @@ macro_rules! build_and_run_hydro {
             .theta(theta)
             .with_solver(solver)
             .expect("fine-level kernel set"));
+        // a refined run attaches its immersed bodies to the hierarchy: the FINEST level owns the full
+        // (accreting) bodies, coarser levels carry a gravity-only proxy (finest-owns-bodies, so the
+        // sink applies once). the sink sphere must lie inside the finest level (asserted there).
+        if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies));
+        }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -3827,11 +3804,15 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
             );
         }
     }
-    // immersed bodies attach to level 0; the AMR body sync (finest-owns-bodies)
-    // is not wired through the binding yet, so refined body runs are rejected.
-    if !cfg.bodies.is_empty() && cfg.refinement_enabled {
-        return Err("immersed bodies are single-grid only in the binding \
-                    (AMR body sync not wired yet)"
+    // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
+    // bodies on the finest level, gravity-only proxy on coarser) is wired for HYDRO (newtonian/rhd);
+    // iso / mhd are not wired yet, so reject only those.
+    if !cfg.bodies.is_empty()
+        && cfg.refinement_enabled
+        && (cfg.regime.contains("iso") || cfg.regime.contains("mhd"))
+    {
+        return Err("immersed bodies with refinement are wired for hydro (newtonian/rhd) only; \
+                    iso / mhd AMR body sync is pending"
             .to_string());
     }
     // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and

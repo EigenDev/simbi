@@ -106,7 +106,7 @@ mod tests {
             cfl_max: 0.8,
             blocks_per_level: vec![64],
             log: vec![("00:01".into(), "started".into())],
-            config: vec![("regime".into(), "rhd".into())],
+            config: vec![("Physics".into(), "regime".into(), "rhd".into())],
             field: None,
             field_count: 0,
             host: Some(crate::hostinfo::HostStats {

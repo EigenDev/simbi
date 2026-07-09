@@ -428,7 +428,7 @@ impl Table {
             config: self
                 .problem_setup
                 .iter()
-                .map(|r| (r[1].clone(), r[2].clone()))
+                .map(|r| (r[0].clone(), r[1].clone(), r[2].clone()))
                 .collect(),
             field: self.field.clone(),
             field_count: self.field_count,
