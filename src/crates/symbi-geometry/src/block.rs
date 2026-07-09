@@ -141,19 +141,24 @@ where
         }
     }
 
-    /// physical coordinate of face at grid index in direction `dir`.
+    /// physical coordinate of the CT face center in direction `dir`: the `dir` axis on the face,
+    /// each TRANSVERSE axis at the ARITHMETIC midpoint of its cell. this is the point the CT curl
+    /// evaluates the metric at (`a_c = (a_lo + a_hi)/2` in the ct_emf curl) and the point `volume`'s
+    /// quadrature centers on, so `face_area` telescopes the area-weighted div(B) to machine zero.
+    /// NOTE: a transverse axis's arithmetic midpoint is NOT the cell `centroid` on a LOG axis
+    /// (whose centroid is the geometric mean sqrt(r_lo r_hi)); using the geometric mean here would
+    /// evaluate the metric a distance O((dr/r)^2) off the curl's point, injecting a spurious ~1e-6
+    /// divergence into the diagnostic for a field that is exactly div-free in the scheme.
     #[inline]
     pub fn face_position(&self, idx: [isize; D], dir: usize) -> Tensor<S, D> {
-        if let Some(ref maps) = self.maps {
-            let mut x = self.centroid(idx);
-            x[dir] = S::from_f64(maps[dir].face(idx[dir]));
-            x
-        } else {
-            let mut x = self.centroid(idx);
-            let half = S::from_f64(0.5);
-            x[dir] = x[dir] - half * self.dx[dir];
-            x
-        }
+        let half = S::from_f64(0.5);
+        Tensor::new(std::array::from_fn(|ax| {
+            if ax == dir {
+                self.axis_face(idx, dir)
+            } else {
+                self.axis_face(idx, ax) + half * self.cell_width(idx, ax)
+            }
+        }))
     }
 
     /// left face position on axis ax at grid index.
@@ -396,6 +401,51 @@ mod tests {
         let src = geo.momentum_source([0], 1.0, Tensor::new([0.0]), 2.5);
         let r = 1.05;
         assert!(approx(src[0], 2.5 / r));
+    }
+
+    #[test]
+    fn logradial_divb_telescopes_to_machine_zero() {
+        // the div(B) diagnostic (area-weighted, sum_d A_d^+ B_d^+ - A_d^- B_d^-) must read machine
+        // zero for a field built div-free by the CT curl. the CT curl evaluates the metric at the
+        // ARITHMETIC face center (a_c = (a_lo + a_hi)/2); face_area must do the same. on a LOG-radial
+        // grid the cell centroid is the GEOMETRIC mean sqrt(r_lo r_hi) != arithmetic, so a face_area
+        // that evaluated the metric at the centroid injected a spurious ~1e-6 divergence (the FM
+        // torus symptom). regression: face_position uses the arithmetic transverse center.
+        let rmap = AxisMap::Log { start: 2.0, log_slope: 0.05 }; // strongly non-uniform radial zones
+        let tmap = AxisMap::Uniform { start: 0.3, dx: 0.15 };
+        let geo: BlockGeometry<Spherical, f64, 2> = BlockGeometry::with_maps(Spherical, [rmap, tmap]);
+        let (nr, nth) = (8isize, 6isize);
+
+        // flat-spherical volume factor r^2 sin(theta) at the metric-evaluation point.
+        let vf = |r: f64, th: f64| r * r * th.sin();
+        // a smooth corner potential A(r, theta); B = curl(A) is metric-div-free by construction.
+        let aphi = |i: isize, j: isize| {
+            let (r, th) = (rmap.face(i), tmap.face(j));
+            (0.4 * r).sin() * (1.3 * th).cos()
+        };
+        let thc = |j: isize| 0.5 * (tmap.face(j) + tmap.face(j + 1));
+        let rc = |i: isize| 0.5 * (rmap.face(i) + rmap.face(i + 1)); // ARITHMETIC (the curl's point)
+
+        // B on the staggered faces, from the CT arithmetic-center curl weights (independent of
+        // face_area — this is what the IC / curl produce).
+        let br = |i: isize, j: isize| (aphi(i, j + 1) - aphi(i, j)) / (vf(rmap.face(i), thc(j)) * tmap.width(j));
+        let bth = |i: isize, j: isize| -(aphi(i + 1, j) - aphi(i, j)) / (vf(rc(i), tmap.face(j)) * rmap.width(i));
+
+        // the arithmetic vs geometric radial center genuinely differ on this log grid — the bug window.
+        let r_arith = rc(3);
+        let r_geom = (rmap.face(3) * rmap.face(4)).sqrt();
+        assert!((r_arith - r_geom).abs() > 1e-3, "log grid must separate arithmetic/geometric centers");
+
+        let mut max_div = 0.0_f64;
+        for i in 1..(nr - 1) {
+            for j in 1..(nth - 1) {
+                let vol = geo.volume([i, j]);
+                let flux = geo.face_area([i + 1, j], 0) * br(i + 1, j) - geo.face_area([i, j], 0) * br(i, j)
+                    + geo.face_area([i, j + 1], 1) * bth(i, j + 1) - geo.face_area([i, j], 1) * bth(i, j);
+                max_div = max_div.max((flux / vol).abs());
+            }
+        }
+        assert!(max_div < 1e-12, "log-radial area-weighted div(B) = {max_div:e}, expected machine zero");
     }
 
     #[test]
