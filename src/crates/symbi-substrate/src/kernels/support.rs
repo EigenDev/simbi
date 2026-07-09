@@ -64,6 +64,9 @@ pub fn to_bc_array<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; 
             // driven faces are SKIPPED by the standard pullback (docs/design/33); the
             // driven-boundary pass prescribes their ghost state from the DAG afterward.
             BoundaryType::Driven(_) => BcType::Skip,
+            // neumann / robin faces are likewise SKIPPED here; the gradient-boundary pass fills
+            // them from the boundary-adjacent interior cell + the registry coefficients.
+            BoundaryType::Neumann(_) | BoundaryType::Robin(_) => BcType::Skip,
         };
         [conv(boundaries.lo(ax)), conv(boundaries.hi(ax))]
     })

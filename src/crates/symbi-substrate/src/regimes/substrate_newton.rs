@@ -34,9 +34,11 @@ use std::sync::Arc;
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
 use crate::regimes::substrate_kernels::{
     cfl_wave_speed, dispatch_body_feedback, dispatch_body_source, dispatch_fields, dispatch_flux,
-    dispatch_driven_boundaries, dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused,
+    dispatch_driven_boundaries, dispatch_fused_runtime_cpu, dispatch_gradient_boundaries,
+    dispatch_godunov_maybe_fused,
     dispatch_named, dispatch_runtime_source, dispatch_source_apply, fused_runtime_cpu_kernel,
-    geom_suffix, resolve_params, scalars_for, FusedSourceBinding, RuntimeSource, ScalarBind, Solver,
+    geom_suffix, resolve_params, scalars_for, FusedSourceBinding, GradientBc, RuntimeSource,
+    ScalarBind, Solver,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_sim::substrate_seam::KernelSet;
@@ -74,6 +76,10 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// faces (the standard ghost-fill is the whole story). reuses `RuntimeSource` as the holder (same
     /// data); the `(Coord, Assign)` dispatch is what makes it a boundary.
     pub boundary_dags: Vec<Arc<RuntimeSource>>,
+    /// gradient-boundary coefficients (Neumann / Robin), indexed by the `BoundaryType::Neumann(id)` /
+    /// `Robin(id)` id. the convenience short-circuit for prescribed-gradient / mixed walls; empty =>
+    /// none. the general path is a driven boundary.
+    pub gradient_bcs: Vec<GradientBc>,
     /// Riemann solver — HLLE (default, two-wave) or HLLC (contact-resolving).
     /// see [[Solver]]. tunable via `.with_solver(Solver::Hllc)`.
     pub solver: Solver,
@@ -86,7 +92,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate adiabatic CFL scratch field");
         // theta defaults to 1.0 (plain minmod) — exact prior behavior; set `theta` to tune.
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, boundary_dags: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
+        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
@@ -126,6 +132,18 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         let id = self.boundary_dags.len() as u16;
         // has_energy = true (Newtonian) — the boundary prescribes prim.pre as well as rho/vel.
         self.boundary_dags.push(RuntimeSource::new(built, params, true));
+        (self, id)
+    }
+
+    /// register a NEUMANN / ROBIN gradient boundary (the convenience short-circuit). the returned id
+    /// (registration order) is what the sim's `Boundaries` carries as `BoundaryType::Neumann(id)` /
+    /// `Robin(id)` on the prescribed face. `coeffs` are the per-variable coefficients in prim order
+    /// `[rho, vel.., pre]`. after the standard ghost-fill skips these faces, `ghost_fill` fills them
+    /// from the boundary-adjacent interior cell + these coefficients.
+    /// `let sub = sim.substrate().with_gradient_boundary(GradientBc::Neumann(qs)).0;`
+    pub fn with_gradient_boundary(mut self, coeffs: GradientBc) -> (Self, u16) {
+        let id = self.gradient_bcs.len() as u16;
+        self.gradient_bcs.push(coeffs);
         (self, id)
     }
 
@@ -242,6 +260,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // now prescribe their ghost prim state from the registered boundary DAGs.
         if !self.boundary_dags.is_empty() {
             dispatch_driven_boundaries(sim, &self.boundary_dags);
+        }
+        // and the Neumann/Robin gradient faces (also skipped above), filled from the edge cell.
+        if !self.gradient_bcs.is_empty() {
+            dispatch_gradient_boundaries(sim, &self.gradient_bcs);
         }
     }
 

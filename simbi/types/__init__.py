@@ -23,6 +23,8 @@ from .bodies import (
 from .input import (
     Array,
     BoundaryCondition,
+    Neumann,
+    Robin,
     CellSpacing,
     CoordSystem,
     Spacetime,
@@ -53,6 +55,8 @@ from .typing import (
 __all__ = [
     # enums
     "BoundaryCondition",
+    "Neumann",
+    "Robin",
     "CellSpacing",
     "CoordSystem",
     "Spacetime",

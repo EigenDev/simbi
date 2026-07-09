@@ -38,6 +38,7 @@ use symbi_discretize::{
     body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
     inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
+    neumann_ghost_fill_gv, robin_ghost_fill_gv,
     nmhd_wave_speed_map_gv,
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
     rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_ct_curl_3d_dir_gv,
@@ -1410,6 +1411,24 @@ fn gen_iso_ghost_fill(out_dir: &str, ndim: u8, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the NEUMANN / ROBIN gradient-boundary ghost fills: the prescribed-gradient / mixed-condition
+// members of the ghost-fill family. reuse the outflow EDGE source coord, then apply the per-variable
+// `symbi_hydro::boundary_term` lift with the outward edge->ghost centroid distance computed in-kernel
+// (hence the spacing-aware face positions). baked with `has_energy = true` (the rho/vel/pre 3-field
+// fill, matching `iso_ghost_fill`), shared across the hydro regimes; the gradient-boundary pass binds
+// the per-variable coefficients as string-keyed spec scalars.
+fn gen_neumann_ghost_fill(out_dir: &str, ndim: u8, geom: Geom) {
+    let name = format!("neumann_ghost_fill{}_{ndim}d", geom.suffix());
+    let (k, writes) = neumann_ghost_fill_gv(ndim as usize, geom.ncomp as usize, true, &geom.spacing);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
+fn gen_robin_ghost_fill(out_dir: &str, ndim: u8, geom: Geom) {
+    let name = format!("robin_ghost_fill{}_{ndim}d", geom.suffix());
+    let (k, writes) = robin_ghost_fill_gv(ndim as usize, geom.ncomp as usize, true, &geom.spacing);
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 // the spinning-kerr ghost fill: the swirl prim pullback with the azimuthal ghost copied
 // through the angular-momentum variable w = v^phi + (gamma_{r phi}/gamma_{phi phi}) v^r, so
 // frame-dragging (w = 0) states stay on the dragging manifold at the ghost's own (r, theta).
@@ -1830,6 +1849,8 @@ fn main() {
         gen_iso_c2p(&out_dir, ndim);
         gen_iso_wave_speed_map(&out_dir, ndim, Geom::cart(ndim));
         gen_iso_ghost_fill(&out_dir, ndim, Geom::cart(ndim));
+        gen_neumann_ghost_fill(&out_dir, ndim, Geom::cart(ndim));
+        gen_robin_ghost_fill(&out_dir, ndim, Geom::cart(ndim));
         gen_godunov_stage(&out_dir, ndim, "iso", false, Geom::cart(ndim), None);
         gen_snapshot(&out_dir, ndim, "iso", false, Geom::cart(ndim));
         // adiabatic (ideal-gas Euler): the same EOS-generic update + the energy law

@@ -34,6 +34,8 @@ from simbi.types.bodies import BodySystemConfig, ImmersedBodyConfig
 # re-export types that problem authors need
 from simbi.types.input import (
     BoundaryCondition,
+    Neumann,
+    Robin,
     CellSpacing,
     CoordSystem,
     Spacetime,
@@ -410,11 +412,16 @@ class SimbiProblem(BaseModel):
         ),
     ]
     boundary_conditions: Annotated[
-        Union[BoundaryCondition, Sequence[BoundaryCondition]],
+        Union[
+            BoundaryCondition,
+            Neumann,
+            Robin,
+            Sequence[Union[BoundaryCondition, Neumann, Robin]],
+        ],
         ProblemParam(
             BoundaryCondition.OUTFLOW,
             cli=True,
-            description="boundary conditions",
+            description="boundary conditions; a face may be a Neumann/Robin gradient wall",
         ),
     ]
 

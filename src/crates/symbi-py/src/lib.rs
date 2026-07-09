@@ -121,6 +121,9 @@ struct Config {
     // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
     // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path only.
     driven_exprs: Vec<String>,
+    // gradient (Neumann / Robin) boundary coefficients, in registry order (gradient_bcs[id] <-> the
+    // face marked BoundaryType::Neumann(id) / Robin(id)). the convenience prescribed-gradient wall.
+    gradient_bcs: Vec<GradientBcSpec>,
     // body-diagnostic output cadence in natural units (× time_unit -> code);
     // 0 disables the diagnostics file.
     diagnostic_interval: f64,
@@ -331,6 +334,41 @@ fn boundary_from_str(s: &str) -> PyResult<BoundaryType> {
     }
 }
 
+/// a gradient-boundary (Neumann / Robin) prescription in registry order: the kind plus the flattened
+/// per-variable coefficients in prim order `[rho, vel.., pre]` — Neumann is one `q` per variable,
+/// Robin one `(a, b, c)` triple per variable. built from a python `Neumann`/`Robin` object.
+struct GradientBcSpec {
+    kind: String,
+    coeffs: Vec<f64>,
+}
+
+/// read the per-variable coefficients off a python `Neumann`/`Robin` object (attributes `rho`,
+/// `velocity`, `pressure`). Neumann flattens to `[rho, vel.., pre]`; Robin flattens each variable's
+/// `(a, b, c)` triple in the same order.
+fn extract_gradient_spec(obj: &Bound<'_, PyAny>, kind: &str) -> PyResult<GradientBcSpec> {
+    let rho = obj.getattr("rho")?;
+    let velocity = obj.getattr("velocity")?;
+    let pressure = obj.getattr("pressure")?;
+    let mut coeffs = Vec::new();
+    if kind == "neumann" {
+        coeffs.push(rho.extract::<f64>()?);
+        for v in velocity.try_iter()? {
+            coeffs.push(v?.extract::<f64>()?);
+        }
+        coeffs.push(pressure.extract::<f64>()?);
+    } else {
+        let (a, b, c): (f64, f64, f64) = rho.extract()?;
+        coeffs.extend_from_slice(&[a, b, c]);
+        for v in velocity.try_iter()? {
+            let (a, b, c): (f64, f64, f64) = v?.extract()?;
+            coeffs.extend_from_slice(&[a, b, c]);
+        }
+        let (a, b, c): (f64, f64, f64) = pressure.extract()?;
+        coeffs.extend_from_slice(&[a, b, c]);
+    }
+    Ok(GradientBcSpec { kind: kind.to_string(), coeffs })
+}
+
 /// parse the exec_dict into a plain Config. only the fields the solver needs;
 /// the rest of the dict (refinement, immersed bodies, expressions) is ignored
 /// until those paths are wired.
@@ -381,6 +419,9 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
     // driven (DYNAMIC) boundary expressions in Driven-id order; id == registration order ==
     // the order faces are visited here, so `Driven(id)` on a face matches `driven_exprs[id]`.
     let mut driven_exprs: Vec<String> = Vec::new();
+    // gradient (Neumann / Robin) boundary coefficients in registry order; id == registration order,
+    // so `Neumann(id)` / `Robin(id)` on a face matches `gradient_bcs[id]`.
+    let mut gradient_bcs: Vec<GradientBcSpec> = Vec::new();
     for (face, obj) in bc_objs.try_iter()?.enumerate() {
         let obj = obj?;
         let s: String = match obj.getattr("value") {
@@ -402,6 +443,16 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
                 let id = driven_exprs.len() as u16;
                 driven_exprs.push(json);
                 boundaries.push(BoundaryType::Driven(id));
+            }
+            kind @ ("neumann" | "robin") => {
+                let spec = extract_gradient_spec(&obj, kind)?;
+                let id = gradient_bcs.len() as u16;
+                gradient_bcs.push(spec);
+                boundaries.push(if kind == "neumann" {
+                    BoundaryType::Neumann(id)
+                } else {
+                    BoundaryType::Robin(id)
+                });
             }
             other => boundaries.push(boundary_from_str(other)?),
         }
@@ -555,6 +606,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .or(get_source_json(dict, "hydro_source_expressions")?),
         motion_json: get_source_json(dict, "scale_factor_expressions")?,
         driven_exprs,
+        gradient_bcs,
     })
 }
 
@@ -1796,6 +1848,19 @@ macro_rules! build_and_run_hydro {
             )
             .map_err(|e| format!("boundary expression lower: {e}"))?;
             sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+        }
+        // register the Neumann/Robin gradient boundaries (the convenience prescribed-gradient walls);
+        // the flattened coeffs are re-grouped into the registry entry (Robin: (a,b,c) triples).
+        for spec in &cfg.gradient_bcs {
+            use symbi::regimes::substrate_kernels::GradientBc;
+            let gbc = match spec.kind.as_str() {
+                "neumann" => GradientBc::Neumann(spec.coeffs.clone()),
+                "robin" => GradientBc::Robin(
+                    spec.coeffs.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect(),
+                ),
+                other => return Err(format!("unknown gradient boundary kind '{other}'")),
+            };
+            sub = sub.with_gradient_boundary(gbc).0;
         }
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s

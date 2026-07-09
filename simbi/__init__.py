@@ -35,6 +35,8 @@ from .types.bodies import (
 )
 from .types.input import (
     BoundaryCondition,
+    Neumann,
+    Robin,
     CellSpacing,
     CoordSystem,
     Reconstruction,
@@ -80,6 +82,8 @@ __all__ = [
     "BinaryConfig",
     "BinaryComponentConfig",
     "BoundaryCondition",
+    "Neumann",
+    "Robin",
     "CellSpacing",
     "CoordSystem",
     "Reconstruction",

@@ -1209,6 +1209,17 @@ pub enum BoundaryType {
     /// driven-boundary pass fills them by evaluating the DAG over the face's ghost band. enum stays
     /// `Copy`/`Eq` — the DAG lives in the side table, only its id rides here.
     Driven(u16),
+    /// a NEUMANN boundary: the ghost holds a prescribed OUTWARD normal derivative `dU/dn = q` per
+    /// primitive variable, `U_ghost = u_edge + q*dist`. the `u16` indexes the kernel-set's
+    /// gradient-BC side table (the per-variable coefficients). standard ghost fill SKIPS these faces;
+    /// the gradient-boundary pass fills them from the boundary-adjacent interior cell. a convenience
+    /// short-circuit for the classical prescribed-gradient wall — a custom boundary is the general path.
+    Neumann(u16),
+    /// a ROBIN boundary: the ghost enforces `a*U_face + b*dU/dn = c` per primitive variable. the
+    /// `u16` indexes the same gradient-BC side table as `Neumann` (the entry carries the `(a,b,c)`
+    /// triples). standard ghost fill SKIPS these faces; the gradient-boundary pass fills them.
+    /// degenerates to Dirichlet (`b=0`) and Neumann (`a=0`).
+    Robin(u16),
 }
 
 /// per-axis boundary conditions, `D`-shaped (not the 3D-padded `[BoundaryType; 6]`): one `[lo, hi]`

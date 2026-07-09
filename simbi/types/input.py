@@ -7,7 +7,7 @@
 # =============================================================================
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -78,6 +78,40 @@ class BoundaryCondition(str, ExtendedEnum):
     REFLECTING = "reflecting"
     DYNAMIC = "dynamic"
     PERIODIC = "periodic"
+
+
+@dataclass(frozen=True)
+class Neumann:
+    """a NEUMANN boundary: prescribe the OUTWARD normal derivative `dU/dn = q` per primitive
+    variable. the ghost holds `u_edge + q*dist`. a convenience short-circuit for a prescribed-
+    gradient wall (a custom/dynamic boundary is the general path). place it in a config's
+    `boundary_conditions` list in the face's slot, alongside plain `BoundaryCondition` members.
+
+      rho / pressure : scalar gradients.
+      velocity       : per-component gradients (length = spatial dimension); missing -> 0.
+    """
+
+    rho: float = 0.0
+    velocity: tuple[float, ...] = ()
+    pressure: float = 0.0
+    # discriminator the exec parser reads (mirrors `BoundaryCondition(...).value`).
+    value: ClassVar[str] = "neumann"
+
+
+@dataclass(frozen=True)
+class Robin:
+    """a ROBIN boundary: prescribe `a*U_face + b*dU/dn = c` per primitive variable, each coefficient
+    a `(a, b, c)` triple. degenerates to Dirichlet (`b=0`) and Neumann (`a=0`). same placement as
+    `Neumann`.
+
+      rho / pressure : one `(a, b, c)` triple.
+      velocity       : per-component triples (length = spatial dimension); missing -> `(1, 0, 0)`.
+    """
+
+    rho: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    velocity: tuple[tuple[float, float, float], ...] = ()
+    pressure: tuple[float, float, float] = (1.0, 0.0, 0.0)
+    value: ClassVar[str] = "robin"
 
 
 class CellSpacing(str, ExtendedEnum):

@@ -197,6 +197,9 @@ def _process_boundary_conditions(
     """process and normalize boundary conditions."""
     if isinstance(boundary_conditions, str):
         return [boundary_conditions] * (2 * effective_dim)
+    # a single non-list bc (a lone Neumann/Robin gradient wall) applies to every face.
+    if not isinstance(boundary_conditions, (list, tuple)):
+        return [boundary_conditions] * (2 * effective_dim)
 
     bcs = list(boundary_conditions)
     num_bcs = len(bcs)

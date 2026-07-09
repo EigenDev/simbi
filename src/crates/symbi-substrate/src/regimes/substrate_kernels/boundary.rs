@@ -18,10 +18,14 @@ use std::sync::Arc;
 
 use symbi_sim::state::FieldStore;
 
-use super::params::{geom_scalar, ScalarBind};
+use super::params::{geom_scalar, physical_geom, resolve_params, ScalarBind};
+use super::dispatch::dispatch_named;
+use super::layout::geom_suffix;
 use super::runtime_source::{
     dispatch_runtime_ir, gv_kernel_to_ir, resolve_runtime_param, sim_gv_geom, RuntimeSource,
 };
+use symbi_sim::state::BoundaryType;
+use std::collections::HashMap;
 
 /// the ghost-cell band of one face: the ghost cells on `(axis, side)` (side 0 = lo, 1 = hi), with
 /// the transverse axes spanning the INTERIOR (the face's own band, corners excluded — a coordinate
@@ -159,4 +163,127 @@ fn apply_boundary_dag_gpu<const D: usize, const DOF: usize, Mem, Sc>(
                 .unwrap_or_else(|| panic!("boundary gpu: unresolved scalar {other:?} (t | x_lo_k | dx_k | p{{i}})")),
         }
     });
+}
+
+
+// =============================================================================
+// GRADIENT BOUNDARIES (Neumann / Robin) — the registry-driven convenience short-circuit for the
+// classical prescribed-gradient / mixed walls. mirrors the driven-boundary pass: the standard
+// pullback SKIPS Neumann/Robin faces, and this pass prescribes their ghost prim state from the
+// boundary-adjacent interior cell (the outflow EDGE source) + the registered per-variable
+// coefficients, via the baked `neumann_ghost_fill` / `robin_ghost_fill` kernels. the general path
+// for an arbitrary user boundary is a custom (driven) boundary; this is the ergonomic wall.
+// =============================================================================
+
+/// per-id gradient-boundary coefficients, in prim-variable order `[rho, vel_0..vel_{DOF-1}, pre]`.
+/// `Neumann` carries the outward normal derivative `q` per variable; `Robin` the `(a, b, c)` triple
+/// per variable (`a*U_face + b*dU/dn = c`). the side table the kernel-set holds, indexed by the id
+/// riding on `BoundaryType::Neumann(id)` / `Robin(id)`.
+pub enum GradientBc {
+    Neumann(Vec<f64>),
+    Robin(Vec<[f64; 3]>),
+}
+
+/// the string-keyed spec-scalar map the baked kernel reads its per-variable coefficients from
+/// (`neu_q_{rho,v{k},pre}` / `rob_{a,b,c}_{rho,v{k},pre}`). the variable order matches the kernel's
+/// write order: rho, then the `DOF` velocity components, then pre.
+fn gradient_spec_map<const DOF: usize>(entry: &GradientBc) -> HashMap<String, f64> {
+    let mut m = HashMap::new();
+    match entry {
+        GradientBc::Neumann(q) => {
+            assert_eq!(q.len(), DOF + 2, "neumann needs {} coeffs [rho, {DOF}*vel, pre], got {}", DOF + 2, q.len());
+            m.insert("neu_q_rho".to_string(), q[0]);
+            for k in 0..DOF {
+                m.insert(format!("neu_q_v{k}"), q[1 + k]);
+            }
+            m.insert("neu_q_pre".to_string(), q[1 + DOF]);
+        }
+        GradientBc::Robin(abc) => {
+            assert_eq!(abc.len(), DOF + 2, "robin needs {} (a,b,c) triples, got {}", DOF + 2, abc.len());
+            let mut ins = |var: &str, t: &[f64; 3]| {
+                m.insert(format!("rob_a_{var}"), t[0]);
+                m.insert(format!("rob_b_{var}"), t[1]);
+                m.insert(format!("rob_c_{var}"), t[2]);
+            };
+            ins("rho", &abc[0]);
+            for k in 0..DOF {
+                ins(&format!("v{k}"), &abc[1 + k]);
+            }
+            ins("pre", &abc[1 + DOF]);
+        }
+    }
+    m
+}
+
+/// run every Neumann/Robin face's ghost fill. iterates the sim's per-axis boundaries; for each
+/// gradient face, dispatches the baked `{neumann,robin}_ghost_fill{sfx}_{D}d` kernel over the face's
+/// ghost band, binding the outflow EDGE source (`map_type = 3`, `arg = the boundary-adjacent interior
+/// cell`) on the boundary axis, the spacing-aware geometry, and the per-variable coefficients (spec
+/// scalars). called at the tail of a regime's `ghost_fill`, after the standard pullback skipped these
+/// faces. energy regimes only (the rho/vel/pre 3-field kernel).
+pub fn dispatch_gradient_boundaries<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    coeffs: &[GradientBc],
+) where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    let pre = sim
+        .fields
+        .prim
+        .pre_field()
+        .expect("gradient boundary needs prim.pre (energy regime)");
+    let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
+    let (x_lo_phys, dx_phys) =
+        physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
+
+    for axis in 0..D {
+        for side in 0..2 {
+            let bt = if side == 0 { sim.boundaries.lo(axis) } else { sim.boundaries.hi(axis) };
+            let (id, kind) = match bt {
+                BoundaryType::Neumann(id) => (id as usize, "neumann"),
+                BoundaryType::Robin(id) => (id as usize, "robin"),
+                _ => continue,
+            };
+            let entry = coeffs.get(id).unwrap_or_else(|| {
+                panic!("gradient boundary on axis {axis} side {side} references unregistered id {id}")
+            });
+            let spec = gradient_spec_map::<DOF>(entry);
+            let name = format!("{kind}_ghost_fill{sfx}_{D}d");
+            let band = ghost_band_domain(&sim.geom.allocated, &sim.geom.interior, axis, side);
+            // the outflow EDGE cell along the boundary axis: the first interior cell on the lo side,
+            // the last interior cell on the hi side (the `map_type = 3` source clamps to it).
+            let edge = (if side == 0 {
+                sim.geom.interior.spaces[axis].lo
+            } else {
+                sim.geom.interior.spaces[axis].hi - 1
+            }) as i32;
+
+            let (ints, scalars) = resolve_params(
+                &name,
+                |bind| match bind {
+                    // the boundary axis carries the outflow map (edge source); every other axis is
+                    // passthrough (map_type 0), so the in-kernel `dist` sums only the active axis.
+                    ScalarBind::Ref(ScalarRef::MapType(ax)) => {
+                        if *ax as usize == axis { 3 } else { 0 }
+                    }
+                    ScalarBind::Ref(ScalarRef::Arg(ax)) => {
+                        if *ax as usize == axis { edge } else { 0 }
+                    }
+                    o => panic!("gradient boundary: unexpected int param {o:?}"),
+                },
+                |bind| match bind {
+                    ScalarBind::Ref(sref) => {
+                        geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref)
+                            .map(Sc::from_f64)
+                            .unwrap_or_else(|| panic!("gradient boundary: unexpected geom scalar {sref:?}"))
+                    }
+                    ScalarBind::Spec(s) => Sc::from_f64(
+                        *spec.get(&**s).unwrap_or_else(|| panic!("gradient boundary: unbound coefficient '{s}'")),
+                    ),
+                },
+            );
+            dispatch_named(sim, pre, None, 0, &name, &band, &ints, &scalars);
+        }
+    }
 }

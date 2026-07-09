@@ -34,8 +34,9 @@ use std::sync::Arc;
 
 use crate::kernels::support::{GhostFillDriver, to_bc_array};
 use crate::regimes::substrate_kernels::{
-    RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries, dispatch_fields,
-    dispatch_flux, dispatch_godunov, dispatch_runtime_source, geom_scalar,
+    GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed, dispatch_driven_boundaries,
+    dispatch_fields, dispatch_flux, dispatch_godunov, dispatch_gradient_boundaries,
+    dispatch_runtime_source, geom_scalar,
     geom_suffix, gr_chart_dof_tag, kernel_geom, resolve_params, scalars_for, spacetime_slug,
 };
 use symbi_hydro::source_spec::BuiltSource;
@@ -64,6 +65,9 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// equilibrium REQUIRES this: no local rule (mirror or copy) can represent the state
     /// beyond a wedge wall — only the analytic continuation can.
     pub boundary_dags: Vec<Arc<RuntimeSource>>,
+    /// gradient-boundary (Neumann / Robin) coefficients, indexed by the `BoundaryType::Neumann(id)` /
+    /// `Robin(id)` id — the convenience prescribed-gradient / mixed walls.
+    pub gradient_bcs: Vec<GradientBc>,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
 }
@@ -82,6 +86,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             solver: Solver::Hlle,
             runtime_source: None,
             boundary_dags: Vec::new(),
+            gradient_bcs: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
         }
     }
@@ -93,6 +98,15 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     pub fn with_driven_boundary(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> (Self, u16) {
         let id = self.boundary_dags.len() as u16;
         self.boundary_dags.push(RuntimeSource::new(built, params, true));
+        (self, id)
+    }
+
+    /// register a NEUMANN / ROBIN gradient boundary (the convenience short-circuit). the id
+    /// (registration order) is what the sim's `Boundaries` carries as `BoundaryType::Neumann(id)` /
+    /// `Robin(id)`. `coeffs` are the per-variable coefficients in prim order `[rho, vel.., pre]`.
+    pub fn with_gradient_boundary(mut self, coeffs: GradientBc) -> (Self, u16) {
+        let id = self.gradient_bcs.len() as u16;
+        self.gradient_bcs.push(coeffs);
         (self, id)
     }
 
@@ -329,6 +343,10 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // BcType::Skip); prescribe their ghost prim state from the registered boundary DAGs.
         if !self.boundary_dags.is_empty() {
             dispatch_driven_boundaries(sim, &self.boundary_dags);
+        }
+        // the Neumann/Robin gradient faces (also skipped above), filled from the edge cell.
+        if !self.gradient_bcs.is_empty() {
+            dispatch_gradient_boundaries(sim, &self.gradient_bcs);
         }
     }
 
