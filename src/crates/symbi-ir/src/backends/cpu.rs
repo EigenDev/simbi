@@ -46,33 +46,8 @@ pub fn emit_cpu(f: &LoweredFn) -> String {
 }
 
 fn emit_signature(out: &mut String, f: &LoweredFn) {
-    // collect const-generic identifiers used by array_len so the fn
-    // can carry them in its generic-parameter list. only Symbol-based
-    // generics are emitted; literal lengths don't add anything.
-    let mut generics: Vec<String> = Vec::new();
-    for p in &f.params {
-        if let Some(crate::DimExpr::Generic(sym)) = &p.array_len {
-            let name = sym.as_str().to_string();
-            if !generics.contains(&name) {
-                generics.push(name);
-            }
-        }
-    }
-
     out.push_str("pub fn ");
     out.push_str(&f.name);
-    if !generics.is_empty() {
-        out.push('<');
-        for (i, g) in generics.iter().enumerate() {
-            if i > 0 {
-                out.push_str(", ");
-            }
-            out.push_str("const ");
-            out.push_str(g);
-            out.push_str(": usize");
-        }
-        out.push('>');
-    }
     out.push('(');
     for (i, p) in f.params.iter().enumerate() {
         if i > 0 {
@@ -94,11 +69,6 @@ fn emit_param_type(out: &mut String, p: &crate::LoweredParam) {
             out.push('[');
             out.push_str(rust_type_name(p.element, false));
             out.push_str(&format!("; {}]", n));
-        }
-        Some(crate::DimExpr::Generic(sym)) => {
-            out.push('[');
-            out.push_str(rust_type_name(p.element, false));
-            out.push_str(&format!("; {}]", sym));
         }
     }
 }
@@ -168,7 +138,6 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
             out.push_str(" in 0..");
             match bound {
                 crate::DimExpr::Literal(n) => out.push_str(&n.to_string()),
-                crate::DimExpr::Generic(sym) => out.push_str(sym.as_str()),
             }
             out.push_str(" { ");
             for s in body {
@@ -472,32 +441,6 @@ mod tests {
     }
 
     #[test]
-    fn dot_product_rust_source_round_trips() {
-        // a 3-vector dot product, end-to-end through the IR + lowering + emit.
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let r = g.einsum("i,i->", vec![a, b], None);
-        let f = scalarize(&g, r, "dot3");
-        let src = emit_cpu(&f);
-        assert_parses(&src);
-        assert!(src.contains(
-            "pub fn dot3(a_0: f64, a_1: f64, a_2: f64, b_0: f64, b_1: f64, b_2: f64) -> f64"
-        ));
-        // body contains the unrolled sum of products.
-        assert!(src.contains("(a_0 * b_0)"));
-        assert!(src.contains("(a_2 * b_2)"));
-    }
-
-    #[test]
     fn rank_n_output_emits_tuple_return() {
         // vector add: scalar param + vector param -> vector result.
         let mut g = Graph::new();
@@ -603,75 +546,6 @@ mod tests {
         assert_parses(&src);
         assert!(src.contains("-5_i32"));
         assert!(src.contains("-> i32"));
-    }
-
-    // ---- R.5.a: const-generic loop emission ----
-
-    #[test]
-    fn generic_dim_dot_emits_for_loop_with_accumulator() {
-        let mut g = Graph::new();
-        let a = g.add_param(
-            crate::Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        let b = g.add_param(
-            crate::Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        let r = g.einsum("i,i->", vec![a, b], None);
-        let f = scalarize(&g, r, "dot_d");
-        let src = emit_cpu(&f);
-        // accept the source; it should be valid Rust.
-        assert_parses(&src);
-        // signature: pub fn dot_d<const D: usize>(a: [f64; D], b: [f64; D]) -> f64
-        assert!(
-            src.contains("pub fn dot_d<const D: usize>"),
-            "signature missing: {}",
-            src
-        );
-        assert!(src.contains("a: [f64; D]"), "{}", src);
-        assert!(src.contains("b: [f64; D]"), "{}", src);
-        assert!(src.contains("-> f64"));
-        // body: let mut __acc_N: f64 = 0.0; for __ii_N in 0..D { __acc_N += a[ii] * b[ii]; }
-        assert!(
-            src.contains("let mut __acc_"),
-            "missing accumulator: {}",
-            src
-        );
-        assert!(src.contains("for __ii_"), "missing for loop: {}", src);
-        assert!(src.contains("a[__ii_"), "missing a[ii] indexing: {}", src);
-        assert!(src.contains("b[__ii_"), "missing b[ii] indexing: {}", src);
-        assert!(
-            src.contains("+= ("),
-            "missing compound-assign with product: {}",
-            src
-        );
-    }
-
-    #[test]
-    fn matmul_emits_full_unrolled_body() {
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(2)]),
-            None,
-        );
-        let n = g.add_param(
-            Symbol::intern("N"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(2)]),
-            None,
-        );
-        let r = g.einsum("ij,jk->ik", vec![m, n], None);
-        let f = scalarize(&g, r, "matmul22");
-        let src = emit_cpu(&f);
-        assert_parses(&src);
-        // 8 scalar params (4 each for M and N), 4-tuple return.
-        assert!(src.contains("M_0_0: f64") && src.contains("N_1_1: f64"));
-        assert!(src.contains("-> (f64, f64, f64, f64)"));
-        // result[0,0] = M_0_0*N_0_0 + M_0_1*N_1_0
-        assert!(src.contains("((M_0_0 * N_0_0) + (M_0_1 * N_1_0))"));
     }
 
     // ----- docs/design/23: ScalarStmt::Scope tests -----

@@ -26,7 +26,6 @@
 
 use std::collections::HashMap;
 
-use crate::einsum::{Atom, EinsumSpec};
 use crate::graph::{Graph, NodeId, Op};
 use crate::symbol::Symbol;
 
@@ -161,34 +160,6 @@ pub fn splice_graph(
 // NodeId order) so a missing entry surfaces as `OutputOutOfRange` from the
 // closure.
 
-// reconstruct an einsum spec string from a parsed EinsumSpec. the
-// grammar (einsum.rs) is closed: each atom is a single label char or
-// "...", input atom-lists are comma-separated, output follows "->".
-//
-// `pub(crate)` so `Op::dispatch_builder` (the canonical Op->target-builder
-// dispatcher in graph.rs) can rebuild the spec string when re-inserting
-// `Op::Einsum` nodes — the public `Graph::einsum` builder reparses from
-// the string form.
-pub(crate) fn einsum_spec_to_string(spec: &EinsumSpec) -> String {
-    let mut out = String::new();
-    for (i, atoms) in spec.inputs.iter().enumerate() {
-        if i > 0 { out.push(','); }
-        append_atoms(&mut out, atoms);
-    }
-    out.push_str("->");
-    append_atoms(&mut out, &spec.output);
-    out
-}
-
-fn append_atoms(buf: &mut String, atoms: &[Atom]) {
-    for a in atoms {
-        match a {
-            Atom::Label(c) => buf.push(*c),
-            Atom::Ellipsis => buf.push_str("..."),
-        }
-    }
-}
-
 // ----- tests -----
 
 #[cfg(test)]
@@ -314,44 +285,6 @@ mod tests {
     }
 
     #[test]
-    fn splice_einsum_node_roundtrips_spec() {
-        // source: dot product v.w where v,w are rank-1.
-        let mut src = Graph::new();
-        let v = src.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let w = src.add_param(
-            Symbol::intern("w"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let dot = src.einsum("i,i->", vec![v, w], None);
-        src.set_output(dot);
-        assert!(!src.has_errors(), "src errors: {:?}", src.errors());
-
-        let mut target = Graph::new();
-        let a = target.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let b = target.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let mut subst = HashMap::new();
-        subst.insert(Symbol::intern("v"), a);
-        subst.insert(Symbol::intern("w"), b);
-
-        let result = splice_graph(&mut target, &src, &[dot], &subst).unwrap()[0];
-        assert!(!target.has_errors(), "target errors: {:?}", target.errors());
-        assert_eq!(target.ty(result).rank, 0);
-    }
-
-    #[test]
     fn splice_chains_multiple_nodes_correctly() {
         // source: ((x + y) * z) — three params, two element-wise ops.
         let mut src = Graph::new();
@@ -448,15 +381,5 @@ mod tests {
         assert_eq!(outs.len(), 3);
         assert_eq!(outs[0], outs[1]);
         assert_eq!(outs[1], outs[2]);
-    }
-
-    #[test]
-    fn spec_to_string_roundtrips_common_specs() {
-        for s in ["i,i->", "ij,jk->ik", "...i,...i->...", "ij->ji", "i,j->ij"] {
-            let parsed = crate::parse_einsum_spec(s).unwrap();
-            let printed = einsum_spec_to_string(&parsed);
-            let reparsed = crate::parse_einsum_spec(&printed).unwrap();
-            assert_eq!(parsed, reparsed, "roundtrip failed for `{}` -> `{}`", s, printed);
-        }
     }
 }

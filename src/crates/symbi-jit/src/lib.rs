@@ -679,14 +679,8 @@ fn translate_stmts(
                 b.def_var(var, v);
             }
             ScalarStmt::For { iter, bound, body } => {
-                let n = match bound {
-                    DimExpr::Literal(n) => *n as i64,
-                    other => {
-                        return Err(JitError::Unsupported(format!(
-                            "generic For bound {other:?}"
-                        )));
-                    }
-                };
+                let DimExpr::Literal(n) = bound;
+                let n = *n as i64;
                 let iter_var = Variable::from_u32(*next_var);
                 *next_var += 1;
                 b.declare_var(iter_var, types::I64);

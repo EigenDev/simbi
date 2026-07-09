@@ -957,58 +957,6 @@ mod tests {
     }
 
     #[test]
-    fn diff_stencil_renders_shifted_load_with_integer_index() {
-        // the godunov-critical path: a flux difference F[coord+1] - F[coord].
-        // the shifted FieldLoadAt must render as a PURE INTEGER index `ii + 1`,
-        // not a float `_coord_0 + 1.0` cast back to int.
-        use crate::morphism::MorphismKind;
-        let mut g = Graph::new();
-        let flux = scalar_param(&mut g, "flux"); // base local, the `lo` term
-        let c0 = g.add_param(
-            Symbol::intern("_coord_0"),
-            TensorTy::scalar(ElementTy::F64),
-            None,
-        );
-        let one = g.add_const(ConstValue::F64(1.0), None);
-        let c0_hi = g.element_wise(ElementWiseOp::Add, vec![c0, one], None);
-        let hi = g.load_at(Symbol::intern("flux"), vec![c0_hi], None);
-        let diff = g.morphism(MorphismKind::Diff { axis: 0 }, vec![flux, hi], None); // hi - flux
-
-        let desc = emit_kernel_cpu(
-            &g,
-            &KernelEmitInputs {
-                kernel_name: "diff_1d",
-                coalesce_layout: false,
-                ndim: 1,
-                target: cfg(),
-                field_inputs: &[("flux".into(), "flux".into())],
-                scalar_params: &[],
-                field_writes: &[("out".into(), "out".into(), diff)],
-                coord_components: &[0],
-                device_preamble: &[],
-                tile_spec: None,
-            },
-        );
-        assert!(desc.source.contains("let flux: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"),
-            "src:\n{}", desc.source);
-        // the shifted load is a PURE INTEGER index; no f64 anywhere in it.
-        // hoisted-base form: base + literal delta.
-        assert!(
-            desc.source.contains(
-                "field0.data[(__idx_cell_buf0 + (((ii + 1)) - ii) * field0.strides[0]) as usize]"
-            ),
-            "shifted load not a pure integer index:\n{}",
-            desc.source,
-        );
-        assert!(
-            !desc.source.contains("as i64"),
-            "indices are i32; no i64 cast:\n{}",
-            desc.source
-        );
-        assert!(desc.source.contains("- flux);"));
-    }
-
-    #[test]
     fn i32_scalar_param_emits_an_integer_signature() {
         // a lattice-map source-coord arg (a shift / pivot / clamp) is an integer
         // param; the emitter must type it i32 from its declared element, not f64,

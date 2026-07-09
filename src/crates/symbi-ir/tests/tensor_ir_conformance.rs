@@ -9,19 +9,16 @@
 // through the IR.
 //
 // section index:
-//   1. vector ops via Einsum  (dot, norm, sum, trace-style)
-//   2. broadcast scaling      (scalar * vector via ElementWise + Broadcast)
-//   3. element-wise vector    (Add, Sub, Neg, etc.)
-//   4. component access       (Index)
-//   5. tensor construction    (Construct)
-//   6. variance + .contract   (einsum with Upper/Lower pairing)
-//   7. matrix ops via Einsum  (trace, matvec, matmul, quadratic, bilinear)
-//   8. reduce + select
+//   1. broadcast scaling      (scalar * vector via ElementWise + Broadcast)
+//   2. element-wise vector    (Add, Sub, Neg, etc.)
+//   3. component access       (Index)
+//   4. tensor construction    (Construct)
+//   5. reduce + select
 // =============================================================================
 
 use symbi_ir::{
     ConstValue, DimExpr, ElementTy, ElementWiseOp, Graph, ReduceOp,
-    Symbol, TensorTy, VarianceTag, emit_cpu, emit_cuda, scalarize,
+    Symbol, TensorTy, emit_cpu, emit_cuda, scalarize,
 };
 
 // ----- helpers -----
@@ -32,22 +29,6 @@ fn add_vec(g: &mut Graph, name: &str, dim: usize) -> symbi_ir::NodeId {
     g.add_param(
         Symbol::intern(name),
         TensorTy::from_shape(ElementTy::F64, vec![lit(dim)]),
-        None,
-    )
-}
-
-fn add_upper(g: &mut Graph, name: &str, dim: usize) -> symbi_ir::NodeId {
-    g.add_param(
-        Symbol::intern(name),
-        TensorTy::from_shape(ElementTy::F64, vec![lit(dim)]).with_variance(VarianceTag::Upper),
-        None,
-    )
-}
-
-fn add_lower(g: &mut Graph, name: &str, dim: usize) -> symbi_ir::NodeId {
-    g.add_param(
-        Symbol::intern(name),
-        TensorTy::from_shape(ElementTy::F64, vec![lit(dim)]).with_variance(VarianceTag::Lower),
         None,
     )
 }
@@ -66,69 +47,7 @@ fn parse_rust(src: &str) {
 }
 
 // ============================================================
-// section 1. vector ops via Einsum
-// ============================================================
-
-#[test]
-fn dot_product_3d() {
-    let mut g = Graph::new();
-    let a = add_vec(&mut g, "a", 3);
-    let b = add_vec(&mut g, "b", 3);
-    let r = g.einsum("i,i->", vec![a, b], None);
-    assert!(!g.has_errors());
-    let f = scalarize(&g, r, "dot3");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    assert!(src.contains("(a_0 * b_0)"), "{}", src);
-    assert!(src.contains("(a_1 * b_1)"), "{}", src);
-    assert!(src.contains("(a_2 * b_2)"), "{}", src);
-    assert!(src.contains("-> f64"));
-}
-
-#[test]
-fn norm_squared_via_self_dot() {
-    // .norm_squared() == .dot(self), so the IR uses einsum "i,i->" with one input twice.
-    let mut g = Graph::new();
-    let t = add_vec(&mut g, "t", 3);
-    let r = g.einsum("i,i->", vec![t, t], None);
-    let f = scalarize(&g, r, "norm_sq");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // each term: t_i * t_i
-    assert!(src.contains("(t_0 * t_0)"), "{}", src);
-    assert!(src.contains("(t_2 * t_2)"), "{}", src);
-}
-
-#[test]
-fn norm_via_sqrt_of_norm_squared() {
-    let mut g = Graph::new();
-    let t = add_vec(&mut g, "t", 2);
-    let ns = g.einsum("i,i->", vec![t, t], None);
-    let n = g.element_wise(ElementWiseOp::Sqrt, vec![ns], None);
-    let f = scalarize(&g, n, "norm");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // outer .sqrt() wrapping the dot sum
-    assert!(src.contains(".sqrt()"), "{}", src);
-    assert!(src.contains("(t_0 * t_0)"), "{}", src);
-}
-
-#[test]
-fn component_sum_via_einsum() {
-    // .component_sum() of a [3] vector is einsum("i->")
-    let mut g = Graph::new();
-    let t = add_vec(&mut g, "t", 3);
-    let r = g.einsum("i->", vec![t], None);
-    let f = scalarize(&g, r, "sum");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // sum of 3 terms — leaves are t_0, t_1, t_2 with Add nodes
-    assert!(src.contains("t_0"));
-    assert!(src.contains("t_2"));
-}
-
-// ============================================================
-// section 2. broadcast scaling (scalar * vector)
+// section 1. broadcast scaling (scalar * vector)
 // ============================================================
 
 #[test]
@@ -159,7 +78,7 @@ fn vector_times_vector_pairs_components() {
 }
 
 // ============================================================
-// section 3. element-wise vector arithmetic
+// section 2. element-wise vector arithmetic
 // ============================================================
 
 #[test]
@@ -201,7 +120,7 @@ fn vector_neg() {
 }
 
 // ============================================================
-// section 4. component access (Index)
+// section 3. component access (Index)
 // ============================================================
 
 #[test]
@@ -236,7 +155,7 @@ fn index_extracts_matrix_element() {
 }
 
 // ============================================================
-// section 5. tensor construction (Construct)
+// section 4. tensor construction (Construct)
 // ============================================================
 
 #[test]
@@ -268,158 +187,7 @@ fn construct_two_vectors_into_matrix() {
 }
 
 // ============================================================
-// section 6. variance + .contract via Einsum
-// ============================================================
-
-#[test]
-fn contract_upper_with_lower_succeeds() {
-    let mut g = Graph::new();
-    let v = add_upper(&mut g, "v", 3);
-    let w = add_lower(&mut g, "w", 3);
-    let r = g.einsum("i,i->", vec![v, w], None);
-    assert!(!g.has_errors(), "errors: {:?}", g.errors());
-    let f = scalarize(&g, r, "ctr");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    assert!(src.contains("(v_0 * w_0)"));
-    assert!(src.contains("(v_2 * w_2)"));
-}
-
-#[test]
-fn contract_lower_with_upper_succeeds() {
-    let mut g = Graph::new();
-    let w = add_lower(&mut g, "w", 2);
-    let v = add_upper(&mut g, "v", 2);
-    let _ = g.einsum("i,i->", vec![w, v], None);
-    assert!(!g.has_errors());
-}
-
-#[test]
-fn contract_two_uppers_emits_variance_error() {
-    let mut g = Graph::new();
-    let a = add_upper(&mut g, "a", 3);
-    let b = add_upper(&mut g, "b", 3);
-    let _ = g.einsum("i,i->", vec![a, b], None);
-    let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-    assert!(summaries.iter().any(|s| s.contains("variance")), "{:?}", summaries);
-}
-
-#[test]
-fn contract_two_lowers_emits_variance_error() {
-    let mut g = Graph::new();
-    let a = add_lower(&mut g, "a", 2);
-    let b = add_lower(&mut g, "b", 2);
-    let _ = g.einsum("i,i->", vec![a, b], None);
-    let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-    assert!(summaries.iter().any(|s| s.contains("variance")), "{:?}", summaries);
-}
-
-#[test]
-fn contract_untagged_with_tagged_is_permitted() {
-    // .dot (Untagged inputs) and mixed Untagged+Tagged should not error
-    // — Untagged matches anything per spec § 2.5.
-    let mut g = Graph::new();
-    let plain = add_vec(&mut g, "plain", 2);
-    let upper = add_upper(&mut g, "u", 2);
-    let _ = g.einsum("i,i->", vec![plain, upper], None);
-    assert!(!g.has_errors());
-}
-
-// ============================================================
-// section 7. matrix ops via Einsum
-// ============================================================
-
-#[test]
-fn matrix_trace() {
-    let mut g = Graph::new();
-    let m = add_mat(&mut g, "M", 3, 3);
-    let r = g.einsum("ii->", vec![m], None);
-    let f = scalarize(&g, r, "tr");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    assert!(src.contains("M_0_0"));
-    assert!(src.contains("M_1_1"));
-    assert!(src.contains("M_2_2"));
-}
-
-#[test]
-fn matrix_vector_product() {
-    let mut g = Graph::new();
-    let m = add_mat(&mut g, "M", 2, 3);
-    let v = add_vec(&mut g, "v", 3);
-    let r = g.einsum("ij,j->i", vec![m, v], None);
-    let f = scalarize(&g, r, "mv");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // result[0] = M_0_0*v_0 + M_0_1*v_1 + M_0_2*v_2
-    assert!(src.contains("(M_0_0 * v_0)"));
-    assert!(src.contains("(M_0_2 * v_2)"));
-    assert!(src.contains("(M_1_2 * v_2)"));
-}
-
-#[test]
-fn matmul_2x2() {
-    let mut g = Graph::new();
-    let m = add_mat(&mut g, "M", 2, 2);
-    let n = add_mat(&mut g, "N", 2, 2);
-    let r = g.einsum("ij,jk->ik", vec![m, n], None);
-    let f = scalarize(&g, r, "matmul");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // R[0,0] = M_0_0 * N_0_0 + M_0_1 * N_1_0
-    assert!(src.contains("(M_0_0 * N_0_0)"));
-    assert!(src.contains("(M_0_1 * N_1_0)"));
-}
-
-#[test]
-fn matrix_quadratic_form() {
-    // v^T M v via ij,i,j->
-    let mut g = Graph::new();
-    let m = add_mat(&mut g, "M", 2, 2);
-    let v = add_vec(&mut g, "v", 2);
-    let r = g.einsum("ij,i,j->", vec![m, v, v], None);
-    let f = scalarize(&g, r, "quad");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // each term: M_i_j * v_i * v_j
-    assert!(src.contains("(M_0_0 * v_0)"));
-    assert!(src.contains("(M_1_1 * v_1)"));
-}
-
-#[test]
-#[allow(non_snake_case)] // bilinear form a^T M b: M is the matrix, deliberate notation
-fn matrix_bilinear_a_M_b() {
-    let mut g = Graph::new();
-    let m = add_mat(&mut g, "M", 2, 2);
-    let a = add_vec(&mut g, "a", 2);
-    let b = add_vec(&mut g, "b", 2);
-    let r = g.einsum("ij,i,j->", vec![m, a, b], None);
-    let f = scalarize(&g, r, "bil");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    assert!(src.contains("(M_0_0 * a_0)"));
-    assert!(src.contains("(M_0_1 * a_0)"));
-    assert!(src.contains("b_0"));
-    assert!(src.contains("b_1"));
-}
-
-#[test]
-fn outer_product() {
-    let mut g = Graph::new();
-    let a = add_vec(&mut g, "a", 2);
-    let b = add_vec(&mut g, "b", 3);
-    let r = g.einsum("i,j->ij", vec![a, b], None);
-    let f = scalarize(&g, r, "outer");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // 6 entries, each a_i * b_j
-    assert!(src.contains("-> (f64, f64, f64, f64, f64, f64)"));
-    assert!(src.contains("(a_0 * b_0)"));
-    assert!(src.contains("(a_1 * b_2)"));
-}
-
-// ============================================================
-// section 8. Reduce + Select
+// section 5. Reduce + Select
 // ============================================================
 
 #[test]
@@ -484,30 +252,6 @@ fn select_broadcasts_scalar_cond_to_vector_branches() {
 // ============================================================
 
 #[test]
-fn cuda_dot_emits_device_inline_double() {
-    let mut g = Graph::new();
-    let a = add_vec(&mut g, "a", 2);
-    let b = add_vec(&mut g, "b", 2);
-    let r = g.einsum("i,i->", vec![a, b], None);
-    let f = scalarize(&g, r, "dot2");
-    let src = emit_cuda(&f);
-    assert!(src.contains("__device__ inline double dot2"));
-    assert!(src.contains("(a_0 * b_0)"));
-}
-
-#[test]
-fn cuda_matmul_emits_struct_return() {
-    let mut g = Graph::new();
-    let m = add_mat(&mut g, "M", 2, 2);
-    let n = add_mat(&mut g, "N", 2, 2);
-    let r = g.einsum("ij,jk->ik", vec![m, n], None);
-    let f = scalarize(&g, r, "mm22");
-    let src = emit_cuda(&f);
-    assert!(src.contains("struct mm22_out"));
-    assert!(src.contains("__device__ inline mm22_out mm22"));
-}
-
-#[test]
 fn cuda_abs_emits_ternary_not_fabs() {
     // emit `(x < 0.0 ? -x : x)` (the carrier's ternary abs), not the
     // libdevice fabs() whose IEEE 754-2008 NaN/signed-zero semantics
@@ -566,43 +310,6 @@ fn const_bool_round_trip() {
 // ============================================================
 
 #[test]
-fn norm_of_difference_vector() {
-    // ||v - w||^2 — a common physics primitive.
-    // each (v_i - w_i) is a SHALLOW cheap share (height 1) used twice. under the
-    // depth-aware cost model the cheap threshold stays at 4 uses for shallow
-    // shares (a single sub is not worth a register), so the subtraction is
-    // inlined in both squared factors rather than hoisted. semantic equivalence
-    // is preserved; only deep cheap chains (height >= 3) hoist at 2 uses.
-    let mut g = Graph::new();
-    let v = add_vec(&mut g, "v", 3);
-    let w = add_vec(&mut g, "w", 3);
-    let d = g.element_wise(ElementWiseOp::Sub, vec![v, w], None);
-    let r = g.einsum("i,i->", vec![d, d], None);
-    let f = scalarize(&g, r, "dist_sq");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    // the per-axis differences appear inline, squared (referenced twice each).
-    assert!(src.contains("(v_0 - w_0) * (v_0 - w_0)"), "missing inlined v_0 diff square: {}", src);
-    assert!(src.contains("(v_2 - w_2) * (v_2 - w_2)"), "missing inlined v_2 diff square: {}", src);
-    // shallow cheap 2-use shares are NOT hoisted (depth-aware threshold).
-    assert!(!src.contains("__cse_"), "shallow cheap 2-use diff must stay inline: {}", src);
-}
-
-#[test]
-fn weighted_sum_kernel() {
-    // result = w_0 * v_0 + w_1 * v_1 + w_2 * v_2 via einsum
-    let mut g = Graph::new();
-    let v = add_vec(&mut g, "v", 3);
-    let w = add_vec(&mut g, "w", 3);
-    let r = g.einsum("i,i->", vec![w, v], None);
-    let f = scalarize(&g, r, "wsum");
-    let src = emit_cpu(&f);
-    parse_rust(&src);
-    assert!(src.contains("(w_0 * v_0)"));
-    assert!(src.contains("(w_2 * v_2)"));
-}
-
-#[test]
 fn velocity_from_momentum_divide_by_rho() {
     // v_i = m_i / rho — the c2p body for isothermal-style kernels.
     let mut g = Graph::new();
@@ -630,7 +337,6 @@ fn every_op_kind_lowers_without_panic() {
     let b = g.add_scalar_param("b", ElementTy::Bool);
     let v = add_vec(&mut g, "v", 2);
     let w = add_vec(&mut g, "w", 2);
-    let m = add_mat(&mut g, "M", 2, 2);
 
     // ElementWise
     let _ = g.element_wise(ElementWiseOp::Add, vec![v, w], None);
@@ -650,10 +356,6 @@ fn every_op_kind_lowers_without_panic() {
     // Select
     let _ = g.select(b, s, s, None);
 
-    // Einsum
-    let _ = g.einsum("i,i->", vec![v, w], None);
-    let _ = g.einsum("ij,jk->ik", vec![m, m], None);
-
     // Construct + Index + Broadcast
     let cv = g.construct(vec![s, s], None);
     let _ = g.index(cv, vec![symbi_ir::DimIndex::Literal(0)], None);
@@ -664,7 +366,7 @@ fn every_op_kind_lowers_without_panic() {
     assert!(!g.has_errors(), "errors: {:?}", g.errors());
 
     // pick one output and lower end-to-end as a final smoke check
-    let result = g.einsum("i,i->", vec![v, w], None);
+    let result = g.element_wise(ElementWiseOp::Add, vec![v, w], None);
     let f = scalarize(&g, result, "summary");
     let src = emit_cpu(&f);
     parse_rust(&src);

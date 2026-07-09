@@ -14,12 +14,10 @@
 //                          (Op signature + Mask + Scalar + SourceLoc + RenderPolicy)
 //   gv                   — the Gv carrier (Scalar impl that traces into the IR)
 //   {element, symbol,    — IR data structures the closed signature operates on
-//    dim, variance, ty,    (rank-0/rank-N types, dimensions, einsum, hash-cons keys)
-//    error, einsum,
-//    morphism, graph}
+//    dim, ty,              (rank-0/rank-N types, dimensions, hash-cons keys)
+//    error, graph}
 //   passes/              — IR-to-IR transformations (scalarize, splice, cse)
 //   backends/            — IR-to-target emitters (cpu, cuda, kernel, render, interp)
-//   class                — ClassWitness determinism lattice (consumed by ty)
 //   emit                 — high-level emit entry (Target enum, render_from_ir)
 // =============================================================================
 
@@ -32,11 +30,8 @@ pub mod gv;
 pub mod element;
 pub mod symbol;
 pub mod dim;
-pub mod variance;
 pub mod ty;
 pub mod error;
-pub mod einsum;
-pub mod morphism;
 pub mod graph;
 
 // IR-to-IR passes
@@ -44,8 +39,7 @@ pub mod passes;
 // IR-to-target backends
 pub mod backends;
 
-// determinism lattice + high-level emit entry
-pub mod class;
+// high-level emit entry
 pub mod emit;
 
 // keystone: symbolic div(curl B) = 0 checker over the traced curl DAG.
@@ -66,7 +60,6 @@ pub mod primitives;
 
 // ───── re-exports — the IR surface at the crate root.
 
-pub use class::ClassWitness;
 // the ABI vocabulary lives in `symbi-abi`; re-exported here so downstream callers
 // use the `symbi_ir::FieldRef` / `symbi_ir::ScalarBind` paths.
 pub use symbi_abi::{
@@ -83,10 +76,8 @@ pub use gv::{
 pub use element::ElementTy;
 pub use symbol::Symbol;
 pub use dim::{DimExpr, Shape, shapes_equal, broadcasts_to, broadcast_shape};
-pub use variance::VarianceTag;
-pub use ty::{TensorTy, DetClass, join_class};
+pub use ty::TensorTy;
 pub use error::ShapeError;
-pub use einsum::{Atom, AtomList, EinsumSpec, EinsumParseError, parse_einsum_spec, MAX_LABELS_PER_SPEC};
 pub use graph::{Graph, Node, NodeId, Op, ConstValue, DimIndex, ElementWiseOp, TranscendentalOp, ReduceOp, FnDef, FnId};
 
 // passes surface

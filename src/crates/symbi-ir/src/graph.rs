@@ -6,8 +6,8 @@
 // newtype indexing into the graph's vector).
 //
 // R.1.d ships the skeleton with only `Const` and `Param` op variants
-// implemented. the remaining eight ops (Construct, Index, Einsum,
-// Reduce, ElementWise, Transcendental, Select, Broadcast) land in R.2.
+// implemented. the remaining ops (Construct, Index, Reduce,
+// ElementWise, Transcendental, Select, Broadcast) land in R.2.
 //
 // invariants:
 //   - every `NodeId` is in-bounds of `nodes` and `types`.
@@ -21,9 +21,8 @@ use std::collections::HashMap;
 use proc_macro2::Span;
 
 use crate::dim::{broadcast_shape, broadcasts_to};
-use crate::einsum::{Atom, EinsumSpec, parse_einsum_spec};
 use crate::error::ShapeError;
-use crate::{DetClass, DimExpr, ElementTy, Symbol, TensorTy, VarianceTag};
+use crate::{DimExpr, ElementTy, Symbol, TensorTy};
 
 // ----- node id -----
 
@@ -359,9 +358,7 @@ fn numeric_promote(a: ElementTy, b: ElementTy) -> Option<ElementTy> {
     }
 }
 
-/// reduction op tag. Sum reductions go through Einsum (single source
-/// of truth for sum-product); the variants here are the non-Sum
-/// reductions where Einsum's bilinear structure doesn't apply.
+/// reduction op tag. the variants here are the non-Sum reductions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ReduceOp {
     Min,
@@ -455,8 +452,8 @@ impl TranscendentalOp {
 }
 
 /// the IR op carried by a node. R.1.d implemented Const and Param;
-/// R.2.a adds Construct, Index, Broadcast. the remaining five ops
-/// (Einsum, Reduce, ElementWise, Transcendental, Select) land later
+/// R.2.a adds Construct, Index, Broadcast. the remaining four ops
+/// (Reduce, ElementWise, Transcendental, Select) land later
 /// in R.2.
 ///
 /// F2.A: Op + dependents implement Hash + Eq so the Graph can
@@ -472,7 +469,7 @@ pub enum Op {
     Param(Symbol),
     /// build a rank-(K+1) tensor by stacking N rank-K tensors along a
     /// new outermost axis of length N. all inputs must agree on
-    /// element, shape, variance, and class.
+    /// element and shape.
     Construct(Vec<NodeId>),
     /// extract a rank-0 element. one DimIndex per axis of the input.
     Index(NodeId, Vec<DimIndex>),
@@ -482,17 +479,14 @@ pub enum Op {
     /// element-wise op with broadcast-aware shape inference. arity is
     /// 1 or 2 depending on the op tag.
     ElementWise(ElementWiseOp, Vec<NodeId>),
-    /// transcendental op (sin/cos/exp/etc.). result class is always
-    /// Tainted. arity 1 or 2 depending on the op tag.
+    /// transcendental op (sin/cos/exp/etc.). arity 1 or 2 depending on
+    /// the op tag.
     Transcendental(TranscendentalOp, Vec<NodeId>),
-    /// non-sum reduction over named axes (sum reductions live in Einsum).
+    /// non-sum reduction over named axes.
     Reduce(ReduceOp, Vec<u32>, NodeId),
     /// element-wise if/else. cond must be Bool; then/else share element
     /// and broadcast to a common shape with cond.
     Select(NodeId, NodeId, NodeId),
-    /// einsum: the core sum-product primitive. spec is parsed once at
-    /// build time and stored alongside the inputs.
-    Einsum(EinsumSpec, Vec<NodeId>),
     /// arbitrary-coord field load. the symbol names a field-input key
     /// (matching a Param key registered for the same field via
     /// add_param / intern_read_param) so the dispatch side resolves a
@@ -542,19 +536,6 @@ pub enum Op {
         lambda: NodeId,
         init: NodeId,
         count: NodeId,
-    },
-    /// F4: physics morphism primitive. carries a `MorphismKind`
-    /// (Diff / FaceAvg / Curl / …) whose `dim_constraint()` participates
-    /// in graph-level ndim inference. arity follows `MorphismKind::arity(ndim)`.
-    ///
-    /// rationale: makes physics intent first-class in the IR. the
-    /// proc-macro reads dim constraints off the Morphism nodes instead
-    /// of relying on the `_3d` naming convention. emit lowers each
-    /// MorphismKind variant to its semantic stencil (e.g., Diff(f, ax)
-    /// lowers to f[+ax] - f[coord]).
-    Morphism {
-        kind: crate::morphism::MorphismKind,
-        args: Vec<NodeId>,
     },
     /// component `idx` of the current accumulator VECTOR inside an `IterateInline`
     /// loop body — a rank-0 placeholder leaf the scalarizer resolves to the loop's
@@ -690,10 +671,8 @@ impl Op {
             Op::ElementWise(_, ins)
             | Op::Transcendental(_, ins)
             | Op::Construct(ins)
-            | Op::Einsum(_, ins)
             | Op::LoadAt(_, ins)
-            | Op::Apply { args: ins, .. }
-            | Op::Morphism { args: ins, .. } => {
+            | Op::Apply { args: ins, .. } => {
                 for n in ins.iter_mut() {
                     *n = f(*n)?;
                 }
@@ -826,10 +805,6 @@ impl Op {
             Op::Transcendental(op, inputs) => target.transcendental(op, inputs, span),
             Op::Reduce(op, axes, input) => target.reduce(op, axes, input, span),
             Op::Select(c, t, e) => target.select(c, t, e, span),
-            Op::Einsum(spec, inputs) => {
-                let spec_str = crate::passes::splice::einsum_spec_to_string(&spec);
-                target.einsum(&spec_str, inputs, span)
-            }
             Op::LoadAt(sym, components) => target.load_at(sym, components, span),
             Op::Apply { lambda, args } => target.apply(lambda, args, span),
             Op::Fold {
@@ -837,7 +812,6 @@ impl Op {
                 init,
                 count,
             } => target.fold(lambda, init, count, span),
-            Op::Morphism { kind, args } => target.morphism(kind, args, span),
             Op::IterAcc(idx) => target.iter_acc(idx, span),
             Op::IterateInline {
                 accs,
@@ -923,8 +897,7 @@ pub struct Graph {
     /// graph-level dim constraint. when set, restricts the
     /// kernel to a specific ndim during macro emission. the constraint is
     /// carried explicitly here.
-    /// `None` means "no graph-level constraint" (combine with per-Morphism
-    /// constraints from Diff/FaceAvg, which are AnyD anyway).
+    /// `None` means "no graph-level constraint".
     pinned_ndim: Option<u8>,
     /// F2.A: structural cache for hash-consing. keyed on (Op, output
     /// TensorTy); equal keys map to the same NodeId. populated by
@@ -1007,7 +980,7 @@ impl Graph {
 
     /// F5.4-retire: pin a graph-level ndim constraint. last call wins.
     /// the macro pipeline reads `pinned_ndim()` and intersects it with
-    /// the per-Morphism constraints from `graph_dim_constraint`.
+    /// any other ndim constraints during emission.
     pub fn pin_ndim(&mut self, ndim: u8) {
         self.pinned_ndim = Some(ndim);
     }
@@ -1075,8 +1048,8 @@ impl Graph {
 
     /// stack N tensors of rank K into one tensor of rank K+1 with a
     /// new outermost axis of length N. all inputs must agree on
-    /// element, shape, variance, and class (mismatches record errors
-    /// and produce a best-effort poison node).
+    /// element and shape (mismatches record errors and produce a
+    /// best-effort poison node).
     pub fn construct(&mut self, elems: Vec<NodeId>, span: Option<Span>) -> NodeId {
         if elems.is_empty() {
             self.record_error(ShapeError::Other {
@@ -1087,7 +1060,6 @@ impl Graph {
             return self.push(Op::Construct(elems), TensorTy::scalar(ElementTy::F64), span);
         }
         let first_ty = self.types[elems[0].0 as usize].clone();
-        let mut joined_class = first_ty.class;
 
         let first_span = self.nodes[elems[0].0 as usize].span;
         for (i, id) in elems.iter().enumerate().skip(1) {
@@ -1096,8 +1068,6 @@ impl Graph {
             let t_element = self.types[id.0 as usize].element;
             let t_rank = self.types[id.0 as usize].rank;
             let t_shape = self.types[id.0 as usize].shape.clone();
-            let t_variance = self.types[id.0 as usize].variance;
-            let t_class = self.types[id.0 as usize].class;
             let t_span = self.nodes[id.0 as usize].span;
 
             if t_element != first_ty.element {
@@ -1117,16 +1087,6 @@ impl Graph {
                     context: format!("Construct input {}", i),
                 });
             }
-            if t_variance != first_ty.variance {
-                self.record_error(ShapeError::VarianceMismatch {
-                    left: first_ty.variance,
-                    right: t_variance,
-                    span_a: first_span,
-                    span_b: t_span,
-                    context: format!("Construct input {}", i),
-                });
-            }
-            joined_class = joined_class.join(t_class);
         }
 
         // output: rank K+1 with Literal(N) prepended.
@@ -1137,16 +1097,13 @@ impl Graph {
             element: first_ty.element,
             rank: first_ty.rank + 1,
             shape: new_shape,
-            variance: first_ty.variance,
-            class: joined_class,
         };
         self.push(Op::Construct(elems), out_ty, span)
     }
 
     /// extract a rank-0 element from a tensor. one DimIndex per axis;
     /// Literal indices against Literal axes are bounds-checked at build
-    /// time. variance becomes Untagged on the result — extracting a
-    /// scalar drops index-position meaning.
+    /// time.
     pub fn index(&mut self, tensor: NodeId, idxs: Vec<DimIndex>, span: Option<Span>) -> NodeId {
         let t = self.types[tensor.0 as usize].clone();
         if idxs.len() as u32 != t.rank {
@@ -1175,8 +1132,6 @@ impl Graph {
             element: t.element,
             rank: 0,
             shape: vec![],
-            variance: VarianceTag::Untagged,
-            class: t.class,
         };
         self.push(Op::Index(tensor, idxs), out_ty, span)
     }
@@ -1202,8 +1157,6 @@ impl Graph {
             element: t.element,
             rank: target.len() as u32,
             shape: target.clone(),
-            variance: t.variance,
-            class: t.class,
         };
         self.push(Op::Broadcast(tensor, target), out_ty, span)
     }
@@ -1212,10 +1165,8 @@ impl Graph {
 
     /// element-wise op (arithmetic, comparison, classification). arity
     /// is fixed per op tag. binary ops broadcast their inputs to a
-    /// common shape; unary ops preserve shape. variance rules: for
-    /// binary ops, if both inputs are non-Untagged they must agree;
-    /// otherwise the non-Untagged side wins. result element follows
-    /// `returns_bool()`. class joins.
+    /// common shape; unary ops preserve shape. result element follows
+    /// `returns_bool()`.
     pub fn element_wise(
         &mut self,
         op: ElementWiseOp,
@@ -1332,33 +1283,6 @@ impl Graph {
             }
         };
 
-        // variance: for unary ops keep input variance (or Untagged if op
-        // returns Bool — comparison/classification erases meaning).
-        // for binary ops: both Untagged -> Untagged; one tagged + one
-        // Untagged -> tagged wins; both tagged but different -> error.
-        let out_variance = if op.returns_bool() {
-            VarianceTag::Untagged
-        } else if want_arity == 1 {
-            in_tys[0].variance
-        } else {
-            let l = in_tys[0].variance;
-            let r = in_tys[1].variance;
-            match (l, r) {
-                (VarianceTag::Untagged, v) | (v, VarianceTag::Untagged) => v,
-                (a, b) if a == b => a,
-                _ => {
-                    self.record_error(ShapeError::VarianceMismatch {
-                        left: l,
-                        right: r,
-                        span_a: in_spans[0],
-                        span_b: in_spans[1],
-                        context: format!("ElementWise({})", op.name()),
-                    });
-                    VarianceTag::Untagged
-                }
-            }
-        };
-
         // Cast(to) always produces the TARGET element — the input type is what
         // is being cast FROM. for every other op the output element follows
         // the (homogeneous) input element. returns_bool ops always produce
@@ -1374,14 +1298,10 @@ impl Graph {
         } else {
             first_elem
         };
-        let out_class = in_tys.iter().fold(DetClass::Det, |a, t| a.join(t.class));
-
         let out_ty = TensorTy {
             element: out_element,
             rank: out_shape.len() as u32,
             shape: out_shape,
-            variance: out_variance,
-            class: out_class,
         };
         // arithmetic-identity smart-constructor fold. catches the
         // patterns the IR is most prone to emit when contracting against unit
@@ -1469,9 +1389,9 @@ impl Graph {
         }
     }
 
-    /// transcendental op. always Tainted result class. arity 1 or 2
-    /// per op tag. inputs must be float; all inputs share element +
-    /// shape (broadcast-aware for binary), variance preserved.
+    /// transcendental op. arity 1 or 2 per op tag. inputs must be
+    /// float; all inputs share element + shape (broadcast-aware for
+    /// binary).
     pub fn transcendental(
         &mut self,
         op: TranscendentalOp,
@@ -1491,7 +1411,7 @@ impl Graph {
             });
             return self.push(
                 Op::Transcendental(op, inputs),
-                TensorTy::scalar(ElementTy::F64).with_class(DetClass::Tainted),
+                TensorTy::scalar(ElementTy::F64),
                 span,
             );
         }
@@ -1545,36 +1465,10 @@ impl Graph {
             }
         };
 
-        let out_variance = if want_arity == 1 {
-            in_tys[0].variance
-        } else {
-            // binary transcendentals: atan2(y, x), pow(b, e), hypot(a, b).
-            // these are scalar-flavored even when broadcast over tensors;
-            // require both sides to agree if both tagged.
-            let l = in_tys[0].variance;
-            let r = in_tys[1].variance;
-            match (l, r) {
-                (VarianceTag::Untagged, v) | (v, VarianceTag::Untagged) => v,
-                (a, b) if a == b => a,
-                _ => {
-                    self.record_error(ShapeError::VarianceMismatch {
-                        left: l,
-                        right: r,
-                        span_a: in_spans[0],
-                        span_b: in_spans[1],
-                        context: format!("Transcendental({})", op.name()),
-                    });
-                    VarianceTag::Untagged
-                }
-            }
-        };
-
         let out_ty = TensorTy {
             element: first_elem,
             rank: out_shape.len() as u32,
             shape: out_shape,
-            variance: out_variance,
-            class: DetClass::Tainted,
         };
         self.push(Op::Transcendental(op, inputs), out_ty, span)
     }
@@ -1583,9 +1477,7 @@ impl Graph {
 
     /// reduce a tensor along the given axes. axes must be sorted, in
     /// bounds, with no duplicates. Min/Max accept float or int inputs;
-    /// Or/And/Xor accept int or bool. variance becomes Untagged because
-    /// V1 carries one variance per tensor and reducing axes erases the
-    /// per-axis information.
+    /// Or/And/Xor accept int or bool.
     pub fn reduce(
         &mut self,
         op: ReduceOp,
@@ -1656,16 +1548,13 @@ impl Graph {
             element: t.element,
             rank: out_shape.len() as u32,
             shape: out_shape,
-            variance: VarianceTag::Untagged,
-            class: t.class,
         };
         self.push(Op::Reduce(op, axes, input), out_ty, span)
     }
 
     /// element-wise if/else. cond.element must be Bool; then/else must
     /// share element and broadcast-compatible shapes; cond participates
-    /// in the broadcast too. result variance = then.variance (must
-    /// equal else.variance when both tagged); class joins all three.
+    /// in the broadcast too.
     pub fn select(
         &mut self,
         cond: NodeId,
@@ -1722,357 +1611,12 @@ impl Graph {
             }
         };
 
-        // variance: cond is Untagged (Bool); then/else must agree if both
-        // tagged. one tagged + one Untagged -> the tagged one wins.
-        let out_variance = match (t.variance, e.variance) {
-            (VarianceTag::Untagged, v) | (v, VarianceTag::Untagged) => v,
-            (a, b) if a == b => a,
-            _ => {
-                self.record_error(ShapeError::VarianceMismatch {
-                    left: t.variance,
-                    right: e.variance,
-                    span_a: t_span,
-                    span_b: e_span,
-                    context: "Select then/else".to_string(),
-                });
-                VarianceTag::Untagged
-            }
-        };
-
         let out_ty = TensorTy {
             element: t.element,
             rank: out_shape.len() as u32,
             shape: out_shape,
-            variance: out_variance,
-            class: c.class.join(t.class).join(e.class),
         };
         self.push(Op::Select(cond, then_branch, else_branch), out_ty, span)
-    }
-
-    // ----- R.2.e builder: Einsum -----
-
-    /// einsum: the core sum-product primitive. spec is parsed at build
-    /// time. shape inference, variance pairing, and class propagation
-    /// run per spec § 4.2; failures are recorded in the side-channel
-    /// error accumulator.
-    ///
-    /// algorithm (spec § 4.2):
-    ///   1. parse spec
-    ///   2. split each input's atom list around its ellipsis (if any)
-    ///   3. validate per-input rank vs spec rank
-    ///   4. walk named labels, bind dim expressions, check conflicts
-    ///   5. resolve output ellipsis (broadcast of input ellipsis dims)
-    ///   6. check output labels appear in inputs
-    ///   7. check variance pairing on contracted labels
-    ///   8. assemble output shape: ellipsis batch dims + named output dims
-    ///   9. element + class propagation
-    pub fn einsum(&mut self, spec_str: &str, inputs: Vec<NodeId>, span: Option<Span>) -> NodeId {
-        // step 1: parse.
-        let spec = match parse_einsum_spec(spec_str) {
-            Ok(s) => s,
-            Err(parse_err) => {
-                self.record_parse_error(parse_err, span);
-                // poison: rank-0 placeholder so downstream queries don't panic.
-                return self.push(
-                    Op::Einsum(
-                        EinsumSpec {
-                            inputs: vec![],
-                            output: vec![],
-                        },
-                        inputs,
-                    ),
-                    TensorTy::scalar(ElementTy::F64),
-                    span,
-                );
-            }
-        };
-
-        // pre-gather input types + spans to dodge borrow conflicts.
-        let in_tys: Vec<TensorTy> = inputs
-            .iter()
-            .map(|id| self.types[id.0 as usize].clone())
-            .collect();
-        let in_spans: Vec<Option<Span>> = inputs
-            .iter()
-            .map(|id| self.nodes[id.0 as usize].span)
-            .collect();
-
-        // step 1b: input arity vs spec.
-        if spec.inputs.len() != inputs.len() {
-            self.record_error(ShapeError::EinsumInputArityMismatch {
-                spec_inputs: spec.inputs.len(),
-                actual_inputs: inputs.len(),
-                span,
-            });
-            return self.push(
-                Op::Einsum(spec, inputs),
-                TensorTy::scalar(in_tys.first().map(|t| t.element).unwrap_or(ElementTy::F64)),
-                span,
-            );
-        }
-
-        // element check + class join (single pass).
-        let first_elem = in_tys.first().map(|t| t.element).unwrap_or(ElementTy::F64);
-        let mut out_class = DetClass::Det;
-        for (i, t) in in_tys.iter().enumerate() {
-            if t.element != first_elem {
-                self.record_error(ShapeError::ElementMismatch {
-                    left: first_elem,
-                    right: t.element,
-                    span_a: in_spans.first().copied().flatten(),
-                    span_b: in_spans[i],
-                    context: format!("Einsum input {}", i),
-                });
-            }
-            out_class = out_class.join(t.class);
-        }
-
-        // step 2: per-input split around ellipsis. for each input, compute
-        // (left_labels, ellipsis_dims, right_labels). when an input has no
-        // ellipsis, ellipsis_dims is empty.
-        struct InputCtx<'a> {
-            left: &'a [Atom],
-            has_ellipsis: bool,
-            ellipsis_dims: Vec<DimExpr>,
-            right: &'a [Atom],
-        }
-
-        let mut ctxs: Vec<InputCtx<'_>> = Vec::with_capacity(spec.inputs.len());
-        for (i, atom_list) in spec.inputs.iter().enumerate() {
-            let pos = atom_list.iter().position(|a| matches!(a, Atom::Ellipsis));
-            let in_rank = in_tys[i].rank as usize;
-            let (left, right, has_ellipsis, ellipsis_dims) = match pos {
-                None => {
-                    // no ellipsis: input rank must match the spec atom count.
-                    if atom_list.len() != in_rank {
-                        self.record_error(ShapeError::EinsumRankMismatch {
-                            input_index: i,
-                            expected: atom_list.len() as u32,
-                            found: in_rank as u32,
-                            span: in_spans[i].or(span),
-                        });
-                    }
-                    (&atom_list[..], &[][..], false, Vec::<DimExpr>::new())
-                }
-                Some(idx) => {
-                    let left = &atom_list[..idx];
-                    let right = &atom_list[idx + 1..];
-                    let named_count = left.len() + right.len();
-                    if in_rank < named_count {
-                        self.record_error(ShapeError::EinsumRankMismatch {
-                            input_index: i,
-                            expected: named_count as u32,
-                            found: in_rank as u32,
-                            span: in_spans[i].or(span),
-                        });
-                        (left, right, true, Vec::new())
-                    } else {
-                        let dims = in_tys[i].shape[left.len()..in_rank - right.len()].to_vec();
-                        (left, right, true, dims)
-                    }
-                }
-            };
-            ctxs.push(InputCtx {
-                left,
-                has_ellipsis,
-                ellipsis_dims,
-                right,
-            });
-        }
-
-        // step 3: walk named labels and bind dim exprs. compare on
-        // subsequent occurrences. record DimMismatch on conflict.
-        let mut bindings: Vec<(char, DimExpr, Option<Span>)> = Vec::new();
-        for (i, ctx) in ctxs.iter().enumerate() {
-            // axes in the input's shape that correspond to LEFT labels
-            // start at index 0; RIGHT labels start at in_rank - right.len().
-            let in_rank = in_tys[i].rank as usize;
-            let mut sites: Vec<(char, usize)> = Vec::new(); // (label, axis index)
-            for (k, atom) in ctx.left.iter().enumerate() {
-                if let Atom::Label(c) = atom {
-                    sites.push((*c, k));
-                }
-            }
-            let right_start = in_rank.saturating_sub(ctx.right.len());
-            for (k, atom) in ctx.right.iter().enumerate() {
-                if let Atom::Label(c) = atom {
-                    sites.push((*c, right_start + k));
-                }
-            }
-
-            for (label, axis) in sites {
-                if axis >= in_tys[i].shape.len() {
-                    // already complained via EinsumRankMismatch; skip the binding to avoid cascades.
-                    continue;
-                }
-                let dim = in_tys[i].shape[axis].clone();
-                match bindings.iter().find(|(c, _, _)| *c == label) {
-                    None => {
-                        bindings.push((label, dim, in_spans[i]));
-                    }
-                    Some((_, existing, prior_span)) => {
-                        if *existing != dim {
-                            self.record_error(ShapeError::DimMismatch {
-                                expected: existing.clone(),
-                                found: dim,
-                                span_a: *prior_span,
-                                span_b: in_spans[i],
-                                context: format!("einsum label '{}'", label),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // step 4: resolve ellipsis output.
-        let any_input_has_ellipsis = ctxs.iter().any(|c| c.has_ellipsis);
-        let output_has_ellipsis = spec.output.iter().any(|a| matches!(a, Atom::Ellipsis));
-        if any_input_has_ellipsis && !output_has_ellipsis {
-            self.record_error(ShapeError::Other {
-                message: "einsum spec: inputs contain '...' but output does not".to_string(),
-                span,
-            });
-        } else if !any_input_has_ellipsis && output_has_ellipsis {
-            self.record_error(ShapeError::Other {
-                message: "einsum spec: output contains '...' but no input does".to_string(),
-                span,
-            });
-        }
-
-        // compute output's batch shape by broadcasting all input ellipsis_dims.
-        let mut batch_shape: Vec<DimExpr> = Vec::new();
-        if any_input_has_ellipsis && output_has_ellipsis {
-            let with_ell: Vec<&Vec<DimExpr>> = ctxs
-                .iter()
-                .filter(|c| c.has_ellipsis)
-                .map(|c| &c.ellipsis_dims)
-                .collect();
-            if let Some((first, rest)) = with_ell.split_first() {
-                batch_shape = (*first).clone();
-                for other in rest {
-                    match broadcast_shape(&batch_shape, other) {
-                        Some(s) => batch_shape = s,
-                        None => {
-                            self.record_error(ShapeError::BroadcastIncompatible {
-                                left: batch_shape.clone(),
-                                right: (*other).clone(),
-                                span,
-                                context: "einsum batch ellipsis".to_string(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // step 5: every named output label must appear in some input.
-        let mut output_labels: Vec<char> = Vec::new();
-        for a in &spec.output {
-            if let Atom::Label(c) = a {
-                output_labels.push(*c);
-            }
-        }
-        for c in &output_labels {
-            if !bindings.iter().any(|(b, _, _)| b == c) {
-                self.record_error(ShapeError::EinsumOutputLabelNotInInputs { label: *c, span });
-            }
-        }
-
-        // step 6: variance pairing for contracted labels. a label is
-        // contracted iff it appears in inputs but not in the output.
-        let mut all_input_labels: Vec<char> = Vec::new();
-        for ctx in &ctxs {
-            for a in ctx.left.iter().chain(ctx.right.iter()) {
-                if let Atom::Label(c) = a
-                    && !all_input_labels.contains(c)
-                {
-                    all_input_labels.push(*c);
-                }
-            }
-        }
-        for label in all_input_labels {
-            if output_labels.contains(&label) {
-                continue;
-            } // batched, not contracted
-            // collect variances of inputs carrying this label.
-            let mut variances: Vec<(VarianceTag, Option<Span>)> = Vec::new();
-            for (i, ctx) in ctxs.iter().enumerate() {
-                let carries = ctx
-                    .left
-                    .iter()
-                    .chain(ctx.right.iter())
-                    .any(|a| matches!(a, Atom::Label(c) if *c == label));
-                if carries {
-                    variances.push((in_tys[i].variance, in_spans[i]));
-                }
-            }
-            // if there's only one carrier, nothing to pair (e.g., trace "ii->").
-            // if all Untagged, fine. otherwise: must have one Upper + one Lower somewhere.
-            if variances.len() >= 2 {
-                let has_upper = variances.iter().any(|(v, _)| *v == VarianceTag::Upper);
-                let has_lower = variances.iter().any(|(v, _)| *v == VarianceTag::Lower);
-                let has_untagged = variances.iter().any(|(v, _)| *v == VarianceTag::Untagged);
-                let same_non_untagged = !has_untagged && !(has_upper && has_lower);
-                if same_non_untagged {
-                    let v0 = variances[0];
-                    let v1 = variances[1];
-                    self.record_error(ShapeError::VarianceMismatch {
-                        left: v0.0,
-                        right: v1.0,
-                        span_a: v0.1,
-                        span_b: v1.1,
-                        context: format!("einsum contracted label '{}'", label),
-                    });
-                }
-            }
-        }
-
-        // step 7: assemble output shape. batch dims first, then named labels.
-        let mut out_shape = batch_shape;
-        for c in &output_labels {
-            if let Some((_, dim, _)) = bindings.iter().find(|(b, _, _)| b == c) {
-                out_shape.push(dim.clone());
-            } else {
-                // missing label — already recorded as EinsumOutputLabelNotInInputs.
-                // push a placeholder so the rank is still right.
-                out_shape.push(DimExpr::Literal(1));
-            }
-        }
-
-        let out_ty = TensorTy {
-            element: first_elem,
-            rank: out_shape.len() as u32,
-            shape: out_shape,
-            variance: VarianceTag::Untagged, // V1: einsum erases tensor-level variance
-            class: out_class,
-        };
-        self.push(Op::Einsum(spec, inputs), out_ty, span)
-    }
-
-    /// translate an EinsumParseError to a ShapeError variant.
-    fn record_parse_error(&mut self, err: crate::einsum::EinsumParseError, span: Option<Span>) {
-        use crate::einsum::{EinsumParseError as P, SideIndex};
-        let mapped = match err {
-            P::MissingArrow
-            | P::MultipleArrows
-            | P::BadCharacter { .. }
-            | P::InvalidEllipsis { .. } => ShapeError::Other {
-                message: format!("einsum parse error: {}", err),
-                span,
-            },
-            P::MultipleEllipses { side_index } => ShapeError::EinsumMultipleEllipses {
-                side: match side_index {
-                    SideIndex::Input(_) => "input",
-                    SideIndex::Output => "output",
-                },
-                span,
-            },
-            P::LabelLimitExceeded { count, max } => {
-                ShapeError::EinsumLabelOverLimit { count, max, span }
-            }
-        };
-        self.record_error(mapped);
     }
 
     /// arbitrary-coord field load. `field_key` must name a field that
@@ -2103,40 +1647,6 @@ impl Graph {
         }
         self.push(
             Op::LoadAt(field_key, components),
-            TensorTy::scalar(ElementTy::F64),
-            span,
-        )
-    }
-
-    /// F4: physics morphism builder. each MorphismKind carries its own
-    /// DimConstraint (consulted at ndim-inference time) and its own
-    /// arity expectations. args are rank-0 scalar field-at-coord reads;
-    /// result is a rank-0 scalar.
-    ///
-    /// the variant + args structure is hashed; identical morphism
-    /// invocations CSE on the existing hash-cons in `push`.
-    pub fn morphism(
-        &mut self,
-        kind: crate::morphism::MorphismKind,
-        args: Vec<NodeId>,
-        span: Option<Span>,
-    ) -> NodeId {
-        for (i, a) in args.iter().enumerate() {
-            let t = &self.types[a.0 as usize];
-            if t.rank != 0 {
-                self.record_error(ShapeError::Other {
-                    message: format!(
-                        "Morphism({}) arg {} must be rank-0 scalar, got rank {}",
-                        kind.label(),
-                        i,
-                        t.rank
-                    ),
-                    span,
-                });
-            }
-        }
-        self.push(
-            Op::Morphism { kind, args },
             TensorTy::scalar(ElementTy::F64),
             span,
         )
@@ -2210,8 +1720,7 @@ impl Graph {
     }
 
     /// apply a lambda to arguments. arg count must match the lambda's
-    /// FnDef.params; arg types must match in element + shape (variance
-    /// and class can differ — caller's args may be tighter). result
+    /// FnDef.params; arg types must match in element + shape. result
     /// type is the type of the lambda's body output.
     pub fn apply(&mut self, lambda: NodeId, args: Vec<NodeId>, span: Option<Span>) -> NodeId {
         let fn_id = match &self.nodes[lambda.0 as usize].op {
@@ -2574,7 +2083,7 @@ impl Graph {
     ///
     /// this is the POINTWISE-physics splice (the use case: a carrier-generic `Regime::wave_speeds`
     /// traced at `S = Gv` grafted into a substrate kernel that owns the geometry). it handles the
-    /// pointwise op subset; iteration / lambda / morphism / einsum / opaque-call / implicit-cast
+    /// pointwise op subset; iteration / lambda / opaque-call / implicit-cast
     /// nodes panic loudly — grafting a whole iterative or lambda-bearing kernel is out of scope.
     pub fn import_subgraph(
         &mut self,
@@ -2615,14 +2124,12 @@ impl Graph {
             Op::ElementWise(ElementWiseOp::Cast(_), _) => {
                 panic!("import_subgraph: implicit Cast node is not importable")
             }
-            // pointwise-physics opset only — lambda / fold / iterate / morphism /
-            // einsum / apply / loadat would either need cross-graph FnDef cloning
-            // or are not used inside the grafted regime fragments.
+            // pointwise-physics opset only — lambda / fold / iterate / apply /
+            // loadat would either need cross-graph FnDef cloning or are not used
+            // inside the grafted regime fragments.
             Op::Lambda(_)
             | Op::Apply { .. }
             | Op::Fold { .. }
-            | Op::Morphism { .. }
-            | Op::Einsum(_, _)
             | Op::IterAcc(_)
             | Op::IterateInline { .. } => {
                 panic!(
@@ -2747,15 +2254,13 @@ mod tests {
     // ---- const builders ----
 
     #[test]
-    fn add_const_f64_is_scalar_det() {
+    fn add_const_f64_is_scalar() {
         let mut g = Graph::new();
         let id = g.add_const(ConstValue::F64(3.14), None);
         let ty = g.ty(id);
         assert_eq!(ty.element, ElementTy::F64);
         assert_eq!(ty.rank, 0);
         assert!(ty.shape.is_empty());
-        assert_eq!(ty.variance, VarianceTag::Untagged);
-        assert_eq!(ty.class, DetClass::Det);
     }
 
     #[test]
@@ -2809,8 +2314,7 @@ mod tests {
     #[test]
     fn rank_n_param_is_supported() {
         let mut g = Graph::new();
-        let ty =
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper);
+        let ty = TensorTy::from_shape(ElementTy::F64, vec![lit(3)]);
         let id = g.add_param(Symbol::intern("v"), ty.clone(), None);
         assert_eq!(g.ty(id), &ty);
     }
@@ -3044,58 +2548,6 @@ mod tests {
         assert!(g.has_errors());
     }
 
-    #[test]
-    fn construct_variance_mismatch_records_error() {
-        let mut g = Graph::new();
-        let up = g.add_param(
-            Symbol::intern("up"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let dn = g.add_param(
-            Symbol::intern("dn"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Lower),
-            None,
-        );
-        let _ = g.construct(vec![up, dn], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("variance")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn construct_joins_class_to_tainted() {
-        let mut g = Graph::new();
-        let det = g.add_const(ConstValue::F64(1.0), None);
-        let tainted = g.add_param(
-            Symbol::intern("t"),
-            TensorTy::scalar(ElementTy::F64).with_class(DetClass::Tainted),
-            None,
-        );
-        let v = g.construct(vec![det, tainted], None);
-        assert_eq!(g.ty(v).class, DetClass::Tainted);
-    }
-
-    #[test]
-    fn construct_preserves_variance() {
-        let mut g = Graph::new();
-        let up1 = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let up2 = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let m = g.construct(vec![up1, up2], None);
-        assert_eq!(g.ty(m).variance, VarianceTag::Upper);
-    }
-
     // ---- R.2.a: Index ----
 
     #[test]
@@ -3107,19 +2559,6 @@ mod tests {
         let ty = g.ty(s);
         assert_eq!(ty.rank, 0);
         assert_eq!(ty.element, ElementTy::F64);
-        assert_eq!(ty.variance, VarianceTag::Untagged);
-    }
-
-    #[test]
-    fn index_drops_variance_to_untagged() {
-        let mut g = Graph::new();
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let s = g.index(v, vec![DimIndex::Literal(0)], None);
-        assert_eq!(g.ty(s).variance, VarianceTag::Untagged);
     }
 
     #[test]
@@ -3138,21 +2577,6 @@ mod tests {
         let _ = g.index(v, vec![DimIndex::Literal(5)], None);
         let err = g.errors()[0].summary();
         assert!(err.contains("out of bounds"), "{}", err);
-    }
-
-    #[test]
-    fn index_against_generic_dim_skips_bounds_check() {
-        // Literal(0) cannot be bounds-checked against Generic("D") at IR
-        // build time; the macro-time check accepts and relies on
-        // the const-generic loop bound to enforce at monomorph time.
-        let mut g = Graph::new();
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        let _ = g.index(v, vec![DimIndex::Literal(0)], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
     }
 
     #[test]
@@ -3199,13 +2623,11 @@ mod tests {
     }
 
     #[test]
-    fn broadcast_preserves_variance_and_element() {
+    fn broadcast_preserves_element() {
         let mut g = Graph::new();
         let s = g.add_const(ConstValue::F64(1.0), None);
         let r = g.broadcast(s, vec![lit(3)], None);
         assert_eq!(g.ty(r).element, ElementTy::F64);
-        // scalar Untagged stays Untagged
-        assert_eq!(g.ty(r).variance, VarianceTag::Untagged);
     }
 
     // ---- R.2.b: ElementWise ----
@@ -3232,7 +2654,6 @@ mod tests {
         let ty = g.ty(s);
         assert_eq!(ty.element, ElementTy::F64);
         assert_eq!(ty.rank, 0);
-        assert_eq!(ty.class, DetClass::Det);
     }
 
     #[test]
@@ -3311,7 +2732,6 @@ mod tests {
         let b = scalar_f64(&mut g, "b");
         let cmp = g.element_wise(ElementWiseOp::Lt, vec![a, b], None);
         assert_eq!(g.ty(cmp).element, ElementTy::Bool);
-        assert_eq!(g.ty(cmp).variance, VarianceTag::Untagged);
     }
 
     #[test]
@@ -3327,62 +2747,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn elementwise_variance_preserved_unary() {
-        let mut g = Graph::new();
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let neg = g.element_wise(ElementWiseOp::Neg, vec![v], None);
-        assert_eq!(g.ty(neg).variance, VarianceTag::Upper);
-    }
-
-    #[test]
-    fn elementwise_scalar_times_tensor_inherits_variance() {
-        let mut g = Graph::new();
-        let s = scalar_f64(&mut g, "s"); // Untagged
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let r = g.element_wise(ElementWiseOp::Mul, vec![s, v], None);
-        assert_eq!(g.ty(r).variance, VarianceTag::Upper);
-    }
-
-    #[test]
-    fn elementwise_mixed_variance_errors() {
-        let mut g = Graph::new();
-        let up = g.add_param(
-            Symbol::intern("up"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let dn = g.add_param(
-            Symbol::intern("dn"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Lower),
-            None,
-        );
-        let _ = g.element_wise(ElementWiseOp::Add, vec![up, dn], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("variance")),
-            "{:?}",
-            summaries
-        );
-    }
-
     // ---- R.2.b: Transcendental ----
 
     #[test]
-    fn transcendental_sin_is_tainted() {
+    fn transcendental_sin_preserves_element() {
         let mut g = Graph::new();
         let a = scalar_f64(&mut g, "a");
         let r = g.transcendental(TranscendentalOp::Sin, vec![a], None);
         assert!(!g.has_errors());
-        assert_eq!(g.ty(r).class, DetClass::Tainted);
         assert_eq!(g.ty(r).element, ElementTy::F64);
     }
 
@@ -3401,7 +2773,7 @@ mod tests {
         let x = scalar_f64(&mut g, "x");
         let r = g.transcendental(TranscendentalOp::Atan2, vec![y, x], None);
         assert!(!g.has_errors());
-        assert_eq!(g.ty(r).class, DetClass::Tainted);
+        assert_eq!(g.ty(r).element, ElementTy::F64);
     }
 
     #[test]
@@ -3425,28 +2797,6 @@ mod tests {
             "{:?}",
             summaries
         );
-    }
-
-    #[test]
-    fn transcendental_preserves_variance() {
-        let mut g = Graph::new();
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let r = g.transcendental(TranscendentalOp::Sin, vec![v], None);
-        assert_eq!(g.ty(r).variance, VarianceTag::Upper);
-    }
-
-    #[test]
-    fn taint_propagates_through_subsequent_arithmetic() {
-        let mut g = Graph::new();
-        let a = scalar_f64(&mut g, "a");
-        let b = scalar_f64(&mut g, "b");
-        let sin_a = g.transcendental(TranscendentalOp::Sin, vec![a], None);
-        let sum = g.element_wise(ElementWiseOp::Add, vec![sin_a, b], None);
-        assert_eq!(g.ty(sum).class, DetClass::Tainted);
     }
 
     #[test]
@@ -3480,7 +2830,6 @@ mod tests {
         let ty = g.ty(r);
         assert_eq!(ty.shape, vec![lit(3)]);
         assert_eq!(ty.element, ElementTy::F64);
-        assert_eq!(ty.variance, VarianceTag::Untagged);
     }
 
     #[test]
@@ -3582,18 +2931,6 @@ mod tests {
         assert_eq!(g.ty(r).element, ElementTy::Bool);
     }
 
-    #[test]
-    fn reduce_preserves_class_lattice() {
-        let mut g = Graph::new();
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_class(DetClass::Tainted),
-            None,
-        );
-        let r = g.reduce(ReduceOp::Max, vec![0], v, None);
-        assert_eq!(g.ty(r).class, DetClass::Tainted);
-    }
-
     // ---- R.2.c: Select ----
 
     fn bool_scalar(g: &mut Graph, name: &str) -> NodeId {
@@ -3667,422 +3004,6 @@ mod tests {
         let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
         assert!(
             summaries.iter().any(|s| s.contains("incompatible")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn select_preserves_variance_when_branches_agree() {
-        let mut g = Graph::new();
-        let c = bool_scalar(&mut g, "c");
-        let t = g.add_param(
-            Symbol::intern("t"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let e = g.add_param(
-            Symbol::intern("e"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let r = g.select(c, t, e, None);
-        assert!(!g.has_errors());
-        assert_eq!(g.ty(r).variance, VarianceTag::Upper);
-    }
-
-    #[test]
-    fn select_variance_mismatch_errors() {
-        let mut g = Graph::new();
-        let c = bool_scalar(&mut g, "c");
-        let t = g.add_param(
-            Symbol::intern("t"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let e = g.add_param(
-            Symbol::intern("e"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]).with_variance(VarianceTag::Lower),
-            None,
-        );
-        let _ = g.select(c, t, e, None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("variance")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn select_joins_class_lattice() {
-        let mut g = Graph::new();
-        let c = bool_scalar(&mut g, "c");
-        let t = scalar_f64(&mut g, "t");
-        let e = g.add_param(
-            Symbol::intern("e"),
-            TensorTy::scalar(ElementTy::F64).with_class(DetClass::Tainted),
-            None,
-        );
-        let r = g.select(c, t, e, None);
-        assert_eq!(g.ty(r).class, DetClass::Tainted);
-    }
-
-    // ---- R.2.e: Einsum ----
-
-    fn mat_f64(g: &mut Graph, name: &str, rows: usize, cols: usize) -> NodeId {
-        g.add_param(
-            Symbol::intern(name),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(rows), lit(cols)]),
-            None,
-        )
-    }
-
-    fn upper_vec(g: &mut Graph, name: &str, dim: usize) -> NodeId {
-        g.add_param(
-            Symbol::intern(name),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(dim)]).with_variance(VarianceTag::Upper),
-            None,
-        )
-    }
-
-    fn lower_vec(g: &mut Graph, name: &str, dim: usize) -> NodeId {
-        g.add_param(
-            Symbol::intern(name),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(dim)]).with_variance(VarianceTag::Lower),
-            None,
-        )
-    }
-
-    // happy paths from spec § 4.2
-
-    #[test]
-    fn einsum_dot_product() {
-        let mut g = Graph::new();
-        let a = vec_f64(&mut g, "a", 3);
-        let b = vec_f64(&mut g, "b", 3);
-        let r = g.einsum("i,i->", vec![a, b], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        let ty = g.ty(r);
-        assert_eq!(ty.rank, 0);
-        assert_eq!(ty.element, ElementTy::F64);
-    }
-
-    #[test]
-    fn einsum_matmul() {
-        let mut g = Graph::new();
-        let m = mat_f64(&mut g, "M", 3, 4);
-        let n = mat_f64(&mut g, "N", 4, 5);
-        let r = g.einsum("ij,jk->ik", vec![m, n], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).shape, vec![lit(3), lit(5)]);
-    }
-
-    #[test]
-    fn einsum_trace() {
-        let mut g = Graph::new();
-        let m = mat_f64(&mut g, "M", 4, 4);
-        let r = g.einsum("ii->", vec![m], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).rank, 0);
-    }
-
-    #[test]
-    fn einsum_matrix_vector() {
-        let mut g = Graph::new();
-        let m = mat_f64(&mut g, "M", 3, 4);
-        let v = vec_f64(&mut g, "v", 4);
-        let r = g.einsum("ij,j->i", vec![m, v], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).shape, vec![lit(3)]);
-    }
-
-    #[test]
-    #[allow(non_snake_case)] // bilinear form v^T M v: M is the matrix, T is transpose, deliberate notation
-    fn einsum_bilinear_form_v_T_M_v() {
-        let mut g = Graph::new();
-        let m = mat_f64(&mut g, "M", 3, 3);
-        let v = vec_f64(&mut g, "v", 3);
-        let r = g.einsum("ij,i,j->", vec![m, v, v], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).rank, 0);
-    }
-
-    #[test]
-    fn einsum_outer_product() {
-        let mut g = Graph::new();
-        let a = vec_f64(&mut g, "a", 3);
-        let b = vec_f64(&mut g, "b", 4);
-        let r = g.einsum("i,j->ij", vec![a, b], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).shape, vec![lit(3), lit(4)]);
-    }
-
-    // generic-dim plumbing
-
-    #[test]
-    fn einsum_matmul_with_const_generic_dim() {
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D"), lit(4)]),
-            None,
-        );
-        let n = g.add_param(
-            Symbol::intern("N"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(4), DimExpr::generic("D")]),
-            None,
-        );
-        let r = g.einsum("ij,jk->ik", vec![m, n], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(
-            g.ty(r).shape,
-            vec![DimExpr::generic("D"), DimExpr::generic("D")]
-        );
-    }
-
-    // batched ellipsis
-
-    #[test]
-    fn einsum_batched_matmul() {
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3), lit(4)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(4), lit(5)]),
-            None,
-        );
-        let r = g.einsum("...ij,...jk->...ik", vec![a, b], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).shape, vec![lit(2), lit(3), lit(5)]);
-    }
-
-    #[test]
-    fn einsum_batched_dot() {
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(7), lit(3)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(7), lit(3)]),
-            None,
-        );
-        let r = g.einsum("...i,...i->...", vec![a, b], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).shape, vec![lit(7)]);
-    }
-
-    #[test]
-    fn einsum_batch_ellipsis_broadcasts_between_inputs() {
-        // [1, 3] vs [4, 3] for dot product: batch dims broadcast to [4].
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(1), lit(3)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(4), lit(3)]),
-            None,
-        );
-        let r = g.einsum("...i,...i->...", vec![a, b], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).shape, vec![lit(4)]);
-    }
-
-    // variance pairing
-
-    #[test]
-    fn einsum_dot_with_proper_variance_pairing() {
-        // contract Upper i with Lower i — well-formed
-        let mut g = Graph::new();
-        let v = upper_vec(&mut g, "v", 3);
-        let w = lower_vec(&mut g, "w", 3);
-        let r = g.einsum("i,i->", vec![v, w], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).rank, 0);
-    }
-
-    #[test]
-    fn einsum_dot_with_two_upper_errors() {
-        let mut g = Graph::new();
-        let v = upper_vec(&mut g, "v", 3);
-        let w = upper_vec(&mut g, "w", 3);
-        let _ = g.einsum("i,i->", vec![v, w], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("variance")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn einsum_dot_with_two_lower_errors() {
-        let mut g = Graph::new();
-        let v = lower_vec(&mut g, "v", 3);
-        let w = lower_vec(&mut g, "w", 3);
-        let _ = g.einsum("i,i->", vec![v, w], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("variance")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn einsum_dot_with_one_untagged_is_ok() {
-        // Untagged paired with anything is fine for V1 (rule § 2.5).
-        let mut g = Graph::new();
-        let v = upper_vec(&mut g, "v", 3);
-        let w = vec_f64(&mut g, "w", 3); // Untagged
-        let r = g.einsum("i,i->", vec![v, w], None);
-        assert!(!g.has_errors(), "errors: {:?}", g.errors());
-        assert_eq!(g.ty(r).rank, 0);
-    }
-
-    // dim mismatches
-
-    #[test]
-    fn einsum_label_dim_mismatch_errors() {
-        // "i" bound to 3 from a, then 4 from b — should record DimMismatch.
-        let mut g = Graph::new();
-        let a = vec_f64(&mut g, "a", 3);
-        let b = vec_f64(&mut g, "b", 4);
-        let _ = g.einsum("i,i->", vec![a, b], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("dim mismatch")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn einsum_rank_mismatch_errors() {
-        // spec says rank 2 ("ij"), input is rank 1.
-        let mut g = Graph::new();
-        let v = vec_f64(&mut g, "v", 3);
-        let m = mat_f64(&mut g, "M", 3, 3);
-        let _ = g.einsum("ij,jk->ik", vec![v, m], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("rank")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    // arity / spec errors
-
-    #[test]
-    fn einsum_input_arity_mismatch_errors() {
-        let mut g = Graph::new();
-        let v = vec_f64(&mut g, "v", 3);
-        let _ = g.einsum("i,i->", vec![v], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries
-                .iter()
-                .any(|s| s.contains("2 inputs") && s.contains("1")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn einsum_parse_error_recorded() {
-        let mut g = Graph::new();
-        let v = vec_f64(&mut g, "v", 3);
-        let _ = g.einsum("ij", vec![v], None); // missing arrow
-        assert!(g.has_errors());
-    }
-
-    #[test]
-    fn einsum_output_label_not_in_inputs() {
-        let mut g = Graph::new();
-        let a = vec_f64(&mut g, "a", 3);
-        let b = vec_f64(&mut g, "b", 4);
-        let _ = g.einsum("i,j->k", vec![a, b], None); // 'k' undefined
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("'k'")),
-            "{:?}",
-            summaries
-        );
-    }
-
-    #[test]
-    fn einsum_ellipsis_mismatch_input_has_none() {
-        let mut g = Graph::new();
-        let a = vec_f64(&mut g, "a", 3);
-        let b = vec_f64(&mut g, "b", 3);
-        let _ = g.einsum("i,i->...", vec![a, b], None); // output has ..., inputs don't
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("'...'")),
-            "{:?}",
-            summaries,
-        );
-    }
-
-    #[test]
-    fn einsum_ellipsis_mismatch_output_has_none() {
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3)]),
-            None,
-        );
-        let _ = g.einsum("...i,...i->", vec![a, b], None); // inputs have ..., output doesn't
-        assert!(g.has_errors());
-    }
-
-    // class + element propagation
-
-    #[test]
-    fn einsum_class_joins_to_tainted() {
-        let mut g = Graph::new();
-        let a = upper_vec(&mut g, "a", 3);
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)])
-                .with_class(DetClass::Tainted)
-                .with_variance(VarianceTag::Lower),
-            None,
-        );
-        let r = g.einsum("i,i->", vec![a, b], None);
-        assert!(!g.has_errors());
-        assert_eq!(g.ty(r).class, DetClass::Tainted);
-    }
-
-    #[test]
-    fn einsum_element_mismatch_errors() {
-        let mut g = Graph::new();
-        let a = vec_f64(&mut g, "a", 3);
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F32, vec![lit(3)]),
-            None,
-        );
-        let _ = g.einsum("i,i->", vec![a, b], None);
-        let summaries: Vec<String> = g.errors().iter().map(|e| e.summary()).collect();
-        assert!(
-            summaries.iter().any(|s| s.contains("element")),
             "{:?}",
             summaries
         );

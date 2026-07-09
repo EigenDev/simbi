@@ -146,28 +146,6 @@ fn emit_struct(out: &mut String, f: &LoweredFn) {
 }
 
 fn emit_signature(out: &mut String, f: &LoweredFn, needs_struct: bool) {
-    // collect const-generic identifiers used by array params; CUDA
-    // doesn't have const-generic functions natively, so a
-    // C++ template<int D, ...> prefix is emitted.
-    let mut generics: Vec<String> = Vec::new();
-    for p in &f.params {
-        if let Some(crate::DimExpr::Generic(sym)) = &p.array_len {
-            let name = sym.as_str().to_string();
-            if !generics.contains(&name) {
-                generics.push(name);
-            }
-        }
-    }
-    if !generics.is_empty() {
-        out.push_str("template<");
-        for (i, g) in generics.iter().enumerate() {
-            if i > 0 { out.push_str(", "); }
-            out.push_str("int ");
-            out.push_str(g);
-        }
-        out.push_str("> ");
-    }
-
     out.push_str("__device__ inline ");
     if needs_struct {
         out.push_str(&f.name);
@@ -196,7 +174,6 @@ fn emit_signature(out: &mut String, f: &LoweredFn, needs_struct: bool) {
                 out.push_str(")[");
                 match &p.array_len {
                     Some(crate::DimExpr::Literal(n)) => out.push_str(&n.to_string()),
-                    Some(crate::DimExpr::Generic(sym)) => out.push_str(sym.as_str()),
                     None => unreachable!(),
                 }
                 out.push(']');
@@ -251,7 +228,6 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             out.push_str(" < ");
             match bound {
                 crate::DimExpr::Literal(n) => out.push_str(&n.to_string()),
-                crate::DimExpr::Generic(sym) => out.push_str(sym.as_str()),
             }
             out.push_str("; ++");
             out.push_str(iter);
@@ -882,30 +858,6 @@ mod tests {
     }
 
     #[test]
-    fn dot_product_emits_full_cuda_source() {
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let r = g.einsum("i,i->", vec![a, b], None);
-        let f = scalarize(&g, r, "dot3");
-        let src = emit_cuda(&f);
-        // rank-0 result -> no struct decl
-        assert!(!src.contains("_out"));
-        assert!(src.contains("__device__ inline double dot3(double a_0, double a_1, double a_2, double b_0, double b_1, double b_2)"));
-        // 3 muls + 2 adds in the return expression
-        assert!(src.contains("(a_0 * b_0)"));
-        assert!(src.contains("(a_2 * b_2)"));
-    }
-
-    #[test]
     fn comparison_emits_c_operator() {
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
@@ -915,59 +867,6 @@ mod tests {
         let src = emit_cuda(&f);
         assert!(src.contains("(a < b)"));
         assert!(src.contains("__device__ inline bool less"));
-    }
-
-    // ---- R.5.a: const-generic loop emission (CUDA) ----
-
-    #[test]
-    fn generic_dim_dot_emits_template_with_for_loop() {
-        let mut g = Graph::new();
-        let a = g.add_param(
-            crate::Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        let b = g.add_param(
-            crate::Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        let r = g.einsum("i,i->", vec![a, b], None);
-        let f = scalarize(&g, r, "dot_d");
-        let src = emit_cuda(&f);
-        // template<int D> __device__ inline double dot_d(const double (&a)[D], const double (&b)[D])
-        assert!(src.contains("template<int D>"), "missing template prefix: {}", src);
-        assert!(src.contains("__device__ inline double dot_d"));
-        assert!(src.contains("const double (&a)[D]"), "missing array-ref param: {}", src);
-        assert!(src.contains("const double (&b)[D]"), "{}", src);
-        // body: double __acc_N = 0.0; #pragma unroll for (int __ii_N = 0; ...) { __acc_N += a[ii] * b[ii]; }
-        assert!(src.contains("double __acc_"), "missing acc decl: {}", src);
-        assert!(src.contains("#pragma unroll"), "missing pragma: {}", src);
-        assert!(src.contains("for (int __ii_"), "missing C-style for: {}", src);
-        assert!(src.contains("a[__ii_"));
-        assert!(src.contains("b[__ii_"));
-        assert!(src.contains("+= ("), "missing compound assign: {}", src);
-    }
-
-    #[test]
-    fn matmul_2x2_emits_struct_with_four_slots() {
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(2)]),
-            None,
-        );
-        let n = g.add_param(
-            Symbol::intern("N"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(2)]),
-            None,
-        );
-        let r = g.einsum("ij,jk->ik", vec![m, n], None);
-        let f = scalarize(&g, r, "matmul22");
-        let src = emit_cuda(&f);
-        assert!(src.contains("struct matmul22_out { double _0; double _1; double _2; double _3; };"));
-        // R[0,0] = M_0_0*N_0_0 + M_0_1*N_1_0
-        assert!(src.contains("((M_0_0 * N_0_0) + (M_0_1 * N_1_0))"));
     }
 
     // ----- per-cell source-kernel ABI emit -----

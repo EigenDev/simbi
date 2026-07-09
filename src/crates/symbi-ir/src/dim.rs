@@ -1,40 +1,25 @@
 // =============================================================================
 // dim.rs
 //
-// dimension expressions for tensor shapes. each axis is either a
-// compile-time literal (e.g., 3, 4) or a const-generic identifier (e.g.
-// "D", "N") that the backend resolves at monomorphization time.
+// dimension expressions for tensor shapes. each axis is a compile-time
+// literal (e.g., 3, 4).
 //
-// shape equality (§ 1.5): two `DimExpr` values are equal iff:
-//   Literal(n) == Literal(n)            (same value)
-//   Generic(s) == Generic(t)            (same interned symbol — O(1))
-//   Literal(_) != Generic(_)            (always — bridged via broadcast)
+// shape equality (§ 1.5): two `DimExpr` values are equal iff
+// `Literal(n) == Literal(n)` (same value).
 //
 // broadcast compatibility (§ 1.5): `S` broadcasts to `T` iff `S` has at
 // most `T.len()` dims and, after right-aligning, each pair (s, t)
-// satisfies `s == t || s == Literal(1)`. Generic dims never broadcast
-// against Literal dims unless the Generic side is itself Literal(1).
+// satisfies `s == t || s == Literal(1)`.
 // =============================================================================
-
-use crate::symbol::Symbol;
 
 /// one dimension of a tensor's shape.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum DimExpr {
     /// known at macro expansion time. fully unrollable.
     Literal(usize),
-    /// const-generic identifier from the surrounding context (e.g., "D").
-    /// resolved at monomorphization; the backend either emits a fixed-
-    /// bound loop or unrolls per monomorph value.
-    Generic(Symbol),
 }
 
 impl DimExpr {
-    /// convenience constructor: intern the name and wrap.
-    pub fn generic(name: &str) -> Self {
-        DimExpr::Generic(Symbol::intern(name))
-    }
-
     /// is this a literal `1`? broadcastable along any axis it meets.
     pub fn is_one(&self) -> bool {
         matches!(self, DimExpr::Literal(1))
@@ -45,7 +30,6 @@ impl std::fmt::Display for DimExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DimExpr::Literal(n) => write!(f, "{}", n),
-            DimExpr::Generic(s) => write!(f, "{}", s),
         }
     }
 }
@@ -113,8 +97,7 @@ fn broadcast_axis(a: &DimExpr, b: &DimExpr) -> Option<DimExpr> {
     if b.is_one() {
         return Some(a.clone());
     }
-    // both non-1 and unequal: incompatible (covers Literal vs Generic
-    // mismatch as a special case).
+    // both non-1 and unequal: incompatible.
     None
 }
 
@@ -124,7 +107,6 @@ mod tests {
 
     // helpers
     fn lit(n: usize) -> DimExpr { DimExpr::Literal(n) }
-    fn g(s: &str) -> DimExpr { DimExpr::generic(s) }
 
     // ---- equality ----
 
@@ -135,22 +117,8 @@ mod tests {
     }
 
     #[test]
-    fn generic_equal_when_same_symbol() {
-        assert_eq!(g("D"), g("D"));
-        assert_eq!(g("D"), g(" D "));  // interner trims
-        assert_ne!(g("D"), g("N"));
-    }
-
-    #[test]
-    fn literal_never_equals_generic() {
-        assert_ne!(lit(3), g("D"));
-        assert_ne!(g("D"), lit(3));
-    }
-
-    #[test]
     fn shape_equality_element_wise() {
         assert!(shapes_equal(&[lit(3), lit(4)], &[lit(3), lit(4)]));
-        assert!(shapes_equal(&[g("D")], &[g("D")]));
         assert!(!shapes_equal(&[lit(3)], &[lit(3), lit(4)]));
         assert!(!shapes_equal(&[lit(3), lit(4)], &[lit(4), lit(3)]));
     }
@@ -187,25 +155,11 @@ mod tests {
     }
 
     #[test]
-    fn generic_dim_matches_only_same_generic_or_one() {
-        // [D] -> [D] : ok (same symbol)
-        assert!(broadcasts_to(&[g("D")], &[g("D")]));
-        // [D] -> [N] : not ok (different symbols)
-        assert!(!broadcasts_to(&[g("D")], &[g("N")]));
-        // [D] -> [3] : not ok (Generic vs Literal)
-        assert!(!broadcasts_to(&[g("D")], &[lit(3)]));
-        // [1] -> [D] : ok (Literal(1) broadcasts to anything)
-        assert!(broadcasts_to(&[lit(1)], &[g("D")]));
-        // [1, D] -> [4, D] : ok (1 broadcasts, D matches D)
-        assert!(broadcasts_to(&[lit(1), g("D")], &[lit(4), g("D")]));
-    }
-
-    #[test]
     fn rank_0_broadcasts_to_anything() {
         // an empty shape (scalar) broadcasts to any shape.
         assert!(broadcasts_to(&[], &[]));
         assert!(broadcasts_to(&[], &[lit(3)]));
-        assert!(broadcasts_to(&[], &[lit(4), lit(5), g("D")]));
+        assert!(broadcasts_to(&[], &[lit(4), lit(5), lit(6)]));
     }
 
     // ---- broadcast_shape ----
@@ -244,10 +198,6 @@ mod tests {
     fn broadcast_shape_mismatch_returns_none() {
         // [3] vs [4] — neither is 1, not equal: incompatible.
         assert!(broadcast_shape(&[lit(3)], &[lit(4)]).is_none());
-        // [D] vs [3] — Generic vs Literal: incompatible.
-        assert!(broadcast_shape(&[g("D")], &[lit(3)]).is_none());
-        // [D] vs [N] — different symbols: incompatible.
-        assert!(broadcast_shape(&[g("D")], &[g("N")]).is_none());
     }
 
     #[test]
@@ -260,25 +210,13 @@ mod tests {
     }
 
     #[test]
-    fn broadcast_shape_with_generic_dims() {
-        // [D, 1] vs [1, N] -> [D, N]
-        let r = broadcast_shape(&[g("D"), lit(1)], &[lit(1), g("N")]).unwrap();
-        assert_eq!(r, vec![g("D"), g("N")]);
-        // [D, D] vs [D, D] -> [D, D]
-        let r = broadcast_shape(&[g("D"), g("D")], &[g("D"), g("D")]).unwrap();
-        assert_eq!(r, vec![g("D"), g("D")]);
-    }
-
-    #[test]
     fn is_one_only_matches_literal_one() {
         assert!(lit(1).is_one());
         assert!(!lit(2).is_one());
-        assert!(!g("D").is_one());
     }
 
     #[test]
     fn display_dim_expr() {
         assert_eq!(format!("{}", lit(7)), "7");
-        assert_eq!(format!("{}", g("D")), "D");
     }
 }

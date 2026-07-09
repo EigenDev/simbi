@@ -383,12 +383,12 @@ mod tests {
     /// For-loop adds its iter variable but the body's lets die per iteration.
     #[test]
     fn for_loop_adds_iter_var_but_body_dies() {
-        use crate::{DimExpr, Symbol};
+        use crate::DimExpr;
         let body = vec![
             let_f64("outer", lit(0.0)),
             ScalarStmt::For {
                 iter: "ii".to_string(),
-                bound: DimExpr::Generic(Symbol::intern("D")),
+                bound: DimExpr::Literal(4),
                 body: vec![let_f64("inner", lit(0.0))],
             },
             let_f64("after", lit(0.0)),

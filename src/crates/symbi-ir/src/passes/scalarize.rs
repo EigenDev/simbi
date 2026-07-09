@@ -16,7 +16,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::einsum::{Atom, EinsumSpec};
 use crate::graph::{
     ConstValue, DimIndex, ElementWiseOp, Graph, NodeId, Op, ReduceOp, TranscendentalOp,
 };
@@ -524,38 +523,13 @@ pub struct LoweredFn {
 
 // ----- the scalarizer -----
 
-/// per-node binding produced by scalarization. either a fully-expanded
-/// list of scalar component expressions (the literal-dim path) or a
-/// reference to a rank-1 array param indexed at runtime (the
-/// const-generic dim path, V1 scope).
+/// per-node binding produced by scalarization: a fully-expanded list of
+/// scalar component expressions (the literal-dim path).
 #[derive(Clone, Debug)]
 enum Binding {
     /// N scalar expressions in row-major order. used for literal-dim
     /// nodes and rank-0 results.
     Concrete(Vec<ScalarExpr>),
-    /// rank-1 array accessible as `container[ii]`. only produced by
-    /// generic-dim param lowering in V1.
-    Array { container: String },
-}
-
-impl Binding {
-    /// reconstruct one component expression using an index-expression
-    /// (typically a `Var(iter_name)` from inside a generated For loop).
-    fn get_at(&self, idx: ScalarExpr) -> ScalarExpr {
-        match self {
-            Binding::Concrete(v) => match &idx {
-                ScalarExpr::Const(ConstValue::U32(k)) => v[*k as usize].clone(),
-                _ => panic!(
-                    "Binding::get_at on Concrete requires a literal U32 index; got {:?}",
-                    idx
-                ),
-            },
-            Binding::Array { container } => ScalarExpr::IndexInto {
-                container: container.clone(),
-                index: Box::new(idx),
-            },
-        }
-    }
 }
 
 /// walks a tensor IR graph in topological (insertion) order and
@@ -644,16 +618,10 @@ impl Scalarizer {
     }
 
     /// concrete-shape requirement: panic with a clear message if this
-    /// op's input is not Concrete (i.e., is an Array — the V1 generic
-    /// path supports einsum-with-rank-0 only).
-    fn require_concrete<'a>(&'a self, id: NodeId, op_name: &str) -> &'a [ScalarExpr] {
+    /// op's input has no binding.
+    fn require_concrete<'a>(&'a self, id: NodeId, _op_name: &str) -> &'a [ScalarExpr] {
         match self.bindings.get(&id) {
             Some(Binding::Concrete(v)) => v,
-            Some(Binding::Array { .. }) => panic!(
-                "scalarization: op {} does not yet support const-generic dim inputs (V1 R.5.a \
-                 covers einsum only; other ops need follow-up phases)",
-                op_name
-            ),
             None => panic!("scalarization: missing binding for input node {:?}", id),
         }
     }
@@ -679,7 +647,6 @@ impl Scalarizer {
             Op::Select(cond, then_id, else_id) => {
                 Binding::Concrete(self.lower_select(*cond, *then_id, *else_id, ty, graph))
             }
-            Op::Einsum(spec, inputs) => self.lower_einsum(spec, inputs, ty, graph),
             Op::LoadAt(sym, comps) => Binding::Concrete(self.lower_load_at(sym, comps)),
             // F2.C: Lambda is a callable value, not a tensor. it's only
             // consumed by Op::Apply, which extracts the FnDef name and
@@ -705,11 +672,6 @@ impl Scalarizer {
                 init,
                 count,
             } => Binding::Concrete(self.lower_fold(*lambda, *init, *count, ty, graph)),
-            // F4.0c: Morphism lowering. each kind expands to a small
-            // arithmetic expression over the two input args (the
-            // proc-macro synthesizes `field[coord]` as args[0] and
-            // `field[coord + e_axis]` as args[1] at the call site).
-            Op::Morphism { kind, args } => Binding::Concrete(self.lower_morphism(*kind, args, ty)),
             // docs/design/14: the loop accumulator placeholder resolves to the
             // mutable local set up by `lower_iterate_inline` (only while lowering
             // a loop's `step` cone).
@@ -1135,51 +1097,6 @@ impl Scalarizer {
         );
     }
 
-    /// F4.0c: lower a Morphism node to its semantic scalar expression.
-    /// the proc-macro synthesizes the args in a kind-specific order:
-    ///   - Diff / FaceAvg: [field[coord], field[+ax]]
-    ///   - Curl:           [E_J@coord, E_J@+e_K, E_K@coord, E_K@+e_J,
-    ///                      inv_dx_J, inv_dx_K]
-    /// each kind reduces to a small arithmetic combination over those
-    /// reads. axis info lives in the MorphismKind variant for ndim
-    /// inference; lowering itself works off the args.
-    fn lower_morphism(
-        &mut self,
-        kind: crate::morphism::MorphismKind,
-        args: &[NodeId],
-        _out_ty: &TensorTy,
-    ) -> Vec<ScalarExpr> {
-        use crate::morphism::MorphismKind;
-        let body = match kind {
-            // Diff(f, axis) = f[+ax] - f[coord] = a1 - a0
-            MorphismKind::Diff { .. } => {
-                let a0 = self.require_concrete(args[0], "Diff arg 0")[0].clone();
-                let a1 = self.require_concrete(args[1], "Diff arg 1")[0].clone();
-                ScalarExpr::BinOp(BinaryKind::Sub, Box::new(a1), Box::new(a0))
-            }
-            // FaceAvg(f, axis) = 0.5 * (f[coord] + f[+ax]) = 0.5 * (a0 + a1)
-            MorphismKind::FaceAvg { .. } => {
-                let a0 = self.require_concrete(args[0], "FaceAvg arg 0")[0].clone();
-                let a1 = self.require_concrete(args[1], "FaceAvg arg 1")[0].clone();
-                ScalarExpr::BinOp(
-                    BinaryKind::Mul,
-                    Box::new(ScalarExpr::Const(ConstValue::F64(0.5))),
-                    Box::new(ScalarExpr::BinOp(
-                        BinaryKind::Add,
-                        Box::new(a0),
-                        Box::new(a1),
-                    )),
-                )
-            } // F5.4-retire: `MorphismKind::Curl` and `::CtEdgeEmf` were
-              // RMHD-specific. their stencil-building moved to the macro
-              // dispatcher (`symbi-macros::ir_builder::dispatch_curl_morphism`
-              // and `dispatch_ct_edge_emf_morphism`), where the curl is
-              // emitted inline as `ElementWise` nodes and the CT-EMF as a
-              // straight `OpaqueCall` tree. nothing for lower.rs to do.
-        };
-        vec![body]
-    }
-
     fn lower_opaque_call(&mut self, name: &Symbol, args: &[NodeId]) -> Vec<ScalarExpr> {
         // each arg is rank-0 by construction (Apply's scalar-function contract).
         // pull its single scalar binding and emit a FreeCall.
@@ -1391,259 +1308,8 @@ impl Scalarizer {
         out
     }
 
-    fn lower_einsum(
-        &mut self,
-        spec: &EinsumSpec,
-        inputs: &[NodeId],
-        out_ty: &TensorTy,
-        graph: &Graph,
-    ) -> Binding {
-        // detect generic-dim path: any input with a non-literal shape
-        // routes through the loop-form lowering (R.5.a V1: rank-0 output
-        // and rank-1 generic inputs only).
-        let any_generic = inputs.iter().any(|id| {
-            graph
-                .ty(*id)
-                .shape
-                .iter()
-                .any(|d| matches!(d, DimExpr::Generic(_)))
-        });
-        if any_generic {
-            return self.lower_einsum_loop(spec, inputs, out_ty, graph);
-        }
-
-        // literal-dim path: fully unroll all batched and contracted loops.
-        Binding::Concrete(self.lower_einsum_literal(spec, inputs, out_ty, graph))
-    }
-
-    /// literal-dim path: existing fully-unrolled scalarization.
-    fn lower_einsum_literal(
-        &mut self,
-        spec: &EinsumSpec,
-        inputs: &[NodeId],
-        out_ty: &TensorTy,
-        graph: &Graph,
-    ) -> Vec<ScalarExpr> {
-        // gather per-input shape + context.
-        let in_shapes: Vec<Vec<usize>> = inputs
-            .iter()
-            .map(|id| resolve_literal_dims(&graph.ty(*id).shape))
-            .collect();
-
-        let ctxs: Vec<EinCtx> = spec
-            .inputs
-            .iter()
-            .enumerate()
-            .map(|(i, atoms)| EinCtx::from_atoms(atoms, in_shapes[i].len()))
-            .collect();
-
-        // bind each named label to its concrete dim (first occurrence wins;
-        // the IR builder already verified all occurrences agree).
-        let mut label_dim: Vec<(char, usize)> = Vec::new();
-        for (i, ctx) in ctxs.iter().enumerate() {
-            for (label, axis) in ctx.named_axes() {
-                if !label_dim.iter().any(|(c, _)| *c == label) {
-                    label_dim.push((label, in_shapes[i][axis]));
-                }
-            }
-        }
-        let dim_of = |c: char| -> usize {
-            label_dim
-                .iter()
-                .find(|(b, _)| *b == c)
-                .map(|(_, d)| *d)
-                .expect("label was validated by builder; should have a dim binding")
-        };
-
-        // output: ellipsis batch dims (if any) then named output labels.
-        let out_shape = resolve_literal_dims(&out_ty.shape);
-        let output_named: Vec<char> = spec
-            .output
-            .iter()
-            .filter_map(|a| match a {
-                Atom::Label(c) => Some(*c),
-                _ => None,
-            })
-            .collect();
-        let batch_size = out_shape.len() - output_named.len();
-        let output_batch_shape = &out_shape[..batch_size];
-
-        // labels in inputs but not in output are contracted.
-        let mut all_input_labels: Vec<char> = Vec::new();
-        for ctx in &ctxs {
-            for (label, _) in ctx.named_axes() {
-                if !all_input_labels.contains(&label) {
-                    all_input_labels.push(label);
-                }
-            }
-        }
-        let contracted: Vec<char> = all_input_labels
-            .iter()
-            .filter(|c| !output_named.contains(c))
-            .copied()
-            .collect();
-        let contracted_dims: Vec<usize> = contracted.iter().map(|c| dim_of(*c)).collect();
-
-        // emit one ScalarExpr per output cell.
-        let out_indices = iter_row_major(&out_shape);
-        let contracted_indices = iter_row_major(&contracted_dims);
-
-        let mut out = Vec::with_capacity(out_indices.len());
-        for out_idx in &out_indices {
-            let out_batch_idx = &out_idx[..batch_size];
-            let out_label_idx = &out_idx[batch_size..];
-
-            // for each contracted-axis tuple, build the product of input lookups.
-            let mut products: Vec<ScalarExpr> = Vec::with_capacity(contracted_indices.len());
-            for c_idx in &contracted_indices {
-                // gather one scalar per input.
-                let mut factors: Vec<ScalarExpr> = Vec::with_capacity(inputs.len());
-                for (k, &nid) in inputs.iter().enumerate() {
-                    let in_shape = &in_shapes[k];
-                    let ctx = &ctxs[k];
-                    let in_idx = compute_einsum_input_index(
-                        ctx,
-                        in_shape,
-                        out_batch_idx,
-                        out_label_idx,
-                        c_idx,
-                        &output_named,
-                        &contracted,
-                    );
-                    let flat = flat_index(in_shape, &in_idx);
-                    factors.push(self.require_concrete(nid, "Einsum")[flat].clone());
-                }
-                // product of all factors (left-associative Mul chain).
-                let prod = factors
-                    .into_iter()
-                    .reduce(|a, b| ScalarExpr::BinOp(BinaryKind::Mul, Box::new(a), Box::new(b)))
-                    .expect("einsum builder rejects zero-input specs");
-                products.push(prod);
-            }
-
-            // sum of products.
-            let sum = products
-                .into_iter()
-                .reduce(|a, b| ScalarExpr::BinOp(BinaryKind::Add, Box::new(a), Box::new(b)))
-                .unwrap_or_else(|| {
-                    // no contracted axes — output is just the product of inputs
-                    // at the kept-index position. unreachable in practice: even
-                    // the no-contraction case (e.g., "i,j->ij") produces a single
-                    // c_idx = [], so products has exactly one entry.
-                    panic!("einsum: empty product set — internal bug")
-                });
-            // suppress unused — batch info gets folded into out_batch_idx,
-            // which the input-index computation already consumes.
-            let _ = output_batch_shape;
-            out.push(sum);
-        }
-        out
-    }
-
-    /// generic-dim path: emit a loop nest for contracted axes whose
-    /// dim is Generic. V1 supports rank-0 output and rank-1 generic
-    /// inputs only — broader shapes panic.
-    fn lower_einsum_loop(
-        &mut self,
-        spec: &EinsumSpec,
-        inputs: &[NodeId],
-        out_ty: &TensorTy,
-        graph: &Graph,
-    ) -> Binding {
-        // V1 restrictions
-        assert!(
-            out_ty.rank == 0,
-            "scalarization R.5.a: const-generic einsum currently supports rank-0 outputs \
-             only (got rank {}); broader output shapes need follow-up phases",
-            out_ty.rank
-        );
-        for (i, id) in inputs.iter().enumerate() {
-            let s = &graph.ty(*id).shape;
-            assert!(
-                s.len() <= 1,
-                "scalarization R.5.a: const-generic einsum currently supports rank-1 inputs \
-                 only (input {} has rank {}); rank-2+ generic needs follow-up phases",
-                i,
-                s.len()
-            );
-        }
-
-        // gather: for each input, get either its Array binding (if generic)
-        // or its single Concrete entry (if rank-0 literal).
-        let input_bindings: Vec<Binding> = inputs
-            .iter()
-            .map(|id| self.bindings.get(id).expect("binding present").clone())
-            .collect();
-
-        // pull each contracted-axis label and find its dim. for V1, the
-        // simplest case: spec "i,i->" with both inputs sharing axis 'i'.
-        // walk the spec's first input's atoms; for each Label, find the
-        // binding's dim and emit a loop.
-        let atoms_first = &spec.inputs[0];
-        let mut contracted_labels: Vec<(char, DimExpr)> = Vec::new();
-        for atom in atoms_first {
-            if let Atom::Label(c) = atom {
-                // dim from the first input's shape; the einsum builder validated agreement.
-                let dim = graph.ty(inputs[0]).shape[0].clone();
-                contracted_labels.push((*c, dim));
-            }
-        }
-
-        // emit one accumulator: `let mut __acc_N: f64 = 0.0;`
-        let acc_name = self.fresh("acc");
-        self.body.push(ScalarStmt::LetMut {
-            name: acc_name.clone(),
-            element: out_ty.element,
-            init: ScalarExpr::Const(zero_const(out_ty.element)),
-        });
-
-        // emit nested For loops, one per contracted label.
-        // rank-1 inputs only, so every label is a
-        // single-axis dim and one for-loop is emitted per distinct label.
-        // the "i,i->" case has one label.
-        let iter_name = self.fresh("ii");
-        let dim = contracted_labels[0].1.clone();
-
-        // build the loop body: acc += prod(input_k[iter_name] for k)
-        let factors: Vec<ScalarExpr> = input_bindings
-            .iter()
-            .map(|b| b.get_at(ScalarExpr::Var(iter_name.clone())))
-            .collect();
-        let prod = factors
-            .into_iter()
-            .reduce(|a, b| ScalarExpr::BinOp(BinaryKind::Mul, Box::new(a), Box::new(b)))
-            .expect("einsum has at least one input");
-        let body_stmt = ScalarStmt::CompoundAssign {
-            name: acc_name.clone(),
-            op: BinaryKind::Add,
-            value: prod,
-        };
-
-        self.body.push(ScalarStmt::For {
-            iter: iter_name,
-            bound: dim,
-            body: vec![body_stmt],
-        });
-
-        // result: a single scalar referring to the accumulator.
-        Binding::Concrete(vec![ScalarExpr::Var(acc_name)])
-    }
-
     fn lower_param(&mut self, sym: &Symbol, ty: &TensorTy) -> Binding {
         let base = sym.as_str().to_string();
-
-        // V1 const-generic path: rank-1 with a single Generic dim
-        // becomes an Array binding pointing at a rank-1 array param.
-        if ty.rank == 1
-            && let DimExpr::Generic(_) = &ty.shape[0]
-        {
-            self.params.push(LoweredParam::array(
-                base.clone(),
-                ty.element,
-                ty.shape[0].clone(),
-            ));
-            return Binding::Array { container: base };
-        }
 
         // literal-dim path (or rank-0): fan out into N scalar params.
         let dims = resolve_literal_dims(&ty.shape);
@@ -1687,11 +1353,6 @@ pub fn scalarize(graph: &Graph, output: NodeId, name: &str) -> LoweredFn {
     }
     let results = match sc.bindings.get(&output) {
         Some(Binding::Concrete(v)) => v.clone(),
-        Some(Binding::Array { .. }) => panic!(
-            "scalarize: output node {:?} produced an Array binding; V1 R.5.a \
-             only supports rank-0 outputs through the generic-dim path",
-            output
-        ),
         None => panic!("output node {:?} not lowered", output),
     };
     let out_ty = graph.ty(output).clone();
@@ -2012,11 +1673,6 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
                 out,
                 v.len()
             ),
-            Some(Binding::Array { .. }) => panic!(
-                "scalarize_kernel: output node {:?} produced an Array binding; \
-                 kernel writes must be rank-0 scalars",
-                out
-            ),
             None => panic!("scalarize_kernel: output node {:?} not lowered", out),
         })
         .collect();
@@ -2126,17 +1782,12 @@ fn iterate_cone(
     cone
 }
 
-/// resolve a shape to its literal-only dimensions. panics on generic.
+/// resolve a shape to its literal-only dimensions.
 fn resolve_literal_dims(shape: &[DimExpr]) -> Vec<usize> {
     shape
         .iter()
         .map(|d| match d {
             DimExpr::Literal(n) => *n,
-            DimExpr::Generic(s) => panic!(
-                "scalarization does not yet support const-generic dim '{}'; \
-                 literal-dim only in V1 (R.3.h adds loop emission)",
-                s
-            ),
         })
         .collect()
 }
@@ -2309,135 +1960,6 @@ fn method_unary(name: &'static str, inputs: &mut Vec<ScalarExpr>) -> ScalarExpr 
     }
 }
 
-/// per-input context for einsum scalarization: positions of the
-/// left/right named-label spans + whether the input had an ellipsis.
-struct EinCtx<'a> {
-    left: &'a [Atom],
-    right: &'a [Atom],
-    has_ellipsis: bool,
-    /// for inputs with an ellipsis, the count of axes the ellipsis covers:
-    /// `in_rank - left.len() - right.len()`. zero when no ellipsis.
-    ellipsis_rank: usize,
-}
-
-impl<'a> EinCtx<'a> {
-    fn from_atoms(atoms: &'a [Atom], in_rank: usize) -> Self {
-        let pos = atoms.iter().position(|a| matches!(a, Atom::Ellipsis));
-        match pos {
-            None => EinCtx {
-                left: atoms,
-                right: &[],
-                has_ellipsis: false,
-                ellipsis_rank: 0,
-            },
-            Some(idx) => {
-                let left = &atoms[..idx];
-                let right = &atoms[idx + 1..];
-                let ellipsis_rank = in_rank.saturating_sub(left.len() + right.len());
-                EinCtx {
-                    left,
-                    right,
-                    has_ellipsis: true,
-                    ellipsis_rank,
-                }
-            }
-        }
-    }
-
-    /// iterate `(label, input_axis_index)` for every named label across
-    /// this input's left + right spans, in input-axis order.
-    fn named_axes(&self) -> impl Iterator<Item = (char, usize)> + '_ {
-        let left_iter = self
-            .left
-            .iter()
-            .enumerate()
-            .filter_map(|(axis, atom)| match atom {
-                Atom::Label(c) => Some((*c, axis)),
-                _ => None,
-            });
-        let right_start = self.left.len() + self.ellipsis_rank;
-        let right_iter = self
-            .right
-            .iter()
-            .enumerate()
-            .filter_map(move |(axis, atom)| match atom {
-                Atom::Label(c) => Some((*c, right_start + axis)),
-                _ => None,
-            });
-        left_iter.chain(right_iter)
-    }
-}
-
-/// compute the full input index for one input given the current output
-/// position (split into batch + label parts) and current contracted-
-/// index tuple. handles ellipsis broadcast against the output batch.
-fn compute_einsum_input_index(
-    ctx: &EinCtx<'_>,
-    in_shape: &[usize],
-    out_batch_idx: &[usize],
-    out_label_idx: &[usize],
-    c_idx: &[usize],
-    output_named: &[char],
-    contracted: &[char],
-) -> Vec<usize> {
-    let mut in_idx = vec![0usize; in_shape.len()];
-
-    let resolve_label = |label: char| -> usize {
-        if let Some(pos) = output_named.iter().position(|c| *c == label) {
-            out_label_idx[pos]
-        } else if let Some(pos) = contracted.iter().position(|c| *c == label) {
-            c_idx[pos]
-        } else {
-            // builder validated; unreachable.
-            panic!("einsum: label '{}' not in output or contracted set", label)
-        }
-    };
-
-    // left named labels.
-    for (axis, atom) in ctx.left.iter().enumerate() {
-        if let Atom::Label(c) = atom {
-            in_idx[axis] = resolve_label(*c);
-        }
-    }
-
-    // ellipsis axes (if any): broadcast against output batch.
-    if ctx.has_ellipsis && ctx.ellipsis_rank > 0 {
-        let ellipsis_start = ctx.left.len();
-        let batch_offset = out_batch_idx.len() - ctx.ellipsis_rank;
-        for axis_within in 0..ctx.ellipsis_rank {
-            let in_axis = ellipsis_start + axis_within;
-            let out_batch_axis = axis_within + batch_offset;
-            if in_shape[in_axis] == 1 {
-                in_idx[in_axis] = 0;
-            } else {
-                in_idx[in_axis] = out_batch_idx[out_batch_axis];
-            }
-        }
-    }
-
-    // right named labels.
-    let right_start = ctx.left.len() + ctx.ellipsis_rank;
-    for (axis_within, atom) in ctx.right.iter().enumerate() {
-        if let Atom::Label(c) = atom {
-            in_idx[right_start + axis_within] = resolve_label(*c);
-        }
-    }
-
-    in_idx
-}
-
-/// zero literal for the given element type, used to initialize loop
-/// accumulators.
-fn zero_const(e: ElementTy) -> ConstValue {
-    match e {
-        ElementTy::F64 => ConstValue::F64(0.0),
-        ElementTy::F32 => ConstValue::F32(0.0),
-        ElementTy::I32 => ConstValue::I32(0),
-        ElementTy::U32 => ConstValue::U32(0),
-        ElementTy::Bool => ConstValue::Bool(false),
-    }
-}
-
 /// fold N scalars into one via a Reduce op.
 fn fold_reduce(op: ReduceOp, vals: Vec<ScalarExpr>) -> ScalarExpr {
     let mut it = vals.into_iter();
@@ -2525,7 +2047,7 @@ fn iter_row_major(dims: &[usize]) -> Vec<Vec<usize>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TensorTy, VarianceTag};
+    use crate::TensorTy;
 
     fn lit(n: usize) -> DimExpr {
         DimExpr::Literal(n)
@@ -2880,105 +2402,6 @@ mod tests {
             names,
             vec!["M_0_0", "M_0_1", "M_0_2", "M_1_0", "M_1_1", "M_1_2"]
         );
-    }
-
-    #[test]
-    fn rank_1_param_variance_is_irrelevant_to_naming() {
-        // upper / lower / untagged all produce the same scalar fan-out;
-        // variance information is metadata, not emitted into target source.
-        let mut g = Graph::new();
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2)]).with_variance(VarianceTag::Upper),
-            None,
-        );
-        let l = scalarize(&g, v, "f");
-        assert_eq!(l.params.len(), 2);
-        assert_eq!(l.params[0].name, "v_0");
-        assert_eq!(l.params[1].name, "v_1");
-    }
-
-    // ---- R.5.a: rank-1 generic-dim param now produces an Array binding ----
-
-    #[test]
-    fn rank_1_generic_param_produces_array_param() {
-        // After R.5.a, this no longer panics. It produces a single array
-        // LoweredParam with array_len = Some(Generic("D")).
-        let mut g = Graph::new();
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        // need an output node; just return the param via an identity einsum-like op.
-        // simplest: use the param node directly as the output even though it's rank-1.
-        // the output extraction expects Concrete, so a no-op einsum reduces the rank-1 param to
-        // rank-0; the param itself serves as the output.
-        // it'll panic with the "Array binding output" message — which is OK for V1.
-        // for testing, instead build a 1-param dot product to validate the array path.
-        let _ = v;
-        // the actual loop-form path is tested via dot_product_with_generic_dim below.
-    }
-
-    #[test]
-    #[should_panic(expected = "does not yet support const-generic dim")]
-    fn rank_2_generic_panics_in_scalarization() {
-        // V1 R.5.a only supports rank-1 generic params. rank-2 generic
-        // (e.g., matrix with generic dims) still panics.
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(
-                ElementTy::F64,
-                vec![DimExpr::generic("D"), DimExpr::generic("D")],
-            ),
-            None,
-        );
-        // wrap in an einsum to force lowering
-        let r = g.einsum("ij,ij->", vec![m, m], None);
-        let _ = scalarize(&g, r, "f");
-    }
-
-    #[test]
-    fn dot_product_with_generic_dim_emits_loop_form() {
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![DimExpr::generic("D")]),
-            None,
-        );
-        let r = g.einsum("i,i->", vec![a, b], None);
-        let f = scalarize(&g, r, "dotd");
-        // single rank-0 result referencing the accumulator
-        assert_eq!(f.results.len(), 1);
-        // params should be two arrays
-        assert_eq!(f.params.len(), 2);
-        assert!(matches!(&f.params[0].array_len, Some(DimExpr::Generic(_))));
-        assert!(matches!(&f.params[1].array_len, Some(DimExpr::Generic(_))));
-        // body should contain a LetMut accumulator, a For loop, and the
-        // loop body should contain a CompoundAssign.
-        assert!(
-            f.body
-                .iter()
-                .any(|s| matches!(s, ScalarStmt::LetMut { .. }))
-        );
-        assert!(f.body.iter().any(|s| matches!(s, ScalarStmt::For { .. })));
-        if let ScalarStmt::For { body, .. } = &f.body[1] {
-            assert!(body.iter().any(|s| matches!(
-                s,
-                ScalarStmt::CompoundAssign {
-                    op: BinaryKind::Add,
-                    ..
-                }
-            )));
-        } else {
-            panic!("expected For at body[1]");
-        }
     }
 
     // ---- R.3.b: ElementWise scalarization ----
@@ -3697,273 +3120,4 @@ mod tests {
         }
     }
 
-    // ---- R.3.e: Einsum scalarization ----
-
-    /// collect the leaf variable names referenced in a ScalarExpr (DFS).
-    fn collect_vars(e: &ScalarExpr, out: &mut Vec<String>) {
-        match e {
-            ScalarExpr::Const(_) => {}
-            ScalarExpr::Var(n) => out.push(n.clone()),
-            ScalarExpr::BinOp(_, a, b) => {
-                collect_vars(a, out);
-                collect_vars(b, out);
-            }
-            ScalarExpr::UnaryOp(_, a) => collect_vars(a, out),
-            ScalarExpr::MethodCall { receiver, args, .. } => {
-                collect_vars(receiver, out);
-                for a in args {
-                    collect_vars(a, out);
-                }
-            }
-            ScalarExpr::Select { cond, then, else_ } => {
-                collect_vars(cond, out);
-                collect_vars(then, out);
-                collect_vars(else_, out);
-            }
-            ScalarExpr::IndexInto { container, index } => {
-                out.push(container.clone());
-                collect_vars(index, out);
-            }
-            ScalarExpr::FieldLoadAt {
-                field_key,
-                components,
-            } => {
-                out.push(field_key.clone());
-                for c in components {
-                    collect_vars(c, out);
-                }
-            }
-            ScalarExpr::FreeCall { name, args } => {
-                out.push(name.clone());
-                for a in args {
-                    collect_vars(a, out);
-                }
-            }
-            ScalarExpr::Cast { value, .. } => collect_vars(value, out),
-        }
-    }
-
-    /// count how many times `BinaryKind::op` appears in `e`.
-    fn count_binop(e: &ScalarExpr, kind: BinaryKind) -> usize {
-        match e {
-            ScalarExpr::BinOp(k, a, b) => {
-                let here = if *k == kind { 1 } else { 0 };
-                here + count_binop(a, kind) + count_binop(b, kind)
-            }
-            ScalarExpr::UnaryOp(_, a) => count_binop(a, kind),
-            ScalarExpr::MethodCall { receiver, args, .. } => {
-                let mut c = count_binop(receiver, kind);
-                for a in args {
-                    c += count_binop(a, kind);
-                }
-                c
-            }
-            ScalarExpr::Select { cond, then, else_ } => {
-                count_binop(cond, kind) + count_binop(then, kind) + count_binop(else_, kind)
-            }
-            _ => 0,
-        }
-    }
-
-    #[test]
-    fn einsum_dot_product_unrolls() {
-        // i,i-> with N=3 yields  a_0*b_0 + a_1*b_1 + a_2*b_2.
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let r = g.einsum("i,i->", vec![a, b], None);
-        let l = scalarize(&g, r, "f");
-        assert_eq!(l.results.len(), 1);
-        // 3 multiplies + 2 adds.
-        assert_eq!(count_binop(&l.results[0], BinaryKind::Mul), 3);
-        assert_eq!(count_binop(&l.results[0], BinaryKind::Add), 2);
-        // refs in order: a_0, b_0, a_1, b_1, a_2, b_2.
-        let mut vars = vec![];
-        collect_vars(&l.results[0], &mut vars);
-        assert_eq!(vars, vec!["a_0", "b_0", "a_1", "b_1", "a_2", "b_2"]);
-    }
-
-    #[test]
-    fn einsum_matmul_unrolls() {
-        // ij,jk->ik with [2,3]·[3,2] -> [2,2]. each output cell sums 3 products.
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3)]),
-            None,
-        );
-        let n = g.add_param(
-            Symbol::intern("N"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3), lit(2)]),
-            None,
-        );
-        let r = g.einsum("ij,jk->ik", vec![m, n], None);
-        let l = scalarize(&g, r, "f");
-        assert_eq!(l.results.len(), 4);
-        // each result cell is sum of 3 products.
-        for cell in &l.results {
-            assert_eq!(count_binop(cell, BinaryKind::Mul), 3);
-            assert_eq!(count_binop(cell, BinaryKind::Add), 2);
-        }
-        // result[0,0] = M_0_0*N_0_0 + M_0_1*N_1_0 + M_0_2*N_2_0
-        let mut vars = vec![];
-        collect_vars(&l.results[0], &mut vars);
-        assert_eq!(
-            vars,
-            vec!["M_0_0", "N_0_0", "M_0_1", "N_1_0", "M_0_2", "N_2_0"]
-        );
-    }
-
-    #[test]
-    fn einsum_trace_unrolls() {
-        // ii-> on [3,3] = M_0_0 + M_1_1 + M_2_2.
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3), lit(3)]),
-            None,
-        );
-        let r = g.einsum("ii->", vec![m], None);
-        let l = scalarize(&g, r, "f");
-        // trace has no multiplies (only one input, single factor per term).
-        // 3 leaf vars, 2 adds.
-        assert_eq!(count_binop(&l.results[0], BinaryKind::Add), 2);
-        let mut vars = vec![];
-        collect_vars(&l.results[0], &mut vars);
-        assert_eq!(vars, vec!["M_0_0", "M_1_1", "M_2_2"]);
-    }
-
-    #[test]
-    fn einsum_bilinear_form_unrolls() {
-        // ij,i,j-> with [2,2] M, [2] a, [2] b: result = sum_{i,j} M_i_j * a_i * b_j.
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(2)]),
-            None,
-        );
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2)]),
-            None,
-        );
-        let r = g.einsum("ij,i,j->", vec![m, a, b], None);
-        let l = scalarize(&g, r, "f");
-        // 4 product groups, each has 3 leaves * 2 mults = 8 mults total; 3 adds.
-        assert_eq!(count_binop(&l.results[0], BinaryKind::Mul), 8);
-        assert_eq!(count_binop(&l.results[0], BinaryKind::Add), 3);
-        let mut vars = vec![];
-        collect_vars(&l.results[0], &mut vars);
-        // expected order: (i=0, j=0), (i=0, j=1), (i=1, j=0), (i=1, j=1).
-        // for each cell: M_i_j, a_i, b_j.
-        assert_eq!(
-            vars,
-            vec![
-                "M_0_0", "a_0", "b_0", "M_0_1", "a_0", "b_1", "M_1_0", "a_1", "b_0", "M_1_1",
-                "a_1", "b_1",
-            ]
-        );
-    }
-
-    #[test]
-    fn einsum_outer_product_unrolls() {
-        // i,j->ij with [2] a, [3] b -> [2,3] matrix; no contraction.
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let r = g.einsum("i,j->ij", vec![a, b], None);
-        let l = scalarize(&g, r, "f");
-        assert_eq!(l.results.len(), 6);
-        // each cell = a_i * b_j with no addition.
-        for cell in &l.results {
-            assert_eq!(count_binop(cell, BinaryKind::Mul), 1);
-            assert_eq!(count_binop(cell, BinaryKind::Add), 0);
-        }
-        // result[1, 2] should be a_1 * b_2.
-        let mut vars = vec![];
-        collect_vars(&l.results[1 * 3 + 2], &mut vars);
-        assert_eq!(vars, vec!["a_1", "b_2"]);
-    }
-
-    #[test]
-    fn einsum_matvec_unrolls() {
-        // ij,j->i with [2,3] M, [3] v -> [2]; each result_i = sum_j M_i_j * v_j.
-        let mut g = Graph::new();
-        let m = g.add_param(
-            Symbol::intern("M"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3)]),
-            None,
-        );
-        let v = g.add_param(
-            Symbol::intern("v"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(3)]),
-            None,
-        );
-        let r = g.einsum("ij,j->i", vec![m, v], None);
-        let l = scalarize(&g, r, "f");
-        assert_eq!(l.results.len(), 2);
-        // each row: 3 muls + 2 adds.
-        for cell in &l.results {
-            assert_eq!(count_binop(cell, BinaryKind::Mul), 3);
-            assert_eq!(count_binop(cell, BinaryKind::Add), 2);
-        }
-        let mut vars = vec![];
-        collect_vars(&l.results[1], &mut vars);
-        assert_eq!(vars, vec!["M_1_0", "v_0", "M_1_1", "v_1", "M_1_2", "v_2"]);
-    }
-
-    #[test]
-    fn einsum_batched_dot_unrolls() {
-        // ...i,...i->...  with [2,3] and [2,3] -> [2]. each batch index gets
-        // its own dot product.
-        let mut g = Graph::new();
-        let a = g.add_param(
-            Symbol::intern("a"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3)]),
-            None,
-        );
-        let b = g.add_param(
-            Symbol::intern("b"),
-            TensorTy::from_shape(ElementTy::F64, vec![lit(2), lit(3)]),
-            None,
-        );
-        let r = g.einsum("...i,...i->...", vec![a, b], None);
-        let l = scalarize(&g, r, "f");
-        assert_eq!(l.results.len(), 2);
-        // batch 0 should reference a_0_0, b_0_0, a_0_1, b_0_1, a_0_2, b_0_2.
-        let mut vars0 = vec![];
-        collect_vars(&l.results[0], &mut vars0);
-        assert_eq!(
-            vars0,
-            vec!["a_0_0", "b_0_0", "a_0_1", "b_0_1", "a_0_2", "b_0_2"]
-        );
-        // batch 1 uses the _1_ slice.
-        let mut vars1 = vec![];
-        collect_vars(&l.results[1], &mut vars1);
-        assert_eq!(
-            vars1,
-            vec!["a_1_0", "b_1_0", "a_1_1", "b_1_1", "a_1_2", "b_1_2"]
-        );
-    }
 }

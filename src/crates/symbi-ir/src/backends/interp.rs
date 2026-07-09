@@ -118,21 +118,14 @@ fn exec_stmt(stmt: &ScalarStmt, env: &mut Env, fr: FieldRead) -> Flow {
         }
         ScalarStmt::For { iter, bound, body } => {
             use crate::dim::DimExpr;
-            match bound {
-                DimExpr::Literal(n) => {
-                    'outer: for i in 0..*n {
-                        env.insert(iter.clone(), Value::F(i as f64));
-                        for s in body {
-                            if exec_stmt(s, env, fr) == Flow::Break {
-                                break 'outer;
-                            }
-                        }
+            let DimExpr::Literal(n) = bound;
+            'outer: for i in 0..*n {
+                env.insert(iter.clone(), Value::F(i as f64));
+                for s in body {
+                    if exec_stmt(s, env, fr) == Flow::Break {
+                        break 'outer;
                     }
                 }
-                other => panic!(
-                    "interp: generic-dim `for {iter} in 0..{other:?}` not supported in \
-                     slice-1 elemental eval (bind the dim or unroll first)"
-                ),
             }
             Flow::Continue
         }
@@ -526,47 +519,6 @@ mod tests {
         let f = scalarize(&g, r, "root");
         let out = Cpu.eval_elemental(&f, &[9.0]);
         assert_eq!(out, vec![3.0]);
-    }
-
-    #[test]
-    fn runs_a_1d_diff_stencil_over_host_buffers() {
-        // out[i] = in[i+1] - in[i]  (the FV Diff primitive), run on the host.
-        use crate::emit::{Precision, Target, TargetConfig};
-        use crate::morphism::MorphismKind;
-        let mut g = Graph::new();
-        let c0 = g.add_param(Symbol::intern("_coord_0"), TensorTy::scalar(ElementTy::F64), None);
-        let one = g.add_const(ConstValue::F64(1.0), None);
-        let c0_hi = g.element_wise(ElementWiseOp::Add, vec![c0, one], None);
-        let lo = g.load_at(Symbol::intern("in"), vec![c0], None);
-        let hi = g.load_at(Symbol::intern("in"), vec![c0_hi], None);
-        let diff = g.morphism(MorphismKind::Diff { axis: 0 }, vec![lo, hi], None); // hi - lo
-
-        let spec = KernelEmitInputs {
-            kernel_name:      "diff_1d",
-            coalesce_layout: false,            ndim:             1,
-            target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
-            field_inputs:     &[("in".into(), "in".into())],
-            scalar_params:    &[],
-            field_writes:     &[("out".into(), "out".into(), diff)],
-            coord_components: &[0],
-            device_preamble:  &[],
-            tile_spec: None,
-        };
-
-        let in_data = [1.0, 4.0, 9.0, 16.0];
-        let mut out_data = [0.0_f64; 4];
-        Cpu.run_kernel(
-            &g, &spec,
-            &[CpuField { data: &in_data, lo: &[0], extent: &[4] }],
-            &mut [CpuFieldMut { data: &mut out_data, lo: &[0], extent: &[4] }],
-            &[],
-            &[3],  // 3 interior cells: i = 0, 1, 2
-            &[0],
-        );
-        assert_eq!(out_data[0], 4.0 - 1.0);   // 3
-        assert_eq!(out_data[1], 9.0 - 4.0);   // 5
-        assert_eq!(out_data[2], 16.0 - 9.0);  // 7
-        assert_eq!(out_data[3], 0.0);         // untouched (outside the domain)
     }
 
     #[test]
