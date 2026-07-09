@@ -79,6 +79,31 @@ pub fn drain_cell<S: Scalar, const D: usize, E: EnergyModel>(
     (drained, delta)
 }
 
+/// the per-cell drain the post-godunov pass iterates: compose the mask (from the
+/// cell's coordinate distance `dist` to the mask center), the local timescale (from
+/// `dx` and the cell sound speed `c_s`), and the exact-exponential drain. `c_s` is
+/// passed in (the caller has the local primitive) so this stays regime-agnostic. a
+/// cell outside the mask (`chi -> 0`) is a bit-exact no-op that contributes nothing
+/// to the body, so the pass may early-return on `dist` before calling this.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub fn drain_body_cell<S: Scalar, const D: usize, E: EnergyModel>(
+    cons: &ConsG<S, D, E>,
+    dist: S,
+    r_mask: S,
+    w: S,
+    dx: S,
+    c_s: S,
+    c_drain: S,
+    dt: S,
+    volume: S,
+    idx: usize,
+) -> (ConsG<S, D, E>, BodyDelta<S, D>) {
+    let chi = drain_mask(dist, r_mask, w);
+    let tau = drain_timescale(dx, c_s, c_drain);
+    drain_cell(cons, chi, tau, dt, volume, idx)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +189,48 @@ mod tests {
         assert!(drain_mask(0.0, r_mask, w) > 1.0 - 1e-4, "deep interior should be ~1");
         assert!(drain_mask(20.0, r_mask, w) < 1e-4, "far exterior should be ~0");
         assert!((drain_mask(r_mask, r_mask, w) - 0.5).abs() < 1e-14, "surface should be 1/2");
+    }
+
+    // the EMERGENT-RATE mechanics the post-godunov pass performs: reduce the per-cell
+    // drain deltas over a radial mask. asserts (1) only masked cells contribute, (2)
+    // gas+body mass conservation is exact across the whole reduction, (3) Mdot is a
+    // FUNCTIONAL of the flow (doubling the density field doubles Mdot) -- never a
+    // target fed in.
+    #[test]
+    fn emergent_rate_reduces_and_conserves_over_a_mask() {
+        let (r_mask, w, dx, c_s, c_drain, dt) = (6.0, 1.0, 1.0, 1.0, 1.0, 0.2);
+        let vol = dx * dx; // 2D-ish cell measure for the test
+        // a radial density field rho(r) = 1 + 1/(1+r) over cells at r = 0, 2, ..., 18.
+        let field = |scale: f64| -> (f64, f64, f64, f64) {
+            let mut body = BodyDelta::<f64, 3>::new(0);
+            let mut gas_lost = 0.0;
+            let (mut inner_removed, mut outer_removed) = (0.0, 0.0);
+            for i in 0..10 {
+                let dist = 2.0 * i as f64;
+                let rho = scale * (1.0 + 1.0 / (1.0 + dist));
+                let cons = ConsG::<f64, 3, Adiabatic> {
+                    den: rho, mom: Tensor::new([0.1 * rho, 0.0, 0.0]), nrg: 2.0 * rho,
+                };
+                let (drained, delta) =
+                    drain_body_cell(&cons, dist, r_mask, w, dx, c_s, c_drain, dt, vol, 0);
+                let removed = (cons.den - drained.den) * vol;
+                gas_lost += removed;
+                if i == 0 { inner_removed = removed; }
+                if i == 9 { outer_removed = removed; }
+                body += delta;
+            }
+            (body.mass_delta, gas_lost, inner_removed, outer_removed)
+        };
+        let (mdot_mass, gas_lost, inner, outer) = field(1.0);
+        // (2) exact conservation across the reduction: body gained exactly what the gas lost.
+        assert!((mdot_mass - gas_lost).abs() < 1e-13, "reduction non-conservative");
+        // (1) the mask LOCALIZES the drain: the deep-interior cell (chi~1) drains O(1e8)x more
+        // mass than a cell at ~3 r_mask (chi~0) -- the far field is untouched.
+        assert!(outer / inner < 1e-6, "drain not localized: outer/inner = {}", outer / inner);
+        // Mdot = absorbed mass / dt is a positive functional of the flow.
+        assert!(mdot_mass / dt > 0.0);
+        // (3) emergent, not targeted: doubling the density field doubles the absorbed mass.
+        let (mdot_mass_2x, ..) = field(2.0);
+        assert!((mdot_mass_2x - 2.0 * mdot_mass).abs() < 1e-13, "rate is not a linear flow-functional");
     }
 }
