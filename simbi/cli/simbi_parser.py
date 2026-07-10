@@ -6,7 +6,7 @@
 from argparse import ArgumentParser
 from typing import Any
 
-from .actions import print_the_version
+from .actions import PrintVersionAction
 from .base_parser import BaseParser
 from .commands import afterglow, attach, plot, run
 from .utils.formatter import HelpFormatter
@@ -25,7 +25,7 @@ class SimbiParser(BaseParser):
             formatter_class=HelpFormatter,
             add_help=False,
         )
-        self.add_argument("--version", action=print_the_version)
+        self.add_argument("--version", action=PrintVersionAction)
         self.subparsers = self.add_subparsers(
             dest="command",
             parser_class=ArgumentParser,

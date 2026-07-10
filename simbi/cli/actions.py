@@ -72,8 +72,6 @@ class RegisterGPUBlockDimensions(Action):
         values: Sequence[int] | None,
         option_string: str | None = None,
     ):
-        import os
-
         if values is not None and len(values) == 3:
             os.environ["BLOCK_X"] = str(values[0])
             os.environ["BLOCK_Y"] = str(values[1])
@@ -92,7 +90,7 @@ class RegisterGPUBlockDimensions(Action):
             )
 
 
-class print_the_version(Action):
+class PrintVersionAction(Action):
     def __init__(self, option_strings, dest, **kwargs):
         return super().__init__(
             option_strings, dest, nargs=0, default=SUPPRESS, **kwargs
@@ -111,7 +109,7 @@ class print_the_version(Action):
         parser.exit()
 
 
-class print_available_configs(Action):
+class PrintAvailableConfigsAction(Action):
     def __init__(self, option_strings, dest, **kwargs):
         return super().__init__(
             option_strings, dest, nargs=0, default=SUPPRESS, **kwargs
@@ -204,13 +202,19 @@ def _find_configs(root: Path) -> list[Path]:
 
 
 def get_available_configs():
-    with open(Path(__file__).resolve().parent.parent / "gitrepo_home.txt") as f:
-        githome = f.read()
-
     # the repo's bundled configs plus a cwd-local `simbi_configs` (real or
     # symlinked), deduplicated by resolved path so the same file isn't listed
-    # twice when invoked from the repo root.
-    roots = [Path(githome).resolve() / "simbi_configs", Path("simbi_configs")]
+    # twice when invoked from the repo root. the repo-home marker is written at
+    # install time; an install without it (or an unreadable marker) degrades to
+    # cwd-local discovery instead of killing every command with a traceback.
+    roots = [Path("simbi_configs")]
+    try:
+        marker = Path(__file__).resolve().parent.parent / "gitrepo_home.txt"
+        githome = marker.read_text().strip()
+        if githome:
+            roots.insert(0, Path(githome).resolve() / "simbi_configs")
+    except OSError:
+        pass
     configs: list[Path] = []
     seen: set[Path] = set()
     for root in roots:

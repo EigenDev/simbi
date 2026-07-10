@@ -8,6 +8,8 @@
 #   simbi run sod --end-time 0.2 --resolution 1000
 #   simbi run sod --checkpoint data/checkpoint.h5 --end-time 1.0
 # =============================================================================
+import difflib
+import sys
 from argparse import ArgumentTypeError, Namespace
 from pathlib import Path
 from typing import Optional
@@ -16,9 +18,36 @@ from ...actions import (
     ComputeModeAction,
     RegisterGPUBlockDimensions,
     get_available_configs,
-    print_available_configs,
+    PrintAvailableConfigsAction,
 )
 from ...utils.formatter import HelpFormatter
+
+
+def _resolve_ambiguous(base: str, matches: list[Path]) -> str:
+    """several discovered configs share the requested name. on a tty, ask the
+    user which one to run; otherwise (scripts, pipes, ci) fail loudly with the
+    full paths so the caller can pass one explicitly. a silent first-match pick
+    would run whichever file the directory walk visited first."""
+    if sys.stdin.isatty() and sys.stderr.isatty():
+        print(
+            f"found {len(matches)} configs named '{base}':", file=sys.stderr
+        )
+        for ii, mm in enumerate(matches, 1):
+            print(f"  [{ii}] {mm}", file=sys.stderr)
+        while True:
+            choice = input(
+                f"select [1-{len(matches)}], or q to abort: "
+            ).strip()
+            if choice.lower() in ("q", "quit", ""):
+                raise ArgumentTypeError(f"'{base}' selection aborted")
+            if choice.isdigit() and 1 <= int(choice) <= len(matches):
+                return str(matches[int(choice) - 1])
+            print(f"invalid choice '{choice}'", file=sys.stderr)
+    raise ArgumentTypeError(
+        f"'{base}' is ambiguous — {len(matches)} configs share the name:\n"
+        + "".join(f"  > {mm}\n" for mm in matches)
+        + "pass the config path explicitly."
+    )
 
 
 def _validate_config_script(param: str) -> str:
@@ -27,24 +56,38 @@ def _validate_config_script(param: str) -> str:
     base = path.stem
     ext = path.suffix
 
-    # if it's already a .py file, return as-is
+    # an explicit .py path bypasses discovery, but a typo'd path must fail HERE
+    # with a clear message, not later inside the loader with an import error.
     if ext.lower() == ".py":
+        if not path.is_file():
+            raise ArgumentTypeError(f"config script '{param}' does not exist")
         return param
 
-    # otherwise, search available configs
+    # otherwise, search available configs. collect EVERY match — the same stem
+    # can exist in several config dirs (bundled examples vs a cwd-local tree).
     available_configs = get_available_configs()
-    for file in available_configs:
-        file_stem = Path(file).stem
-        # match exact name or kebab-case variant
-        if base == file_stem or base.replace("-", "_") == file_stem:
-            return str(file)
+    matches = [
+        Path(file)
+        for file in available_configs
+        if base == Path(file).stem or base.replace("-", "_") == Path(file).stem
+    ]
+    if len(matches) == 1:
+        return str(matches[0])
+    if len(matches) > 1:
+        return _resolve_ambiguous(base, matches)
 
-    # not found - show helpful error
+    # not found - show the closest names first, then everything
     config_names = sorted(
-        [Path(f).stem.replace("_", "-") for f in available_configs]
+        {Path(f).stem.replace("_", "-") for f in available_configs}
+    )
+    close = difflib.get_close_matches(
+        base.replace("_", "-"), config_names, n=3, cutoff=0.5
+    )
+    hint = (
+        "did you mean: " + ", ".join(close) + "?\n" if close else ""
     )
     raise ArgumentTypeError(
-        f"no configuration named '{base}'. available configs:\n"
+        f"no configuration named '{base}'. {hint}available configs:\n"
         + "".join(f"  > {name}\n" for name in config_names)
     )
 
@@ -132,7 +175,7 @@ def setup_parser(subparsers) -> None:
     util_group.add_argument(
         "--configs",
         help="list available configs",
-        action=print_available_configs,
+        action=PrintAvailableConfigsAction,
     )
 
     run_parser.set_defaults(func=execute)
