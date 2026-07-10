@@ -245,7 +245,12 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
 
     // ---- 1. scalarize all output RHSes through one shared body ----
     let output_nodes: Vec<NodeId> = inputs.field_writes.iter().map(|(_, _, id)| *id).collect();
-    let scalarized = scalarize_kernel(graph, &output_nodes);
+    let mut scalarized = scalarize_kernel(graph, &output_nodes);
+    // lazy scheduling of expensive select arms (passes::lazy_select): a select
+    // whose arm-exclusive cost crosses the threshold becomes a real branch with
+    // its exclusive lets sunk in — the taken arm's value is unchanged, so the
+    // rewrite is bit-exact on every carrier and every backend inherits it.
+    crate::passes::lazy_select::apply(&mut scalarized);
 
     // ---- 2. assign buffer indices in a CANONICAL order, independent of the builder's
     //          field-touch order: pure inputs first (field_inputs order), then ALL
