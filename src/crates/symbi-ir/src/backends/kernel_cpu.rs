@@ -814,9 +814,9 @@ mod tests {
         assert!(desc.source.contains("for _d0 in 0.._ts {"));
         assert!(desc.source.contains("let _i0: i32 = _c0 as i32;"));
         assert!(desc.source.contains("let ii: i32 = _i0 + dom_lo_0;"));
-        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"));
+        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"));
         assert!(desc.source.contains(
-            "field1.data[(__idx_cell_buf1 + ((ii) - ii) * field1.strides[0]) as usize] = cons_den;"
+            "field1.data[(__idx_cell_buf1 + ((ii) - ii)) as usize] = cons_den;"
         ));
         // no float-routed indices.
         assert!(
@@ -857,7 +857,7 @@ mod tests {
             },
         );
         assert_eq!(desc.field_bindings.len(), 3);
-        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"));
+        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"));
         // the f64-built ConstValue(2.0) renders scalar-parametric via Scalar::from_f64.
         assert!(
             desc.source
@@ -909,7 +909,7 @@ mod tests {
             "src:\n{}",
             desc.source
         );
-        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii) * field0.strides[0]) as usize];"));
+        assert!(desc.source.contains("let cons_den: S = field0.data[(__idx_cell_buf0 + ((ii) - ii)) as usize];"));
         assert!(
             desc.source
                 .contains("] = ((cons_den * S::from_f64(2.0)) + cons_nrg);"),
@@ -1062,7 +1062,9 @@ mod tests {
         // field0 is the input — it's a `&CpuField<S>` kernel arg.
         // body indexes via `field0.lo[..]` / `field0.strides[..]` / `field0.data`.
         assert!(desc.source.contains("field0: &CpuField<S>"));
-        assert!(desc.source.contains("field0.strides[0]"));
+        // axis 0 is CONTIGUOUS_AXIS: its stride is 1 by construction, so the emitter drops the
+        // multiply. axis 1 keeps its stride factor.
+        assert!(desc.source.contains("field0.strides[1]"));
         // 2D default emit is cache-TILED: parallelize over 2D tile blocks with
         // nested intra-tile loops (one per axis). axis 1 comes from its own
         // `for _d1` loop + tile coord, not a flat unflatten.

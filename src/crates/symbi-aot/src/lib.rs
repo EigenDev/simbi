@@ -71,6 +71,12 @@ pub fn compute_strides(extent: &[u32]) -> [i32; 4] {
     let ext_i32: [i32; 4] = std::array::from_fn(|d| if d < n { extent[d] as i32 } else { 0 });
     let mut s = [0i32; 4];
     symbi_algebra::strides_from_extent(&ext_i32[..n], &mut s[..n]);
+    // the emitted Rust index omits the `* strides[CONTIGUOUS_AXIS]` factor because it is 1 by
+    // construction. if that ever stopped holding, every kernel would mis-index this buffer silently.
+    debug_assert!(
+        n == 0 || s[symbi_algebra::CONTIGUOUS_AXIS] == 1,
+        "compute_strides: CONTIGUOUS_AXIS must be unit-stride, got {s:?} for extent {extent:?}",
+    );
     s
 }
 

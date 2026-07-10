@@ -119,29 +119,26 @@ pub enum IndexLang {
     Cuda,
 }
 
+/// drop the `* strides[CONTIGUOUS_AXIS]` factor from the cell index. this is an IDENTITY, not an
+/// optimization: `strides_from_extent` sets that stride to exactly 1 for every buffer, so the emitted
+/// address is unchanged. what changes is what the compiler can PROVE — with the multiply present the
+/// index advances by an opaque runtime `i32` per iteration of the innermost loop, so LLVM cannot show
+/// the access is unit-stride and will not vectorize the load. with it gone the index is affine in the
+/// inner coord with coefficient 1.
+///
+/// the axis is DERIVED from the layout (`CONTIGUOUS_AXIS`), never assumed: the physical-x-fastest
+/// convention makes axis 0 contiguous, not the last axis. Rust (CPU) only — the CUDA arm is SIMT and
+/// maps `threadIdx.x` onto the same axis, so it needs no index rewrite.
+const fn unit_stride_contiguous(lang: IndexLang) -> bool {
+    matches!(lang, IndexLang::Rust)
+}
+
 /// emit ONE `__idx_cell_buf{b}` declaration: the flat offset of cell `(ii, jj, kk)`
 /// for buffer `b`. the per-cell hoist that every subsequent load delta-adds to.
 ///
 /// the formula references the buffer's `lo` and `strides` ARRAYS (pre-multiplied
 /// at View construction). every backend uses the same formula — `IndexLang`
 /// only picks the let/int decl syntax. adding a new backend is one new arm.
-/// SYMBI_VEC_LOOP=1: drop the `* strides[CONTIGUOUS_AXIS]` term (it is 1 by construction —
-/// `strides_from_extent`, guarded by a debug_assert in the vec loop) so the cell index is affine in
-/// the inner coord with coefficient 1 — LLVM's loop-vectorizer then reads consecutive lanes as one
-/// vector load. the axis is DERIVED from the layout, never assumed: the physical-x-fastest
-/// convention makes axis 0 contiguous, not the last axis. CPU (Rust) only; GPU is SIMT.
-fn unit_stride_contiguous() -> bool {
-    // debug-emit-knobs gates the SYMBI_VEC_LOOP a/b knob; feature off (default) = canonical env-unset shape (false).
-    #[cfg(feature = "debug-emit-knobs")]
-    {
-        std::env::var("SYMBI_VEC_LOOP").map(|v| v == "1").unwrap_or(false)
-    }
-    #[cfg(not(feature = "debug-emit-knobs"))]
-    {
-        false
-    }
-}
-
 pub fn emit_cell_index_base(lang: IndexLang, ndim: u8, buf: u32, coalesce: bool) -> String {
     let (decl, ty) = match lang {
         IndexLang::Rust => ("let ", ": i32"),
@@ -156,7 +153,7 @@ pub fn emit_cell_index_base(lang: IndexLang, ndim: u8, buf: u32, coalesce: bool)
     if coalesce && buf != 0 {
         return format!("    {decl}__idx_cell_buf{f}{ty} = __idx_cell_buf0;");
     }
-    if lang == IndexLang::Rust && unit_stride_contiguous() {
+    if unit_stride_contiguous(lang) {
         let coords = ["ii", "jj", "kk"];
         let nd = ndim as usize;
         // the unit-stride term belongs to CONTIGUOUS_AXIS — the axis `strides_from_extent` gives a
@@ -202,7 +199,7 @@ pub fn emit_flat_index(lang: IndexLang, ndim: u8, buf: u32, comps: &[&str]) -> S
         IndexLang::Cuda => "",
     };
     let f = buf;
-    if lang == IndexLang::Rust && unit_stride_contiguous() {
+    if unit_stride_contiguous(lang) {
         let coords = ["ii", "jj", "kk"];
         let nd = ndim as usize;
         // the stencil delta drops its multiply on CONTIGUOUS_AXIS for the same reason the cell base

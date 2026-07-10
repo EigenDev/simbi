@@ -196,18 +196,42 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
     // (no rayon setup, bit-stable for the small exactness gates).
     let (identity, combine) = host_identity_combine(op);
     const PAR_THRESHOLD: usize = 1 << 16;
-    let (outer_lo, outer_hi) = (domain.spaces[0].lo, domain.spaces[0].hi);
+    // slab the OUTERMOST axis, derived from the layout — `nest_order`'s first entry. splitting
+    // `CONTIGUOUS_AXIS` instead hands each worker a slab of one x-index spanning every other axis,
+    // so its reads stride by `extent[0]` and touch a fresh cache line per cell; the cost GROWS with
+    // the grid (the stride is the row length). slabbing the outermost axis gives each worker a
+    // contiguous run. min/max are exact in any order; add/mul reassociate within roundoff either way.
+    let split = symbi_algebra::nest_order(D).next().expect("Domain rank >= 1");
+    let (outer_lo, outer_hi) = (domain.spaces[split].lo, domain.spaces[split].hi);
     if domain.volume() >= PAR_THRESHOLD && (outer_hi - outer_lo) > 1 {
         use rayon::prelude::*;
         return (outer_lo..outer_hi)
             .into_par_iter()
             .map(|ii| {
                 let mut slab = domain.clone();
-                slab.spaces[0].lo = ii;
-                slab.spaces[0].hi = ii + 1;
+                slab.spaces[split].lo = ii;
+                slab.spaces[split].hi = ii + 1;
+                // walk the slab in STORAGE order (CONTIGUOUS_AXIS innermost) via an odometer.
+                // `Domain::iter` advances the LAST axis fastest — the opposite of storage — so it
+                // strides the fold by `extent[0]` on every cell. the fold is a max/min (exact in any
+                // order) or an add/mul (reassociating within roundoff either way), so the visit order
+                // is free to follow memory.
+                let lo: [isize; D] = std::array::from_fn(|a| slab.spaces[a].lo);
+                let hi: [isize; D] = std::array::from_fn(|a| slab.spaces[a].hi);
+                let total: usize =
+                    (0..D).map(|a| (hi[a] - lo[a]).max(0) as usize).product();
                 let mut acc = identity;
-                for c in slab.iter() {
+                let mut c = lo;
+                for _ in 0..total {
                     acc = combine(acc, field.view().at(c).to_f64());
+                    // carry with CONTIGUOUS_AXIS first: `nest_order` reversed is innermost-first.
+                    for a in symbi_algebra::nest_order(D).rev() {
+                        c[a] += 1;
+                        if c[a] < hi[a] {
+                            break;
+                        }
+                        c[a] = lo[a];
+                    }
                 }
                 acc
             })
