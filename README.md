@@ -31,12 +31,15 @@ SIMBI is a finite volume code for astrophysical fluid simulations. If you want t
 A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. The physics is the same, the speed got better, and the codebase is a lot easier to live in. You drive the whole thing from Python, so you never have to touch the Rust unless you want to.
 
 **What you get:**
-- Special relativistic magnetohydrodynamics (SRMHD), special relativistic hydrodynamics (SRHD), and Newtonian hydrodynamics, all in one code
+- Six fluid regimes in one code: Newtonian hydro, relativistic hydro (RHD), Newtonian and relativistic MHD, plus isothermal variants of both
+- Spacetime as its own axis: hand the relativistic regimes a Minkowski, Schwarzschild, or horizon-penetrating Kerr-Schild metric the same way you would pick a coordinate system
 - GPU acceleration on NVIDIA cards, with kernels compiled on the fly so there is no separate build step and no architecture flag to remember
-- High-resolution shock capturing with HLLE, HLLC, and HLLD Riemann solvers
-- An immersed boundary method (Peskin 2002) for putting solid objects in the flow
-- Adaptive mesh refinement with Berger-Colella subcycling
+- High-resolution shock capturing with HLLE, HLLC (plus a low-Mach variant), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches
+- Constrained-transport MHD (contact or UCT edge EMFs) that keeps div B at machine zero by construction
+- An immersed boundary method for solid objects, point-mass gravity, and Bondi-Hoyle accretion sinks — with per-body force/torque/accretion diagnostics
+- Block-based static mesh refinement with Berger-Colella subcycling
 - Afterglow radiation transport, so you can turn a simulation into synthetic observables
+- A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
 
 On the roadmap: an AMD/HIP backend and multi-GPU (then multi-node) domain decomposition. The architecture is already pointed that way, but those are not shipped yet, so this README only promises what actually runs today.
@@ -82,7 +85,7 @@ uv run simbi run marti-muller --mode cpu --resolution 400
 # look at the result
 uv run simbi plot data/1000.chkpt.000_400.h5 --setup "Marti & Muller Problem 1" --field rho v p
 ```
-You can also save a bunch of time by doing `source .venv/bin/activate` and you''ll remain in the 
+You can also save a bunch of time by doing `source .venv/bin/activate` and you'll remain in the 
 simbi environment you created when you ran `uv venv`. 
 
 Got an NVIDIA card? The GPU build adds the CUDA feature, so it goes through the project helper:
@@ -173,12 +176,13 @@ The CPU and GPU extensions live side by side (`cpu_ext` and `gpu_ext`), so insta
 
 ## Usage
 
-### The three commands
+### The four commands
 
 ```bash
 simbi run        # run simulations
 simbi plot       # visualize checkpoint data
 simbi afterglow  # radiation transport and observables
+simbi attach     # watch a headless (cluster/batch) run from your own terminal
 ```
 
 (Remember, with uv you write `uv run simbi ...`.)
@@ -202,12 +206,27 @@ simbi run simbi_configs/examples/kh.py --mode cpu --resolution 512
 simbi run <problem> --checkpoint data/checkpoint.h5
 ```
 
+The CLI tries to be a good roommate: config names match with or without kebab-case, a
+typo gets a "did you mean...?", and if two configs in different directories share a name,
+it lists both and asks.
+
 **Options you will reach for:**
 - `--mode cpu|gpu` sets the execution backend
 - `--resolution N`, `--resolution N M`, or `--resolution N M K` sets the grid
 - `--adiabatic-index` is the ratio of specific heats
 - `--end-time` is when to stop
 - `--data-directory` is where the output goes
+- `--live` writes a read-only snapshot each cadence so `simbi attach <data_dir>` can watch from elsewhere
+
+**When you want to know where the time goes:**
+
+```bash
+SYMBI_PROFILE=1 simbi run <problem> ...
+```
+
+prints a per-phase wall-time breakdown at the end of the run — flux, godunov, c2p,
+checkpoint I/O, even the JIT compile — in ns per zone-cycle. The exit summary reports
+wall time and I/O time separately, and quotes throughput over pure integration time.
 
 ### Visualization
 
@@ -394,9 +413,27 @@ def scale_factor_derivative(self):
 
 | Regime | Description | Use cases |
 |--------|-------------|-----------|
-| `SRMHD` | Special relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
-| `SRHD` | Special relativistic hydrodynamics | Gamma-ray bursts, relativistic shocks, stellar explosions |
 | `NEWTONIAN` | Classical hydrodynamics | Stellar winds, ISM dynamics, classical turbulence |
+| `ISOTHERMAL` | Classical hydro with a fixed (optionally position-dependent) sound speed | Disks, locally-isothermal setups |
+| `RHD` | Relativistic hydrodynamics | Gamma-ray bursts, relativistic shocks, stellar explosions |
+| `NMHD` | Newtonian magnetohydrodynamics | Classical MHD turbulence, blast waves |
+| `IMHD` | Isothermal MHD | Magnetized disks |
+| `SRMHD` | Relativistic magnetohydrodynamics | AGN jets, pulsar wind nebulae, magnetic reconnection |
+
+(`SRHD` still works as an alias for `RHD` — old configs keep running.)
+
+### Spacetimes
+
+Relativity in SIMBI is a property of the *spacetime*, not the fluid regime. The
+relativistic regimes take a `Spacetime` on top:
+
+- `MINKOWSKI` — flat, i.e. plain special relativity
+- `SCHWARZSCHILD` — a static central mass
+- `KERR_SCHILD` — horizon-penetrating coordinates; gas crosses r = 2M without drama
+- `KERR` — a spinning black hole
+
+So "GR hydro around a Kerr black hole" is the same `RHD` regime you already know,
+handed a different metric.
 
 ### Coordinate systems
 
@@ -409,9 +446,10 @@ def scale_factor_derivative(self):
 ### Numerical methods
 
 **Riemann solvers:**
-- `HLLE`, HLL with an entropy fix
-- `HLLC`, HLL with a contact wave (hydrodynamics)
-- `HLLD`, HLL with discontinuities (magnetohydrodynamics)
+- `HLLE`, the two-wave workhorse, written in a branch-free closed form the compiler can vectorize
+- `HLLC`, HLL with a contact wave (hydrodynamics), Toro's adaptive pressure estimates evaluated lazily — a smooth cell never pays for the shock estimate
+- `HLLC_LM`, the Fleischmann (2020) low-Mach / low-dissipation HLLC
+- `HLLD`, HLL with discontinuities (magnetohydrodynamics), faithful to Mignone & Del Zanna
 
 **Grid spacing:**
 - `LINEAR`, uniform spacing
@@ -425,12 +463,22 @@ def scale_factor_derivative(self):
 
 **Time integration:**
 - `EULER`, forward Euler
-- `RK2`, second-order Runge-Kutta (Berger-Colella for AMR)
+- `RK2`, second-order SSP Runge-Kutta (Berger-Colella subcycling under refinement)
+- `RK3`, third-order SSP Runge-Kutta
+
+**Constrained transport (MHD):**
+- `CONTACT`, Gardiner & Stone (2005) edge EMFs (default)
+- `UCT`, Del Zanna / Mignone & Del Zanna upwind CT (kills the checkerboard mode)
+
+Either way, div B stays at machine zero by construction — the curl-of-EMF update carries
+a symbolic proof of div(curl) = 0 in the test suite, and bug-injection tests keep the
+proof honest.
 
 **A few extras:**
-- `plm_theta`, the PLM reconstruction parameter (0 to 2, default 1.5)
+- `plm_theta`, the PLM reconstruction parameter (0 to 2, default 1.5; 0 gives you piecewise-constant)
 - `use_quirk_smoothing`, Quirk's carbuncle fix
-- `use_fleischmann_limiter`, a low-Mach fix for HLLC
+- First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
+- Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
 
 ### Static mesh refinement
 
@@ -460,26 +508,32 @@ refinement_subcycling_mode: Annotated[
 
 Here is the quick tour of how the Rust side fits together, in case you want to hack on it.
 
-The compute backend is a Cargo workspace of small, focused crates rather than one giant blob. The interesting idea at the center of it: the physics is written down once as an intermediate representation, and that IR gets lowered to either native CPU code or CUDA source. The GPU source is compiled at run time with NVRTC. The upshot is that the CPU and GPU run the exact same math, because there is no second hand-written copy of every kernel to keep in sync.
+The compute backend is a Cargo workspace of small, focused crates rather than one giant blob. The interesting idea at the center of it: the physics is written ONCE, generically over a "carrier" type, and traced into an intermediate representation. That IR gets lowered to native CPU code (compiled by LLVM at build time), CUDA source (compiled at run time with NVRTC), or — for the source terms you write in Python — machine code JIT-compiled at startup with Cranelift. One definition of the math serves every backend. The same trick powers the test suite: the f64 evaluation of a kernel doubles as its own oracle, so CPU, GPU, and JIT are checked against each other bit-for-bit.
+
+The compiler layer earns its keep: common-subexpression elimination, constant-power strength reduction (`r ** -2` in your config compiles down to two multiplies), automatic lazy scheduling of expensive conditional branches (a `where(...)` in your source expressions becomes a real branch when the arms are worth skipping), and a cost-gated select-vectorization pass that turns branch-free kernel bodies into NEON/SIMD-friendly straight-line code. The guiding rule, enforced by the graph itself: only compute what you actually need.
 
 A few load-bearing pieces:
 
-- **`symbi-ir`** holds the kernel IR and the code generators (CPU and CUDA share one renderer)
+- **`symbi-ir`** holds the kernel IR, the graph passes, and the code generators (CPU and CUDA share one renderer)
 - **`symbi-hydro`** is the physics: regimes, equations of state, and the Riemann solvers
+- **`symbi-jit`** is the Cranelift JIT for runtime-authored kernels (your Python source expressions)
 - **`symbi-sim`** owns the simulation state and the kernel-native evolution driver
 - **`symbi-substrate`** assembles the per-regime kernel sets (flux, c2p, godunov, cfl, ghost fill)
 - **`symbi-amr`** is the refinement hierarchy: prolongation, restriction, flux registers, and subcycling
+- **`symbi-ib`** is the immersed-body layer: body state, motion, and accretion ledgers
 - **`symbi-xpu`** is the device layer: memory, streams, and kernel launches
 - **`symbi-afterglow`** does the radiation transport and observables
 - **`symbi-py`** is the thin pyo3 bridge that becomes the `cpu_ext` and `gpu_ext` Python modules
 
-Two design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. And the time step is sequenced entirely through a `KernelSet` trait, so the driver never reaches into the fields directly. That second part is what keeps multi-GPU on the table: a subdomain is just a self-contained simulation state, and the refinement machinery already knows how to exchange halos between neighboring regions.
+A few design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. The CPU executor fans serial kernels over a cache-blocked cover whose tiles run the full grid row along the contiguous axis, which gives the vectorized kernel bodies the long unit-stride runs they thrive on. And the time step is sequenced entirely through a `KernelSet` trait, so the driver never reaches into the fields directly. That last part is what keeps multi-GPU on the table: a subdomain is just a self-contained simulation state, and the refinement machinery already knows how to exchange halos between neighboring regions.
+
+On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave at 256^3 sustains ~38 million zone-cycles per second on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, AthenaK reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
 
 ---
 
 ## Example Configurations
 
-There are around two dozen ready-to-run configs in `simbi_configs/examples/`. A sampler:
+There are 60-odd ready-to-run configs in `simbi_configs/examples/`. A sampler:
 
 | Example | What it is |
 |---------|------------|
@@ -493,6 +547,7 @@ There are around two dozen ready-to-run configs in `simbi_configs/examples/`. A 
 | `magnetic_shock_tube.py` | 1D MHD shock |
 | `orszag_tang.py` | SRMHD Orszag-Tang vortex |
 | `kepler.py` | Keplerian disk with a central mass |
+| `bondi.py` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
 | `uniform_sphere.py` | Uniform sphere with homologous mesh expansion |
 | `quad_shocktube.py` | 2D multi-region shock |
 
@@ -539,8 +594,7 @@ SIMBI has been used in the following papers:
 
 | Version | Changes |
 |---------|---------|
-| **v0.9.0** | Full rewrite of the compute backend from C++ to Rust, built with maturin |
-| **v0.8.0** | Minimized compiler warnings |
+| **v0.8.0** (current) | Full rewrite of the compute backend from C++ to Rust (traced-IR kernels, LLVM + NVRTC + Cranelift); GR spacetimes; constrained-transport MHD; static mesh refinement; live TUI; the big performance campaign |
 | **v0.7.0** | Added mypy type checking and the immersed boundary method |
 | **v0.6.0** | Fixed git tag ordering, general refactoring |
 | **v0.5.0** | Performance optimizations |
@@ -568,6 +622,12 @@ When a run misbehaves:
 ```bash
 simbi run <problem> --info  # see the options this problem takes
 simbi run --configs         # list the problems you can run
+```
+
+When a run is *slow* and you want receipts:
+
+```bash
+SYMBI_PROFILE=1 simbi run <problem> ...   # per-phase wall-time breakdown at exit
 ```
 
 ---
