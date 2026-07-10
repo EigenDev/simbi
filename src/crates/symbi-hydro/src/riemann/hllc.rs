@@ -71,38 +71,50 @@ fn wave_properties<S: Scalar>(
 
     let q_user = S::from_f64(2.0);
 
-    // compute all three estimates unconditionally, select via mask.
-    let p_pvrs = S::ZERO.max(pvrs);
-
-    // two-rarefaction case
-    let gf = (gamma - one) / (two * gamma);
-    let pl_pow = pre_l.powf(gf);
-    let pr_pow = pre_r.powf(gf);
-    let num = cs_l + cs_r - half * (gamma - one) * (vn_r - vn_l);
-    let den = cs_l / pl_pow + cs_r / pr_pow;
-    let arg = num / den;
-    let p_rarefaction = S::select(arg.cmp_gt(S::ZERO), arg.powf(one / gf), S::ZERO);
-
-    // two-shock case
-    let gp1 = gamma + one;
-    let gm1 = gamma - one;
-    let alpha_l = two / (gp1 * rho_l);
-    let alpha_r = two / (gp1 * rho_r);
-    let beta_l = gm1 / gp1 * pre_l;
-    let beta_r = gm1 / gp1 * pre_r;
-    let p0 = S::ZERO.max(pvrs);
-    let g_l = (alpha_l / (p0 + beta_l)).sqrt();
-    let g_r = (alpha_r / (p0 + beta_r)).sqrt();
-    let p_shock = S::ZERO.max((g_l * pre_l + g_r * pre_r - (vn_r - vn_l)) / (g_l + g_r));
-
     // pvrs if the pressure ratio is mild AND pvrs is bounded, else rarefaction
     // (if pvrs <= p_min) or shock. mask AND uses `&` on `S::Mask` (the carrier's
     // bitwise BitAnd; not native `&&`, which would lock to a host carrier).
+    //
+    // the estimates live in LAZY `S::cond` arms — a smooth-flow face pays only
+    // the pvrs arithmetic; the two-rarefaction arm's three `powf` calls and the
+    // two-shock arm's roots run only on the faces that reject pvrs. an eager
+    // select spelling paid all three estimates at every face and dominated the
+    // hllc kernel's cost (~49 ns/zone vs ~14 for hlle). carrier-equivalent:
+    // every carrier takes the same arm for the same input, bit-identically.
     let cond_pvrs = (p_max / p_min).cmp_le(q_user)
         & p_min.cmp_le(pvrs) & pvrs.cmp_le(p_max);
-    let cond_rarefaction = pvrs.cmp_le(p_min);
-    let p_else = S::select(cond_rarefaction, p_rarefaction, p_shock);
-    let p_star = S::select(cond_pvrs, p_pvrs, p_else);
+    let p_star = S::cond(
+        cond_pvrs,
+        || S::ZERO.max(pvrs),
+        || {
+            S::cond(
+                pvrs.cmp_le(p_min),
+                || {
+                    // two-rarefaction (toro eq 9.41)
+                    let gf = (gamma - one) / (two * gamma);
+                    let pl_pow = pre_l.powf(gf);
+                    let pr_pow = pre_r.powf(gf);
+                    let num = cs_l + cs_r - half * (gamma - one) * (vn_r - vn_l);
+                    let den = cs_l / pl_pow + cs_r / pr_pow;
+                    let arg = num / den;
+                    S::select(arg.cmp_gt(S::ZERO), arg.powf(one / gf), S::ZERO)
+                },
+                || {
+                    // two-shock (toro eq 9.42)
+                    let gp1 = gamma + one;
+                    let gm1 = gamma - one;
+                    let alpha_l = two / (gp1 * rho_l);
+                    let alpha_r = two / (gp1 * rho_r);
+                    let beta_l = gm1 / gp1 * pre_l;
+                    let beta_r = gm1 / gp1 * pre_r;
+                    let p0 = S::ZERO.max(pvrs);
+                    let g_l = (alpha_l / (p0 + beta_l)).sqrt();
+                    let g_r = (alpha_r / (p0 + beta_r)).sqrt();
+                    S::ZERO.max((g_l * pre_l + g_r * pre_r - (vn_r - vn_l)) / (g_l + g_r))
+                },
+            )
+        },
+    );
 
     // q factors (toro eq 9.43). carrier gate: both select arms trace at S = Gv,
     // so clamp the radicand to >= 0 BEFORE the sqrt (matches the RMHD HLLC disc
@@ -944,7 +956,6 @@ mod tests {
     // ---- carrier gate: newtonian wave_properties q-factor sqrt ----
 
     use symbi_ir::backends::interp::{Backend, Cpu};
-    use symbi_ir::passes::scalarize::scalarize;
     use symbi_ir::{begin_trace, end_trace, Gv};
 
     // trace `wave_properties` at S = Gv, scalarize each of the three signal-speed
@@ -961,13 +972,23 @@ mod tests {
             p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8],
         );
         let kernel = end_trace();
-        let mut out = [0.0f64; 3];
-        for (kk, root) in [s_l, s_r, s_star].iter().enumerate() {
-            let lowered = scalarize(&kernel.graph, root.node(), "wave_props_probe");
-            assert!(!lowered.body.is_empty(), "wave_properties output {kk} rendered an empty kernel");
-            out[kk] = Cpu.eval_elemental(&lowered, state)[0];
-        }
-        out
+        // the KERNEL lowering: `Op::IfElse` (the pressure-estimate lazy branch)
+        // lowers only through `scalarize_kernel`; the single-root elemental
+        // path refuses it. the interpreter evaluates the IfElse statement
+        // directly, so the lowered kernel adapts into a LoweredFn verbatim.
+        let outputs = [s_l.node(), s_r.node(), s_star.node()];
+        let k = symbi_ir::passes::scalarize::scalarize_kernel(&kernel.graph, &outputs);
+        assert!(!k.body.is_empty(), "wave_properties rendered an empty kernel");
+        let lowered = symbi_ir::passes::scalarize::LoweredFn {
+            name: "wave_props_probe".to_string(),
+            params: k.params,
+            body: k.body,
+            results: k.outputs,
+            result_element: symbi_ir::ElementTy::F64,
+            result_shape: Vec::new(),
+        };
+        let vals = Cpu.eval_elemental(&lowered, state);
+        [vals[0], vals[1], vals[2]]
     }
 
     fn wave_properties_f64(state: &[f64; 9]) -> [f64; 3] {
