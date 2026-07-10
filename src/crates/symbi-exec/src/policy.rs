@@ -468,6 +468,25 @@ mod block_tests {
     }
 
     #[test]
+    fn large_2d_gets_full_contiguous_rows() {
+        // 1024^2 on 12 threads: the transverse axis alone gives 128 tiles, so
+        // the contiguous axis runs the full row.
+        let b = auto_block_size([1024usize, 1024], 12).unwrap();
+        assert_eq!(b, [1024, 8]);
+    }
+
+    #[test]
+    fn small_2d_shrinks_the_row_for_load_balance() {
+        // 256^2 on 12 threads: 32 transverse tiles < 48; the row halves until
+        // the cover feeds the pool.
+        let b = auto_block_size([256usize, 256], 12).unwrap();
+        assert!(b[0] < 256 && b[0] >= 8, "row must shrink: {b:?}");
+        assert_eq!(b[1], 8);
+        let tiles = 256usize.div_ceil(b[0]) * 32;
+        assert!(tiles >= 48, "tiles {tiles} block {b:?}");
+    }
+
+    #[test]
     fn one_d_keeps_the_fixed_edge() {
         // 1D: axis 0 is the only tile source; a full row would serialize.
         let b = auto_block_size([1 << 20usize], 12).unwrap();
