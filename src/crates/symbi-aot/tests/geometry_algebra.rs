@@ -89,7 +89,8 @@ fn spherical_log_1d_matches_analytic() {
     NamedKernel::new("geom_sph_log_1d")
         .output("inv_volume", &mut iv).output("area_lo_0", &mut al)
         .output("area_hi_0", &mut ah).output("centroid_0", &mut ct)
-        .grid(&[n as u32]).dom_lo(&[0]).scalar("x_lo_0", start).scalar("dx_0", slope).run();
+        .grid(&[n as u32]).dom_lo(&[0]).scalar("x_lo_0", start).scalar("dx_0", slope)
+        .scalar("map_kind_0", 1.0).run();
     for i in 0..n {
         let r_lo = start * 10f64.powf(i as f64 * slope);
         let r_hi = start * 10f64.powf((i as f64 + 1.0) * slope);
@@ -196,7 +197,8 @@ fn log_spherical_cfl_uses_per_cell_widths() {
         .input("prim.rho", &rho_v).input("prim.vel[0]", &vel).input("prim.pre", &pre)
         .output("scratch", &mut lambda)
         .grid(&[n as u32]).dom_lo(&[0])
-        .scalar("gamma", gamma).scalar("x_lo_0", start).scalar("dx_0", slope).run();
+        .scalar("gamma", gamma).scalar("x_lo_0", start).scalar("dx_0", slope)
+        .scalar("map_kind_0", 1.0).run();
     let mut prev = f64::INFINITY;
     for i in 0..n {
         let r_lo = start * 10f64.powf(i as f64 * slope);

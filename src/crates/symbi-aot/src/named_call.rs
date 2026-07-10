@@ -190,7 +190,18 @@ impl<'a, S: Scalar + OrderedNumeric> NamedKernel<'a, S> {
                     // than forcing every static test to enumerate mesh_adot/mesh_vtrans/mesh_hdil.
                     // this closes the footgun where a kernel growing a moving-mesh scalar silently
                     // rotted every static test that hand-builds its scalar list by name.
-                    .or_else(|| matches!(bind, ScalarBind::Ref(ScalarRef::Mesh(_))).then_some(S::ZERO))
+                    //
+                    // uniform-spacing default, same footgun class: `map_kind_{ax}` = 0 selects the
+                    // uniform face map `x_lo + i*dx` — what every test written before spacing
+                    // became a runtime scalar means. a log-spacing test supplies `map_kind_{ax}`
+                    // = 1 explicitly (its analytic expectations fail loudly if it forgets).
+                    .or_else(|| {
+                        matches!(
+                            bind,
+                            ScalarBind::Ref(ScalarRef::Mesh(_) | ScalarRef::MapKind(_))
+                        )
+                        .then_some(S::ZERO)
+                    })
                     .unwrap_or_else(|| {
                         panic!("kernel '{}': missing float scalar '{name}'", self.name)
                     });
