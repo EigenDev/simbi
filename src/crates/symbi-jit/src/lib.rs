@@ -864,15 +864,14 @@ impl CompiledKernel {
         let in_ptrs: Vec<*const f64> = in_bufs.iter().map(|b| b.as_ptr()).collect();
         let mut out_ptrs: Vec<*mut f64> = out_bufs.iter_mut().map(|b| b.as_mut_ptr()).collect();
         let ndim = self.ndim;
-        let total: usize = grid_sizes.iter().map(|&g| g as usize).product();
+        let ext: Vec<usize> = grid_sizes.iter().map(|&g| g as usize).collect();
+        let total: usize = ext.iter().product();
+        let mut idx = vec![0usize; ndim];
         for flat in 0..total {
-            let mut coord = vec![0i64; ndim];
-            let mut rem = flat;
-            for ax in (0..ndim).rev() {
-                let g = grid_sizes[ax] as usize;
-                coord[ax] = dom_los[ax] as i64 + (rem % g) as i64;
-                rem /= g;
-            }
+            // the canonical flat -> coord map, owned by `symbi_algebra::unflatten`.
+            symbi_algebra::unflatten(flat, &ext, &mut idx);
+            let coord: Vec<i64> =
+                (0..ndim).map(|ax| dom_los[ax] as i64 + idx[ax] as i64).collect();
             // SAFETY: the kernel reads n_in bases + n_scalar scalars and writes n_out bases at the
             // flat index of `coord` within the shared (lo, extent) layout; the asserts size them.
             unsafe {
@@ -963,14 +962,21 @@ impl CompiledKernel {
         );
         let ndim = self.ndim;
         let total: usize = grid_sizes.iter().map(|&g| g as usize).product();
+        // the iteration extent, hoisted; `unflatten` (symbi-algebra) owns the flat -> coord map so
+        // this driver visits cells in the SAME order as the emitted kernels and the interpreter.
+        // walking the slowest axis fastest is cell-disjoint (hence correct, hence invisible to every
+        // correctness test) while striding the hot loop by extent[0]*extent[1] on every cell.
+        let mut ext = [1usize; MAX_NDIM];
+        for ax in 0..ndim {
+            ext[ax] = grid_sizes[ax] as usize;
+        }
         (0..total).into_par_iter().for_each(|flat| {
             let shared = &shared;
             let mut coord = [0i64; MAX_NDIM];
-            let mut rem = flat;
-            for ax in (0..ndim).rev() {
-                let g = grid_sizes[ax] as usize;
-                coord[ax] = dom_los[ax] as i64 + (rem % g) as i64;
-                rem /= g;
+            let mut idx = [0usize; MAX_NDIM];
+            symbi_algebra::unflatten(flat, &ext[..ndim], &mut idx[..ndim]);
+            for ax in 0..ndim {
+                coord[ax] = dom_los[ax] as i64 + idx[ax] as i64;
             }
             // SAFETY: per the function contract — the kernel reads n_in bases + n_scalar scalars
             // and writes n_out bases at THIS coord's flat index; cell-disjoint write indices make
@@ -984,6 +990,98 @@ impl CompiledKernel {
                     scalars.as_ptr(),
                     shared.out_ptrs.as_ptr() as *mut *mut f64,
                 );
+            }
+        });
+    }
+
+    /// the CACHE-TILED raw-base driver: fan the kernel over a disjoint block cover of the exec
+    /// window in ONE fork-join, walking each block SERIALLY with axis 0 innermost. this is the JIT
+    /// twin of the AOT `ExecPolicy::Cover` (`symbi-exec/src/policy.rs`) — a stencil kernel re-reads
+    /// each cell's neighbours across adjacent output cells, and on a full-grid sweep the reuse
+    /// distance along the slow axes exceeds cache, so every neighbour read hits RAM. a small block
+    /// keeps that reuse L1-resident.
+    ///
+    /// bit-identical to [`run_parallel_raw`]: the blocks PARTITION the window, so every cell is
+    /// computed exactly once by the same kernel on the same inputs; only the visit order differs.
+    ///
+    /// SAFETY: the same caller contract as [`run_parallel_raw`] — blocks are cell-disjoint, so the
+    /// in-place `cons.*` read-before-write aliasing stays sound across threads.
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn run_cover_raw(
+        &self,
+        grid_sizes: &[u32],
+        dom_los: &[i32],
+        lo: &[i32],
+        extent: &[u32],
+        block: &[usize],
+        in_bases: &[*const f64],
+        scalars: &[f64],
+        out_bases: &[*mut f64],
+    ) {
+        use rayon::prelude::*;
+        assert_eq!(grid_sizes.len(), self.ndim);
+        assert_eq!(block.len(), self.ndim);
+        assert_eq!(in_bases.len(), self.n_in);
+        assert_eq!(out_bases.len(), self.n_out);
+        assert_eq!(scalars.len(), self.n_scalar);
+        const MAX_NDIM: usize = 8;
+        assert!(self.ndim <= MAX_NDIM, "run_cover: ndim {} exceeds {MAX_NDIM}", self.ndim);
+        let ndim = self.ndim;
+        let lo_i: Vec<i64> = lo.iter().map(|&x| x as i64).collect();
+        let ext_i: Vec<i64> = extent.iter().map(|&x| x as i64).collect();
+        let shared = SharedBufs { in_ptrs: in_bases.to_vec(), out_ptrs: out_bases.to_vec() };
+
+        // blocks per axis (ceil-div); their product is the fork-join width.
+        let mut nblk = [1usize; MAX_NDIM];
+        for ax in 0..ndim {
+            let g = grid_sizes[ax] as usize;
+            let b = block[ax].max(1);
+            nblk[ax] = g.div_ceil(b);
+        }
+        let total_blocks: usize = nblk[..ndim].iter().product();
+
+        (0..total_blocks).into_par_iter().for_each(|bi| {
+            let shared = &shared;
+            // block coordinate, then its half-open cell bounds in WINDOW-index space (clamped to
+            // the window so the last block on a non-divisible axis is short, never over-runs).
+            let (mut b_lo, mut b_hi) = ([0usize; MAX_NDIM], [1usize; MAX_NDIM]);
+            // block-space index -> block coordinate, through the same owner as the cell-space map.
+            let mut bc = [0usize; MAX_NDIM];
+            symbi_algebra::unflatten(bi, &nblk[..ndim], &mut bc[..ndim]);
+            for ax in 0..ndim {
+                b_lo[ax] = bc[ax] * block[ax].max(1);
+                b_hi[ax] = ((bc[ax] + 1) * block[ax].max(1)).min(grid_sizes[ax] as usize);
+            }
+            let cells: usize = (0..ndim).map(|ax| b_hi[ax] - b_lo[ax]).product();
+            if cells == 0 {
+                return;
+            }
+            // serial odometer over the block, axis 0 innermost (stride-1 runs).
+            let mut idx = [0usize; MAX_NDIM];
+            let mut coord = [0i64; MAX_NDIM];
+            for _ in 0..cells {
+                for ax in 0..ndim {
+                    coord[ax] = dom_los[ax] as i64 + (b_lo[ax] + idx[ax]) as i64;
+                }
+                // SAFETY: per the function contract; blocks partition the window so writes are
+                // cell-disjoint across threads (in-place aliasing is read-before-write per cell).
+                unsafe {
+                    (self.cell)(
+                        coord.as_ptr(),
+                        lo_i.as_ptr(),
+                        ext_i.as_ptr(),
+                        shared.in_ptrs.as_ptr(),
+                        scalars.as_ptr(),
+                        shared.out_ptrs.as_ptr() as *mut *mut f64,
+                    );
+                }
+                for ax in 0..ndim {
+                    idx[ax] += 1;
+                    if idx[ax] < b_hi[ax] - b_lo[ax] {
+                        break;
+                    }
+                    idx[ax] = 0;
+                }
             }
         });
     }
@@ -1858,6 +1956,91 @@ mod tests {
                 out_interp[c],
                 buf[c],
             );
+        }
+    }
+
+    #[test]
+    fn run_cover_raw_matches_run_parallel_raw_3d() {
+        // the cache-tiled cover must be a pure REORDERING of the flat parallel driver: the blocks
+        // PARTITION the window, so every cell is computed exactly once on the same inputs. the
+        // discriminating case is a 3D stencil with a neighbour read on EVERY axis (the slow-axis
+        // reads are the ones tiling makes cache-resident) over a window divisible by NO block edge,
+        // so the last block on each axis is short and the clamp is exercised.
+        use symbi_ir::Symbol;
+
+        let mut g = Graph::new();
+        let x_cell = g.add_scalar_param("x", ElementTy::F64); // in-place, own-cell read
+        let f_cell = g.add_scalar_param("f", ElementTy::F64); // read-only
+        let c0 = g.add_scalar_param("_coord_0", ElementTy::I32);
+        let c1 = g.add_scalar_param("_coord_1", ElementTy::I32);
+        let c2 = g.add_scalar_param("_coord_2", ElementTy::I32);
+        let one = g.add_const(ConstValue::I32(1), None);
+        let c0p = g.element_wise(ElementWiseOp::Add, vec![c0, one], None);
+        let c1p = g.element_wise(ElementWiseOp::Add, vec![c1, one], None);
+        let c2p = g.element_wise(ElementWiseOp::Add, vec![c2, one], None);
+        let fx = g.load_at(Symbol::intern("f"), vec![c0p, c1, c2], None);
+        let fy = g.load_at(Symbol::intern("f"), vec![c0, c1p, c2], None);
+        let fz = g.load_at(Symbol::intern("f"), vec![c0, c1, c2p], None);
+        let (k2, k3, k5) = (
+            g.add_const(ConstValue::F64(2.0), None),
+            g.add_const(ConstValue::F64(3.0), None),
+            g.add_const(ConstValue::F64(5.0), None),
+        );
+        let t1 = g.element_wise(ElementWiseOp::Mul, vec![k2, fx], None);
+        let t2 = g.element_wise(ElementWiseOp::Mul, vec![k3, fy], None);
+        let t3 = g.element_wise(ElementWiseOp::Mul, vec![k5, fz], None);
+        let s1 = g.element_wise(ElementWiseOp::Add, vec![x_cell, t1], None);
+        let s2 = g.element_wise(ElementWiseOp::Add, vec![s1, t2], None);
+        let s3 = g.element_wise(ElementWiseOp::Add, vec![s2, t3], None);
+        let out = g.element_wise(ElementWiseOp::Sub, vec![s3, f_cell], None);
+        assert!(!g.has_errors(), "graph errors: {:?}", g.errors());
+
+        // window 13 x 11 x 7 — divisible by none of the block edges below; buffer +1 per axis so the
+        // `c + 1` neighbour reads stay in bounds.
+        let win = [13u32, 11, 7];
+        let ext = [win[0] + 1, win[1] + 1, win[2] + 1];
+        let n: usize = ext.iter().map(|&e| e as usize).product();
+        let x0: Vec<f64> = (0..n).map(|i| 0.5 + 1.3 * ((i as f64) * 0.071).fract()).collect();
+        let f0: Vec<f64> = (0..n).map(|i| 0.2 + 0.9 * ((i as f64) * 0.053).fract()).collect();
+
+        let kernel = compile_kernel(&g, &["x".into(), "f".into()], &[], &[("x".into(), out)], 3)
+            .expect("jit compile_kernel (3d cover)");
+
+        // the flat driver is the reference.
+        let mut buf_par = x0.clone();
+        // SAFETY: `p` is the live `buf_par` allocation over the (lo=0, ext) layout, aliased as `x`'s
+        // read input and the write output (the intended in-place pattern); `f0` is distinct + read-only.
+        unsafe {
+            let p = buf_par.as_mut_ptr();
+            kernel.run_parallel_raw(
+                &win, &[0, 0, 0], &[0, 0, 0], &ext,
+                &[p as *const f64, f0.as_ptr()], &[], &[p],
+            );
+        }
+        assert!(
+            buf_par.iter().zip(&x0).any(|(a, b)| a.to_bits() != b.to_bits()),
+            "kernel left the buffer unchanged — the comparison would be vacuous",
+        );
+
+        // every block shape must reproduce it bit-for-bit: an edge that splits each axis into short
+        // trailing blocks, a ragged edge, a block larger than the window (one block), and edge 1.
+        for block in [[8usize, 8, 8], [4, 3, 2], [32, 32, 32], [1, 1, 1]] {
+            let mut buf_cov = x0.clone();
+            // SAFETY: as above; the cover's blocks are cell-disjoint, so writes never race.
+            unsafe {
+                let c = buf_cov.as_mut_ptr();
+                kernel.run_cover_raw(
+                    &win, &[0, 0, 0], &[0, 0, 0], &ext, &block,
+                    &[c as *const f64, f0.as_ptr()], &[], &[c],
+                );
+            }
+            for i in 0..n {
+                assert_eq!(
+                    buf_par[i].to_bits(), buf_cov[i].to_bits(),
+                    "cover{block:?} != parallel at flat {i}: par={} cov={}",
+                    buf_par[i], buf_cov[i],
+                );
+            }
         }
     }
 }

@@ -372,16 +372,16 @@ impl Cpu {
             f.data[flat_index(coord, f.lo, f.extent, ndim)]
         };
 
-        let total: usize = grid_sizes.iter().map(|&g| g as usize).product();
+        let ext: Vec<usize> = grid_sizes.iter().map(|&g| g as usize).collect();
+        let total: usize = ext.iter().product();
+        let mut idx = vec![0usize; ndim];
         for flat in 0..total {
-            // unflatten the iteration index into a domain coordinate.
-            let mut coord = vec![0i64; ndim];
-            let mut rem = flat;
-            for ax in (0..ndim).rev() {
-                let g = grid_sizes[ax] as usize;
-                coord[ax] = dom_los[ax] as i64 + (rem % g) as i64;
-                rem /= g;
-            }
+            // the canonical flat -> coord map, owned by the layout (`CONTIGUOUS_AXIS` fastest), so
+            // this reference sweep visits cells in the same order the emitted kernels and the JIT
+            // drivers do. hand-rolling the inverse here is how the two halves drifted apart.
+            symbi_algebra::unflatten(flat, &ext, &mut idx);
+            let coord: Vec<i64> =
+                (0..ndim).map(|ax| dom_los[ax] as i64 + idx[ax] as i64).collect();
             // per-cell environment: coord components, field cell loads, scalars.
             let mut env = Env::new();
             for ax in 0..ndim {

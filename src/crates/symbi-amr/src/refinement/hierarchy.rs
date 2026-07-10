@@ -639,11 +639,16 @@ where
     /// global dt is the min, each tile's internal `dt_cfl.min(global_dt)` collapses to global_dt,
     /// giving a lockstep root step without a separate dt-injection path.
     pub fn root_cfl_dt(&self) -> f64 {
-        let mut dt_cfl = f64::INFINITY;
-        for (ll, lvl) in self.levels.iter().enumerate() {
-            let scale = RATIO.pow(ll as u32) as f64;
-            dt_cfl = dt_cfl.min(lvl.kernels.cfl(&lvl.state) * scale);
-        }
+        // same full-grid wave-speed pass as `step_root`; instrumented under the same phase name so a
+        // decomposed run attributes it identically.
+        let dt_cfl = prof("cfl", || {
+            let mut dt = f64::INFINITY;
+            for (ll, lvl) in self.levels.iter().enumerate() {
+                let scale = RATIO.pow(ll as u32) as f64;
+                dt = dt.min(lvl.kernels.cfl(&lvl.state) * scale);
+            }
+            dt
+        });
         // the user clamp (max_dt > 0): pins the dt sequence across runs whose CFL
         // estimators differ. applied AFTER the raw-cfl crash heuristics elsewhere.
         let clamp = self.levels[0].state.max_dt;
@@ -657,11 +662,18 @@ where
     /// root's own cfl; level l subcycles RATIO^l times, so its limit enters
     /// scaled by RATIO^l (tests/refine_per_level_cfl.rs pins this).
     fn step_root(&mut self, t_final: f64) {
-        let mut dt_cfl = f64::INFINITY;
-        for (ll, lvl) in self.levels.iter().enumerate() {
-            let scale = RATIO.pow(ll as u32) as f64;
-            dt_cfl = dt_cfl.min(lvl.kernels.cfl(&lvl.state) * scale);
-        }
+        // the per-root-step wave-speed pass + global min reduction. instrumented because it is a
+        // FULL-GRID read of prim on every level, once per step, and sits OUTSIDE the substage loop:
+        // at a small domain / high step count it is a large fraction of the step that no per-phase
+        // timing would otherwise attribute.
+        let dt_cfl = prof("cfl", || {
+            let mut dt = f64::INFINITY;
+            for (ll, lvl) in self.levels.iter().enumerate() {
+                let scale = RATIO.pow(ll as u32) as f64;
+                dt = dt.min(lvl.kernels.cfl(&lvl.state) * scale);
+            }
+            dt
+        });
         // a crashed state must HALT the run, not get masked by the `t_final` clamp below. the clamp
         // `dt_cfl.min(t_final - time)` silently replaces a NaN dt with the remaining time (f64::min
         // returns the non-NaN operand) AND clamps a collapsed-wave-speed BLOWUP (an unphysical c2p

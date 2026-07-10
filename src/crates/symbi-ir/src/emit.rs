@@ -125,11 +125,12 @@ pub enum IndexLang {
 /// the formula references the buffer's `lo` and `strides` ARRAYS (pre-multiplied
 /// at View construction). every backend uses the same formula — `IndexLang`
 /// only picks the let/int decl syntax. adding a new backend is one new arm.
-/// SYMBI_VEC_LOOP=1: drop the `*strides[last]` on the CONTIGUOUS axis (==1 for
-/// row-major, guarded by a debug_assert in the vec loop) so the cell index is
-/// affine in the inner coord with coefficient 1 — LLVM's loop-vectorizer then
-/// reads consecutive lanes as one vector load. CPU (Rust) only; GPU is SIMT.
-fn unit_stride_last() -> bool {
+/// SYMBI_VEC_LOOP=1: drop the `* strides[CONTIGUOUS_AXIS]` term (it is 1 by construction —
+/// `strides_from_extent`, guarded by a debug_assert in the vec loop) so the cell index is affine in
+/// the inner coord with coefficient 1 — LLVM's loop-vectorizer then reads consecutive lanes as one
+/// vector load. the axis is DERIVED from the layout, never assumed: the physical-x-fastest
+/// convention makes axis 0 contiguous, not the last axis. CPU (Rust) only; GPU is SIMT.
+fn unit_stride_contiguous() -> bool {
     // debug-emit-knobs gates the SYMBI_VEC_LOOP a/b knob; feature off (default) = canonical env-unset shape (false).
     #[cfg(feature = "debug-emit-knobs")]
     {
@@ -155,12 +156,14 @@ pub fn emit_cell_index_base(lang: IndexLang, ndim: u8, buf: u32, coalesce: bool)
     if coalesce && buf != 0 {
         return format!("    {decl}__idx_cell_buf{f}{ty} = __idx_cell_buf0;");
     }
-    if lang == IndexLang::Rust && unit_stride_last() {
+    if lang == IndexLang::Rust && unit_stride_contiguous() {
         let coords = ["ii", "jj", "kk"];
         let nd = ndim as usize;
+        // the unit-stride term belongs to CONTIGUOUS_AXIS — the axis `strides_from_extent` gives a
+        // stride of 1. dropping the multiply on any OTHER axis silently mis-indexes the buffer.
         let terms: Vec<String> = (0..nd)
             .map(|a| {
-                if a == nd - 1 {
+                if a == symbi_algebra::CONTIGUOUS_AXIS {
                     format!("({} - field{f}.lo[{a}])", coords[a])
                 } else {
                     format!("({} - field{f}.lo[{a}]) * field{f}.strides[{a}]", coords[a])
@@ -199,12 +202,14 @@ pub fn emit_flat_index(lang: IndexLang, ndim: u8, buf: u32, comps: &[&str]) -> S
         IndexLang::Cuda => "",
     };
     let f = buf;
-    if lang == IndexLang::Rust && unit_stride_last() {
+    if lang == IndexLang::Rust && unit_stride_contiguous() {
         let coords = ["ii", "jj", "kk"];
         let nd = ndim as usize;
+        // the stencil delta drops its multiply on CONTIGUOUS_AXIS for the same reason the cell base
+        // does: that stride is 1 by construction. any other axis keeps its stride factor.
         let terms: Vec<String> = (0..nd)
             .map(|a| {
-                if a == nd - 1 {
+                if a == symbi_algebra::CONTIGUOUS_AXIS {
                     format!("(({}) - {})", comps[a], coords[a])
                 } else {
                     format!("(({}) - {}) * field{f}.strides[{a}]", comps[a], coords[a])

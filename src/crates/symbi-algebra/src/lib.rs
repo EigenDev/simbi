@@ -25,7 +25,7 @@ pub use block::BlockGrid;
 pub use boundary::{self as bc, IndexMap};
 pub use element::FieldElement;
 pub use domain::{Domain, DomainId, Space, Side, Axis, IntoAxis, domain, index, IndexName, IntoRange, Split};
-pub use layout::{flat_offset, Layout, strides_from_extent};
+pub use layout::{flat_offset, nest_order, strides_from_extent, unflatten, Layout, CONTIGUOUS_AXIS};
 pub use matrix::{Matrix, outer};
 pub use tensor::{Tensor, dot, cross, norm, normalize, vec2, vec3, vec4, VecN, Vec2, Vec3, Vec4};
 pub use variance::{

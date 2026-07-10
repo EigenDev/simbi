@@ -25,6 +25,7 @@ use crate::regimes::substrate_gpu::dispatch;
 use symbi_sim::state::FieldStore;
 
 use super::binding::{bind_manifest, parse_manifest, resolve_path};
+use super::exec::{policy_for, ExecPolicy};
 use super::layout::{alloc_layout, exec_layout};
 use super::params::{body_scalar, geom_scalar, motion_scalar, physical_geom, ScalarBind};
 
@@ -487,11 +488,24 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
 
     let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
     let (grid, dlo) = exec_layout(&sim.geom.interior);
+    // the SAME cache-tiling policy the AOT kernels get through `dispatch_fields_each`: a big window
+    // is fanned over a disjoint block cover so the godunov flux-divergence stencil's neighbour reads
+    // (which run along the SLOW memory axes) stay L1-resident instead of streaming RAM. without this
+    // the fused stage is the one kernel in the step that never tiles. bit-identical: the cover
+    // partitions the window, so each cell is computed once by the same kernel on the same inputs.
+    //
     // SAFETY: every base points into a buffer allocated over the shared `allocated` (alo, aext)
     // layout; the only aliasing is the intended in-place cons.* (read-before-write per cell);
-    // distinct cells write distinct indices on distinct threads.
+    // distinct cells write distinct indices on distinct threads (blocks are cell-disjoint).
     unsafe {
-        fk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases);
+        match policy_for(&sim.geom.interior, Mem::IS_DEVICE_ACCESSIBLE) {
+            ExecPolicy::Cover(block) => fk
+                .kernel
+                .run_cover_raw(&grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases),
+            ExecPolicy::Whole => {
+                fk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases)
+            }
+        }
     }
 }
 

@@ -237,7 +237,11 @@ impl KernelRenderer for RustRenderer {
         // (incl. the `&mut CpuFieldMut` outputs) is used directly. the cover
         // executor parallelizes over many such blocks, paying ONE fork-join total.
         if self.serial {
-            for aa in 0..ndim {
+            // the nest order is DERIVED from the layout, never assumed: `nest_order` puts
+            // `CONTIGUOUS_AXIS` innermost, so the cell index advances by one element per iteration of
+            // the hot loop. nesting the contiguous axis outermost still produces a correct kernel —
+            // it just strides the hot loop by `extent[0]*extent[1]`, which no correctness test sees.
+            for aa in symbi_algebra::nest_order(ndim) {
                 v.push(format!("    for _i{aa} in 0..(grid_size_{aa} as i32) {{"));
                 v.push(format!(
                     "    let {}: i32 = _i{aa} + dom_lo_{aa};",
@@ -300,50 +304,56 @@ impl KernelRenderer for RustRenderer {
         };
 
         if vec_loop() && ndim >= 2 {
-            // VECTORIZABLE ROW MODE (SYMBI_VEC_LOOP): parallelize over the outer
-            // (non-contiguous) axes; a single COUNTABLE inner loop walks the
-            // contiguous last axis. with the unit-stride index (emit::) this is the
-            // shape LLVM loop-vectorizes (the simd-spike B/C form). row-major
-            // guarantees strides[last]==1 — asserted once per row.
-            let last = ndim - 1;
-            let outer_expr = (0..last)
+            // VECTORIZABLE ROW MODE (SYMBI_VEC_LOOP): parallelize over the NON-contiguous axes; a
+            // single COUNTABLE inner loop walks `CONTIGUOUS_AXIS`. paired with the unit-stride index
+            // (`emit::emit_cell_index_base`) the inner trip advances the cell offset by exactly one
+            // element, which is the shape LLVM's loop-vectorizer turns into whole-vector loads.
+            //
+            // the inner axis is DERIVED from the layout. it is axis 0 under `strides_from_extent`,
+            // NOT the last axis: pointing this loop at the last axis leaves the kernel correct and
+            // strided, so the debug_assert below is the only thing that would ever say so.
+            let inner = symbi_algebra::CONTIGUOUS_AXIS;
+            // outer axes, ascending, so the one adjacent to `inner` in memory varies fastest —
+            // the same nesting `nest_order` gives, minus the innermost.
+            let outer: Vec<usize> = (0..ndim).filter(|&a| a != inner).collect();
+            let outer_expr = outer
+                .iter()
                 .map(|aa| format!("(grid_size_{aa} as usize)"))
                 .collect::<Vec<_>>()
                 .join(" * ");
             v.push(format!("    let _orows: usize = {outer_expr};"));
             v.push("    (0.._orows).into_par_iter().for_each(|_orow| {".to_string());
             push_rebind(&mut v);
-            // unflatten _orow -> outer coords (axis `last-1` fastest among them).
-            if last == 1 {
-                v.push("        let _i0: i32 = _orow as i32;".to_string());
+            // unflatten _orow -> outer coords, canonical order (lowest outer axis fastest).
+            if outer.len() == 1 {
+                v.push(format!("        let _i{}: i32 = _orow as i32;", outer[0]));
             } else {
                 v.push("        let mut _orem: usize = _orow;".to_string());
-                for aa in (1..last).rev() {
+                for &aa in &outer {
                     v.push(format!(
                         "        let _i{aa}: i32 = (_orem % (grid_size_{aa} as usize)) as i32;"
                     ));
                     v.push(format!("        _orem /= grid_size_{aa} as usize;"));
                 }
-                v.push("        let _i0: i32 = _orem as i32;".to_string());
             }
-            for aa in 0..last {
+            for &aa in &outer {
                 v.push(format!(
                     "        let {}: i32 = _i{aa} + dom_lo_{aa};",
                     COORD_VARS[aa]
                 ));
             }
-            // unit-stride precondition (row-major); debug-only, carrier oracle gates correctness.
+            // unit-stride precondition; debug-only, the carrier oracle gates correctness.
             v.push(format!(
-                "        debug_assert!(field0.strides[{last}] == 1, \"SYMBI_VEC_LOOP needs a contiguous last axis\");"
+                "        debug_assert!(field0.strides[{inner}] == 1, \"the vectorized inner loop must walk the contiguous axis\");"
             ));
             // countable inner loop over the contiguous axis (the vectorized dim).
             v.push(format!(
-                "        for _ic in 0..(grid_size_{last} as usize) {{"
+                "        for _ic in 0..(grid_size_{inner} as usize) {{"
             ));
-            v.push(format!("        let _i{last}: i32 = _ic as i32;"));
+            v.push(format!("        let _i{inner}: i32 = _ic as i32;"));
             v.push(format!(
-                "        let {}: i32 = _i{last} + dom_lo_{last};",
-                COORD_VARS[last]
+                "        let {}: i32 = _i{inner} + dom_lo_{inner};",
+                COORD_VARS[inner]
             ));
         } else if cpu_tile_size() == 0 {
             // FLAT (default): parallelize over the flattened interior (every
@@ -358,18 +368,22 @@ impl KernelRenderer for RustRenderer {
                 "    (0.._ptotal).into_par_iter().with_min_len(16).for_each(|_flat| {".to_string(),
             );
             push_rebind(&mut v);
-            // unflatten row-major (axis 0 outermost, axis ndim-1 contiguous).
+            // the emitted flat -> coord map mirrors `symbi_algebra::unflatten`: CONTIGUOUS_AXIS peels
+            // FIRST because it varies fastest, and the outermost axis takes the remainder. peeling
+            // the outermost axis first walks the flat index along the slowest memory axis — correct,
+            // cell-disjoint, and strided by extent[0]*extent[1] on every cell.
+            let peel: Vec<usize> = symbi_algebra::nest_order(ndim).rev().collect();
             if ndim == 1 {
-                v.push("        let _i0: i32 = _flat as i32;".to_string());
+                v.push(format!("        let _i{}: i32 = _flat as i32;", peel[0]));
             } else {
                 v.push("        let mut _rem: usize = _flat;".to_string());
-                for aa in (1..ndim).rev() {
+                for &aa in &peel[..ndim - 1] {
                     v.push(format!(
                         "        let _i{aa}: i32 = (_rem % (grid_size_{aa} as usize)) as i32;"
                     ));
                     v.push(format!("        _rem /= grid_size_{aa} as usize;"));
                 }
-                v.push("        let _i0: i32 = _rem as i32;".to_string());
+                v.push(format!("        let _i{}: i32 = _rem as i32;", peel[ndim - 1]));
             }
             for aa in 0..ndim {
                 v.push(format!(
@@ -397,21 +411,26 @@ impl KernelRenderer for RustRenderer {
             v.push(format!("    let _ntiles: usize = {ntiles_expr};"));
             v.push("    (0.._ntiles).into_par_iter().for_each(|_tile| {".to_string());
             push_rebind(&mut v);
-            // unflatten the tile index -> per-axis tile coord (ndim-1 fastest).
+            // the tile index -> tile coord map, peeled in the same canonical order as the cell map so
+            // consecutive tile indices are adjacent along CONTIGUOUS_AXIS: a rayon worker that takes
+            // a contiguous slice of tile indices then sweeps a row of tiles rather than a column.
+            let peel: Vec<usize> = symbi_algebra::nest_order(ndim).rev().collect();
             if ndim == 1 {
-                v.push("        let _tc0: usize = _tile;".to_string());
+                v.push(format!("        let _tc{}: usize = _tile;", peel[0]));
             } else {
                 v.push("        let mut _trem: usize = _tile;".to_string());
-                for aa in (1..ndim).rev() {
+                for &aa in &peel[..ndim - 1] {
                     v.push(format!("        let _tc{aa}: usize = _trem % _nt_{aa};"));
                     v.push(format!("        _trem /= _nt_{aa};"));
                 }
-                v.push("        let _tc0: usize = _trem;".to_string());
+                v.push(format!("        let _tc{}: usize = _trem;", peel[ndim - 1]));
             }
             // nested cell loops within the tile; declare each axis's coord right
             // after its index. `break` on the boundary handles partial tiles
             // (`_c{aa}` is monotonic in `_d{aa}`). close() emits ndim matching `}`.
-            for aa in 0..ndim {
+            // the nest order is DERIVED from the layout (see the serial branch); each `break` still
+            // exits its own axis's loop, so partial tiles are unaffected by the nesting order.
+            for aa in symbi_algebra::nest_order(ndim) {
                 v.push(format!("        for _d{aa} in 0.._ts {{"));
                 v.push(format!(
                     "        let _c{aa}: usize = _tc{aa} * _ts + _d{aa};"

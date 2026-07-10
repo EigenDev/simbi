@@ -82,12 +82,14 @@ impl<const R: usize> BlockGrid<R> {
     /// arithmetic (no alloc, no atomic). the last block per axis is clipped.
     pub fn window(&self, bi: usize) -> ([isize; R], [usize; R]) {
         let counts = self.counts();
-        let mut rem = bi;
+        // block-space index -> block coordinate through the layout's canonical inverse, so a block
+        // cover walks blocks in the same order a cell sweep walks cells.
+        let mut b = [0usize; R];
+        crate::layout::unflatten(bi, &counts, &mut b);
         let mut lo = [0isize; R];
         let mut size = [0usize; R];
         for aa in 0..R {
-            let b = rem % counts[aa];
-            rem /= counts[aa];
+            let b = b[aa];
             let l = self.domain.spaces[aa].lo + (b * self.block[aa]) as isize;
             let hi = (l + self.block[aa] as isize).min(self.domain.spaces[aa].hi);
             lo[aa] = l;

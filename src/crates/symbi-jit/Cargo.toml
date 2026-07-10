@@ -12,6 +12,7 @@ edition.workspace = true
 
 [dependencies]
 symbi-ir = { path = "../symbi-ir" }
+symbi-algebra = { path = "../symbi-algebra" }
 cranelift-jit = "0.116"
 cranelift-module = "0.116"
 cranelift-native = "0.116"

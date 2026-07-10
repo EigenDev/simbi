@@ -166,3 +166,69 @@ fn iso_runtime_force_fused_equals_two_pass_rk2() {
         assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
     }
 }
+
+#[test]
+fn adiabatic_fused_equals_two_pass_on_the_cache_tiled_cover() {
+    // the oracles above run 24^2 = 576 interior cells, below `WHOLE_BELOW_CELLS` — so the fused
+    // dispatch takes `ExecPolicy::Whole` (the flat driver) and the CACHE-TILED cover is never
+    // exercised. this runs a domain large enough that `policy_for` returns `Cover`, so the fused
+    // godunov executes through `run_cover_raw` (blocks fanned out, serial axis-0-innermost within).
+    // the cover must be a pure reordering: bit-for-bit equal to the two-pass trajectory.
+    use symbi_exec::policy::{policy_for, ExecPolicy};
+
+    type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
+    const GAMMA: f64 = 1.4;
+    let n = 192usize; // 192^2 = 36864 >= WHOLE_BELOW_CELLS (32768)
+    let t_final = 0.001;
+
+    let json = r#"{
+        "kind": "force", "dim": 2, "outputs": [0, 1], "params": [0.5, -0.3],
+        "nodes": [ {"op": "PARAMETER", "param_idx": 0}, {"op": "PARAMETER", "param_idx": 1} ]
+    }"#;
+    let cfg = SourceConfig::from_json(json).expect("parse config");
+
+    let build = || -> Sim {
+        let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([n, n])
+            .bounds([0.0, 0.0], [1.0, 1.0])
+            .boundaries(BoundaryType::Periodic)
+            .finish()
+            .unwrap();
+        sim.seed_cells(|p| {
+            let (x, y) = (p[0], p[1]);
+            let rho = 1.0 + 0.2 * (std::f64::consts::TAU * x).sin() * (std::f64::consts::TAU * y).cos();
+            Prim { rho, vel: Tensor::new([0.1, -0.05]), pre: 1.0 }
+        });
+        sim
+    };
+
+    let mut sim_two = build();
+    let sub_two = sim_two.substrate()
+        .with_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    evolve(&mut sim_two, &sub_two, t_final).expect("two-pass evolve");
+
+    let mut sim_fused = build();
+    let sub_fused = sim_fused.substrate()
+        .with_fused_runtime_source(build_user_source(&cfg, &NEWTONIAN_SPEC).unwrap(), cfg.params.clone());
+    evolve(&mut sim_fused, &sub_fused, t_final).expect("fused evolve");
+
+    // GUARD 1: the fused kernel compiled (else two-pass vs two-pass).
+    assert_eq!(
+        sub_fused.runtime_source.as_ref().unwrap().fused_cpu_state(), Some(true),
+        "fused godunov+source kernel did not compile",
+    );
+    // GUARD 2: the domain really does select the tiled cover (else this duplicates the Whole-path
+    // oracles and proves nothing about `run_cover_raw`).
+    assert!(
+        matches!(policy_for(&sim_fused.geom.interior, false), ExecPolicy::Cover(_)),
+        "domain did not select ExecPolicy::Cover — the cache-tiled fused path was not exercised",
+    );
+
+    let interior = &sim_fused.geom.interior;
+    assert_cons_bit_identical(interior, &sim_fused.fields.cons.den, &sim_two.fields.cons.den, "cons.den");
+    for k in 0..2 {
+        assert_cons_bit_identical(interior, &sim_fused.fields.cons.mom[k], &sim_two.fields.cons.mom[k], "cons.mom");
+    }
+    let (nf, nt) = (sim_fused.fields.cons.nrg_field().unwrap(), sim_two.fields.cons.nrg_field().unwrap());
+    assert_cons_bit_identical(interior, nf, nt, "cons.nrg");
+}

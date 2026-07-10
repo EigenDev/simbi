@@ -41,6 +41,39 @@ where
     }
 }
 
+/// THE contiguous axis: the one `strides_from_extent` gives a stride of 1. every consumer that needs
+/// to know "which axis is adjacent in memory" — the CPU loop nest, the unit-stride index term, the
+/// vectorized inner loop, the GPU warp axis — must read it from HERE rather than assume a rank.
+/// assuming the wrong axis is silent: the code stays correct (the offset formula is still affine) and
+/// only the memory-access pattern degrades, which no correctness test can see.
+pub const CONTIGUOUS_AXIS: usize = 0;
+
+/// the INVERSE of the flat index: recover a coordinate from a canonical iteration index, with
+/// [`CONTIGUOUS_AXIS`] varying FASTEST. this is the map every flat driver (`0..total` parallel
+/// sweeps, block covers, the IR interpreter) needs, and the one the layout historically did not own —
+/// so each rolled its own and half of them walked the SLOWEST axis fastest, striding the hot loop by
+/// `extent[0]*extent[1]` on every cell.
+///
+/// the defining law, pinned by `unflatten_inverts_the_flat_offset`: for a buffer whose extent equals
+/// the iteration extent and whose origin is zero, `flat_offset(unflatten(f)) == f`.
+#[inline]
+pub fn unflatten(mut flat: usize, extent: &[usize], out: &mut [usize]) {
+    debug_assert_eq!(extent.len(), out.len(), "unflatten: length mismatch");
+    for a in 0..extent.len() {
+        out[a] = flat % extent[a];
+        flat /= extent[a];
+    }
+}
+
+/// the canonical loop-nest order: OUTERMOST axis first, innermost last. the innermost axis is always
+/// [`CONTIGUOUS_AXIS`], so the hot loop advances the flat offset by exactly one element per iteration
+/// — the precondition both for cache-line reuse and for a compiler to prove a unit-stride access and
+/// vectorize the body.
+#[inline]
+pub fn nest_order(ndim: usize) -> impl DoubleEndedIterator<Item = usize> + Clone {
+    (0..ndim).rev()
+}
+
 /// the affine flat offset under physical-x-fastest strides: `sum_a (coord[a] - lo[a]) * strides[a]`.
 /// THE single value-path index formula (docs/design/38 P3a) — `Layout::at`, `Domain::flat_index`,
 /// and the grid `View`/`ViewMut` accessors all route here, so the storage convention lives in
@@ -102,10 +135,10 @@ impl<const D: usize> Layout<D> {
         self.extent.iter().any(|&e| e == 0)
     }
 
-    /// the contiguous (unit-stride) axis — always 0 under physical-x-fastest. the
+    /// the contiguous (unit-stride) axis — always [`CONTIGUOUS_AXIS`] under physical-x-fastest. the
     /// invariant the lane primitive (`Gv<N>`) will load `N` consecutive lanes along.
     pub const fn contiguous_axis(&self) -> usize {
-        0
+        CONTIGUOUS_AXIS
     }
 }
 
@@ -179,5 +212,113 @@ mod laws {
         assert_eq!(Layout::from_domain(&d), Layout::from_domain(&d));
         assert_eq!(Layout::from_domain(&d).contiguous_axis(), 0);
         assert_eq!(Layout::from_domain(&d).len(), d.volume());
+    }
+
+    // ---- the traversal laws ---------------------------------------------------------------
+    // the layout owns WHERE a cell lives (`strides_from_extent`, `flat_offset`) AND, from here
+    // down, the ORDER a sweep visits cells (`unflatten`, `nest_order`). every driver and every
+    // code emitter derives from these; the tests below are what makes "derives" enforceable.
+
+    /// the definition: `strides_from_extent` gives the contiguous axis a stride of exactly 1.
+    #[test]
+    fn contiguous_axis_has_unit_stride() {
+        for extent in [vec![7usize], vec![7, 5], vec![7, 5, 3], vec![2, 128, 1]] {
+            let mut s = vec![0usize; extent.len()];
+            strides_from_extent(&extent, &mut s);
+            assert_eq!(
+                s[CONTIGUOUS_AXIS], 1,
+                "CONTIGUOUS_AXIS={CONTIGUOUS_AXIS} is not unit-stride for extent {extent:?}: {s:?}",
+            );
+        }
+    }
+
+    /// `unflatten` is the exact inverse of the layout's flat index. a driver that unflattens the
+    /// OTHER way round (slowest axis fastest) still visits every cell exactly once — so no
+    /// correctness test catches it — but it strides the hot loop by `extent[0]*extent[1]`. this law
+    /// is what makes that a compile-time-visible bug instead of a silent 2x.
+    #[test]
+    fn unflatten_inverts_the_flat_offset() {
+        for extent in [vec![7usize], vec![7, 5], vec![4, 3, 2], vec![2, 128, 1]] {
+            let nd = extent.len();
+            let mut strides = vec![0usize; nd];
+            strides_from_extent(&extent, &mut strides);
+            let total: usize = extent.iter().product();
+            let mut coord = vec![0usize; nd];
+            for flat in 0..total {
+                unflatten(flat, &extent, &mut coord);
+                // flat_offset over a zero-origin buffer must reproduce the iteration index itself.
+                let off: usize = (0..nd).map(|a| coord[a] * strides[a]).sum();
+                assert_eq!(off, flat, "unflatten != inverse at {flat} of {extent:?}");
+            }
+        }
+    }
+
+    /// consecutive iteration indices differ by exactly one element in memory. this is the property
+    /// a compiler needs to prove a unit-stride access and vectorize; it is also the reason the hot
+    /// loop stays on one cache line.
+    #[test]
+    fn consecutive_iteration_indices_are_adjacent_in_memory() {
+        let extent = vec![4usize, 3, 2];
+        let mut strides = vec![0usize; 3];
+        strides_from_extent(&extent, &mut strides);
+        let total: usize = extent.iter().product();
+        let (mut a, mut b) = (vec![0usize; 3], vec![0usize; 3]);
+        for flat in 0..total - 1 {
+            unflatten(flat, &extent, &mut a);
+            unflatten(flat + 1, &extent, &mut b);
+            let off = |c: &[usize]| -> usize { (0..3).map(|i| c[i] * strides[i]).sum() };
+            assert_eq!(
+                off(&b) - off(&a),
+                strides[CONTIGUOUS_AXIS],
+                "consecutive indices {flat},{} are not adjacent in memory",
+                flat + 1,
+            );
+        }
+    }
+
+    /// the loop nest's INNERMOST axis is the contiguous one. an emitter that nests the contiguous
+    /// axis outermost produces a correct kernel whose hot loop strides across memory — the exact
+    /// shape that denies vectorization and thrashes the line.
+    #[test]
+    fn nest_order_puts_the_contiguous_axis_innermost() {
+        for ndim in 1..=3 {
+            let order: Vec<usize> = nest_order(ndim).collect();
+            assert_eq!(order.len(), ndim);
+            assert_eq!(
+                *order.last().unwrap(),
+                CONTIGUOUS_AXIS,
+                "nest_order({ndim}) innermost axis must be CONTIGUOUS_AXIS, got {order:?}",
+            );
+            let mut seen: Vec<usize> = order.clone();
+            seen.sort_unstable();
+            assert_eq!(seen, (0..ndim).collect::<Vec<_>>(), "nest_order must be a permutation");
+        }
+    }
+
+    /// walking `nest_order` as a real nest visits cells in exactly `unflatten` order — so the two
+    /// halves of the traversal contract (a nested emitter, a flat driver) cannot disagree.
+    #[test]
+    fn nest_order_walk_agrees_with_unflatten() {
+        let extent = [4usize, 3, 2];
+        let order: Vec<usize> = nest_order(3).collect(); // [2, 1, 0]
+        let mut visited = Vec::new();
+        for o in 0..extent[order[0]] {
+            for m in 0..extent[order[1]] {
+                for i in 0..extent[order[2]] {
+                    let mut c = [0usize; 3];
+                    c[order[0]] = o;
+                    c[order[1]] = m;
+                    c[order[2]] = i;
+                    visited.push(c);
+                }
+            }
+        }
+        let total: usize = extent.iter().product();
+        assert_eq!(visited.len(), total);
+        let mut c = vec![0usize; 3];
+        for (flat, v) in visited.iter().enumerate() {
+            unflatten(flat, &extent, &mut c);
+            assert_eq!(&c[..], &v[..], "nest walk diverges from unflatten at {flat}");
+        }
     }
 }
