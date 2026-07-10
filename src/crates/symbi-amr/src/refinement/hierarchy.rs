@@ -742,10 +742,13 @@ where
                 .as_ref()
                 .is_some_and(|im| im.bodies.needs_feedback());
             if needs_fb {
-                finest.kernels.body_feedback(&finest.state, dt);
+                // the backward reduction sweeps the full domain (~11 outputs per
+                // body: force/torque/mass/energy) — a real per-step cost that must
+                // appear in the profile, not hide in the wall-vs-instrumented gap.
+                prof("body_feedback", || finest.kernels.body_feedback(&finest.state, dt));
             }
             finest.state.dt = dt;
-            evolve_bodies(&mut finest.state);
+            prof("body_motion", || evolve_bodies(&mut finest.state));
 
             let truth: Vec<_> = {
                 let bodies = &self.levels[fi].state.immersed.as_ref().unwrap().bodies;

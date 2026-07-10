@@ -921,6 +921,10 @@ where
     let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
     let mut next_diag = diag_interval;
     let start = std::time::Instant::now();
+    // checkpoint-write seconds, accumulated ALWAYS (not just under SYMBI_PROFILE): the
+    // exit summary reports the sustained integration rate with i/o excluded — on a
+    // short run the h5 writes are a large slice of wall and dilute the displayed rate.
+    let io_secs = std::cell::Cell::new(0.0f64);
     let mut last_inst = start;
     let mut last_iter = hier.levels[0].state.iteration;
     // FOFC observability: zero the deliberate-fallback counters at run start, track the last-seen
@@ -1033,7 +1037,10 @@ where
             let states: Vec<&_> = h.levels.iter().map(|l| &l.state).collect();
             let path =
                 checkpoint_name(cfg, &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index));
-            match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
+            let t_io = std::time::Instant::now();
+            let res = write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index));
+            io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
+            match res {
                 Ok(_) => table.post_success(&format!(
                     "checkpoint {path}  ({}, manual)",
                     fmt_time_msg(cfg, time)
@@ -1107,7 +1114,12 @@ where
                 cfg,
                 &checkpoint_tag(cfg, cp_idx_width, cp_width, time, cp_index),
             );
-            match write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index)) {
+            let t_io = std::time::Instant::now();
+            let res = symbi_sim::driver::prof("checkpoint_io", || {
+                write_hierarchy_checkpoint(&states, &path, &checkpoint_metadata(cfg, cp_index))
+            });
+            io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
+            match res {
                 Ok(_) => {
                     table.post_success(&format!("checkpoint {path}  ({})", fmt_time_msg(cfg, time)))
                 }
@@ -1305,11 +1317,19 @@ where
 
     let states: Vec<&_> = hier.levels.iter().map(|l| &l.state).collect();
     let final_path = checkpoint_name(cfg, "final");
-    write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))?;
+    let t_io = std::time::Instant::now();
+    symbi_sim::driver::prof("checkpoint_io", || {
+        write_hierarchy_checkpoint(&states, &final_path, &checkpoint_metadata(cfg, cp_index))
+    })?;
+    io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
     let root = &hier.levels[0].state;
     let wall = start.elapsed().as_secs_f64();
+    // the sustained integration rate excludes checkpoint i/o: what the solver
+    // delivers between writes, and the number comparable across run lengths
+    // (wall-based rates dilute with checkpoint cadence on short runs).
+    let compute = (wall - io_secs.get()).max(1e-9);
     let avg = if wall > 1e-9 {
-        n_zones as f64 * root.iteration as f64 / wall
+        n_zones as f64 * root.iteration as f64 / compute
     } else {
         0.0
     };
@@ -1318,10 +1338,11 @@ where
     screen.leave();
     table.set_dynamic(false);
     let summary = format!(
-        "complete — {} steps, t = {:.4}, {:.2}s, {}/s · final {final_path}",
+        "complete — {} steps, t = {:.4}, {:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
         root.iteration,
         root.time,
         wall,
+        io_secs.get(),
         humanize_rate(avg),
     );
     table.post_success(&summary);

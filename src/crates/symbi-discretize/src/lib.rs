@@ -36,7 +36,8 @@ pub use coords::{Coords, Spacing, Spacetime};
 // types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use symbi_ir::{Gv, GvKernel};
 pub use gv_immersed::{
-    body_feedback_gv, body_feedback_iso_gv, body_source_built, body_source_gv, body_source_iso_gv,
+    body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,
+    body_source_built, body_source_gv, body_source_iso_gv,
 };
 pub use gv::{
     adiabatic_c2p_gv, adiabatic_flux_cyl_rz_gv, adiabatic_flux_gv, adiabatic_hllc_flux_gv,

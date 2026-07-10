@@ -209,6 +209,16 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
     if D < 2 {
         return; // body feedback is emitted for ndim >= 2 (torque is degenerate in 1D)
     }
+    // cartesian grids take the SPLIT path: the gravity reaction reduces globally over
+    // one streamed field, the drain-weighted quantities over the sink support box —
+    // the combined kernel wrote MAX_BODIES*(D+5) full-domain scratch fields per step
+    // (~800 MB of traffic at 128^3) to integrate quantities supported on the sink.
+    // curvilinear grids keep the combined kernel: the support box is a coordinate
+    // ball, not an index-aligned box, so the restriction does not apply directly.
+    if sim.geom.coords == symbi_geometry::Geometry::Cartesian {
+        dispatch_body_feedback_split(sim, dt, gamma);
+        return;
+    }
     let geom = &sim.geom;
     let sfx = geom_suffix(geom.coords, DOF, D);
     let name = format!("body_feedback{sfx}_{D}d");
@@ -268,6 +278,128 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
                 energy_delta: sums[base + D + 4],
             });
         }
+    }
+}
+
+/// the SPLIT feedback path (cartesian): per ACTIVE body, a gravity-reaction pass
+/// reduced over the full interior (one field streamed, D outputs) and a drain pass
+/// dispatched AND reduced over the body's sink support bounding box (D+5 outputs,
+/// every integrand exactly zero outside the box by tanh saturation —
+/// `ibm::DRAIN_SUPPORT_WIDTHS`). inert body slots cost nothing. sums differ from the
+/// combined kernel only by floating-point reassociation over the smaller region
+/// (omitted terms are exact zeros).
+fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let Some(im) = sim.immersed.as_ref() else { return };
+    let geom = &sim.geom;
+    let sfx = geom_suffix(geom.coords, DOF, D);
+    let grav_name = format!("body_feedback_grav{sfx}_{D}d");
+    let drain_name = format!("body_feedback_drain{sfx}_{D}d");
+    let per_drain = D + 5;
+
+    // slot-0 scalar resolution rebound to body `b`: the single-body kernels declare
+    // `body_0_*`; each active body's dispatch feeds its own parameters through them.
+    let bodies = &im.bodies;
+    let resolve = |name: &str, b: usize| -> Vec<Sc> {
+        scalars_for(name, |bind| {
+            let ScalarBind::Ref(sref) = bind else {
+                panic!("body kernel '{name}': unexpected spec scalar {bind:?}");
+            };
+            let v: f64 = match *sref {
+                ScalarRef::Dt => dt,
+                ScalarRef::Gamma | ScalarRef::Cs => gamma,
+                ScalarRef::Body { idx: 0, field } => body_scalar::<D>(Some(bodies), b as u8, field),
+                other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, other)
+                    .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
+            };
+            Sc::from_f64(v)
+        })
+    };
+
+    // reduction scratch, shared across bodies and both passes (assign-write + reduce
+    // over the SAME region needs no zeroing).
+    let scratch: Vec<Field<Sc, D, Mem>> = (0..per_drain)
+        .map(|_| Field::<Sc, D, Mem>::zeros(&geom.allocated).expect("feedback scratch alloc"))
+        .collect();
+
+    let nrg = sim.fields.cons.nrg_field().expect("body_feedback needs cons.nrg");
+    let mut den_in: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+    let mut full_in: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+    for comp in 0..DOF {
+        full_in.push(&sim.fields.cons.mom[comp]);
+    }
+    full_in.push(nrg);
+    den_in.truncate(1);
+
+    for b in 0..bodies.len() {
+        // gravity reaction: global support, reads cons.den only.
+        let g_out: Vec<&Field<Sc, D, Mem>> = scratch[..D].iter().collect();
+        let g_scalars = resolve(&grav_name, b);
+        dispatch_fields::<Sc, Mem, D>(
+            &grav_name, &geom.allocated, &geom.interior, &den_in, &g_out, &[], &g_scalars,
+        );
+        let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
+        for g in 0..D {
+            force[g] = field_reduce(&scratch[g], &geom.interior, ReductionOp::Add);
+        }
+
+        // drain-weighted quantities: support-box dispatch + reduce. the box is the
+        // body position +- (racc + support-widths * min dx) in index space, clamped
+        // to the interior. a non-accreting body has no sink (every drain output is
+        // identically zero) and a body outside the domain intersects nothing — both
+        // skip the pass entirely, BEFORE Domain construction (an empty Space panics).
+        let body = bodies.get(b);
+        let min_dx = (0..D).map(|a| geom.dx[a]).fold(f64::INFINITY, f64::min);
+        let bbox = body.accretion_radius().and_then(|racc| {
+            let r_cut = racc + symbi_discretize::ibm::DRAIN_SUPPORT_WIDTHS * min_dx;
+            let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
+                let s = &geom.interior.spaces[a];
+                // index anchor: `x = x_lo + i*dx` with ABSOLUTE index i
+                // (stagger_coord), no interior offset in the map.
+                let lo_x = (body.position[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
+                let hi_x = (body.position[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
+                let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
+                let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
+                symbi_algebra::Space { name: s.name, lo, hi }
+            });
+            spaces.iter().all(|sp| sp.lo < sp.hi).then(|| Domain::new(spaces))
+        });
+        let mut drag = symbi_algebra::Tensor::<f64, D>::zeros();
+        let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
+        let (mut mass, mut energy) = (0.0f64, 0.0f64);
+        if let Some(bbox) = bbox {
+            let d_out: Vec<&Field<Sc, D, Mem>> = scratch[..per_drain].iter().collect();
+            let d_scalars = resolve(&drain_name, b);
+            dispatch_fields::<Sc, Mem, D>(
+                &drain_name, &geom.allocated, &bbox, &full_in, &d_out, &[], &d_scalars,
+            );
+            for g in 0..D {
+                drag[g] = field_reduce(&scratch[g], &bbox, ReductionOp::Add);
+            }
+            for t in 0..3 {
+                torque[t] = field_reduce(&scratch[D + t], &bbox, ReductionOp::Add);
+            }
+            mass = field_reduce(&scratch[D + 3], &bbox, ReductionOp::Add);
+            energy = field_reduce(&scratch[D + 4], &bbox, ReductionOp::Add);
+        }
+
+        for g in 0..D {
+            force[g] += drag[g];
+        }
+        im.diagnostics.accumulate(symbi_ib::BodyDelta {
+            idx: b,
+            force_delta: force,
+            torque_delta: torque,
+            mass_delta: mass,
+            prev_mass_delta: 0.0,
+            energy_delta: energy,
+        });
     }
 }
 

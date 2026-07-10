@@ -35,7 +35,8 @@ static REGISTRY: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
 // hlle_flux, rhd_hlle_flux, godunov_euler/snapshot/rk2, ...). build.rs only
 // drives them: build the graph via a builder, then emit (CPU Rust + CUDA source).
 use symbi_discretize::{
-    body_feedback_gv, body_feedback_iso_gv, body_source_gv, body_source_iso_gv,
+    body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,
+    body_source_gv, body_source_iso_gv,
     geometric_momentum_source_probe_gv, geometry_probe_gv, godunov_mass_gv,
     inertial_momentum_probe_gv, iso_ghost_fill_gv, iso_wave_speed_map_gv,
     neumann_ghost_fill_gv, robin_ghost_fill_gv,
@@ -1547,6 +1548,16 @@ fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {
     let g = Geom::identity(coords, ndim);
     let (k, writes) = body_feedback_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
+    // the SPLIT single-body halves (design 47 act 9): the gravity reaction reduces
+    // globally over one streamed field; the drain-weighted quantities reduce over the
+    // sink support box only. the combined kernel above stays registered (iso + the
+    // full-domain fallback for curvilinear grids where the box is not index-aligned).
+    let gname = format!("body_feedback_grav{}_{ndim}d", coords_suffix(coords));
+    let (k, writes) = body_feedback_grav_gv(coords, ndim as usize, &g.axes);
+    emit_gv(out_dir, &gname, ndim, &k, &writes);
+    let dname = format!("body_feedback_drain{}_{ndim}d", coords_suffix(coords));
+    let (k, writes) = body_feedback_drain_gv(coords, ndim as usize, g.ncomp as usize, &g.axes);
+    emit_gv(out_dir, &dname, ndim, &k, &writes);
 }
 
 // immersed-body ISOTHERMAL forward/backward: identical physics, but cs comes from

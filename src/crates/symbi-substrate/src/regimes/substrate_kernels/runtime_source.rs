@@ -380,7 +380,9 @@ where
     let (coords, spacing, axes) = sim_gv_geom(sim);
     rs.source_cpu
         .get_or_init(|| {
-            build_source_only_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, &rs.built)
+            symbi_sim::driver::prof("jit_build", || {
+                build_source_only_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, &rs.built)
+            })
         })
         .as_ref()
 }
@@ -477,7 +479,9 @@ where
     let n_bodies = if fold_body && sim.immersed.is_some() { MAX_BODIES } else { 0 };
     rs.fused_cpu
         .get_or_init(|| {
-            build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, geo, &rs.built, n_bodies)
+            symbi_sim::driver::prof("jit_build", || {
+                build_fused_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, geo, &rs.built, n_bodies)
+            })
         })
         .as_ref()
 }

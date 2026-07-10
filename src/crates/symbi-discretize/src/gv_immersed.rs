@@ -315,6 +315,94 @@ pub fn body_source_gv(
     (end_trace(), writes)
 }
 
+/// BACKWARD feedback, GRAVITY-REACTION half (single body slot): per cell, the reaction
+/// force the gas exerts on the body, `f_grav[ax] = -(den * g_cart[ax]) * dv`. genuinely
+/// GLOBAL support — every gas cell pulls on the body — so the runtime reduces it over
+/// the full interior. reads only `cons.den` (no velocity / energy / sound speed), so
+/// the pass streams one field instead of five. slot-0 scalar names (`body_0_*`); the
+/// dispatch rebinds them per ACTIVE body.
+pub fn body_feedback_grav_gv(
+    coords: Coords,
+    ndim: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    begin_trace();
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let den = Gv::field("den", FieldRef::cons_den());
+    let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    let mut coord3 = [Gv::ZERO; 3];
+    for (g, &coord_idx) in axes.iter().enumerate() {
+        if coord_idx < 3 {
+            coord3[coord_idx] = geo.centroid[g];
+        }
+    }
+    let cell_cart = to_cartesian_gv(coords, &coord3);
+    let dv = Gv::ONE / geo.inv_volume;
+    let mass = Gv::scalar("body_0_mass");
+    let soft = Gv::scalar("body_0_soft");
+    let bpos = body_vec3(0, ndim, &cart_axes, "pos");
+    let rvec: [Gv; 3] = std::array::from_fn(|i| cell_cart[i] - bpos[i]);
+    let g = crate::ibm::softened_gravity(rvec, mass, soft);
+    let mut writes: Writes = Vec::new();
+    for ax in 0..ndim {
+        let fc = -(den * g[cart_axes[ax]]) * dv;
+        writes.push((format!("b0_f{ax}"), format!("fb_0_force_{ax}").into(), fc.node()));
+    }
+    (end_trace(), writes)
+}
+
+/// BACKWARD feedback, DRAIN half (single body slot): the sink-weighted quantities —
+/// drag force (absorbed momentum / dt), torque, absorbed mass and energy. every output
+/// is proportional to `frac = 1 - exp(-rate*dt)`, which is EXACTLY zero outside the
+/// mask support (tanh saturation, `ibm::DRAIN_SUPPORT_WIDTHS`), so the runtime
+/// dispatches AND reduces this kernel over the body's support bounding box only: an
+/// omitted cell contributes an exact zero to every sum. slot-0 scalar names; the
+/// dispatch rebinds them per active body.
+pub fn body_feedback_drain_gv(
+    coords: Coords,
+    ndim: usize,
+    ncomp: usize,
+    axes: &[usize],
+) -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let gamma = Gv::scalar("gamma");
+    let inv_dt = Gv::ONE / dt;
+    let cart_axes = body_cart_axes(coords, ndim, axes);
+    let den = Gv::field("den", FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ncomp)
+        .map(|comp| Gv::field(&format!("mom_{comp}"), FieldRef::cons_mom(comp as u8)))
+        .collect();
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let (_coord3, cell_cart, vel_cart, min_w, cs, _e_int) =
+        cell_scaffold(coords, ndim, ncomp, axes, gamma, den, &mom, nrg);
+    let geo: CellGeometryGv = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], axes, ndim);
+    let dv = Gv::ONE / geo.inv_volume;
+    let mom_cart: [Gv; 3] = std::array::from_fn(|i| den * vel_cart[i]);
+
+    let bc = body_contribution(0, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
+    let frac = Gv::cond(
+        bc.drain_rate.cmp_gt(Gv::ZERO),
+        || Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp(),
+        || Gv::ZERO,
+    );
+    let mut fa = [Gv::ZERO; 3];
+    for i in 0..3 {
+        fa[i] = mom_cart[i] * frac * dv * inv_dt;
+    }
+    let mut writes: Writes = Vec::new();
+    for ax in 0..ndim {
+        writes.push((format!("b0_f{ax}"), format!("fb_0_force_{ax}").into(), fa[cart_axes[ax]].node()));
+    }
+    let cross = |a: usize, bb: usize| bc.rvec[a] * fa[bb] - bc.rvec[bb] * fa[a];
+    for (t, tc) in [cross(1, 2), cross(2, 0), cross(0, 1)].into_iter().enumerate() {
+        writes.push((format!("b0_t{t}"), format!("fb_0_torque_{t}").into(), tc.node()));
+    }
+    writes.push(("b0_m".to_string(), "fb_0_mass".into(), (den * frac * dv).node()));
+    writes.push(("b0_e".to_string(), "fb_0_energy".into(), (nrg * frac * dv).node()));
+    (end_trace(), writes)
+}
+
 /// BACKWARD feedback: per cell, per body, the CARTESIAN force / 3D torque / absorbed mass / absorbed
 /// energy each body receives -> the MAX_BODIES*(ndim+5) reduction-scratch writes (`fb_{b}_force_{ax}`
 /// / `fb_{b}_torque_{t}` / `fb_{b}_mass` / `fb_{b}_energy`, the order the runtime sums). generic over
