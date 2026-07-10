@@ -818,7 +818,20 @@ where
         let l = &self.levels[level];
         // the stage-input cons snapshot: needed by the additive source pass AND by FOFC (which
         // restores `cons <- u_stage` to reconstruct the first-order fluxes from the physical input).
-        if additive_source || l.kernels.fofc_active() {
+        //
+        // at the FIRST stage of a multi-stage scheme `level_step_begin` has just run `snapshot`
+        // (`cons -> u_n`) and nothing has touched cons since, so u_n ALREADY holds the stage input.
+        // flag it and skip the copy: `stage_input()` binds u_n for this stage, saving a full-grid
+        // conserved memcpy per step. u_stage is never written while the flag is set, so the alias is
+        // read-only. `stages.len() == 1` has no `snapshot`, so u_n is stale and the copy stands.
+        let stage_input_is_un = ii == 0
+            && n > 1
+            && l.state.workspace.elide_stage_snapshot.load(std::sync::atomic::Ordering::Relaxed);
+        l.state
+            .workspace
+            .stage_input_is_un
+            .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
+        if !stage_input_is_un && (additive_source || l.kernels.fofc_active()) {
             prof("snapshot_stage", || l.kernels.snapshot_stage(&l.state));
         }
         l.kernels.wave_speeds(&l.state);

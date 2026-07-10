@@ -649,6 +649,17 @@ pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpac
     /// invariant (see `godunov_with_fused_source` S2 proof). dead weight unless an
     /// additive source overlay is active (the step loop gates the snapshot).
     pub u_stage: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
+    /// when set, every `u_stage` binding resolves to `u_n` instead. at the FIRST stage of a
+    /// multi-stage SSP scheme `snapshot` has just copied `cons -> u_n` and nothing has touched cons
+    /// since, so `u_n` IS the stage input — copying cons a second time into `u_stage` moves a
+    /// full-grid conserved set for no information. `u_stage` is read-only once written (only
+    /// `snapshot_stage` writes it), so the alias can never be written through. the driver sets it per
+    /// stage; `binding.rs` is the single site that honours it.
+    pub stage_input_is_un: std::sync::atomic::AtomicBool,
+    /// disables the stage-0 alias above, forcing the `cons -> u_stage` copy at every stage. the
+    /// REFERENCE path: an oracle evolves the same state both ways and asserts a bit-identical
+    /// trajectory, so the elision cannot silently change physics. `true` (elide) in production.
+    pub elide_stage_snapshot: std::sync::atomic::AtomicBool,
     /// first-order flux-correction scratch: the HIGH-ORDER per-direction conserved fluxes, saved
     /// before FOFC redoes the substage at first order (which overwrites `fields.flux`). the
     /// face-based splice reads HO here and FO from the live `fields.flux`, choosing per face by the
@@ -1430,6 +1441,24 @@ pub struct Context<S: ExecutionSpace> {
 /// `DOF = NDIM = D` (the natural case); axisymmetric hydro uses `SimStateGeneric<R, 2, 3,
 /// Cylindrical, ..>` directly (2D grid, 3-vector momentum with the v_phi swirl).
 ///
+impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + OrderedNumeric>
+    FieldStore<NDIM, DOF, Mem, Sc>
+{
+    /// THE stage-INPUT conserved set — the state an SSP stage's sources and its FOFC fallback must
+    /// evaluate against. it is `u_n` at the first stage of a multi-stage scheme (where `snapshot`
+    /// has already captured it and the driver elides the redundant `cons -> u_stage` copy), and the
+    /// `u_stage` snapshot otherwise. every reader routes here; branching on
+    /// `stage_input_is_un` at each call site is how a buffer alias drifts into a correctness bug.
+    #[inline]
+    pub fn stage_input(&self) -> &ConsFieldsGeneric<NDIM, DOF, Mem, Sc> {
+        if self.workspace.stage_input_is_un.load(std::sync::atomic::Ordering::Relaxed) {
+            &self.workspace.u_n
+        } else {
+            &self.workspace.u_stage
+        }
+    }
+}
+
 /// **the storage seam (R3):** `SimStateGeneric` `Deref`s to its `FieldStore`. this is a
 /// DELIBERATE seam, not accidental `Deref`-as-inheritance: the `FieldStore` IS the sim's
 /// substance (1300+ `sim.fields` / `sim.geom` / `sim.time` accesses), while `physics` /
@@ -1745,6 +1774,8 @@ where
             u_n: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
             prim_n: PrimFieldsGeneric::zeros_with_pressure(&allocated, alloc_pre)?,
             u_stage: ConsFieldsGeneric::zeros_with_energy(&allocated, has_energy)?,
+            stage_input_is_un: std::sync::atomic::AtomicBool::new(false),
+            elide_stage_snapshot: std::sync::atomic::AtomicBool::new(true),
             flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
             fofc_flag: Field::zeros(&allocated)?,
         };

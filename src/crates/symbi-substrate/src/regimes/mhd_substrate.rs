@@ -483,7 +483,7 @@ pub(crate) fn snapshot_stage<const D: usize, const DOF: usize, Mem, Sc>(
         extent: &aext,
     };
 
-    let u = &sim.workspace.u_stage;
+    let u = sim.stage_input();
     let mut pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
         vec![(&sim.fields.cons.den, &u.den)];
     for k in 0..DOF {

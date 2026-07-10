@@ -398,9 +398,24 @@ where
         //  - godunov/source_apply/body_source share the SSP stage weight `ac*dt` (Euler ac=1
         //    -> dt; RK2 corrector ac=0.5 -> 0.5*dt, the RK2-consistent 0.5*dt*(S^n + S*)).
         // stage entry: cons + prim are current (init c2p+ghost, or the prior stage's tail).
+        //
+        // at the FIRST stage of a multi-stage scheme the `snapshot` above wrote `cons -> u_n` and
+        // nothing has touched cons since, so u_n ALREADY holds the stage input. flag it and skip the
+        // `snapshot_stage` copy — `stage_input()` binds u_n for this stage. forward-Euler (n == 1)
+        // takes no snapshot, so u_n is stale there and the copy stands.
+        let stage_input_is_un = ii == 0
+            && n > 1
+            && sim.workspace.elide_stage_snapshot.load(std::sync::atomic::Ordering::Relaxed);
+        sim.workspace
+            .stage_input_is_un
+            .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
         let mut have = FieldSet::CONS.or(FieldSet::PRIM);
         for ph in STAGE_PIPELINE {
             if !ph.gate.active(additive_source, bodies) {
+                continue;
+            }
+            if matches!(ph.kind, PhaseKind::SnapshotStage) && stage_input_is_un {
+                have = have.or(ph.writes);
                 continue;
             }
             debug_assert!(

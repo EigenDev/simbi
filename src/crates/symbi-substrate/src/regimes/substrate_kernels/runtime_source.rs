@@ -195,7 +195,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     );
     use rayon::prelude::*;
 
-    let u = &sim.workspace.u_stage;
+    let u = sim.stage_input();
     let t = sim.time;
     // pressure is read from `prim.pre` (the c2p-computed field) — at the source-apply phase prim is
     // still the stage input, consistent with rho/vel from `u_stage`. `None` on iso (no pressure slot);

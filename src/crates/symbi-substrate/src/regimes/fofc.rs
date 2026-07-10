@@ -172,7 +172,7 @@ pub fn fofc_select_with_body<const D: usize, const DOF: usize, Mem, Sc>(
         coord_suffix(sim.geom.coords)
     );
     let scalars = resolve_body_scalars(sim, dt, gamma, &name);
-    let u_stage = &sim.workspace.u_stage;
+    let u_stage = sim.stage_input();
     let cons = &sim.fields.cons;
     let prim = &sim.fields.prim;
     let slot = |s: &str| -> &Field<Sc, D, Mem> {

@@ -169,7 +169,9 @@ where
         let group = match slot {
             StateSlot::Cons => &f.cons,
             StateSlot::UN => &sim.workspace.u_n,
-            StateSlot::UStage => &sim.workspace.u_stage,
+            // the stage INPUT — `u_n` at the first stage of a multi-stage scheme (the driver elides
+            // the redundant copy there), else the `u_stage` snapshot. resolved by the ONE accessor.
+            StateSlot::UStage => sim.stage_input(),
             StateSlot::Flux => &f.flux[dir],
         };
         match comp {
