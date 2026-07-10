@@ -399,19 +399,29 @@ impl KernelRenderer for RustRenderer {
                 ));
             }
         } else {
-            // TILED (SYMBI_TILE_CPU=N): parallelize over N^ndim cache blocks;
-            // serial nested loops over each block's cells keep its stencil
+            // TILED (SYMBI_TILE_CPU=N): parallelize over cache blocks; serial
+            // nested loops over each block's cells keep its stencil
             // neighborhood in cache. recovers the per-cell cache-miss penalty
             // once the grid working set exceeds cache (docs/design/26). per-tile
             // rebind (amortized over the block's cells).
+            //
+            // the CONTIGUOUS axis is NOT tiled (ndim >= 2): the vectorized
+            // (mask-form/SLP) bodies need long unit-stride inner trips —
+            // edge-length trips invert their win (docs/design/47 act 6, the
+            // same law as the cover executor's row-elongated blocks). 1d tiles
+            // its only axis: an untiled 1d loop would serialize the kernel.
             let tile = cpu_tile_size();
+            let contig = symbi_algebra::CONTIGUOUS_AXIS;
+            let tiled_axes: Vec<usize> =
+                (0..ndim).filter(|&aa| ndim == 1 || aa != contig).collect();
             v.push(format!("    let _ts: usize = {tile};"));
-            for aa in 0..ndim {
+            for &aa in &tiled_axes {
                 v.push(format!(
                     "    let _nt_{aa}: usize = ((grid_size_{aa} as usize) + _ts - 1) / _ts;"
                 ));
             }
-            let ntiles_expr = (0..ndim)
+            let ntiles_expr = tiled_axes
+                .iter()
                 .map(|aa| format!("_nt_{aa}"))
                 .collect::<Vec<_>>()
                 .join(" * ");
@@ -419,25 +429,37 @@ impl KernelRenderer for RustRenderer {
             v.push("    (0.._ntiles).into_par_iter().for_each(|_tile| {".to_string());
             push_rebind(&mut v);
             // the tile index -> tile coord map, peeled in the same canonical order as the cell map so
-            // consecutive tile indices are adjacent along CONTIGUOUS_AXIS: a rayon worker that takes
-            // a contiguous slice of tile indices then sweeps a row of tiles rather than a column.
-            let peel: Vec<usize> = symbi_algebra::nest_order(ndim).rev().collect();
-            if ndim == 1 {
+            // consecutive tile indices are adjacent in memory: a rayon worker that takes a contiguous
+            // slice of tile indices then sweeps adjacent rows rather than a scattered column.
+            let peel: Vec<usize> = symbi_algebra::nest_order(ndim)
+                .rev()
+                .filter(|aa| tiled_axes.contains(aa))
+                .collect();
+            if peel.len() == 1 {
                 v.push(format!("        let _tc{}: usize = _tile;", peel[0]));
             } else {
                 v.push("        let mut _trem: usize = _tile;".to_string());
-                for &aa in &peel[..ndim - 1] {
+                for &aa in &peel[..peel.len() - 1] {
                     v.push(format!("        let _tc{aa}: usize = _trem % _nt_{aa};"));
                     v.push(format!("        _trem /= _nt_{aa};"));
                 }
-                v.push(format!("        let _tc{}: usize = _trem;", peel[ndim - 1]));
+                v.push(format!("        let _tc{}: usize = _trem;", peel[peel.len() - 1]));
             }
             // nested cell loops within the tile; declare each axis's coord right
             // after its index. `break` on the boundary handles partial tiles
             // (`_c{aa}` is monotonic in `_d{aa}`). close() emits ndim matching `}`.
             // the nest order is DERIVED from the layout (see the serial branch); each `break` still
             // exits its own axis's loop, so partial tiles are unaffected by the nesting order.
+            // the untiled contiguous axis is a plain full-extent loop.
             for aa in symbi_algebra::nest_order(ndim) {
+                if !tiled_axes.contains(&aa) {
+                    v.push(format!("        for _i{aa} in 0..(grid_size_{aa} as i32) {{"));
+                    v.push(format!(
+                        "        let {}: i32 = _i{aa} + dom_lo_{aa};",
+                        COORD_VARS[aa]
+                    ));
+                    continue;
+                }
                 v.push(format!("        for _d{aa} in 0.._ts {{"));
                 v.push(format!(
                     "        let _c{aa}: usize = _tc{aa} * _ts + _d{aa};"
@@ -1294,12 +1316,22 @@ mod tests {
         // axis 0 is CONTIGUOUS_AXIS: its stride is 1 by construction, so the emitter drops the
         // multiply. axis 1 keeps its stride factor.
         assert!(desc.source.contains("field0.strides[1]"));
-        // 2D default emit is cache-TILED: parallelize over 2D tile blocks with
-        // nested intra-tile loops (one per axis). axis 1 comes from its own
-        // `for _d1` loop + tile coord, not a flat unflatten.
+        // 2D default emit is cache-TILED on the TRANSVERSE axis only: axis 1
+        // gets a `for _d1` tile loop; the contiguous axis 0 runs the full
+        // extent (vectorized bodies need long unit-stride inner trips).
         assert!(desc.source.contains("(0.._ntiles).into_par_iter()"));
         assert!(desc.source.contains("for _d1 in 0.._ts {"));
         assert!(desc.source.contains("let _i1: i32 = _c1 as i32;"));
         assert!(desc.source.contains("let jj: i32 = _i1 + dom_lo_1;"));
+        assert!(
+            desc.source.contains("for _i0 in 0..(grid_size_0 as i32) {"),
+            "contiguous axis must be a full-extent loop:\n{}",
+            desc.source
+        );
+        assert!(
+            !desc.source.contains("for _d0"),
+            "contiguous axis must not be tiled in 2d:\n{}",
+            desc.source
+        );
     }
 }
