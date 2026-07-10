@@ -147,6 +147,11 @@ pub struct RustRenderer {
     /// instead of one-per-block. soundness rests on the cover being a PARTITION
     /// (disjoint output writes) — the proven law.
     serial: bool,
+    /// whether the mask-form rewrite was applied to THIS kernel (set via
+    /// `note_mask_form`). in a mask-formed body every bool local holds a
+    /// `cmp_*` result, so its type is `<S as Scalar>::Mask`, not native `bool`;
+    /// fallback (control-flow) kernels keep native bools.
+    mask_applied: std::cell::Cell<bool>,
 }
 
 impl RustRenderer {
@@ -154,12 +159,14 @@ impl RustRenderer {
         Self {
             mut_buf_indices: std::cell::RefCell::new(Vec::new()),
             serial: false,
+            mask_applied: std::cell::Cell::new(false),
         }
     }
     pub fn serial() -> Self {
         Self {
             mut_buf_indices: std::cell::RefCell::new(Vec::new()),
             serial: true,
+            mask_applied: std::cell::Cell::new(false),
         }
     }
 }
@@ -458,6 +465,30 @@ impl KernelRenderer for RustRenderer {
     fn index_lang(&self) -> crate::emit::IndexLang {
         crate::emit::IndexLang::Rust
     }
+    // branch-free cmp/select spelling (passes::mask_form). DEFAULT OFF: `select`
+    // computes BOTH arms of every conditional, and on the 3d adiabatic flux that
+    // is ~1.8x the dynamic work of the bool/if form, whose uniform limiter
+    // branch predicts perfectly (measured 16 -> 29 ns/zone at runtime-opaque
+    // scalars; an apparent 2x WIN under inlined constant scalars was
+    // constant-propagation deleting the untaken arm, not vectorization).
+    // re-evaluate only after the limiter select is hoisted to a codegen axis.
+    fn mask_form(&self) -> bool {
+        // debug-emit-knobs gates the SYMBI_MASK_FORM a/b knob; feature off
+        // (default) = canonical bool/if spelling.
+        #[cfg(feature = "debug-emit-knobs")]
+        {
+            std::env::var("SYMBI_MASK_FORM")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+        }
+        #[cfg(not(feature = "debug-emit-knobs"))]
+        {
+            false
+        }
+    }
+    fn note_mask_form(&self, applied: bool) {
+        self.mask_applied.set(applied);
+    }
     fn skip_scattered_buffer_layout_args(&self) -> bool {
         true
     }
@@ -489,6 +520,12 @@ impl KernelRenderer for RustRenderer {
     fn render_stmt(&self, stmt: &ScalarStmt) -> String {
         let mut s = String::from("    ");
         emit_stmt(&mut s, stmt, true);
+        // in a mask-formed body every bool local holds a `cmp_*` result — an
+        // `S::Mask`, not a native bool. the shared emit_stmt spells the native
+        // type; retype here so the CUDA/elemental spellings stay untouched.
+        if self.mask_applied.get() {
+            s = s.replace(": bool = ", ": <S as Scalar>::Mask = ");
+        }
         s
     }
     fn render_output(&self, expr: &ScalarExpr) -> String {

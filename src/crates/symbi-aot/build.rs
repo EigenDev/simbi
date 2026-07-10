@@ -2426,6 +2426,7 @@ fn main() {
         println!("cargo:rerun-if-env-changed=SYMBI_TILE_CPU");
         println!("cargo:rerun-if-env-changed=SYMBI_VEC_LOOP");
         println!("cargo:rerun-if-env-changed=SYMBI_GEN_SERIAL");
+        println!("cargo:rerun-if-env-changed=SYMBI_MASK_FORM");
     }
     for dep_src in [
         "../symbi-ir/src",

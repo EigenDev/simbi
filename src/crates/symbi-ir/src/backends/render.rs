@@ -70,6 +70,23 @@ pub trait KernelRenderer {
     /// preamble emitted by `render_source` (see `emit::emit_cell_index_base`).
     /// every other syntactic dispatch goes through the existing trait methods.
     fn index_lang(&self) -> crate::emit::IndexLang;
+    /// when `true`, `render` rewrites eligible float bool/if bodies into the
+    /// branch-free `cmp_*` / `S::select` spelling BEFORE emission (see
+    /// `passes::mask_form`) — a straight-line body LLVM's SLP vectorizer can
+    /// fuse. the serialized `Prepared` artifact is untouched (the rewrite runs
+    /// on the render-time copy). default = `false`; the Rust CPU renderer
+    /// exposes it behind the SYMBI_MASK_FORM a/b knob — `select` computes both
+    /// arms, which measured SLOWER than the branch-predicted bool/if form on
+    /// the flux body (docs/design/47 resolution).
+    fn mask_form(&self) -> bool {
+        false
+    }
+    /// told once per `render` whether the mask-form rewrite was APPLIED to this
+    /// kernel (eligible bodies only — control-flow / untyped-comparison bodies
+    /// keep the bool/if spelling). renderers that spell the mask type
+    /// differently from native `bool` (the Rust `S::Mask` associated type)
+    /// track this to type bool locals per kernel. default: ignore.
+    fn note_mask_form(&self, _applied: bool) {}
     /// when `true`, `render_source` skips emitting the per-buffer `buf_lo_<b>_<a>`
     /// and `buf_extent_<b>_<a>` scalar kernel args — the renderer bundles that
     /// layout into its `buffer_param` (e.g., a `View` struct that carries the
@@ -347,6 +364,15 @@ pub fn kernel_scalar_params_typed_from_ir(ir: &str) -> Vec<(ScalarBind, bool)> {
 /// `prepare`), then emit the source. `render(deserialize(serialize(prepare(g))), r)`
 /// equals `render(prepare(g), r)` — the round-trip is the correctness proof.
 pub fn render<R: KernelRenderer>(mut prepared: Prepared, r: &R) -> KernelDescriptor {
+    // branch-free spelling for backends that want it. runs BEFORE the
+    // FieldLoadAt rewrite so index expressions are still identifiable (the
+    // pass must not enter them). ineligible bodies (statement control flow,
+    // untyped comparisons) keep the bool/if spelling.
+    if r.mask_form() {
+        let applied = crate::passes::mask_form::apply(&mut prepared.scalarized);
+        r.note_mask_form(applied);
+    }
+
     // buf-index lookups, rederived from the bindings (consistent by construction):
     // field-bind -> buffer, and IR key -> buffer (via the field-input path). the join
     // is keyed by `FieldBind`, NOT by the raw runtime string: a producer mints two
