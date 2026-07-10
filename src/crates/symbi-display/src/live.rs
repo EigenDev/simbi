@@ -808,6 +808,18 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
             sections.push(s.as_str());
         }
     }
+    // label column sized to the LONGEST label panel-wide (values stay aligned
+    // across sections), floored so short-label configs keep the classic look
+    // and capped to leave the value at least a third of the panel. the
+    // explicit two-space gap survives even at the cap, so a long label can
+    // never run into its value.
+    let label_w = view
+        .config
+        .iter()
+        .map(|(_, k, _)| k.chars().count())
+        .max()
+        .unwrap_or(0)
+        .clamp(16, width.saturating_mul(2) / 3);
     let mut lines: Vec<Line> = Vec::new();
     for (i, sec) in sections.iter().enumerate() {
         if i > 0 {
@@ -818,7 +830,7 @@ fn render_config(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
         lines.push(Line::from(Span::styled(format!("{head}{rule}"), fgb(TEAL))));
         for (s, k, v) in view.config.iter().filter(|(s, _, _)| s.eq_ignore_ascii_case(sec)) {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {k:<18}"), fg(DIM)),
+                Span::styled(format!("  {k:<label_w$}  "), fg(DIM)),
                 Span::styled(v.clone(), fgb(VALUE)),
             ]));
             let _ = s;
