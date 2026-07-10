@@ -6,12 +6,13 @@
 // `Select` becomes the `S::select(mask, then, else)` free call, so the emitted
 // Rust body is straight-line and LLVM's SLP vectorizer can fuse it.
 //
-// A/B TOOLING, NOT A DEFAULT: `select` computes BOTH arms of every
-// conditional, and on the 3d adiabatic flux that is ~1.8x the dynamic work of
-// the bool/if spelling, whose uniform limiter branch predicts perfectly
-// (measured 16 -> 29 ns/zone at runtime-opaque scalars; docs/design/47
-// resolution). the spelling pays only where select arms are cheap — gate any
-// future default on a timing run, never on a static census.
+// DEFAULT ON, COST-GATED: `select` computes BOTH arms of every conditional,
+// so the spelling pays only where arms are cheap. the arm gate below rejects
+// transcendental / multi-division arms (the hllc star fan measured 2.6x
+// SLOWER mask-formed) and tolerates a single guarded division (the van-leer
+// limiter idiom measured FASTER eager than branched). the win depends on
+// long unit-stride trips — the row-elongated cover blocks (docs/design/47
+// act 6) are this spelling's other half.
 //
 // bit-identity: `select` evaluates both arms and returns the taken arm's
 // value unchanged, so per-cell results are bit-for-bit identical to the
@@ -235,20 +236,29 @@ fn expr_eligible(e: &ScalarExpr, env: &HashMap<String, ElementTy>) -> bool {
     e.children().iter().all(|c| expr_eligible(c, env))
 }
 
-// inline arm cost gate for the select rewrite: divisions, transcendental /
-// power methods, and free calls dominate the cost of computing a discarded
-// arm. add/sub/mul/min/max/abs/compare chains are cheap enough that computing
-// both arms beats a branch.
+// inline arm cost gate for the select rewrite: transcendental / power methods
+// and free calls dominate the cost of computing a discarded arm, and so do
+// MULTIPLE divisions. a SINGLE division is tolerated: the guarded-denominator
+// limiter idiom `select(pos, 2ab/select(pos, a+b, 1), 0)` carries exactly one
+// safe division per arm, and computing it eagerly measured FASTER than the
+// branchy spelling (the mask-form flux body with van-leer arms ran 16.4
+// vs 18.5 ns/zone bool/if) — the branch costs more than one discarded fdiv.
 fn arm_is_expensive(e: &ScalarExpr) -> bool {
-    let expensive_here = match e {
-        ScalarExpr::BinOp(BinaryKind::Div, _, _) => true,
-        ScalarExpr::MethodCall { method, .. } => {
-            !matches!(method.as_str(), "min" | "max" | "abs")
-        }
-        ScalarExpr::FreeCall { .. } => true,
-        _ => false,
-    };
-    expensive_here || e.children().iter().any(|c| arm_is_expensive(c))
+    fn scan(e: &ScalarExpr, divs: &mut u32) -> bool {
+        let heavy = match e {
+            ScalarExpr::BinOp(BinaryKind::Div, _, _) => {
+                *divs += 1;
+                *divs >= 2
+            }
+            ScalarExpr::MethodCall { method, .. } => {
+                !matches!(method.as_str(), "min" | "max" | "abs")
+            }
+            ScalarExpr::FreeCall { .. } => true,
+            _ => false,
+        };
+        heavy || e.children().iter().any(|c| scan(c, divs))
+    }
+    scan(e, &mut 0)
 }
 
 // ---- pass 2: rewrite (in place) ----------------------------------------------
@@ -473,9 +483,38 @@ mod tests {
     }
 
     #[test]
-    fn division_in_select_arm_bails_whole_kernel() {
-        // both select arms run every cell under mask form; a division in an
-        // arm is the hllc-class regression. the kernel keeps bool/if form.
+    fn multiple_divisions_in_select_arm_bail_whole_kernel() {
+        // both select arms run every cell under mask form; a MULTI-division
+        // arm is the hllc-class regression (one guarded division is tolerated
+        // — the limiter idiom measured faster eager). the kernel keeps
+        // bool/if form.
+        let div = |a: ScalarExpr, b: ScalarExpr| {
+            ScalarExpr::BinOp(BinaryKind::Div, Box::new(a), Box::new(b))
+        };
+        let sel = ScalarExpr::Select {
+            cond: Box::new(ScalarExpr::BinOp(
+                BinaryKind::Gt,
+                Box::new(var("x")),
+                Box::new(f(0.0)),
+            )),
+            then: Box::new(div(div(f(1.0), var("x")), var("x"))),
+            else_: Box::new(f(0.0)),
+        };
+        let mut k = kernel(
+            vec![param("x", ElementTy::F64)],
+            vec![let_s("y", sel.clone())],
+            vec![var("y")],
+        );
+        assert!(!apply(&mut k));
+        assert!(matches!(
+            &k.body[0],
+            ScalarStmt::Let { value, .. } if *value == sel
+        ));
+    }
+
+    #[test]
+    fn single_division_arm_stays_eligible() {
+        // the guarded-denominator limiter: one division per arm masks.
         let sel = ScalarExpr::Select {
             cond: Box::new(ScalarExpr::BinOp(
                 BinaryKind::Gt,
@@ -491,14 +530,10 @@ mod tests {
         };
         let mut k = kernel(
             vec![param("x", ElementTy::F64)],
-            vec![let_s("y", sel.clone())],
+            vec![let_s("y", sel)],
             vec![var("y")],
         );
-        assert!(!apply(&mut k));
-        assert!(matches!(
-            &k.body[0],
-            ScalarStmt::Let { value, .. } if *value == sel
-        ));
+        assert!(apply(&mut k));
     }
 
     #[test]
