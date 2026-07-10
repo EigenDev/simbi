@@ -13,8 +13,11 @@
 //   pressure  — peak-register-pressure analysis (docs/design/23);
 //               powers `assert_peak_pressure!` for per-kernel bounds.
 //   mask_form — float bool/if -> cmp_*/select spelling (branch-free bodies
-//               for the Rust CPU backend). a/b tooling, off by default:
-//               select computes both arms (docs/design/47 resolution).
+//               for the Rust CPU backend), arm-cost gated: a select whose arm
+//               divides or calls out keeps bool/if form (docs/design/47).
+//   unswitch  — param-invariant selects (the limiter pick) partially
+//               evaluated both ways; the emitter renders two specialized
+//               loop nests behind one per-call branch (docs/design/47).
 // =============================================================================
 
 pub mod scalarize;
@@ -22,3 +25,4 @@ pub mod splice;
 pub mod cse;
 pub mod pressure;
 pub mod mask_form;
+pub mod unswitch;

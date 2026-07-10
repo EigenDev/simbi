@@ -397,24 +397,30 @@ pub fn run_policy<const D: usize>(
     }
 }
 
-/// AUTO block policy — CACHE TILING. keep the WHOLE domain (`None`) only when it is
-/// small enough to already sit in cache; otherwise tile it into small fixed-edge
-/// blocks whose per-cell stencil working set stays in L1/L2 instead of streaming
-/// the whole grid from RAM.
+/// AUTO block policy — ROW-ELONGATED CACHE TILING. keep the WHOLE domain (`None`)
+/// only when it is small enough to already sit in cache; otherwise tile the
+/// TRANSVERSE axes at a small fixed edge (stencil reuse stays in cache) while the
+/// CONTIGUOUS axis runs the full row — the vectorized (mask-form/SLP) kernel
+/// bodies need long unit-stride inner trips to amortize; 8-cell trips invert
+/// their win into a loss (docs/design/47 act 6).
 ///
-/// this is the 3D throughput lever. a stencil kernel re-reads each cell's neighbours
-/// across adjacent output cells; if the block is large the reuse distance exceeds
-/// cache and every read hits RAM (the memory wall — why 3D MZCS *falls* as the grid
-/// grows). a small transverse tile keeps the reuse in cache. sizing
-/// blocks for LOAD BALANCE (~4*threads big blocks) is exactly wrong here.
+/// measured on M4 Pro (linear_wave 256^3, hlle, f64), whole step:
+///   block 8^3 = 28.9 MZCS (flux 16 ns/zc) — the pre-vectorization sweet spot
+///   16x8x8   = 33.3        (flux 13)
+///   32x8x8   = 34.8        (flux 12)
+///   64x8x8   = 35.6        (flux 11)
+///   256x8x8  = 38.5        (flux 10) — monotonic to the FULL row
+/// the transverse 8x8 cross-section keeps the stencil working set bounded; the
+/// hardware prefetchers cover the streaming row. `SYMBI_BLOCK=<x,y,z>` overrides
+/// per run.
 ///
-/// measured on M4 (sedov3d 128^3, ~8 fields f64): edge 8 (8^3 ~ 32 KB ~ L1) is the
-/// sweet spot — 22 (old auto) / 20 (off) -> 33 MZCS, near AthenaK's 35. edges 16/32
-/// fall off as the tile leaves cache; edge 4 loses to per-block overhead. `CACHE_EDGE`
-/// is the one tunable; `SYMBI_BLOCK=<n>` overrides it per run.
-fn auto_block_size<const D: usize>(shape: [usize; D], _threads: usize) -> Option<[usize; D]> {
-    // the cache tile edge (cells per axis). 8 keeps ~8 f64 fields of an 8^3 block
-    // (~32 KB) resident; clamps to the axis extent for thin domains.
+/// the full-row block trades tile COUNT for row length, so when the transverse
+/// axes alone cannot feed the thread pool (small or low-D grids) the row is
+/// halved until the cover has ~4 tiles per thread — load balance beats row
+/// length only when tiles are scarce. 1D keeps the fixed edge: axis 0 is the
+/// ONLY source of parallel tiles there.
+fn auto_block_size<const D: usize>(shape: [usize; D], threads: usize) -> Option<[usize; D]> {
+    // the transverse cache-tile edge (cells per axis); clamps for thin domains.
     const CACHE_EDGE: usize = 8;
     // a domain that already fits cache gains nothing from tiling (and pays the
     // per-block overhead) — keep it whole. ~ one cache tile's worth across axes.
@@ -423,5 +429,53 @@ fn auto_block_size<const D: usize>(shape: [usize; D], _threads: usize) -> Option
     if n < WHOLE_BELOW_CELLS {
         return None;
     }
-    Some(std::array::from_fn(|a| CACHE_EDGE.min(shape[a]).max(1)))
+    let mut block: [usize; D] = std::array::from_fn(|a| CACHE_EDGE.min(shape[a]).max(1));
+    let contig = symbi_algebra::CONTIGUOUS_AXIS;
+    if D >= 2 && contig < D {
+        block[contig] = shape[contig].max(1);
+        let tile_count = |block: &[usize; D]| -> usize {
+            (0..D).map(|a| shape[a].div_ceil(block[a])).product()
+        };
+        while block[contig] > CACHE_EDGE && tile_count(&block) < 4 * threads.max(1) {
+            block[contig] = (block[contig] / 2).max(CACHE_EDGE);
+        }
+    }
+    Some(block)
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::auto_block_size;
+
+    #[test]
+    fn large_3d_gets_full_contiguous_rows() {
+        // 256^3 on 12 threads: transverse 8x8 alone gives 1024 tiles — plenty —
+        // so the contiguous axis runs the full row.
+        let b = auto_block_size([256usize, 256, 256], 12).unwrap();
+        assert_eq!(b, [256, 8, 8]);
+    }
+
+    #[test]
+    fn scarce_transverse_tiles_shrink_the_row() {
+        // 512 x 16 x 16: transverse tiling alone gives 2*2 = 4 tiles for 12
+        // threads; the row halves until ~4 tiles/thread (or the edge floor).
+        let b = auto_block_size([512usize, 16, 16], 12).unwrap();
+        assert!(b[0] < 512, "row must shrink: {b:?}");
+        let tiles: usize = (0..3)
+            .map(|a| [512usize, 16, 16][a].div_ceil(b[a]))
+            .product();
+        assert!(tiles >= 48 || b[0] == 8, "tiles {tiles} block {b:?}");
+    }
+
+    #[test]
+    fn one_d_keeps_the_fixed_edge() {
+        // 1D: axis 0 is the only tile source; a full row would serialize.
+        let b = auto_block_size([1 << 20usize], 12).unwrap();
+        assert_eq!(b, [8]);
+    }
+
+    #[test]
+    fn cache_resident_domain_stays_whole() {
+        assert!(auto_block_size([64usize, 64, 4], 12).is_none());
+    }
 }

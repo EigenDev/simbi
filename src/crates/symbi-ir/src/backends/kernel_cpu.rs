@@ -111,7 +111,7 @@ fn vec_loop() -> bool {
 
 use crate::backends::cpu::{emit_expr, emit_stmt, rust_type_name};
 use crate::backends::kernel::KernelEmitInputs;
-use crate::backends::render::{COORD_VARS, KernelRenderer, emit_kernel_render};
+use crate::backends::render::{COORD_VARS, KernelRenderer};
 use crate::emit::KernelDescriptor;
 use crate::graph::ConstValue;
 use crate::passes::scalarize::{BinaryKind, ScalarExpr, ScalarStmt, UnaryKind};
@@ -465,25 +465,24 @@ impl KernelRenderer for RustRenderer {
     fn index_lang(&self) -> crate::emit::IndexLang {
         crate::emit::IndexLang::Rust
     }
-    // branch-free cmp/select spelling (passes::mask_form). DEFAULT OFF: `select`
-    // computes BOTH arms of every conditional, and on the 3d adiabatic flux that
-    // is ~1.8x the dynamic work of the bool/if form, whose uniform limiter
-    // branch predicts perfectly (measured 16 -> 29 ns/zone at runtime-opaque
-    // scalars; an apparent 2x WIN under inlined constant scalars was
-    // constant-propagation deleting the untaken arm, not vectorization).
-    // re-evaluate only after the limiter select is hoisted to a codegen axis.
+    // branch-free cmp/select spelling (passes::mask_form). DEFAULT ON, made
+    // safe by the pass's arm-cost gate: `select` computes BOTH arms of every
+    // conditional, so a kernel whose select arms divide or call out (the hllc
+    // star-state fan: measured 31 -> 79 ns/zone mask-formed) keeps the bool/if
+    // spelling, while cheap-arm bodies (the clamped-hlle flux: 18.5 -> 13.3
+    // ns/zone combined with unswitching) vectorize.
     fn mask_form(&self) -> bool {
-        // debug-emit-knobs gates the SYMBI_MASK_FORM a/b knob; feature off
-        // (default) = canonical bool/if spelling.
+        // debug-emit-knobs gates the SYMBI_MASK_FORM=0 opt-out a/b knob;
+        // feature off (default) = mask form on, cost-gated.
         #[cfg(feature = "debug-emit-knobs")]
         {
             std::env::var("SYMBI_MASK_FORM")
-                .map(|v| v == "1")
-                .unwrap_or(false)
+                .map(|v| v != "0")
+                .unwrap_or(true)
         }
         #[cfg(not(feature = "debug-emit-knobs"))]
         {
-            false
+            true
         }
     }
     fn note_mask_form(&self, applied: bool) {
@@ -600,7 +599,50 @@ fn emit_kernel_cpu_with(
     inputs: &KernelEmitInputs,
     renderer: &RustRenderer,
 ) -> KernelDescriptor {
-    let mut desc = emit_kernel_render(graph, inputs, renderer);
+    let prepared = crate::backends::render::prepare(graph, inputs);
+
+    // loop unswitching (passes::unswitch): a select gated on a param-only
+    // condition (the limiter pick `theta < 0`) takes the same arm in every
+    // cell. render TWO specialized loop nests plus a dispatcher that branches
+    // once per kernel call — each specialization is rendered independently, so
+    // mask_form's arm-cost gate applies per branch (the division-heavy
+    // van-Leer body keeps bool/if; the cheap-arm minmod body vectorizes).
+    // specialization is bit-identical: select(true, t, f) == t by definition.
+    let scalar_names: std::collections::HashSet<String> = prepared
+        .scalar_params
+        .iter()
+        .map(|b| b.name())
+        .collect();
+    let mut desc = if let Some(cand) =
+        crate::passes::unswitch::find(&prepared.scalarized, &scalar_names)
+    {
+        let fresh = || {
+            if renderer.serial {
+                RustRenderer::serial()
+            } else {
+                RustRenderer::new()
+            }
+        };
+        let mut p_t = prepared.clone();
+        p_t.kernel_name = format!("{}__uswt", prepared.kernel_name);
+        crate::passes::unswitch::specialize(&mut p_t.scalarized, &cand.cond_let, true);
+        let mut p_f = prepared.clone();
+        p_f.kernel_name = format!("{}__uswf", prepared.kernel_name);
+        crate::passes::unswitch::specialize(&mut p_f.scalarized, &cand.cond_let, false);
+        let dispatcher = unswitch_dispatcher(&prepared, &cand);
+        let d_t = crate::backends::render::render(p_t, &fresh());
+        let d_f = crate::backends::render::render(p_f, &fresh());
+        KernelDescriptor {
+            source: format!("{}\n{}\n{}", d_t.source, d_f.source, dispatcher),
+            kernel_name: prepared.kernel_name,
+            field_bindings: d_t.field_bindings,
+            param_names: d_t.param_names,
+            scalar_is_int: d_t.scalar_is_int,
+            tile_spec: d_t.tile_spec,
+        }
+    } else {
+        crate::backends::render::render(prepared, renderer)
+    };
     // which scalar params are integer (i32/u32) — they come from the wrapper's
     // `ints: &[i32]` lane; float params from `scalars: &[f64]`.
     let scalar_is_int: Vec<bool> = inputs
@@ -621,6 +663,61 @@ fn emit_kernel_cpu_with(
         &scalar_is_int,
     ));
     desc
+}
+
+/// generate the unswitch dispatcher `pub fn {name}__raw(...)`: the SAME positional
+/// signature as a rendered `__raw` kernel (buffers in binding order, grid, dom_lo,
+/// scalars in declared order — mirroring `render_source`), forwarding every arg to
+/// the `__uswt`/`__uswf` specialization picked by the param-only condition. one
+/// branch per kernel call; the loop nests inside the specializations carry no
+/// trace of the invariant select.
+fn unswitch_dispatcher(
+    prepared: &crate::backends::render::Prepared,
+    cand: &crate::passes::unswitch::Candidate,
+) -> String {
+    let name = &prepared.kernel_name;
+    let ndim = prepared.ndim as usize;
+    let mut binds: Vec<&crate::emit::FieldBinding> = prepared.bindings.iter().collect();
+    binds.sort_by_key(|b| b.buffer_index);
+    let mut params: Vec<String> = Vec::new();
+    let mut args: Vec<String> = Vec::new();
+    for b in &binds {
+        let i = b.buffer_index;
+        if b.is_output {
+            params.push(format!("    field{i}: &mut CpuFieldMut<S>"));
+        } else {
+            params.push(format!("    field{i}: &CpuField<S>"));
+        }
+        args.push(format!("field{i}"));
+    }
+    for aa in 0..ndim {
+        params.push(format!("    grid_size_{aa}: i32"));
+        args.push(format!("grid_size_{aa}"));
+    }
+    for aa in 0..ndim {
+        params.push(format!("    dom_lo_{aa}: i32"));
+        args.push(format!("dom_lo_{aa}"));
+    }
+    for bind in &prepared.scalar_params {
+        let pn = bind.name();
+        let elem = prepared
+            .param_elem
+            .get(&pn)
+            .copied()
+            .unwrap_or(crate::ElementTy::F64);
+        params.push(format!("    {pn}: {}", rust_type_name(elem, true)));
+        args.push(pn);
+    }
+    let mut cond = String::new();
+    emit_expr(&mut cond, &cand.cond_expr, true);
+    let arg_list = args.join(", ");
+    format!(
+        "#[doc(hidden)]\n#[allow(non_snake_case, unused_variables, unused_parens)]\n\
+         pub fn {name}__raw<S: Scalar + OrderedNumeric + Send + Sync>(\n{}\n) {{\n    \
+         if {cond} {{\n        {name}__uswt__raw({arg_list});\n    }} else {{\n        \
+         {name}__uswf__raw({arg_list});\n    }}\n}}\n",
+        params.join(",\n"),
+    )
 }
 
 /// generate the descriptor-ABI wrapper `pub fn {name}(inputs, outputs, grid, dom_lo,
@@ -1075,6 +1172,101 @@ mod tests {
             s,
             "(if (map_type == 1) { (ii + shift) } else { (pivot2 - ii) })"
         );
+    }
+
+    #[test]
+    fn param_invariant_select_unswitches_into_two_specializations() {
+        // four float selects gated on `theta < 0` (a param-only condition):
+        // the emitter must render a true and a false specialization plus a
+        // dispatcher branching once per call. the specialized bodies carry no
+        // select on the invariant condition.
+        let mut g = Graph::new();
+        let x = scalar_param(&mut g, "x");
+        let theta = scalar_param(&mut g, "theta");
+        let zero = g.add_const(ConstValue::F64(0.0), None);
+        let cond = g.element_wise(ElementWiseOp::Lt, vec![theta, zero], None);
+        let two = g.add_const(ConstValue::F64(2.0), None);
+        let mut acc = x;
+        for _ in 0..4 {
+            let scaled = g.element_wise(ElementWiseOp::Mul, vec![acc, two], None);
+            acc = g.select(cond, scaled, acc, None);
+        }
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "limiter_pick_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[("x".into(), "prim.rho".into())],
+                scalar_params: &["theta".into()],
+                field_writes: &[("out".into(), "out".into(), acc)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
+        assert!(
+            desc.source
+                .contains("pub fn limiter_pick_1d__uswt__raw<S: Scalar"),
+            "src:\n{}",
+            desc.source
+        );
+        assert!(
+            desc.source
+                .contains("pub fn limiter_pick_1d__uswf__raw<S: Scalar"),
+            "src:\n{}",
+            desc.source
+        );
+        // the dispatcher branches on the rendered param condition and forwards.
+        assert!(
+            desc.source.contains("if (theta < S::from_f64(0.0)) {"),
+            "src:\n{}",
+            desc.source
+        );
+        assert!(
+            desc.source.contains("limiter_pick_1d__uswt__raw(field0, field1, grid_size_0, dom_lo_0, theta);"),
+            "src:\n{}",
+            desc.source
+        );
+        // the descriptor wrapper still targets the dispatcher by the original name.
+        assert!(
+            desc.source.contains("limiter_pick_1d__raw(\n"),
+            "src:\n{}",
+            desc.source
+        );
+    }
+
+    #[test]
+    fn cell_varying_select_does_not_unswitch() {
+        // the condition reads the field: it varies per cell, no specialization.
+        let mut g = Graph::new();
+        let x = scalar_param(&mut g, "x");
+        let zero = g.add_const(ConstValue::F64(0.0), None);
+        let cond = g.element_wise(ElementWiseOp::Lt, vec![x, zero], None);
+        let two = g.add_const(ConstValue::F64(2.0), None);
+        let mut acc = x;
+        for _ in 0..4 {
+            let scaled = g.element_wise(ElementWiseOp::Mul, vec![acc, two], None);
+            acc = g.select(cond, scaled, acc, None);
+        }
+        let desc = emit_kernel_cpu(
+            &g,
+            &KernelEmitInputs {
+                kernel_name: "cell_pick_1d",
+                coalesce_layout: false,
+                ndim: 1,
+                target: cfg(),
+                field_inputs: &[("x".into(), "prim.rho".into())],
+                scalar_params: &[],
+                field_writes: &[("out".into(), "out".into(), acc)],
+                coord_components: &[],
+                device_preamble: &[],
+                tile_spec: None,
+            },
+        );
+        assert!(!desc.source.contains("__uswt"), "src:\n{}", desc.source);
+        assert!(!desc.source.contains("__uswf"), "src:\n{}", desc.source);
     }
 
     #[test]

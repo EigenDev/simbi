@@ -219,10 +219,36 @@ fn expr_eligible(e: &ScalarExpr, env: &HashMap<String, ElementTy>) -> bool {
             if !(is_float(infer(then, env)) || is_float(infer(else_, env))) {
                 return false;
             }
+            // `select` evaluates BOTH arms every cell, where the `if` spelling
+            // evaluates one behind a (usually well-predicted) branch. an arm
+            // whose INLINE cost is heavy — a division, an expensive method, a
+            // free call — makes the trade a measured loss (the hllc star-state
+            // fan runs 2.6x slower mask-formed). cse-hoisted lets referenced by
+            // the arm are shared straight-line work, not arm cost, so the walk
+            // sees only what the arm computes inline.
+            if arm_is_expensive(then) || arm_is_expensive(else_) {
+                return false;
+            }
         }
         _ => {}
     }
     e.children().iter().all(|c| expr_eligible(c, env))
+}
+
+// inline arm cost gate for the select rewrite: divisions, transcendental /
+// power methods, and free calls dominate the cost of computing a discarded
+// arm. add/sub/mul/min/max/abs/compare chains are cheap enough that computing
+// both arms beats a branch.
+fn arm_is_expensive(e: &ScalarExpr) -> bool {
+    let expensive_here = match e {
+        ScalarExpr::BinOp(BinaryKind::Div, _, _) => true,
+        ScalarExpr::MethodCall { method, .. } => {
+            !matches!(method.as_str(), "min" | "max" | "abs")
+        }
+        ScalarExpr::FreeCall { .. } => true,
+        _ => false,
+    };
+    expensive_here || e.children().iter().any(|c| arm_is_expensive(c))
 }
 
 // ---- pass 2: rewrite (in place) ----------------------------------------------
@@ -444,6 +470,61 @@ mod tests {
             }
             other => panic!("expected Let, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn division_in_select_arm_bails_whole_kernel() {
+        // both select arms run every cell under mask form; a division in an
+        // arm is the hllc-class regression. the kernel keeps bool/if form.
+        let sel = ScalarExpr::Select {
+            cond: Box::new(ScalarExpr::BinOp(
+                BinaryKind::Gt,
+                Box::new(var("x")),
+                Box::new(f(0.0)),
+            )),
+            then: Box::new(ScalarExpr::BinOp(
+                BinaryKind::Div,
+                Box::new(f(1.0)),
+                Box::new(var("x")),
+            )),
+            else_: Box::new(f(0.0)),
+        };
+        let mut k = kernel(
+            vec![param("x", ElementTy::F64)],
+            vec![let_s("y", sel.clone())],
+            vec![var("y")],
+        );
+        assert!(!apply(&mut k));
+        assert!(matches!(
+            &k.body[0],
+            ScalarStmt::Let { value, .. } if *value == sel
+        ));
+    }
+
+    #[test]
+    fn division_outside_select_arms_stays_eligible() {
+        // a cse-hoisted division feeding cheap select arms by name is shared
+        // straight-line work, not arm cost — the kernel is rewritten.
+        let div = ScalarExpr::BinOp(BinaryKind::Div, Box::new(f(1.0)), Box::new(var("x")));
+        let sel = ScalarExpr::Select {
+            cond: Box::new(ScalarExpr::BinOp(
+                BinaryKind::Gt,
+                Box::new(var("x")),
+                Box::new(f(0.0)),
+            )),
+            then: Box::new(var("iv")),
+            else_: Box::new(f(0.0)),
+        };
+        let mut k = kernel(
+            vec![param("x", ElementTy::F64)],
+            vec![let_s("iv", div), let_s("y", sel)],
+            vec![var("y")],
+        );
+        assert!(apply(&mut k));
+        assert!(matches!(
+            &k.body[1],
+            ScalarStmt::Let { value: ScalarExpr::FreeCall { name, .. }, .. } if name == "S::select"
+        ));
     }
 
     #[test]
