@@ -241,6 +241,9 @@ pub fn build_user_source(
     if let Some(r) = cfg.region {
         lower_outputs.push(r);
     }
+    // constant-power strength reduction (symbi_expr::strength): `x ** (-2.0)` in a
+    // user config becomes a multiply/divide chain instead of a per-cell libm pow.
+    let (nodes, lower_outputs) = symbi_expr::strength_reduce(&nodes, &lower_outputs);
     let mut field =
         lower_dag_to_builtsource(&nodes, &lower_outputs).map_err(|e| format!("bridge: {e:?}"))?;
     let region: Option<NodeId> = cfg.region.map(|_| field.outputs.pop().expect("region output"));
@@ -421,6 +424,7 @@ pub fn build_boundary_dag(
     spec: &crate::regime_spec::RegimeSpec,
 ) -> Result<Vec<(String, BuiltSource)>, String> {
     let nodes = symbi_expr::nodes_from_descs(&cfg.nodes).map_err(|e| format!("dag load: {e}"))?;
+    let (nodes, reduced_outputs) = symbi_expr::strength_reduce(&nodes, &cfg.outputs);
     let d = cfg.dim;
     // MHD prescribes the cell-B vector too. the OUT-OF-PLANE component (B_phi in a 2.5D
     // axisymmetric grid: cell-centered, flux-evolved) is the safe toroidal case — div-free
@@ -447,16 +451,16 @@ pub fn build_boundary_dag(
         lower_dag_to_builtsource(&nodes, outs).map_err(|e| format!("bridge: {e:?}"))
     };
     let mut out = vec![
-        ("den".to_string(), lower(&cfg.outputs[0..1])?),
-        ("mom".to_string(), lower(&cfg.outputs[1..1 + d])?),
+        ("den".to_string(), lower(&reduced_outputs[0..1])?),
+        ("mom".to_string(), lower(&reduced_outputs[1..1 + d])?),
     ];
     let mut next = 1 + d;
     if spec.has_energy {
-        out.push(("nrg".to_string(), lower(&cfg.outputs[next..next + 1])?));
+        out.push(("nrg".to_string(), lower(&reduced_outputs[next..next + 1])?));
         next += 1;
     }
     if spec.is_mhd {
-        out.push(("bcell".to_string(), lower(&cfg.outputs[next..next + d])?));
+        out.push(("bcell".to_string(), lower(&reduced_outputs[next..next + d])?));
     }
     Ok(out)
 }

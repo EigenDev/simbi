@@ -26,9 +26,11 @@ pub mod dag;
 pub mod linearize;
 pub mod eval;
 pub mod load;
+pub mod strength;
 
 pub use op::Op;
 pub use dag::{Dag, Node, Payload};
 pub use linearize::{Instr, linearize, max_register};
 pub use eval::{Expression, evaluate};
 pub use load::{NodeDesc, LoadError, SourceConfig, load_expression, nodes_from_descs};
+pub use strength::strength_reduce;

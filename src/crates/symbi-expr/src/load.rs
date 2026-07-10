@@ -149,7 +149,10 @@ pub fn load_expression(
     params: &[f64],
 ) -> Result<Expression, LoadError> {
     let nodes = nodes_from_descs(node_descs)?;
-    let mut expr = Expression::from_nodes(&nodes, output_indices);
+    // constant-power strength reduction — the SAME rewrite the ir bridge applies, so the
+    // f64 reference vm and the lowered kernel evaluate identical arithmetic.
+    let (nodes, output_indices) = crate::strength::strength_reduce(&nodes, output_indices);
+    let mut expr = Expression::from_nodes(&nodes, &output_indices);
     if !params.is_empty() {
         expr.set_params(params);
     }

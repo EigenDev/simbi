@@ -539,7 +539,8 @@ SIMBI has been used in the following papers:
 
 | Version | Changes |
 |---------|---------|
-| **v0.8.0** | Full rewrite of the compute backend from C++ to Rust, built with maturin |
+| **v0.9.0** | Full rewrite of the compute backend from C++ to Rust, built with maturin |
+| **v0.8.0** | Minimized compiler warnings |
 | **v0.7.0** | Added mypy type checking and the immersed boundary method |
 | **v0.6.0** | Fixed git tag ordering, general refactoring |
 | **v0.5.0** | Performance optimizations |

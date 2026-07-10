@@ -218,7 +218,16 @@ fn body_contribution(
     // the full sound-crossing drain. carrier-generic form proven nonnegative -> f in (0,1] (`ibm.rs`).
     let r_mask = Gv::scalar(&format!("body_{b}_racc"));
     let sink_rate = Gv::scalar(&format!("body_{b}_sink"));
-    let drain_rate = crate::ibm::drain_rate(r_mag, r_mask, min_w, sink_rate, cs);
+    // spatial gate at the mask's EXACT support (ibm::DRAIN_SUPPORT_WIDTHS): beyond it the
+    // ungated rate is exactly zero (tanh saturation), so the lazy branch skips the
+    // tanh + divisions on the far field — ~all cells for a sink of a few cell widths —
+    // without changing any bit. the branch is spatially coherent, hence well predicted.
+    let r_cut = r_mask + Gv::from_f64(crate::ibm::DRAIN_SUPPORT_WIDTHS) * min_w;
+    let drain_rate = Gv::cond(
+        r_mag.cmp_lt(r_cut),
+        || crate::ibm::drain_rate(r_mag, r_mask, min_w, sink_rate, cs),
+        || Gv::ZERO,
+    );
     let _ = (tiny, eps_r, inv_dt, vel_cart, den); // unused by the drain (kept for the shared signature)
     BodyContributionGv { g, drain_rate, rvec }
 }
@@ -267,7 +276,13 @@ pub(crate) fn body_evolved_gv(
 
     // f = exp(-total_rate * dt) in (0, 1]: uniform scaling of den, mom, nrg (intensive state
     // invariant, positivity-preserving for any dt). f = 1 outside every mask -> exact no-op.
-    let f = crate::ibm::drain_factor(total_rate, dt);
+    // outside every mask total_rate is exactly zero and the ungated factor exactly
+    // one — the lazy branch skips the exp without changing a bit.
+    let f = Gv::cond(
+        total_rate.cmp_gt(Gv::ZERO),
+        || crate::ibm::drain_factor(total_rate, dt),
+        || Gv::ONE,
+    );
     let den_new = den * f;
     let mom_new: Vec<Gv> = (0..ncomp).map(|comp| (mom[comp] + dt * d_mom[comp]) * f).collect();
     let nrg_new = (nrg + dt * d_nrg) * f;
@@ -339,7 +354,11 @@ pub fn body_feedback_gv(
         // the fraction of this cell drained by body b this step: frac = 1 - exp(-rate*dt). exact for
         // NON-overlapping masks (each cell in at most one mask -> matches the forward's total-rate
         // factor); overlapping masks slightly over-attribute in this DIAGNOSTIC reduction.
-        let frac = Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp();
+        let frac = Gv::cond(
+            bc.drain_rate.cmp_gt(Gv::ZERO),
+            || Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp(),
+            || Gv::ZERO,
+        );
         // body force (cartesian, 3D) = gravity reaction (-den*g*dv) + accretion drag
         // (+ absorbed momentum / dt). the drag `fa` alone carries the torque (gravity is central).
         let mut force_cart = [Gv::ZERO; 3];
@@ -482,7 +501,11 @@ pub(crate) fn body_evolved_iso_gv(
         total_rate = total_rate + bc.drain_rate;
     }
 
-    let f = (Gv::ZERO - total_rate * dt).exp();
+    let f = Gv::cond(
+        total_rate.cmp_gt(Gv::ZERO),
+        || (Gv::ZERO - total_rate * dt).exp(),
+        || Gv::ONE,
+    );
     let den_new = den * f;
     let mom_new: Vec<Gv> = (0..ncomp).map(|comp| (mom[comp] + dt * d_mom[comp]) * f).collect();
     (den_new, mom_new)
@@ -516,7 +539,11 @@ pub fn body_feedback_iso_gv(
     let mut writes: Writes = Vec::new();
     for b in 0..n_bodies {
         let bc = body_contribution(b, ndim, &cart_axes, &cell_cart, &vel_cart, den, cs, min_w, inv_dt);
-        let frac = Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp();
+        let frac = Gv::cond(
+            bc.drain_rate.cmp_gt(Gv::ZERO),
+            || Gv::ONE - (Gv::ZERO - bc.drain_rate * dt).exp(),
+            || Gv::ZERO,
+        );
         let mut force_cart = [Gv::ZERO; 3];
         let mut fa = [Gv::ZERO; 3];
         for i in 0..3 {

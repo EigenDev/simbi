@@ -121,6 +121,13 @@ pub struct RuntimeSource {
     /// `CompiledKernel` is a bare code ptr (`Send + Sync`), so this field does NOT make `RuntimeSource`
     /// any less `Sync` than `built` already does.
     fused_cpu: OnceLock<Option<FusedCpuKernel>>,
+    /// the COMPILED standalone source pass (the two-pass twin of `fused_cpu`): the source-only
+    /// `GvKernel` (`source_apply_from_built_gv`, the SAME builder the gpu path uses) cranelift-JIT'd
+    /// into one native kernel dispatched over the interior like any other — replacing the per-cell
+    /// evaluation harness, whose per-cell coord/param/lookup orchestration measured 93 ns/zone-cycle
+    /// on the bondi sponge (vs ~4 for a compiled kernel over the same math). `Some(None)` = out of
+    /// jit subset -> the per-cell path remains the fallback oracle.
+    source_cpu: OnceLock<Option<FusedCpuKernel>>,
 }
 
 /// a runtime-JIT'd fused godunov+source host kernel + the manifest to bind it: the input/output
@@ -147,6 +154,7 @@ impl RuntimeSource {
             eval, built, params, has_energy,
             gpu_ir: OnceLock::new(),
             fused_cpu: OnceLock::new(),
+            source_cpu: OnceLock::new(),
         })
     }
 
@@ -173,6 +181,8 @@ pub fn dispatch_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
 {
     if Mem::IS_DEVICE_ACCESSIBLE {
         apply_runtime_source_gpu(sim, rs, weight);
+    } else if let Some(sk) = source_only_cpu_kernel(sim, rs) {
+        dispatch_source_only_cpu(sim, sk, rs, weight);
     } else {
         apply_runtime_source(sim, rs, weight);
     }
@@ -326,6 +336,111 @@ fn build_fused_cpu_kernel<const D: usize>(
     })
 }
 
+fn build_source_only_cpu_kernel<const D: usize>(
+    coords: symbi_discretize::Coords,
+    spacing: &[symbi_discretize::Spacing],
+    axes: &[usize],
+    ncomp: usize,
+    has_energy: bool,
+    built: &[(String, BuiltSource)],
+) -> Option<FusedCpuKernel> {
+    let src_refs: Vec<(&str, &BuiltSource)> = built.iter().map(|(t, b)| (t.as_str(), b)).collect();
+    let (gvk, writes) = symbi_discretize::gv::source_apply_from_built_gv(
+        coords, spacing, axes, D as u8, ncomp, has_energy, &src_refs,
+    );
+    let kernel = symbi_jit::compile_gv_kernel(&gvk, &writes, D).ok()?;
+    let bind_ref = |b: &FieldBind| match b {
+        FieldBind::Ref(f) => *f,
+        FieldBind::Raw(s) => panic!("compiled runtime source: manifest path '{s}' is not a known FieldRef"),
+    };
+    Some(FusedCpuKernel {
+        kernel,
+        in_refs: gvk.field_inputs.iter().map(|(_, rt)| bind_ref(rt)).collect(),
+        out_refs: writes.iter().map(|(_, rt, _)| bind_ref(rt)).collect(),
+        scalar_params: gvk.scalar_params.iter().map(|s| ScalarBind::from_name(s)).collect(),
+    })
+}
+
+/// the GATE for the compiled standalone source pass: host memory AND `Sc == f64` AND the
+/// source-only kernel compiled. `None` -> the per-cell evaluation path (the oracle fallback).
+pub(crate) fn source_only_cpu_kernel<'a, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    rs: &'a RuntimeSource,
+) -> Option<&'a FusedCpuKernel>
+where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        return None;
+    }
+    if std::any::TypeId::of::<Sc>() != std::any::TypeId::of::<f64>() {
+        return None;
+    }
+    let (coords, spacing, axes) = sim_gv_geom(sim);
+    rs.source_cpu
+        .get_or_init(|| {
+            build_source_only_cpu_kernel::<D>(coords, &spacing, &axes, DOF, rs.has_energy, &rs.built)
+        })
+        .as_ref()
+}
+
+/// dispatch the COMPILED standalone source pass: `cons += weight * S(u_stage)` as one native
+/// kernel over the interior, with the same cover tiling every other kernel gets. scalar
+/// resolution mirrors the fused dispatcher minus the godunov/body binds: the kernel's `dt`
+/// scalar carries the SSP `weight` (exactly what the aot `source_apply` twin receives).
+fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    sk: &FusedCpuKernel,
+    rs: &RuntimeSource,
+    weight: f64,
+) where
+    Sc: Scalar + OrderedNumeric,
+    Mem: MemorySpace,
+{
+    debug_assert!(!Mem::IS_DEVICE_ACCESSIBLE, "compiled runtime source is the host path");
+    let pre = sim.fields.prim.pre_field();
+    let in_bases: Vec<*const f64> = sk.in_refs.iter()
+        .map(|&fref| resolve_path(sim, pre, None, 0, fref).as_ptr() as *const f64)
+        .collect();
+    let out_bases: Vec<*mut f64> = sk.out_refs.iter()
+        .map(|&fref| resolve_path(sim, pre, None, 0, fref).as_mut_ptr() as *mut f64)
+        .collect();
+    let t = sim.time;
+    let (x_lo_phys, dx_phys) =
+        physical_geom(&sim.geom.x_lo, &sim.geom.dx, sim.geom.coords, sim.motion.a);
+    let scalars: Vec<f64> = sk.scalar_params.iter().map(|bind| {
+        let ScalarBind::Ref(sref) = bind else {
+            panic!("compiled runtime source: unexpected spec scalar {bind:?}");
+        };
+        match *sref {
+            ScalarRef::Dt => weight,
+            ScalarRef::Time => t,
+            ScalarRef::UserParam(i) => rs.params.get(i as usize).copied()
+                .unwrap_or_else(|| panic!("compiled runtime source: param p{i} not provided")),
+            other => motion_scalar(&sim.motion, sim.geom.coords, D, other)
+                .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
+                .unwrap_or_else(|| panic!(
+                    "compiled runtime source: unresolved scalar {other:?} (dt|mesh_*|dx_k|x_lo_k|t|p{{i}})"
+                )),
+        }
+    }).collect();
+    let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
+    let (grid, dlo) = exec_layout(&sim.geom.interior);
+    // SAFETY: same contract as the fused dispatcher — shared allocated layout, in-place cons.*
+    // read-before-write per cell, cell-disjoint blocks.
+    unsafe {
+        match policy_for(&sim.geom.interior, Mem::IS_DEVICE_ACCESSIBLE) {
+            ExecPolicy::Cover(block) => sk
+                .kernel
+                .run_cover_raw(&grid, &dlo, &alo, &aext, &block, &in_bases, &scalars, &out_bases),
+            ExecPolicy::Whole => {
+                sk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases)
+            }
+        }
+    }
+}
+
 /// the GATE for the fused host path: returns the cached `FusedCpuKernel` only when it applies —
 /// host memory AND `Sc == f64` (the JIT reads/writes raw f64 buffers) AND the kernel compiled. any
 /// failure returns `None` -> the caller runs the two-pass (plain AOT godunov + `apply_runtime_source`),
@@ -351,6 +466,9 @@ where
     }
     // the JIT buffer ABI is f64; a non-f64 carrier (f32, Gv) keeps the two-pass.
     if std::any::TypeId::of::<Sc>() != std::any::TypeId::of::<f64>() {
+        return None;
+    }
+    if unfuse_override() {
         return None;
     }
     let (coords, spacing, axes) = sim_gv_geom(sim);
@@ -388,6 +506,16 @@ where
 /// two-pass the body. cached on the KERNEL-SET (not a RuntimeSource, since there is none). host+f64 +
 /// energy regime + bodies present; `None` otherwise (nothing to fold, or the two-pass fallback). the
 /// body is baked at MAX_BODIES to match the standalone `body_source` (unused slots zero via mass = 0).
+/// SYMBI_UNFUSE=1: a/b override forcing the (bit-identical) two-pass path — the
+/// llvm-compiled aot godunov + the standalone body pass + the small jit source pass.
+/// the fused kernel puts ALL the stage compute under cranelift (no slp, simpler
+/// scheduling); the two-pass pays one extra memory sweep for llvm-quality compute.
+/// which side wins is workload-dependent: measure, don't assume.
+fn unfuse_override() -> bool {
+    static UNFUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *UNFUSE.get_or_init(|| std::env::var("SYMBI_UNFUSE").map(|v| v == "1").unwrap_or(false))
+}
+
 pub(crate) fn resolve_body_only_fused<'a, const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     cache: &'a OnceLock<Option<FusedCpuKernel>>,
@@ -405,6 +533,9 @@ where
         return None;
     }
     if !has_energy || sim.immersed.is_none() {
+        return None;
+    }
+    if unfuse_override() {
         return None;
     }
     let (coords, spacing, axes) = sim_gv_geom(sim);

@@ -214,6 +214,14 @@ impl<S: Scalar, const D: usize> PointMassGravity<S, D> {
 /// Cartesian, cylindrical, AND spherical. the per-body MAX_BODIES sum lives one
 /// layer up. future media (porous drag, deformable stress) extend THIS struct's
 /// methods, inheriting the frame handling + fused machinery for free.
+/// the EXACT support of the gaussian sink kernel, in accretion radii: the weight
+/// `exp(-(r/(racc/2))^2)` underflows to exactly +0 in f64 once the exponent argument
+/// passes ~-745, i.e. `r/(racc/2) >= 27.3`. gating at `r >= SINK_SUPPORT_RADII * racc`
+/// (= 28 half-radii, with margin) therefore skips the exp / roots / divisions on the
+/// far field WITHOUT changing any bit of any field: outside the support the ungated
+/// kernel computes den_dot = 0 exactly.
+pub const SINK_SUPPORT_RADII: f64 = 14.0;
+
 pub struct BodySource<S> {
     /// gravitating mass (0 for an inactive body — a branch-free no-op).
     pub mass: S,
@@ -244,17 +252,30 @@ impl<S: Scalar> BodySource<S> {
     /// Bondi-Hoyle accretion rate `den_dot = rho * min(sink, 1/t_nat, 1/dt) * w(r)`,
     /// `w = exp(-(r/(racc/2))^2)`, `t_nat = min(min_w/cs, sqrt(r^3/(2 mass)))`. reads
     /// the LOCAL `rho` + `cs` — the state dependence the fused source must carry.
+    ///
+    /// spatially gated at the kernel's EXACT support ([`SINK_SUPPORT_RADII`]): beyond it
+    /// the gaussian weight underflows to exactly +0 in f64, so the ungated rate is
+    /// exactly zero and the lazy branch skips the exp + roots on the far field —
+    /// ~all cells for a sink of a few cell widths — without changing any bit.
     pub fn accretion_rate(&self, rho: S, cs: S, x: &[S; 3], min_w: S, inv_dt: S) -> S {
-        let tiny = S::from_f64(1e-30);
         let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
         let r_mag = dot(&dx, &dx).sqrt();
-        let r_norm = r_mag / (S::from_f64(0.5) * self.racc);
-        let weight = (S::ZERO - r_norm * r_norm).exp();
-        let sound_crossing = min_w / cs;
-        let t_ff = (r_mag * r_mag * r_mag / (S::from_f64(2.0) * self.mass + tiny)).sqrt();
-        let nat_rate = S::ONE / (sound_crossing.min(t_ff) + tiny);
-        let sr = self.sink.min(nat_rate).min(inv_dt);
-        rho * sr * weight
+        let r_cut = S::from_f64(SINK_SUPPORT_RADII) * self.racc;
+        S::cond(
+            r_mag.cmp_lt(r_cut),
+            || {
+                let tiny = S::from_f64(1e-30);
+                let r_norm = r_mag / (S::from_f64(0.5) * self.racc);
+                let weight = (S::ZERO - r_norm * r_norm).exp();
+                let sound_crossing = min_w / cs;
+                let t_ff =
+                    (r_mag * r_mag * r_mag / (S::from_f64(2.0) * self.mass + tiny)).sqrt();
+                let nat_rate = S::ONE / (sound_crossing.min(t_ff) + tiny);
+                let sr = self.sink.min(nat_rate).min(inv_dt);
+                rho * sr * weight
+            },
+            || S::ZERO,
+        )
     }
 
     /// the sink velocity `v_star` (Cartesian): radial + `delta`*angular, in the body
@@ -275,11 +296,25 @@ impl<S: Scalar> BodySource<S> {
 
     /// the Cartesian momentum source `S = rho*a - v_star*den_dot` (gravity + sink).
     /// the composer projects this onto the physical coordinate basis.
+    ///
+    /// gravity acts everywhere; the SINK term carries the same exact-support gate as
+    /// [`Self::accretion_rate`] so the far field skips `sink_velocity`'s root and
+    /// divisions too (they would be multiplied by an exact zero).
     pub fn momentum_cartesian(&self, rho: S, vel: &[S; 3], x: &[S; 3], cs: S, min_w: S, inv_dt: S) -> [S; 3] {
         let a = self.accel(x);
-        let den_dot = self.accretion_rate(rho, cs, x, min_w, inv_dt);
-        let vstar = self.sink_velocity(vel, x);
-        std::array::from_fn(|k| rho * a[k] - vstar[k] * den_dot)
+        let dx: [S; 3] = std::array::from_fn(|k| x[k] - self.xm[k]);
+        let r_mag = dot(&dx, &dx).sqrt();
+        let r_cut = S::from_f64(SINK_SUPPORT_RADII) * self.racc;
+        let sink_mom: [S; 3] = S::cond_vec(
+            r_mag.cmp_lt(r_cut),
+            || {
+                let den_dot = self.accretion_rate(rho, cs, x, min_w, inv_dt);
+                let vstar = self.sink_velocity(vel, x);
+                std::array::from_fn(|k| vstar[k] * den_dot)
+            },
+            || [S::ZERO; 3],
+        );
+        std::array::from_fn(|k| rho * a[k] - sink_mom[k])
     }
 
     /// the density source `S_den = -den_dot` (mass removed by accretion).
@@ -291,6 +326,38 @@ impl<S: Scalar> BodySource<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // the sink gate's bit-exactness rests on gaussian underflow: at and beyond
+    // the support radius the UNGATED weight is exactly +0 in f64, so the lazy
+    // branch that skips the exp / roots changes nothing. gravity is unaffected.
+    #[test]
+    fn sink_is_exactly_zero_beyond_the_support_radius() {
+        let body = BodySource::<f64> {
+            mass: 1.0,
+            xm: [0.0; 3],
+            vm: [0.0; 3],
+            soft: 0.05,
+            racc: 0.4,
+            sink: 1e6,
+            delta: 0.0,
+        };
+        let (rho, cs, min_w, inv_dt) = (1.3_f64, 0.7, 0.05, 1e3);
+        for scale in [1.0_f64, 2.0, 50.0] {
+            let r = SINK_SUPPORT_RADII * body.racc * scale;
+            let x = [r, 0.0, 0.0];
+            assert_eq!(body.accretion_rate(rho, cs, &x, min_w, inv_dt), 0.0);
+            // momentum reduces to pure gravity, bit-for-bit
+            let vel = [0.3, -0.2, 0.1];
+            let m = body.momentum_cartesian(rho, &vel, &x, cs, min_w, inv_dt);
+            let a = body.accel(&x);
+            for k in 0..3 {
+                assert_eq!(m[k], rho * a[k], "far-field momentum must be pure gravity");
+            }
+        }
+        // just inside the support the sink is alive
+        let x_in = [0.5 * body.racc, 0.0, 0.0];
+        assert!(body.accretion_rate(rho, cs, &x_in, min_w, inv_dt) > 0.0);
+    }
 
     #[test]
     fn uniform_accel_f64_matches_analytical() {

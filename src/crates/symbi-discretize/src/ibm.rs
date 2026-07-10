@@ -65,10 +65,40 @@ pub fn drain_rate<S: Scalar>(r_mag: S, r_mask: S, min_w: S, sink: S, cs: S) -> S
     chi * sink.min(sound_rate)
 }
 
+/// the EXACT support of the drain mask, in mask widths: `tanh(z)` returns exactly 1.0 in
+/// f64 for `z >= 19.1` (the taylor tail `2 exp(-2z)` falls below half an ulp of 1), so
+/// `chi = (1 - tanh(z))/2` — and with it the drain rate — is exactly zero for
+/// `r >= r_mask + DRAIN_SUPPORT_WIDTHS * w`. a spatial gate at this radius skips the
+/// tanh/exp evaluation on the far field WITHOUT changing any bit of any field: outside
+/// the support the ungated kernel computes rate = 0 and factor = exp(0) = 1 exactly.
+pub const DRAIN_SUPPORT_WIDTHS: f64 = 20.0;
+
 /// the exact-exponential drain factor `f = exp(-total_rate * dt)`. for `total_rate >= 0`, `dt >= 0`
 /// this lies in `(0, 1]`: `f > 0` (positivity-preserving) and `f <= 1` (non-expansive on the
 /// intensive state), for ANY dt — no CFL condition on the sink.
 #[inline]
 pub fn drain_factor<S: Scalar>(total_rate: S, dt: S) -> S {
     (S::ZERO - total_rate * dt).exp()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // the spatial gate's bit-exactness rests on tanh saturation: at and beyond
+    // the support radius the UNGATED rate is exactly zero and the ungated
+    // factor exactly one, so a branch that skips them changes nothing.
+    #[test]
+    fn drain_is_exactly_zero_beyond_the_support_radius() {
+        let (r_mask, w, sink, cs) = (2.0_f64, 0.1, 1e6, 0.7);
+        for extra in [0.0, 1.0, 100.0] {
+            let r = r_mask + (DRAIN_SUPPORT_WIDTHS + extra) * w;
+            let rate = drain_rate(r, r_mask, w, sink, cs);
+            assert_eq!(rate, 0.0, "rate must saturate to exact zero at r = {r}");
+            assert_eq!(drain_factor(rate, 1e3), 1.0, "factor must be exact one");
+        }
+        // just INSIDE the support the mask is alive — the gate is not oversized.
+        let r_in = r_mask + (DRAIN_SUPPORT_WIDTHS - 2.0) * w;
+        assert!(drain_rate(r_in, r_mask, w, sink, cs) > 0.0);
+    }
 }
