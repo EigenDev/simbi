@@ -151,3 +151,35 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
         ledger / lost,
     );
 }
+
+#[test]
+fn iso_dispatch_drains_directly() {
+    use symbi_hydro::eos::Isothermal;
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::isothermal::IsoNewtonian;
+    use symbi_hydro::state::PrimG;
+    type ISim = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let sim = ISim::build(IsoNewtonian, Isothermal { cs: 1.0 }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|_| PrimG::<f64, 2, IsoModel> {
+            rho: 1.5,
+            vel: Tensor::new([0.1, -0.05]),
+            pre: Default::default(),
+        })
+        .build()
+        .with_bodies(BodyCollection::new().add(Body::black_hole(
+            0,
+            Tensor::new([0.1, -0.05]),
+            Tensor::zeros(),
+            1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
+        )));
+    dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
+    let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert!(deltas[0].mass_delta > 0.0, "iso dispatch removed no mass: {:e}", deltas[0].mass_delta);
+}

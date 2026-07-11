@@ -514,6 +514,19 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         .get_item("adiabatic_index")?
         .and_then(|v| v.extract::<f64>().ok())
         .unwrap_or(5.0 / 3.0);
+    // gamma = 1 on an ENERGY regime is a degenerate EOS: the adiabatic sound
+    // speed gamma(gamma-1)e is identically zero, the CFL wave speed vanishes
+    // on quiescent gas, and the first dt spans the whole run — one giant step
+    // to NaN, reported as success. reject at parse with the actionable fix.
+    {
+        let regime_s = enum_str(dict, "regime")?;
+        let has_energy = !(regime_s.contains("iso") || regime_s == "imhd");
+        if has_energy && gamma <= 1.0 {
+            return Err(PyValueError::new_err(format!(
+                "adiabatic_index = {gamma} is degenerate for the energy regime '{regime_s}'                  (adiabatic sound speed = 0): gamma = 1 is the ISOTHERMAL equation of state —                  set regime = Regime.ISOTHERMAL (and ambient_sound_speed), or use gamma > 1",
+            )));
+        }
+    }
 
     let solver_name = enum_str(dict, "solver")?;
     // constrained-transport edge-EMF scheme; defaults to contact for back-compat.
@@ -1323,6 +1336,15 @@ where
     })?;
     io_secs.set(io_secs.get() + t_io.elapsed().as_secs_f64());
     let root = &hier.levels[0].state;
+    // fail-loud completion: a run whose FINAL state is non-finite must never
+    // wear the green box — the in-loop NaN guard only fires on the NEXT cfl,
+    // so a run that ends on its bad step (e.g. one degenerate-EOS giant dt)
+    // would otherwise be reported as success over garbage.
+    let final_finite = root
+        .geom
+        .interior
+        .iter()
+        .all(|c| root.fields.cons.den.view().at(c).is_finite());
     let wall = start.elapsed().as_secs_f64();
     // the sustained integration rate excludes checkpoint i/o: what the solver
     // delivers between writes, and the number comparable across run lengths
@@ -1337,15 +1359,26 @@ where
     // run's summary persists on the primary buffer.
     screen.leave();
     table.set_dynamic(false);
-    let summary = format!(
-        "complete — {} steps, t = {:.4}, {:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
-        root.iteration,
-        root.time,
-        wall,
-        io_secs.get(),
-        humanize_rate(avg),
-    );
-    table.post_success(&summary);
+    let summary = if final_finite {
+        format!(
+            "complete — {} steps, t = {:.4}, {:.2}s ({:.2}s io), {}/s sustained · final {final_path}",
+            root.iteration,
+            root.time,
+            wall,
+            io_secs.get(),
+            humanize_rate(avg),
+        )
+    } else {
+        format!(
+            "CRASHED — final state is non-finite (NaN/inf density) after {} steps at t = {:.4};              the written checkpoint holds garbage. suspect a degenerate parameter set (dt = {:.3e})",
+            root.iteration, root.time, root.dt,
+        )
+    };
+    if final_finite {
+        table.post_success(&summary);
+    } else {
+        table.post_error(&summary);
+    }
     // FOFC run total: report the deliberate fallbacks over the whole run (a quiet run shows nothing).
     let (fb_total, fz_total) = symbi::regimes::fofc::fofc_stats();
     if fb_total > 0 || fz_total > 0 {
@@ -1353,7 +1386,7 @@ where
             "FOFC total: {fb_total} first-order fallback cell-steps, {fz_total} freezes"
         ));
     }
-    table.exit_frame(ExitKind::Success, &summary);
+    table.exit_frame(if final_finite { ExitKind::Success } else { ExitKind::Crash }, &summary);
     dump_profile_if_enabled(root.iteration, n_zones);
     Ok(())
 }
@@ -3839,8 +3872,10 @@ macro_rules! build_and_run_iso {
             })
             .build();
 
-        // attach immersed bodies (gravity / accretion sinks) when declared.
-        let sim = if cfg.bodies.is_empty() {
+        // attach immersed bodies (gravity / accretion sinks) when declared. a REFINED
+        // run attaches them to the HIERARCHY instead (finest level owns the sinks),
+        // exactly like the energy-regime hydro macro.
+        let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
             sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
@@ -3850,15 +3885,10 @@ macro_rules! build_and_run_iso {
         let sub = sim.substrate().theta(theta);
         // attach a user source expression. iso has NO energy, so build_user_source
         // (against the iso spec) drops the energy overlay for force/relax and rejects
-        // raw->nrg; den/mom sources work. single-grid only.
+        // raw->nrg; den/mom sources work. refined runs re-attach the same source to
+        // each fine level in the into_hierarchy make-closure below.
         let sub = match &cfg.source_json {
             Some(json) => {
-                if cfg.refinement_enabled {
-                    return Err(
-                        "user source expressions are not yet supported with mesh refinement"
-                            .to_string(),
-                    );
-                }
                 let scfg = symbi_hydro::SourceConfig::from_json(json)
                     .map_err(|e| format!("source expression parse: {e}"))?;
                 let built = symbi_hydro::expr_bridge::build_user_source(
@@ -3908,7 +3938,32 @@ macro_rules! build_and_run_iso {
             sub.compute_isothermal_cs2(&sim.fields.cons.den, &pre_ic, &interior);
         }
 
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s.substrate().theta(theta));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
+            let ks = s.substrate().theta(theta);
+            // attach the SAME user source to each fine level (a base-only attach
+            // would be restricted away by the fine solution). already validated
+            // at the base attach.
+            match &cfg.source_json {
+                Some(json) => {
+                    let scfg = symbi_hydro::SourceConfig::from_json(json)
+                        .expect("fine-level source parse");
+                    let built = symbi_hydro::expr_bridge::build_user_source(
+                        &scfg,
+                        <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                    )
+                    .expect("fine-level source lower");
+                    ks.attach_runtime_source(built, scfg.params.clone())
+                        .expect("fine-level source attach")
+                }
+                None => ks,
+            }
+        });
+        // a refined run attaches its immersed bodies to the hierarchy: the FINEST
+        // level owns the full (accreting) bodies, coarser levels a gravity-only
+        // proxy (finest-owns-bodies, so the sink applies once).
+        if !cfg.bodies.is_empty() && cfg.refinement_enabled {
+            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies));
+        }
 
         // locally isothermal + refinement: the per-cell cs^2(x) "temperature"
         // lives in the iso kernel-set (not the SimState), so prolong it coarse ->
@@ -3990,14 +4045,11 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
         }
     }
     // immersed bodies + refinement: the finest-owns-bodies AMR sync (`hier.with_bodies` — full
-    // bodies on the finest level, gravity-only proxy on coarser) is wired for HYDRO (newtonian/rhd);
-    // iso / mhd are not wired yet, so reject only those.
-    if !cfg.bodies.is_empty()
-        && cfg.refinement_enabled
-        && (cfg.regime.contains("iso") || cfg.regime.contains("mhd"))
-    {
-        return Err("immersed bodies with refinement are wired for hydro (newtonian/rhd) only; \
-                    iso / mhd AMR body sync is pending"
+    // bodies on the finest level, gravity-only proxy on coarser) is wired for every HYDRO regime
+    // (newtonian/rhd/isothermal — the iso body source/feedback/penalize kernels are baked and the
+    // build macro is shared); mhd remains unwired (staggered-B body coupling pending).
+    if !cfg.bodies.is_empty() && cfg.refinement_enabled && cfg.regime.contains("mhd") {
+        return Err("immersed bodies with refinement are not wired for MHD (staggered-B body coupling pending)"
             .to_string());
     }
     // gpus>1 takes the decomposed run loop: single-level hydro (newtonian/rhd/isothermal) and

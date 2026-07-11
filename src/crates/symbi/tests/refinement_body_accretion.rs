@@ -216,3 +216,87 @@ fn prescribed_binary_positions_stay_synced_across_levels() {
         );
     }
 }
+
+// the ISOTHERMAL twin of the finest-owns-bodies gate: the iso kernel set's
+// body source / feedback / penalize run on a refined hierarchy, accretion is
+// recorded on the finest level, and the gravitating mass stays fixed — the
+// certificate for un-gating iso + refinement + bodies in the binding.
+#[test]
+fn central_bh_accretes_on_the_finest_level_iso() {
+    use symbi::regimes::substrate::IsoSubstrateKernelSet;
+    use symbi_hydro::eos::Isothermal;
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::isothermal::IsoNewtonian;
+    use symbi_hydro::state::PrimG;
+    type ISim = SimState<IsoNewtonian, 3, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    type IKset = IsoSubstrateKernelSet<HostMemory, f64, 3>;
+    let cs = 1.0;
+    let m_init = 0.05;
+    let dx = 1.0 / N as f64;
+    let coarse = ISim::build(IsoNewtonian, Isothermal { cs }, Cartesian)
+        .cells([N; 3])
+        .origin([0.0; 3])
+        .spacing([dx; 3])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(CFL)
+        .allocate()
+        .unwrap()
+        .set_initial(|_x: [f64; 3]| PrimG::<f64, 3, IsoModel> {
+            rho: 2.0,
+            vel: Tensor::new([0.0; 3]),
+            pre: Default::default(),
+        })
+        .build();
+    let ck = IKset::new(cs, CFL, &coarse.geom.allocated);
+    let regions = [RefinementRegion { x_lo: [0.25; 3], x_hi: [0.75; 3] }];
+    let mut hier = Hierarchy::with_refinement(coarse, ck, &regions, ProlongOrder::Ppm, |s| {
+        IKset::new(cs, CFL, &s.geom.allocated)
+    })
+    .unwrap()
+    .with_bodies(BodyCollection::new().add(Body::black_hole(
+        0,
+        Tensor::new([0.5; 3]),
+        Tensor::zeros(),
+        m_init,
+        0.05,
+        0.1,
+        5.0,
+        1.0,
+        0.1,
+    )));
+
+    // seed the fine level's gas (the harness convention — with_refinement's
+    // IC prolongation is not relied on here); iso has no energy slot.
+    {
+        let fine = &hier.levels[1].state;
+        for c in fine.geom.interior.iter() {
+            fine.fields.cons.den.view_mut().set(c, 2.0);
+            for dd in 0..3 {
+                fine.fields.cons.mom[dd].view_mut().set(c, 0.0);
+            }
+        }
+    }
+
+    let coarse_body = *hier.levels[0].state.immersed.as_ref().unwrap().bodies.get(0);
+    assert!(coarse_body.has_gravity() && !coarse_body.has_accretion());
+
+    hier.evolve_steps(6).unwrap();
+
+    let body = *hier.levels[1].state.immersed.as_ref().unwrap().bodies.get(0);
+    assert_eq!(body.mass, m_init, "fixed-potential sink: gravitating mass drifted");
+    let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = body.kind else {
+        panic!("finest body lost its accretion capability");
+    };
+    assert!(
+        total_accreted_mass > 0.0 && total_accreted_mass.is_finite(),
+        "no iso accretion recorded on the finest level: {total_accreted_mass:e}"
+    );
+    assert!(accretion_rate > 0.0, "iso mdot not recorded: {accretion_rate:e}");
+
+    // every level finite (the restriction + penalize interplay held together).
+    for lvll in &hier.levels {
+        for c in lvll.state.geom.interior.iter() {
+            assert!(lvll.state.fields.cons.den.view().at(c).is_finite());
+        }
+    }
+}

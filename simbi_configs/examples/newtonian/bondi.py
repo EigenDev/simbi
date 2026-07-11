@@ -286,6 +286,13 @@ class SphericalBondiTest(SimbiProblem):
         """
         super().setup()
 
+        # gamma = 1 IS the isothermal equation of state: the adiabatic branch
+        # is degenerate there (sound speed gamma(gamma-1)e = 0 -> zero wave
+        # speed -> one unbounded dt). select the genuine isothermal regime,
+        # whose sound speed is `ambient_sound_speed`.
+        if self.adiabatic_index == 1.0:
+            self.regime = Regime.ISOTHERMAL
+
         R_B = self.bondi_radius
         box_radius = self.domain_radius * R_B
 
