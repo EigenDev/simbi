@@ -561,8 +561,12 @@ impl Table {
         });
 
         // trim to capacity
-        let cap = max_messages();
-        while self.messages.len() > cap {
+        // the retained HISTORY is sized for the live dashboard's log tab
+        // (which shows a full pane of tail lines); the static board trims
+        // itself to max_messages() at render time, so the small cap there
+        // never needs to bound the buffer.
+        const LOG_HISTORY: usize = 500;
+        while self.messages.len() > LOG_HISTORY {
             self.messages.pop_front();
         }
     }
@@ -763,13 +767,16 @@ mod tests {
     #[test]
     fn message_capacity_trim() {
         let mut table = Table::new("Test", false);
-        // post more than max_messages (at most 10)
-        for ii in 0..20 {
+        // the buffer retains a deep history for the live log tab (the static
+        // board trims itself to max_messages at render time); only the hard
+        // history cap evicts.
+        for ii in 0..600 {
             table.post_info(&format!("msg {}", ii));
         }
-        assert!(table.messages.len() <= 10);
-        // most recent should be last
-        assert!(table.messages.back().unwrap().text.contains("19"));
+        assert!(table.messages.len() <= 500);
+        // most recent should be last, oldest evicted from the front.
+        assert!(table.messages.back().unwrap().text.contains("599"));
+        assert!(table.messages.front().unwrap().text.contains("100"));
     }
 
     #[test]

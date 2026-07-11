@@ -552,6 +552,71 @@ where
         .with_group(cons)
 }
 
+
+// =============================================================================
+// body state round-trip: the per-body kinematic + accretion ledger a restart
+// must restore. bodies re-attach from the CONFIG on restart, so without this
+// group a moving body's orbit phase and a sink's cumulative accreted mass
+// silently reset — wrong physics for binaries, a broken cumulative ledger for
+// accretors.
+// =============================================================================
+
+/// the materialized per-body state buffers a write borrows (Snapshot-style).
+struct BodyStateSnap {
+    pos: Vec<f64>,      // [nb, D]
+    vel: Vec<f64>,      // [nb, D]
+    mass: Vec<f64>,     // [nb]
+    accreted: Vec<f64>, // [nb] cumulative (0 for non-sinks)
+    rate: Vec<f64>,     // [nb] instantaneous (0 for non-sinks)
+    nb: usize,
+}
+
+fn body_state_snap<const D: usize>(
+    im: &ImmersedBodies<D>,
+) -> BodyStateSnap {
+    let nb = im.bodies.len();
+    let mut snap = BodyStateSnap {
+        pos: Vec::with_capacity(nb * D),
+        vel: Vec::with_capacity(nb * D),
+        mass: Vec::with_capacity(nb),
+        accreted: Vec::with_capacity(nb),
+        rate: Vec::with_capacity(nb),
+        nb,
+    };
+    for b in 0..nb {
+        let body = im.bodies.get(b);
+        for a in 0..D {
+            snap.pos.push(body.position[a]);
+            snap.vel.push(body.velocity[a]);
+        }
+        snap.mass.push(body.mass);
+        let (acc, rate) = match body.kind {
+            symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
+                (total_accreted_mass, accretion_rate)
+            }
+            _ => (0.0, 0.0),
+        };
+        snap.accreted.push(acc);
+        snap.rate.push(rate);
+    }
+    snap
+}
+
+fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
+    let nb = snap.nb;
+    Tree::new("bodies")
+        .with_attr("n_bodies", nb as u64)
+        .with_dataset(Dataset::new("position", vec![nb, D], DataRef::F64(&snap.pos)))
+        .with_dataset(Dataset::new("velocity", vec![nb, D], DataRef::F64(&snap.vel)))
+        .with_dataset(Dataset::new("mass", vec![nb], DataRef::F64(&snap.mass)))
+        .with_dataset(Dataset::new(
+            "total_accreted_mass",
+            vec![nb],
+            DataRef::F64(&snap.accreted),
+        ))
+        .with_dataset(Dataset::new("accretion_rate", vec![nb], DataRef::F64(&snap.rate)))
+}
+
 fn build_tree<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &'a SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     snap: &'a Snapshot<D>,
@@ -629,7 +694,13 @@ where
     Mem: MemorySpace,
 {
     let snap = snapshot(sim);
-    let tree = build_tree(sim, &snap, extras);
+    let mut tree = build_tree(sim, &snap, extras);
+    // per-body kinematic + accretion state (restart round-trip): derived
+    // buffers, so they live HERE and the tree borrows them.
+    let body_snap = sim.immersed.as_ref().map(body_state_snap);
+    if let Some(bs) = body_snap.as_ref() {
+        tree.push_group(body_state_group::<D>(bs));
+    }
     Hdf5Backend.write(Path::new(path), &tree)
 }
 
@@ -667,6 +738,27 @@ where
     root.push_group(build_metadata_group(levels[0], &snaps[0], extras));
     for (idx, snap) in snaps.iter().enumerate() {
         root.push_group(build_level_group(levels[idx], snap, idx));
+    }
+    // per-body kinematic + accretion state (restart round-trip), from
+    // whichever level carries the immersed sidecar.
+    let body_snap = levels.iter().filter_map(|l| l.immersed.as_ref()).next().map(body_state_snap);
+    if let Some(bs) = body_snap.as_ref() {
+        root.push_group(body_state_group::<D>(bs));
+    }
+    // the per-step body-gas exchange series: whichever level carries the
+    // immersed sidecar (the driver consolidates on one) supplies it — the
+    // same group layout the single-grid writer emits.
+    if let Some(im) = levels.iter().filter_map(|l| l.immersed.as_ref()).find(|im| !im.history.is_empty()) {
+        let (n, nb) = (im.history.len(), im.history.n_bodies());
+        root.push_group(
+            Tree::new("body_diagnostics")
+                .with_attr("n_bodies", nb as u64)
+                .with_dataset(Dataset::new("time", vec![n], DataRef::F64(im.history.time())))
+                .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
+                .with_dataset(Dataset::new("mass_delta", vec![n, nb], DataRef::F64(im.history.mass_delta())))
+                .with_dataset(Dataset::new("energy_delta", vec![n, nb], DataRef::F64(im.history.energy_delta())))
+                .with_dataset(Dataset::new("force", vec![n, nb, D], DataRef::F64(im.history.force()))),
+        );
     }
     Hdf5Backend.write(Path::new(path), &root)
 }
@@ -857,6 +949,42 @@ where
             if all_ok {
                 mhd.bface_initialized
                     .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
+    // restore per-body kinematic + accretion state over the config-attached
+    // collection: without this, a restart resets a moving body's orbit phase
+    // and a sink's cumulative accreted mass (the diagnostics.dat ledger would
+    // step down at the seam). checkpoints written before the group exists
+    // restore fields only — bodies keep their config values.
+    if let (Some(bodies_g), Some(im)) = (tree.find_group("bodies"), sim.immersed.as_mut()) {
+        let get = |name: &str| -> Result<Vec<f64>> {
+            Ok(bodies_g
+                .find_dataset(name)
+                .ok_or_else(|| IoError::MissingPath(format!("bodies/{name}")))?
+                .data
+                .as_f64()
+                .ok_or_else(|| IoError::MissingPath(format!("bodies/{name}: not f64")))?
+                .to_vec())
+        };
+        let (pos, vel) = (get("position")?, get("velocity")?);
+        let (mass, accreted, rate) =
+            (get("mass")?, get("total_accreted_mass")?, get("accretion_rate")?);
+        let nb = im.bodies.len().min(mass.len());
+        for b in 0..nb {
+            let body = im.bodies.get_mut(b);
+            for a in 0..D {
+                body.position[a] = pos[b * D + a];
+                body.velocity[a] = vel[b * D + a];
+            }
+            body.mass = mass[b];
+            if let symbi_ib::BodyKind::BlackHole {
+                total_accreted_mass, accretion_rate, ..
+            } = &mut body.kind
+            {
+                *total_accreted_mass = accreted[b];
+                *accretion_rate = rate[b];
             }
         }
     }
@@ -1128,6 +1256,63 @@ mod tests {
             ghost_checked > 0,
             "test seeded no ghosts — allocation has no halo"
         );
+    }
+
+    #[test]
+    fn body_state_round_trips_through_a_restart() {
+        // the restart contract: a moving sink's orbit phase and cumulative
+        // accreted mass survive write -> fresh-config sim -> load. without the
+        // bodies group, restart resets both to config values silently.
+        type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+        let build = || {
+            let mut s = Sim2::new_at(
+                Newtonian, IdealGas { gamma: 5.0 / 3.0 }, Cartesian,
+                [0isize, 0], [4usize, 4], [0.0, 0.0], [0.25, 0.25], 2,
+                Boundaries::uniform(BoundaryType::Outflow), 0.4, Timestepping::Rk2, 0,
+            )
+            .unwrap();
+            s.attach_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::black_hole(
+                0,
+                symbi_algebra::Tensor::new([0.5, 0.5]),
+                symbi_algebra::Tensor::zeros(),
+                1.0, 0.1, 0.05, 0.5, 0.0, 0.1,
+            )));
+            s
+        };
+        let mut sim = build();
+        {
+            let body = sim.immersed.as_mut().unwrap().bodies.get_mut(0);
+            body.position = symbi_algebra::Tensor::new([0.7, 0.3]); // orbit advanced
+            body.velocity = symbi_algebra::Tensor::new([-0.1, 0.2]);
+            body.mass = 1.25;
+            if let symbi_ib::BodyKind::BlackHole {
+                total_accreted_mass, accretion_rate, ..
+            } = &mut body.kind
+            {
+                *total_accreted_mass = 0.042;
+                *accretion_rate = 3.5e-3;
+            }
+        }
+        let dir = std::env::temp_dir().join("symbi_checkpoint_bodystate");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bodystate.h5");
+        let path = path.to_str().unwrap();
+        write_checkpoint(&sim, path, &Metadata::new()).unwrap();
+
+        let mut restored = build(); // fresh: body back at config values
+        load_checkpoint(&mut restored, path).unwrap();
+        let b = restored.immersed.as_ref().unwrap().bodies.get(0);
+        assert_eq!(b.position[0], 0.7);
+        assert_eq!(b.position[1], 0.3);
+        assert_eq!(b.velocity[0], -0.1);
+        assert_eq!(b.mass, 1.25);
+        match b.kind {
+            symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
+                assert_eq!(total_accreted_mass, 0.042);
+                assert_eq!(accretion_rate, 3.5e-3);
+            }
+            _ => panic!("body kind lost through the round trip"),
+        }
     }
 
     #[test]
