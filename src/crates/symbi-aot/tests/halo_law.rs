@@ -1,0 +1,123 @@
+// =============================================================================
+// halo_law.rs
+//
+// the ghost-width law (docs/design/48 part 1): every registered kernel's
+// stencil reach — read off its FieldLoadAt index expressions in the serialized
+// neutral IR — must fit inside the allocated ghost halo. a stencil widened
+// without widening the halo fails here at test time, naming the kernel, the
+// field, and the axis, instead of reading garbage at run time.
+//
+// three kernel families index in ways that are not fixed-offset stencils BY
+// DESIGN, and are exempted as families:
+//   - ghost fills: the source coord picks periodic/reflect/outflow through a
+//     runtime lattice-map select; the map keeps reads in range by construction
+//   - refinement transfers (refine_*): cross-grid addressing through scaled
+//     coords (fine = 2*coarse); the transfer layer computes its own reach
+//   - field_axpy_shift: reads at a runtime shift parameter bounded by dispatch
+// an unbounded kernel OUTSIDE these families fails the law.
+// =============================================================================
+
+use symbi_aot::IR_BLOBS;
+use symbi_ir::prepared_from_ir;
+use symbi_ir::{stencil_reach, AxisReach};
+
+// the ghost halo every sim allocates (the SimBuilder default). the widest
+// stencil in the registry — plm reconstruction's -2..+1 fan on the flux axis —
+// fits exactly.
+const NG: u32 = 2;
+
+// kernel-name families whose index expressions are runtime-directed rather
+// than fixed-offset stencils; unbounded reach is their design, not a defect.
+const UNBOUNDED_BY_DESIGN: &[&str] = &["ghost_fill", "refine_", "field_axpy_shift"];
+
+// diagnostic census of the whole registry: reach per kernel/field/axis.
+#[test]
+#[ignore = "diagnostic census, run explicitly with -- --ignored --nocapture"]
+fn halo_census() {
+    for (name, ir) in IR_BLOBS {
+        let report = stencil_reach(&prepared_from_ir(ir).scalarized);
+        if report.per_field.is_empty() {
+            continue;
+        }
+        println!("{name}:");
+        for (field, axes) in &report.per_field {
+            println!("  {field}: {axes:?}");
+        }
+    }
+}
+
+#[test]
+fn every_registered_kernel_fits_the_ghost_halo() {
+    let mut violations = Vec::new();
+    for (name, ir) in IR_BLOBS {
+        let exempt = UNBOUNDED_BY_DESIGN.iter().any(|fam| name.contains(fam));
+        let report = stencil_reach(&prepared_from_ir(ir).scalarized);
+        for (field, axes) in &report.per_field {
+            for (axis, reach) in axes.iter().enumerate() {
+                match reach {
+                    AxisReach::Bounded(w) if *w > NG => violations.push(format!(
+                        "{name}: field '{field}' axis {axis} reaches {w} > ng = {NG}"
+                    )),
+                    AxisReach::Bounded(_) => {}
+                    AxisReach::Unbounded if !exempt => violations.push(format!(
+                        "{name}: field '{field}' axis {axis} has reach the analysis cannot \
+                         bound, and the kernel is not in an unbounded-by-design family"
+                    )),
+                    AxisReach::Unbounded => {}
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "the ghost-width law failed:\n{}",
+        violations.join("\n"),
+    );
+}
+
+// the positive control: the law is not passing vacuously. plm reconstruction's
+// -2..+1 fan on the flux axis is a pinned fact of the discretization — if the
+// analysis stops seeing it, the law above has gone blind, not clean.
+#[test]
+fn plm_face_flux_reach_is_two_on_the_flux_axis() {
+    let report = stencil_reach(&prepared_from_ir(flux_blob()).scalarized);
+    assert_eq!(
+        report.per_field["prim_rho"],
+        vec![AxisReach::Bounded(2), AxisReach::Bounded(0)],
+        "plm stencil reach on the axis-0 face flux",
+    );
+    assert!(report.unbounded().is_empty());
+}
+
+// bug injection through the serialized artifact: widen the real blob's -2
+// stencil offset to -3 and assert the analysis reports the violation with the
+// field and axis attached. this exercises the whole audit path — serde, the
+// let-environment resolution, the reach join — not just the classifier.
+#[test]
+fn widened_stencil_in_a_real_blob_breaks_the_law() {
+    let widened = flux_blob().replace("\"I32\":-2", "\"I32\":-3");
+    assert_ne!(widened, flux_blob(), "injection site missing from the blob");
+    let report = stencil_reach(&prepared_from_ir(&widened).scalarized);
+    let over_halo: Vec<(&String, usize, u32)> = report
+        .per_field
+        .iter()
+        .flat_map(|(field, axes)| {
+            axes.iter().enumerate().filter_map(move |(axis, r)| match r {
+                AxisReach::Bounded(w) if *w > NG => Some((field, axis, *w)),
+                _ => None,
+            })
+        })
+        .collect();
+    assert!(
+        over_halo.iter().all(|(_, axis, w)| *axis == 0 && *w == 3) && !over_halo.is_empty(),
+        "the widened flux-axis offset must surface as reach 3 on axis 0, got {over_halo:?}",
+    );
+}
+
+fn flux_blob() -> &'static str {
+    IR_BLOBS
+        .iter()
+        .find(|(name, _)| *name == "adiabatic_face_flux_2d_0")
+        .map(|(_, ir)| *ir)
+        .expect("adiabatic_face_flux_2d_0 missing from the registry")
+}

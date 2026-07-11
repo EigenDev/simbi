@@ -38,6 +38,9 @@ fn assert_cons_bit_identical<const D: usize>(
 
 #[test]
 fn rhd_raw_source_fused_equals_two_pass_rk2() {
+    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
+    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     type Sim = SimCpu<Rhd, 2, Cartesian, IdealGas<f64>>;
     const GAMMA: f64 = 4.0 / 3.0;
     let n = 24usize;

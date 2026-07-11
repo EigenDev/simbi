@@ -86,6 +86,7 @@ pub use passes::scalarize::{
     scalarize, scalarize_kernel, KernelScalarized,
 };
 pub use passes::splice::{splice_graph, SpliceError};
+pub use passes::stencil_reach::{stencil_reach, AxisReach, ReachReport};
 pub use passes::cse::{cse_lowered_fn, cse_kernel};
 
 // backends surface

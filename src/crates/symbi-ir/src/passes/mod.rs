@@ -20,6 +20,8 @@
 //               loop nests behind one per-call branch (docs/design/47).
 //   lazy_select — expensive select arms rescheduled as real branches with
 //               arm-exclusive lets sunk in (docs/design/47; runs in prepare).
+//   stencil_reach — per-field, per-axis halo reach read off FieldLoadAt index
+//               expressions (docs/design/48 part 1); powers the ghost-width law.
 // =============================================================================
 
 pub mod scalarize;
@@ -29,3 +31,4 @@ pub mod pressure;
 pub mod mask_form;
 pub mod unswitch;
 pub mod lazy_select;
+pub mod stencil_reach;

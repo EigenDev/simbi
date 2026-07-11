@@ -238,10 +238,10 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
         inputs.push(&sim.fields.cons.mom[comp]);
     }
     inputs.push(nrg);
-    // reduction scratch (allocated on demand — body-free sims never reach here).
-    let scratch: Vec<Field<Sc, D, Mem>> = (0..n_out)
-        .map(|_| Field::<Sc, D, Mem>::zeros(&geom.allocated).expect("feedback scratch alloc"))
-        .collect();
+    // reduction scratch, cached on the workspace across calls (allocated on the
+    // first feedback dispatch — body-free sims never reach here). the kernel
+    // assign-writes every interior cell before the reduce, so no re-zeroing.
+    let scratch = feedback_scratch(sim, n_out);
     let outputs: Vec<&Field<Sc, D, Mem>> = scratch.iter().collect();
     dispatch_fields::<Sc, Mem, D>(
         &name,
@@ -279,6 +279,35 @@ pub fn dispatch_body_feedback<const D: usize, const DOF: usize, Mem, Sc>(
             });
         }
     }
+}
+
+/// the workspace-cached feedback reduction scratch: `n` full-domain fields,
+/// allocated once on the first feedback dispatch and reused every call (the
+/// per-call alloc + zero moved ~800 MB/step at 128^3 for nothing — the kernels
+/// assign-write their whole dispatch region before the reduction reads it).
+/// the OnceLock is sized by the first caller; both feedback paths of one sim
+/// request the same `n`, asserted here.
+fn feedback_scratch<'s, const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &'s FieldStore<D, DOF, Mem, Sc>,
+    n: usize,
+) -> &'s [Field<Sc, D, Mem>]
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let scratch = sim.workspace.body_scratch.get_or_init(|| {
+        (0..n)
+            .map(|_| {
+                Field::<Sc, D, Mem>::zeros(&sim.geom.allocated).expect("feedback scratch alloc")
+            })
+            .collect()
+    });
+    assert!(
+        scratch.len() >= n,
+        "feedback scratch holds {} fields, dispatch needs {n}",
+        scratch.len(),
+    );
+    &scratch[..n]
 }
 
 /// the SPLIT feedback path (cartesian): per ACTIVE body, a gravity-reaction pass
@@ -322,11 +351,10 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         })
     };
 
-    // reduction scratch, shared across bodies and both passes (assign-write + reduce
-    // over the SAME region needs no zeroing).
-    let scratch: Vec<Field<Sc, D, Mem>> = (0..per_drain)
-        .map(|_| Field::<Sc, D, Mem>::zeros(&geom.allocated).expect("feedback scratch alloc"))
-        .collect();
+    // reduction scratch, shared across bodies and both passes and cached on the
+    // workspace across calls (assign-write + reduce over the SAME region needs
+    // no zeroing).
+    let scratch = feedback_scratch(sim, per_drain);
 
     let nrg = sim.fields.cons.nrg_field().expect("body_feedback needs cons.nrg");
     let mut den_in: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];

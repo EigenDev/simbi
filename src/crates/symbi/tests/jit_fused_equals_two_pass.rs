@@ -50,6 +50,9 @@ fn assert_cons_bit_identical<const D: usize>(
 
 #[test]
 fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
+    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
+    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
     const GAMMA: f64 = 1.4;
     let n = 24usize;
@@ -117,6 +120,9 @@ fn adiabatic_runtime_force_fused_equals_two_pass_rk2() {
 
 #[test]
 fn iso_runtime_force_fused_equals_two_pass_rk2() {
+    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
+    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     // the iso analogue: no energy law, so the fused kernel writes only den + mom_k (no nrg).
     // proves the has_energy=false fused path matches the iso two-pass bit-for-bit.
     type Sim = SimCpu<IsoNewtonian, 2, Cartesian, Isothermal<f64>>;
@@ -169,6 +175,9 @@ fn iso_runtime_force_fused_equals_two_pass_rk2() {
 
 #[test]
 fn adiabatic_fused_equals_two_pass_on_the_cache_tiled_cover() {
+    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
+    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     // the oracles above run 24^2 = 576 interior cells, below `WHOLE_BELOW_CELLS` — so the fused
     // dispatch takes `ExecPolicy::Whole` (the flat driver) and the CACHE-TILED cover is never
     // exercised. this runs a domain large enough that `policy_for` returns `Cover`, so the fused

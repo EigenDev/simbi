@@ -173,6 +173,19 @@ fn write_registry(out_dir: &str) {
         ));
     }
     src.push_str("        _ => return None,\n    })\n}\n");
+    // the ENUMERABLE registry: every generated kernel's (name, neutral IR blob).
+    // registry-wide audits (the ghost-width law over FieldLoadAt stencil reach,
+    // docs/design/48 part 1) iterate this instead of naming kernels by hand, so
+    // a newly generated kernel is audited the build it appears.
+    src.push_str("\n/// every generated kernel's (name, neutral IR blob), in registration order.\n");
+    src.push_str("pub static IR_BLOBS: &[(&str, &str)] = &[\n");
+    for (_cpu_file, kernel_name) in reg.iter() {
+        src.push_str(&format!(
+            "    (\"{kernel_name}\", {}_IR),\n",
+            kernel_name.to_uppercase(),
+        ));
+    }
+    src.push_str("];\n");
     fs::write(Path::new(out_dir).join("kernels_registry.rs"), src)
         .expect("failed to write kernel registry");
 }

@@ -209,8 +209,8 @@ where
             // backward feedback: reduce per-body force/torque/accreted-mass from the fluid into
             // the side-car diagnostics (docs/design/19), then evolve_bodies consolidates + applies it
             // + advances the (prescribed) binary, and resets the accumulator for the next step.
-            kernels.body_feedback(sim, sim.dt);
-            evolve_bodies(sim);
+            prof("body_feedback", || kernels.body_feedback(sim, sim.dt));
+            prof("body_motion", || evolve_bodies(sim));
         }
 
         if sim.iteration - last_cb >= interval {

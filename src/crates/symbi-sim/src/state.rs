@@ -670,6 +670,13 @@ pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpac
     /// unphysical, else 0, with boundary-consistent ghosts (a face is first-order iff either
     /// adjacent cell is flagged). the splice stencil reads it at the two cells sharing each face.
     pub fofc_flag: Field<Sc, NDIM, M>,
+    /// body-feedback reduction scratch, allocated on first feedback dispatch (body-free sims
+    /// never touch it, and pay neither the memory nor a per-call allocation). the feedback
+    /// kernels assign-write every cell of their dispatch region before the reduction reads
+    /// it, so reuse across calls needs no re-zeroing. sized by the first caller — the split
+    /// cartesian path needs D+5 fields, the combined curvilinear path MAX_BODIES*(D+5);
+    /// a sim's geometry picks exactly one path for its lifetime.
+    pub body_scratch: std::sync::OnceLock<Vec<Field<Sc, NDIM, M>>>,
 }
 
 /// the natural case: vector dimension == grid dimension.
@@ -1778,6 +1785,7 @@ where
             elide_stage_snapshot: std::sync::atomic::AtomicBool::new(true),
             flux_ho: array_cons_zeros_with_energy(&allocated, has_energy)?,
             fofc_flag: Field::zeros(&allocated)?,
+            body_scratch: std::sync::OnceLock::new(),
         };
 
         let exec = Executor::<S>::new(device_id)?;

@@ -74,6 +74,9 @@ fn two_level(fused: bool) -> Hier {
 
 #[test]
 fn fused_fine_level_equals_two_pass() {
+    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
+    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     let t_final = 0.02;
     let mut h_two = two_level(false);
     let mut h_fused = two_level(true);

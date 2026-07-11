@@ -444,9 +444,10 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// the GATE for the fused host path: returns the cached `FusedCpuKernel` only when it applies —
-/// host memory AND `Sc == f64` (the JIT reads/writes raw f64 buffers) AND the kernel compiled. any
-/// failure returns `None` -> the caller runs the two-pass (plain AOT godunov + `apply_runtime_source`),
-/// which stays the default + fallback. builds + caches on first call (geometry known only here). both
+/// host memory AND `Sc == f64` (the JIT reads/writes raw f64 buffers) AND `SYMBI_FUSE=1` or the
+/// source-only kernel missed the jit subset (E3: the two-pass with a compiled source pass is the
+/// default) AND the kernel compiled. any failure returns `None` -> the caller runs the two-pass
+/// (plain AOT godunov + the source pass). builds + caches on first call (geometry known only here). both
 /// `godunov_stage` and `source_apply` call this with the SAME `geo` so they agree on whether the
 /// fused path is live this stage (the cache makes the second call free).
 pub(crate) fn fused_runtime_cpu_kernel<'a, const D: usize, const DOF: usize, Mem, Sc>(
@@ -470,7 +471,10 @@ where
     if std::any::TypeId::of::<Sc>() != std::any::TypeId::of::<f64>() {
         return None;
     }
-    if unfuse_override() {
+    // the two-pass default (E3) needs the compiled source-only pass to be viable —
+    // the per-cell interpreter harness (~93 ns/zone-cycle) must never be the
+    // default. a source outside the jit subset keeps the fused kernel.
+    if !fuse_override() && source_only_cpu_kernel(sim, rs).is_some() {
         return None;
     }
     let (coords, spacing, axes) = sim_gv_geom(sim);
@@ -510,14 +514,19 @@ where
 /// two-pass the body. cached on the KERNEL-SET (not a RuntimeSource, since there is none). host+f64 +
 /// energy regime + bodies present; `None` otherwise (nothing to fold, or the two-pass fallback). the
 /// body is baked at MAX_BODIES to match the standalone `body_source` (unused slots zero via mass = 0).
-/// SYMBI_UNFUSE=1: a/b override forcing the (bit-identical) two-pass path — the
-/// llvm-compiled aot godunov + the standalone body pass + the small jit source pass.
-/// the fused kernel puts ALL the stage compute under cranelift (no slp, simpler
-/// scheduling); the two-pass pays one extra memory sweep for llvm-quality compute.
-/// which side wins is workload-dependent: measure, don't assume.
-fn unfuse_override() -> bool {
-    static UNFUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *UNFUSE.get_or_init(|| std::env::var("SYMBI_UNFUSE").map(|v| v == "1").unwrap_or(false))
+/// the fused-vs-two-pass policy (executor law E3, docs/design/48): the two-pass —
+/// llvm-compiled aot godunov + the standalone aot body pass + the compiled
+/// cranelift source-only pass — is the DEFAULT. fusing puts ALL the stage compute
+/// under cranelift (no slp, simpler scheduling); the two-pass pays one extra
+/// memory sweep for llvm-quality compute, and measures faster (bondi 25.1 vs
+/// 16.2 MZCS with the source-only pass compiled). SYMBI_FUSE=1 opts back into
+/// the fused kernel (the a/b override); SYMBI_UNFUSE=1 vetoes it.
+fn fuse_override() -> bool {
+    static FUSE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FUSE.get_or_init(|| {
+        std::env::var("SYMBI_FUSE").map(|v| v == "1").unwrap_or(false)
+            && std::env::var("SYMBI_UNFUSE").map(|v| v != "1").unwrap_or(true)
+    })
 }
 
 pub(crate) fn resolve_body_only_fused<'a, const D: usize, const DOF: usize, Mem, Sc>(
@@ -539,7 +548,9 @@ where
     if !has_energy || sim.immersed.is_none() {
         return None;
     }
-    if unfuse_override() {
+    // E3: the body-only two-pass (aot godunov + the standalone aot body pass) is
+    // always compiled, so the default is unconditionally two-pass.
+    if !fuse_override() {
         return None;
     }
     let (coords, spacing, axes) = sim_gv_geom(sim);
