@@ -26,6 +26,7 @@ use symbi_xpu::MemorySpace;
 
 use symbi_substrate::regimes::substrate_kernels::dispatch_fields_each;
 use symbi_sim::state::{Boundaries, BoundaryType, ConsFieldsGeneric, PrimFieldsGeneric};
+use symbi_sim::driver::prof;
 use symbi_ir::{KernelId, ProlongTag};
 
 /// coarse-fine prolongation order — the driver-side selector for the aot
@@ -272,7 +273,7 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
     let has_pre = old.pre_field().is_some();
     let ncomp = 1 + DOF + has_pre as usize;
     if !(D == 3 && (ncomp == 4 || ncomp == 5) && order != ProlongOrder::Pcm) {
-        prolong_prims_lerped(lerp, old, new, dst, region, order, alpha);
+        prof("refine_prolong_1t", || prolong_prims_lerped(lerp, old, new, dst, region, order, alpha));
         return;
     }
     let w = order.ghost_width() as isize;
@@ -294,7 +295,9 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
         lerp_in.push(new_c[k]);
     }
     let name = KernelId::FieldLerpMulti { ncomp: ncomp as u8, ndim: D as u8 }.name();
-    dispatch_fields_each::<f64, Mem, D>(name, &coarse, &lerp_in, &lerp_c, &[], &[alpha]);
+    prof("refine_prolong_lerp", || {
+        dispatch_fields_each::<f64, Mem, D>(name, &coarse, &lerp_in, &lerp_c, &[], &[alpha]);
+    });
 
     // the three sweeps: lerp -> A -> B -> dst, axis 0 innermost first (the
     // inlined kernel's nesting order — the bit-identity requirement).
@@ -312,9 +315,15 @@ pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
         }
         .name()
     };
-    dispatch_fields_each::<f64, Mem, D>(sweep(0), &a_dom, &lerp_c, &a_c, &[], &[]);
-    dispatch_fields_each::<f64, Mem, D>(sweep(1), &b_dom, &a_c, &b_c, &[], &[]);
-    dispatch_fields_each::<f64, Mem, D>(sweep(2), region, &b_c, &dst_c, &[], &[]);
+    prof("refine_prolong_sw0", || {
+        dispatch_fields_each::<f64, Mem, D>(sweep(0), &a_dom, &lerp_c, &a_c, &[], &[]);
+    });
+    prof("refine_prolong_sw1", || {
+        dispatch_fields_each::<f64, Mem, D>(sweep(1), &b_dom, &a_c, &b_c, &[], &[]);
+    });
+    prof("refine_prolong_sw2", || {
+        dispatch_fields_each::<f64, Mem, D>(sweep(2), region, &b_c, &dst_c, &[], &[]);
+    });
 }
 
 /// prolong the prim batch through a pre-lerped coarse scratch: one `field_lerp`

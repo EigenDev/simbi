@@ -946,9 +946,7 @@ where
         // the substep end = the next substep's start) before the physical
         // fill reads corners.
         if has_coarser {
-            prof("refine_prolong", || {
-                self.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64)
-            });
+            self.prolong_cf(level, alpha0 + stage_time[ii] / RATIO as f64);
         }
         let l = &self.levels[level];
         prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
@@ -1007,7 +1005,7 @@ where
         let fine_dt = dt / RATIO as f64;
         for sub in 0..RATIO {
             let alpha = sub as f64 / RATIO as f64;
-            prof("refine_prolong", || self.prolong_cf(level + 1, alpha));
+            self.prolong_cf(level + 1, alpha);
             let f = &self.levels[level + 1];
             prof("ghost_fill", || f.kernels.ghost_fill(&f.state));
             self.advance_level(level + 1, fine_dt, alpha);
@@ -1062,9 +1060,7 @@ where
         let l = &self.levels[level];
         prof("c2p", || l.kernels.c2p(&l.state));
         if has_coarser {
-            prof("refine_prolong", || {
-                self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64)
-            });
+            self.prolong_cf(level, alpha0 + 1.0 / RATIO as f64);
         }
         let l = &self.levels[level];
         prof("ghost_fill", || l.kernels.ghost_fill(&l.state));
@@ -1125,14 +1121,16 @@ where
             {
                 let pmhd = parent.state.fields.mhd.as_ref().unwrap();
                 for aa in 0..NDIM {
-                    prolong_field(
-                        &bcell_old[aa],
-                        &pmhd.bcell[aa],
-                        &fmhd.bcell[aa],
-                        slab,
-                        self.prolong_order,
-                        alpha,
-                    );
+                    prof("refine_prolong_face", || {
+                        prolong_field(
+                            &bcell_old[aa],
+                            &pmhd.bcell[aa],
+                            &fmhd.bcell[aa],
+                            slab,
+                            self.prolong_order,
+                            alpha,
+                        )
+                    });
                 }
             }
         }
@@ -1149,14 +1147,16 @@ where
                 for slab in
                     bface_cf_halo_slabs(&fine.state.geom.interior, &fine.state.boundaries, dd)
                 {
-                    prolong_face_field(
-                        dd,
-                        &bface_old[dd],
-                        &pmhd.bface[dd],
-                        &fmhd.bface[dd],
-                        &slab,
-                        alpha,
-                    );
+                    prof("refine_prolong_face", || {
+                        prolong_face_field(
+                            dd,
+                            &bface_old[dd],
+                            &pmhd.bface[dd],
+                            &fmhd.bface[dd],
+                            &slab,
+                            alpha,
+                        )
+                    });
                 }
             }
         }
