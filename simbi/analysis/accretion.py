@@ -53,6 +53,77 @@ def load_body_diagnostics(path: str) -> BodyDiagnostics:
         )
 
 
+@dataclass(frozen=True)
+class DatDiagnostics:
+    """the cadence-sampled body-state log (`diagnostics.dat`): one row per body
+    per diagnostic interval, appended across the whole run INCLUDING restarts.
+    complements the per-step checkpoint series — the cumulative accreted_mass
+    column yields exact interval-averaged rates at any cadence, while per-step
+    fluctuation amplitudes live only in the checkpoint series."""
+
+    time: NDArray[np.float64]  # [n] sample times
+    accreted_mass: NDArray[np.float64]  # [n, nb] cumulative
+    accretion_rate: NDArray[np.float64]  # [n, nb] instantaneous (last step)
+    force: NDArray[np.float64]  # [n, nb, 3]; nan where the file lacks a column
+    mass: NDArray[np.float64]  # [n, nb]
+
+
+def load_diagnostics_dat(path: str) -> DatDiagnostics:
+    """parse `diagnostics.dat`. the header line names the columns, so both the
+    current 3-component schema (x y z .. fx fy fz torque_x..) and the legacy
+    2d-shaped one (x y .. fx fy torque_z) load; components a file does not
+    record come back nan."""
+    with open(path) as f:
+        first = f.readline()
+    if not first.startswith("#"):
+        raise ValueError(f"{path}: missing the '# <columns>' header line")
+    names = first.lstrip("#").split()
+    col = {name: i for i, name in enumerate(names)}
+    for required in ("time", "body", "mass", "accreted_mass", "accretion_rate"):
+        if required not in col:
+            raise ValueError(f"{path}: header lacks required column '{required}'")
+
+    raw = np.loadtxt(path, comments="#", ndmin=2)
+    bodies = raw[:, col["body"]].astype(int)
+    nb = int(bodies.max()) + 1 if raw.size else 0
+    times = np.unique(raw[:, col["time"]])
+    n = times.size
+    idx = {t: i for i, t in enumerate(times)}
+    accreted = np.full((n, nb), np.nan)
+    rate = np.full((n, nb), np.nan)
+    force = np.full((n, nb, 3), np.nan)
+    mass = np.full((n, nb), np.nan)
+    for row in raw:
+        i, b = idx[row[col["time"]]], int(row[col["body"]])
+        for ax, name in enumerate(("fx", "fy", "fz")):
+            if name in col:
+                force[i, b, ax] = row[col[name]]
+        mass[i, b] = row[col["mass"]]
+        accreted[i, b] = row[col["accreted_mass"]]
+        rate[i, b] = row[col["accretion_rate"]]
+    return DatDiagnostics(
+        time=times, accreted_mass=accreted, accretion_rate=rate, force=force, mass=mass
+    )
+
+
+def mdot_from_cumulative(
+    time: NDArray[np.float64],
+    accreted_mass: NDArray[np.float64],
+    t_start: float,
+) -> float:
+    """the EXACT mean accretion rate over (t_start, end] from the cumulative
+    accreted-mass column: a difference of totals, immune to the sampling
+    cadence (unlike averaging the instantaneous-rate samples, which aliases
+    sub-interval variability)."""
+    time = np.asarray(time, dtype=np.float64)
+    m = np.asarray(accreted_mass, dtype=np.float64)
+    sel = np.nonzero(time >= t_start)[0]
+    if sel.size < 2:
+        return np.nan
+    i0, i1 = sel[0], sel[-1]
+    return float((m[i1] - m[i0]) / (time[i1] - time[i0]))
+
+
 def _window_mean(
     time: NDArray[np.float64],
     dt: NDArray[np.float64],

@@ -100,6 +100,53 @@ def test_stagnation_crossing_interpolates_linearly() -> None:
     assert stagnation_distance(x, np.ones_like(x)) is None
 
 
+def test_dat_loader_reads_the_legacy_2d_schema(tmp_path) -> None:
+    from simbi.analysis import load_diagnostics_dat, mdot_from_cumulative
+
+    # two bodies, three samples; body 0 accretes at a constant 0.5/unit time.
+    path = tmp_path / "diagnostics.dat"
+    header = "# time body x y vx vy fx fy torque_z mass accreted_mass accretion_rate\n"
+    rows = []
+    for t in [1.0, 2.0, 3.0]:
+        rows.append(f"{t} 0 0 0 0 0 {0.1 * t} -0.2 0 1.0 {0.5 * t} 0.5\n")
+        rows.append(f"{t} 1 1 1 0 0 0 0 0 2.0 0.0 0.0\n")
+    path.write_text(header + "".join(rows))
+
+    d = load_diagnostics_dat(str(path))
+    assert d.time.shape == (3,)
+    assert d.accreted_mass.shape == (3, 2)
+    assert d.force[1, 0, 0] == pytest.approx(0.2)
+    # the legacy row never recorded fz: absent, not zero.
+    assert np.isnan(d.force[1, 0, 2])
+    # the cumulative diff gives the exact mean rate regardless of cadence.
+    assert mdot_from_cumulative(d.time, d.accreted_mass[:, 0], t_start=1.0) == pytest.approx(0.5)
+    assert mdot_from_cumulative(d.time, d.accreted_mass[:, 1], t_start=1.0) == pytest.approx(0.0)
+
+
+def test_dat_loader_reads_the_three_component_schema(tmp_path) -> None:
+    from simbi.analysis import load_diagnostics_dat
+
+    path = tmp_path / "diagnostics.dat"
+    header = (
+        "# time body x y z vx vy vz fx fy fz torque_x torque_y torque_z "
+        "mass accreted_mass accretion_rate\n"
+    )
+    row = "1.0 0 1 2 3 0.1 0.2 0.3 4 5 6 7 8 9 1.0 0.25 0.5\n"
+    path.write_text(header + row)
+    d = load_diagnostics_dat(str(path))
+    assert d.force[0, 0].tolist() == [4.0, 5.0, 6.0]
+    assert d.accreted_mass[0, 0] == pytest.approx(0.25)
+
+
+def test_dat_loader_rejects_a_headerless_file(tmp_path) -> None:
+    from simbi.analysis import load_diagnostics_dat
+
+    path = tmp_path / "diagnostics.dat"
+    path.write_text("1.0 0 0 0 0 0 0 0 0 1.0 0.0 0.0\n")
+    with pytest.raises(ValueError, match="header"):
+        load_diagnostics_dat(str(path))
+
+
 def test_loader_round_trips_the_checkpoint_group(tmp_path) -> None:
     h5py = pytest.importorskip("h5py")
     path = tmp_path / "diag.h5"

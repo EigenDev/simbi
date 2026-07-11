@@ -1699,10 +1699,15 @@ fn append_diagnostics<const D: usize>(
         .create(true)
         .append(true)
         .open(path)?;
+    // the row is 3-component for EVERY grid dimension (unused axes exactly
+    // zero): one schema serves 1d/2d/3d runs, and a 3d run's z-components are
+    // never dropped. the header line is the schema declaration — readers parse
+    // column names from it, so old 2d-shaped files stay loadable.
     if fresh {
         writeln!(
             f,
-            "# time body x y vx vy fx fy torque_z mass accreted_mass accretion_rate"
+            "# time body x y z vx vy vz fx fy fz torque_x torque_y torque_z \
+             mass accreted_mass accretion_rate"
         )?;
     }
     let comp = |t: &Tensor<f64, D>, ax: usize| if ax < D { t[ax] } else { 0.0 };
@@ -1718,18 +1723,106 @@ fn append_diagnostics<const D: usize>(
         };
         writeln!(
             f,
-            "{time:.8e} {bb} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {accreted:.8e} {rate:.8e}",
+            "{time:.8e} {bb} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} {:.8e} \
+             {:.8e} {:.8e} {:.8e} {:.8e} {accreted:.8e} {rate:.8e}",
             comp(&b.position, 0),
             comp(&b.position, 1),
+            comp(&b.position, 2),
             comp(&b.velocity, 0),
             comp(&b.velocity, 1),
+            comp(&b.velocity, 2),
             comp(&b.force, 0),
             comp(&b.force, 1),
+            comp(&b.force, 2),
+            b.torque[0],
+            b.torque[1],
             b.torque[2],
             b.mass,
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod diagnostics_tests {
+    use super::*;
+
+    // the diagnostics row carries all three components for every grid
+    // dimension — a 3d run's z position/velocity/force and the full torque
+    // vector survive, and the header names every column (readers parse it).
+    #[test]
+    fn diagnostics_row_is_three_component_in_3d() {
+        let mut b = symbi_ib::Body::<f64, 3>::black_hole(
+            0,
+            Tensor::new([1.0, 2.0, 3.0]),
+            Tensor::new([0.1, 0.2, 0.3]),
+            1.0,
+            0.1,
+            0.05,
+            0.5,
+            0.0,
+            0.2,
+        );
+        b.force = Tensor::new([4.0, 5.0, 6.0]);
+        b.torque = Tensor::new([7.0, 8.0, 9.0]);
+        let bodies = BodyCollection::new().add(b);
+
+        let dir = std::env::temp_dir().join("symbi_diag_dat_3d");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("diagnostics.dat");
+        let _ = std::fs::remove_file(&path);
+        append_diagnostics(path.to_str().unwrap(), 0.5, &bodies).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut lines = text.lines();
+        let header: Vec<&str> = lines.next().unwrap().trim_start_matches('#').split_whitespace().collect();
+        let row: Vec<f64> = lines
+            .next()
+            .unwrap()
+            .split_whitespace()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        assert_eq!(header.len(), row.len(), "header names every column");
+        let col = |name: &str| row[header.iter().position(|h| *h == name).unwrap()];
+        assert_eq!(col("z"), 3.0);
+        assert_eq!(col("vz"), 0.3);
+        assert_eq!(col("fz"), 6.0);
+        assert_eq!(col("torque_x"), 7.0);
+        assert_eq!(col("torque_z"), 9.0);
+        assert_eq!(col("mass"), 1.0);
+    }
+
+    // a 2d run pads the unused axis with exact zeros — one schema for every D.
+    #[test]
+    fn diagnostics_row_pads_2d_with_zeros() {
+        let bodies = BodyCollection::new().add(symbi_ib::Body::<f64, 2>::gravitational(
+            0,
+            Tensor::new([1.0, 2.0]),
+            Tensor::zeros(),
+            1.0,
+            0.1,
+            0.05,
+        ));
+        let dir = std::env::temp_dir().join("symbi_diag_dat_2d");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("diagnostics.dat");
+        let _ = std::fs::remove_file(&path);
+        append_diagnostics(path.to_str().unwrap(), 0.0, &bodies).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let header: Vec<&str> =
+            text.lines().next().unwrap().trim_start_matches('#').split_whitespace().collect();
+        let row: Vec<f64> = text
+            .lines()
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let col = |name: &str| row[header.iter().position(|h| *h == name).unwrap()];
+        assert_eq!(col("z"), 0.0);
+        assert_eq!(col("vz"), 0.0);
+        assert_eq!(col("fz"), 0.0);
+    }
 }
 
 /// the coarse->fine prolongation order: ONE above the interior reconstruction

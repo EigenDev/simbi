@@ -13,8 +13,11 @@
 
 from .accretion import (
     BodyDiagnostics,
+    DatDiagnostics,
     averaged_rate,
     load_body_diagnostics,
+    load_diagnostics_dat,
+    mdot_from_cumulative,
     sonic_radius_vs_angle,
     stagnation_distance,
     steady_state_time,
@@ -22,8 +25,11 @@ from .accretion import (
 
 __all__ = [
     "BodyDiagnostics",
+    "DatDiagnostics",
     "averaged_rate",
     "load_body_diagnostics",
+    "load_diagnostics_dat",
+    "mdot_from_cumulative",
     "sonic_radius_vs_angle",
     "stagnation_distance",
     "steady_state_time",
