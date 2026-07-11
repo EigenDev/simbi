@@ -127,3 +127,75 @@ pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
     let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
     (kernel, writes)
 }
+
+/// the ISOTHERMAL twin: no energy channel (the drain scales den + mom; the
+/// sound speed is the constant `cs` param, not recovered from cons), delta
+/// outputs mass + force only. same [Drain] stack, same integrator — the iso
+/// energy slot discards the e-channel by construction.
+pub fn penalize_drain_iso_gv(ndim: usize) -> (GvKernel, Writes) {
+    use symbi_hydro::energy::IsoModel;
+    assert!((1..=3).contains(&ndim), "penalize_drain_iso_gv: ndim must be 1..=3");
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let cs = Gv::scalar("cs");
+    let c_drain = Gv::scalar("c_drain");
+
+    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ndim)
+        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+        .collect();
+
+    let geo = cell_geometry_gv(Coords::Cartesian, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
+    let dv = Gv::ONE / geo.inv_volume;
+    let mut min_w = Gv::scalar("dx_0");
+    for ax in 1..ndim {
+        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+    }
+
+    let center: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+    });
+    let x: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim { geo.centroid[a] } else { Gv::ZERO }
+    });
+    let r_mask = Gv::scalar("body_0_racc");
+    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
+    let inv_tau = cs / (c_drain * min_w);
+
+    let kin = BodyKin::<Gv, 3> { u_solid: Tensor::zeros(), e_wall: Gv::ZERO };
+    let mut acc = Relax::<Gv, 3>::none();
+    Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
+    let cons = ConsG::<Gv, 3, IsoModel> {
+        den,
+        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        nrg: Default::default(),
+    };
+    let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
+
+    let mut writes: Writes = Vec::new();
+    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    for a in 0..ndim {
+        writes.push((
+            format!("mom_out_{a}"),
+            symbi_ir::FieldRef::cons_mom(a as u8).into(),
+            out.mom[a].node(),
+        ));
+    }
+    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    for a in 0..ndim {
+        writes.push((
+            format!("pen_force_{a}"),
+            format!("pen_0_force_{a}").into(),
+            delta.force_delta[a].node(),
+        ));
+    }
+
+    let center_p: Vec<ParamExpr> =
+        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
+    let radius_p = ParamExpr::param("body_0_racc")
+        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
+            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
+    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    (kernel, writes)
+}

@@ -224,7 +224,7 @@ pub(crate) fn body_scalar<const D: usize>(
 /// feedback (both kernels take the same scalar set).
 
 /// whether the IBM penalization (docs/design/50) owns accretion on this sim:
-/// cartesian + an energy channel — the baked penalize envelope. where true,
+/// cartesian (adiabatic AND isothermal kernels are baked). where true,
 /// every legacy sink-rate scalar resolves to zero (an exact no-op in the
 /// traced drain) and `dispatch_penalize` performs the drain instead.
 pub fn penalize_owns_accretion<const D: usize, const DOF: usize, Mem, Sc>(
@@ -235,7 +235,6 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     sim.geom.coords == _GeomChk::Cartesian
-        && sim.fields.cons.nrg_field().is_some()
 }
 
 pub(crate) fn resolve_body_scalars<const D: usize, const DOF: usize, Mem, Sc>(

@@ -62,6 +62,8 @@ pub enum KernelId {
     /// property-algebra kernel whose p = 1 stack reduces bit-exactly to the
     /// uniform-scaling drain. adiabatic, cartesian.
     PenalizeDrain { ndim: u8 },
+    /// the isothermal twin: constant sound speed, no energy channel.
+    PenalizeDrainIso { ndim: u8 },
     /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -183,6 +185,10 @@ impl KernelId {
             },
             KernelId::PenalizeDrain { ndim } => {
                 ["penalize_drain_1d", "penalize_drain_2d", "penalize_drain_3d"][dim_ix(ndim)]
+            }
+            KernelId::PenalizeDrainIso { ndim } => {
+                ["penalize_drain_iso_1d", "penalize_drain_iso_2d", "penalize_drain_iso_3d"]
+                    [dim_ix(ndim)]
             }
             KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
                 match (order, axis, ncomp, ndim) {

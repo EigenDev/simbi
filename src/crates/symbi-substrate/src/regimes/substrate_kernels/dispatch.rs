@@ -501,9 +501,17 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     if sim.geom.coords != symbi_geometry::Geometry::Cartesian {
         return;
     }
-    let Some(nrg) = sim.fields.cons.nrg_field() else { return };
+    let nrg = sim.fields.cons.nrg_field();
     let geom = &sim.geom;
-    let name = symbi_ir::KernelId::PenalizeDrain { ndim: D as u8 }.name();
+    // the regime picks the kernel: adiabatic recovers c_s from cons; iso reads
+    // the constant `cs` param (the caller's `gamma` argument carries it) and
+    // has no energy channel (deltas: mass + force only).
+    let name = if nrg.is_some() {
+        symbi_ir::KernelId::PenalizeDrain { ndim: D as u8 }.name()
+    } else {
+        symbi_ir::KernelId::PenalizeDrainIso { ndim: D as u8 }.name()
+    };
+    let n_delta = if nrg.is_some() { D + 2 } else { D + 1 };
     let bodies = &im.bodies;
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
         match bind {
@@ -518,7 +526,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             other => panic!("penalize: unexpected spec scalar {other:?}"),
         }
     };
-    let scratch = feedback_scratch(sim, D + 2);
+    let scratch = feedback_scratch(sim, n_delta);
     for b in 0..bodies.len() {
         if bodies.get(b).accretion_radius().is_none() {
             continue;
@@ -556,8 +564,10 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         for comp in 0..DOF {
             outputs.push(&sim.fields.cons.mom[comp]);
         }
-        outputs.push(nrg);
-        for s in scratch[..D + 2].iter() {
+        if let Some(nrg) = nrg {
+            outputs.push(nrg);
+        }
+        for s in scratch[..n_delta].iter() {
             outputs.push(s);
         }
         let scalars = scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b)));
@@ -568,7 +578,11 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         for a in 0..D {
             force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
         }
-        let energy = field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add);
+        let energy = if nrg.is_some() {
+            field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add)
+        } else {
+            0.0
+        };
         im.diagnostics.accumulate(symbi_ib::BodyDelta {
             idx: b,
             force_delta: force,

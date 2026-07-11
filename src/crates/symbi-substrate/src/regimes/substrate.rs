@@ -50,6 +50,8 @@ const ISO_GAMMA: f64 = 1.0;
 /// a D-generic isothermal `KernelSet`, every method substrate-generated.
 pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
     pub cs: f64,
+    /// the drain timescale dial tau = c_drain dx / c_s (accretor.md §2.3).
+    pub c_drain: f64,
     pub cfl_number: f64,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
@@ -109,6 +111,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             .expect("failed to allocate iso CFL scratch field");
         Self {
             cs,
+            c_drain: 1.0,
             cfl_number,
             theta: 1.0,
             cs2,
@@ -454,6 +457,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         if sim.geom.coords != Geometry::Cartesian {
             dispatch_body_source_iso(sim, &self.pre, dt);
         }
+    }
+
+    fn penalize(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+        // the [Drain] stack (docs/design/50): the sole accretion mechanism on
+        // cartesian grids; the iso kernel reads `cs` through the eos-param slot.
+        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain);
     }
 
     fn body_feedback(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
