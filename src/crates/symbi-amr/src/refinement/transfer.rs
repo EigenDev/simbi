@@ -185,6 +185,88 @@ pub fn prolong_prims<const D: usize, const DOF: usize, Mem: MemorySpace>(
     }
 }
 
+/// the prim batch as an ordered component list: rho, vel[0..DOF], pre (when present).
+fn prim_comps<'a, const D: usize, const DOF: usize, Mem: MemorySpace>(
+    p: &'a PrimFieldsGeneric<D, DOF, Mem>,
+    has_pre: bool,
+) -> Vec<&'a symbi_grid::Field<f64, D, Mem>> {
+    let mut v: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(1 + DOF + has_pre as usize);
+    v.push(&p.rho);
+    for kk in 0..DOF {
+        v.push(&p.vel[kk]);
+    }
+    if has_pre {
+        v.push(p.pre_field().expect("pre present when has_pre"));
+    }
+    v
+}
+
+/// prolong the prim batch through a pre-lerped coarse scratch: one `field_lerp`
+/// pass time-interpolates the coarse snapshots ONCE PER COARSE CELL over the
+/// parent region of `region` (+ stencil halo), then the single-snapshot prolong
+/// reads the lerped buffer — half the gather traffic of the fused time-pair
+/// kernel (which re-lerps the whole stencil neighbourhood per FINE cell), with
+/// bit-identical output (the lerp expression and its consumption are unchanged;
+/// only where the intermediate lives moves). `lerp` is a caller-owned coarse
+/// scratch (allocated once — the step loop allocates nothing per call). falls
+/// back to `prolong_prims` when the batched 3d kernels are not generated.
+pub fn prolong_prims_lerped<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    lerp: &PrimFieldsGeneric<D, DOF, Mem>,
+    old: &PrimFieldsGeneric<D, DOF, Mem>,
+    new: &PrimFieldsGeneric<D, DOF, Mem>,
+    dst: &PrimFieldsGeneric<D, DOF, Mem>,
+    region: &Domain<D>,
+    order: ProlongOrder,
+    alpha: f64,
+) {
+    let has_pre = old.pre_field().is_some();
+    let ncomp = 1 + DOF + has_pre as usize;
+    if !(D == 3 && (ncomp == 4 || ncomp == 5)) {
+        prolong_prims(old, new, dst, region, order, alpha);
+        return;
+    }
+
+    // the coarse cells the prolong stencil reads for this fine region: the
+    // parent range floor_div(lo, 2) .. floor_div(hi - 1, 2) + 1, grown by the
+    // stencil width. euclidean division — ghost-slab indices are negative.
+    let w = order.ghost_width() as isize;
+    let coarse = Domain::new(std::array::from_fn(|a| {
+        let s = &region.spaces[a];
+        symbi_algebra::Space {
+            name: s.name,
+            lo: s.lo.div_euclid(2) - w,
+            hi: (s.hi - 1).div_euclid(2) + 1 + w,
+        }
+    }));
+
+    // component order everywhere: rho, vel[0..DOF], pre (when present).
+    let (old_c, new_c, lerp_c, dst_c) = (
+        prim_comps(old, has_pre),
+        prim_comps(new, has_pre),
+        prim_comps(lerp, has_pre),
+        prim_comps(dst, has_pre),
+    );
+
+    // pass 1: lerp the coarse snapshots — inputs interleaved (old_k, new_k),
+    // outputs lerp_k, the field_lerp_multi_gv buffer order.
+    let mut lerp_in: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(2 * ncomp);
+    for k in 0..ncomp {
+        lerp_in.push(old_c[k]);
+        lerp_in.push(new_c[k]);
+    }
+    let name = KernelId::FieldLerpMulti { ncomp: ncomp as u8, ndim: D as u8 }.name();
+    dispatch_fields_each::<f64, Mem, D>(name, &coarse, &lerp_in, &lerp_c, &[], &[alpha]);
+
+    // pass 2: single-snapshot prolong from the lerped coarse buffer (no scalars).
+    let name = KernelId::RefineProlongMulti1t {
+        order: prolong_tag(order),
+        ncomp: ncomp as u8,
+        ndim: D as u8,
+    }
+    .name();
+    dispatch_fields_each::<f64, Mem, D>(name, region, &lerp_c, &dst_c, &[], &[]);
+}
+
 /// restrict one cell-centered scalar field (volume-weighted child average)
 /// from the fine interior onto the covered coarse cells. `coverage` is the
 /// covered region in absolute coarse indices; the kernel reads the `2^D` fine

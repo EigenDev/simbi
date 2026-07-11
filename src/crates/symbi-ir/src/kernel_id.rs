@@ -49,6 +49,15 @@ pub enum KernelId {
     /// (the prim batch), sharing the per-cell stencil geometry. generated for the
     /// 3D hot path only (ncomp 4 = isothermal, 5 = adiabatic/rhd).
     RefineProlongMulti { order: ProlongTag, ncomp: u8, ndim: u8 },
+    /// MULTI-FIELD single-snapshot cell prolongation: the leaf reads ONE
+    /// pre-lerped coarse buffer per component (a `FieldLerpMulti` pass hoisted
+    /// the time interpolation to once per coarse cell — half the gather
+    /// traffic of the time-pair kernel). same generation envelope as
+    /// `RefineProlongMulti`.
+    RefineProlongMulti1t { order: ProlongTag, ncomp: u8, ndim: u8 },
+    /// MULTI-FIELD pointwise time interpolation `dst_k = (1-alpha)*old_k +
+    /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
+    FieldLerpMulti { ncomp: u8, ndim: u8 },
     /// staggered face restriction on the `axis`-normal faces.
     RefineRestrictFace { axis: u8, ndim: u8 },
     /// staggered face prolongation on the `axis`-normal faces.
@@ -141,6 +150,26 @@ impl KernelId {
                 (o, n, d) => panic!(
                     "KernelId::RefineProlongMulti: unsupported (order={o:?}, ncomp={n}, ndim={d}) \
                      — only 3D ncomp 4/5 are generated"
+                ),
+            },
+            KernelId::RefineProlongMulti1t { order, ncomp, ndim } => match (order, ncomp, ndim) {
+                (ProlongTag::Pcm, 4, 3) => "refine_prolong_1t_pcm_4c_3d",
+                (ProlongTag::Pcm, 5, 3) => "refine_prolong_1t_pcm_5c_3d",
+                (ProlongTag::Plm, 4, 3) => "refine_prolong_1t_plm_4c_3d",
+                (ProlongTag::Plm, 5, 3) => "refine_prolong_1t_plm_5c_3d",
+                (ProlongTag::Ppm, 4, 3) => "refine_prolong_1t_ppm_4c_3d",
+                (ProlongTag::Ppm, 5, 3) => "refine_prolong_1t_ppm_5c_3d",
+                (o, n, d) => panic!(
+                    "KernelId::RefineProlongMulti1t: unsupported (order={o:?}, ncomp={n}, ndim={d}) \
+                     — only 3D ncomp 4/5 are generated"
+                ),
+            },
+            KernelId::FieldLerpMulti { ncomp, ndim } => match (ncomp, ndim) {
+                (4, 3) => "field_lerp_4c_3d",
+                (5, 3) => "field_lerp_5c_3d",
+                (n, d) => panic!(
+                    "KernelId::FieldLerpMulti: unsupported (ncomp={n}, ndim={d}) — only 3D \
+                     ncomp 4/5 are generated"
                 ),
             },
             KernelId::RefineRestrictFace { axis, ndim } => RESTRICT_FACE[dim_ix(ndim)][axis as usize],

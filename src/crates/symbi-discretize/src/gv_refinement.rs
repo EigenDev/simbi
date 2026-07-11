@@ -446,41 +446,27 @@ pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKer
     assert!(ratio >= 2, "refine_prolong_gv: ratio must be >= 2");
     begin_trace();
     let alpha = Gv::scalar("alpha");
-    let one = Gv::from_f64(1.0);
+    let geom = prolong_geometry(ndim, ratio);
+    let src = ProlongSrc::TimePair { old: "src_old", new: "src_new", alpha };
+    let ctx = geom.ctx(ndim, order, &src);
+    let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
+    let writes = vec![("dst".to_string(), "dst".into(), val.node())];
+    (end_trace(), writes)
+}
 
-    // the per-axis Coarsen map + the child parity: parent = floor_div(c, r),
-    // parity = c - parent*r in 0..r.
-    let (parent, parity): (Vec<NodeId>, Vec<NodeId>) = with_trace(|t| {
-        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let g = t.graph();
-        let mut ps = Vec::with_capacity(ndim);
-        let mut qs = Vec::with_capacity(ndim);
-        for &c in &coords {
-            let r = g.add_const(ConstValue::I32(ratio as i32), None);
-            let p = g.element_wise(ElementWiseOp::FloorDiv, vec![c, r], None);
-            let pr = g.element_wise(ElementWiseOp::Mul, vec![p, r], None);
-            let q = g.element_wise(ElementWiseOp::Sub, vec![c, pr], None);
-            ps.push(p);
-            qs.push(q);
-        }
-        (ps, qs)
-    });
-
-    // the reference's per-pass sub-cell positions from the parity kk (int
-    // promoted to f64 by the graph): plm midpoint frac = (kk + 1/2)/r - 1/2,
-    // ppm sub-cell average bounds xi_lo = kk/r, xi_hi = (kk + 1)/r.
-    let half = Gv::from_f64(0.5);
-    let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
-    let ratio_f = Gv::from_f64(ratio as f64);
-    let parity_f: Vec<Gv> = parity.iter().map(|&q| Gv::of(q)).collect();
-    let frac: Vec<Gv> = parity_f.iter().map(|&q| (q + half) * inv_ratio - half).collect();
-    let xi_lo: Vec<Gv> = parity_f.iter().map(|&q| q * inv_ratio).collect();
-    let xi_hi: Vec<Gv> = parity_f.iter().map(|&q| (q + one) * inv_ratio).collect();
-
-    let ctx = ProlongCtx {
-        ndim, order, parent: &parent, frac: &frac, xi_lo: &xi_lo, xi_hi: &xi_hi,
-        ratio_f, one, alpha, old_name: "src_old", new_name: "src_new",
-    };
+/// trace the SINGLE-SNAPSHOT cell prolongation: identical stencil sweep to
+/// `refine_prolong_gv`, but the leaf reads ONE coarse buffer "src" — no time
+/// pair, no alpha. paired with a `field_lerp` pass that time-interpolates the
+/// coarse snapshots once per coarse cell, this halves the prolong kernel's
+/// gather traffic (the design-47 act-8 census put the time pair at 2x the
+/// loads of a 5^3 ppm neighbourhood, recomputed per fine cell).
+pub fn refine_prolong_1t_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "refine_prolong_1t_gv: ndim must be 1..=3");
+    assert!(ratio >= 2, "refine_prolong_1t_gv: ratio must be >= 2");
+    begin_trace();
+    let geom = prolong_geometry(ndim, ratio);
+    let src = ProlongSrc::Single { name: "src" };
+    let ctx = geom.ctx(ndim, order, &src);
     let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
     let writes = vec![("dst".to_string(), "dst".into(), val.node())];
     (end_trace(), writes)
@@ -506,44 +492,68 @@ pub fn refine_prolong_multi_gv(
     assert!(ncomp >= 1, "refine_prolong_multi_gv: ncomp must be >= 1");
     begin_trace();
     let alpha = Gv::scalar("alpha");
-    let one = Gv::from_f64(1.0);
-
-    // shared per-cell geometry: parent (coarse) index + child parity per axis —
-    // identical for every component, CSE'd across them.
-    let (parent, parity): (Vec<NodeId>, Vec<NodeId>) = with_trace(|t| {
-        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
-        let g = t.graph();
-        let mut ps = Vec::with_capacity(ndim);
-        let mut qs = Vec::with_capacity(ndim);
-        for &c in &coords {
-            let r = g.add_const(ConstValue::I32(ratio as i32), None);
-            let p = g.element_wise(ElementWiseOp::FloorDiv, vec![c, r], None);
-            let pr = g.element_wise(ElementWiseOp::Mul, vec![p, r], None);
-            let q = g.element_wise(ElementWiseOp::Sub, vec![c, pr], None);
-            ps.push(p);
-            qs.push(q);
-        }
-        (ps, qs)
-    });
-
-    let half = Gv::from_f64(0.5);
-    let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
-    let ratio_f = Gv::from_f64(ratio as f64);
-    let parity_f: Vec<Gv> = parity.iter().map(|&q| Gv::of(q)).collect();
-    let frac: Vec<Gv> = parity_f.iter().map(|&q| (q + half) * inv_ratio - half).collect();
-    let xi_lo: Vec<Gv> = parity_f.iter().map(|&q| q * inv_ratio).collect();
-    let xi_hi: Vec<Gv> = parity_f.iter().map(|&q| (q + one) * inv_ratio).collect();
-
+    let geom = prolong_geometry(ndim, ratio);
     let mut writes = Vec::with_capacity(ncomp);
     for k in 0..ncomp {
         let (old_name, new_name, dst_name) =
             (format!("src_old_{k}"), format!("src_new_{k}"), format!("dst_{k}"));
-        let ctx = ProlongCtx {
-            ndim, order, parent: &parent, frac: &frac, xi_lo: &xi_lo, xi_hi: &xi_hi,
-            ratio_f, one, alpha, old_name: &old_name, new_name: &new_name,
-        };
+        let src = ProlongSrc::TimePair { old: &old_name, new: &new_name, alpha };
+        let ctx = geom.ctx(ndim, order, &src);
         let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
         writes.push((dst_name.clone(), dst_name.into(), val.node()));
+    }
+    (end_trace(), writes)
+}
+
+/// the SINGLE-SNAPSHOT multi-field prolongation: `refine_prolong_multi_gv`
+/// with the leaf reading one coarse buffer per component ("src_{k}") — the
+/// batched twin of `refine_prolong_1t_gv`. buffers in signature order:
+/// src_0..src_{n-1} (inputs) then dst_0..dst_{n-1} (outputs); no scalars.
+pub fn refine_prolong_multi_1t_gv(
+    ndim: usize,
+    ratio: i64,
+    order: ProlongOrder,
+    ncomp: usize,
+) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "refine_prolong_multi_1t_gv: ndim must be 1..=3");
+    assert!(ratio >= 2, "refine_prolong_multi_1t_gv: ratio must be >= 2");
+    assert!(ncomp >= 1, "refine_prolong_multi_1t_gv: ncomp must be >= 1");
+    begin_trace();
+    let geom = prolong_geometry(ndim, ratio);
+    let mut writes = Vec::with_capacity(ncomp);
+    for k in 0..ncomp {
+        let (src_name, dst_name) = (format!("src_{k}"), format!("dst_{k}"));
+        let src = ProlongSrc::Single { name: &src_name };
+        let ctx = geom.ctx(ndim, order, &src);
+        let val = prolong_eval(&ctx, ndim as isize - 1, &mut [0; 3]);
+        writes.push((dst_name.clone(), dst_name.into(), val.node()));
+    }
+    (end_trace(), writes)
+}
+
+/// the pointwise time interpolation `dst_k = (1 - alpha)*src_old_k +
+/// alpha*src_new_k` over `ncomp` co-located fields in one dispatch — the pass
+/// that hoists the prolong leaf's per-fine-cell lerp to once per COARSE cell.
+/// the expression is spelled exactly as the prolong leaf spelled it, so the
+/// lerp-then-prolong-1t chain is bit-identical to the fused time-pair kernel.
+/// buffers: src_old_0, src_new_0, .., interleaved (inputs) then dst_0..
+/// (outputs); scalar "alpha".
+pub fn field_lerp_multi_gv(ndim: usize, ncomp: usize) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "field_lerp_multi_gv: ndim must be 1..=3");
+    assert!(ncomp >= 1, "field_lerp_multi_gv: ncomp must be >= 1");
+    begin_trace();
+    let alpha = Gv::scalar("alpha");
+    let one = Gv::from_f64(1.0);
+    let _ = ndim;
+    let mut writes = Vec::with_capacity(ncomp);
+    for k in 0..ncomp {
+        let old_key = format!("src_old_{k}");
+        let new_key = format!("src_new_{k}");
+        let v_old = Gv::field(&old_key, old_key.as_str());
+        let v_new = Gv::field(&new_key, new_key.as_str());
+        let v = (one - alpha) * v_old + alpha * v_new;
+        let dst_name = format!("dst_{k}");
+        writes.push((dst_name.clone(), dst_name.into(), v.node()));
     }
     (end_trace(), writes)
 }
@@ -669,6 +679,72 @@ fn face_prolong_eval(ctx: &FaceProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv 
     plm_interp(vals[0], vals[1], vals[2], ctx.frac[aa])
 }
 
+/// the coarse-field read the prolong leaf performs: the classic TIME PAIR
+/// (`(1 - alpha)*old + alpha*new` per coarse cell, recomputed per fine cell)
+/// or a SINGLE pre-interpolated buffer (a `field_lerp` pass hoisted the time
+/// interpolation to once per coarse cell — half the gather traffic).
+enum ProlongSrc<'a> {
+    TimePair { old: &'a str, new: &'a str, alpha: Gv },
+    Single { name: &'a str },
+}
+
+/// the shared per-cell prolong geometry: the per-axis Coarsen map (parent =
+/// floor_div(c, r), parity = c - parent*r in 0..r) and the reference's
+/// per-pass sub-cell positions from the parity kk (int promoted to f64 by the
+/// graph): plm midpoint frac = (kk + 1/2)/r - 1/2, ppm sub-cell average
+/// bounds xi_lo = kk/r, xi_hi = (kk + 1)/r.
+struct ProlongGeom {
+    parent: Vec<NodeId>,
+    frac: Vec<Gv>,
+    xi_lo: Vec<Gv>,
+    xi_hi: Vec<Gv>,
+    ratio_f: Gv,
+    one: Gv,
+}
+
+fn prolong_geometry(ndim: usize, ratio: i64) -> ProlongGeom {
+    let one = Gv::from_f64(1.0);
+    let (parent, parity): (Vec<NodeId>, Vec<NodeId>) = with_trace(|t| {
+        let coords: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+        let g = t.graph();
+        let mut ps = Vec::with_capacity(ndim);
+        let mut qs = Vec::with_capacity(ndim);
+        for &c in &coords {
+            let r = g.add_const(ConstValue::I32(ratio as i32), None);
+            let p = g.element_wise(ElementWiseOp::FloorDiv, vec![c, r], None);
+            let pr = g.element_wise(ElementWiseOp::Mul, vec![p, r], None);
+            let q = g.element_wise(ElementWiseOp::Sub, vec![c, pr], None);
+            ps.push(p);
+            qs.push(q);
+        }
+        (ps, qs)
+    });
+    let half = Gv::from_f64(0.5);
+    let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
+    let ratio_f = Gv::from_f64(ratio as f64);
+    let parity_f: Vec<Gv> = parity.iter().map(|&q| Gv::of(q)).collect();
+    let frac: Vec<Gv> = parity_f.iter().map(|&q| (q + half) * inv_ratio - half).collect();
+    let xi_lo: Vec<Gv> = parity_f.iter().map(|&q| q * inv_ratio).collect();
+    let xi_hi: Vec<Gv> = parity_f.iter().map(|&q| (q + one) * inv_ratio).collect();
+    ProlongGeom { parent, frac, xi_lo, xi_hi, ratio_f, one }
+}
+
+impl ProlongGeom {
+    fn ctx<'a>(&'a self, ndim: usize, order: ProlongOrder, src: &'a ProlongSrc<'a>) -> ProlongCtx<'a> {
+        ProlongCtx {
+            ndim,
+            order,
+            parent: &self.parent,
+            frac: &self.frac,
+            xi_lo: &self.xi_lo,
+            xi_hi: &self.xi_hi,
+            ratio_f: self.ratio_f,
+            one: self.one,
+            src,
+        }
+    }
+}
+
 struct ProlongCtx<'a> {
     ndim: usize,
     order: ProlongOrder,
@@ -678,18 +754,13 @@ struct ProlongCtx<'a> {
     xi_hi: &'a [Gv],
     ratio_f: Gv,
     one: Gv,
-    alpha: Gv,
-    // the coarse-field buffer names this sweep reads. single-field prolong uses
-    // "src_old"/"src_new"; the multi-field (prim batch) kernel sweeps the SAME
-    // geometry over "src_old_{k}"/"src_new_{k}" per component.
-    old_name: &'a str,
-    new_name: &'a str,
+    src: &'a ProlongSrc<'a>,
 }
 
 /// the inlined prolong sweep: axis `ax` interpolates the values recursively
 /// prolonged through the lower axes at the stencil offsets (axis 0 innermost =
-/// the reference's first pass). leaf = the time-interpolated coarse read at
-/// `parent + off`.
+/// the reference's first pass). leaf = the coarse read at `parent + off`
+/// (time-interpolated for a TimePair source, plain for a pre-lerped Single).
 fn prolong_eval(ctx: &ProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv {
     if ax < 0 {
         let coords: Vec<NodeId> = with_trace(|t| {
@@ -704,9 +775,14 @@ fn prolong_eval(ctx: &ProlongCtx, ax: isize, off: &mut [i64; 3]) -> Gv {
                 })
                 .collect()
         });
-        let v_old = gv_load_at(ctx.old_name, ctx.old_name, &coords);
-        let v_new = gv_load_at(ctx.new_name, ctx.new_name, &coords);
-        return (ctx.one - ctx.alpha) * v_old + ctx.alpha * v_new;
+        return match ctx.src {
+            ProlongSrc::TimePair { old, new, alpha } => {
+                let v_old = gv_load_at(old, *old, &coords);
+                let v_new = gv_load_at(new, *new, &coords);
+                (ctx.one - *alpha) * v_old + *alpha * v_new
+            }
+            ProlongSrc::Single { name } => gv_load_at(name, *name, &coords),
+        };
     }
     let aa = ax as usize;
     let w = ctx.order.ghost_width() as i64;

@@ -44,7 +44,7 @@ use super::emf_register::EmfRegister;
 use super::flux_register::FluxRegister;
 use super::transfer::{
     ProlongOrder, bcell_from_bface_region, bface_cf_halo_slabs, cf_ghost_slabs, copy_field,
-    prolong_face_field, prolong_field, prolong_prims, restrict_bface, restrict_cell_field,
+    prolong_face_field, prolong_field, prolong_prims_lerped, restrict_bface, restrict_cell_field,
     restrict_cons,
 };
 use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage_time_fractions};
@@ -92,6 +92,12 @@ where
     /// primitives at this level's step start, for the time-interpolated
     /// coarse-fine ghost prolongation of the finer level. None on the finest.
     pub prim_old: Option<PrimFieldsGeneric<NDIM, DOF, Mem>>,
+    /// coarse scratch for the lerp-then-prolong split: `field_lerp` writes
+    /// `(1-alpha)*prim_old + alpha*prim` here once per coarse cell, and the
+    /// single-snapshot prolong reads it — half the time-pair kernel's gather
+    /// traffic. allocated with prim_old (None on the finest); reused every
+    /// call, never allocated in the step loop.
+    pub prim_lerp: Option<PrimFieldsGeneric<NDIM, DOF, Mem>>,
     /// cell-centered B at this level's step start (mhd only) — the magnetic
     /// counterpart of prim_old for the finer level's ghost prolongation.
     pub bcell_old: Option<[Field<f64, NDIM, Mem>; NDIM]>,
@@ -317,6 +323,7 @@ where
                 state,
                 kernels,
                 prim_old: None,
+                prim_lerp: None,
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
@@ -346,6 +353,7 @@ where
             state: coarse,
             kernels: coarse_kernels,
             prim_old: None,
+            prim_lerp: None,
             bcell_old: None,
             bface_old: None,
             coverage: None,
@@ -410,6 +418,10 @@ where
                 &last.state.geom.allocated,
                 last.state.fields.prim.pre_field().is_some(),
             )?);
+            last.prim_lerp = Some(PrimFieldsGeneric::zeros_with_pressure(
+                &last.state.geom.allocated,
+                last.state.fields.prim.pre_field().is_some(),
+            )?);
             if let Some(pmhd) = last.state.fields.mhd.as_ref() {
                 last.bcell_old = Some(array_field_zeros(&last.state.geom.allocated)?);
                 // per-component staggered domains (face axis + transverse halo).
@@ -424,6 +436,7 @@ where
                 state: fine,
                 kernels,
                 prim_old: None,
+                prim_lerp: None,
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
@@ -1066,13 +1079,18 @@ where
             .prim_old
             .as_ref()
             .expect("the parent of a fine level carries prim_old");
+        let prim_lerp = parent
+            .prim_lerp
+            .as_ref()
+            .expect("the parent of a fine level carries prim_lerp");
         let slabs = cf_ghost_slabs(
             &fine.state.geom.allocated,
             &fine.state.geom.interior,
             &fine.state.boundaries,
         );
         for slab in &slabs {
-            prolong_prims(
+            prolong_prims_lerped(
+                prim_lerp,
                 prim_old,
                 &parent.state.fields.prim,
                 &fine.state.fields.prim,

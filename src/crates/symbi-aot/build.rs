@@ -251,7 +251,9 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
         let (k, writes) = refine_prolong_gv(nd, 2, order);
         emit_gv(out_dir, KernelId::RefineProlong { order: tag, ndim }.name(), ndim, &k, &writes);
         // multi-field (prim batch) prolong: 3D hot path only, ncomp 4 (isothermal)
-        // and 5 (adiabatic/rhd) — one launch over the whole prim set.
+        // and 5 (adiabatic/rhd) — one launch over the whole prim set. the `_1t`
+        // twin reads a single pre-lerped coarse buffer per component (half the
+        // gather traffic); `field_lerp` is the coarse-side pass that feeds it.
         if ndim == 3 {
             for ncomp in [4u8, 5u8] {
                 let (k, writes) =
@@ -261,7 +263,20 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
                     KernelId::RefineProlongMulti { order: tag, ncomp, ndim }.name(),
                     ndim, &k, &writes,
                 );
+                let (k, writes) =
+                    symbi_discretize::refine_prolong_multi_1t_gv(nd, 2, order, ncomp as usize);
+                emit_gv(
+                    out_dir,
+                    KernelId::RefineProlongMulti1t { order: tag, ncomp, ndim }.name(),
+                    ndim, &k, &writes,
+                );
             }
+        }
+    }
+    if ndim == 3 {
+        for ncomp in [4u8, 5u8] {
+            let (k, writes) = symbi_discretize::field_lerp_multi_gv(nd, ncomp as usize);
+            emit_gv(out_dir, KernelId::FieldLerpMulti { ncomp, ndim }.name(), ndim, &k, &writes);
         }
     }
 }
