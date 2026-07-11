@@ -4204,6 +4204,31 @@ fn attach_dashboard(py: Python<'_>, rundir: String, poll_ms: u64) -> PyResult<()
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
+/// the analytic transonic bondi state at radius `r` (bondi radii, code units
+/// G*M = c_inf = rho_inf = 1): `(rho, u, pre)` with `u` the INFLOW speed
+/// magnitude (the radial velocity is `-u * rhat`). the config-side initial
+/// condition and validation target of docs/ideas/accretor.md — seed the
+/// transonic profile instead of relaxing from uniform.
+#[pyfunction]
+fn bondi_profile(r: f64, gamma: f64) -> (f64, f64, f64) {
+    let s = symbi_ib::bondi_profile(r, gamma);
+    (s.rho, s.u, s.pre)
+}
+
+/// the analytic bondi accretion rate 4 pi lambda_c(gamma) in code units —
+/// the target the emergent drain rate is validated against.
+#[pyfunction]
+fn mdot_bondi(gamma: f64) -> f64 {
+    symbi_ib::mdot_bondi(gamma)
+}
+
+/// the sonic radius (5 - 3 gamma)/4 in bondi radii. the well-posedness
+/// constraint is r_mask < r_s; degenerate 0 at gamma = 5/3.
+#[pyfunction]
+fn bondi_sonic_radius(gamma: f64) -> f64 {
+    symbi_ib::sonic_radius(gamma)
+}
+
 // shared module body. the pyo3 entry-point name below decides the `PyInit_*`
 // symbol and the imported module name: `cpu_ext` for the default build,
 // `gpu_ext` for the cuda build. both compile the SAME source — cuda only adds
@@ -4211,6 +4236,9 @@ fn attach_dashboard(py: Python<'_>, rundir: String, poll_ms: u64) -> PyResult<()
 fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(run_simulation, m)?)?;
     m.add_function(wrap_pyfunction!(attach_dashboard, m)?)?;
+    m.add_function(wrap_pyfunction!(bondi_profile, m)?)?;
+    m.add_function(wrap_pyfunction!(mdot_bondi, m)?)?;
+    m.add_function(wrap_pyfunction!(bondi_sonic_radius, m)?)?;
     afterglow::register(m)?;
     Ok(())
 }

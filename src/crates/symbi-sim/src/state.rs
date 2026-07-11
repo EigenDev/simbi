@@ -1383,6 +1383,11 @@ pub enum CtMethod {
 pub struct ImmersedBodies<const NDIM: usize> {
     pub bodies: symbi_ib::BodyCollection<f64, NDIM>,
     pub diagnostics: symbi_ib::DiagnosticAccumulator<f64, NDIM>,
+    /// the per-step body-gas exchange series (Mdot(t) = mass_delta/dt, drag
+    /// F_acc(t)) — appended by `evolve_bodies`, written into every checkpoint
+    /// as the `body_diagnostics` group, consumed by the steady-state detector.
+    /// restarts empty on load; earlier segments live in earlier checkpoints.
+    pub history: symbi_ib::BodyHistory<NDIM>,
 }
 
 /// the simulation's mutable SUBSTANCE: every buffer + grid + time-state a kernel reads
@@ -1911,6 +1916,7 @@ where
         self.immersed = Some(ImmersedBodies {
             bodies,
             diagnostics: symbi_ib::DiagnosticAccumulator::new(n),
+            history: symbi_ib::BodyHistory::new(n),
         });
     }
 

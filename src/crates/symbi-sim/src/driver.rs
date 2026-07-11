@@ -117,7 +117,7 @@ pub fn evolve_bodies<R: Regime<f64, D>, const D: usize, const DOF: usize, M, E, 
 )
 where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace,
 {
-    let dt = sim.dt;
+    let (dt, time) = (sim.dt, sim.time);
 
     let Some(im) = sim.immersed.as_mut() else { return; };
     let step_deltas = im.diagnostics.consolidate();
@@ -127,6 +127,10 @@ where M: Metric<f64, D> + Copy, E: Eos<f64>, S: ExecutionSpace, Mem: MemorySpace
     // the central potential does not drift; force/torque are recorded for output, not consumed by
     // the prescribed motion). the SAME apply the decomposed body step uses with its cross-tile sum.
     symbi_ib::apply_body_deltas(&mut im.bodies, &step_deltas, dt);
+
+    // the per-step exchange series: Mdot(t) and F_acc(t) as functionals of the
+    // solved flow — the record the steady-state detector consumes.
+    im.history.push(time, dt, &step_deltas);
 
     im.diagnostics.reset();
 }

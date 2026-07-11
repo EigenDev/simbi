@@ -569,6 +569,36 @@ where
         .with_attr("symbi_version", "0.1.0");
     root.push_group(build_metadata_group(sim, snap, extras));
     root.push_group(build_level_group(sim, snap, 0));
+    // the per-step body-gas exchange series (immersed runs): Mdot(t) is
+    // mass_delta/dt, the accretion drag is force. shapes: time/dt [len],
+    // mass_delta/energy_delta [len, nb], force [len, nb, D]. the series covers
+    // THIS run segment only (it restarts empty on checkpoint load).
+    if let Some(im) = sim.immersed.as_ref()
+        && !im.history.is_empty()
+    {
+        let (n, nb) = (im.history.len(), im.history.n_bodies());
+        root.push_group(
+            Tree::new("body_diagnostics")
+                .with_attr("n_bodies", nb as u64)
+                .with_dataset(Dataset::new("time", vec![n], DataRef::F64(im.history.time())))
+                .with_dataset(Dataset::new("dt", vec![n], DataRef::F64(im.history.dt())))
+                .with_dataset(Dataset::new(
+                    "mass_delta",
+                    vec![n, nb],
+                    DataRef::F64(im.history.mass_delta()),
+                ))
+                .with_dataset(Dataset::new(
+                    "energy_delta",
+                    vec![n, nb],
+                    DataRef::F64(im.history.energy_delta()),
+                ))
+                .with_dataset(Dataset::new(
+                    "force",
+                    vec![n, nb, D],
+                    DataRef::F64(im.history.force()),
+                )),
+        );
+    }
     root
 }
 
@@ -1098,5 +1128,67 @@ mod tests {
             ghost_checked > 0,
             "test seeded no ghosts — allocation has no halo"
         );
+    }
+
+    #[test]
+    fn body_diagnostics_series_lands_in_the_checkpoint() {
+        // the Mdot(t)/F_acc(t) series (docs/ideas/accretor.md §5): pushed per
+        // step by evolve_bodies, flushed into every checkpoint as the
+        // `body_diagnostics` group. shapes: time/dt [len], mass_delta [len, nb],
+        // force [len, nb, D]. this pins the group layout the steady-state
+        // detector reads.
+        type Sim2 = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+        let mut sim = Sim2::new_at(
+            Newtonian,
+            IdealGas { gamma: 5.0 / 3.0 },
+            Cartesian,
+            [0isize, 0],
+            [4usize, 4],
+            [0.0, 0.0],
+            [0.25, 0.25],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
+        sim.attach_bodies(symbi_ib::BodyCollection::new().add(symbi_ib::Body::black_hole(
+            0,
+            symbi_algebra::Tensor::new([0.5, 0.5]),
+            symbi_algebra::Tensor::zeros(),
+            1.0,
+            0.1,
+            0.05,
+            0.5,
+            0.0,
+            0.1,
+        )));
+
+        // two steps' worth of exchanges, distinct so ordering bugs are loud.
+        let im = sim.immersed.as_mut().unwrap();
+        let mut d = symbi_ib::BodyDelta::<f64, 2>::new(0);
+        d.mass_delta = 0.25;
+        d.force_delta = symbi_algebra::Tensor::new([1.0, -2.0]);
+        im.history.push(0.1, 0.1, &[d]);
+        d.mass_delta = 0.5;
+        im.history.push(0.2, 0.1, &[d]);
+
+        let dir = std::env::temp_dir().join("symbi_checkpoint_bodydiag");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bodydiag.h5");
+        let path = path.to_str().unwrap();
+        write_checkpoint(&sim, path, &Metadata::new()).unwrap();
+
+        let tree = Hdf5Backend.read(std::path::Path::new(path)).unwrap();
+        let diag = tree
+            .find_group("body_diagnostics")
+            .expect("body_diagnostics group missing from the checkpoint");
+        let time = diag.find_dataset("time").unwrap().data.as_f64().unwrap().to_vec();
+        let mass = diag.find_dataset("mass_delta").unwrap().data.as_f64().unwrap().to_vec();
+        let force = diag.find_dataset("force").unwrap().data.as_f64().unwrap().to_vec();
+        assert_eq!(time, vec![0.1, 0.2]);
+        assert_eq!(mass, vec![0.25, 0.5]);
+        assert_eq!(force, vec![1.0, -2.0, 1.0, -2.0]);
     }
 }

@@ -58,6 +58,17 @@ try:
 except ImportError:
     afterglow_lightcurve = None
 
+# the analytic transonic bondi solution (docs/ideas/accretor.md §8): the
+# config-side initial condition and the validation target for the emergent
+# drain rate. code units G*M = c_inf = rho_inf = 1; bondi_profile(r, gamma)
+# returns (rho, u_inflow, pre) with the radial velocity -u * rhat.
+try:
+    from .libs.cpu_ext import bondi_profile, bondi_sonic_radius, mdot_bondi
+except ImportError:
+    bondi_profile = None
+    bondi_sonic_radius = None
+    mdot_bondi = None
+
 # the installed package version (set by maturin from pyproject `[project] version`).
 try:
     from importlib.metadata import PackageNotFoundError, version as _pkg_version
@@ -99,6 +110,10 @@ __all__ = [
     "calc_dlogt",
     # optional
     "afterglow_lightcurve",
+    # accretor validation (docs/ideas/accretor.md)
+    "bondi_profile",
+    "bondi_sonic_radius",
+    "mdot_bondi",
     # version
     "__version__",
 ]
