@@ -355,6 +355,26 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         if !self.gradient_bcs.is_empty() {
             dispatch_gradient_boundaries(sim, &self.pre, &self.gradient_bcs, Some(self.cs * self.cs));
         }
+        // re-derive the eos law p = cs^2 * rho over the FULL allocated lattice. the
+        // substrate pressure lives outside the prim batch, so the coarse-fine ghost
+        // prolongation (which fills prim rho/vel) never writes it, and the pullback above
+        // skips coarse-fine faces — without this pass the face reconstruction at a level
+        // seam reads pre = 0 and injects a spurious vacuum pressure (a density ring at
+        // the refinement boundary). idempotent where c2p already wrote pre (rho = den
+        // there, same product), and the single source of pressure in every ghost the
+        // reconstruction can reach.
+        {
+            let name = format!("iso_pre_{D}d");
+            dispatch_fields::<Sc, Mem, D>(
+                &name,
+                &sim.geom.allocated,
+                &sim.geom.allocated,
+                &[&sim.fields.prim.rho, &self.cs2],
+                &[&self.pre],
+                &[],
+                &[],
+            );
+        }
     }
 
     fn snapshot(&self, sim: &FieldStore<D, D, Mem, Sc>) {

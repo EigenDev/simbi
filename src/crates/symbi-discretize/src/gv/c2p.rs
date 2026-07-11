@@ -80,6 +80,25 @@ pub fn iso_c2p_gv<const D: usize>() -> (GvKernel, Vec<(String, FieldBind, NodeId
 }
 
 
+/// the isothermal eos law `p = cs^2(x) * rho` as a standalone pointwise kernel, from the
+/// PRIMITIVE density. c2p derives the substrate pressure from the conserved state over
+/// the interior only, but coarse-fine ghost cells receive prim rho by prolongation and
+/// carry NO conserved state — the pressure there must be re-derived from the prolonged
+/// rho or the face reconstruction sees a spurious vacuum at every level seam. pointwise
+/// and dimension-independent (emitted per ndim like the snapshot family).
+pub fn iso_pre_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let rho = Gv::field("prim_rho", FieldRef::PrimRho);
+    let cs2 = Gv::field("cs2", "cs2");
+    // the materialized `Isothermal::pressure` closure, same single source as iso c2p.
+    let pre = cs2 * rho;
+    (
+        end_trace(),
+        vec![("prim_pre".to_string(), FieldRef::PrimPre.into(), pre.node())],
+    )
+}
+
+
 /// trace the REAL RHD c2p — symbi-hydro's branch-free `rhd_recover` (the iterative
 /// relativistic cons->prim: a carrier-generic Newton on the pressure root, then the
 /// algebraic velocity/Lorentz/density recovery) at `S = Gv`. the Newton lowers to one

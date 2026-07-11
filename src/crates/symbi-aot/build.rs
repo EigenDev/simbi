@@ -687,6 +687,15 @@ fn gen_iso_c2p(out_dir: &str, ndim: u8) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
+// the isothermal eos law p = cs2 * rho from the PRIMITIVE density: re-derives the
+// substrate pressure after ghost fills, where coarse-fine ghosts carry prolonged
+// prim rho but no conserved state for c2p to read. pointwise, dimension-generic.
+fn gen_iso_pre(out_dir: &str, ndim: u8) {
+    let name = format!("iso_pre_{ndim}d");
+    let (k, writes) = symbi_discretize::gv::iso_pre_gv();
+    emit_gv(out_dir, &name, ndim, &k, &writes);
+}
+
 // P4: isothermal CFL wave-speed map (per-cell lambda); the host reduces by max. for
 // curvilinear coords it folds per-cell PHYSICAL widths (cell_inv_phys_widths) instead of
 // a uniform inv_dx; the iso map is shared by the adiabatic/Newton CFL too.
@@ -1921,6 +1930,7 @@ fn main() {
     for ndim in 1u8..=3 {
         // isothermal Euler (no energy law; the EOS closure p = cs^2*rho is in c2p).
         gen_iso_c2p(&out_dir, ndim);
+        gen_iso_pre(&out_dir, ndim);
         gen_iso_wave_speed_map(&out_dir, ndim, Geom::cart(ndim));
         gen_iso_ghost_fill(&out_dir, ndim, Geom::cart(ndim));
         gen_neumann_ghost_fill(&out_dir, ndim, Geom::cart(ndim));
