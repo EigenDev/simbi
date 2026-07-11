@@ -734,6 +734,10 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             // for adiabatic/curvilinear this IS the body pass; for iso-cartesian it
                             // no-ops (fused into godunov_stage). proven by `decomp_body_equivalence`.
                             kernels[i].body_source(sh[i], ac * dt);
+                            // the IBM surface physics (docs/design/50): each tile
+                            // penalizes its own support-ball intersection; the
+                            // per-tile deltas join the existing cross-tile body sum.
+                            kernels[i].penalize(sh[i], ac * dt);
                         }
                         kernels[i].c2p(sh[i]);
                         kernels[i].ghost_fill(sh[i]);
