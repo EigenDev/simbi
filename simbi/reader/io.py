@@ -519,6 +519,11 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 x3_spacing=decode_str(attrs.get("x3_spacing", "linear")),
                 boundary_conditions=bcs,
                 initial_time=float(attrs.get("initial_time", attrs["time"])),
+                sound_speed=(
+                    float(attrs["sound_speed"])
+                    if "sound_speed" in attrs
+                    else None
+                ),
             )
         )
     except Exception as e:

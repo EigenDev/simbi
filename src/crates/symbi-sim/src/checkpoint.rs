@@ -368,7 +368,7 @@ where
     Mem: MemorySpace,
 {
     // builtins. user extras can override any name here — explicit win.
-    let builtins: Vec<(&str, Attr)> = vec![
+    let mut builtins: Vec<(&str, Attr)> = vec![
         ("gamma", Attr::F64(sim.physics.eos.gamma())),
         ("cfl", Attr::F64(sim.cfl)),
         ("time", Attr::F64(sim.time)),
@@ -394,6 +394,15 @@ where
             Attr::Str(coord_name(sim.physics.metric.geometry()).into()),
         ),
     ];
+    // isothermal regimes close with p = cs^2 rho at a constant sound speed
+    // and store no pressure dataset; record cs so readers can reconstruct
+    // pressure-dependent fields. the isothermal eos ignores (rho, pre).
+    if !sim.physics.regime.has_energy() {
+        builtins.push((
+            "sound_speed",
+            Attr::F64(sim.physics.eos.sound_speed(1.0, 1.0)),
+        ));
+    }
     let mut meta = Tree::new("metadata");
     // explicit user extras WIN. start with them, then fill in any built-in
     // the user didn't override.
@@ -1375,5 +1384,71 @@ mod tests {
         assert_eq!(time, vec![0.1, 0.2]);
         assert_eq!(mass, vec![0.25, 0.5]);
         assert_eq!(force, vec![1.0, -2.0, 1.0, -2.0]);
+    }
+
+    #[test]
+    fn isothermal_checkpoints_record_the_sound_speed() {
+        // the isothermal eos closes with p = cs^2 rho and stores no pressure
+        // dataset, so cs must travel in metadata for readers to reconstruct
+        // pressure-dependent fields. energy regimes must NOT carry the attr:
+        // their sound speed varies per cell and a constant would be a lie.
+        use symbi_hydro::eos::Isothermal;
+        use symbi_hydro::IsoNewtonian;
+
+        type IsoSim =
+            SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+        let iso = IsoSim::new_at(
+            IsoNewtonian,
+            Isothermal { cs: 0.75 },
+            Cartesian,
+            [0isize, 0],
+            [4usize, 4],
+            [0.0, 0.0],
+            [0.25, 0.25],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
+
+        let dir = std::env::temp_dir().join("symbi_checkpoint_iso_cs");
+        std::fs::create_dir_all(&dir).unwrap();
+        let iso_path = dir.join("iso.h5");
+        write_checkpoint(&iso, iso_path.to_str().unwrap(), &Metadata::new()).unwrap();
+        let tree = Hdf5Backend.read(&iso_path).unwrap();
+        let meta = tree.find_group("metadata").unwrap();
+        let cs = meta
+            .find_attr("sound_speed")
+            .expect("isothermal metadata must carry sound_speed")
+            .as_f64("sound_speed")
+            .unwrap();
+        assert_eq!(cs, 0.75);
+
+        type AdiSim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+        let adi = AdiSim::new_at(
+            Newtonian,
+            IdealGas { gamma: 5.0 / 3.0 },
+            Cartesian,
+            [0isize, 0],
+            [4usize, 4],
+            [0.0, 0.0],
+            [0.25, 0.25],
+            2,
+            Boundaries::uniform(BoundaryType::Outflow),
+            0.4,
+            Timestepping::Rk2,
+            0,
+        )
+        .unwrap();
+        let adi_path = dir.join("adi.h5");
+        write_checkpoint(&adi, adi_path.to_str().unwrap(), &Metadata::new()).unwrap();
+        let tree = Hdf5Backend.read(&adi_path).unwrap();
+        let meta = tree.find_group("metadata").unwrap();
+        assert!(
+            meta.find_attr("sound_speed").is_none(),
+            "energy-regime metadata must not carry a constant sound_speed"
+        );
     }
 }

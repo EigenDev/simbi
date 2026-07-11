@@ -15,6 +15,13 @@ from .io import Checkpoint
 ComputeFunc = Callable[[dict[str, Any]], Any]
 
 
+class FieldComputationError(ValueError):
+    """a derived field could not be computed from the checkpoint's stored
+    datasets (e.g. a pressure-dependent field on a file with no pressure).
+    deliberately not a KeyError: callers that skip fields absent from a
+    level must still surface this as a hard failure."""
+
+
 # =============================================================================
 # physics primitives
 # =============================================================================
@@ -243,8 +250,12 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     # simple wrapper representing a derived field
     class derived_field_t:
         def __init__(
-            self, func: Callable[..., Array], requires_composite: bool = False
+            self,
+            name: str,
+            func: Callable[..., Array],
+            requires_composite: bool = False,
         ):
+            self._name = name
             self._func = func
             self._requires_composite = requires_composite
 
@@ -295,9 +306,32 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
                 for name, field in partition.hydro.magnetic.items():
                     mapping[name] = field.data
 
+            # the isothermal regime carries no pressure dataset; its eos
+            # closes with p = cs^2 rho at the constant metadata sound speed,
+            # so p-dependent derived fields stay computable.
+            if "p" not in mapping and regime == "isothermal":
+                cs = data.metadata.sound_speed
+                if cs is not None:
+                    mapping["p"] = cs * cs * mapping["rho"]
+
             # provide context to compute function
             ctx = level_context_t(mapping, mesh)
-            result = self._func(ctx)
+            try:
+                result = self._func(ctx)
+            except KeyError as exc:
+                missing = exc.args[0] if exc.args else "?"
+                hint = ""
+                if missing == "p" and regime == "isothermal":
+                    hint = (
+                        " (this isothermal checkpoint predates the"
+                        " 'sound_speed' metadata attr, so p = cs^2 rho"
+                        " cannot be reconstructed)"
+                    )
+                raise FieldComputationError(
+                    f"derived field '{self._name}' needs base field"
+                    f" '{missing}', which this {regime} checkpoint does not"
+                    f" store; available: {sorted(mapping)}{hint}"
+                ) from exc
             return np.asarray(result)
 
     def get_velocities(fields: dict[str, Array]) -> list[Array]:
@@ -891,7 +925,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     # wrap functions into derived-field objects exposing evaluate(level)
     pipeline: dict[str, Any] = {
         name: derived_field_t(
-            func, requires_composite=(name in composite_required)
+            name, func, requires_composite=(name in composite_required)
         )
         for name, func in base_pipeline.items()
     }

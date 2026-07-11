@@ -513,6 +513,10 @@ class SphericalBondiTest(SimbiProblem):
         # kappa (output 0) is the only masked channel; it is already zoned by the cubic ramp, so no
         # separate region mask is needed. rust `sponge` forms S_U = kappa*(U_ref - U) for each of den,
         # mom, nrg -- the density channel is what the old velocity-only relax lacked.
+        # the ISOTHERMAL regime has no energy equation: its sponge spec takes
+        # [kappa, den_ref, mom_ref_*] only (5 outputs, no nrg_ref).
+        if self.adiabatic_index == 1.0:
+            return [kappa, rho_ref, mom_x, mom_y, mom_z]
         return [kappa, rho_ref, mom_x, mom_y, mom_z, nrg_ref]
 
     @property

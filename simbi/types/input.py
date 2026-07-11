@@ -312,6 +312,9 @@ class Metadata:
     x3_spacing: str = "linear"
     boundary_conditions: tuple[str, ...] = ()
     initial_time: float = 0.0  # start time from original initial conditions
+    # the constant sound speed of an isothermal run; None on energy regimes
+    # and on isothermal checkpoints written before the attr existed.
+    sound_speed: float | None = None
 
     # amr fields
     level_dts: tuple[float, ...] = ()

@@ -239,6 +239,23 @@ def validate_props(component: str, config: dict[str, Any]) -> ComponentProps:
     """
     props_cls = get_props_class(component)
 
+    # name unknown keys up front with a close-match suggestion; pydantic's
+    # extra=forbid would reject them too, but without the did-you-mean.
+    known = set(props_cls.model_fields)
+    unknown = [k for k in config if k not in known]
+    if unknown:
+        import difflib
+
+        parts = []
+        for k in unknown:
+            close = difflib.get_close_matches(k, known, n=1)
+            hint = f" (did you mean '{close[0]}'?)" if close else ""
+            parts.append(f"'{k}'{hint}")
+        raise ValueError(
+            f"unknown {component} prop(s): {', '.join(parts)};"
+            f" known props: {sorted(known)}"
+        )
+
     try:
         return props_cls(**config)
     except ValidationError as e:
@@ -303,7 +320,7 @@ def load_component_props(
 
         try:
             props[component] = validate_props(component, config)
-        except (ValidationError, TypeError) as e:
+        except (ValidationError, TypeError, ValueError) as e:
             errors.append(f"{component}: {e}")
 
     if errors:

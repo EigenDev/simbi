@@ -21,6 +21,9 @@ class ComponentProps(BaseModel):
     model_config = {
         "frozen": True,
         "arbitrary_types_allowed": True,
+        # a mistyped prop name (e.g. cma for cmap) must fail, not be
+        # silently ignored while the user wonders why the style never applied
+        "extra": "forbid",
     }
 
 

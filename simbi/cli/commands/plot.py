@@ -52,7 +52,11 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
     config = config_from_args(args)
 
     # load component props from --config file and/or --props overrides
-    component_props = load_props_from_args(args)
+    try:
+        component_props = load_props_from_args(args)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     is_animation = getattr(args, "animate", False) or args.kind == "movie"
     is_overlay = getattr(args, "overlay", False)

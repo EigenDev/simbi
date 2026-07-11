@@ -1,6 +1,7 @@
 from typing import Optional, Sequence
 
 from simbi.reader.adapter import SimData
+from simbi.reader.computation import FieldComputationError
 
 from ..config import VisualizationConfig
 from ..types import CoordSystem, FieldData, PlotData
@@ -60,7 +61,13 @@ def prepare_fields(
             )
             all_fields.append(field_data)
         else:
-            # prepare one field for each active level
+            # prepare one field for each active level. a field genuinely
+            # absent from one level is skipped, but a field that produces
+            # nothing on ANY level must fail here by name: dropping it
+            # silently yields an empty PlotData whose validation error
+            # ("dimensions = 0") points nowhere near the cause.
+            produced = 0
+            last_missing: KeyError | None = None
             for level in sorted(active_levels):
                 if level >= data.num_levels:
                     continue
@@ -71,8 +78,16 @@ def prepare_fields(
                         data, field_name, level, ndim, crop_to_owned=should_crop
                     )
                     all_fields.append(field_data)
-                except KeyError:
+                    produced += 1
+                except KeyError as exc:
+                    last_missing = exc
                     continue
+            if produced == 0:
+                raise FieldComputationError(
+                    f"field '{field_name}' is not available in this"
+                    f" checkpoint (tried levels {sorted(active_levels)});"
+                    f" available: {sorted(data.available_fields())}"
+                ) from last_missing
 
     return all_fields
 
@@ -165,6 +180,14 @@ def create_plot_data(
             fd.model_copy(update={"values": fd.values / _denom(fd.values)})
             for fd in sliced_fields
         ]
+
+    # an empty field list would fail PlotData validation with a message
+    # ("dimensions = 0") far from the cause; name the inputs instead.
+    if not sliced_fields:
+        raise FieldComputationError(
+            f"no plottable fields were produced for {list(field_names)}"
+            + (f" with slice {slice_spec}" if slice_spec else "")
+        )
 
     # Package and return the (potentially un-stitched) fields
     return PlotData(
