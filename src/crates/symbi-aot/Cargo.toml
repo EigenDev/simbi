@@ -40,6 +40,8 @@ symbi-ib         = { path = "../symbi-ib" }
 symbi-hydro      = { path = "../symbi-hydro" }
 
 [dev-dependencies]
+# the penalize kernel's f64 oracle chain (docs/design/50): SdfExpr + penalize_cell.
+symbi-ib         = { path = "../symbi-ib" }
 # the CPU-side regression for docs/design/15 §3: render the generated `_IR` blobs
 # back to source (render_from_ir) to prove they deserialize + render. NOT a runtime
 # dep — symbi-aot stays a thin artifact holder; the render lives in symbi-ir.

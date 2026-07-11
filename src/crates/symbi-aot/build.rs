@@ -1593,6 +1593,12 @@ fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, h
 // immersed-body BACKWARD feedback (docs/design/19 P3): per cell, per body, the force /
 // torque / accreted-mass contributions -> scratch fields a device reduction sums into
 // each body's BodyDelta. reads cons (pure); writes MAX_BODIES*(ndim+4) scratch outputs.
+fn gen_penalize(out_dir: &str, ndim: u8) {
+    use symbi_ir::KernelId;
+    let (k, writes) = symbi_discretize::penalize_drain_gv(ndim as usize);
+    emit_gv(out_dir, KernelId::PenalizeDrain { ndim }.name(), ndim, &k, &writes);
+}
+
 fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {
     let name = format!("body_feedback{}_{ndim}d", coords_suffix(coords));
     let g = Geom::identity(coords, ndim);
@@ -1634,6 +1640,7 @@ fn main() {
     // pullbacks at ratio 2, every dimension.
     for ndim in 1u8..=3 {
         gen_refine_transfer(&out_dir, ndim);
+        gen_penalize(&out_dir, ndim);
     }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.

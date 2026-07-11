@@ -58,6 +58,10 @@ pub enum KernelId {
     /// MULTI-FIELD pointwise time interpolation `dst_k = (1-alpha)*old_k +
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
     FieldLerpMulti { ncomp: u8, ndim: u8 },
+    /// the immersed-boundary [Drain] penalization (docs/design/50): the
+    /// property-algebra kernel whose p = 1 stack reduces bit-exactly to the
+    /// uniform-scaling drain. adiabatic, cartesian.
+    PenalizeDrain { ndim: u8 },
     /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -177,6 +181,9 @@ impl KernelId {
                      ncomp 4/5 are generated"
                 ),
             },
+            KernelId::PenalizeDrain { ndim } => {
+                ["penalize_drain_1d", "penalize_drain_2d", "penalize_drain_3d"][dim_ix(ndim)]
+            }
             KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
                 match (order, axis, ncomp, ndim) {
                     (ProlongTag::Pcm, 0, 4, 3) => "refine_prolong_sw0_pcm_4c_3d",

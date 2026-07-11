@@ -14,6 +14,7 @@
 pub mod body;
 pub mod bondi;
 pub mod history;
+pub mod penalize;
 pub mod sdf;
 pub mod body_delta;
 pub mod collection;
@@ -26,6 +27,7 @@ pub mod diagnostics;
 pub use body::{Body, BodyKind};
 pub use bondi::{bondi_profile, mdot_bondi, sonic_radius, BondiState};
 pub use history::BodyHistory;
+pub use penalize::{penalize_cell, BodyKin, Property, Relax};
 pub use sdf::SdfExpr;
 pub use body_delta::BodyDelta;
 pub use drain::{drain_body_cell, drain_cell, drain_mask, drain_timescale, sound_speed_from_cons};

@@ -24,6 +24,16 @@
 use symbi_ir::algebra::Scalar;
 use symbi_ir::dual::Dual;
 
+
+/// the mollified indicator of a signed distance: 1 well inside the body, 0
+/// well outside, a tanh ramp of width `w` across the surface. spelled
+/// identically to `drain::drain_mask` (same subtraction folded into phi, same
+/// division, same tanh), so a sphere SDF's chi is bit-equal to the mask the
+/// validated drain uses.
+pub fn chi<S: Scalar>(phi: S, w: S) -> S {
+    S::from_f64(0.5) * (S::ONE - (phi / w).tanh())
+}
+
 /// a signed-distance expression over carrier `S` in `D` dimensions. shape
 /// parameters are carrier values: f64 constants on the host, scalar-param
 /// nodes in a trace — one structure serves both.
