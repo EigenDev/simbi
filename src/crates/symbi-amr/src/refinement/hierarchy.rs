@@ -934,6 +934,9 @@ where
         }
         if l.state.has_bodies() {
             prof("body_source", || l.kernels.body_source(&l.state, ac * dt));
+            // the IBM surface physics (docs/design/50), post-source per
+            // substage — profs itself ("penalize").
+            l.kernels.penalize(&l.state, ac * dt);
         }
         prof("c2p", || l.kernels.c2p(&l.state));
         // first-order flux correction: redo any zone whose high-order c2p went unphysical with a

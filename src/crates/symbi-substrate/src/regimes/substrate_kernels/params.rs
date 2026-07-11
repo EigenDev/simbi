@@ -9,6 +9,7 @@
 
 use symbi_algebra::OrderedNumeric;
 use symbi_ir::algebra::Scalar;
+use symbi_geometry::Geometry as _GeomChk;
 use symbi_ir::{BodyScalar, ScalarRef};
 // the typed scalar binding (`Ref` closed vocab | `Spec` open knob) now lives in symbi-ir next to
 // `ScalarRef`/`FieldBind`, so the serialized IR scalar manifest is born typed. the dispatch
@@ -221,6 +222,22 @@ pub(crate) fn body_scalar<const D: usize>(
 /// resolve a body kernel's scalar tail BY NAME: `dt`, `gamma`, the per-axis `x_lo`/`dx`, and
 /// the MAX_BODIES body params from the immersed side-car. shared by the forward source + the backward
 /// feedback (both kernels take the same scalar set).
+
+/// whether the IBM penalization (docs/design/50) owns accretion on this sim:
+/// cartesian + an energy channel — the baked penalize envelope. where true,
+/// every legacy sink-rate scalar resolves to zero (an exact no-op in the
+/// traced drain) and `dispatch_penalize` performs the drain instead.
+pub fn penalize_owns_accretion<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) -> bool
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    sim.geom.coords == _GeomChk::Cartesian
+        && sim.fields.cons.nrg_field().is_some()
+}
+
 pub(crate) fn resolve_body_scalars<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -242,7 +259,21 @@ where
             // `gamma` carries the regime EOS parameter: the adiabatic index for `Gamma`, the
             // isothermal sound speed for `Cs` (the iso freeze-select-with-body kernel).
             ScalarRef::Gamma | ScalarRef::Cs => gamma,
-            ScalarRef::Body { idx, field } => body_scalar::<D>(bodies, idx, field),
+            // MIGRATION (docs/design/50): the IBM penalize path owns accretion on
+            // cartesian adiabatic grids — the legacy in-godunov sink retires by
+            // resolving its rate to zero (drain_rate = chi min(sink, cs/dx) is an
+            // exact arithmetic no-op at sink = 0, same baked kernel, gravity
+            // untouched). curvilinear grids keep the legacy sink until the SDF
+            // layer speaks curvilinear coordinates.
+            ScalarRef::Body { idx, field } => {
+                if matches!(field, BodyScalar::Sink)
+                    && penalize_owns_accretion::<D, DOF, Mem, Sc>(sim)
+                {
+                    0.0
+                } else {
+                    body_scalar::<D>(bodies, idx, field)
+                }
+            }
             other => geom_scalar(&geom.x_lo, &geom.dx, &sim.geom.maps, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         };

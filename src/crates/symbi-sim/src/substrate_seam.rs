@@ -113,6 +113,12 @@ where
     /// backward immersed-body feedback (docs/design/19): reduce the per-body force/torque/
     /// accreted-mass from the fluid into the side-car diagnostics, once per step. default: no-op.
     fn body_feedback(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
+
+    /// the immersed-boundary penalization (docs/design/50): the property-
+    /// algebra surface physics (drain today; walls, porosity, thermal surfaces
+    /// as they land), applied post-source each substage — the ONE body
+    /// mechanism. default: no-op (regimes without a baked penalize envelope).
+    fn penalize(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 }
 
 // =============================================================================

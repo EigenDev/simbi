@@ -34,6 +34,7 @@ use std::sync::{Arc, OnceLock};
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
 use crate::regimes::substrate_kernels::{
     cfl_wave_speed, dispatch_body_feedback, dispatch_body_source, dispatch_fields, dispatch_flux,
+    dispatch_penalize,
     dispatch_driven_boundaries, dispatch_fused_runtime_cpu, dispatch_gradient_boundaries,
     dispatch_godunov_maybe_fused,
     dispatch_named, dispatch_runtime_source, dispatch_source_apply, body_fused_in, fused_runtime_cpu_kernel,
@@ -72,6 +73,9 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// to the two-pass on non-f64 carriers, device memory, or an out-of-JIT-subset source. the
     /// two-pass remains the default. proven bit-for-bit by `jit_fused_equals_two_pass`.
     pub fuse_runtime: bool,
+    /// the drain timescale dial tau = c_drain dx / c_s (accretor.md §2.3): a
+    /// convergence-study parameter, never tuned to a target rate.
+    pub c_drain: f64,
     /// the BODY-ONLY fused godunov kernel (godunov + geo + immersed-body wrap, no user source),
     /// resolved once + cached here on the kernel-set — a gravity/accretion run with no runtime source
     /// to carry the body. built lazily on first `godunov_stage` (geometry + bodies known then), gated
@@ -98,7 +102,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate adiabatic CFL scratch field");
         // theta defaults to 1.0 (plain minmod) — exact prior behavior; set `theta` to tune.
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
+        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, c_drain: 1.0, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
@@ -406,6 +410,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
         // forward immersed-body source (gravity + accretion, docs/design/19): cons += dt*S, in-place.
         dispatch_body_source(sim, dt, self.gamma);
+    }
+
+    fn penalize(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        // the [Drain] stack (docs/design/50): the sole accretion mechanism on
+        // cartesian grids — the legacy in-godunov sink resolves its rate to
+        // zero under the same predicate (params::penalize_owns_accretion).
+        dispatch_penalize(sim, dt, self.gamma, self.c_drain);
     }
 
     fn body_feedback(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {

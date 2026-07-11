@@ -350,7 +350,15 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         match *sref {
             ScalarRef::Dt => dt,
             ScalarRef::Gamma | ScalarRef::Cs => gamma,
-            ScalarRef::Body { idx: 0, field } => body_scalar::<D>(Some(bodies), b as u8, field),
+                        ScalarRef::Body { idx: 0, field } => {
+                if matches!(field, symbi_ir::BodyScalar::Sink)
+                    && super::params::penalize_owns_accretion::<D, DOF, Mem, Sc>(sim)
+                {
+                    0.0
+                } else {
+                    body_scalar::<D>(Some(bodies), b as u8, field)
+                }
+            }
             other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, other)
                 .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
         }
@@ -688,7 +696,13 @@ pub fn dispatch_godunov_with_body_source<const D: usize, const DOF: usize, Mem, 
             ScalarBind::Ref(ScalarRef::Ac) => ac,
             ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => eos_param,
             ScalarBind::Ref(ScalarRef::Body { idx, field }) => {
-                body_scalar::<D>(bodies, *idx, *field)
+                if matches!(field, symbi_ir::BodyScalar::Sink)
+                    && super::params::penalize_owns_accretion::<D, DOF, Mem, Sc>(sim)
+                {
+                    0.0
+                } else {
+                    body_scalar::<D>(bodies, *idx, *field)
+                }
             }
             ScalarBind::Ref(sref) => motion_scalar(&sim.motion, geom.coords, D, *sref)
                 .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, *sref))

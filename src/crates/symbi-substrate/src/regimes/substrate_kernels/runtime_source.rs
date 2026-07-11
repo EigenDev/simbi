@@ -623,7 +623,15 @@ pub(crate) fn dispatch_fused_runtime_cpu<const D: usize, const DOF: usize, Mem, 
                 .unwrap_or_else(|| panic!("fused runtime source: param p{i} not provided")),
             // the fused body fold declares these: the EOS parameter and the per-body params.
             ScalarRef::Gamma | ScalarRef::Cs => gamma,
-            ScalarRef::Body { idx, field } => body_scalar::<D>(bodies, idx, field),
+            ScalarRef::Body { idx, field } => {
+                if matches!(field, symbi_ir::BodyScalar::Sink)
+                    && super::params::penalize_owns_accretion::<D, DOF, Mem, Sc>(sim)
+                {
+                    0.0
+                } else {
+                    body_scalar::<D>(bodies, idx, field)
+                }
+            }
             other => motion_scalar(&sim.motion, sim.geom.coords, D, other)
                 .or_else(|| geom_scalar(&x_lo_phys, &dx_phys, &sim.geom.maps, other))
                 .unwrap_or_else(|| panic!(
