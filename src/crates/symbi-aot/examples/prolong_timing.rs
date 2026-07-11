@@ -71,7 +71,55 @@ fn main() {
         single(&inputs, &mut outs, &f_ext, &LO, &[], &[]);
     };
 
-    // warmup + verify the two paths agree bitwise before timing anything.
+    // the axis-split sweep chain (design 49): lerp -> sw0 (A: fine-x,
+    // coarse-yz) -> sw1 (B: fine-xy, coarse-z) -> sw2 (dst). w = the order's
+    // stencil halfwidth; the intermediate lattices mirror transfer.rs.
+    let w: isize = match order.as_str() {
+        "pcm" => 0,
+        "plm" => 1,
+        _ => 2,
+    };
+    let parents = |lo: isize, hi: isize| (lo.div_euclid(2) - w, (hi - 1).div_euclid(2) + 1 + w);
+    let f_hi = [LO[0] as isize + SLAB[0] as isize, LO[1] as isize + SLAB[1] as isize, LO[2] as isize + SLAB[2] as isize];
+    let (p1_lo, p1_hi) = parents(LO[1] as isize, f_hi[1]);
+    let (p2_lo, p2_hi) = parents(LO[2] as isize, f_hi[2]);
+    let a_lo = [LO[0], p1_lo as i32, p2_lo as i32];
+    let a_ext = [SLAB[0] as u32, (p1_hi - p1_lo) as u32, (p2_hi - p2_lo) as u32];
+    let b_lo = [LO[0], LO[1], p2_lo as i32];
+    let b_ext = [SLAB[0] as u32, SLAB[1] as u32, (p2_hi - p2_lo) as u32];
+    let na = (a_ext[0] * a_ext[1] * a_ext[2]) as usize;
+    let nb = (b_ext[0] * b_ext[1] * b_ext[2]) as usize;
+    let mut mid_a: Vec<Vec<f64>> = (0..5).map(|_| vec![0.0f64; na]).collect();
+    let mut mid_b: Vec<Vec<f64>> = (0..5).map(|_| vec![0.0f64; nb]).collect();
+    let (sw0, _) = kernel_by_name::<f64>(&format!("refine_prolong_sw0_{order}_5c_3d_serial")).expect("sw0");
+    let (sw1, _) = kernel_by_name::<f64>(&format!("refine_prolong_sw1_{order}_5c_3d_serial")).expect("sw1");
+    let (sw2, _) = kernel_by_name::<f64>(&format!("refine_prolong_sw2_{order}_5c_3d_serial")).expect("sw2");
+    let run_sweep = |lerped: &mut [Vec<f64>], mid_a: &mut [Vec<f64>], mid_b: &mut [Vec<f64>], fine: &mut [Vec<f64>]| {
+        {
+            let inputs: Vec<CpuField> = (0..10).map(|k| CpuField::from_layout(&coarse[k], &LO, &c_ext)).collect();
+            let mut louts: Vec<CpuFieldMut> =
+                lerped.iter_mut().map(|o| CpuFieldMut::from_layout(o, &LO, &c_ext)).collect();
+            lerp(&inputs, &mut louts, &c_ext, &LO, &[], &[alpha]);
+        }
+        {
+            let inputs: Vec<CpuField> = lerped.iter().map(|l| CpuField::from_layout(l, &LO, &c_ext)).collect();
+            let mut outs: Vec<CpuFieldMut> =
+                mid_a.iter_mut().map(|o| CpuFieldMut::from_layout(o, &a_lo, &a_ext)).collect();
+            sw0(&inputs, &mut outs, &a_ext, &a_lo, &[], &[]);
+        }
+        {
+            let inputs: Vec<CpuField> = mid_a.iter().map(|l| CpuField::from_layout(l, &a_lo, &a_ext)).collect();
+            let mut outs: Vec<CpuFieldMut> =
+                mid_b.iter_mut().map(|o| CpuFieldMut::from_layout(o, &b_lo, &b_ext)).collect();
+            sw1(&inputs, &mut outs, &b_ext, &b_lo, &[], &[]);
+        }
+        let inputs: Vec<CpuField> = mid_b.iter().map(|l| CpuField::from_layout(l, &b_lo, &b_ext)).collect();
+        let mut outs: Vec<CpuFieldMut> =
+            fine.iter_mut().map(|o| CpuFieldMut::from_layout(o, &LO, &f_ext)).collect();
+        sw2(&inputs, &mut outs, &f_ext, &LO, &[], &[]);
+    };
+
+    // warmup + verify every path agrees bitwise before timing anything.
     run_pair(&mut fine);
     let reference: Vec<Vec<f64>> = fine.clone();
     for f in fine.iter_mut() {
@@ -82,6 +130,16 @@ fn main() {
         assert!(
             a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()),
             "comp {k}: split path diverged from the time-pair kernel — timing would be meaningless",
+        );
+    }
+    for f in fine.iter_mut() {
+        f.fill(0.0);
+    }
+    run_sweep(&mut lerped, &mut mid_a, &mut mid_b, &mut fine);
+    for (k, (a, b)) in reference.iter().zip(&fine).enumerate() {
+        assert!(
+            a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()),
+            "comp {k}: sweep chain diverged from the time-pair kernel — timing would be meaningless",
         );
     }
 
@@ -100,7 +158,17 @@ fn main() {
     }
     let split_ns = t0.elapsed().as_secs_f64() * 1e9 / (reps as f64 * zones);
 
+    let t0 = Instant::now();
+    for _ in 0..reps {
+        run_sweep(&mut lerped, &mut mid_a, &mut mid_b, &mut fine);
+        black_box(&fine);
+        black_box(&mid_a);
+        black_box(&mid_b);
+    }
+    let sweep_ns = t0.elapsed().as_secs_f64() * 1e9 / (reps as f64 * zones);
+
     println!("{order} on {SLAB:?} slab ({} fine zones, {reps} reps, serial):", nfine);
     println!("  time-pair kernel:       {pair_ns:8.1} ns/zone");
     println!("  lerp + single-snapshot: {split_ns:8.1} ns/zone  ({:.2}x)", pair_ns / split_ns);
+    println!("  lerp + axis sweeps:     {sweep_ns:8.1} ns/zone  ({:.2}x)", pair_ns / sweep_ns);
 }

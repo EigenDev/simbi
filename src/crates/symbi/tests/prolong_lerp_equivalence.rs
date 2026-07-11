@@ -24,7 +24,9 @@
 // evaluation): any replacement pipeline must pass the same three.
 // =============================================================================
 
-use symbi::sim::refinement::transfer::{prolong_prims, prolong_prims_lerped};
+use symbi::sim::refinement::transfer::{
+    prolong_prims, prolong_prims_lerped, prolong_prims_swept, ProlongSweepScratch,
+};
 use symbi::sim::refinement::ProlongOrder;
 use symbi::sim::state::PrimFieldsGeneric;
 use symbi_algebra::{Domain, Space};
@@ -101,6 +103,38 @@ fn lerp_then_prolong_is_bit_identical_to_the_time_pair_kernel() {
                     va.to_bits(),
                     vb.to_bits(),
                     "{order:?} comp {kk} differs at {c:?}: pair={va:?} split={vb:?}",
+                );
+            }
+        }
+    }
+}
+
+// the axis-split sweep chain (design 49) against the fused tensor-product
+// kernel: bit identity at every order and a nontrivial alpha. the sweeps
+// materialize the SAME per-axis composition through f64 intermediates, so any
+// bit difference is a wiring bug (pass order, operand order, a frac spelled
+// differently) — never loosen this to a tolerance.
+#[test]
+fn axis_split_sweeps_are_bit_identical_to_the_fused_kernel() {
+    for order in [ProlongOrder::Pcm, ProlongOrder::Plm, ProlongOrder::Ppm] {
+        let (old, new) = (coarse_prims(), coarse_prims());
+        seed(&old, wavy);
+        seed(&new, |kk, c| wavy(kk, c) + 0.1 * ((c[0] + c[1]) as f64 * 0.2).sin());
+        let lerp = coarse_prims();
+        let (dst_pair, dst_sweep) = (fine_prims(), fine_prims());
+        let region = fine_region();
+        let scratch = ProlongSweepScratch::for_slab(&region, order, true);
+
+        prolong_prims(&old, &new, &dst_pair, &region, order, ALPHA);
+        prolong_prims_swept(&scratch, &lerp, &old, &new, &dst_sweep, &region, order, ALPHA);
+
+        for (kk, (a, b)) in comps(&dst_pair).iter().zip(comps(&dst_sweep)).enumerate() {
+            for c in region.iter() {
+                let (va, vb) = (*a.view().at(c), *b.view().at(c));
+                assert_eq!(
+                    va.to_bits(),
+                    vb.to_bits(),
+                    "{order:?} comp {kk} differs at {c:?}: fused={va:?} sweep={vb:?}",
                 );
             }
         }

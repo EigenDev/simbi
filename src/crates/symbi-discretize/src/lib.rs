@@ -64,6 +64,7 @@ pub use gv::{
 pub use gv_refinement::{
     field_lerp_multi_gv, refine_acc_edge_gv, refine_acc_face_gv, refine_prolong_1t_gv,
     refine_prolong_face_gv, refine_prolong_gv, refine_prolong_multi_1t_gv, refine_prolong_multi_gv,
+    refine_prolong_sweep_multi_gv,
     refine_restrict_face_gv, refine_restrict_gv, field_axpy_shift_gv, field_copy_gv, field_fill_gv,
     ProlongOrder,
 };

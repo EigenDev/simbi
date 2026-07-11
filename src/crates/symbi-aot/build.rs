@@ -270,6 +270,17 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
                     KernelId::RefineProlongMulti1t { order: tag, ncomp, ndim }.name(),
                     ndim, &k, &writes,
                 );
+                // the axis-split sweep passes (docs/design/49): one per axis.
+                for axis in 0..3u8 {
+                    let (k, writes) = symbi_discretize::refine_prolong_sweep_multi_gv(
+                        nd, 2, order, axis as usize, ncomp as usize,
+                    );
+                    emit_gv(
+                        out_dir,
+                        KernelId::RefineProlongSweep { order: tag, axis, ncomp, ndim }.name(),
+                        ndim, &k, &writes,
+                    );
+                }
             }
         }
     }

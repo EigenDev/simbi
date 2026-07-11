@@ -58,6 +58,11 @@ pub enum KernelId {
     /// MULTI-FIELD pointwise time interpolation `dst_k = (1-alpha)*old_k +
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
     FieldLerpMulti { ncomp: u8, ndim: u8 },
+    /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
+    /// operator along `axis`, other axes passing through. chained axis
+    /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
+    /// the interp evaluations.
+    RefineProlongSweep { order: ProlongTag, axis: u8, ncomp: u8, ndim: u8 },
     /// staggered face restriction on the `axis`-normal faces.
     RefineRestrictFace { axis: u8, ndim: u8 },
     /// staggered face prolongation on the `axis`-normal faces.
@@ -172,6 +177,32 @@ impl KernelId {
                      ncomp 4/5 are generated"
                 ),
             },
+            KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
+                match (order, axis, ncomp, ndim) {
+                    (ProlongTag::Pcm, 0, 4, 3) => "refine_prolong_sw0_pcm_4c_3d",
+                    (ProlongTag::Pcm, 1, 4, 3) => "refine_prolong_sw1_pcm_4c_3d",
+                    (ProlongTag::Pcm, 2, 4, 3) => "refine_prolong_sw2_pcm_4c_3d",
+                    (ProlongTag::Pcm, 0, 5, 3) => "refine_prolong_sw0_pcm_5c_3d",
+                    (ProlongTag::Pcm, 1, 5, 3) => "refine_prolong_sw1_pcm_5c_3d",
+                    (ProlongTag::Pcm, 2, 5, 3) => "refine_prolong_sw2_pcm_5c_3d",
+                    (ProlongTag::Plm, 0, 4, 3) => "refine_prolong_sw0_plm_4c_3d",
+                    (ProlongTag::Plm, 1, 4, 3) => "refine_prolong_sw1_plm_4c_3d",
+                    (ProlongTag::Plm, 2, 4, 3) => "refine_prolong_sw2_plm_4c_3d",
+                    (ProlongTag::Plm, 0, 5, 3) => "refine_prolong_sw0_plm_5c_3d",
+                    (ProlongTag::Plm, 1, 5, 3) => "refine_prolong_sw1_plm_5c_3d",
+                    (ProlongTag::Plm, 2, 5, 3) => "refine_prolong_sw2_plm_5c_3d",
+                    (ProlongTag::Ppm, 0, 4, 3) => "refine_prolong_sw0_ppm_4c_3d",
+                    (ProlongTag::Ppm, 1, 4, 3) => "refine_prolong_sw1_ppm_4c_3d",
+                    (ProlongTag::Ppm, 2, 4, 3) => "refine_prolong_sw2_ppm_4c_3d",
+                    (ProlongTag::Ppm, 0, 5, 3) => "refine_prolong_sw0_ppm_5c_3d",
+                    (ProlongTag::Ppm, 1, 5, 3) => "refine_prolong_sw1_ppm_5c_3d",
+                    (ProlongTag::Ppm, 2, 5, 3) => "refine_prolong_sw2_ppm_5c_3d",
+                    (o, a, n, d) => panic!(
+                        "KernelId::RefineProlongSweep: unsupported (order={o:?}, axis={a}, \
+                         ncomp={n}, ndim={d}) — only 3D ncomp 4/5 are generated"
+                    ),
+                }
+            }
             KernelId::RefineRestrictFace { axis, ndim } => RESTRICT_FACE[dim_ix(ndim)][axis as usize],
             KernelId::RefineProlongFace { axis, ndim } => PROLONG_FACE[dim_ix(ndim)][axis as usize],
             KernelId::RefineAccFace { axis, ndim } => ACC_FACE[dim_ix(ndim)][axis as usize],

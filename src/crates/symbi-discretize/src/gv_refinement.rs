@@ -531,6 +531,86 @@ pub fn refine_prolong_multi_1t_gv(
     (end_trace(), writes)
 }
 
+/// trace ONE PASS of the axis-split prolongation (docs/design/49): the 1d
+/// interpolation operator applied along `sweep_axis` only, every other axis
+/// passing the thread coordinate through to the input load. the swept axis of
+/// the OUTPUT lattice is fine-indexed (parent = floor_div(c, r), parity = the
+/// child sub-position), the unswept axes keep the input's indexing — chaining
+/// the passes axis 0 -> 1 -> 2 reproduces the inlined tensor product BIT FOR
+/// BIT (same 1d operators, same operand order, f64 intermediates). inputs
+/// "src_{k}" (the lerped coarse for pass 0, the previous intermediate after),
+/// outputs "dst_{k}"; no scalars.
+pub fn refine_prolong_sweep_multi_gv(
+    ndim: usize,
+    ratio: i64,
+    order: ProlongOrder,
+    sweep_axis: usize,
+    ncomp: usize,
+) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "refine_prolong_sweep_multi_gv: ndim must be 1..=3");
+    assert!(ratio >= 2, "refine_prolong_sweep_multi_gv: ratio must be >= 2");
+    assert!(sweep_axis < ndim, "refine_prolong_sweep_multi_gv: sweep_axis out of range");
+    assert!(ncomp >= 1, "refine_prolong_sweep_multi_gv: ncomp must be >= 1");
+    begin_trace();
+    // parent + parity on the SWEPT axis only (the same arithmetic
+    // prolong_geometry builds per axis).
+    let (parent, parity): (NodeId, NodeId) = with_trace(|t| {
+        let c = t.coord(sweep_axis as u8);
+        let g = t.graph();
+        let r = g.add_const(ConstValue::I32(ratio as i32), None);
+        let p = g.element_wise(ElementWiseOp::FloorDiv, vec![c, r], None);
+        let pr = g.element_wise(ElementWiseOp::Mul, vec![p, r], None);
+        let q = g.element_wise(ElementWiseOp::Sub, vec![c, pr], None);
+        (p, q)
+    });
+    let half = Gv::from_f64(0.5);
+    let inv_ratio = Gv::from_f64(1.0 / ratio as f64);
+    let ratio_f = Gv::from_f64(ratio as f64);
+    let one = Gv::from_f64(1.0);
+    let parity_f = Gv::of(parity);
+    let frac = (parity_f + half) * inv_ratio - half;
+    let xi_lo = parity_f * inv_ratio;
+    let xi_hi = (parity_f + one) * inv_ratio;
+
+    let w = order.ghost_width() as i64;
+    let mut writes = Vec::with_capacity(ncomp);
+    for k in 0..ncomp {
+        let src_name = format!("src_{k}");
+        // the stencil loads: swept axis at parent + dd, unswept axes at the
+        // raw thread coordinate.
+        let load = |dd: i64| -> Gv {
+            let coords: Vec<NodeId> = with_trace(|t| {
+                let raw: Vec<NodeId> = (0..ndim).map(|ax| t.coord(ax as u8)).collect();
+                let g = t.graph();
+                raw.into_iter()
+                    .enumerate()
+                    .map(|(ax, c)| {
+                        if ax == sweep_axis {
+                            let o = g.add_const(ConstValue::I32(dd as i32), None);
+                            g.element_wise(ElementWiseOp::Add, vec![parent, o], None)
+                        } else {
+                            c
+                        }
+                    })
+                    .collect()
+            });
+            gv_load_at(&src_name, src_name.as_str(), &coords)
+        };
+        let vals: Vec<Gv> = (-w..=w).map(load).collect();
+        let val = match order {
+            ProlongOrder::Pcm => vals[0],
+            ProlongOrder::Plm => plm_interp(vals[0], vals[1], vals[2], frac),
+            ProlongOrder::Ppm => ppm_interp(
+                vals[0], vals[1], vals[2], vals[3], vals[4],
+                xi_lo, xi_hi, ratio_f,
+            ),
+        };
+        let dst_name = format!("dst_{k}");
+        writes.push((dst_name.clone(), dst_name.into(), val.node()));
+    }
+    (end_trace(), writes)
+}
+
 /// the pointwise time interpolation `dst_k = (1 - alpha)*src_old_k +
 /// alpha*src_new_k` over `ncomp` co-located fields in one dispatch — the pass
 /// that hoists the prolong leaf's per-fine-cell lerp to once per COARSE cell.

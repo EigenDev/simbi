@@ -201,6 +201,122 @@ fn prim_comps<'a, const D: usize, const DOF: usize, Mem: MemorySpace>(
     v
 }
 
+/// the parent range of `region` grown by the stencil width: floor_div(lo, 2)
+/// - w .. floor_div(hi - 1, 2) + 1 + w per axis. euclidean division — ghost
+/// slab indices are negative.
+fn coarse_parents<const D: usize>(region: &Domain<D>, w: isize) -> Domain<D> {
+    Domain::new(std::array::from_fn(|a| {
+        let s = &region.spaces[a];
+        symbi_algebra::Space {
+            name: s.name,
+            lo: s.lo.div_euclid(2) - w,
+            hi: (s.hi - 1).div_euclid(2) + 1 + w,
+        }
+    }))
+}
+
+/// the two mixed-resolution intermediate lattices of the axis-split
+/// prolongation of `region` (docs/design/49): pass 0's output A is fine along
+/// axis 0 and coarse (parents + stencil halo) elsewhere; pass 1's output B is
+/// fine along axes 0..=1 and coarse along axis 2.
+fn sweep_domains<const D: usize>(region: &Domain<D>, w: isize) -> (Domain<D>, Domain<D>) {
+    let parents = coarse_parents(region, w);
+    let mix = |fine_axes: usize| -> Domain<D> {
+        Domain::new(std::array::from_fn(|a| {
+            if a < fine_axes { region.spaces[a].clone() } else { parents.spaces[a].clone() }
+        }))
+    };
+    (mix(1), mix(2))
+}
+
+/// the per-slab intermediates of the axis-split prolongation: one prim batch
+/// per pass, shaped exactly to the slab's mixed lattices. SMR slabs are
+/// static, so these allocate once (the fine level's lazy init) and are reused
+/// every call — the step loop allocates nothing (law E2).
+pub struct ProlongSweepScratch<const D: usize, const DOF: usize, Mem: MemorySpace> {
+    pub a: PrimFieldsGeneric<D, DOF, Mem>,
+    pub b: PrimFieldsGeneric<D, DOF, Mem>,
+}
+
+impl<const D: usize, const DOF: usize, Mem: MemorySpace> ProlongSweepScratch<D, DOF, Mem> {
+    pub fn for_slab(slab: &Domain<D>, order: ProlongOrder, has_pre: bool) -> Self {
+        let (a_dom, b_dom) = sweep_domains(slab, order.ghost_width() as isize);
+        Self {
+            a: PrimFieldsGeneric::zeros_with_pressure(&a_dom, has_pre)
+                .expect("prolong sweep scratch A"),
+            b: PrimFieldsGeneric::zeros_with_pressure(&b_dom, has_pre)
+                .expect("prolong sweep scratch B"),
+        }
+    }
+}
+
+/// prolong the prim batch as THREE axis-split sweep passes over the lerped
+/// coarse scratch (docs/design/49): interp along axis 0 into A (fine-x,
+/// coarse-yz), along axis 1 into B (fine-xy, coarse-z), along axis 2 into
+/// `dst` — bit-identical to the fused tensor-product kernel at ~1/17 the
+/// interp evaluations and ~1/14 the loads. `scratch` must have been built
+/// with `for_slab(region, order, ..)` — a shape mismatch panics. plm/ppm
+/// 3d ncomp 4/5 only; everything else falls back to the lerp+1t path (pcm's
+/// single-load kernel cannot be beaten by three passes).
+#[allow(clippy::too_many_arguments)]
+pub fn prolong_prims_swept<const D: usize, const DOF: usize, Mem: MemorySpace>(
+    scratch: &ProlongSweepScratch<D, DOF, Mem>,
+    lerp: &PrimFieldsGeneric<D, DOF, Mem>,
+    old: &PrimFieldsGeneric<D, DOF, Mem>,
+    new: &PrimFieldsGeneric<D, DOF, Mem>,
+    dst: &PrimFieldsGeneric<D, DOF, Mem>,
+    region: &Domain<D>,
+    order: ProlongOrder,
+    alpha: f64,
+) {
+    let has_pre = old.pre_field().is_some();
+    let ncomp = 1 + DOF + has_pre as usize;
+    if !(D == 3 && (ncomp == 4 || ncomp == 5) && order != ProlongOrder::Pcm) {
+        prolong_prims_lerped(lerp, old, new, dst, region, order, alpha);
+        return;
+    }
+    let w = order.ghost_width() as isize;
+    let (a_dom, b_dom) = sweep_domains(region, w);
+    for a in 0..D {
+        let (sa, ea) = (&scratch.a.rho.domain().spaces[a], &a_dom.spaces[a]);
+        assert!(
+            sa.lo == ea.lo && sa.hi == ea.hi,
+            "prolong sweep scratch A does not match this region/order on axis {a}",
+        );
+    }
+
+    // pass 0 feed: the time-lerped coarse snapshots over the parent region.
+    let coarse = coarse_parents(region, w);
+    let (old_c, new_c, lerp_c) = (prim_comps(old, has_pre), prim_comps(new, has_pre), prim_comps(lerp, has_pre));
+    let mut lerp_in: Vec<&symbi_grid::Field<f64, D, Mem>> = Vec::with_capacity(2 * ncomp);
+    for k in 0..ncomp {
+        lerp_in.push(old_c[k]);
+        lerp_in.push(new_c[k]);
+    }
+    let name = KernelId::FieldLerpMulti { ncomp: ncomp as u8, ndim: D as u8 }.name();
+    dispatch_fields_each::<f64, Mem, D>(name, &coarse, &lerp_in, &lerp_c, &[], &[alpha]);
+
+    // the three sweeps: lerp -> A -> B -> dst, axis 0 innermost first (the
+    // inlined kernel's nesting order — the bit-identity requirement).
+    let (a_c, b_c, dst_c) = (
+        prim_comps(&scratch.a, has_pre),
+        prim_comps(&scratch.b, has_pre),
+        prim_comps(dst, has_pre),
+    );
+    let sweep = |axis: u8| {
+        KernelId::RefineProlongSweep {
+            order: prolong_tag(order),
+            axis,
+            ncomp: ncomp as u8,
+            ndim: D as u8,
+        }
+        .name()
+    };
+    dispatch_fields_each::<f64, Mem, D>(sweep(0), &a_dom, &lerp_c, &a_c, &[], &[]);
+    dispatch_fields_each::<f64, Mem, D>(sweep(1), &b_dom, &a_c, &b_c, &[], &[]);
+    dispatch_fields_each::<f64, Mem, D>(sweep(2), region, &b_c, &dst_c, &[], &[]);
+}
+
 /// prolong the prim batch through a pre-lerped coarse scratch: one `field_lerp`
 /// pass time-interpolates the coarse snapshots ONCE PER COARSE CELL over the
 /// parent region of `region` (+ stencil halo), then the single-snapshot prolong
@@ -226,18 +342,8 @@ pub fn prolong_prims_lerped<const D: usize, const DOF: usize, Mem: MemorySpace>(
         return;
     }
 
-    // the coarse cells the prolong stencil reads for this fine region: the
-    // parent range floor_div(lo, 2) .. floor_div(hi - 1, 2) + 1, grown by the
-    // stencil width. euclidean division — ghost-slab indices are negative.
-    let w = order.ghost_width() as isize;
-    let coarse = Domain::new(std::array::from_fn(|a| {
-        let s = &region.spaces[a];
-        symbi_algebra::Space {
-            name: s.name,
-            lo: s.lo.div_euclid(2) - w,
-            hi: (s.hi - 1).div_euclid(2) + 1 + w,
-        }
-    }));
+    // the coarse cells the prolong stencil reads for this fine region.
+    let coarse = coarse_parents(region, order.ghost_width() as isize);
 
     // component order everywhere: rho, vel[0..DOF], pre (when present).
     let (old_c, new_c, lerp_c, dst_c) = (

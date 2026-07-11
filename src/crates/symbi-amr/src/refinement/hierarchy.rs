@@ -44,7 +44,8 @@ use super::emf_register::EmfRegister;
 use super::flux_register::FluxRegister;
 use super::transfer::{
     ProlongOrder, bcell_from_bface_region, bface_cf_halo_slabs, cf_ghost_slabs, copy_field,
-    prolong_face_field, prolong_field, prolong_prims_lerped, restrict_bface, restrict_cell_field,
+    prolong_face_field, prolong_field, prolong_prims_swept,
+    restrict_bface, restrict_cell_field, ProlongSweepScratch,
     restrict_cons,
 };
 use symbi_sim::driver::{check_dt_or_panic, evolve_bodies, prof, stage_tag, stage_time_fractions};
@@ -105,6 +106,12 @@ where
     /// finer level's bface transverse-halo prolongation (per-component
     /// staggered domains, cloned from this level's bface).
     pub bface_old: Option<[Field<f64, NDIM, Mem>; NDIM]>,
+    /// per-slab intermediates of the axis-split prolongation INTO this level
+    /// (docs/design/49), in `cf_ghost_slabs` order. SMR slabs are static, so
+    /// the shapes are too: lazily allocated on the first prolongation, reused
+    /// every call (the step loop allocates nothing — law E2). None-equivalent
+    /// (uninitialized) on the root.
+    pub prolong_sweep: std::sync::OnceLock<Vec<ProlongSweepScratch<NDIM, DOF, Mem>>>,
     /// the region of THIS level covered by the next finer level, in absolute
     /// indices of this level. None on the finest. single-coverage cap: exactly
     /// ONE refined box per level (this is static refinement / SMR, not multi-patch
@@ -324,6 +331,7 @@ where
                 kernels,
                 prim_old: None,
                 prim_lerp: None,
+                prolong_sweep: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
@@ -354,6 +362,7 @@ where
             kernels: coarse_kernels,
             prim_old: None,
             prim_lerp: None,
+            prolong_sweep: std::sync::OnceLock::new(),
             bcell_old: None,
             bface_old: None,
             coverage: None,
@@ -437,6 +446,7 @@ where
                 kernels,
                 prim_old: None,
                 prim_lerp: None,
+                prolong_sweep: std::sync::OnceLock::new(),
                 bcell_old: None,
                 bface_old: None,
                 coverage: None,
@@ -1088,8 +1098,16 @@ where
             &fine.state.geom.interior,
             &fine.state.boundaries,
         );
-        for slab in &slabs {
-            prolong_prims_lerped(
+        let sweep_scratch = fine.prolong_sweep.get_or_init(|| {
+            let has_pre = fine.state.fields.prim.pre_field().is_some();
+            slabs
+                .iter()
+                .map(|s| ProlongSweepScratch::for_slab(s, self.prolong_order, has_pre))
+                .collect()
+        });
+        for (slab, scratch) in slabs.iter().zip(sweep_scratch) {
+            prolong_prims_swept(
+                scratch,
                 prim_lerp,
                 prim_old,
                 &parent.state.fields.prim,
