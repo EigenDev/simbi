@@ -295,8 +295,12 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    // every body pass shares this OnceLock (feedback grav D, drain D+5,
+    // penalize D+2): allocate the family maximum once so the first caller's
+    // size never starves a later pass.
+    let n_alloc = n.max(D + 5);
     let scratch = sim.workspace.body_scratch.get_or_init(|| {
-        (0..n)
+        (0..n_alloc)
             .map(|_| {
                 Field::<Sc, D, Mem>::zeros(&sim.geom.allocated).expect("feedback scratch alloc")
             })
@@ -445,6 +449,122 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             idx: b,
             force_delta: force,
             torque_delta: torque,
+            mass_delta: mass,
+            prev_mass_delta: 0.0,
+            energy_delta: energy,
+        });
+    }
+}
+
+/// dispatch the [Drain]-stack immersed-boundary penalization (docs/design/50
+/// step 2b): per accreting body, run `penalize_drain_{D}d` over the kernel's
+/// DECLARED support ball (evaluated with this body's scalar table, clamped to
+/// the interior), in place on cons, with the per-cell exchange deltas reduced
+/// into the diagnostics accumulator — the same feedback stream the sink path
+/// feeds, so Mdot(t)/F_acc(t) land in the body history unchanged. cartesian +
+/// adiabatic only (the baked envelope); `c_drain` is the convergence dial
+/// (tau = c_drain dx / c_s), never tuned to a target rate. runs beside the
+/// production sink until the bondi equivalence gate (design 50 gate 4b)
+/// retires one of them.
+pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+    c_drain: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    symbi_sim::driver::prof("penalize", || {
+        dispatch_penalize_inner(sim, dt, gamma, c_drain);
+    });
+}
+
+fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    gamma: f64,
+    c_drain: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let Some(im) = sim.immersed.as_ref() else { return };
+    if sim.geom.coords != symbi_geometry::Geometry::Cartesian {
+        return;
+    }
+    let Some(nrg) = sim.fields.cons.nrg_field() else { return };
+    let geom = &sim.geom;
+    let name = symbi_ir::KernelId::PenalizeDrain { ndim: D as u8 }.name();
+    let bodies = &im.bodies;
+    let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
+        match bind {
+            ScalarBind::Ref(sref) => match *sref {
+                ScalarRef::Dt => dt,
+                ScalarRef::Gamma | ScalarRef::Cs => gamma,
+                ScalarRef::Body { idx: 0, field } => body_scalar::<D>(Some(bodies), b as u8, field),
+                other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, other)
+                    .unwrap_or_else(|| panic!("penalize: unexpected scalar param {other:?}")),
+            },
+            ScalarBind::Spec(spec) if &**spec == "c_drain" => c_drain,
+            other => panic!("penalize: unexpected spec scalar {other:?}"),
+        }
+    };
+    let scratch = feedback_scratch(sim, D + 2);
+    for b in 0..bodies.len() {
+        if bodies.get(b).accretion_radius().is_none() {
+            continue;
+        }
+        // the reduction/dispatch box from the kernel's declared support ball —
+        // the design-48 consumer, identical clamping to the feedback drain.
+        let names = super::binding::kernel_scalar_names(name);
+        let bbox = super::binding::kernel_output_support(name)
+            .and_then(|support| {
+                support.eval_ball(&|pname: &str| {
+                    let (_, bind) = names
+                        .iter()
+                        .find(|(n, _)| n == pname)
+                        .unwrap_or_else(|| panic!("support param '{pname}' not in '{name}'"));
+                    bind_value(bind, b)
+                })
+            })
+            .and_then(|(center, r_cut)| {
+                let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
+                    let s = &geom.interior.spaces[a];
+                    let lo_x = (center[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
+                    let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
+                    let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
+                    let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
+                    symbi_algebra::Space { name: s.name, lo, hi }
+                });
+                spaces.iter().all(|sp| sp.lo < sp.hi).then(|| Domain::new(spaces))
+            });
+        let Some(bbox) = bbox else { continue };
+
+        // in-place cons: every field input is also a write, so the manifest
+        // folds them into the output group — the input list is empty and the
+        // output order is den, mom.., nrg, then the D+2 delta scratch.
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+        for comp in 0..DOF {
+            outputs.push(&sim.fields.cons.mom[comp]);
+        }
+        outputs.push(nrg);
+        for s in scratch[..D + 2].iter() {
+            outputs.push(s);
+        }
+        let scalars = scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b)));
+        dispatch_fields::<Sc, Mem, D>(name, &geom.allocated, &bbox, &[], &outputs, &[], &scalars);
+
+        let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
+        let mass = field_reduce(&scratch[0], &bbox, ReductionOp::Add);
+        for a in 0..D {
+            force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
+        }
+        let energy = field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add);
+        im.diagnostics.accumulate(symbi_ib::BodyDelta {
+            idx: b,
+            force_delta: force,
+            torque_delta: symbi_algebra::Tensor::zeros(),
             mass_delta: mass,
             prev_mass_delta: 0.0,
             energy_delta: energy,
