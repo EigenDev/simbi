@@ -206,6 +206,12 @@ where
         }
 
         if sim.has_bodies() {
+            // the IBM surface physics (docs/design/50), ONCE per step AFTER the
+            // full RK combination: applied inside the stage blend, a stage's
+            // exponential removal is partially undone by the SSP convex
+            // combination while its receipt is not — the ledger then over-
+            // counts (RK2: 3/2x). post-step, receipt == removal exactly.
+            kernels.penalize(sim, sim.dt);
             // backward feedback: reduce per-body force/torque/accreted-mass from the fluid into
             // the side-car diagnostics (docs/design/19), then evolve_bodies consolidates + applies it
             // + advances the (prescribed) binary, and resets the accumulator for the next step.
@@ -312,7 +318,7 @@ impl FieldSet {
 }
 
 #[derive(Clone, Copy)]
-enum PhaseKind { SnapshotStage, WaveSpeeds, Flux, Efield, Godunov, PostGodunov, SourceApply, BodySource, Penalize, C2p, GhostFill }
+enum PhaseKind { SnapshotStage, WaveSpeeds, Flux, Efield, Godunov, PostGodunov, SourceApply, BodySource, C2p, GhostFill }
 
 /// when a phase runs: unconditional, or gated by an additive source overlay / immersed bodies.
 #[derive(Clone, Copy)]
@@ -339,7 +345,6 @@ const STAGE_PIPELINE: &[Phase] = &[
     Phase { name: "post_godunov",   kind: PhaseKind::PostGodunov,   reads: FieldSet::CONS,                    writes: FieldSet::NONE,   gate: Gate::Always },
     Phase { name: "source_apply",   kind: PhaseKind::SourceApply,   reads: FieldSet::USTAGE,                  writes: FieldSet::CONS,   gate: Gate::AdditiveSource },
     Phase { name: "body_source",    kind: PhaseKind::BodySource,    reads: FieldSet::CONS.or(FieldSet::PRIM), writes: FieldSet::CONS,   gate: Gate::Bodies },
-    Phase { name: "penalize",       kind: PhaseKind::Penalize,      reads: FieldSet::CONS,                    writes: FieldSet::CONS,   gate: Gate::Bodies },
     Phase { name: "c2p",            kind: PhaseKind::C2p,           reads: FieldSet::CONS,                    writes: FieldSet::PRIM,   gate: Gate::Always },
     Phase { name: "ghost_fill",     kind: PhaseKind::GhostFill,     reads: FieldSet::PRIM,                    writes: FieldSet::PRIM,   gate: Gate::Always },
 ];
@@ -433,9 +438,6 @@ where
                 PhaseKind::PostGodunov   => prof("post_godunov", || k.post_godunov(sim, sim.dt, stage_tag(ii, n))),
                 PhaseKind::SourceApply   => prof("source_apply", || k.source_apply(sim, ac * sim.dt)),
                 PhaseKind::BodySource    => prof("body_source", || k.body_source(sim, ac * sim.dt)),
-                // the IBM surface physics (docs/design/50): post-source, the
-                // accretor.md operator ordering. profs itself ("penalize").
-                PhaseKind::Penalize      => k.penalize(sim, ac * sim.dt),
                 PhaseKind::C2p           => prof("c2p", || k.c2p(sim)),
                 PhaseKind::GhostFill     => prof("ghost_fill", || k.ghost_fill(sim)),
             }

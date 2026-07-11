@@ -99,3 +99,55 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
         deltas[0].energy_delta,
     );
 }
+
+// the LEDGER LAW through the full RK evolve loop: with periodic boundaries the
+// drain is the only mass sink, so the accumulated per-step receipts must equal
+// the gas's total conserved loss. this is the gate the legacy feedback failed
+// (RK2 stage-weight over-count, measured 1.5x on bondi) and the gate a
+// stage-blended penalize placement fails the same way — the penalize runs ONCE
+// per step after the RK combination precisely so this holds.
+#[test]
+fn ledger_equals_gas_loss_through_the_rk_loop() {
+    use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
+    use symbi::sim::evolve::evolve;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .allocate()
+        .expect("sim")
+        .set_initial(|[x, y]| Prim {
+            rho: 1.0 + 0.1 * (3.0 * x).sin() * (2.0 * y).cos(),
+            vel: Tensor::new([0.05, -0.03]),
+            pre: 1.0,
+        })
+        .build()
+        .with_bodies(BodyCollection::new().add(Body::black_hole(
+            0,
+            Tensor::new([0.1, -0.05]),
+            Tensor::zeros(),
+            1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
+        )));
+    let sub =
+        AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
+
+    let dv = {
+        let w = ((-L) + dx) - (-L);
+        1.0 / (1.0 / (w * w))
+    };
+    let mass0: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c) * dv).sum();
+    evolve(&mut sim, &sub, 0.05).expect("evolve");
+    let mass1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c) * dv).sum();
+
+    let ledger: f64 = sim.immersed.as_ref().unwrap().history.mass_delta().iter().sum();
+    let lost = mass0 - mass1;
+    assert!(ledger > 0.0, "the drain never fired");
+    assert!(
+        (ledger - lost).abs() <= 1e-11 * lost.abs(),
+        "ledger {ledger} != gas loss {lost} (ratio {})",
+        ledger / lost,
+    );
+}

@@ -934,9 +934,6 @@ where
         }
         if l.state.has_bodies() {
             prof("body_source", || l.kernels.body_source(&l.state, ac * dt));
-            // the IBM surface physics (docs/design/50), post-source per
-            // substage — profs itself ("penalize").
-            l.kernels.penalize(&l.state, ac * dt);
         }
         prof("c2p", || l.kernels.c2p(&l.state));
         // first-order flux correction: redo any zone whose high-order c2p went unphysical with a
@@ -962,6 +959,14 @@ where
     pub fn level_step_tail(&mut self, level: usize, dt: f64, alpha0: f64) {
         let has_finer = level + 1 < self.levels.len();
         self.level_tail_emf(level, dt);
+        // the IBM surface physics on the FINEST level, once per its substep,
+        // AFTER the full RK combination (receipt == removal) and BEFORE the
+        // parent's restriction (so the coarse covered cells sync to the
+        // drained state — restriction consistency).
+        if !has_finer {
+            let l = &self.levels[level];
+            l.kernels.penalize(&l.state, dt);
+        }
         if has_finer {
             self.level_subcycle(level, dt);
             self.level_restrict_reflux(level, alpha0);
