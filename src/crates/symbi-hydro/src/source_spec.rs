@@ -547,9 +547,9 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 //   kernel — `symbi_discretize::gv_immersed` — replaced it as the sole accretion mechanism.)
 //
 // (energy entrainment, torque-controlled sink velocity, mach-aware boundary
-// layers — the full IB physics from `symbi-ib::effects.rs` — are deferred.
-// the spec layer here encodes the canonical analytical forms; the full
-// IB machinery composes on top of them.)
+// layers are surface physics: they belong to the property algebra
+// (`symbi_ib::penalize`, docs/design/50), not to this spec layer. the spec
+// layer encodes the canonical analytical source forms only.)
 // =============================================================================
 
 /// immersed-body parameter naming.

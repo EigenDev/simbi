@@ -26,7 +26,40 @@
 //   let rs = sonic_radius(gamma);
 // =============================================================================
 
-use crate::sink::accretion_coefficient;
+use symbi_algebra::OrderedNumeric;
+use symbi_ir::algebra::Scalar;
+
+/// bondi-hoyle accretion rate coefficient lambda(gamma).
+/// isothermal (gamma=1): exp(1.5)/4, adiabatic (gamma=5/3): 0.25.
+/// general: 0.25 * (2/(5-3*gamma))^((5-3*gamma)/(2*gamma-2)).
+pub fn accretion_coefficient<S: Scalar + OrderedNumeric>(gamma: S) -> S {
+    let one = S::ONE;
+    let diff_iso = (gamma - one).abs();
+
+    if diff_iso < S::from_f64(1e-5) {
+        // isothermal
+        return S::from_f64(std::f64::consts::E.powf(1.5) / 4.0);
+    }
+
+    let five_thirds = S::from_f64(5.0 / 3.0);
+    let diff_adi = (gamma - five_thirds).abs();
+
+    if diff_adi < S::from_f64(1e-5) {
+        return S::from_f64(0.25);
+    }
+
+    // general case
+    let five = S::from_f64(5.0);
+    let three = S::from_f64(3.0);
+    let two = S::from_f64(2.0);
+    let quarter = S::from_f64(0.25);
+
+    let num = five - three * gamma;
+    let den = two * gamma - two;
+    let base = two / num;
+    let exponent = num / den;
+    quarter * base.powf(exponent)
+}
 
 /// the local transonic bondi state at radius `r` (bondi radii): density,
 /// INFLOW speed magnitude (the radial velocity is `-u * rhat`), and pressure.
