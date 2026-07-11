@@ -400,7 +400,28 @@ pub fn body_feedback_drain_gv(
     }
     writes.push(("b0_m".to_string(), "fb_0_mass".into(), (den * frac * dv).node()));
     writes.push(("b0_e".to_string(), "fb_0_energy".into(), (nrg * frac * dv).node()));
-    (end_trace(), writes)
+    let kernel = end_trace();
+    // the declared output support (docs/design/48 part 3): every drain output is
+    // exactly zero outside |x - body_pos| > racc + DRAIN_SUPPORT_WIDTHS*min(dx).
+    // drain_rate is cond-gated to exact zero there (where tanh saturation makes
+    // the ungated rate zero anyway), so frac = 0 and every write is a multiple
+    // of it. cartesian only: the ball lives in cartesian space, and a cartesian
+    // grid is the one whose index box contains it directly.
+    let kernel = if matches!(coords, Coords::Cartesian) {
+        use symbi_ir::{ParamExpr, Support};
+        let center = (0..ndim)
+            .map(|ax| ParamExpr::param(&format!("body_0_pos_{}", cart_axes[ax])))
+            .collect();
+        let radius = ParamExpr::param("body_0_racc")
+            + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
+                * ParamExpr::min_of(
+                    (0..ndim).map(|ax| ParamExpr::param(&format!("dx_{ax}"))).collect(),
+                );
+        kernel.with_output_support(Support::ball(center, radius))
+    } else {
+        kernel
+    };
+    (kernel, writes)
 }
 
 /// BACKWARD feedback: per cell, per body, the CARTESIAN force / 3D torque / absorbed mass / absorbed

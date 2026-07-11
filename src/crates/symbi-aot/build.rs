@@ -96,10 +96,21 @@ fn serial_twins_enabled() -> bool {
     }
 }
 
-fn write_both(out_dir: &str, graph: &Graph, inputs: &KernelEmitInputs) {
+// the artifact-producing emit: CPU source + the serialized neutral IR blob.
+// `output_support` is the GvKernel's declared output support (docs/design/48
+// part 3), stamped onto the Prepared AFTER prepare — no renderer reads it, so
+// it does not ride KernelEmitInputs. the serial twin reuses the same blob, so
+// the declaration travels with both registrations.
+fn write_both_with_support(
+    out_dir: &str,
+    graph: &Graph,
+    inputs: &KernelEmitInputs,
+    output_support: Option<&symbi_ir::Support>,
+) {
     let cpu_file = format!("{}_generated.rs", inputs.kernel_name);
     write_kernel(out_dir, &cpu_file, &emit_kernel_cpu(graph, inputs));
-    let prepared = prepare(graph, inputs);
+    let mut prepared = prepare(graph, inputs);
+    prepared.output_support = output_support.cloned();
     let ir = prepared_to_ir(&prepared);
     fs::write(Path::new(out_dir).join(format!("{}.ir.json", inputs.kernel_name)), &ir)
         .expect("failed to write neutral ir blob");
@@ -486,7 +497,7 @@ fn emit_gv(out_dir: &str, kernel_name: &str, ndim: u8, k: &GvKernel, writes: &[(
     } else {
         None
     };
-    write_both(out_dir, &k.graph, &KernelEmitInputs {
+    write_both_with_support(out_dir, &k.graph, &KernelEmitInputs {
         kernel_name,
         ndim,
         target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },
@@ -497,7 +508,7 @@ fn emit_gv(out_dir: &str, kernel_name: &str, ndim: u8, k: &GvKernel, writes: &[(
         coord_components: &k.coord_components,
         device_preamble:  &[],
         tile_spec: tile_spec.as_ref(),
-    });
+    }, k.output_support.as_ref());
 }
 
 // the curvilinear geometric momentum source the godunov binds, by regime prefix: RMHD's

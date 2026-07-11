@@ -140,6 +140,50 @@ pub(crate) fn kernel_scalar_kinds(name: &str) -> Arc<[(ScalarBind, bool)]> {
     parsed
 }
 
+/// the declared OUTPUT SUPPORT of a kernel (docs/design/48 part 3), cached: the
+/// region outside which every output is exactly zero, as serialized in the
+/// neutral IR blob. `None` = the artifact declares nothing (= Everywhere).
+/// dispatch evaluates a Ball's center/radius against its own scalar table to
+/// derive reduction / launch regions instead of hand-deriving boxes.
+pub(crate) fn kernel_output_support(name: &str) -> Option<Arc<symbi_ir::Support>> {
+    static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<symbi_ir::Support>>>>> =
+        OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    if let Some(s) = cache.read().unwrap().get(name) {
+        return s.clone();
+    }
+    let mut w = cache.write().unwrap();
+    if let Some(s) = w.get(name) {
+        return s.clone();
+    }
+    let (_, ir) = expect_kernel::<f64>(name);
+    let parsed = symbi_ir::kernel_output_support_from_ir(ir).map(Arc::new);
+    w.insert(name.to_string(), parsed.clone());
+    parsed
+}
+
+/// a kernel's scalar manifest with MATERIALIZED param names, cached: one
+/// `(name, bind)` per scalar param, in declared order. the names are allocated
+/// once per kernel per process, so a per-step by-name lookup (the support
+/// ball's param evaluation) compares `&str` without allocating.
+pub(crate) fn kernel_scalar_names(name: &str) -> Arc<[(String, ScalarBind)]> {
+    static CACHE: OnceLock<RwLock<HashMap<String, Arc<[(String, ScalarBind)]>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    if let Some(s) = cache.read().unwrap().get(name) {
+        return Arc::clone(s);
+    }
+    let mut w = cache.write().unwrap();
+    if let Some(s) = w.get(name) {
+        return Arc::clone(s);
+    }
+    let named: Arc<[(String, ScalarBind)]> = kernel_scalar_kinds(name)
+        .iter()
+        .map(|(bind, _)| (bind.name(), bind.clone()))
+        .collect();
+    w.insert(name.to_string(), Arc::clone(&named));
+    named
+}
+
 /// resolve a kernel's recorded runtime path to the sim field that backs it. the path is
 /// parsed ONCE into a typed `FieldRef` (the trace <-> dispatch ABI vocabulary, minted in
 /// `symbi_ir`) and matched EXHAUSTIVELY — adding a field variant is then a compile error

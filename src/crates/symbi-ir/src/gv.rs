@@ -56,6 +56,12 @@ pub struct GvKernel {
     /// exists so builders, fusion, and the runtime can be extended without
     /// further enum-shape changes.
     pub tile_spec: Option<TileSpec>,
+    /// the declared SUPPORT of this kernel's outputs (docs/design/48 part 3):
+    /// a region outside which every output is exactly zero for any field input.
+    /// declared by the builder (where the saturation constants live), carried
+    /// into the serialized `Prepared` blob, consumed by dispatch (reduction /
+    /// launch regions). `None` = Everywhere (always sound).
+    pub output_support: Option<crate::support::Support>,
 }
 
 /// shared-memory tile spec for stencil kernels. names the fields to prefetch
@@ -252,6 +258,7 @@ pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
         coord_components: t.coord_components,
         grade,
         tile_spec: None,
+        output_support: None,
     }
 }
 
@@ -326,6 +333,7 @@ impl GvKernel {
                 coord_components: Vec::new(),
                 grade,
                 tile_spec: None,
+                output_support: None,
             },
             Vec::new(),
         )
@@ -356,6 +364,46 @@ impl GvKernel {
         );
         self.tile_spec = Some(spec);
         self
+    }
+
+    /// declare the support of this kernel's outputs: exactly zero outside the
+    /// region, for every field input value (validated by sampling the compiled
+    /// kernel — the support-validation gates). a ball's center/radius are
+    /// expressions over THIS kernel's scalar params; every referenced param
+    /// must be in the manifest, or dispatch could never evaluate the geometry.
+    pub fn with_output_support(mut self, support: crate::support::Support) -> Self {
+        if let crate::support::Support::Ball { center, radius } = &support {
+            let manifest: std::collections::HashSet<&str> =
+                self.scalar_params.iter().map(|s| s.as_str()).collect();
+            let check = |e: &crate::support::ParamExpr| {
+                collect_support_params(e, &mut |name| {
+                    assert!(
+                        manifest.contains(name),
+                        "with_output_support: param `{name}` is not in this kernel's scalar manifest",
+                    );
+                });
+            };
+            for c in center {
+                check(c);
+            }
+            check(radius);
+        }
+        self.output_support = Some(support);
+        self
+    }
+}
+
+/// walk a support param expression calling `f` on every referenced param name.
+fn collect_support_params(e: &crate::support::ParamExpr, f: &mut impl FnMut(&str)) {
+    use crate::support::ParamExpr::*;
+    match e {
+        Param(name) => f(name),
+        Const(_) => {}
+        Add(a, b) | Mul(a, b) => {
+            collect_support_params(a, f);
+            collect_support_params(b, f);
+        }
+        Min(items) => items.iter().for_each(|i| collect_support_params(i, f)),
     }
 }
 
@@ -499,6 +547,13 @@ pub fn try_fuse(
         }
     }
 
+    // the fused outputs' support is the UNION of both sides'. representable
+    // only when both declare the same region; any mismatch (or an undeclared
+    // side) widens to Everywhere — always sound, never wrong.
+    let output_support = match (&a.output_support, &b.output_support) {
+        (Some(sa), Some(sb)) if sa == sb => a.output_support.clone(),
+        _ => None,
+    };
     let fused = GvKernel {
         graph: target,
         field_inputs,
@@ -508,6 +563,7 @@ pub fn try_fuse(
         // tile_spec is preserved across fusion: the pre-check guaranteed
         // a.tile_spec == b.tile_spec, so either side's value serves.
         tile_spec: a.tile_spec,
+        output_support,
     };
 
     // writes: a's preserved verbatim (target started as a's graph clone),

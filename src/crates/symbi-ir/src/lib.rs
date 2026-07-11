@@ -52,6 +52,7 @@ pub mod proof;
 
 // typed kernel registry names for the amr-transfer / field-op family.
 pub mod kernel_id;
+pub mod support;
 
 // Layer 0 universal primitives — categorical structures over the substrate:
 // variance (re-exported), Scope/Scoped (multi-rank discipline), LinearSpace
@@ -87,6 +88,7 @@ pub use passes::scalarize::{
 };
 pub use passes::splice::{splice_graph, SpliceError};
 pub use passes::stencil_reach::{stencil_reach, AxisReach, ReachReport};
+pub use support::{ParamExpr, Support};
 pub use passes::cse::{cse_lowered_fn, cse_kernel};
 
 // backends surface
@@ -98,7 +100,8 @@ pub use backends::kernel::{
 };
 pub use backends::kernel_cpu::{emit_kernel_cpu, emit_kernel_cpu_serial};
 pub use backends::render::{
-    emit_kernel_render, kernel_bindings_from_ir, kernel_scalar_params_typed_from_ir, prepare,
+    emit_kernel_render, kernel_bindings_from_ir, kernel_output_support_from_ir,
+    kernel_scalar_params_typed_from_ir, prepare,
     render, KernelRenderer, Prepared,
 };
 pub use backends::interp::{Backend, Cpu, CpuField, CpuFieldMut};

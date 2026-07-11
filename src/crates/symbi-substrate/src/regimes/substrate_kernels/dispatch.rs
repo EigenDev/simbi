@@ -312,9 +312,11 @@ where
 
 /// the SPLIT feedback path (cartesian): per ACTIVE body, a gravity-reaction pass
 /// reduced over the full interior (one field streamed, D outputs) and a drain pass
-/// dispatched AND reduced over the body's sink support bounding box (D+5 outputs,
-/// every integrand exactly zero outside the box by tanh saturation —
-/// `ibm::DRAIN_SUPPORT_WIDTHS`). inert body slots cost nothing. sums differ from the
+/// dispatched AND reduced over the sink's support bounding box (D+5 outputs). the
+/// box derives from the drain kernel's DECLARED output support — the artifact
+/// carries the ball inside which every integrand can be nonzero (tanh saturation
+/// makes it exactly zero beyond; the support-law sampler validates the claim on
+/// the compiled kernel). inert body slots cost nothing. sums differ from the
 /// combined kernel only by floating-point reassociation over the smaller region
 /// (omitted terms are exact zeros).
 fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
@@ -334,22 +336,23 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
 
     // slot-0 scalar resolution rebound to body `b`: the single-body kernels declare
     // `body_0_*`; each active body's dispatch feeds its own parameters through them.
+    // `bind_value` is the ONE bind -> f64 map — the kernel's scalar arguments and
+    // the support-ball evaluation below read the same values by construction.
     let bodies = &im.bodies;
-    let resolve = |name: &str, b: usize| -> Vec<Sc> {
-        scalars_for(name, |bind| {
-            let ScalarBind::Ref(sref) = bind else {
-                panic!("body kernel '{name}': unexpected spec scalar {bind:?}");
-            };
-            let v: f64 = match *sref {
-                ScalarRef::Dt => dt,
-                ScalarRef::Gamma | ScalarRef::Cs => gamma,
-                ScalarRef::Body { idx: 0, field } => body_scalar::<D>(Some(bodies), b as u8, field),
-                other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, other)
-                    .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
-            };
-            Sc::from_f64(v)
-        })
+    let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
+        let ScalarBind::Ref(sref) = bind else {
+            panic!("body kernel: unexpected spec scalar {bind:?}");
+        };
+        match *sref {
+            ScalarRef::Dt => dt,
+            ScalarRef::Gamma | ScalarRef::Cs => gamma,
+            ScalarRef::Body { idx: 0, field } => body_scalar::<D>(Some(bodies), b as u8, field),
+            other => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, other)
+                .unwrap_or_else(|| panic!("body kernel: unexpected scalar param {other:?}")),
+        }
     };
+    let resolve =
+        |name: &str, b: usize| -> Vec<Sc> { scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b))) };
 
     // reduction scratch, shared across bodies and both passes and cached on the
     // workspace across calls (assign-write + reduce over the SAME region needs
@@ -377,21 +380,39 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
             force[g] = field_reduce(&scratch[g], &geom.interior, ReductionOp::Add);
         }
 
-        // drain-weighted quantities: support-box dispatch + reduce. the box is the
-        // body position +- (racc + support-widths * min dx) in index space, clamped
-        // to the interior. a non-accreting body has no sink (every drain output is
-        // identically zero) and a body outside the domain intersects nothing — both
-        // skip the pass entirely, BEFORE Domain construction (an empty Space panics).
+        // drain-weighted quantities: support-box dispatch + reduce. the box derives
+        // from the drain kernel's DECLARED output support (docs/design/48 part 3):
+        // evaluate the ball with this body's own scalar table (the same values the
+        // kernel receives), convert to index space, clamp to the interior. a
+        // non-accreting body has no sink (every drain output is identically zero)
+        // and a body outside the domain intersects nothing — both skip the pass
+        // entirely, BEFORE Domain construction (an empty Space panics). a kernel
+        // with NO declared support integrates over the full interior — sound,
+        // never a silent physics loss.
         let body = bodies.get(b);
-        let min_dx = (0..D).map(|a| geom.dx[a]).fold(f64::INFINITY, f64::min);
-        let bbox = body.accretion_radius().and_then(|racc| {
-            let r_cut = racc + symbi_discretize::ibm::DRAIN_SUPPORT_WIDTHS * min_dx;
+        let bbox = body.accretion_radius().and_then(|_| {
+            let names = super::binding::kernel_scalar_names(&drain_name);
+            let ball = super::binding::kernel_output_support(&drain_name).and_then(|support| {
+                support.eval_ball(&|pname: &str| {
+                    let (_, bind) = names
+                        .iter()
+                        .find(|(n, _)| n == pname)
+                        .unwrap_or_else(|| {
+                            panic!("support param '{pname}' not in '{drain_name}' scalar manifest")
+                        });
+                    bind_value(bind, b)
+                })
+            });
+            let Some((center, r_cut)) = ball else {
+                return Some(geom.interior.clone());
+            };
+            assert_eq!(center.len(), D, "support ball rank != grid dim");
             let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
                 let s = &geom.interior.spaces[a];
                 // index anchor: `x = x_lo + i*dx` with ABSOLUTE index i
                 // (stagger_coord), no interior offset in the map.
-                let lo_x = (body.position[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
-                let hi_x = (body.position[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
+                let lo_x = (center[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
+                let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
                 let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
                 let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
                 symbi_algebra::Space { name: s.name, lo, hi }

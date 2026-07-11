@@ -220,6 +220,14 @@ pub struct Prepared {
     /// identity lands. the carrier oracle is the correctness gate.
     #[serde(default)]
     pub coalesce_layout: bool,
+    /// the declared SUPPORT of this kernel's outputs (docs/design/48 part 3):
+    /// exactly zero outside the region, for every field input value. stamped by
+    /// the artifact producer (build.rs) from the `GvKernel` declaration AFTER
+    /// `prepare` — no renderer reads it, so it does not ride `KernelEmitInputs`.
+    /// consumed by dispatch: a reduction over a Ball-supported output only
+    /// needs the cells inside the ball. `None` = Everywhere (always sound).
+    #[serde(default)]
+    pub output_support: Option<crate::support::Support>,
 }
 
 /// emit a scalarized stencil kernel for `R`'s backend — `prepare` then `render`.
@@ -326,6 +334,9 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
         param_elem,
         tile_spec: inputs.tile_spec.cloned(),
         coalesce_layout: inputs.coalesce_layout,
+        // stamped by the artifact producer post-prepare (build.rs, from the
+        // GvKernel declaration); no renderer reads it.
+        output_support: None,
     }
 }
 
@@ -348,6 +359,15 @@ pub fn kernel_bindings_from_ir(ir: &str) -> Vec<(FieldBind, bool)> {
 /// reads the sort to route each lane by name to the right tail (so a mixed kernel like
 /// ghost-fill, with int `map_type`/`arg` + float `vel_sign`, resolves fully by name, never
 /// positionally). the sort comes from the graph's param element types (`param_elem`).
+/// the declared output support of a serialized kernel (docs/design/48 part 3),
+/// or `None` when the artifact declares nothing (= Everywhere). the dispatch
+/// layer evaluates a Ball's center/radius against its own scalar table to
+/// derive reduction / launch regions.
+pub fn kernel_output_support_from_ir(ir: &str) -> Option<crate::support::Support> {
+    let prepared: Prepared = serde_json::from_str(ir).expect("deserialize Prepared from kernel IR");
+    prepared.output_support
+}
+
 pub fn kernel_scalar_params_typed_from_ir(ir: &str) -> Vec<(ScalarBind, bool)> {
     let prepared: Prepared = serde_json::from_str(ir).expect("deserialize Prepared from kernel IR");
     prepared
