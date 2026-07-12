@@ -120,13 +120,13 @@ where
     /// mechanism. default: no-op (regimes without a baked penalize envelope).
     fn penalize(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
-    /// the constant-nu viscous transport pass (docs/design/54): the Navier-Stokes
+    /// the constant-nu viscous transport pass: the Navier-Stokes
     /// shear operator, applied post-step once the primitive velocity is current.
     /// default: no-op (inviscid regimes, and sets without a baked viscous kernel).
     fn viscous(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 }
 
-/// stash the config's constant-nu viscosity onto a kernel set (docs/design/54).
+/// stash the config's constant-nu viscosity onto a kernel set.
 /// a SEPARATE (non-const-generic) trait so the build chain can call it on the
 /// concrete set without the `KernelSet<NDIM, DOF, ..>` inference ambiguity. the
 /// default is a no-op (regimes with no viscous kernel ignore it);
@@ -135,7 +135,7 @@ pub trait WithViscosity: Sized {
     fn with_viscosity(self, _nu: f64) -> Self {
         self
     }
-    /// stash the Shakura-Sunyaev alpha (docs/design/54). default no-op;
+    /// stash the Shakura-Sunyaev alpha. default no-op;
     /// IsoSubstrateKernelSet stores it.
     fn with_alpha(self, _alpha: f64) -> Self {
         self

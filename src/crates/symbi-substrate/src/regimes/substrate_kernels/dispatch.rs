@@ -193,7 +193,7 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// dispatch the constant-nu VISCOUS operator (`viscous_iso_2d`, docs/design/54):
+/// dispatch the constant-nu VISCOUS operator (`viscous_iso_2d`):
 /// accumulate `dt div(tau)` into `cons.mom` over the interior. isothermal, 2D
 /// cartesian; the caller gates on `nu > 0`. reads `prim.rho` / `prim.vel` (current
 /// post-c2p) at the halo-1 3x3 stencil and writes `cons.mom` at the center cell —
@@ -206,7 +206,7 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    assert_eq!(D, 2, "the viscous operator is baked for 2D only (docs/design/54)");
+    assert_eq!(D, 2, "the viscous operator is baked for 2D only");
     let geom = &sim.geom;
     let name = symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name();
     let scalars = super::params::scalars_for(name, |bind| match bind {
@@ -222,7 +222,7 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_named(sim, &sim.fields.cons.den, None, 0, name, &geom.interior, &[], &scalars);
 }
 
-/// dispatch the alpha VISCOUS operator (`viscous_iso_alpha_2d`, docs/design/54):
+/// dispatch the alpha VISCOUS operator (`viscous_iso_alpha_2d`):
 /// like `dispatch_viscous` but with a spatially varying `nu(x) = alpha cs^2 /
 /// Omega_k(r)` about the central body. resolves the body position/mass (body 0),
 /// the sound speed (the `cs`/`gamma` eos slot), and `alpha`. requires a body.
@@ -235,14 +235,14 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    assert_eq!(D, 2, "the alpha viscous operator is baked for 2D only (docs/design/54)");
+    assert_eq!(D, 2, "the alpha viscous operator is baked for 2D only");
     let im = sim
         .immersed
         .as_ref()
-        .expect("alpha viscosity requires a central body (docs/design/54)");
+        .expect("alpha viscosity requires a central body");
     assert!(
         !im.bodies.is_empty(),
-        "alpha viscosity requires a central body (docs/design/54)"
+        "alpha viscosity requires a central body"
     );
     let bodies = &im.bodies;
     let geom = &sim.geom;

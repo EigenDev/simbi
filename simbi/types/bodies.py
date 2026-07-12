@@ -169,7 +169,7 @@ class AccretionProperties:
     porosity: float | None = None
     k_eta_n: float = 0.0
     k_eta_t: float = 0.0
-    # the torque-free dial (docs/design/53): None keeps the pure drain; a value
+    # the torque-free dial: None keeps the pure drain; a value
     # in [0, 1] selects the isothermal torque-free accretor (the Dittmann sink),
     # where xi = 1 removes mass but no angular momentum. mutually exclusive with
     # porosity (a different surface physics on the same tangential channel).

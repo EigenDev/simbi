@@ -205,7 +205,7 @@ where
             emit_trace_neighborhood(sim, c);
         }
 
-        // the constant-nu viscous transport (docs/design/54), ONCE per step after
+        // the constant-nu viscous transport, ONCE per step after
         // the RK combination — the primitive velocity is current (each stage ends
         // with c2p), and the pass reads prim / writes cons.mom, so it is body-
         // independent and runs whether or not the sim carries immersed bodies.

@@ -1657,7 +1657,7 @@ fn main() {
         gen_refine_transfer(&out_dir, ndim);
         gen_penalize(&out_dir, ndim);
     }
-    // the viscous operators (docs/design/54): constant-nu + alpha, 2D only.
+    // the viscous operators: constant-nu + alpha, 2D only.
     {
         use symbi_ir::KernelId;
         let (k, writes) = symbi_discretize::viscous_iso_gv();

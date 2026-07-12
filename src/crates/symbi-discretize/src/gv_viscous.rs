@@ -1,7 +1,7 @@
 // =============================================================================
 // gv_viscous.rs
 //
-// the traced isothermal viscous operators (docs/design/54): per interior cell,
+// the traced isothermal viscous operators: per interior cell,
 // read the primitive velocity + density on the halo-1 3x3 stencil (via
 // `field_offset`), evaluate the SAME carrier-generic `viscous_mom_update_2d` the
 // f64 oracle runs, and accumulate `dt div(tau)` into `cons.mom`. 2D cartesian.

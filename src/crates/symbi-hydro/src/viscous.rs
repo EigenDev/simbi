@@ -1,7 +1,7 @@
 // =============================================================================
 // viscous.rs
 //
-// the constant-nu Navier-Stokes shear operator (docs/design/54), carrier-generic
+// the constant-nu Navier-Stokes shear operator, carrier-generic
 // (f64 oracle / Gv trace / Dual). the shear stress
 //   tau_ij = rho nu ( d_i v_j + d_j v_i - (2/3) delta_ij d_k v_k )
 // is evaluated at the FOUR cell faces from a halo-1 velocity stencil and
@@ -12,7 +12,7 @@
 // isothermal only here: no energy channel (the viscous heating is not booked; a
 // locally-isothermal disk radiates it instantly by assumption). the r-phi shear
 // is what drives disk accretion, so the momentum operator is the load-bearing
-// piece; the energy twin (v_i tau_ij flux + heating) is design-54 build step 3.
+// piece; the energy twin (the v_i tau_ij flux + viscous heating) is not built here.
 //
 // stencil convention: v[jj][ii] and rho[jj][ii] with jj, ii in {0, 1, 2} for the
 // grid offsets {-1, 0, +1} along (y, x); the center cell is [1][1]. the face

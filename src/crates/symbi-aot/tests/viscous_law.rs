@@ -1,7 +1,7 @@
 // =============================================================================
 // viscous_law.rs
 //
-// the constant-nu viscous kernel's gate (docs/design/54 step 1): the compiled
+// the constant-nu viscous kernel's gate: the compiled
 // halo-1 stencil kernel is BIT-IDENTICAL to the f64 host chain built from the
 // same carrier-generic `viscous_mom_update_2d` (read prim.vel/prim.rho on the
 // 3x3 stencil -> conservative shear-stress flux divergence -> accumulate into
@@ -109,7 +109,7 @@ fn compiled_viscous_iso_matches_the_f64_chain_bitwise() {
     assert!(checked > 20, "the viscous operator never produced a nonzero force");
 }
 
-// docs/design/54: the alpha kernel. nu(x) = alpha c_s^2 / Omega_k(r) is a
+// the alpha kernel. nu(x) = alpha c_s^2 / Omega_k(r) is a
 // SPATIALLY VARYING viscosity (face-averaged in the core); the compiled kernel
 // must be bit-identical to the f64 chain that computes the same per-cell nu.
 #[test]

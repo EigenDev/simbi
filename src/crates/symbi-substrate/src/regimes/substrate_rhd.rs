@@ -46,7 +46,7 @@ use symbi_sim::state::FieldStore;
 use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 
 /// a D-generic RHD `KernelSet`, every method substrate-generated.
-// viscosity is isothermal-only (docs/design/54); RHD uses the no-op default.
+// viscosity is isothermal-only; RHD uses the no-op default.
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for RhdSubstrateKernelSet<Mem, Sc, D>
 {

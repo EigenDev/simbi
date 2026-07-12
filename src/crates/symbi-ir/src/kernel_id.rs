@@ -70,18 +70,18 @@ pub enum KernelId {
     /// exactly). p = 1 reduces bit-exactly to `PenalizeDrain`. adiabatic,
     /// cartesian.
     PenalizePorous { ndim: u8 },
-    /// the [TorqueFreeAccretor] penalization (docs/design/53): the drain plus a
+    /// the torque-free accretor penalization: the drain plus a
     /// tangential anti-relaxation `lambda_t = -xi lambda_rho` about the sphere
     /// normal, so the accreted mass carries no net angular momentum to the body
     /// (the Dittmann torque-free sink, coordinate-free). the retention floor
     /// bounds the growing tangential factor. xi = 0 reduces bit-exactly to
     /// `PenalizeDrainIso`. isothermal (thin-disk), cartesian.
     PenalizeTorqueFreeIso { ndim: u8 },
-    /// the constant-nu Navier-Stokes viscous operator (docs/design/54): the
+    /// the constant-nu Navier-Stokes viscous operator: the
     /// conservative shear-stress flux divergence, a halo-1 stencil accumulated
     /// into cons.mom. isothermal (thin-disk), cartesian, 2D.
     ViscousIso { ndim: u8 },
-    /// the Shakura-Sunyaev alpha viscous operator (docs/design/54): the same
+    /// the Shakura-Sunyaev alpha viscous operator: the same
     /// conservative shear-stress flux divergence, but with a spatially varying
     /// nu(x) = alpha c_s^2 / Omega_k(r) about the central body. isothermal, 2D.
     ViscousIsoAlpha { ndim: u8 },

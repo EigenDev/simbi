@@ -271,7 +271,7 @@ pub fn penalize_porous_gv(ndim: usize) -> (GvKernel, Writes) {
     (kernel, writes)
 }
 
-/// the ISOTHERMAL torque-free accretor (docs/design/53): the drain plus a
+/// the ISOTHERMAL torque-free accretor: the drain plus a
 /// tangential ANTI-relaxation `lambda_t = -xi lambda_rho` about the sphere
 /// normal, so the accreted mass carries no net angular momentum to the body
 /// (the Dittmann & Ryan 2021 torque-free sink, coordinate-free via the SDF

@@ -155,7 +155,7 @@ struct BodyParams {
     porosity: Option<f64>,
     k_eta_n: f64,
     k_eta_t: f64,
-    /// the torque-free dial (docs/design/53): Some(xi) selects the isothermal
+    /// the torque-free dial: Some(xi) selects the isothermal
     /// torque-free accretor (xi in [0, 1]); None keeps the pure drain. mutually
     /// exclusive with porosity.
     torque_free_xi: Option<f64>,
@@ -1745,8 +1745,8 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                 b.accretion_radius,
             );
             // the declared surface stack selects the penalization kernel: a
-            // torque-free xi (docs/design/53) or a porosity dial (docs/design/50
-            // zoo) switches off the pure drain. they are mutually exclusive
+            // torque-free xi or a porosity dial
+            // switches off the pure drain. they are mutually exclusive
             // (the python config rejects declaring both).
             match (b.torque_free_xi, b.porosity) {
                 (Some(xi), _) => bh.with_surface(symbi_ib::SurfaceSpec::TorqueFree { xi }),
@@ -3961,7 +3961,7 @@ macro_rules! build_and_run_iso {
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
         let theta = build_theta(cfg);
-        // the constant-nu viscosity (docs/design/54) — the iso path has its OWN
+        // the constant-nu viscosity — the iso path has its OWN
         // build macro, so it needs its own .with_viscosity (the base hydro build
         // at build_and_run_hydro does not cover it).
         let sub = sim

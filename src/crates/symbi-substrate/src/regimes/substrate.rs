@@ -52,11 +52,11 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     pub cs: f64,
     /// the drain timescale dial tau = c_drain dx / c_s (accretor.md §2.3).
     pub c_drain: f64,
-    /// constant kinematic viscosity nu (docs/design/54). 0 = inviscid (the
+    /// constant kinematic viscosity nu. 0 = inviscid (the
     /// viscous pass and its CFL cap are inert). >0 selects the Navier-Stokes
     /// shear operator and caps dt at C_visc dx^2 / nu.
     pub viscosity: f64,
-    /// Shakura-Sunyaev alpha (docs/design/54). >0 selects the alpha viscous
+    /// Shakura-Sunyaev alpha. >0 selects the alpha viscous
     /// operator nu(x) = alpha cs^2 / Omega_k(r) (TAKES PRECEDENCE over the
     /// constant-nu `viscosity`); requires a central body. 0 = off.
     pub alpha: f64,
@@ -351,7 +351,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             self.cfl_number,
             None,
         );
-        // the parabolic viscous cap (docs/design/54): an explicit diffusion step
+        // the parabolic viscous cap: an explicit diffusion step
         // is stable for dt <= C_visc dx^2 / nu_max. inert when inviscid. for alpha
         // the viscosity grows with radius, so nu_max is at the farthest corner.
         let nu_max = if self.alpha > 0.0 {
@@ -545,17 +545,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
-        // the Navier-Stokes shear (docs/design/54); inert when inviscid. baked
+        // the Navier-Stokes shear; inert when inviscid. baked
         // for 2D cartesian only — fail loud otherwise rather than silently drop
         // the transport a viscous run declared. alpha (spatially varying nu)
         // takes precedence over the constant-nu viscosity.
         if self.alpha <= 0.0 && self.viscosity <= 0.0 {
             return;
         }
-        assert_eq!(D, 2, "viscosity is baked for 2D isothermal only (docs/design/54)");
+        assert_eq!(D, 2, "viscosity is baked for 2D isothermal only");
         assert!(
             sim.geom.coords == Geometry::Cartesian,
-            "viscosity is baked for cartesian only (docs/design/54)"
+            "viscosity is baked for cartesian only"
         );
         if self.alpha > 0.0 {
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(sim, dt, self.alpha, self.cs);

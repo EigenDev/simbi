@@ -102,7 +102,7 @@ impl<S: Scalar, const D: usize> BodyKin<S, D> {
     }
 }
 
-/// docs/design/53 G-WP saturation. the torque-free tangential retention is a
+/// the retention floor for the torque-free tangential channel. the retention is a
 /// GROWING exponential (`lambda_t < 0`); left unbounded it boosts the retained
 /// angular momentum of a vanishing remnant to an infinite velocity, and forms
 /// `0 * inf = NaN` in the conserved momentum once the density underflows. the
@@ -127,7 +127,7 @@ pub struct Relax<S: Scalar, const D: usize> {
     /// cap on the tangential velocity growth factor `exp(-lambda_ut dt)`.
     /// `INFINITY` (the default) is inert — every decaying wall has a factor
     /// `<= 1`. only the torque-free channel (`lambda_ut < 0`) grows; the cap
-    /// bounds its retained-momentum velocity boost (docs/design/53 G-WP).
+    /// bounds its retained-momentum velocity boost at the evacuation limit.
     pub ut_growth_cap: S,
 }
 
@@ -166,7 +166,7 @@ pub enum Property<S: Scalar> {
     /// `inv_eta_t = 0` (an exact off switch: the tangential velocity is
     /// bit-untouched), no-slip with both finite.
     PorousAccretor { p: S, inv_tau: S, inv_eta_n: S, inv_eta_t: S },
-    /// the torque-free accretor (docs/design/53): the drain plus a tangential
+    /// the torque-free accretor: the drain plus a tangential
     /// ANTI-relaxation locked to the drain rate, `lambda_t = -xi lambda_rho`.
     /// the radial-relative momentum drains with the mass (accreted, zero center
     /// torque on a spherical mask where the normal is radial); the tangential
@@ -175,7 +175,7 @@ pub enum Property<S: Scalar> {
     /// `xi = 0` is the standard sink, `xi = 1` retains ALL angular momentum
     /// (torque-free). `xi in [0, 1]`. `lambda_t < 0` is a growing exponential —
     /// bounded in momentum, divergent in velocity as the mask evacuates (the
-    /// design-53 G-WP well-posedness gate).
+    /// well-posedness limit as the mask evacuates).
     TorqueFreeAccretor { inv_tau: S, xi: S },
 }
 
@@ -215,7 +215,7 @@ impl<S: Scalar> Property<S> {
                 // relative momentum drains with the mass (accreted, radial force
                 // has zero moment on a spherical mask).
                 acc.lambda_ut = acc.lambda_ut - xi * lambda_rho;
-                // the retention floor (docs/design/53 G-WP): bound the growing
+                // the retention floor: bound the growing
                 // tangential factor so a fully draining cell cannot boost the
                 // retained momentum to an infinite velocity or a NaN.
                 acc.ut_growth_cap = S::from_f64(1.0 / TORQUE_FREE_RETENTION_FLOOR);
@@ -247,7 +247,7 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel>(
     // factor is <= 1 and the cap (INFINITY by default) is inert; for the
     // torque-free channel (lambda_ut < 0) it grows, and the cap bounds the
     // retained-momentum velocity boost so a vanishing remnant stays finite
-    // (docs/design/53 G-WP retention floor).
+    // (the retention floor).
     let b_t = (-(relax.lambda_ut * dt)).exp().min(relax.ut_growth_cap);
     let g_t = S::ONE - b_t;
     let g_e = S::ONE - (-(relax.lambda_e * dt)).exp();
@@ -491,7 +491,7 @@ mod tests {
         assert_eq!(moment(&r, &delta_r.force_delta)[2], 0.0);
     }
 
-    // docs/design/53 gate 1: the torque-free dial books the analytic accretion
+    // the torque-free dial books the analytic accretion
     // torque about the sink center on a spherical mask (normal = radial),
     //   tau_z = |r| rho (1 - f_rho^{1-xi}) (n_hat x du_t) * (vol / dt),
     // the radial-relative momentum contributing zero moment. xi = 0 recovers the
@@ -534,7 +534,7 @@ mod tests {
         assert!(moment(&r, &d.force_delta)[2].abs() < 1e-12);
     }
 
-    // docs/design/53 G-WP, the RAW (uncapped) coupling — WHY the retention floor
+    // the RAW (uncapped) coupling — WHY the retention floor
     // is needed. built by hand so the tangential growth cap is INFINITY (the
     // Property sets a finite cap; see the saturation test). two regimes:
     //   (1) strong-but-finite drain: tangential momentum retained (bounded) but
@@ -568,7 +568,7 @@ mod tests {
         assert!(!out.mom[1].is_finite(), "uncapped conserved momentum is NaN at underflow");
     }
 
-    // docs/design/53 G-WP saturation: the retention floor keeps the CONSERVED
+    // the retention floor keeps the CONSERVED
     // state finite at full evacuation AND leaves torque-free EXACT in the
     // physical regime (f_rho >> f_floor). the Property sets the cap.
     #[test]
@@ -614,7 +614,7 @@ mod tests {
         );
     }
 
-    // docs/design/53: the saturated torque-free sink holds torque == 0 across the
+    // the saturated torque-free sink holds torque == 0 across the
     // WHOLE physical range of per-step drain fractions (f_rho down to the floor)
     // — the cap is inert there — and reintroduces a bounded torque only once a
     // cell is drained BELOW the floor in a single step (`inv_tau dt >> 1`, an

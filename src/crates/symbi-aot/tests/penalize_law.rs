@@ -278,11 +278,11 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     assert!(fired > 20, "the iso drain never fired");
 }
 
-// docs/design/53: the ISOTHERMAL torque-free accretor kernel. the compiled
+// the ISOTHERMAL torque-free accretor kernel. the compiled
 // kernel is bit-identical to the f64 chain (guarded sphere normal ->
 // TorqueFreeAccretor contribute + retention floor -> penalize_cell at IsoModel),
 // and xi = 0 reduces to the iso drain kernel bit-for-bit (the tangential
-// coupling vanishes as an exact zero — the design-53 anchor).
+// coupling vanishes as an exact zero — the drain-reduction anchor).
 #[test]
 fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() {
     use symbi_hydro::energy::IsoModel;
