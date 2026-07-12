@@ -151,23 +151,30 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         if gm <= 0.0 {
             return 0.0;
         }
-        // the orbital frequency is set by the CYLINDRICAL radius in the disk plane
-        // (the first two axes, x-y); the vertical z (axis 2 in 3D) does not enter
-        // Omega_k. nu grows outward, so nu_max sits at the largest in-plane radius,
-        // the farthest corner in x-y. matches the kernel's nu(x,y) exactly.
-        let plane = D.min(2);
-        let mut r_max = 0.0_f64;
-        for corner in 0..(1usize << D) {
-            let mut d2 = 0.0;
-            for a in 0..plane {
-                let sp = &geom.interior.spaces[a];
-                let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
-                let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
-                let d = x - b.position[a];
-                d2 += d * d;
+        // nu grows outward (nu ~ R^{3/2}), so nu_max sits at the largest orbital
+        // radius. on a cylindrical (R, phi) grid R IS that radius, so nu_max is at
+        // the outer R edge. cartesian forms it as the farthest domain corner from
+        // the body in the disk plane (the first two axes; the vertical z in 3D does
+        // not enter Omega_k) — matching the kernel's nu(x, y) exactly.
+        let r_max = if geom.coords == Geometry::Cylindrical {
+            let sp = &geom.interior.spaces[0];
+            geom.x_lo[0] + geom.dx[0] * (sp.hi as f64)
+        } else {
+            let plane = D.min(2);
+            let mut r_max = 0.0_f64;
+            for corner in 0..(1usize << D) {
+                let mut d2 = 0.0;
+                for a in 0..plane {
+                    let sp = &geom.interior.spaces[a];
+                    let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
+                    let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
+                    let d = x - b.position[a];
+                    d2 += d * d;
+                }
+                r_max = r_max.max(d2.sqrt());
             }
-            r_max = r_max.max(d2.sqrt());
-        }
+            r_max
+        };
         if r_max <= 0.0 {
             return 0.0;
         }
@@ -578,15 +585,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             coords == Geometry::Cartesian || coords == Geometry::Cylindrical,
             "viscosity is baked for cartesian (2D/3D) and cylindrical (2D R-phi) only"
         );
+        // both dispatches select the cartesian or cylindrical kernel by coords and
+        // assert the supported dimension (alpha: cartesian 2D/3D, cylindrical 2D).
         if self.alpha > 0.0 {
-            assert!(
-                coords == Geometry::Cartesian,
-                "alpha viscosity is baked for cartesian only; use constant nu on a cylindrical grid"
-            );
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(sim, dt, self.alpha, self.cs);
         } else {
-            // dispatch_viscous selects the cartesian or cylindrical kernel by coords
-            // and asserts the supported dimension.
             crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
         }
     }

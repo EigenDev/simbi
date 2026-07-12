@@ -249,7 +249,6 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    assert!(D == 2 || D == 3, "the alpha viscous operator is baked for 2D and 3D cartesian");
     let im = sim
         .immersed
         .as_ref()
@@ -260,7 +259,22 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     );
     let bodies = &im.bodies;
     let geom = &sim.geom;
-    let name = symbi_ir::KernelId::ViscousIsoAlpha { ndim: D as u8 }.name();
+    // cartesian forms nu from the body-position distance; cylindrical uses R itself
+    // (the central mass is on the axis), so the two kernels share every scalar but
+    // body_0_pos, which the cylindrical kernel simply never declares.
+    let name = match geom.coords {
+        symbi_geometry::Geometry::Cartesian => {
+            assert!(D == 2 || D == 3, "cartesian alpha viscosity is baked for 2D/3D");
+            symbi_ir::KernelId::ViscousIsoAlpha { ndim: D as u8 }.name()
+        }
+        symbi_geometry::Geometry::Cylindrical => {
+            assert_eq!(D, 2, "cylindrical alpha viscosity is baked for 2D (R, phi) only");
+            symbi_ir::KernelId::ViscousIsoAlphaCyl { ndim: D as u8 }.name()
+        }
+        symbi_geometry::Geometry::Spherical => {
+            panic!("alpha viscosity is not baked for spherical coordinates yet")
+        }
+    };
     let scalars = super::params::scalars_for(name, |bind| match bind {
         ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),
         ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(cs),

@@ -1698,9 +1698,11 @@ fn main() {
         emit_gv(&out_dir, KernelId::ViscousIso { ndim: 3 }.name(), 3, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_alpha_gv_3d();
         emit_gv(&out_dir, KernelId::ViscousIsoAlpha { ndim: 3 }.name(), 3, &k, &writes);
-        // 2D cylindrical (R, phi) constant-nu viscosity.
+        // 2D cylindrical (R, phi): constant-nu + Shakura-Sunyaev alpha.
         let (k, writes) = symbi_discretize::viscous_iso_cyl_gv();
         emit_gv(&out_dir, KernelId::ViscousIsoCyl { ndim: 2 }.name(), 2, &k, &writes);
+        let (k, writes) = symbi_discretize::viscous_iso_alpha_cyl_gv();
+        emit_gv(&out_dir, KernelId::ViscousIsoAlphaCyl { ndim: 2 }.name(), 2, &k, &writes);
     }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.
