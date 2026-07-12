@@ -706,6 +706,32 @@ impl Gv {
         })))
     }
 
+    /// read a field at a MULTI-axis integer offset from the current cell — the
+    /// halo-stencil primitive for operators that read diagonals (e.g. the
+    /// viscous transverse gradient). `field_shifted` is the single-axis case.
+    /// `offsets[ax]` is the per-axis shift; `offsets.len()` must be `ndim`.
+    pub fn field_offset(key: &str, runtime: impl Into<FieldBind>, ndim: u8, offsets: &[i32]) -> Gv {
+        assert_eq!(offsets.len(), ndim as usize, "field_offset: one offset per axis");
+        let runtime = runtime.into();
+        if offsets.iter().all(|&o| o == 0) {
+            return Gv::field(key, runtime);
+        }
+        Gv(GvVal::Node(with_trace(|t| {
+            if t.field_keys.insert(key.to_string()) {
+                t.field_inputs.push((key.to_string(), runtime));
+            }
+            let mut shifted: Vec<NodeId> = (0..ndim).map(|ax| coord_node(t, ax)).collect();
+            for (ax, &o) in offsets.iter().enumerate() {
+                if o != 0 {
+                    let off = t.graph.add_const(ConstValue::I32(o), None);
+                    shifted[ax] =
+                        t.graph.element_wise(ElementWiseOp::Add, vec![shifted[ax], off], None);
+                }
+            }
+            t.graph.load_at(Symbol::intern(key), shifted, None)
+        })))
+    }
+
     /// a scalar kernel param (e.g., `gamma`), recorded (deduped) in the manifest signature.
     pub fn scalar(name: &str) -> Gv {
         Gv(GvVal::Node(with_trace(|t| {

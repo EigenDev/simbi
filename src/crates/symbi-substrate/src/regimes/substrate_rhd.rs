@@ -43,9 +43,15 @@ use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
-use symbi_sim::substrate_seam::KernelSet;
+use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 
 /// a D-generic RHD `KernelSet`, every method substrate-generated.
+// viscosity is isothermal-only (docs/design/54); RHD uses the no-op default.
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
+    for RhdSubstrateKernelSet<Mem, Sc, D>
+{
+}
+
 pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
     pub gamma: f64,
     pub cfl_number: f64,

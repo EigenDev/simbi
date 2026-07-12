@@ -46,6 +46,7 @@ use symbi_io::Metadata;
 use symbi_sim::checkpoint::write_hierarchy_checkpoint;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::state::CtMethod;
+use symbi_sim::substrate_seam::WithViscosity;
 
 // =============================================================================
 // parsed configuration — a plain-rust mirror of the python exec_dict. the
@@ -2100,7 +2101,8 @@ macro_rules! build_and_run_hydro {
             .substrate()
             .theta(theta)
             .with_solver(cfg.solver)
-            .map_err(|e| format!("substrate/solver: {e:?}"))?;
+            .map_err(|e| format!("substrate/solver: {e:?}"))?
+            .with_viscosity(cfg.viscosity);
         // attach a user source expression (force/cooling/relax/raw) when present.
         // lowered against THIS regime's spec via the source front door — the bridge rejects
         // force/cooling/relax on relativistic regimes (use raw). the base level attaches it here;

@@ -193,6 +193,35 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
+/// dispatch the constant-nu VISCOUS operator (`viscous_iso_2d`, docs/design/54):
+/// accumulate `dt div(tau)` into `cons.mom` over the interior. isothermal, 2D
+/// cartesian; the caller gates on `nu > 0`. reads `prim.rho` / `prim.vel` (current
+/// post-c2p) at the halo-1 3x3 stencil and writes `cons.mom` at the center cell —
+/// hazard-free in place because the stencil is on the read-only primitives.
+pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    nu: f64,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    assert_eq!(D, 2, "the viscous operator is baked for 2D only (docs/design/54)");
+    let geom = &sim.geom;
+    let name = symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name();
+    let scalars = super::params::scalars_for(name, |bind| match bind {
+        ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),
+        ScalarBind::Spec(s) if &**s == "nu" => Sc::from_f64(nu),
+        ScalarBind::Ref(sref) => Sc::from_f64(
+            super::params::geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
+                .unwrap_or_else(|| panic!("viscous: unexpected scalar {sref:?}")),
+        ),
+        other => panic!("viscous: unexpected scalar {other:?}"),
+    });
+    // the kernel reads no prim.pre; pass cons.den as the (unused) pre override.
+    dispatch_named(sim, &sim.fields.cons.den, None, 0, name, &geom.interior, &[], &scalars);
+}
+
 /// dispatch the backward body FEEDBACK (`body_feedback_2d`): run the per-cell per-body
 /// force[ndim]/torque[3]/mass/energy kernel into MAX_BODIES*(D+5) scratch fields, reduce each
 /// (device sum over the interior), assemble each body's BodyDelta (the drag force, accretion

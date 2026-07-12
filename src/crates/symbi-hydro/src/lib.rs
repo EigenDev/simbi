@@ -34,6 +34,7 @@ pub mod isothermal_mhd;
 pub mod rhd;
 pub mod rmhd;
 pub mod dissipation;
+pub mod viscous;
 pub mod riemann;
 pub mod isothermal;
 pub use symbi_ir::algebra::Scalar;

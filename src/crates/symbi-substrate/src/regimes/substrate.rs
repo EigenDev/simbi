@@ -40,7 +40,7 @@ use crate::regimes::substrate_kernels::{
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Geometry;
 use symbi_sim::state::FieldStore;
-use symbi_sim::substrate_seam::KernelSet;
+use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 
 /// the adiabatic index of the isothermal limit: `cs^2 = gamma*p/rho` with the
 /// closure `p = cs^2*rho` recovers the isothermal sound speed when `gamma = 1`. the
@@ -52,6 +52,10 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     pub cs: f64,
     /// the drain timescale dial tau = c_drain dx / c_s (accretor.md §2.3).
     pub c_drain: f64,
+    /// constant kinematic viscosity nu (docs/design/54). 0 = inviscid (the
+    /// viscous pass and its CFL cap are inert). >0 selects the Navier-Stokes
+    /// shear operator and caps dt at C_visc dx^2 / nu.
+    pub viscosity: f64,
     pub cfl_number: f64,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
@@ -112,6 +116,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         Self {
             cs,
             c_drain: 1.0,
+            viscosity: 0.0,
             cfl_number,
             theta: 1.0,
             cs2,
@@ -298,7 +303,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     fn cfl(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
         // iso wave-speed map (cs = sqrt(gamma*p/rho) from the substrate-owned self.pre);
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
-        cfl_wave_speed(
+        let dt_hydro = cfl_wave_speed(
             sim,
             &self.pre,
             &self.cfl_scratch,
@@ -306,7 +311,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             ISO_GAMMA,
             self.cfl_number,
             None,
-        )
+        );
+        // the parabolic viscous cap (docs/design/54): an explicit diffusion step
+        // is stable for dt <= C_visc dx^2 / nu. inert when inviscid (nu = 0).
+        if self.viscosity > 0.0 {
+            const C_VISC: f64 = 0.25;
+            let min_dx = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
+            let dt_visc = C_VISC * min_dx * min_dx / self.viscosity;
+            dt_hydro.min(dt_visc)
+        } else {
+            dt_hydro
+        }
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, D, Mem, Sc>) {
@@ -485,8 +500,31 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain);
     }
 
+    fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
+        // the constant-nu Navier-Stokes shear (docs/design/54); inert when
+        // inviscid. baked for 2D cartesian only — fail loud otherwise rather
+        // than silently drop the transport a viscous run declared.
+        if self.viscosity > 0.0 {
+            assert_eq!(D, 2, "viscosity is baked for 2D isothermal only (docs/design/54)");
+            assert!(
+                sim.geom.coords == Geometry::Cartesian,
+                "viscosity is baked for cartesian only (docs/design/54)"
+            );
+            crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
+        }
+    }
+
     fn body_feedback(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
         // backward feedback (force/torque/accreted-mass -> diagnostics), isothermal.
         dispatch_body_feedback_iso(sim, &self.pre, dt);
+    }
+}
+
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
+    for IsoSubstrateKernelSet<Mem, Sc, D>
+{
+    fn with_viscosity(mut self, nu: f64) -> Self {
+        self.viscosity = nu;
+        self
     }
 }

@@ -1657,6 +1657,12 @@ fn main() {
         gen_refine_transfer(&out_dir, ndim);
         gen_penalize(&out_dir, ndim);
     }
+    // the constant-nu viscous operator (docs/design/54): 2D only for now.
+    {
+        use symbi_ir::KernelId;
+        let (k, writes) = symbi_discretize::viscous_iso_gv();
+        emit_gv(&out_dir, KernelId::ViscousIso { ndim: 2 }.name(), 2, &k, &writes);
+    }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.
     gen_geometry_probe(&out_dir, 1, Coords::Cartesian, &[Spacing::Uniform], "geom_cart_unif_1d");

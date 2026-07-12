@@ -205,6 +205,13 @@ where
             emit_trace_neighborhood(sim, c);
         }
 
+        // the constant-nu viscous transport (docs/design/54), ONCE per step after
+        // the RK combination — the primitive velocity is current (each stage ends
+        // with c2p), and the pass reads prim / writes cons.mom, so it is body-
+        // independent and runs whether or not the sim carries immersed bodies.
+        // inert when inviscid (the kernel-set gates on nu > 0).
+        prof("viscous", || kernels.viscous(sim, sim.dt));
+
         if sim.has_bodies() {
             // the IBM surface physics (docs/design/50), ONCE per step AFTER the
             // full RK combination: applied inside the stage blend, a stage's

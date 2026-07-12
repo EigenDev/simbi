@@ -747,6 +747,13 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
                 }
             }
+            // the viscous transport (docs/design/54), per tile, once per step after
+            // the final halo exchange (the +-1 stencil reads the neighbor's
+            // exchanged edge). body-independent; inert when inviscid.
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || kernels[i].viscous(sh[i], dt));
+            }
+            drain_devices::<M>(devices);
             // backward immersed-body feedback (per STEP, after all stages): each tile reduces its
             // LOCAL interior force/torque/accreted-mass into its own accumulator. the cross-tile sum
             // + the prescribed-orbit advance happen in `step_bodies_decomposed` below, which needs

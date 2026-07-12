@@ -966,6 +966,10 @@ where
         if !has_finer {
             let l = &self.levels[level];
             l.kernels.penalize(&l.state, dt);
+            // the viscous transport (docs/design/54) on the finest level — where
+            // the resolved disk dynamics live. coarse-level viscosity (the outer
+            // low-dynamics buffer) is a follow-up; inert when inviscid.
+            l.kernels.viscous(&l.state, dt);
         }
         if has_finer {
             self.level_subcycle(level, dt);

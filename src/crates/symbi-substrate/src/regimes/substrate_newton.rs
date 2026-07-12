@@ -43,10 +43,17 @@ use crate::regimes::substrate_kernels::{
     ScalarBind, Solver,
 };
 use symbi_discretize::gv::GeoSource;
-use symbi_sim::substrate_seam::KernelSet;
+use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 use symbi_sim::state::FieldStore;
 
 /// a D-generic adiabatic (ideal-gas Euler) `KernelSet`, every method substrate-generated.
+// the constant-nu viscous operator is isothermal-only (docs/design/54); the
+// adiabatic set uses the no-op default (viscosity is ignored, not stored).
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
+    for AdiabaticSubstrateKernelSet<Mem, Sc, D>
+{
+}
+
 pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
     pub gamma: f64,
     pub cfl_number: f64,

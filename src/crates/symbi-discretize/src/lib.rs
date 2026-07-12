@@ -28,6 +28,7 @@ pub mod gv;
 pub mod gv_refinement;
 pub mod gv_immersed;
 pub mod gv_penalize;
+pub mod gv_viscous;
 pub mod ibm;
 pub mod lattice;
 
@@ -39,6 +40,7 @@ pub use symbi_ir::{Gv, GvKernel};
 pub use gv_penalize::{
     penalize_drain_gv, penalize_drain_iso_gv, penalize_porous_gv, penalize_torque_free_iso_gv,
 };
+pub use gv_viscous::viscous_iso_gv;
 pub use gv_immersed::{
     body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,
     body_source_built, body_source_gv, body_source_iso_gv,

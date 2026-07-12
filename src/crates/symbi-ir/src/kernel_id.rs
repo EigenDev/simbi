@@ -77,6 +77,10 @@ pub enum KernelId {
     /// bounds the growing tangential factor. xi = 0 reduces bit-exactly to
     /// `PenalizeDrainIso`. isothermal (thin-disk), cartesian.
     PenalizeTorqueFreeIso { ndim: u8 },
+    /// the constant-nu Navier-Stokes viscous operator (docs/design/54): the
+    /// conservative shear-stress flux divergence, a halo-1 stencil accumulated
+    /// into cons.mom. isothermal (thin-disk), cartesian, 2D.
+    ViscousIso { ndim: u8 },
     /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -212,6 +216,9 @@ impl KernelId {
                     "penalize_torque_free_iso_2d",
                     "penalize_torque_free_iso_3d",
                 ][dim_ix(ndim)]
+            }
+            KernelId::ViscousIso { ndim } => {
+                ["viscous_iso_1d", "viscous_iso_2d", "viscous_iso_3d"][dim_ix(ndim)]
             }
             KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
                 match (order, axis, ncomp, ndim) {
