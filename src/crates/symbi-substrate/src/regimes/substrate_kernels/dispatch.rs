@@ -529,6 +529,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 ("porosity", symbi_ib::SurfaceSpec::Porous { porosity, .. }) => porosity,
                 ("k_eta_n", symbi_ib::SurfaceSpec::Porous { k_eta_n, .. }) => k_eta_n,
                 ("k_eta_t", symbi_ib::SurfaceSpec::Porous { k_eta_t, .. }) => k_eta_t,
+                ("xi", symbi_ib::SurfaceSpec::TorqueFree { xi }) => xi,
                 other => panic!("penalize: unexpected spec scalar {other:?}"),
             },
         }
@@ -556,6 +557,13 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             (symbi_ib::SurfaceSpec::Porous { .. }, false) => panic!(
                 "penalize: the porous surface is baked for the adiabatic regime only \
                  (an isothermal porous accretor needs the iso twin baked first)"
+            ),
+            (symbi_ib::SurfaceSpec::TorqueFree { .. }, false) => {
+                symbi_ir::KernelId::PenalizeTorqueFreeIso { ndim: D as u8 }.name()
+            }
+            (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => panic!(
+                "penalize: the torque-free surface is baked for the isothermal (thin-disk) \
+                 regime only (an adiabatic torque-free accretor needs the adiabatic twin baked)"
             ),
         };
         // the reduction/dispatch box from the kernel's declared support ball —

@@ -271,6 +271,106 @@ pub fn penalize_porous_gv(ndim: usize) -> (GvKernel, Writes) {
     (kernel, writes)
 }
 
+/// the ISOTHERMAL torque-free accretor (docs/design/53): the drain plus a
+/// tangential ANTI-relaxation `lambda_t = -xi lambda_rho` about the sphere
+/// normal, so the accreted mass carries no net angular momentum to the body
+/// (the Dittmann & Ryan 2021 torque-free sink, coordinate-free via the SDF
+/// normal). the retention floor (`Relax.ut_growth_cap`, set by the property)
+/// bounds the growing tangential factor at the evacuation limit. `xi = 0`
+/// reduces bit-for-bit to `penalize_drain_iso`; `xi = 1` is torque-free. no
+/// energy channel (iso, the thin-disk regime); delta outputs mass + force +
+/// torque. the velocity target is the body's translational velocity
+/// `body_0_vel_*` (the accretion is torque-free RELATIVE to the moving sink).
+pub fn penalize_torque_free_iso_gv(ndim: usize) -> (GvKernel, Writes) {
+    use symbi_hydro::energy::IsoModel;
+    assert!(
+        (1..=3).contains(&ndim),
+        "penalize_torque_free_iso_gv: ndim must be 1..=3"
+    );
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let cs = Gv::scalar("cs");
+    let c_drain = Gv::scalar("c_drain");
+    let xi = Gv::scalar("xi");
+
+    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ndim)
+        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+        .collect();
+
+    let geo = cell_geometry_gv(Coords::Cartesian, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
+    let dv = Gv::ONE / geo.inv_volume;
+    let mut min_w = Gv::scalar("dx_0");
+    for ax in 1..ndim {
+        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+    }
+
+    let center: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+    });
+    let x: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim { geo.centroid[a] } else { Gv::ZERO }
+    });
+    let r_mask = Gv::scalar("body_0_racc");
+    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
+    let inv_tau = cs / (c_drain * min_w);
+
+    // the sphere normal with the guarded division (as in porous): the
+    // radial/tangential split of the torque-free channel is about this normal,
+    // which for a spherical mask is exactly r_hat from the body center.
+    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+    let r = x_rel.dot(&x_rel).sqrt();
+    let normal = x_rel.scale(Gv::ONE / r.max(Gv::from_f64(1e-300)));
+
+    let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
+        if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
+    }));
+    let kin = BodyKin::<Gv, 3> { u_solid, omega: Tensor::zeros(), e_wall: Gv::ZERO };
+    let mut acc = Relax::<Gv, 3>::none();
+    Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
+    let cons = ConsG::<Gv, 3, IsoModel> {
+        den,
+        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        nrg: Default::default(),
+    };
+    let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
+    let torque = symbi_ib::moment(&x_rel, &delta.force_delta);
+
+    let mut writes: Writes = Vec::new();
+    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    for a in 0..ndim {
+        writes.push((
+            format!("mom_out_{a}"),
+            symbi_ir::FieldRef::cons_mom(a as u8).into(),
+            out.mom[a].node(),
+        ));
+    }
+    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    for a in 0..ndim {
+        writes.push((
+            format!("pen_force_{a}"),
+            format!("pen_0_force_{a}").into(),
+            delta.force_delta[a].node(),
+        ));
+    }
+    for a in torque_axes(ndim) {
+        writes.push((
+            format!("pen_torque_{a}"),
+            format!("pen_0_torque_{a}").into(),
+            torque[a].node(),
+        ));
+    }
+
+    let center_p: Vec<ParamExpr> =
+        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
+    let radius_p = ParamExpr::param("body_0_racc")
+        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
+            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
+    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    (kernel, writes)
+}
+
 /// the ISOTHERMAL twin: no energy channel (the drain scales den + mom; the
 /// sound speed is the constant `cs` param, not recovered from cons), delta
 /// outputs mass + force only. same [Drain] stack, same integrator — the iso

@@ -102,6 +102,17 @@ impl<S: Scalar, const D: usize> BodyKin<S, D> {
     }
 }
 
+/// docs/design/53 G-WP saturation. the torque-free tangential retention is a
+/// GROWING exponential (`lambda_t < 0`); left unbounded it boosts the retained
+/// angular momentum of a vanishing remnant to an infinite velocity, and forms
+/// `0 * inf = NaN` in the conserved momentum once the density underflows. the
+/// retention floor caps the tangential growth factor at `1 / f_floor`: torque-
+/// free is EXACT while a cell keeps a fraction `>= f_floor` of its mass over a
+/// step, and degrades to a bounded standard drain below it (a cell drained past
+/// `f_floor` in one step is being annihilated — far outside any physical steady
+/// state, where drain balances inflow). analogous to a positivity floor.
+pub const TORQUE_FREE_RETENTION_FLOOR: f64 = 1e-4;
+
 /// the accumulated relaxation system: rates and targets per primitive channel.
 /// rates ADD across properties; targets are SET (single-body stack — the
 /// multi-body nearest-wins policy composes above this).
@@ -113,6 +124,11 @@ pub struct Relax<S: Scalar, const D: usize> {
     pub u_solid: Tensor<S, D>,
     pub lambda_e: S,
     pub e_target: S,
+    /// cap on the tangential velocity growth factor `exp(-lambda_ut dt)`.
+    /// `INFINITY` (the default) is inert — every decaying wall has a factor
+    /// `<= 1`. only the torque-free channel (`lambda_ut < 0`) grows; the cap
+    /// bounds its retained-momentum velocity boost (docs/design/53 G-WP).
+    pub ut_growth_cap: S,
 }
 
 impl<S: Scalar, const D: usize> Relax<S, D> {
@@ -125,6 +141,7 @@ impl<S: Scalar, const D: usize> Relax<S, D> {
             u_solid: Tensor::zeros(),
             lambda_e: S::ZERO,
             e_target: S::ZERO,
+            ut_growth_cap: S::INFINITY,
         }
     }
 }
@@ -149,6 +166,17 @@ pub enum Property<S: Scalar> {
     /// `inv_eta_t = 0` (an exact off switch: the tangential velocity is
     /// bit-untouched), no-slip with both finite.
     PorousAccretor { p: S, inv_tau: S, inv_eta_n: S, inv_eta_t: S },
+    /// the torque-free accretor (docs/design/53): the drain plus a tangential
+    /// ANTI-relaxation locked to the drain rate, `lambda_t = -xi lambda_rho`.
+    /// the radial-relative momentum drains with the mass (accreted, zero center
+    /// torque on a spherical mask where the normal is radial); the tangential
+    /// (angular) momentum is retained by the factor `f_rho^{1-xi}`, so the
+    /// removed tangential momentum is `rho (1 - f_rho^{1-xi}) du_t`:
+    /// `xi = 0` is the standard sink, `xi = 1` retains ALL angular momentum
+    /// (torque-free). `xi in [0, 1]`. `lambda_t < 0` is a growing exponential —
+    /// bounded in momentum, divergent in velocity as the mask evacuates (the
+    /// design-53 G-WP well-posedness gate).
+    TorqueFreeAccretor { inv_tau: S, xi: S },
 }
 
 impl<S: Scalar> Property<S> {
@@ -178,6 +206,21 @@ impl<S: Scalar> Property<S> {
                 acc.lambda_ut = acc.lambda_ut + solidity * inv_eta_t;
                 acc.u_solid = kin.u_solid;
             }
+            Property::TorqueFreeAccretor { inv_tau, xi } => {
+                let lambda_rho = chi * inv_tau;
+                acc.lambda_rho = acc.lambda_rho + lambda_rho;
+                // NEGATIVE tangential rate: the tangential (angular) momentum is
+                // retained as mass drains, so the accreted material carries no
+                // net moment about the sink. lambda_un stays 0 — the radial
+                // relative momentum drains with the mass (accreted, radial force
+                // has zero moment on a spherical mask).
+                acc.lambda_ut = acc.lambda_ut - xi * lambda_rho;
+                // the retention floor (docs/design/53 G-WP): bound the growing
+                // tangential factor so a fully draining cell cannot boost the
+                // retained momentum to an infinite velocity or a NaN.
+                acc.ut_growth_cap = S::from_f64(1.0 / TORQUE_FREE_RETENTION_FLOOR);
+                acc.u_solid = kin.u_solid;
+            }
         }
     }
 }
@@ -200,7 +243,13 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel>(
     let half = S::from_f64(0.5);
     let f_rho = (-(relax.lambda_rho * dt)).exp();
     let g_n = S::ONE - (-(relax.lambda_un * dt)).exp();
-    let g_t = S::ONE - (-(relax.lambda_ut * dt)).exp();
+    // tangential growth factor, capped. for a decaying wall (lambda_ut >= 0) the
+    // factor is <= 1 and the cap (INFINITY by default) is inert; for the
+    // torque-free channel (lambda_ut < 0) it grows, and the cap bounds the
+    // retained-momentum velocity boost so a vanishing remnant stays finite
+    // (docs/design/53 G-WP retention floor).
+    let b_t = (-(relax.lambda_ut * dt)).exp().min(relax.ut_growth_cap);
+    let g_t = S::ONE - b_t;
     let g_e = S::ONE - (-(relax.lambda_e * dt)).exp();
 
     let inv_den = S::ONE / cons.den;
@@ -396,6 +445,213 @@ mod tests {
             );
         }
         assert_eq!(delta.energy_delta.to_bits(), ((cons.nrg - out.nrg) * vol).to_bits());
+    }
+
+    // what the penalization sink does to a 2D orbiting flow: the pure drain
+    // (p = 1) removes mass at the LOCAL gas velocity, so the body absorbs the
+    // gas's full momentum -- force = Mdot u -- and the accretion torque is the
+    // moment of that, Mdot (r x u)_z = Mdot |r| v_orb for azimuthal motion. this
+    // is a STANDARD (angular-momentum-absorbing) sink, NOT the torque-free
+    // dittmann prescription: the booked torque is the physical angular-momentum
+    // flux of the accreted gas, exact by conservation (gas loss = body gain). a
+    // purely radial inflow (u parallel r) carries no angular momentum and books
+    // exactly zero torque -- the torque tracks the real flow, not a grid artifact.
+    #[test]
+    fn drain_books_the_physical_accretion_torque_in_2d() {
+        type Cons2 = ConsG<f64, 2, Adiabatic>;
+        let r = Tensor::new([1.5, 0.0]); // gas-cell offset from the body center
+        let v_orb = 0.8;
+        let u = Tensor::new([0.0, v_orb]); // azimuthal: u perpendicular to r
+        let den = 3.0;
+        let e_int = 1.1;
+        let cons: Cons2 =
+            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let (tau, dt, vol) = (0.05, 0.01, 2.0);
+        let (_, delta) = drain_cell(&cons, 1.0, tau, dt, vol, 0); // chi = 1: inside the mask
+
+        let mdot = delta.mass_delta / dt;
+        // force = Mdot u: momentum absorbed at the local velocity.
+        for a in 0..2 {
+            assert!((delta.force_delta[a] - mdot * u[a]).abs() < 1e-12);
+        }
+        // accretion torque = moment(r, force) = Mdot (r x u)_z = Mdot |r| v_orb.
+        let tau_z = moment(&r, &delta.force_delta)[2];
+        assert!((tau_z - mdot * (r[0] * u[1] - r[1] * u[0])).abs() < 1e-12);
+        assert!(tau_z > 0.0, "an orbiting standard sink absorbs angular momentum");
+
+        // purely radial inflow (u along -r) carries no angular momentum: zero
+        // torque even for the standard sink -- the booked torque is physical.
+        let u_rad = Tensor::new([-0.5, 0.0]);
+        let cons_r: Cons2 = ConsG {
+            den,
+            mom: u_rad.scale(den),
+            nrg: den * (e_int + 0.5 * u_rad.dot(&u_rad)),
+        };
+        let (_, delta_r) = drain_cell(&cons_r, 1.0, tau, dt, vol, 0);
+        assert_eq!(moment(&r, &delta_r.force_delta)[2], 0.0);
+    }
+
+    // docs/design/53 gate 1: the torque-free dial books the analytic accretion
+    // torque about the sink center on a spherical mask (normal = radial),
+    //   tau_z = |r| rho (1 - f_rho^{1-xi}) (n_hat x du_t) * (vol / dt),
+    // the radial-relative momentum contributing zero moment. xi = 0 recovers the
+    // standard sink (full angular momentum), xi = 1 is EXACTLY torque-free.
+    #[test]
+    fn torque_free_dial_books_the_analytic_torque_in_2d() {
+        type Cons2 = ConsG<f64, 2, Adiabatic>;
+        let r = Tensor::new([1.5, 0.0]); // gas-cell offset from the sink center
+        let n = Tensor::new([1.0, 0.0]); // spherical-mask normal = r_hat
+        let u = Tensor::new([0.3, 0.8]); // mixed radial + azimuthal flow
+        let den = 3.0;
+        let e_int = 1.1;
+        let cons: Cons2 =
+            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let (inv_tau, dt, vol, chi) = (5.0, 0.02, 2.0, 1.0);
+        // u_solid = 0, so du = u; du_t is the component perpendicular to n.
+        let du_t = u - n.scale(u.dot(&n));
+        let f_rho = (-(chi * inv_tau * dt)).exp();
+        let kin0 = BodyKin::<f64, 2> {
+            u_solid: Tensor::zeros(),
+            omega: Tensor::zeros(),
+            e_wall: 0.0,
+        };
+
+        for &xi in &[0.0, 0.5, 1.0] {
+            let mut acc = Relax::none();
+            Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin0, &mut acc);
+            let (_out, delta) = penalize_cell(&cons, &acc, n, dt, vol, 0);
+            let coeff = 1.0 - f_rho.powf(1.0 - xi); // retained-tangential complement
+            let expect = (r[0] * (den * coeff * du_t[1]) - r[1] * (den * coeff * du_t[0]))
+                * (vol / dt);
+            let got = moment(&r, &delta.force_delta)[2];
+            assert!((got - expect).abs() < 1e-11, "xi={xi}: {got} vs {expect}");
+        }
+
+        // the torque-free endpoint is EXACTLY zero for this orbiting cell.
+        let mut acc = Relax::none();
+        Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(chi, &kin0, &mut acc);
+        let (_o, d) = penalize_cell(&cons, &acc, n, dt, vol, 0);
+        assert!(moment(&r, &d.force_delta)[2].abs() < 1e-12);
+    }
+
+    // docs/design/53 G-WP, the RAW (uncapped) coupling — WHY the retention floor
+    // is needed. built by hand so the tangential growth cap is INFINITY (the
+    // Property sets a finite cap; see the saturation test). two regimes:
+    //   (1) strong-but-finite drain: tangential momentum retained (bounded) but
+    //       the primitive VELOCITY u'_t = du_t / f_rho diverges.
+    //   (2) full evacuation (f_rho underflows to 0): `0 * inf = NaN` — the
+    //       CONSERVED momentum itself goes non-finite. the cliff to prevent.
+    #[test]
+    fn torque_free_raw_coupling_is_ill_posed_at_evacuation() {
+        type Cons2 = ConsG<f64, 2, Adiabatic>;
+        let n = Tensor::new([1.0, 0.0]);
+        let u = Tensor::new([0.3, 0.7]); // radial 0.3 (drains) + azimuthal 0.7 (retained)
+        let den = 4.0;
+        let e_int = 1.0;
+        let cons: Cons2 =
+            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+
+        // (1) lambda_rho dt = 30 -> f_rho ~ 9e-14, finite. cap = INFINITY (raw).
+        let mut acc = Relax::<f64, 2>::none();
+        acc.lambda_rho = 30.0;
+        acc.lambda_ut = -30.0; // xi = 1, uncapped
+        let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
+        assert!(out.den < 1e-10 * den, "mass nearly fully drained");
+        assert!((out.mom[1] - cons.mom[1]).abs() < 1e-6, "tangential momentum retained (bounded)");
+        assert!(out.mom[1] / out.den > 1e10, "primitive velocity diverges");
+
+        // (2) lambda_rho dt = 1000 -> f_rho underflows to 0 -> 0 * inf = NaN.
+        let mut acc = Relax::<f64, 2>::none();
+        acc.lambda_rho = 1e3;
+        acc.lambda_ut = -1e3;
+        let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
+        assert!(!out.mom[1].is_finite(), "uncapped conserved momentum is NaN at underflow");
+    }
+
+    // docs/design/53 G-WP saturation: the retention floor keeps the CONSERVED
+    // state finite at full evacuation AND leaves torque-free EXACT in the
+    // physical regime (f_rho >> f_floor). the Property sets the cap.
+    #[test]
+    fn torque_free_saturation_bounds_the_evacuation_limit() {
+        type Cons2 = ConsG<f64, 2, Adiabatic>;
+        let n = Tensor::new([1.0, 0.0]);
+        let r = Tensor::new([1.5, 0.0]);
+        let (den, e_int) = (4.0, 1.0);
+        let kin0 = BodyKin::<f64, 2> {
+            u_solid: Tensor::zeros(),
+            omega: Tensor::zeros(),
+            e_wall: 0.0,
+        };
+
+        // (1) full evacuation: the conserved state stays FINITE (no NaN). the cap
+        // bounds the tangential factor at 1/f_floor, so `den' (du_t g_t)` is
+        // `0 * finite = 0`, not `0 * inf = NaN`.
+        let u = Tensor::new([0.3, 0.7]);
+        let cons: Cons2 =
+            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let mut acc = Relax::none();
+        Property::TorqueFreeAccretor { inv_tau: 1e3, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
+        let (out, _) = penalize_cell(&cons, &acc, n, 1.0, 1.0, 0);
+        assert!(
+            out.den.is_finite()
+                && out.mom[0].is_finite()
+                && out.mom[1].is_finite()
+                && out.nrg.value().is_finite(),
+            "saturated conserved state is finite at underflow"
+        );
+
+        // (2) physical regime: lambda_rho dt = 0.5 -> f_rho = 0.607, growth factor
+        // 1.65 << the 1e4 cap (inert) -> torque-free is EXACT.
+        let u2 = Tensor::new([0.3, 0.8]);
+        let cons2: Cons2 =
+            ConsG { den, mom: u2.scale(den), nrg: den * (e_int + 0.5 * u2.dot(&u2)) };
+        let mut acc2 = Relax::none();
+        Property::TorqueFreeAccretor { inv_tau: 0.5, xi: 1.0 }.contribute(1.0, &kin0, &mut acc2);
+        let (_o2, d2) = penalize_cell(&cons2, &acc2, n, 1.0, 1.0, 0);
+        assert!(
+            moment(&r, &d2.force_delta)[2].abs() < 1e-12,
+            "torque-free exact above the retention floor"
+        );
+    }
+
+    // docs/design/53: the saturated torque-free sink holds torque == 0 across the
+    // WHOLE physical range of per-step drain fractions (f_rho down to the floor)
+    // — the cap is inert there — and reintroduces a bounded torque only once a
+    // cell is drained BELOW the floor in a single step (`inv_tau dt >> 1`, an
+    // over-aggressive/pathological rate carrying negligible mass). this is the
+    // evidence that saturation preserves torque-free where the physics lives.
+    #[test]
+    fn saturated_torque_free_holds_across_the_physical_range() {
+        type Cons2 = ConsG<f64, 2, Adiabatic>;
+        let n = Tensor::new([1.0, 0.0]);
+        let r = Tensor::new([2.0, 0.0]);
+        let u = Tensor::new([0.1, 0.6]); // radial + azimuthal
+        let (den, e_int, dt) = (3.0, 1.0, 1.0);
+        let cons: Cons2 =
+            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let kin0 = BodyKin::<f64, 2> {
+            u_solid: Tensor::zeros(),
+            omega: Tensor::zeros(),
+            e_wall: 0.0,
+        };
+        // physical per-step drain fractions, down to the floor (1e-4): torque-free.
+        for &f_rho in &[0.9_f64, 0.5, 0.1, 1e-2, 1e-3, 1e-4] {
+            let inv_tau = -f_rho.ln() / dt;
+            let mut acc = Relax::none();
+            Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
+            let (_o, d) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
+            assert!(
+                moment(&r, &d.force_delta)[2].abs() < 1e-9,
+                "torque-free at f_rho = {f_rho}"
+            );
+        }
+        // BELOW the floor (f_rho = 1e-6): the cap fires -> a bounded standard torque.
+        let inv_tau = -(1e-6_f64).ln() / dt;
+        let mut acc = Relax::none();
+        Property::TorqueFreeAccretor { inv_tau, xi: 1.0 }.contribute(1.0, &kin0, &mut acc);
+        let (_o, d) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
+        let t = moment(&r, &d.force_delta)[2];
+        assert!(t.is_finite() && t.abs() > 1e-3, "below the floor: bounded standard torque, not NaN");
     }
 
     // the moment/cross helpers agree across dimensions: the 2D forms are the

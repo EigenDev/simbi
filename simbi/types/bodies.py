@@ -169,6 +169,11 @@ class AccretionProperties:
     porosity: float | None = None
     k_eta_n: float = 0.0
     k_eta_t: float = 0.0
+    # the torque-free dial (docs/design/53): None keeps the pure drain; a value
+    # in [0, 1] selects the isothermal torque-free accretor (the Dittmann sink),
+    # where xi = 1 removes mass but no angular momentum. mutually exclusive with
+    # porosity (a different surface physics on the same tangential channel).
+    torque_free_xi: float | None = None
 
     def __post_init__(self) -> None:
         if self.accretion_radius <= 0.0:
@@ -192,6 +197,20 @@ class AccretionProperties:
                 f"k_eta_n and k_eta_t must be >= 0: they are surface-friction "
                 f"rate dials; negative is anti-friction. got k_eta_n="
                 f"{self.k_eta_n}, k_eta_t={self.k_eta_t}."
+            )
+        if self.torque_free_xi is not None and not (
+            0.0 <= self.torque_free_xi <= 1.0
+        ):
+            raise _config_error(
+                f"torque_free_xi must be in [0, 1]: it is the torque-free "
+                f"strength (0 = standard drain, 1 = fully torque-free). got "
+                f"{self.torque_free_xi}."
+            )
+        if self.torque_free_xi is not None and self.porosity is not None:
+            raise _config_error(
+                "an accretor cannot be both porous and torque-free: porosity and "
+                "torque_free_xi are different surface physics on the same "
+                "tangential channel. declare one."
             )
 
 

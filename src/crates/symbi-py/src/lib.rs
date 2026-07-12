@@ -153,6 +153,10 @@ struct BodyParams {
     porosity: Option<f64>,
     k_eta_n: f64,
     k_eta_t: f64,
+    /// the torque-free dial (docs/design/53): Some(xi) selects the isothermal
+    /// torque-free accretor (xi in [0, 1]); None keeps the pure drain. mutually
+    /// exclusive with porosity.
+    torque_free_xi: Option<f64>,
     /// whether the gas reaction force acts back on the body. black-hole sinks
     /// always feel feedback; this dial adds it to non-accreting gravitating
     /// masses (BodyCollection gates feedback on this flag OR the sink kind).
@@ -748,6 +752,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let porosity = sub_f64_opt(b, "accretion", "porosity");
         let k_eta_n = sub_f64(b, "accretion", "k_eta_n", 0.0);
         let k_eta_t = sub_f64(b, "accretion", "k_eta_t", 0.0);
+        let torque_free_xi = sub_f64_opt(b, "accretion", "torque_free_xi");
         out.push(BodyParams {
             capability,
             mass: f("mass"),
@@ -760,6 +765,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             porosity,
             k_eta_n,
             k_eta_t,
+            torque_free_xi,
             two_way_coupling,
         });
     }
@@ -1735,15 +1741,18 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                 1.0,
                 b.accretion_radius,
             );
-            // a declared porosity switches the surface stack from the pure
-            // drain to the porous penalization (docs/design/50 zoo).
-            match b.porosity {
-                Some(porosity) => bh.with_surface(symbi_ib::SurfaceSpec::Porous {
+            // the declared surface stack selects the penalization kernel: a
+            // torque-free xi (docs/design/53) or a porosity dial (docs/design/50
+            // zoo) switches off the pure drain. they are mutually exclusive
+            // (the python config rejects declaring both).
+            match (b.torque_free_xi, b.porosity) {
+                (Some(xi), _) => bh.with_surface(symbi_ib::SurfaceSpec::TorqueFree { xi }),
+                (None, Some(porosity)) => bh.with_surface(symbi_ib::SurfaceSpec::Porous {
                     porosity,
                     k_eta_n: b.k_eta_n,
                     k_eta_t: b.k_eta_t,
                 }),
-                None => bh,
+                (None, None) => bh,
             }
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)

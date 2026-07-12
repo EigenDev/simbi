@@ -278,6 +278,146 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     assert!(fired > 20, "the iso drain never fired");
 }
 
+// docs/design/53: the ISOTHERMAL torque-free accretor kernel. the compiled
+// kernel is bit-identical to the f64 chain (guarded sphere normal ->
+// TorqueFreeAccretor contribute + retention floor -> penalize_cell at IsoModel),
+// and xi = 0 reduces to the iso drain kernel bit-for-bit (the tangential
+// coupling vanishes as an exact zero — the design-53 anchor).
+#[test]
+fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() {
+    use symbi_hydro::energy::IsoModel;
+    let (tf, ir) =
+        kernel_by_name::<f64>("penalize_torque_free_iso_2d").expect("torque-free kernel");
+    assert!(kernel_output_support_from_ir(ir).is_some());
+    let (drain, drain_ir) =
+        kernel_by_name::<f64>("penalize_drain_iso_2d").expect("iso drain kernel");
+
+    const CS: f64 = 0.8;
+    const VEL: [f64; 2] = [0.05, -0.03];
+
+    let n2 = N * N;
+    let (mut den0, mut mx0, mut my0) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    for jj in 0..N {
+        for ii in 0..N {
+            let (x, y) = (cell_center(ii), cell_center(jj));
+            let c = ii + jj * N;
+            den0[c] = 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos();
+            mx0[c] = den0[c] * 0.3 * (x + y).cos();
+            my0[c] = den0[c] * -0.2 * (x - 2.0 * y).sin();
+        }
+    }
+
+    // one scalar closure (a superset) serves both kernels: the iso drain pulls
+    // only its subset (no xi / vel).
+    #[allow(clippy::type_complexity)]
+    let run = |kern: symbi_aot::KernelFn<f64>,
+               kern_ir,
+               xi_val: f64|
+     -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let scalar = |name: &str| -> f64 {
+            match name {
+                "dt" => DT,
+                "cs" => CS,
+                "c_drain" => C_DRAIN,
+                "xi" => xi_val,
+                "x_lo_0" | "x_lo_1" => X_LO,
+                "dx_0" | "dx_1" => DX,
+                "map_kind_0" | "map_kind_1" => 0.0,
+                "body_0_pos_0" => POS[0],
+                "body_0_pos_1" => POS[1],
+                "body_0_racc" => RACC,
+                "body_0_vel_0" => VEL[0],
+                "body_0_vel_1" => VEL[1],
+                other => panic!("unexpected scalar '{other}'"),
+            }
+        };
+        let (mut ints, mut scalars) = (Vec::new(), Vec::new());
+        for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(kern_ir) {
+            let v = scalar(&bind.name());
+            if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        }
+        let lo = [0i32; 2];
+        let ext = [N as u32; 2];
+        let inputs = [
+            CpuField::from_layout(&den0, &lo, &ext),
+            CpuField::from_layout(&mx0, &lo, &ext),
+            CpuField::from_layout(&my0, &lo, &ext),
+        ];
+        let (mut d, mut mx, mut my) = (den0.clone(), mx0.clone(), my0.clone());
+        let (mut pm, mut pfx, mut pfy, mut pt) =
+            (vec![7.7; n2], vec![7.7; n2], vec![7.7; n2], vec![7.7; n2]);
+        {
+            let mut outs = [
+                CpuFieldMut::from_layout(&mut d, &lo, &ext),
+                CpuFieldMut::from_layout(&mut mx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut my, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pm, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+            ];
+            kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+        }
+        (d, mx, my, pm, pfx, pfy, pt)
+    };
+
+    // (1) bit-identity against the f64 chain at a partial dial xi = 0.7.
+    const XI: f64 = 0.7;
+    let out = run(tf, ir, XI);
+    let sphere = SdfExpr::<f64, 2>::sphere(POS, RACC);
+    let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
+    let width = |i: usize| (X_LO + (i as f64 + 1.0) * DX) - (X_LO + i as f64 * DX);
+    let mut fired = 0usize;
+    for jj in 0..N {
+        for ii in 0..N {
+            let c = ii + jj * N;
+            let cons = ConsG::<f64, 2, IsoModel> {
+                den: den0[c],
+                mom: Tensor::new([mx0[c], my0[c]]),
+                nrg: Default::default(),
+            };
+            let x = [mid(ii), mid(jj)];
+            let ch = chi(sphere.dist(x), DX);
+            let inv_tau = CS / (C_DRAIN * DX);
+            let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
+            let r = x_rel.dot(&x_rel).sqrt();
+            let normal = x_rel.scale(1.0 / r.max(1e-300));
+            let kin = BodyKin::<f64, 2> {
+                u_solid: Tensor::new(VEL),
+                omega: Tensor::zeros(),
+                e_wall: 0.0,
+            };
+            let mut acc = Relax::none();
+            Property::TorqueFreeAccretor { inv_tau, xi: XI }.contribute(ch, &kin, &mut acc);
+            let dv = width(ii) * width(jj);
+            let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
+            assert_eq!(out.0[c].to_bits(), expect.den.to_bits(), "den at ({ii},{jj})");
+            assert_eq!(out.1[c].to_bits(), expect.mom[0].to_bits(), "mom0 at ({ii},{jj})");
+            assert_eq!(out.2[c].to_bits(), expect.mom[1].to_bits(), "mom1 at ({ii},{jj})");
+            assert_eq!(out.3[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            assert_eq!(out.4[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
+            assert_eq!(out.5[c].to_bits(), delta.force_delta[1].to_bits(), "fy at ({ii},{jj})");
+            let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
+            assert_eq!(out.6[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
+            if out.3[c] != 0.0 {
+                fired += 1;
+            }
+        }
+    }
+    assert!(fired > 20, "the torque-free drain never fired");
+
+    // (2) xi = 0: the torque-free kernel IS the iso drain kernel, bit for bit.
+    let tf0 = run(tf, ir, 0.0);
+    let dr = run(drain, drain_ir, 0.0);
+    for c in 0..n2 {
+        assert_eq!(tf0.0[c].to_bits(), dr.0[c].to_bits(), "xi=0 den at {c}");
+        assert_eq!(tf0.1[c].to_bits(), dr.1[c].to_bits(), "xi=0 mom0 at {c}");
+        assert_eq!(tf0.2[c].to_bits(), dr.2[c].to_bits(), "xi=0 mom1 at {c}");
+        assert_eq!(tf0.3[c].to_bits(), dr.3[c].to_bits(), "xi=0 mass at {c}");
+        assert_eq!(tf0.6[c].to_bits(), dr.6[c].to_bits(), "xi=0 torque at {c}");
+    }
+}
+
 // the [PorousAccretor] kernel (docs/design/50 zoo): the compiled kernel is
 // bit-identical to the f64 chain (guarded sphere normal -> PorousAccretor
 // contribute -> penalize_cell), free-slip (k_eta_t = 0) leaves the tangential

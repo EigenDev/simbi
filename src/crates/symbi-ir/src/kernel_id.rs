@@ -70,6 +70,13 @@ pub enum KernelId {
     /// exactly). p = 1 reduces bit-exactly to `PenalizeDrain`. adiabatic,
     /// cartesian.
     PenalizePorous { ndim: u8 },
+    /// the [TorqueFreeAccretor] penalization (docs/design/53): the drain plus a
+    /// tangential anti-relaxation `lambda_t = -xi lambda_rho` about the sphere
+    /// normal, so the accreted mass carries no net angular momentum to the body
+    /// (the Dittmann torque-free sink, coordinate-free). the retention floor
+    /// bounds the growing tangential factor. xi = 0 reduces bit-exactly to
+    /// `PenalizeDrainIso`. isothermal (thin-disk), cartesian.
+    PenalizeTorqueFreeIso { ndim: u8 },
     /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -198,6 +205,13 @@ impl KernelId {
             }
             KernelId::PenalizePorous { ndim } => {
                 ["penalize_porous_1d", "penalize_porous_2d", "penalize_porous_3d"][dim_ix(ndim)]
+            }
+            KernelId::PenalizeTorqueFreeIso { ndim } => {
+                [
+                    "penalize_torque_free_iso_1d",
+                    "penalize_torque_free_iso_2d",
+                    "penalize_torque_free_iso_3d",
+                ][dim_ix(ndim)]
             }
             KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
                 match (order, axis, ncomp, ndim) {

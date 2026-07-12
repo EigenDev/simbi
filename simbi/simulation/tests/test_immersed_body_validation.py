@@ -60,6 +60,53 @@ def test_negative_surface_friction_rejected() -> None:
         AccretionProperties(accretion_radius=0.5, k_eta_n=-1.0)
 
 
+@pytest.mark.parametrize("xi", [-0.1, 1.5])
+def test_torque_free_xi_outside_unit_interval_rejected(xi: float) -> None:
+    with pytest.raises(ConfigError, match="torque_free_xi"):
+        AccretionProperties(accretion_radius=0.5, torque_free_xi=xi)
+
+
+@pytest.mark.parametrize("xi", [0.0, 0.5, 1.0])
+def test_torque_free_xi_in_unit_interval_accepted(xi: float) -> None:
+    AccretionProperties(accretion_radius=0.5, torque_free_xi=xi)
+
+
+def test_torque_free_and_porous_are_mutually_exclusive() -> None:
+    with pytest.raises(ConfigError, match="both porous and torque-free"):
+        AccretionProperties(
+            accretion_radius=0.5, torque_free_xi=1.0, porosity=0.5
+        )
+
+
+def test_torque_free_xi_serializes_into_the_execution_dict() -> None:
+    from simbi.simulation.runner import to_execution_dict
+
+    prob = FofcPeriodicBlast.from_cli([])
+
+    def _bodies(self):  # noqa: ANN001
+        return [
+            ImmersedBodyConfig(
+                capability=BodyCapability.ACCRETION | BodyCapability.GRAVITATIONAL,
+                mass=1.0,
+                velocity=(0.0, 0.0, 0.0),
+                position=(0.0, 0.0, 0.0),
+                radius=0.0,
+                gravitational=_grav(),
+                accretion=AccretionProperties(
+                    accretion_radius=0.5, torque_free_xi=1.0
+                ),
+            )
+        ]
+
+    import pytest as _pytest
+
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(type(prob), "immersed_bodies", property(_bodies), raising=False)
+        exec_dict = to_execution_dict(prob)
+    accretion = exec_dict["immersed_bodies"][0]["accretion"]
+    assert accretion["torque_free_xi"] == 1.0
+
+
 # -- capability requires its property block -------------------------------------
 
 

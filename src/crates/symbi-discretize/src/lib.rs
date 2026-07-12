@@ -36,7 +36,9 @@ pub use coords::{Coords, Spacing, Spacetime};
 // 2026-05-30; symbi-core was folded in). re-export them so the builder return
 // types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use symbi_ir::{Gv, GvKernel};
-pub use gv_penalize::{penalize_drain_gv, penalize_drain_iso_gv, penalize_porous_gv};
+pub use gv_penalize::{
+    penalize_drain_gv, penalize_drain_iso_gv, penalize_porous_gv, penalize_torque_free_iso_gv,
+};
 pub use gv_immersed::{
     body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,
     body_source_built, body_source_gv, body_source_iso_gv,

@@ -53,6 +53,11 @@ pub enum SurfaceSpec {
     /// (multiplicative dials — zero is an exact off switch, so `k_eta_t = 0`
     /// is a free-slip surface).
     Porous { porosity: f64, k_eta_n: f64, k_eta_t: f64 },
+    /// the torque-free accretor (docs/design/53): the drain plus a tangential
+    /// anti-relaxation `lambda_t = -xi lambda_rho`, so the accreted mass carries
+    /// no net angular momentum to the body (the Dittmann sink). `xi in [0, 1]`:
+    /// `xi = 0` is the standard drain, `xi = 1` fully torque-free. isothermal.
+    TorqueFree { xi: f64 },
 }
 
 /// a physical body embedded in the simulation grid.
