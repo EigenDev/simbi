@@ -53,7 +53,6 @@ class BinaryComponentConfig:
     two_way_coupling: bool
     accretion_radius: float
     sink_rate: float = 0.0
-    sink_delta: float = 1.0  # 1 is standard sink, 0 is torque-free
     position: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     velocity: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
     force: Sequence[float] = field(default_factory=lambda: (0.0, 0.0, 0.0))
@@ -78,7 +77,6 @@ class BinaryComponentConfig:
             config["accretion"] = {
                 "accretion_radius": self.accretion_radius,
                 "sink_rate": self.sink_rate,
-                "sink_delta": self.sink_delta,
                 "total_accreted_mass": self.total_accreted_mass,
             }
 
@@ -163,7 +161,6 @@ class AccretionProperties:
     sink_rate: float = 0.0
     total_accreted_mass: float = 0.0
     accretion_rate: float = 0.0
-    sink_delta: float = 1.0  # 1 is standard sink, 0 is torque-free
     # the porous surface dial (docs/design/50): None keeps the pure drain.
     # porosity p scales the drain channel, (1 - p) the wall channels; the
     # wall rates are k_eta_* c_s / dx (multiplicative dials, zero = channel

@@ -149,9 +149,6 @@ struct BodyParams {
     softening: f64,
     accretion_radius: f64,
     sink_rate: f64,
-    /// sink torque dial: 1.0 = standard sink, 0.0 = torque-free drain. read by
-    /// the substrate kernel as BodyScalar::Delta.
-    sink_delta: f64,
     /// the porous-surface dial (docs/design/50): None keeps the pure drain.
     porosity: Option<f64>,
     k_eta_n: f64,
@@ -748,7 +745,6 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let softening = sub_f64(b, "gravitational", "softening_length", 0.0);
         let accretion_radius = sub_f64(b, "accretion", "accretion_radius", 0.0);
         let sink_rate = sub_f64(b, "accretion", "sink_rate", 0.0);
-        let sink_delta = sub_f64(b, "accretion", "sink_delta", 1.0);
         let porosity = sub_f64_opt(b, "accretion", "porosity");
         let k_eta_n = sub_f64(b, "accretion", "k_eta_n", 0.0);
         let k_eta_t = sub_f64(b, "accretion", "k_eta_t", 0.0);
@@ -761,7 +757,6 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             softening,
             accretion_radius,
             sink_rate,
-            sink_delta,
             porosity,
             k_eta_n,
             k_eta_t,
@@ -1713,8 +1708,8 @@ fn build_theta(cfg: &Config) -> f64 {
 
 /// build a typed `BodyCollection<f64, D>` from the parsed params. an ACCRETION
 /// body becomes a black-hole sink (gravity + accretion onto the body);
-/// otherwise it is a fixed-potential gravitating mass. the sink torque dial
-/// `sink_delta` and the `two_way_coupling` feedback flag are carried from config.
+/// otherwise it is a fixed-potential gravitating mass. the `two_way_coupling`
+/// feedback flag is carried from config.
 fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D> {
     const ACCRETION: u64 = 2;
     let mut coll = BodyCollection::new();
@@ -1734,7 +1729,10 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                 b.radius,
                 b.softening,
                 b.sink_rate,
-                b.sink_delta,
+                // sink_delta: the sunset dittmann torque-free dial. the baked
+                // uniform-scaling drain ignores it; the backend field lingers
+                // only as the body_{idx}_delta expression scalar (defaults 1.0).
+                1.0,
                 b.accretion_radius,
             );
             // a declared porosity switches the surface stack from the pure
@@ -1898,11 +1896,11 @@ mod diagnostics_tests {
         assert_eq!(col("fz"), 0.0);
     }
 
-    // the sink torque dial and the two-way-coupling flag reach the built body:
-    // build_bodies must carry them from config rather than hardcode delta = 1
-    // (a torque-free sink is delta = 0) and coupling = false.
+    // the two-way-coupling flag reaches the built body: build_bodies must carry
+    // it from config rather than hardcode coupling = false (feedback onto a
+    // non-accreting gravitating mass is opt-in via this flag).
     #[test]
-    fn build_bodies_carries_sink_delta_and_two_way_coupling() {
+    fn build_bodies_carries_two_way_coupling() {
         let params = vec![BodyParams {
             capability: 2, // ACCRETION
             mass: 1.0,
@@ -1912,16 +1910,13 @@ mod diagnostics_tests {
             softening: 0.05,
             accretion_radius: 0.2,
             sink_rate: 0.5,
-            sink_delta: 0.0,
             porosity: None,
             k_eta_n: 0.0,
             k_eta_t: 0.0,
             two_way_coupling: true,
         }];
         let coll = build_bodies::<2>(&params);
-        let b = coll.get(0);
-        assert_eq!(b.sink_delta(), Some(0.0));
-        assert!(b.two_way_coupling);
+        assert!(coll.get(0).two_way_coupling);
     }
 }
 

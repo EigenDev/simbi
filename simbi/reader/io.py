@@ -603,7 +603,6 @@ def read_bodies(bodies_group: h5py.Group) -> Result[BodyCollection, str]:
                         accr_g.attrs["total_accreted_mass"]
                     ),
                     accretion_rate=float(accr_g.attrs["accretion_rate"]),
-                    sink_delta=float(accr_g.attrs["sink_delta"]),
                 )
 
             rigid = None
