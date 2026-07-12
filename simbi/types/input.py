@@ -316,6 +316,12 @@ class Metadata:
     # and on isothermal checkpoints written before the attr existed.
     sound_speed: float | None = None
 
+    # the background spacetime chart (minkowski/schwarzschild/kerr_schild/kerr),
+    # orthogonal to coord_system; "minkowski" on flat runs and on pre-attr checkpoints.
+    spacetime: str = "minkowski"
+    # the schwarzschild geometric mass M (G=c=1); 0 on a flat background.
+    schwarzschild_mass: float = 0.0
+
     # amr fields
     level_dts: tuple[float, ...] = ()
     level_substeps: tuple[int, ...] = ()

@@ -344,6 +344,15 @@ fn coord_name(g: symbi_geometry::Geometry) -> &'static str {
     }
 }
 
+fn spacetime_name(s: symbi_geometry::Spacetime) -> &'static str {
+    match s {
+        symbi_geometry::Spacetime::Minkowski => "minkowski",
+        symbi_geometry::Spacetime::Schwarzschild => "schwarzschild",
+        symbi_geometry::Spacetime::KerrSchild => "kerr_schild",
+        symbi_geometry::Spacetime::Kerr => "kerr",
+    }
+}
+
 fn timestepping_name(t: Timestepping) -> &'static str {
     match t {
         Timestepping::Euler => "euler",
@@ -393,7 +402,18 @@ where
             "coord_system",
             Attr::Str(coord_name(sim.physics.metric.geometry()).into()),
         ),
+        // the background spacetime chart — ORTHOGONAL to coord_system. GR readers need
+        // this to select the metric (lapse, shift, densitization) when reducing fluxes.
+        (
+            "spacetime",
+            Attr::Str(spacetime_name(sim.geom.spacetime).into()),
+        ),
     ];
+    // the curved-spacetime scalar params (schwarzschild_mass, kerr_spin) ride as
+    // named attrs so a reader can reconstruct the metric; empty on a flat background.
+    for (name, value) in &sim.geom.spacetime_scalars {
+        builtins.push((name.as_str(), Attr::F64(*value)));
+    }
     // isothermal regimes close with p = cs^2 rho at a constant sound speed
     // and store no pressure dataset; record cs so readers can reconstruct
     // pressure-dependent fields. the isothermal eos ignores (rho, pre).

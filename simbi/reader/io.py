@@ -524,6 +524,8 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                     if "sound_speed" in attrs
                     else None
                 ),
+                spacetime=decode_str(attrs.get("spacetime", "minkowski")),
+                schwarzschild_mass=float(attrs.get("schwarzschild_mass", 0.0)),
             )
         )
     except Exception as e:

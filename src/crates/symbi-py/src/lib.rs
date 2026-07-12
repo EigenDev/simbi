@@ -1995,6 +1995,7 @@ mod diagnostics_tests {
             porosity: None,
             k_eta_n: 0.0,
             k_eta_t: 0.0,
+            torque_free_xi: None,
             two_way_coupling: true,
         }];
         let coll = build_bodies::<2>(&params);
@@ -4397,6 +4398,122 @@ fn fmt_time_msg(cfg: &Config, time: f64) -> String {
 // 37, 38): gpus==1 is the only wired path; gpus>1 is validated and rejected with the PRECISE
 // reason -- a cpu build, too few visible devices, or the decomposed run loop (M4) not yet
 // wired -- so the user gets an actionable message instead of a silent single-device run.
+/// the outer horizon r_+ containment gate for a GR accretion run. a well-posed
+/// accretion-rate certificate needs the innermost flux surface to be causally one-way;
+/// the domain's inner radius must sit on the correct side of the horizon for the chart:
+///   schwarzschild  singular at r_+ = 2M (lapse -> 0)  -> r_min > r_+   (stay outside)
+///   kerr_schild    horizon-penetrating, r_+ = 2M      -> r_min < r_+   (swallow it)
+///   kerr           horizon-penetrating, r_+ = M + sqrt(M^2 - a^2)  -> r_min < r_+
+/// the gate is a radial (spherical/cylindrical) condition; the cartesian equatorial
+/// slice places the origin inside the box, a containment condition on the box bounds
+/// rather than on r_min, so it is left to those bounds. flat minkowski has no horizon.
+fn check_horizon_containment(
+    spacetime: &str,
+    mass: f64,
+    spin: f64,
+    coord_system: &str,
+    r_min: f64,
+) -> Result<(), String> {
+    if spacetime == "minkowski" {
+        return Ok(());
+    }
+    if mass <= 0.0 {
+        return Err(format!(
+            "GR spacetime '{spacetime}' requires a positive mass; got M = {mass}"
+        ));
+    }
+    let r_plus = match spacetime {
+        "schwarzschild" | "kerr_schild" => 2.0 * mass,
+        "kerr" => {
+            if spin.abs() > mass {
+                return Err(format!(
+                    "kerr spin |a| = {} exceeds mass M = {mass}: no horizon (a naked \
+                     singularity), the accretion certificate is undefined",
+                    spin.abs()
+                ));
+            }
+            mass + (mass * mass - spin * spin).sqrt()
+        }
+        other => return Err(format!("unknown GR spacetime '{other}'")),
+    };
+    // the origin-interior cartesian slice is gated by its box bounds, not r_min.
+    if coord_system == "cartesian" {
+        return Ok(());
+    }
+    match spacetime {
+        "schwarzschild" => {
+            if r_min <= r_plus {
+                return Err(format!(
+                    "schwarzschild inner radius r_min = {r_min} <= r_+ = 2M = {r_plus}: the \
+                     metric is singular at and inside the horizon (lapse alpha = sqrt(1 - 2M/r) \
+                     is imaginary). use r_min > 2M, or the horizon-penetrating kerr_schild chart."
+                ));
+            }
+        }
+        "kerr_schild" | "kerr" => {
+            if r_min >= r_plus {
+                return Err(format!(
+                    "horizon-penetrating inner radius r_min = {r_min} >= r_+ = {r_plus}: the \
+                     domain does not swallow the horizon, so the inner boundary is in causal \
+                     contact with the exterior flow and the accretion-rate certificate is \
+                     ill-posed. set r_min < r_+ (the purpose of a horizon-penetrating chart)."
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod horizon_gate_tests {
+    use super::check_horizon_containment;
+
+    #[test]
+    fn minkowski_has_no_horizon_to_gate() {
+        assert!(check_horizon_containment("minkowski", 0.0, 0.0, "spherical", 0.5).is_ok());
+    }
+
+    #[test]
+    fn schwarzschild_must_stay_outside_the_horizon() {
+        // the standard-chart configs use r_min = 3 > 2M = 2.
+        assert!(check_horizon_containment("schwarzschild", 1.0, 0.0, "spherical", 3.0).is_ok());
+        // at or inside r_+ = 2M the lapse is imaginary.
+        assert!(check_horizon_containment("schwarzschild", 1.0, 0.0, "spherical", 2.0).is_err());
+        assert!(check_horizon_containment("schwarzschild", 1.0, 0.0, "spherical", 1.5).is_err());
+    }
+
+    #[test]
+    fn kerr_schild_must_swallow_the_horizon() {
+        // the horizon-penetrating config uses r_min = 1.5 < 2M = 2.
+        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 1.5).is_ok());
+        // an inner boundary at or outside r_+ leaves it causally connected to the exterior.
+        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 2.0).is_err());
+        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 3.0).is_err());
+    }
+
+    #[test]
+    fn kerr_horizon_shrinks_with_spin() {
+        // r_+ = M + sqrt(M^2 - a^2); a = 0.6, M = 1 -> r_+ = 1.8.
+        assert!(check_horizon_containment("kerr", 1.0, 0.6, "spherical", 1.7).is_ok());
+        assert!(check_horizon_containment("kerr", 1.0, 0.6, "spherical", 1.8).is_err());
+        // |a| > M is a naked singularity: no horizon at all.
+        assert!(check_horizon_containment("kerr", 1.0, 1.5, "spherical", 0.5).is_err());
+    }
+
+    #[test]
+    fn cartesian_slice_is_gated_by_box_bounds_not_r_min() {
+        // the origin sits inside the box; r_min (a corner distance) does not gate it.
+        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "cartesian", 5.0).is_ok());
+    }
+
+    #[test]
+    fn gr_chart_requires_positive_mass() {
+        assert!(check_horizon_containment("kerr_schild", 0.0, 0.0, "spherical", 1.0).is_err());
+        assert!(check_horizon_containment("schwarzschild", -1.0, 0.0, "spherical", 3.0).is_err());
+    }
+}
+
 fn validate_gpu_request(n_gpus: usize) -> Result<(), String> {
     if n_gpus <= 1 {
         return Ok(());
@@ -4451,6 +4568,17 @@ fn run_simulation(
     let mut cfg = parse_config(sim_info)?;
     // fail fast on an unsupported multi-gpu request, before draining generators or allocating.
     validate_gpu_request(cfg.n_gpus).map_err(PyRuntimeError::new_err)?;
+    // a GR run's inner radius must sit on the correct side of the horizon for its chart
+    // (outside for singular schwarzschild, inside for horizon-penetrating kerr-schild/kerr)
+    // so the accretion-rate certificate's innermost flux surface is causally one-way.
+    check_horizon_containment(
+        &cfg.spacetime,
+        cfg.schwarzschild_mass,
+        cfg.kerr_spin,
+        &cfg.coord_system,
+        cfg.x_lo[0],
+    )
+    .map_err(PyValueError::new_err)?;
     // mesh refinement is cartesian + uniform-spacing ONLY: the coarse-fine prolongation/restriction
     // transfer kernels are geometry-agnostic (equal index-based sub-cells), correct solely for
     // uniform-volume cells. a curvilinear grid (variable r^2 / r cell volumes) or a non-linear axis
