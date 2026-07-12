@@ -81,6 +81,10 @@ pub enum KernelId {
     /// conservative shear-stress flux divergence, a halo-1 stencil accumulated
     /// into cons.mom. isothermal (thin-disk), cartesian, 2D.
     ViscousIso { ndim: u8 },
+    /// the Shakura-Sunyaev alpha viscous operator (docs/design/54): the same
+    /// conservative shear-stress flux divergence, but with a spatially varying
+    /// nu(x) = alpha c_s^2 / Omega_k(r) about the central body. isothermal, 2D.
+    ViscousIsoAlpha { ndim: u8 },
     /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -219,6 +223,10 @@ impl KernelId {
             }
             KernelId::ViscousIso { ndim } => {
                 ["viscous_iso_1d", "viscous_iso_2d", "viscous_iso_3d"][dim_ix(ndim)]
+            }
+            KernelId::ViscousIsoAlpha { ndim } => {
+                ["viscous_iso_alpha_1d", "viscous_iso_alpha_2d", "viscous_iso_alpha_3d"]
+                    [dim_ix(ndim)]
             }
             KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
                 match (order, axis, ncomp, ndim) {

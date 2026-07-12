@@ -28,13 +28,17 @@
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 
-/// the constant-nu viscous momentum increment `dt * div(tau)` for the center
-/// cell of a 3x3 velocity + density stencil (2D, cartesian). additive onto
-/// `cons.mom`.
+/// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3
+/// velocity + density + viscosity stencil (2D, cartesian). additive onto
+/// `cons.mom`. `nu` is per-cell: constant-nu passes a uniform stencil (the face
+/// average `0.5(nu + nu) = nu` is bit-identical to a scalar); alpha passes
+/// `nu(x) = alpha c_s^2 / Omega_k(r)`. the FACE viscosity is the average of the
+/// two straddling cells' `nu` — single-valued at the face, so the update stays
+/// conservative under a spatially varying viscosity.
 pub fn viscous_mom_update_2d<S: Scalar>(
     v: &[[Tensor<S, 2>; 3]; 3],
     rho: &[[S; 3]; 3],
-    nu: S,
+    nu: &[[S; 3]; 3],
     dx: S,
     dy: S,
     dt: S,
@@ -51,44 +55,45 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     // --- x-face i+1/2 (between center [1][1] and [1][2]) ---
     // normal gradient: central across the face. transverse gradient: averaged
     // over the two straddling cells (a 4-point central difference in y).
-    let rho_xp = half * (rho[1][1] + rho[1][2]);
+    // the face DYNAMIC viscosity mu = rho_face * nu_face.
+    let mu_xp = half * (rho[1][1] + rho[1][2]) * (half * (nu[1][1] + nu[1][2]));
     let dvxdx = (vx(1, 2) - vx(1, 1)) / dx;
     let dvydx = (vy(1, 2) - vy(1, 1)) / dx;
     let dvxdy = ((vx(2, 1) - vx(0, 1)) + (vx(2, 2) - vx(0, 2))) / (four * dy);
     let dvydy = ((vy(2, 1) - vy(0, 1)) + (vy(2, 2) - vy(0, 2))) / (four * dy);
     let div = dvxdx + dvydy;
-    let txx_xp = rho_xp * nu * (two * dvxdx - two_thirds * div);
-    let txy_xp = rho_xp * nu * (dvxdy + dvydx);
+    let txx_xp = mu_xp * (two * dvxdx - two_thirds * div);
+    let txy_xp = mu_xp * (dvxdy + dvydx);
 
     // --- x-face i-1/2 (between [1][0] and center [1][1]) ---
-    let rho_xm = half * (rho[1][0] + rho[1][1]);
+    let mu_xm = half * (rho[1][0] + rho[1][1]) * (half * (nu[1][0] + nu[1][1]));
     let dvxdx = (vx(1, 1) - vx(1, 0)) / dx;
     let dvydx = (vy(1, 1) - vy(1, 0)) / dx;
     let dvxdy = ((vx(2, 0) - vx(0, 0)) + (vx(2, 1) - vx(0, 1))) / (four * dy);
     let dvydy = ((vy(2, 0) - vy(0, 0)) + (vy(2, 1) - vy(0, 1))) / (four * dy);
     let div = dvxdx + dvydy;
-    let txx_xm = rho_xm * nu * (two * dvxdx - two_thirds * div);
-    let txy_xm = rho_xm * nu * (dvxdy + dvydx);
+    let txx_xm = mu_xm * (two * dvxdx - two_thirds * div);
+    let txy_xm = mu_xm * (dvxdy + dvydx);
 
     // --- y-face j+1/2 (between center [1][1] and [2][1]) ---
-    let rho_yp = half * (rho[1][1] + rho[2][1]);
+    let mu_yp = half * (rho[1][1] + rho[2][1]) * (half * (nu[1][1] + nu[2][1]));
     let dvxdy = (vx(2, 1) - vx(1, 1)) / dy;
     let dvydy = (vy(2, 1) - vy(1, 1)) / dy;
     let dvxdx = ((vx(1, 2) - vx(1, 0)) + (vx(2, 2) - vx(2, 0))) / (four * dx);
     let dvydx = ((vy(1, 2) - vy(1, 0)) + (vy(2, 2) - vy(2, 0))) / (four * dx);
     let div = dvxdx + dvydy;
-    let tyx_yp = rho_yp * nu * (dvxdy + dvydx);
-    let tyy_yp = rho_yp * nu * (two * dvydy - two_thirds * div);
+    let tyx_yp = mu_yp * (dvxdy + dvydx);
+    let tyy_yp = mu_yp * (two * dvydy - two_thirds * div);
 
     // --- y-face j-1/2 (between [0][1] and center [1][1]) ---
-    let rho_ym = half * (rho[0][1] + rho[1][1]);
+    let mu_ym = half * (rho[0][1] + rho[1][1]) * (half * (nu[0][1] + nu[1][1]));
     let dvxdy = (vx(1, 1) - vx(0, 1)) / dy;
     let dvydy = (vy(1, 1) - vy(0, 1)) / dy;
     let dvxdx = ((vx(1, 2) - vx(1, 0)) + (vx(0, 2) - vx(0, 0))) / (four * dx);
     let dvydx = ((vy(1, 2) - vy(1, 0)) + (vy(0, 2) - vy(0, 0))) / (four * dx);
     let div = dvxdx + dvydy;
-    let tyx_ym = rho_ym * nu * (dvxdy + dvydx);
-    let tyy_ym = rho_ym * nu * (two * dvydy - two_thirds * div);
+    let tyx_ym = mu_ym * (dvxdy + dvydx);
+    let tyy_ym = mu_ym * (two * dvydy - two_thirds * div);
 
     // conservative flux divergence: d_x tau_x. + d_y tau_y.
     let dmom_x = dt * ((txx_xp - txx_xm) / dx + (tyx_yp - tyx_ym) / dy);
@@ -127,11 +132,16 @@ mod tests {
         (v, r)
     }
 
+    // a uniform (constant-nu) viscosity stencil.
+    fn uni(nu: f64) -> [[f64; 3]; 3] {
+        [[nu; 3]; 3]
+    }
+
     // null 1: a uniform velocity has zero strain -> zero viscous force, exactly.
     #[test]
     fn uniform_flow_books_zero_force() {
         let (v, r) = stencil(0.3, -0.2, 0.05, 0.05, |_, _| [0.7, -0.4], |_, _| 1.3);
-        let d = viscous_mom_update_2d(&v, &r, 0.01, 0.05, 0.05, 0.001);
+        let d = viscous_mom_update_2d(&v, &r, &uni(0.01), 0.05, 0.05, 0.001);
         assert!(d[0].abs() < 1e-15 && d[1].abs() < 1e-15, "{d:?}");
     }
 
@@ -149,7 +159,7 @@ mod tests {
             |x, y| [-omega * y, omega * x],
             |_, _| 2.0,
         );
-        let d = viscous_mom_update_2d(&v, &r, 0.03, 0.05, 0.05, 0.01);
+        let d = viscous_mom_update_2d(&v, &r, &uni(0.03), 0.05, 0.05, 0.01);
         assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14, "{d:?}");
     }
 
@@ -159,7 +169,7 @@ mod tests {
     fn linear_shear_books_zero_force() {
         let s = 0.9;
         let (v, r) = stencil(0.1, 0.3, 0.05, 0.05, |_, y| [s * y, 0.0], |_, _| 1.0);
-        let d = viscous_mom_update_2d(&v, &r, 0.02, 0.05, 0.05, 0.01);
+        let d = viscous_mom_update_2d(&v, &r, &uni(0.02), 0.05, 0.05, 0.01);
         assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14, "{d:?}");
     }
 
@@ -172,7 +182,7 @@ mod tests {
         let (dx, dy) = (0.05, 0.05);
         let (v, r) =
             stencil(0.2, 0.13, dx, dy, |_, y| [a * y * y, 0.0], |_, _| rho);
-        let d = viscous_mom_update_2d(&v, &r, nu, dx, dy, dt);
+        let d = viscous_mom_update_2d(&v, &r, &uni(nu), dx, dy, dt);
         let expect_x = dt * 2.0 * a * rho * nu;
         assert!((d[0] - expect_x).abs() < 1e-14, "fx {} vs {expect_x}", d[0]);
         assert!(d[1].abs() < 1e-14, "fy {}", d[1]);
