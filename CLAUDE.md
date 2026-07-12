@@ -201,8 +201,16 @@
   * verification narrative naming a test by its project nickname instead of the property it
     checks. Write `// equals the flat curvilinear value when M = 0`, not `// verified by the
     michel oracle`.
-  A comment that would stop making sense once this conversation is forgotten is broken. Delete it
-  or rewrite it as a domain statement.
+  * **document / design-note / gate / milestone references**: `docs/design/54`, `design 53`,
+    `(docs/design/50)`, `the design-53 anchor`, `gate 4b`, `G-WP`, `part 3`, `the 50-doc
+    discipline`. A reader in five years has no such document open and no idea what number
+    means what. State the DOMAIN FACT the document happens to also discuss — the physics, the
+    invariant, the algorithm — never a pointer to the document. Write `// removing mass but
+    not angular momentum leaves the accreted gas torque-free`, not `// the torque-free sink
+    (docs/design/53)`. If the fact genuinely needs a citation, cite the PUBLISHED SOURCE
+    (`// Shakura & Sunyaev 1973 eq. 1.4`), not an internal design note.
+  A comment that would stop making sense once this conversation, or any internal document, is
+  forgotten is broken. Delete it or rewrite it as a self-contained domain statement.
 
 ### 5.3 Documentation Headers
 

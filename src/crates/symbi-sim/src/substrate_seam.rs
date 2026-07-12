@@ -135,6 +135,11 @@ pub trait WithViscosity: Sized {
     fn with_viscosity(self, _nu: f64) -> Self {
         self
     }
+    /// stash the Shakura-Sunyaev alpha (docs/design/54). default no-op;
+    /// IsoSubstrateKernelSet stores it.
+    fn with_alpha(self, _alpha: f64) -> Self {
+        self
+    }
 }
 
 // =============================================================================

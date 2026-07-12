@@ -56,6 +56,10 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// viscous pass and its CFL cap are inert). >0 selects the Navier-Stokes
     /// shear operator and caps dt at C_visc dx^2 / nu.
     pub viscosity: f64,
+    /// Shakura-Sunyaev alpha (docs/design/54). >0 selects the alpha viscous
+    /// operator nu(x) = alpha cs^2 / Omega_k(r) (TAKES PRECEDENCE over the
+    /// constant-nu `viscosity`); requires a central body. 0 = off.
+    pub alpha: f64,
     pub cfl_number: f64,
     /// the theta-MC reconstruction compression (regime-generic; 1 == plain minmod).
     pub theta: f64,
@@ -117,6 +121,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             cs,
             c_drain: 1.0,
             viscosity: 0.0,
+            alpha: 0.0,
             cfl_number,
             theta: 1.0,
             cs2,
@@ -129,6 +134,40 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             gradient_bcs: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
         }
+    }
+
+    /// nu_max for the alpha viscous CFL cap: nu(r) = alpha cs^2 / Omega_k(r)
+    /// grows with r (Omega_k = sqrt(GM/r^3)), so the maximum over the interior is
+    /// at the corner farthest from the central body. returns 0 (cap inert) with
+    /// no body — the alpha dispatch then fails loud.
+    fn alpha_nu_max(&self, sim: &FieldStore<D, D, Mem, Sc>) -> f64 {
+        let geom = &sim.geom;
+        let Some(im) = sim.immersed.as_ref() else { return 0.0 };
+        if im.bodies.is_empty() {
+            return 0.0;
+        }
+        let b = im.bodies.get(0);
+        let gm = b.mass;
+        if gm <= 0.0 {
+            return 0.0;
+        }
+        let mut r_max = 0.0_f64;
+        for corner in 0..(1usize << D) {
+            let mut d2 = 0.0;
+            for a in 0..D {
+                let sp = &geom.interior.spaces[a];
+                let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
+                let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
+                let d = x - b.position[a];
+                d2 += d * d;
+            }
+            r_max = r_max.max(d2.sqrt());
+        }
+        if r_max <= 0.0 {
+            return 0.0;
+        }
+        let omega_min = (gm / (r_max * r_max * r_max)).sqrt();
+        self.alpha * self.cs * self.cs / omega_min
     }
 
     /// register a NEUMANN / ROBIN gradient boundary (the convenience short-circuit). the id
@@ -313,12 +352,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             None,
         );
         // the parabolic viscous cap (docs/design/54): an explicit diffusion step
-        // is stable for dt <= C_visc dx^2 / nu. inert when inviscid (nu = 0).
-        if self.viscosity > 0.0 {
+        // is stable for dt <= C_visc dx^2 / nu_max. inert when inviscid. for alpha
+        // the viscosity grows with radius, so nu_max is at the farthest corner.
+        let nu_max = if self.alpha > 0.0 {
+            self.alpha_nu_max(sim)
+        } else {
+            self.viscosity
+        };
+        if nu_max > 0.0 {
             const C_VISC: f64 = 0.25;
             let min_dx = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
-            let dt_visc = C_VISC * min_dx * min_dx / self.viscosity;
-            dt_hydro.min(dt_visc)
+            dt_hydro.min(C_VISC * min_dx * min_dx / nu_max)
         } else {
             dt_hydro
         }
@@ -501,15 +545,21 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
-        // the constant-nu Navier-Stokes shear (docs/design/54); inert when
-        // inviscid. baked for 2D cartesian only — fail loud otherwise rather
-        // than silently drop the transport a viscous run declared.
-        if self.viscosity > 0.0 {
-            assert_eq!(D, 2, "viscosity is baked for 2D isothermal only (docs/design/54)");
-            assert!(
-                sim.geom.coords == Geometry::Cartesian,
-                "viscosity is baked for cartesian only (docs/design/54)"
-            );
+        // the Navier-Stokes shear (docs/design/54); inert when inviscid. baked
+        // for 2D cartesian only — fail loud otherwise rather than silently drop
+        // the transport a viscous run declared. alpha (spatially varying nu)
+        // takes precedence over the constant-nu viscosity.
+        if self.alpha <= 0.0 && self.viscosity <= 0.0 {
+            return;
+        }
+        assert_eq!(D, 2, "viscosity is baked for 2D isothermal only (docs/design/54)");
+        assert!(
+            sim.geom.coords == Geometry::Cartesian,
+            "viscosity is baked for cartesian only (docs/design/54)"
+        );
+        if self.alpha > 0.0 {
+            crate::regimes::substrate_kernels::dispatch_viscous_alpha(sim, dt, self.alpha, self.cs);
+        } else {
             crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
         }
     }
@@ -525,6 +575,10 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosit
 {
     fn with_viscosity(mut self, nu: f64) -> Self {
         self.viscosity = nu;
+        self
+    }
+    fn with_alpha(mut self, alpha: f64) -> Self {
+        self.alpha = alpha;
         self
     }
 }

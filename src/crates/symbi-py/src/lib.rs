@@ -95,6 +95,7 @@ struct Config {
     plm_theta: f64,
     dlogt: f64,
     viscosity: f64,
+    alpha: f64,
     x1_spacing: String,
     start_time: f64,
     // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
@@ -659,6 +660,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         plm_theta: get_f64_or(dict, "plm_theta", 1.5),
         dlogt: get_f64_or(dict, "dlogt", 0.0),
         viscosity: get_f64_or(dict, "viscosity", 0.0),
+        alpha: get_f64_or(dict, "alpha", 0.0),
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
         start_time: get_f64_or(dict, "start_time", 0.0),
         checkpoint_log_anchor: get_f64_or(dict, "checkpoint_log_anchor", 0.0),
@@ -3820,7 +3822,11 @@ macro_rules! build_and_run_iso_decomposed {
                 } else {
                     sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
                 };
-                let sub = sim.substrate().theta(theta);
+                let sub = sim
+                    .substrate()
+                    .theta(theta)
+                    .with_viscosity(cfg.viscosity)
+                    .with_alpha(cfg.alpha);
                 // attach the user source per tile (two-pass). iso has no energy -> momentum-only
                 // force/relax, raw den/mom. each tile evaluates S at its own global coords.
                 let sub = match &cfg.source_json {
@@ -3955,7 +3961,14 @@ macro_rules! build_and_run_iso {
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
         let theta = build_theta(cfg);
-        let sub = sim.substrate().theta(theta);
+        // the constant-nu viscosity (docs/design/54) — the iso path has its OWN
+        // build macro, so it needs its own .with_viscosity (the base hydro build
+        // at build_and_run_hydro does not cover it).
+        let sub = sim
+            .substrate()
+            .theta(theta)
+            .with_viscosity(cfg.viscosity)
+            .with_alpha(cfg.alpha);
         // attach a user source expression. iso has NO energy, so build_user_source
         // (against the iso spec) drops the energy overlay for force/relax and rejects
         // raw->nrg; den/mom sources work. refined runs re-attach the same source to
@@ -4012,7 +4025,11 @@ macro_rules! build_and_run_iso {
         }
 
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
-            let ks = s.substrate().theta(theta);
+            let ks = s
+                .substrate()
+                .theta(theta)
+                .with_viscosity(cfg.viscosity)
+                .with_alpha(cfg.alpha);
             // attach the SAME user source to each fine level (a base-only attach
             // would be restricted away by the fine solution). already validated
             // at the base attach.

@@ -222,6 +222,47 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     dispatch_named(sim, &sim.fields.cons.den, None, 0, name, &geom.interior, &[], &scalars);
 }
 
+/// dispatch the alpha VISCOUS operator (`viscous_iso_alpha_2d`, docs/design/54):
+/// like `dispatch_viscous` but with a spatially varying `nu(x) = alpha cs^2 /
+/// Omega_k(r)` about the central body. resolves the body position/mass (body 0),
+/// the sound speed (the `cs`/`gamma` eos slot), and `alpha`. requires a body.
+pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    dt: f64,
+    alpha: f64,
+    cs: f64,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    assert_eq!(D, 2, "the alpha viscous operator is baked for 2D only (docs/design/54)");
+    let im = sim
+        .immersed
+        .as_ref()
+        .expect("alpha viscosity requires a central body (docs/design/54)");
+    assert!(
+        !im.bodies.is_empty(),
+        "alpha viscosity requires a central body (docs/design/54)"
+    );
+    let bodies = &im.bodies;
+    let geom = &sim.geom;
+    let name = symbi_ir::KernelId::ViscousIsoAlpha { ndim: D as u8 }.name();
+    let scalars = super::params::scalars_for(name, |bind| match bind {
+        ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),
+        ScalarBind::Ref(ScalarRef::Gamma) | ScalarBind::Ref(ScalarRef::Cs) => Sc::from_f64(cs),
+        ScalarBind::Ref(ScalarRef::Body { idx, field }) => {
+            Sc::from_f64(super::params::body_scalar::<D>(Some(bodies), *idx, *field))
+        }
+        ScalarBind::Ref(sref) => Sc::from_f64(
+            super::params::geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
+                .unwrap_or_else(|| panic!("viscous alpha: unexpected scalar {sref:?}")),
+        ),
+        ScalarBind::Spec(s) if &**s == "alpha" => Sc::from_f64(alpha),
+        other => panic!("viscous alpha: unexpected spec scalar {other:?}"),
+    });
+    dispatch_named(sim, &sim.fields.cons.den, None, 0, name, &geom.interior, &[], &scalars);
+}
+
 /// dispatch the backward body FEEDBACK (`body_feedback_2d`): run the per-cell per-body
 /// force[ndim]/torque[3]/mass/energy kernel into MAX_BODIES*(D+5) scratch fields, reduce each
 /// (device sum over the interior), assemble each body's BodyDelta (the drag force, accretion
