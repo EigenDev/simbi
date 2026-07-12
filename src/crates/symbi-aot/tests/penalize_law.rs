@@ -79,6 +79,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
     let mut pfx = vec![7.7; n2];
     let mut pfy = vec![7.7; n2];
     let mut pe = vec![7.7; n2];
+    let mut pt = vec![7.7; n2];
     {
         // in-place cons: the same buffers appear as inputs and outputs.
         let inputs = [
@@ -104,6 +105,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
             CpuFieldMut::from_layout(&mut pe, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pt, &lo, &ext),
         ];
         kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         drop(outs);
@@ -139,7 +141,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             let mom_sq = cons.mom.dot(&cons.mom);
             let cs = symbi_ib::drain::sound_speed_from_cons(cons.den, mom_sq, cons.nrg, GAMMA);
             let inv_tau = cs / (C_DRAIN * DX);
-            let kin = BodyKin::<f64, 2> { u_solid: Tensor::zeros(), e_wall: 0.0 };
+            let kin = BodyKin::<f64, 2> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
             let mut acc = Relax::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
@@ -151,6 +153,11 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             assert_eq!(pm[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
             assert_eq!(pfx[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
             assert_eq!(pe[c].to_bits(), delta.energy_delta.to_bits(), "energy at ({ii},{jj})");
+            // the angular-momentum receipt: the z moment of the force receipt
+            // about the body center, same helper, same bits.
+            let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
+            let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
+            assert_eq!(pt[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
             // gate 5, per cell: the delta IS the gas's loss.
             assert_eq!(
                 pm[c].to_bits(),
@@ -211,6 +218,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     let mut pm = vec![7.7; n2];
     let mut pfx = vec![7.7; n2];
     let mut pfy = vec![7.7; n2];
+    let mut pt = vec![7.7; n2];
     {
         let inputs = [
             CpuField::from_layout(&den, &lo, &ext),
@@ -227,6 +235,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             CpuFieldMut::from_layout(&mut pm, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
             CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
+            CpuFieldMut::from_layout(&mut pt, &lo, &ext),
         ];
         kernel(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
         drop(outs);
@@ -249,7 +258,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
             let ch = chi(sphere.dist([mid(ii), mid(jj)]), DX);
             let inv_tau = CS / (C_DRAIN * DX);
-            let kin = BodyKin::<f64, 2> { u_solid: Tensor::zeros(), e_wall: 0.0 };
+            let kin = BodyKin::<f64, 2> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
             let mut acc = Relax::none();
             Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
             let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
@@ -258,6 +267,9 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
             assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
             assert_eq!(pm[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            let x_rel = Tensor::new([mid(ii) - POS[0], mid(jj) - POS[1]]);
+            let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
+            assert_eq!(pt[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
             if pm[c] != 0.0 {
                 fired += 1;
             }

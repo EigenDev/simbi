@@ -162,3 +162,51 @@ def test_loader_round_trips_the_checkpoint_group(tmp_path) -> None:
     assert diag.time.shape == (n,)
     assert diag.mdot.shape == (n, nb)
     assert diag.mdot[1, 0] == pytest.approx(0.2)
+
+
+def test_sphere_flux_recovers_the_analytic_rotating_inflow() -> None:
+    # a uniform-density cloud in rigid rotation w_z falling radially at speed
+    # u: Mdot(r) = 4 pi r^2 rho u exactly, and the z angular momentum carried
+    # through the sphere is Ldot_z(r) = 4 pi r^2 rho u * w_z <x^2 + y^2>
+    # with the shell average <x^2 + y^2> = 2 r^2 / 3.
+    from simbi.analysis import sphere_flux
+
+    rng = np.random.default_rng(7)
+    n = 200_000
+    pos = rng.uniform(-1.0, 1.0, size=(n, 3))
+    r = np.sqrt(np.sum(pos**2, axis=1))
+    keep = (r > 0.05) & (r < 1.0)
+    pos, r = pos[keep], r[keep]
+    rho = np.full(len(pos), 1.3)
+    u, w_z = 0.4, 0.9
+    vel = -u * pos / r[:, None]
+    vel[:, 0] += -w_z * pos[:, 1]
+    vel[:, 1] += w_z * pos[:, 0]
+
+    radii = np.array([0.3, 0.5, 0.8])
+    mdot, ldot = sphere_flux(pos, rho, vel, radii, shell_width=0.02)
+    for i, rs in enumerate(radii):
+        assert mdot[i] == pytest.approx(4.0 * np.pi * rs**2 * 1.3 * u, rel=0.02)
+        expect_l = 4.0 * np.pi * rs**2 * 1.3 * u * w_z * (2.0 * rs**2 / 3.0)
+        assert ldot[i] == pytest.approx(expect_l, rel=0.05)
+
+
+def test_sphere_flux_flags_empty_shells_with_nan() -> None:
+    from simbi.analysis import sphere_flux
+
+    pos = np.array([[0.5, 0.0, 0.0]])
+    rho = np.array([1.0])
+    vel = np.array([[-0.1, 0.0, 0.0]])
+    mdot, ldot = sphere_flux(pos, rho, vel, np.array([0.5, 2.0]), shell_width=0.05)
+    assert np.isfinite(mdot[0]) and np.isnan(mdot[1])
+    assert np.isnan(ldot[1])
+
+
+def test_lambda_c_handles_the_monoatomic_edge() -> None:
+    # gamma = 5/3 makes the general formula 0/0; the limit is 1/4. also pin
+    # continuity: a gamma just below the edge stays near 1/4.
+    from simbi.analysis.__main__ import lambda_c
+
+    assert lambda_c(5.0 / 3.0) == pytest.approx(0.25)
+    assert lambda_c(5.0 / 3.0 - 1e-4) == pytest.approx(0.25, rel=1e-2)
+    assert lambda_c(1.0) == pytest.approx(np.e**1.5 / 4.0)

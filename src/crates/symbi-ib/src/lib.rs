@@ -25,7 +25,7 @@ pub mod diagnostics;
 pub use body::{Body, BodyKind};
 pub use bondi::{accretion_coefficient, bondi_profile, mdot_bondi, sonic_radius, BondiState};
 pub use history::BodyHistory;
-pub use penalize::{penalize_cell, BodyKin, Property, Relax};
+pub use penalize::{moment, omega_cross, penalize_cell, BodyKin, Property, Relax};
 pub use sdf::SdfExpr;
 pub use body_delta::BodyDelta;
 pub use drain::{drain_body_cell, drain_cell, drain_mask, drain_timescale, sound_speed_from_cons};

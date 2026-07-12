@@ -183,3 +183,75 @@ fn iso_dispatch_drains_directly() {
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert!(deltas[0].mass_delta > 0.0, "iso dispatch removed no mass: {:e}", deltas[0].mass_delta);
 }
+
+// the ANGULAR-MOMENTUM receipt (docs/design/51): the reduced torque_delta is
+// the moment of the gas's momentum loss about the body center, machine-exact.
+// gas in rigid rotation about the body makes the receipt decisively nonzero
+// (a drain removes the local angular momentum along with the mass).
+#[test]
+fn torque_receipt_equals_the_moment_of_the_momentum_loss() {
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let center = [0.1, -0.05];
+    let w_z = 0.6;
+    let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|[x, y]| Prim {
+            rho: 1.0 + 0.1 * (3.0 * x).cos() * (2.0 * y).sin(),
+            // rigid rotation about the body center: v = w_z z-hat x r.
+            vel: Tensor::new([-w_z * (y - center[1]), w_z * (x - center[0])]),
+            pre: 1.0,
+        })
+        .build()
+        .with_bodies(BodyCollection::new().add(Body::black_hole(
+            0,
+            Tensor::new(center),
+            Tensor::zeros(),
+            1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
+        )));
+
+    let mom_before: Vec<[f64; 2]> = sim
+        .geom
+        .interior
+        .iter()
+        .map(|c| [*sim.fields.cons.mom[0].view().at(c), *sim.fields.cons.mom[1].view().at(c)])
+        .collect();
+
+    let dt = 1e-3;
+    dispatch_penalize(&sim, dt, GAMMA, 1.0);
+    let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert!(deltas[0].mass_delta > 0.0, "the drain never fired");
+
+    // the independent recomputation: sum (x - x_b) x dmom * dv / dt over the
+    // interior — the same face-mid centroid and double-reciprocal volume the
+    // kernel evaluates.
+    let dv = {
+        let w = ((-L) + dx) - (-L);
+        1.0 / (1.0 / (w * w))
+    };
+    let mid = |i: isize| ((-L + i as f64 * dx) + (-L + (i as f64 + 1.0) * dx)) * 0.5;
+    let mut torque_z = 0.0;
+    for (i, c) in sim.geom.interior.iter().enumerate() {
+        let dmx = mom_before[i][0] - *sim.fields.cons.mom[0].view().at(c);
+        let dmy = mom_before[i][1] - *sim.fields.cons.mom[1].view().at(c);
+        let rx = mid(c[0]) - center[0];
+        let ry = mid(c[1]) - center[1];
+        torque_z += (rx * dmy - ry * dmx) * dv / dt;
+    }
+    assert!(
+        torque_z.abs() > 1e-6,
+        "the rotating cloud produced no angular-momentum exchange: {torque_z:e}"
+    );
+    assert!(
+        (torque_z - deltas[0].torque_delta[2]).abs() <= 1e-11 * torque_z.abs(),
+        "torque receipt {} != moment of the momentum loss {torque_z}",
+        deltas[0].torque_delta[2],
+    );
+    assert_eq!(deltas[0].torque_delta[0], 0.0);
+    assert_eq!(deltas[0].torque_delta[1], 0.0);
+}

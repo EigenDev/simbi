@@ -243,3 +243,34 @@ def stagnation_distance(
     i = sign_change[0]
     f = u[i] / (u[i] - u[i + 1])
     return float(abs(x[i] + f * (x[i + 1] - x[i])))
+
+
+def sphere_flux(
+    pos: NDArray[np.float64],
+    rho: NDArray[np.float64],
+    vel: NDArray[np.float64],
+    radii: NDArray[np.float64],
+    shell_width: float,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """the mass and angular-momentum inflow rates through spheres about the
+    body: Mdot(r) = -4 pi r^2 <rho v_r> and Ldot_z(r) = -4 pi r^2
+    <rho (r x v)_z v_r>, each shell-averaged over cells within
+    +- shell_width of the radius. `pos` is [n, ndim] relative to the body,
+    `vel` [n, ndim]; the z moment is the only component for 2d data (embedded
+    z-hat) and the quotable one for 3d. positive = inflow. the independent
+    cross-check of the receipt ledgers (mass_delta/dt and torque_delta):
+    receipt == flux is the theorem, and a mismatch is a placement bug, not
+    noise. shells with no cells return nan."""
+    r = np.sqrt(np.sum(pos**2, axis=1))
+    vr = np.sum(pos * vel, axis=1) / np.maximum(r, 1e-300)
+    lz = rho * (pos[:, 0] * vel[:, 1] - pos[:, 1] * vel[:, 0])
+    mdot = np.full(len(radii), np.nan)
+    ldot = np.full(len(radii), np.nan)
+    for i, rs in enumerate(np.asarray(radii, dtype=float)):
+        shell = (r > rs - shell_width) & (r < rs + shell_width)
+        if not np.any(shell):
+            continue
+        area = 4.0 * np.pi * rs**2
+        mdot[i] = -area * np.mean(rho[shell] * vr[shell])
+        ldot[i] = -area * np.mean(lz[shell] * vr[shell])
+    return mdot, ldot

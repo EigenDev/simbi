@@ -40,13 +40,66 @@ use symbi_ir::algebra::Scalar;
 
 use crate::body_delta::BodyDelta;
 
-/// the body kinematics a property may target: the solid velocity field value
-/// at the cell and the wall internal-energy target (from the wall temperature
-/// through the EOS; unused unless a thermal property is stacked).
+/// the body kinematics a property may target: the rigid-motion velocity field
+/// and the wall internal-energy target (from the wall temperature through the
+/// EOS; unused unless a thermal property is stacked). `u_solid` is the value
+/// AT THE CELL — for a spinning body, evaluate it per cell with `at()`.
 #[derive(Clone, Copy, Debug)]
 pub struct BodyKin<S: Scalar, const D: usize> {
     pub u_solid: Tensor<S, D>,
+    /// rigid angular velocity about the body center. 2D: only the z component
+    /// acts; 1D: rotation has no meaning and the field is inert.
+    pub omega: Tensor<S, 3>,
     pub e_wall: S,
+}
+
+/// `omega x r` restricted to the D in-plane components: the rigid-rotation
+/// velocity at offset `r` from the rotation center. 1D: exactly zero (no
+/// rotation in one dimension); 2D: the z-spin acting in the plane,
+/// `(-w_z r_1, w_z r_0)`; 3D: the full cross product.
+pub fn omega_cross<S: Scalar, const D: usize>(
+    omega: &Tensor<S, 3>,
+    r: &Tensor<S, D>,
+) -> Tensor<S, D> {
+    let mut out = Tensor::<S, D>::zeros();
+    if D == 2 {
+        out[0] = -(omega[2] * r[1]);
+        out[1] = omega[2] * r[0];
+    } else if D == 3 {
+        out[0] = omega[1] * r[2] - omega[2] * r[1];
+        out[1] = omega[2] * r[0] - omega[0] * r[2];
+        out[2] = omega[0] * r[1] - omega[1] * r[0];
+    }
+    out
+}
+
+/// the moment `r x f` of a D-dimensional vector about the origin, embedded in
+/// 3-space: the torque booking of a force applied at offset `r`. 1D: zero;
+/// 2D: only the z component, `r_0 f_1 - r_1 f_0`; 3D: the full cross product.
+pub fn moment<S: Scalar, const D: usize>(r: &Tensor<S, D>, f: &Tensor<S, D>) -> Tensor<S, 3> {
+    let mut out = Tensor::<S, 3>::zeros();
+    if D == 2 {
+        out[2] = r[0] * f[1] - r[1] * f[0];
+    } else if D == 3 {
+        out[0] = r[1] * f[2] - r[2] * f[1];
+        out[1] = r[2] * f[0] - r[0] * f[2];
+        out[2] = r[0] * f[1] - r[1] * f[0];
+    }
+    out
+}
+
+impl<S: Scalar, const D: usize> BodyKin<S, D> {
+    /// the kinematics evaluated at a cell offset `x_rel` from the body center:
+    /// the returned kin's `u_solid` is the local rigid-motion target
+    /// `u_translation + omega x x_rel`, ready for `Property::contribute`. the
+    /// added terms are exactly `+-0` at zero spin.
+    pub fn at(&self, x_rel: &Tensor<S, D>) -> BodyKin<S, D> {
+        BodyKin {
+            u_solid: self.u_solid + omega_cross(&self.omega, x_rel),
+            omega: self.omega,
+            e_wall: self.e_wall,
+        }
+    }
 }
 
 /// the accumulated relaxation system: rates and targets per primitive channel.
@@ -201,7 +254,7 @@ mod tests {
     }
 
     fn kin() -> BodyKin<f64, 3> {
-        BodyKin { u_solid: Tensor::new([0.05, 0.0, -0.02]), e_wall: 0.9 }
+        BodyKin { u_solid: Tensor::new([0.05, 0.0, -0.02]), omega: Tensor::zeros(), e_wall: 0.9 }
     }
 
     fn normal() -> Tensor<f64, 3> {
@@ -342,6 +395,124 @@ mod tests {
         assert_eq!(delta.energy_delta.to_bits(), ((cons.nrg - out.nrg) * vol).to_bits());
     }
 
+    // the moment/cross helpers agree across dimensions: the 2D forms are the
+    // z-slice of the 3D embedding, and rotation has no 1D meaning.
+    #[test]
+    fn moment_and_cross_embed_consistently() {
+        let w3: Tensor<f64, 3> = Tensor::new([0.0, 0.0, 0.7]);
+        let r2: Tensor<f64, 2> = Tensor::new([0.3, -0.4]);
+        let r3: Tensor<f64, 3> = Tensor::new([0.3, -0.4, 0.0]);
+        let u2 = omega_cross(&w3, &r2);
+        let u3 = omega_cross(&w3, &r3);
+        assert_eq!(u2[0].to_bits(), u3[0].to_bits());
+        assert_eq!(u2[1].to_bits(), u3[1].to_bits());
+        assert_eq!(u3[2], 0.0);
+
+        let f2: Tensor<f64, 2> = Tensor::new([0.9, 0.2]);
+        let f3: Tensor<f64, 3> = Tensor::new([0.9, 0.2, 0.0]);
+        let t2 = moment(&r2, &f2);
+        let t3 = moment(&r3, &f3);
+        assert_eq!(t2[2].to_bits(), t3[2].to_bits());
+        assert_eq!((t3[0], t3[1]), (0.0, 0.0));
+
+        let w1: Tensor<f64, 3> = Tensor::new([0.0, 0.0, 5.0]);
+        let r1: Tensor<f64, 1> = Tensor::new([2.0]);
+        assert_eq!(omega_cross(&w1, &r1)[0], 0.0);
+        assert_eq!(moment(&r1, &r1), Tensor::zeros());
+    }
+
+    // gate 1 (design 51): the rotating target through the SAME exponentials —
+    // u relaxes toward u_translation + omega x x_rel, analytic per channel.
+    #[test]
+    fn rotating_target_matches_the_analytic_exponential() {
+        let cons = sample_cons();
+        let (_, u0, _) = primitives(&cons);
+        let base = BodyKin::<f64, 3> {
+            u_solid: Tensor::new([0.05, 0.0, -0.02]),
+            omega: Tensor::new([0.1, -0.3, 0.8]),
+            e_wall: 0.9,
+        };
+        let x_rel = Tensor::new([0.21, -0.13, 0.34]);
+        let k = base.at(&x_rel);
+        let expect_target = base.u_solid + omega_cross(&base.omega, &x_rel);
+        for a in 0..3 {
+            assert_eq!(k.u_solid[a].to_bits(), expect_target[a].to_bits());
+        }
+
+        let n = normal();
+        let dt = 0.23;
+        let mut acc = Relax::none();
+        Property::Wall { inv_eta_n: 12.0, inv_eta_t: 4.0 }.contribute(0.7, &k, &mut acc);
+        let (out, _) = penalize_cell(&cons, &acc, n, dt, 1.0, 0);
+        let (_, u1, _) = primitives(&out);
+        let du = u0 - k.u_solid;
+        let du_n = n.scale(du.dot(&n));
+        let du_t = du - du_n;
+        let expect_u = k.u_solid
+            + du_n.scale((-acc.lambda_un * dt).exp())
+            + du_t.scale((-acc.lambda_ut * dt).exp());
+        for a in 0..3 {
+            assert!((u1[a] - expect_u[a]).abs() < 1e-13);
+        }
+    }
+
+    // gate 2 (design 51): zero spin through `at()` is bit-identical to the
+    // constant-target path — the omega terms are exactly +-0.
+    #[test]
+    fn zero_omega_at_reduces_bit_exactly() {
+        let cons = sample_cons();
+        let k = kin();
+        let x_rel = Tensor::new([0.4, -0.2, 0.9]);
+        let n = normal();
+        let dt = 0.05;
+        let run = |kin_used: &BodyKin<f64, 3>| {
+            let mut acc = Relax::none();
+            Property::Wall { inv_eta_n: 9.0, inv_eta_t: 3.0 }.contribute(0.8, kin_used, &mut acc);
+            Property::Drain { inv_tau: 2.0 }.contribute(0.8, kin_used, &mut acc);
+            penalize_cell(&cons, &acc, n, dt, 1.0, 0).0
+        };
+        let direct = run(&k);
+        let via_at = run(&k.at(&x_rel));
+        assert_eq!(direct.den.to_bits(), via_at.den.to_bits());
+        assert_eq!(direct.nrg.to_bits(), via_at.nrg.to_bits());
+        for a in 0..3 {
+            assert_eq!(direct.mom[a].to_bits(), via_at.mom[a].to_bits());
+        }
+    }
+
+    // gate 3 (design 51): gas already in rigid co-rotation with the target
+    // gets exactly +-0 corrections — a stiff spinning wall is a no-op on it.
+    #[test]
+    fn co_rotation_is_an_exact_no_op() {
+        let base = BodyKin::<f64, 3> {
+            u_solid: Tensor::new([0.02, -0.07, 0.11]),
+            omega: Tensor::new([0.5, -1.1, 2.3]),
+            e_wall: 0.0,
+        };
+        let x_rel = Tensor::new([0.17, 0.29, -0.23]);
+        let k = base.at(&x_rel);
+        // seed the gas EXACTLY co-moving: same helper, same bits. den is a
+        // power of two so the kernel's u = mom * (1/den) round trip is exact
+        // and du is a true +-0, not an ulp.
+        let den = 2.0;
+        let u = base.u_solid + omega_cross(&base.omega, &x_rel);
+        let e_int = 1.3;
+        let cons: Cons3 = ConsG {
+            den,
+            mom: u.scale(den),
+            nrg: den * (e_int + 0.5 * u.dot(&u)),
+        };
+        let mut acc = Relax::none();
+        Property::Wall { inv_eta_n: 1e12, inv_eta_t: 1e12 }.contribute(1.0, &k, &mut acc);
+        let (out, delta) = penalize_cell(&cons, &acc, normal(), 10.0, 1.0, 0);
+        assert_eq!(out.den.to_bits(), cons.den.to_bits());
+        assert_eq!(out.nrg.to_bits(), cons.nrg.to_bits());
+        for a in 0..3 {
+            assert_eq!(out.mom[a].to_bits(), cons.mom[a].to_bits());
+            assert_eq!(delta.force_delta[a], 0.0);
+        }
+    }
+
     // the isothermal regime: no energy channel — the drain and wall still act,
     // the thermal property is structurally inert (the slot discards it).
     #[test]
@@ -351,7 +522,7 @@ mod tests {
             mom: Tensor::new([0.7, -0.3]),
             nrg: Default::default(),
         };
-        let k = BodyKin { u_solid: Tensor::zeros(), e_wall: 5.0 };
+        let k = BodyKin { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 5.0 };
         let n = Tensor::new([1.0, 0.0]);
         let mut acc = Relax::none();
         Property::Drain { inv_tau: 4.0 }.contribute(0.5, &k, &mut acc);

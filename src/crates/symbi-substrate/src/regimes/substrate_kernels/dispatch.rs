@@ -512,6 +512,14 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         symbi_ir::KernelId::PenalizeDrainIso { ndim: D as u8 }.name()
     };
     let n_delta = if nrg.is_some() { D + 2 } else { D + 1 };
+    // the torque receipt slots after mass/force/energy: the moment of the
+    // force receipt about the body center. rotation needs a plane, so 1d
+    // books none and 2d only the z component.
+    let n_torque = match D {
+        3 => 3,
+        2 => 1,
+        _ => 0,
+    };
     let bodies = &im.bodies;
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
         match bind {
@@ -526,7 +534,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
             other => panic!("penalize: unexpected spec scalar {other:?}"),
         }
     };
-    let scratch = feedback_scratch(sim, n_delta);
+    let scratch = feedback_scratch(sim, n_delta + n_torque);
     for b in 0..bodies.len() {
         if bodies.get(b).accretion_radius().is_none() {
             continue;
@@ -567,7 +575,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         if let Some(nrg) = nrg {
             outputs.push(nrg);
         }
-        for s in scratch[..n_delta].iter() {
+        for s in scratch[..n_delta + n_torque].iter() {
             outputs.push(s);
         }
         let scalars = scalars_for(name, |bind| Sc::from_f64(bind_value(bind, b)));
@@ -583,10 +591,16 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         } else {
             0.0
         };
+        // torque: the 3d slots are (x, y, z); the single 2d slot is the z moment.
+        let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
+        for k in 0..n_torque {
+            let axis = if n_torque == 1 { 2 } else { k };
+            torque[axis] = field_reduce(&scratch[n_delta + k], &bbox, ReductionOp::Add);
+        }
         im.diagnostics.accumulate(symbi_ib::BodyDelta {
             idx: b,
             force_delta: force,
-            torque_delta: symbi_algebra::Tensor::zeros(),
+            torque_delta: torque,
             mass_delta: mass,
             prev_mass_delta: 0.0,
             energy_delta: energy,

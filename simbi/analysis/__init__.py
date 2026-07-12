@@ -19,6 +19,7 @@ from .accretion import (
     load_diagnostics_dat,
     mdot_from_cumulative,
     sonic_radius_vs_angle,
+    sphere_flux,
     stagnation_distance,
     steady_state_time,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "load_diagnostics_dat",
     "mdot_from_cumulative",
     "sonic_radius_vs_angle",
+    "sphere_flux",
     "stagnation_distance",
     "steady_state_time",
 ]

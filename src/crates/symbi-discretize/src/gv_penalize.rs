@@ -36,6 +36,17 @@ use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
 use symbi_ir::{begin_trace, end_trace};
 
+/// the 3-space axes whose torque component can be nonzero at dimension
+/// `ndim`: rotation needs a plane, so 1d has none, 2d only the z moment,
+/// 3d all three.
+pub fn torque_axes(ndim: usize) -> std::ops::Range<usize> {
+    match ndim {
+        3 => 0..3,
+        2 => 2..3,
+        _ => 0..0,
+    }
+}
+
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian,
 /// DOF = ndim. dimension-generic over 1..=3.
 pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
@@ -86,7 +97,11 @@ pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
 
     // the property stack (docs/design/50): [Drain]. contribute at Gv, then
     // the SAME integrator the f64 oracle runs.
-    let kin = BodyKin::<Gv, 3> { u_solid: Tensor::zeros(), e_wall: Gv::ZERO };
+    let kin = BodyKin::<Gv, 3> {
+        u_solid: Tensor::zeros(),
+        omega: Tensor::zeros(),
+        e_wall: Gv::ZERO,
+    };
     let mut acc = Relax::<Gv, 3>::none();
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
@@ -95,6 +110,12 @@ pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
+    // the angular-momentum receipt: the moment of the cell's force receipt
+    // about the body center, r x F with r = x - body_pos. exactly zero beyond
+    // the support ball (F vanishes there), so the same reduction box applies.
+    // 3d books all three components; 2d only z; 1d none.
+    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+    let torque = symbi_ib::moment(&x_rel, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -115,6 +136,13 @@ pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
         ));
     }
     writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
+    for a in torque_axes(ndim) {
+        writes.push((
+            format!("pen_torque_{a}"),
+            format!("pen_0_torque_{a}").into(),
+            torque[a].node(),
+        ));
+    }
 
     // the delta outputs vanish exactly beyond the tanh saturation radius; the
     // in-place cons writes are unchanged-value there, so the ball bounds
@@ -163,7 +191,11 @@ pub fn penalize_drain_iso_gv(ndim: usize) -> (GvKernel, Writes) {
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     let inv_tau = cs / (c_drain * min_w);
 
-    let kin = BodyKin::<Gv, 3> { u_solid: Tensor::zeros(), e_wall: Gv::ZERO };
+    let kin = BodyKin::<Gv, 3> {
+        u_solid: Tensor::zeros(),
+        omega: Tensor::zeros(),
+        e_wall: Gv::ZERO,
+    };
     let mut acc = Relax::<Gv, 3>::none();
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
@@ -172,6 +204,9 @@ pub fn penalize_drain_iso_gv(ndim: usize) -> (GvKernel, Writes) {
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
+    // the angular-momentum receipt, identical booking to the adiabatic twin.
+    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+    let torque = symbi_ib::moment(&x_rel, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -188,6 +223,13 @@ pub fn penalize_drain_iso_gv(ndim: usize) -> (GvKernel, Writes) {
             format!("pen_force_{a}"),
             format!("pen_0_force_{a}").into(),
             delta.force_delta[a].node(),
+        ));
+    }
+    for a in torque_axes(ndim) {
+        writes.push((
+            format!("pen_torque_{a}"),
+            format!("pen_0_torque_{a}").into(),
+            torque[a].node(),
         ));
     }
 
