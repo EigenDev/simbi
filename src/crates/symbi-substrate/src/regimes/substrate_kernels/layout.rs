@@ -23,7 +23,7 @@ pub use symbi_exec::layout::{alloc_layout, exec_layout, expect_kernel};
 // `super::layout::{coord_suffix, geom_suffix, ...}` paths resolve unchanged.
 pub use symbi_discretize::kernel_slug::{
     coord_suffix, geom_suffix, gr_chart_dof_tag, mhd_flux_suffix, mhd_geom_suffix, penalize_name,
-    spacetime_slug,
+    spacetime_slug, viscous_ortho_name,
 };
 
 // the per-axis geometry scalars a CURVILINEAR kernel expects, in the order cell_geometry

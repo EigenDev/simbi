@@ -20,8 +20,10 @@
 
 use symbi_algebra::algebra::Numeric;
 use symbi_algebra::Tensor;
+use symbi_geometry::{CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::viscous::{
     viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_cyl_2d,
+    viscous_mom_update_orthogonal_2d,
 };
 use symbi_ir::gv::Writes;
 use symbi_ir::{begin_trace, end_trace, FieldRef, Gv, GvKernel};
@@ -105,6 +107,66 @@ pub fn viscous_iso_cyl_gv() -> (GvKernel, Writes) {
     let r_c = geo.centroid[0];
     let nust = [[nu; 3]; 3];
     let dmom = viscous_mom_update_cyl_2d(&vst, &rst, &nust, r_c, dr, dphi, dt);
+    let writes = accumulate_mom(dmom);
+    (end_trace(), writes)
+}
+
+/// the scale factors `(h1, h2)` at a coordinate point, per chart (Cartesian -> 1;
+/// cylindrical (R, phi) -> (1, R); spherical (r, theta) -> (1, r)). the const-D
+/// metric bridge mirrors the geometric-source dispatch — one metric family.
+fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv> {
+    fn run<M, const D: usize>(m: M, x: &[Gv]) -> Vec<Gv>
+    where
+        M: Metric<Gv, D> + DiagonalMetric<Gv, D>,
+    {
+        let h = m.scale_factors(Tensor::from_fn(|i| x[i]));
+        (0..D).map(|i| h[i]).collect()
+    }
+    match (coords, ndim) {
+        (Coords::Cartesian, _) => vec![Gv::ONE; ndim],
+        (Coords::Cylindrical, 2) => run::<_, 2>(CylindricalRPhi, x),
+        (Coords::Spherical, 2) => run::<_, 2>(Spherical, x),
+        (c, d) => panic!("viscous scale_factors: unsupported (coords {c:?}, ndim {d})"),
+    }
+}
+
+/// trace the constant-nu isothermal viscous operator on a GENERAL 2D ORTHOGONAL
+/// chart: read the scale factors `(h1, h2)` at each stencil cell from the chart's
+/// `Metric::scale_factors` (evaluated at `centroid + coordinate offset`), then run
+/// the one carrier-generic orthogonal operator. `coords` is the bake-time chart —
+/// cylindrical and spherical both route here (spherical `h = (1, r)` falls out for
+/// free), so this ONE kernel subsumes the chart-specific curvilinear operators.
+pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+    const NDIM: u8 = 2;
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let nu = Gv::scalar("nu");
+    let dx1 = Gv::scalar("dx_0");
+    let dx2 = Gv::scalar("dx_1");
+
+    let (vst, rst) = prim_stencil();
+    let geo = cell_geometry_gv(
+        coords,
+        &vec![Spacing::Uniform; NDIM as usize],
+        &(0..NDIM as usize).collect::<Vec<_>>(),
+        NDIM as usize,
+    );
+    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+
+    let mut h1 = [[Gv::ZERO; 3]; 3];
+    let mut h2 = [[Gv::ZERO; 3]; 3];
+    for dj in 0..3usize {
+        for di in 0..3usize {
+            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+            let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
+            h1[dj][di] = h[0];
+            h2[dj][di] = h[1];
+        }
+    }
+
+    let nust = [[nu; 3]; 3];
+    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
     let writes = accumulate_mom(dmom);
     (end_trace(), writes)
 }

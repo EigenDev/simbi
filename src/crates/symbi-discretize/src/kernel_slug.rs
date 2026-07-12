@@ -65,6 +65,13 @@ pub fn penalize_name(base: &str, coords: Geometry, ndim: usize) -> String {
     format!("{base}{}_{ndim}d", geom_suffix(coords, ndim, ndim))
 }
 
+/// the general orthogonal viscous kernel name for a chart: `viscous_iso_ortho{chart}
+/// _{ndim}d`. one operator, one name per chart (cylindrical `_cyl`, spherical
+/// `_sph`); Cartesian keeps its own flat `viscous_iso` kernel.
+pub fn viscous_ortho_name(coords: Geometry, ndim: usize) -> String {
+    format!("viscous_iso_ortho{}_{ndim}d", geom_suffix(coords, ndim, ndim))
+}
+
 /// the MHD curvilinear suffix, keyed on the GRID-AXIS SET (not DOF-vs-ndim). MHD
 /// B is ALWAYS a 3-vector, so both cylindrical 2D planes carry DOF = 3 and the
 /// DOF lift cannot tell them apart: r-z axisymmetric = axes `[0, 2]` (out-of-plane

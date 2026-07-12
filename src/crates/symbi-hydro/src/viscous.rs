@@ -215,6 +215,128 @@ pub fn viscous_mom_update_cyl_2d<S: Scalar>(
     Tensor::new([dt * f_r, dt * f_phi])
 }
 
+/// the general ORTHOGONAL-coordinate physical deviatoric stress `(tau_11, tau_22,
+/// tau_12)` from the physical velocity gradients + the scale factors `h1, h2` and
+/// their gradients at a point. reduces to Cartesian at `h = 1` and to the
+/// cylindrical `cyl_stress` at `h = (1, R)` (`d1h2 = 1`). `u1 = v along axis 1`,
+/// `u2 = v along axis 2`; `dNhM = d h_M / d x_N`.
+#[allow(clippy::too_many_arguments)]
+fn ortho_stress<S: Scalar>(
+    u1: S, u2: S,
+    d1u1: S, d2u1: S, d1u2: S, d2u2: S,
+    h1: S, h2: S,
+    d2h1: S, d1h2: S,
+    mu: S,
+) -> (S, S, S) {
+    let two = S::from_f64(2.0);
+    let half = S::from_f64(0.5);
+    let two_thirds = S::from_f64(2.0 / 3.0);
+    let inv_h1 = S::from_f64(1.0) / h1;
+    let inv_h2 = S::from_f64(1.0) / h2;
+    let inv_h1h2 = inv_h1 * inv_h2;
+    let e11 = d1u1 * inv_h1 + u2 * d2h1 * inv_h1h2;
+    let e22 = d2u2 * inv_h2 + u1 * d1h2 * inv_h1h2;
+    let e12 = half * (d2u1 * inv_h2 - u1 * d2h1 * inv_h1h2 + d1u2 * inv_h1 - u2 * d1h2 * inv_h1h2);
+    let theta = e11 + e22;
+    let t11 = mu * (two * e11 - two_thirds * theta);
+    let t22 = mu * (two * e22 - two_thirds * theta);
+    let t12 = mu * two * e12;
+    (t11, t22, t12)
+}
+
+/// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3
+/// stencil on a GENERAL 2D ORTHOGONAL grid, physical frame, given the scale-factor
+/// stencils `h1, h2` (their gradients are differenced from the stencil). ONE
+/// operator for every diagonal chart: `h = (1, 1)` is Cartesian, `(1, R)` is
+/// cylindrical, `(1, r)` is the spherical meridian. axis 2 is the ANGULAR / Killing
+/// axis (`h` independent of `x2`): its momentum uses the conservative
+/// `(1/(h1 h2^2)) d1(h2^2 tau_12)` flux, so the generalized angular momentum
+/// `h2 * mom_2` is transported, never created. axis 1 carries the geometric hoop
+/// source `-tau_22 d1(h2)/(h1 h2)`.
+#[allow(clippy::too_many_arguments)]
+pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
+    v: &[[Tensor<S, 2>; 3]; 3],
+    rho: &[[S; 3]; 3],
+    nu: &[[S; 3]; 3],
+    h1: &[[S; 3]; 3],
+    h2: &[[S; 3]; 3],
+    dx1: S,
+    dx2: S,
+    dt: S,
+) -> Tensor<S, 2> {
+    let half = S::from_f64(0.5);
+    let two = S::from_f64(2.0);
+    let four = S::from_f64(4.0);
+    let tiny = S::from_f64(1e-300);
+    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let u1a: [[S; 3]; 3] = std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][0]));
+    let u2a: [[S; 3]; 3] = std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][1]));
+
+    // stress at the x1-face between columns (ia, ib) of row band: normal d1 compact,
+    // transverse d2 four-point. returns (tau_11, tau_12, h2_face).
+    let x1_face = |ia: usize, ib: usize| -> (S, S, S) {
+        let g1 = |x: &[[S; 3]; 3]| (x[1][ib] - x[1][ia]) / dx1;
+        let g2 = |x: &[[S; 3]; 3]| {
+            ((x[2][ia] - x[0][ia]) + (x[2][ib] - x[0][ib])) / (four * dx2)
+        };
+        let fv = |x: &[[S; 3]; 3]| half * (x[1][ia] + x[1][ib]);
+        let mu = harm(rho[1][ia], rho[1][ib]) * (half * (nu[1][ia] + nu[1][ib]));
+        let (t11, _, t12) = ortho_stress(
+            fv(&u1a), fv(&u2a), g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a),
+            fv(h1), fv(h2), g2(h1), g1(h2), mu,
+        );
+        (t11, t12, fv(h2))
+    };
+    // stress at the x2-face between rows (ja, jb): normal d2 compact, transverse d1
+    // four-point. returns (tau_22, tau_12, h1_face).
+    let x2_face = |ja: usize, jb: usize| -> (S, S, S) {
+        let g2 = |x: &[[S; 3]; 3]| (x[jb][1] - x[ja][1]) / dx2;
+        let g1 = |x: &[[S; 3]; 3]| {
+            ((x[ja][2] - x[ja][0]) + (x[jb][2] - x[jb][0])) / (four * dx1)
+        };
+        let fv = |x: &[[S; 3]; 3]| half * (x[ja][1] + x[jb][1]);
+        let mu = harm(rho[ja][1], rho[jb][1]) * (half * (nu[ja][1] + nu[jb][1]));
+        let (_, t22, t12) = ortho_stress(
+            fv(&u1a), fv(&u2a), g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a),
+            fv(h1), fv(h2), g2(h1), g1(h2), mu,
+        );
+        (t22, t12, fv(h1))
+    };
+
+    let (t11_1p, t12_1p, h2_1p) = x1_face(1, 2);
+    let (t11_1m, t12_1m, h2_1m) = x1_face(0, 1);
+    let (t22_2p, t12_2p, h1_2p) = x2_face(1, 2);
+    let (t22_2m, t12_2m, h1_2m) = x2_face(0, 1);
+
+    // center: the hoop-stress source for the axis-1 force.
+    let (h1_c, h2_c) = (h1[1][1], h2[1][1]);
+    let inv_h1h2 = S::from_f64(1.0) / (h1_c * h2_c);
+    let d1u1_c = (u1a[1][2] - u1a[1][0]) / (two * dx1);
+    let d2u1_c = (u1a[2][1] - u1a[0][1]) / (two * dx2);
+    let d1u2_c = (u2a[1][2] - u2a[1][0]) / (two * dx1);
+    let d2u2_c = (u2a[2][1] - u2a[0][1]) / (two * dx2);
+    let d2h1_c = (h1[2][1] - h1[0][1]) / (two * dx2);
+    let d1h2_c = (h2[1][2] - h2[1][0]) / (two * dx1);
+    let mu_c = rho[1][1] * nu[1][1];
+    let (t11_c, t22_c, t12_c) = ortho_stress(
+        u1a[1][1], u2a[1][1], d1u1_c, d2u1_c, d1u2_c, d2u2_c,
+        h1_c, h2_c, d2h1_c, d1h2_c, mu_c,
+    );
+    let _ = t11_c;
+
+    // axis-1 (radial) force: area-weighted divergence + the geometric sources.
+    let f1 = ((h2_1p * t11_1p - h2_1m * t11_1m) / dx1
+        + (h1_2p * t12_2p - h1_2m * t12_2m) / dx2)
+        * inv_h1h2
+        + (t12_c * d2h1_c - t22_c * d1h2_c) * inv_h1h2;
+    // axis-2 (angular) force: the conservative h2^2 flux + the h2 phi-divergence.
+    let inv_h1h2sq = S::from_f64(1.0) / (h1_c * h2_c * h2_c);
+    let f2 = (h2_1p * h2_1p * t12_1p - h2_1m * h2_1m * t12_1m) * (inv_h1h2sq / dx1)
+        + (t22_2p - t22_2m) * (S::from_f64(1.0) / h2_c / dx2);
+
+    Tensor::new([dt * f1, dt * f2])
+}
+
 /// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to axis `a`
 /// of the center cell (`hi` = the +a face i+1/2, else the -a face i-1/2), from
 /// the 3x3x3 velocity/density/viscosity stencil. the normal gradient is compact
@@ -437,6 +559,100 @@ mod tests {
         // rough magnitude: -(3/4) mu sqrt(GM) R^-5/2 * dt at R=1.
         let expect = -0.75 * rho * nu * gm.sqrt() * dt;
         assert!((d[1] / expect - 1.0).abs() < 0.1, "f_phi {} vs ~{expect}", d[1]);
+    }
+
+    // -- general orthogonal operator -----------------------------------------
+    // h = (1, 1) recovers the flat Cartesian operator to roundoff (every metric
+    // term is an exact zero).
+    #[test]
+    fn orthogonal_reduces_to_cartesian() {
+        let (nu, rho, dt) = (0.03, 1.1, 0.01);
+        let (dx, dy) = (0.05, 0.05);
+        let (v, r) = stencil(0.2, 0.13, dx, dy, |x, y| [x + 0.5 * y, -0.3 * x * x], |_, _| rho);
+        let ones = [[1.0f64; 3]; 3];
+        let d_o = viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &ones, &ones, dx, dy, dt);
+        let d_c = viscous_mom_update_2d(&v, &r, &uni(nu), dx, dy, dt);
+        let rel = |a: f64, b: f64| (a - b).abs() / b.abs().max(1e-30);
+        assert!(rel(d_o[0], d_c[0]) < 1e-11, "f1 {} vs {}", d_o[0], d_c[0]);
+        assert!(rel(d_o[1], d_c[1]) < 1e-11, "f2 {} vs {}", d_o[1], d_c[1]);
+    }
+
+    // h = (1, R) recovers the hand-written cylindrical operator (which is itself
+    // bit-gated) to roundoff — the general form and the chart-specific form agree.
+    #[test]
+    fn orthogonal_reduces_to_cylindrical() {
+        let (nu, rho, dt) = (0.04, 1.2, 0.01);
+        let (r_c, dr, dphi) = (1.5, 0.05, 0.1);
+        let (v, r) =
+            cyl_stencil(r_c, dr, dphi, |rr, pp| [0.2 * (rr + pp).cos(), (1.0 / rr).sqrt()], |_, _| rho);
+        let ones = [[1.0f64; 3]; 3];
+        let h2: [[f64; 3]; 3] =
+            std::array::from_fn(|_| std::array::from_fn(|i| r_c + (i as f64 - 1.0) * dr));
+        let d_o = viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &ones, &h2, dr, dphi, dt);
+        let d_c = viscous_mom_update_cyl_2d(&v, &r, &uni(nu), r_c, dr, dphi, dt);
+        let rel = |a: f64, b: f64| (a - b).abs() / b.abs().max(1e-30);
+        assert!(rel(d_o[0], d_c[0]) < 1e-9, "f1 {} vs {}", d_o[0], d_c[0]);
+        assert!(rel(d_o[1], d_c[1]) < 1e-9, "f2 {} vs {}", d_o[1], d_c[1]);
+    }
+
+    // rigid rotation is stress-free in the general operator too (h = (1, R)).
+    #[test]
+    fn orthogonal_rigid_rotation_books_zero_force() {
+        let (om, nu, rho, dt) = (0.7, 0.05, 1.3, 0.01);
+        let (r_c, dr, dphi) = (1.5, 0.05, 0.1);
+        let (v, r) = cyl_stencil(r_c, dr, dphi, |rr, _| [0.0, om * rr], |_, _| rho);
+        let ones = [[1.0f64; 3]; 3];
+        let h2: [[f64; 3]; 3] =
+            std::array::from_fn(|_| std::array::from_fn(|i| r_c + (i as f64 - 1.0) * dr));
+        let d = viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &ones, &h2, dr, dphi, dt);
+        assert!(d[0].abs() < 1e-12 && d[1].abs() < 1e-12, "not stress-free: {d:?}");
+    }
+
+    // THE conservation gate: a smooth, doubly-periodic fake orthogonal metric
+    // h1 = 1, h2 = 1 + 0.3 sin(2pi i/n), INDEPENDENT of x2 (the angular axis is
+    // Killing), so h2 * mom_2 is the conserved generalized angular momentum. every
+    // face flux (the single-valued h2^2 tau_12 and h1 h2 tau_22) telescopes on a
+    // periodic grid, so the total change is EXACTLY zero — the property a naive
+    // non-conservative discretization would violate.
+    #[test]
+    fn orthogonal_conserves_generalized_angular_momentum() {
+        use std::f64::consts::PI;
+        let n = 12usize;
+        let (dx1, dx2, nu, dt) = (0.1, 0.1, 0.05, 1e-4);
+        let h2f = |i: usize| 1.0 + 0.3 * (2.0 * PI * (i as f64) / (n as f64)).sin();
+        let vfun = |i: usize, j: usize| {
+            let (fi, fj) = (i as f64 / n as f64, j as f64 / n as f64);
+            [
+                0.4 * (2.0 * PI * fi).cos() + 0.2 * (2.0 * PI * fj).sin(),
+                0.3 * (2.0 * PI * fj).cos() + 0.1 * (2.0 * PI * fi).sin(),
+            ]
+        };
+        let rfun = |i: usize, j: usize| {
+            1.0 + 0.2 * (2.0 * PI * i as f64 / n as f64).sin() * (2.0 * PI * j as f64 / n as f64).cos()
+        };
+        let mut total = 0.0f64;
+        for jc in 0..n {
+            for ic in 0..n {
+                let mut v = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+                let mut r = [[0.0; 3]; 3];
+                let h1s = [[1.0; 3]; 3];
+                let mut h2s = [[0.0; 3]; 3];
+                for dj in 0..3 {
+                    for di in 0..3 {
+                        let i = (ic + di + n - 1) % n;
+                        let j = (jc + dj + n - 1) % n;
+                        v[dj][di] = Tensor::new(vfun(i, j));
+                        r[dj][di] = rfun(i, j);
+                        h2s[dj][di] = h2f(i); // x2-independent -> Killing
+                    }
+                }
+                let d = viscous_mom_update_orthogonal_2d(&v, &r, &uni(nu), &h1s, &h2s, dx1, dx2, dt);
+                // the conserved increment: h1_c h2_c^2 * dmom_2 (common dx dropped).
+                let h2c = h2f(ic);
+                total += h2c * h2c * d[1];
+            }
+        }
+        assert!(total.abs() < 1e-12, "angular momentum not conserved: {total}");
     }
 
     // a mass sink that retains momentum (the torque-free surface) leaves a mask

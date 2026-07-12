@@ -1703,6 +1703,15 @@ fn main() {
         emit_gv(&out_dir, KernelId::ViscousIsoCyl { ndim: 2 }.name(), 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_alpha_cyl_gv();
         emit_gv(&out_dir, KernelId::ViscousIsoAlphaCyl { ndim: 2 }.name(), 2, &k, &writes);
+        // the GENERAL 2D orthogonal constant-nu operator (scale-factor form): one
+        // kernel per curvilinear chart, subsuming the chart-specific ones.
+        use symbi_discretize::coords::Coords;
+        use symbi_discretize::kernel_slug::viscous_ortho_name;
+        for coords in [Coords::Cylindrical, Coords::Spherical] {
+            let geom = coords.to_geometry();
+            let (k, writes) = symbi_discretize::viscous_iso_ortho_gv(coords);
+            emit_gv(&out_dir, &viscous_ortho_name(geom, 2), 2, &k, &writes);
+        }
     }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.

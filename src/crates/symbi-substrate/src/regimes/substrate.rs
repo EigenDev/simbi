@@ -383,7 +383,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             // smallest at the inner edge — using the raw angle would leave the inner
             // annulus under-resolved and unstable. cartesian widths are already
             // physical.
-            let min_dx = if sim.geom.coords == Geometry::Cylindrical {
+            let curvilinear = sim.geom.coords == Geometry::Cylindrical
+                || sim.geom.coords == Geometry::Spherical;
+            let min_dx = if curvilinear {
+                // h2 = the radial coordinate on both curvilinear charts, so the x2
+                // physical width is r*dx2, smallest at the inner edge.
                 let dr = sim.geom.dx[0];
                 let r_min = sim.geom.x_lo[0] + 0.5 * dr; // innermost cell centroid
                 dr.min((r_min * sim.geom.dx[1]).max(1e-30))
@@ -582,8 +586,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         }
         let coords = sim.geom.coords;
         assert!(
-            coords == Geometry::Cartesian || coords == Geometry::Cylindrical,
-            "viscosity is baked for cartesian (2D/3D) and cylindrical (2D R-phi) only"
+            coords == Geometry::Cartesian
+                || coords == Geometry::Cylindrical
+                || coords == Geometry::Spherical,
+            "viscosity is baked for cartesian (2D/3D) and curvilinear (2D, the general \
+             orthogonal operator) only"
         );
         // both dispatches select the cartesian or cylindrical kernel by coords and
         // assert the supported dimension (alpha: cartesian 2D/3D, cylindrical 2D).

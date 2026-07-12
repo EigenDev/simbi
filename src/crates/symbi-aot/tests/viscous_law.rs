@@ -655,3 +655,107 @@ fn compiled_viscous_iso_alpha_cyl_matches_the_f64_chain_bitwise() {
     }
     assert!(checked > 20, "the cylindrical alpha viscous operator never produced a torque");
 }
+
+// the GENERAL ORTHOGONAL kernel on the cylindrical chart: bit-identical to the f64
+// `viscous_mom_update_orthogonal_2d` fed the scale factors h = (1, R) that the
+// kernel reads from CylindricalRPhi::scale_factors (R = the cell centroid + offset).
+// this is the ONE kernel every curvilinear chart routes through.
+#[test]
+fn compiled_viscous_iso_ortho_cyl_matches_the_f64_chain_bitwise() {
+    use symbi_hydro::viscous::viscous_mom_update_orthogonal_2d;
+    let (kernel, ir) = kernel_by_name::<f64>("viscous_iso_ortho_cyl_2d").expect("ortho cyl kernel");
+
+    const R_LO: f64 = 0.1;
+    const DR: f64 = 0.05;
+    const PHI_LO: f64 = 0.0;
+    const DPHI: f64 = 0.1;
+
+    let n2 = N * N;
+    let (mut rho, mut v0, mut v1) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    let (mut m0, mut m1) = (vec![0.0; n2], vec![0.0; n2]);
+    for jj in 0..N {
+        for ii in 0..N {
+            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            let c = ii + jj * N;
+            rho[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
+            v0[c] = 0.3 * (rr + pp).cos();
+            v1[c] = (1.0 / rr).sqrt() - 0.2 * (rr - 2.0 * pp).sin();
+            m0[c] = rho[c] * v0[c];
+            m1[c] = rho[c] * v1[c];
+        }
+    }
+    let (m0_in, m1_in) = (m0.clone(), m1.clone());
+
+    let scalar = |name: &str| -> f64 {
+        match name {
+            "dt" => DT,
+            "nu" => NU,
+            "dx_0" => DR,
+            "dx_1" => DPHI,
+            "x_lo_0" => R_LO,
+            "x_lo_1" => PHI_LO,
+            "map_kind_0" | "map_kind_1" => 0.0,
+            other => panic!("unexpected scalar '{other}'"),
+        }
+    };
+    let (mut ints, mut scalars) = (Vec::new(), Vec::new());
+    for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
+        let v = scalar(&bind.name());
+        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+    }
+
+    let lo = [0i32; 2];
+    let ext = [N as u32; 2];
+    let disp_lo = [1i32; 2];
+    let disp_ext = [(N - 2) as u32; 2];
+    {
+        let inputs = [
+            CpuField::from_layout(&rho, &lo, &ext),
+            CpuField::from_layout(&v0, &lo, &ext),
+            CpuField::from_layout(&v1, &lo, &ext),
+            CpuField::from_layout(&m0_in, &lo, &ext),
+            CpuField::from_layout(&m1_in, &lo, &ext),
+        ];
+        let mut outs = [
+            CpuFieldMut::from_layout(&mut m0, &lo, &ext),
+            CpuFieldMut::from_layout(&mut m1, &lo, &ext),
+        ];
+        kernel(&inputs, &mut outs, &disp_ext, &disp_lo, &ints, &scalars);
+    }
+
+    // f64 chain: h1 = 1, h2 = R = r_c + (di-1) dr (the CylindricalRPhi scale factor),
+    // r_c the volume-weighted centroid, then the general orthogonal operator.
+    let rl = |i: usize| R_LO + i as f64 * DR;
+    let rh = |i: usize| R_LO + (i as f64 + 1.0) * DR;
+    let r_c = |i: usize| {
+        let (a, b) = (rh(i), rl(i));
+        ((a * a * a - b * b * b) / 3.0) / ((a * a - b * b) / 2.0)
+    };
+    let ones = [[1.0f64; 3]; 3];
+    let mut checked = 0usize;
+    for jj in 1..N - 1 {
+        for ii in 1..N - 1 {
+            let rc = r_c(ii);
+            let mut vst = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+            let mut rst = [[0.0f64; 3]; 3];
+            let mut h2 = [[0.0f64; 3]; 3];
+            for dj in 0..3 {
+                for di in 0..3 {
+                    let c = (ii + di - 1) + (jj + dj - 1) * N;
+                    vst[dj][di] = Tensor::new([v0[c], v1[c]]);
+                    rst[dj][di] = rho[c];
+                    h2[dj][di] = rc + (di as f64 - 1.0) * DR;
+                }
+            }
+            let dmom =
+                viscous_mom_update_orthogonal_2d(&vst, &rst, &[[NU; 3]; 3], &ones, &h2, DR, DPHI, DT);
+            let c = ii + jj * N;
+            assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj})");
+            assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj})");
+            if (m1[c] - m1_in[c]).abs() > 1e-14 {
+                checked += 1;
+            }
+        }
+    }
+    assert!(checked > 20, "the general orthogonal operator never produced a torque");
+}

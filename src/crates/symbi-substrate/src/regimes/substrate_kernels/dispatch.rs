@@ -207,22 +207,20 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    // the constant-nu operator is baked for 2D/3D cartesian (flat face differences)
-    // and 2D cylindrical (R, phi) (the physical-frame metric operator). the kernel
-    // reads the R centroid from cell_geometry, so the geom scalars resolve as usual.
-    let name = match geom.coords {
+    // cartesian uses the flat face-difference kernel (2D/3D); every curvilinear
+    // chart routes through the ONE general orthogonal kernel (scale-factor form),
+    // which reads the cell geometry, so the geom scalars resolve as usual.
+    let name: String = match geom.coords {
         symbi_geometry::Geometry::Cartesian => {
             assert!(D == 2 || D == 3, "cartesian viscosity is baked for 2D/3D");
-            symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name()
+            symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name().to_string()
         }
-        symbi_geometry::Geometry::Cylindrical => {
-            assert_eq!(D, 2, "cylindrical viscosity is baked for 2D (R, phi) only");
-            symbi_ir::KernelId::ViscousIsoCyl { ndim: D as u8 }.name()
-        }
-        symbi_geometry::Geometry::Spherical => {
-            panic!("viscosity is not baked for spherical coordinates yet")
+        symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {
+            assert_eq!(D, 2, "curvilinear viscosity is baked for 2D only");
+            super::layout::viscous_ortho_name(geom.coords, D)
         }
     };
+    let name: &str = &name;
     let scalars = super::params::scalars_for(name, |bind| match bind {
         ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),
         ScalarBind::Spec(s) if &**s == "nu" => Sc::from_f64(nu),
