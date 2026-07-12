@@ -95,6 +95,7 @@ mod tests {
             dt: 3.1e-4,
             wall_secs: 12.0,
             throughput_mzcups: 148.0,
+            progress: 42,
             tab: 0,
             config_scroll: 0,
             throughput_hist: vec![140.0, 148.0],

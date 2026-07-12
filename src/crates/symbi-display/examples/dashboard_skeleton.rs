@@ -222,6 +222,7 @@ impl App {
             dt: self.dt,
             wall_secs: self.start.elapsed().as_secs_f64(),
             throughput_mzcups: self.throughput.back().copied().unwrap_or(0.0),
+            progress: 63,
             tab: 0,
             config_scroll: 0,
             throughput_hist: self.throughput.iter().copied().collect(),

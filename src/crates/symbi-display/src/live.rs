@@ -71,6 +71,8 @@ pub struct DiagnosticView {
     pub dt: f64,
     pub wall_secs: f64,
     pub throughput_mzcups: f64,
+    /// run progress toward t_final, 0..=100 (time / t_final). drives the header bar.
+    pub progress: usize,
     // active tab
     pub tab: usize,
     pub config_scroll: u16,
@@ -202,15 +204,25 @@ pub fn render(frame: &mut Frame, view: &DiagnosticView) {
 }
 
 fn render_header(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
+    // title on the left; the run-progress bar on the free right side (or the
+    // attach note when attached to a running sim, which owns that slot instead).
+    let cols = Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).split(area);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(view.app_title.clone(), fgb(LAV)))),
-        area,
+        cols[0],
     );
     if !view.attached.is_empty() {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(view.attached.clone(), fg(DIM)))).right_aligned(),
-            area,
+            cols[1],
         );
+    } else {
+        let gauge = LineGauge::default()
+            .ratio((view.progress as f64 / 100.0).clamp(0.0, 1.0))
+            .filled_style(fgb(GOLD))
+            .unfilled_style(fg(BORDER))
+            .label(Span::styled(format!("{:>3}%", view.progress), fgb(VALUE)));
+        frame.render_widget(gauge, cols[1]);
     }
 }
 
@@ -865,6 +877,7 @@ mod tests {
             dt: 3.1e-4,
             wall_secs: 252.0,
             throughput_mzcups: 148.0,
+            progress: 42,
             tab: 0,
             config_scroll: 0,
             throughput_hist: vec![100.0, 120.0, 148.0, 150.0, 145.0, 148.0],

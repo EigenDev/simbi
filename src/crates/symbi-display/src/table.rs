@@ -425,6 +425,7 @@ impl Table {
             dt: self.m_dt,
             wall_secs: self.start.elapsed().as_secs_f64(),
             throughput_mzcups: self.m_rate / 1e6,
+            progress: self.progress,
             tab: self.tab,
             config_scroll: self.scroll,
             throughput_hist: self.throughput.iter().map(|v| v / 1e6).collect(),
