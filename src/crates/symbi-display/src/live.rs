@@ -217,11 +217,14 @@ fn render_header(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
             cols[1],
         );
     } else {
+        // the unfilled track is DIM (visible), not BORDER (near-background) — at low
+        // progress the bar is almost all track, so an invisible track reads as just
+        // a stray percentage. a leading label marks it unambiguously as progress.
         let gauge = LineGauge::default()
             .ratio((view.progress as f64 / 100.0).clamp(0.0, 1.0))
             .filled_style(fgb(GOLD))
-            .unfilled_style(fg(BORDER))
-            .label(Span::styled(format!("{:>3}%", view.progress), fgb(VALUE)));
+            .unfilled_style(fg(DIM))
+            .label(Span::styled(format!("{:>3}% ", view.progress), fg(DIM)));
         frame.render_widget(gauge, cols[1]);
     }
 }
