@@ -112,6 +112,109 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     Tensor::new([dmom_x, dmom_y])
 }
 
+/// the cylindrical `(R, phi)` PHYSICAL-frame deviatoric stress `(tau_RR, tau_pp,
+/// tau_Rphi)` from the physical velocity gradients at a point of radius `r`.
+/// `u = v_R`, `w = v_phi`. the metric enters as the `u/R` (azimuthal stretch) and
+/// `-w/R` (rigid-rotation cancellation) terms — a rigid rotation `w = Omega R`
+/// gives `e_Rphi = (Omega - Omega)/2 = 0`, the stress-free null.
+#[allow(clippy::too_many_arguments)]
+fn cyl_stress<S: Scalar>(du_dr: S, dw_dr: S, du_dp: S, dw_dp: S, u: S, w: S, r: S, mu: S) -> (S, S, S) {
+    let two = S::from_f64(2.0);
+    let two_thirds = S::from_f64(2.0 / 3.0);
+    let half = S::from_f64(0.5);
+    let inv_r = S::from_f64(1.0) / r;
+    let e_rr = du_dr;
+    let e_pp = dw_dp * inv_r + u * inv_r;
+    let e_rp = half * (du_dp * inv_r + dw_dr - w * inv_r);
+    let theta = e_rr + e_pp;
+    let t_rr = mu * (two * e_rr - two_thirds * theta);
+    let t_pp = mu * (two * e_pp - two_thirds * theta);
+    let t_rp = mu * two * e_rp;
+    (t_rr, t_pp, t_rp)
+}
+
+/// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3
+/// stencil on a cylindrical `(R, phi)` grid, PHYSICAL orthonormal frame,
+/// conservative. `v[j][i] = (v_R, v_phi)`. the radial force uses the area-weighted
+/// `(1/R) d_R(R tau_RR)` divergence plus the `-tau_pp/R` hoop stress; the azimuthal
+/// force uses the ANGULAR-MOMENTUM-conserving `(1/R^2) d_R(R^2 tau_Rphi)` flux, so
+/// `R * mom_phi` (the angular momentum) is transported, never created — the r-phi
+/// shear of a differentially rotating disk drives `v_R = -3 nu / (2 R)`. `r_c` is
+/// the cell R centroid; neighbours sit at `r_c +- dr`, faces at `r_c +- dr/2`.
+pub fn viscous_mom_update_cyl_2d<S: Scalar>(
+    v: &[[Tensor<S, 2>; 3]; 3],
+    rho: &[[S; 3]; 3],
+    nu: &[[S; 3]; 3],
+    r_c: S,
+    dr: S,
+    dphi: S,
+    dt: S,
+) -> Tensor<S, 2> {
+    let half = S::from_f64(0.5);
+    let two = S::from_f64(2.0);
+    let four = S::from_f64(4.0);
+    let tiny = S::from_f64(1e-300);
+    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let u = |j: usize, i: usize| v[j][i][0];
+    let w = |j: usize, i: usize| v[j][i][1];
+    let mu_of = |ja: usize, ia: usize, jb: usize, ib: usize| {
+        harm(rho[ja][ia], rho[jb][ib]) * (half * (nu[ja][ia] + nu[jb][ib]))
+    };
+    let r_m = r_c - half * dr;
+    let r_p = r_c + half * dr;
+    let inv_rc = S::from_f64(1.0) / r_c;
+
+    // outer R-face (i+1/2), radius r_p: normal d/dR compact, transverse d/dphi 4-pt.
+    let du_dr = (u(1, 2) - u(1, 1)) / dr;
+    let dw_dr = (w(1, 2) - w(1, 1)) / dr;
+    let du_dp = ((u(2, 1) - u(0, 1)) + (u(2, 2) - u(0, 2))) / (four * dphi);
+    let dw_dp = ((w(2, 1) - w(0, 1)) + (w(2, 2) - w(0, 2))) / (four * dphi);
+    let (uf, wf) = (half * (u(1, 1) + u(1, 2)), half * (w(1, 1) + w(1, 2)));
+    let (trr_rp, _, trp_rp) =
+        cyl_stress(du_dr, dw_dr, du_dp, dw_dp, uf, wf, r_p, mu_of(1, 1, 1, 2));
+
+    // inner R-face (i-1/2), radius r_m.
+    let du_dr = (u(1, 1) - u(1, 0)) / dr;
+    let dw_dr = (w(1, 1) - w(1, 0)) / dr;
+    let du_dp = ((u(2, 0) - u(0, 0)) + (u(2, 1) - u(0, 1))) / (four * dphi);
+    let dw_dp = ((w(2, 0) - w(0, 0)) + (w(2, 1) - w(0, 1))) / (four * dphi);
+    let (uf, wf) = (half * (u(1, 0) + u(1, 1)), half * (w(1, 0) + w(1, 1)));
+    let (trr_rm, _, trp_rm) =
+        cyl_stress(du_dr, dw_dr, du_dp, dw_dp, uf, wf, r_m, mu_of(1, 0, 1, 1));
+
+    // outer phi-face (j+1/2), radius r_c: normal d/dphi compact, transverse d/dR 4-pt.
+    let dw_dp = (w(2, 1) - w(1, 1)) / dphi;
+    let du_dp = (u(2, 1) - u(1, 1)) / dphi;
+    let du_dr = ((u(1, 2) - u(1, 0)) + (u(2, 2) - u(2, 0))) / (four * dr);
+    let dw_dr = ((w(1, 2) - w(1, 0)) + (w(2, 2) - w(2, 0))) / (four * dr);
+    let (uf, wf) = (half * (u(1, 1) + u(2, 1)), half * (w(1, 1) + w(2, 1)));
+    let (_, tpp_pp, trp_pp) =
+        cyl_stress(du_dr, dw_dr, du_dp, dw_dp, uf, wf, r_c, mu_of(1, 1, 2, 1));
+
+    // inner phi-face (j-1/2), radius r_c.
+    let dw_dp = (w(1, 1) - w(0, 1)) / dphi;
+    let du_dp = (u(1, 1) - u(0, 1)) / dphi;
+    let du_dr = ((u(1, 2) - u(1, 0)) + (u(0, 2) - u(0, 0))) / (four * dr);
+    let dw_dr = ((w(1, 2) - w(1, 0)) + (w(0, 2) - w(0, 0))) / (four * dr);
+    let (uf, wf) = (half * (u(0, 1) + u(1, 1)), half * (w(0, 1) + w(1, 1)));
+    let (_, tpp_pm, trp_pm) =
+        cyl_stress(du_dr, dw_dr, du_dp, dw_dp, uf, wf, r_c, mu_of(0, 1, 1, 1));
+
+    // center: the hoop stress tau_pp for the -tau_pp/R source in F_R.
+    let du_dr_c = (u(1, 2) - u(1, 0)) / (two * dr);
+    let dw_dp_c = (w(2, 1) - w(0, 1)) / (two * dphi);
+    let (_, tpp_c, _) =
+        cyl_stress(du_dr_c, S::ZERO, S::ZERO, dw_dp_c, u(1, 1), w(1, 1), r_c, rho[1][1] * nu[1][1]);
+
+    let f_r = (r_p * trr_rp - r_m * trr_rm) * (inv_rc / dr)
+        + (trp_pp - trp_pm) * (inv_rc / dphi)
+        - tpp_c * inv_rc;
+    let f_phi = (r_p * r_p * trp_rp - r_m * r_m * trp_rm) * (inv_rc * inv_rc / dr)
+        + (tpp_pp - tpp_pm) * (inv_rc / dphi);
+
+    Tensor::new([dt * f_r, dt * f_phi])
+}
+
 /// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to axis `a`
 /// of the center cell (`hi` = the +a face i+1/2, else the -a face i-1/2), from
 /// the 3x3x3 velocity/density/viscosity stencil. the normal gradient is compact
@@ -281,6 +384,59 @@ mod tests {
         let expect_x = dt * 2.0 * a * rho * nu;
         assert!((d[0] - expect_x).abs() < 1e-14, "fx {} vs {expect_x}", d[0]);
         assert!(d[1].abs() < 1e-14, "fy {}", d[1]);
+    }
+
+    // -- cylindrical (R, phi) operator ---------------------------------------
+    // build a 3x3 (v_R, v_phi) + rho stencil about a cell at radius r_c; the
+    // neighbours sit at r_c + (i-1) dr, and phi is measured relative to the cell.
+    fn cyl_stencil(
+        r_c: f64,
+        dr: f64,
+        dphi: f64,
+        vf: impl Fn(f64, f64) -> [f64; 2],
+        rf: impl Fn(f64, f64) -> f64,
+    ) -> ([[Tensor<f64, 2>; 3]; 3], [[f64; 3]; 3]) {
+        let mut v = [[Tensor::zeros(); 3]; 3];
+        let mut r = [[0.0; 3]; 3];
+        for jj in 0..3 {
+            for ii in 0..3 {
+                let rr = r_c + (ii as f64 - 1.0) * dr;
+                let pp = (jj as f64 - 1.0) * dphi;
+                v[jj][ii] = Tensor::new(vf(rr, pp));
+                r[jj][ii] = rf(rr, pp);
+            }
+        }
+        (v, r)
+    }
+
+    // the load-bearing null: a rigid rotation v_phi = Omega R is strain-free
+    // (e_Rphi = (Omega - Omega)/2 = 0), so the viscous force vanishes. catches a
+    // wrong metric term or sign in the cylindrical strain rate.
+    #[test]
+    fn cyl_rigid_rotation_books_zero_force() {
+        let (om, nu, rho, dt) = (0.7, 0.05, 1.3, 0.01);
+        let (r_c, dr, dphi) = (1.5, 0.05, 0.1);
+        let (v, r) = cyl_stencil(r_c, dr, dphi, |rr, _| [0.0, om * rr], |_, _| rho);
+        let d = viscous_mom_update_cyl_2d(&v, &r, &uni(nu), r_c, dr, dphi, dt);
+        assert!(d[0].abs() < 1e-12, "f_R not zero: {}", d[0]);
+        assert!(d[1].abs() < 1e-12, "f_phi not zero: {}", d[1]);
+    }
+
+    // a Keplerian profile v_phi = sqrt(GM/R) shears (Omega ~ R^-3/2), so the
+    // r-phi stress is active and the azimuthal force is NEGATIVE — viscosity
+    // removes angular momentum from the inner gas, driving inflow. the analytic
+    // axisymmetric value is F_phi = -(3/4) mu sqrt(GM) R^-5/2.
+    #[test]
+    fn cyl_keplerian_shear_removes_angular_momentum() {
+        let (gm, nu, rho, dt) = (1.0, 0.05, 1.0, 0.01);
+        let (r_c, dr, dphi) = (1.0, 0.02, 0.1);
+        let (v, r) = cyl_stencil(r_c, dr, dphi, |rr, _| [0.0, (gm / rr).sqrt()], |_, _| rho);
+        let d = viscous_mom_update_cyl_2d(&v, &r, &uni(nu), r_c, dr, dphi, dt);
+        assert!(d[1].abs() > 1e-8, "keplerian shear produced no torque: {}", d[1]);
+        assert!(d[1] < 0.0, "expected angular-momentum loss, got f_phi = {}", d[1]);
+        // rough magnitude: -(3/4) mu sqrt(GM) R^-5/2 * dt at R=1.
+        let expect = -0.75 * rho * nu * gm.sqrt() * dt;
+        assert!((d[1] / expect - 1.0).abs() < 0.1, "f_phi {} vs ~{expect}", d[1]);
     }
 
     // a mass sink that retains momentum (the torque-free surface) leaves a mask

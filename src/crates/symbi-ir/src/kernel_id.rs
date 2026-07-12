@@ -85,6 +85,10 @@ pub enum KernelId {
     /// conservative shear-stress flux divergence, but with a spatially varying
     /// nu(x) = alpha c_s^2 / Omega_k(r) about the central body. isothermal, 2D.
     ViscousIsoAlpha { ndim: u8 },
+    /// the CYLINDRICAL (R, phi) constant-nu viscous operator: the physical-frame
+    /// conservative Navier-Stokes shear with the metric strain terms (u/R, -w/R)
+    /// and the angular-momentum-conserving R^2 flux. isothermal, 2D.
+    ViscousIsoCyl { ndim: u8 },
     /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -227,6 +231,9 @@ impl KernelId {
             KernelId::ViscousIsoAlpha { ndim } => {
                 ["viscous_iso_alpha_1d", "viscous_iso_alpha_2d", "viscous_iso_alpha_3d"]
                     [dim_ix(ndim)]
+            }
+            KernelId::ViscousIsoCyl { ndim } => {
+                ["viscous_iso_cyl_1d", "viscous_iso_cyl_2d", "viscous_iso_cyl_3d"][dim_ix(ndim)]
             }
             KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
                 match (order, axis, ncomp, ndim) {

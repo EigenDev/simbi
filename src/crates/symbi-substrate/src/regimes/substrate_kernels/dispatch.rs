@@ -206,9 +206,23 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    assert!(D == 2 || D == 3, "the viscous operator is baked for 2D and 3D cartesian");
     let geom = &sim.geom;
-    let name = symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name();
+    // the constant-nu operator is baked for 2D/3D cartesian (flat face differences)
+    // and 2D cylindrical (R, phi) (the physical-frame metric operator). the kernel
+    // reads the R centroid from cell_geometry, so the geom scalars resolve as usual.
+    let name = match geom.coords {
+        symbi_geometry::Geometry::Cartesian => {
+            assert!(D == 2 || D == 3, "cartesian viscosity is baked for 2D/3D");
+            symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name()
+        }
+        symbi_geometry::Geometry::Cylindrical => {
+            assert_eq!(D, 2, "cylindrical viscosity is baked for 2D (R, phi) only");
+            symbi_ir::KernelId::ViscousIsoCyl { ndim: D as u8 }.name()
+        }
+        symbi_geometry::Geometry::Spherical => {
+            panic!("viscosity is not baked for spherical coordinates yet")
+        }
+    };
     let scalars = super::params::scalars_for(name, |bind| match bind {
         ScalarBind::Ref(ScalarRef::Dt) => Sc::from_f64(dt),
         ScalarBind::Spec(s) if &**s == "nu" => Sc::from_f64(nu),

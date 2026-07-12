@@ -371,7 +371,18 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         };
         if nu_max > 0.0 {
             const C_VISC: f64 = 0.1;
-            let min_dx = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
+            // the diffusion cap uses the PHYSICAL min cell size. cylindrical (R, phi)
+            // has a coordinate azimuthal width dphi, so its physical extent is R dphi,
+            // smallest at the inner edge — using the raw angle would leave the inner
+            // annulus under-resolved and unstable. cartesian widths are already
+            // physical.
+            let min_dx = if sim.geom.coords == Geometry::Cylindrical {
+                let dr = sim.geom.dx[0];
+                let r_min = sim.geom.x_lo[0] + 0.5 * dr; // innermost cell centroid
+                dr.min((r_min * sim.geom.dx[1]).max(1e-30))
+            } else {
+                sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min)
+            };
             dt_hydro.min(C_VISC * min_dx * min_dx / nu_max)
         } else {
             dt_hydro
@@ -562,14 +573,20 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
         if self.alpha <= 0.0 && self.viscosity <= 0.0 {
             return;
         }
-        assert!(D == 2 || D == 3, "viscosity is baked for 2D and 3D isothermal only");
+        let coords = sim.geom.coords;
         assert!(
-            sim.geom.coords == Geometry::Cartesian,
-            "viscosity is baked for cartesian only"
+            coords == Geometry::Cartesian || coords == Geometry::Cylindrical,
+            "viscosity is baked for cartesian (2D/3D) and cylindrical (2D R-phi) only"
         );
         if self.alpha > 0.0 {
+            assert!(
+                coords == Geometry::Cartesian,
+                "alpha viscosity is baked for cartesian only; use constant nu on a cylindrical grid"
+            );
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(sim, dt, self.alpha, self.cs);
         } else {
+            // dispatch_viscous selects the cartesian or cylindrical kernel by coords
+            // and asserts the supported dimension.
             crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
         }
     }
