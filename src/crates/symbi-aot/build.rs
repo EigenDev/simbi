@@ -1698,13 +1698,8 @@ fn main() {
         emit_gv(&out_dir, KernelId::ViscousIso { ndim: 3 }.name(), 3, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_alpha_gv_3d();
         emit_gv(&out_dir, KernelId::ViscousIsoAlpha { ndim: 3 }.name(), 3, &k, &writes);
-        // 2D cylindrical (R, phi): constant-nu + Shakura-Sunyaev alpha.
-        let (k, writes) = symbi_discretize::viscous_iso_cyl_gv();
-        emit_gv(&out_dir, KernelId::ViscousIsoCyl { ndim: 2 }.name(), 2, &k, &writes);
-        let (k, writes) = symbi_discretize::viscous_iso_alpha_cyl_gv();
-        emit_gv(&out_dir, KernelId::ViscousIsoAlphaCyl { ndim: 2 }.name(), 2, &k, &writes);
-        // the GENERAL 2D orthogonal constant-nu operator (scale-factor form): one
-        // kernel per curvilinear chart, subsuming the chart-specific ones.
+        // the GENERAL 2D orthogonal operator (scale-factor form): ONE constant-nu +
+        // ONE alpha kernel per curvilinear chart, subsuming every chart-specific one.
         use symbi_discretize::coords::Coords;
         use symbi_discretize::kernel_slug::viscous_ortho_name;
         for coords in [Coords::Cylindrical, Coords::Spherical] {

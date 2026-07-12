@@ -42,9 +42,8 @@ pub use gv_penalize::{
     penalize_torque_free_gv, penalize_torque_free_iso_gv,
 };
 pub use gv_viscous::{
-    viscous_iso_alpha_cyl_gv, viscous_iso_alpha_gv, viscous_iso_alpha_gv_3d,
-    viscous_iso_alpha_ortho_gv, viscous_iso_cyl_gv, viscous_iso_gv, viscous_iso_gv_3d,
-    viscous_iso_ortho_gv,
+    viscous_iso_alpha_gv, viscous_iso_alpha_gv_3d, viscous_iso_alpha_ortho_gv, viscous_iso_gv,
+    viscous_iso_gv_3d, viscous_iso_ortho_gv,
 };
 pub use gv_immersed::{
     body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,

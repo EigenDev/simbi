@@ -22,8 +22,7 @@ use symbi_algebra::algebra::Numeric;
 use symbi_algebra::Tensor;
 use symbi_geometry::{CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::viscous::{
-    viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_cyl_2d,
-    viscous_mom_update_orthogonal_2d,
+    viscous_mom_update_2d, viscous_mom_update_3d, viscous_mom_update_orthogonal_2d,
 };
 use symbi_ir::gv::Writes;
 use symbi_ir::{begin_trace, end_trace, FieldRef, Gv, GvKernel};
@@ -80,33 +79,6 @@ pub fn viscous_iso_gv() -> (GvKernel, Writes) {
     // is bit-identical to a scalar).
     let nust = [[nu; 3]; 3];
     let dmom = viscous_mom_update_2d(&vst, &rst, &nust, dx, dy, dt);
-    let writes = accumulate_mom(dmom);
-    (end_trace(), writes)
-}
-
-/// trace the constant-nu isothermal viscous operator, 2D CYLINDRICAL (R, phi):
-/// the physical-frame, conservative cylindrical Navier-Stokes shear (the angular-
-/// momentum-conserving R^2 flux that drives disk accretion). the cell R centroid
-/// comes from the cylindrical geometry scaffold (volume-weighted); dr, dphi are
-/// the grid widths. prim.vel = (v_R, v_phi) physical, as the substrate stores it.
-pub fn viscous_iso_cyl_gv() -> (GvKernel, Writes) {
-    const NDIM: u8 = 2;
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let nu = Gv::scalar("nu");
-    let dr = Gv::scalar("dx_0");
-    let dphi = Gv::scalar("dx_1");
-
-    let (vst, rst) = prim_stencil();
-    let geo = cell_geometry_gv(
-        Coords::Cylindrical,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let r_c = geo.centroid[0];
-    let nust = [[nu; 3]; 3];
-    let dmom = viscous_mom_update_cyl_2d(&vst, &rst, &nust, r_c, dr, dphi, dt);
     let writes = accumulate_mom(dmom);
     (end_trace(), writes)
 }
@@ -215,48 +187,6 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     }
 
     let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
-    let writes = accumulate_mom(dmom);
-    (end_trace(), writes)
-}
-
-/// trace the alpha-viscosity isothermal operator, 2D CYLINDRICAL (R, phi):
-/// `nu(R) = alpha c_s^2 / Omega_k(R)`, `Omega_k = sqrt(GM/R^3)` about the central
-/// mass on the axis (`GM` = body 0 mass). because R IS the orbital radius here,
-/// there is no body-position distance to form (the Cartesian alpha kernel needs
-/// it; cylindrical does not) — nu depends only on the R index of the stencil,
-/// evaluated at the operator's uniform neighbour radii `r_c + (i-1) dr`.
-pub fn viscous_iso_alpha_cyl_gv() -> (GvKernel, Writes) {
-    const NDIM: u8 = 2;
-    begin_trace();
-    let dt = Gv::scalar("dt");
-    let alpha = Gv::scalar("alpha");
-    let cs = Gv::scalar("cs");
-    let gm = Gv::scalar("body_0_mass");
-    let dr = Gv::scalar("dx_0");
-    let dphi = Gv::scalar("dx_1");
-
-    let (vst, rst) = prim_stencil();
-    let geo = cell_geometry_gv(
-        Coords::Cylindrical,
-        &vec![Spacing::Uniform; NDIM as usize],
-        &(0..NDIM as usize).collect::<Vec<_>>(),
-        NDIM as usize,
-    );
-    let r_c = geo.centroid[0];
-    let cs2 = cs * cs;
-    let floor = Gv::from_f64(1e-30);
-
-    // nu(R) varies with the radial index i, not phi: a cylinder of constant nu.
-    let mut nust = [[Gv::ZERO; 3]; 3];
-    for ii in 0..3usize {
-        let r = (r_c + Gv::from_f64(ii as f64 - 1.0) * dr).max(floor);
-        let omega_k = (gm / (r * r * r)).sqrt().max(floor);
-        let nu = alpha * cs2 / omega_k;
-        for row in nust.iter_mut() {
-            row[ii] = nu;
-        }
-    }
-    let dmom = viscous_mom_update_cyl_2d(&vst, &rst, &nust, r_c, dr, dphi, dt);
     let writes = accumulate_mom(dmom);
     (end_trace(), writes)
 }
