@@ -964,6 +964,20 @@ class SimbiProblem(BaseModel):
         """
         self.__setup_base_reached = True
 
+    def summary(self) -> list[tuple[str, str, str]]:
+        """
+        override to report DERIVED quantities (bondi radius, expected rates,
+        computed grid facts, ...) as (group, label, value) rows. the runner
+        collects these once, after setup(), into the live dashboard's grouped
+        problem-setup panel alongside the declared parameters.
+
+        this is the config's one reporting hook: never print from __del__ —
+        a destructor fires on garbage-collection timing, on every transient
+        instantiation (discovery, validation, tests), and races the live
+        dashboard for the terminal.
+        """
+        return []
+
     @model_validator(mode="after")
     def _finalize(self) -> SimbiProblem:
         """

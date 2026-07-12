@@ -330,18 +330,20 @@ class SphericalBondiTest(SimbiProblem):
             self.refinement_max_levels = num_levels + 1
             self.refinement_ratios = [np.uint64(2)] * num_levels
 
-            # telescoping regions centered on accretor
-            # finest box covers ~2 R_B, each coarser level doubles
+            # telescoping regions centered on the accretor: finest box covers
+            # ~2 R_B, each coarser level doubles, with a HALVING CAP — each
+            # region is at most half its parent's radius, so nesting margins
+            # are guaranteed (a quarter of the parent box per side). without
+            # the cap, deep telescopes stack domain-clamped levels against the
+            # boundary with sub-cell margins and the hierarchy's coverage
+            # check rejects them.
             regions = []
+            r_prev = box_radius
             for ii in range(num_levels):
                 levels_from_fine = (num_levels - 1) - ii
-
-                # geometric expansion: 2, 4, 8, ... R_B
-                region_radius = 2.0 * R_B * (2.0**levels_from_fine)
-
-                # clamp to domain
-                region_radius = min(region_radius, box_radius * 0.99)
-
+                region_radius = min(
+                    2.0 * R_B * (2.0**levels_from_fine), 0.5 * r_prev
+                )
                 regions.append(
                     [
                         -region_radius,
@@ -352,6 +354,7 @@ class SphericalBondiTest(SimbiProblem):
                         region_radius,
                     ]
                 )
+                r_prev = region_radius
             self.refinement_regions = regions
 
         # 6. runtime control
@@ -680,45 +683,29 @@ class SphericalBondiTest(SimbiProblem):
         ]
 
     # =========================================================================
-    # summary
+    # summary (derived quantities for the dashboard's problem-setup panel)
     # =========================================================================
-    def __del__(self) -> None:
-        """print summary of configuration."""
-        if self.bounds is None:
-            return
-
-        print("Spherical Bondi Test Configuration:")
-        print(f"  Central Mass: {self.central_mass:.3f}")
-        print(f"  Ambient Density: {self.ambient_density:.3f}")
-        print(f"  Sound Speed: {self.ambient_sound_speed:.3f}")
-        print(f"  Adiabatic Index: {self.adiabatic_index:.3f}")
-        print(f"  Bondi Radius: {self.bondi_radius:.4f}")
-        print(f"  Bondi Time: {self.bondi_time:.4f}")
-        print(f"  Expected Accretion Rate: {self.bondi_accretion_rate:.6f}")
-
-        if self.resolution:
-            dx_coarse = (
-                self.bounds[0][1] - self.bounds[0][0]
-            ) / self.resolution[0]
-            dx_fine = dx_coarse / (2 ** max(0, self.refinement_max_levels - 1))
-            print("  Grid Configuration:")
-            print(
-                f"    Domain Size: +/- {self.bounds[0][1]:.1f} "
-                f"({self.domain_radius:.1f} R_B)"
-            )
-            print(
-                f"    Base Resolution: {self.resolution[0]}^3 "
-                f"(dx = {dx_coarse:.4f})"
-            )
-            if self.refinement_enabled:
-                print(f"    FMR Levels: {self.refinement_max_levels}")
-                print(
-                    f"    Finest dx: {dx_fine:.5f} "
-                    f"({self.bondi_radius / dx_fine:.1f} zones/R_B)"
+    def summary(self) -> list[tuple[str, str, str]]:
+        """the derived quantities: the bondi scales, the expected rate, and
+        the grid facts the declared dials imply."""
+        if self.bounds is None or self.resolution is None:
+            return []
+        rows = [
+            ("derived", "bondi radius", f"{self.bondi_radius:.4f}"),
+            ("derived", "bondi time", f"{self.bondi_time:.4f}"),
+            ("derived", "expected mdot", f"{self.bondi_accretion_rate:.6f}"),
+        ]
+        dx_coarse = (self.bounds[0][1] - self.bounds[0][0]) / self.resolution[0]
+        dx_fine = dx_coarse / (2 ** max(0, self.refinement_max_levels - 1))
+        rows.append(("derived", "coarse dx", f"{dx_coarse:.4f}"))
+        if self.refinement_enabled:
+            rows.append(
+                (
+                    "derived",
+                    "finest dx",
+                    f"{dx_fine:.5f} ({self.bondi_radius / dx_fine:.1f} zones/R_B)",
                 )
-
-        if self.use_buffer:
-            print("  Buffer Zone Enabled:")
-            buffer_params = self.buffer_parameters
-            for key, value in buffer_params.items():
-                print(f"    {key}: {value:.3f}")
+            )
+        for key, value in self.buffer_parameters.items():
+            rows.append(("buffer (derived)", key.replace("_", " "), f"{value:.3f}"))
+        return rows

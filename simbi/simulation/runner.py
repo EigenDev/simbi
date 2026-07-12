@@ -68,6 +68,11 @@ def _collect_custom_params(problem: SimbiProblem) -> list[list[str]]:
             continue
         group = get_param_metadata(finfo).group or "Parameters"
         rows.append([group, fname.replace("_", " "), formatted])
+    # the config's DERIVED quantities (the summary() hook): same panel, own
+    # groups — the declared dials and the numbers computed from them side by
+    # side, rendered by the dashboard instead of printed from __del__.
+    for group, label, value in problem.summary():
+        rows.append([str(group), str(label), str(value)])
     return rows
 
 
