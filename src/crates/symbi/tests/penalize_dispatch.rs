@@ -255,3 +255,55 @@ fn torque_receipt_equals_the_moment_of_the_momentum_loss() {
     assert_eq!(deltas[0].torque_delta[0], 0.0);
     assert_eq!(deltas[0].torque_delta[1], 0.0);
 }
+
+// the porous surface through the dispatch (docs/design/50 zoo): the body's
+// declared SurfaceSpec picks the kernel, and the porosity endpoints hold
+// end to end — p = 0 books EXACTLY zero mass receipts (a sealed wall absorbs
+// momentum but never mass), p > 0 drains.
+#[test]
+fn porous_surface_endpoints_hold_through_the_dispatch() {
+    use symbi_ib::SurfaceSpec;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let build = |surface: SurfaceSpec| -> Sim {
+        Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([N, N])
+            .origin([-L, -L])
+            .spacing([dx, dx])
+            .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+            .allocate()
+            .expect("sim")
+            .set_initial(|[x, y]| Prim {
+                rho: 1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos(),
+                vel: Tensor::new([0.2, -0.15]),
+                pre: 1.0,
+            })
+            .build()
+            .with_bodies(BodyCollection::new().add(
+                Body::black_hole(
+                    0,
+                    Tensor::new([0.1, -0.05]),
+                    Tensor::zeros(),
+                    1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
+                )
+                .with_surface(surface),
+            ))
+    };
+
+    // sealed free-slip wall: zero mass receipts, exactly; momentum exchanged.
+    let sealed = build(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 0.0 });
+    dispatch_penalize(&sealed, 1e-3, GAMMA, 1.0);
+    let d = sealed.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert_eq!(d[0].mass_delta, 0.0, "a sealed surface must book zero mass, exactly");
+    let f = d[0].force_delta;
+    assert!(
+        (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
+        "the sealed wall never pushed back: {f:?}"
+    );
+
+    // half-open: the drain fires.
+    let porous = build(SurfaceSpec::Porous { porosity: 0.5, k_eta_n: 50.0, k_eta_t: 0.0 });
+    dispatch_penalize(&porous, 1e-3, GAMMA, 1.0);
+    let d = porous.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert!(d[0].mass_delta > 0.0, "the half-open surface never drained");
+}

@@ -156,6 +156,121 @@ pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
     (kernel, writes)
 }
 
+/// trace the [PorousAccretor]-stack penalization for the adiabatic regime,
+/// cartesian, DOF = ndim. the porosity dial `p` scales the drain channel and
+/// `(1 - p)` the wall channels; the wall rates are `k_eta_n/t * c_s / dx`
+/// (sound-crossings per cell width — MULTIPLICATIVE dials so zero is an EXACT
+/// off switch: `k_eta_t = 0` is free-slip with the tangential velocity
+/// bit-untouched). the velocity target is the body's translational velocity
+/// (`body_0_vel_*`); the surface normal is the sphere's, `x_rel / |x_rel|`,
+/// with the division guarded by a subnormal floor so the body-center cell
+/// (|x_rel| = 0) degrades to a zero normal — its whole du is treated as
+/// tangential, exact and finite. at p = 1 every wall factor carries an exact
+/// (1 - p) = 0 and the kernel reduces bit-for-bit to `penalize_drain`.
+pub fn penalize_porous_gv(ndim: usize) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim), "penalize_porous_gv: ndim must be 1..=3");
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let gamma = Gv::scalar("gamma");
+    let c_drain = Gv::scalar("c_drain");
+    let porosity = Gv::scalar("porosity");
+    let k_eta_n = Gv::scalar("k_eta_n");
+    let k_eta_t = Gv::scalar("k_eta_t");
+
+    let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
+    let mom: Vec<Gv> = (0..ndim)
+        .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
+        .collect();
+    let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
+
+    let geo = cell_geometry_gv(Coords::Cartesian, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
+    let dv = Gv::ONE / geo.inv_volume;
+    let mut min_w = Gv::scalar("dx_0");
+    for ax in 1..ndim {
+        min_w = min_w.min(Gv::scalar(&format!("dx_{ax}")));
+    }
+
+    let center: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
+    });
+    let x: [Gv; 3] = std::array::from_fn(|a| {
+        if a < ndim { geo.centroid[a] } else { Gv::ZERO }
+    });
+    let r_mask = Gv::scalar("body_0_racc");
+    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let phi = sphere.dist(x);
+    let chi = symbi_ib::sdf::chi(phi, min_w);
+
+    let mut mom_sq = Gv::ZERO;
+    for m in &mom {
+        mom_sq = mom_sq + *m * *m;
+    }
+    let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
+    let inv_tau = cs / (c_drain * min_w);
+    let rate_scale = cs / min_w;
+
+    // the sphere normal with the guarded division: |x_rel| = 0 yields a zero
+    // normal (n = x_rel * (1 / max(r, floor))), never a NaN.
+    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+    let r = x_rel.dot(&x_rel).sqrt();
+    let normal = x_rel.scale(Gv::ONE / r.max(Gv::from_f64(1e-300)));
+
+    let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
+        if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
+    }));
+    let kin = BodyKin::<Gv, 3> { u_solid, omega: Tensor::zeros(), e_wall: Gv::ZERO };
+    let mut acc = Relax::<Gv, 3>::none();
+    Property::PorousAccretor {
+        p: porosity,
+        inv_tau,
+        inv_eta_n: k_eta_n * rate_scale,
+        inv_eta_t: k_eta_t * rate_scale,
+    }
+    .contribute(chi, &kin, &mut acc);
+    let cons = ConsG::<Gv, 3, Adiabatic> {
+        den,
+        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        nrg,
+    };
+    let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
+    let torque = symbi_ib::moment(&x_rel, &delta.force_delta);
+
+    let mut writes: Writes = Vec::new();
+    writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
+    for a in 0..ndim {
+        writes.push((
+            format!("mom_out_{a}"),
+            symbi_ir::FieldRef::cons_mom(a as u8).into(),
+            out.mom[a].node(),
+        ));
+    }
+    writes.push(("nrg_out".to_string(), symbi_ir::FieldRef::cons_nrg().into(), out.nrg.node()));
+    writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
+    for a in 0..ndim {
+        writes.push((
+            format!("pen_force_{a}"),
+            format!("pen_0_force_{a}").into(),
+            delta.force_delta[a].node(),
+        ));
+    }
+    writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
+    for a in torque_axes(ndim) {
+        writes.push((
+            format!("pen_torque_{a}"),
+            format!("pen_0_torque_{a}").into(),
+            torque[a].node(),
+        ));
+    }
+
+    let center_p: Vec<ParamExpr> =
+        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
+    let radius_p = ParamExpr::param("body_0_racc")
+        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
+            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
+    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    (kernel, writes)
+}
+
 /// the ISOTHERMAL twin: no energy channel (the drain scales den + mom; the
 /// sound speed is the constant `cs` param, not recovered from cons), delta
 /// outputs mass + force only. same [Drain] stack, same integrator — the iso

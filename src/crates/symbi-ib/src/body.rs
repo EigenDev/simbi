@@ -42,6 +42,19 @@ pub enum BodyKind<S: Scalar> {
     },
 }
 
+/// the penalization stack a body's surface runs (docs/design/50 property
+/// algebra). config-static — parameters, never state, never checkpointed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SurfaceSpec {
+    /// the uniform-scaling drain: the validated accretor (p = 1).
+    Drain,
+    /// the porosity dial: `porosity` scales the drain channel, (1 - porosity)
+    /// the wall channels; the wall rates are `k_eta_* c_s / dx`
+    /// (multiplicative dials — zero is an exact off switch, so `k_eta_t = 0`
+    /// is a free-slip surface).
+    Porous { porosity: f64, k_eta_n: f64, k_eta_t: f64 },
+}
+
 /// a physical body embedded in the simulation grid.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body<S: Scalar, const D: usize> {
@@ -54,6 +67,9 @@ pub struct Body<S: Scalar, const D: usize> {
     pub radius: S,
     pub two_way_coupling: bool,
     pub kind: BodyKind<S>,
+    /// the surface physics: which penalization stack acts at the boundary.
+    /// kinematics stay on `kind`; this picks the baked kernel.
+    pub surface: SurfaceSpec,
 }
 
 // -- factory functions --
@@ -68,7 +84,14 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             mass, radius,
             two_way_coupling: false,
             kind,
+            surface: SurfaceSpec::Drain,
         }
+    }
+
+    /// declare the surface stack (fluent; the default is the drain).
+    pub fn with_surface(mut self, surface: SurfaceSpec) -> Self {
+        self.surface = surface;
+        self
     }
 
     pub fn passive(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,

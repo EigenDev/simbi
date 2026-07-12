@@ -503,14 +503,6 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     }
     let nrg = sim.fields.cons.nrg_field();
     let geom = &sim.geom;
-    // the regime picks the kernel: adiabatic recovers c_s from cons; iso reads
-    // the constant `cs` param (the caller's `gamma` argument carries it) and
-    // has no energy channel (deltas: mass + force only).
-    let name = if nrg.is_some() {
-        symbi_ir::KernelId::PenalizeDrain { ndim: D as u8 }.name()
-    } else {
-        symbi_ir::KernelId::PenalizeDrainIso { ndim: D as u8 }.name()
-    };
     let n_delta = if nrg.is_some() { D + 2 } else { D + 1 };
     // the torque receipt slots after mass/force/energy: the moment of the
     // force receipt about the body center. rotation needs a plane, so 1d
@@ -522,6 +514,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let bodies = &im.bodies;
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
+        let surface = bodies.get(b).surface;
         match bind {
             ScalarBind::Ref(sref) => match *sref {
                 ScalarRef::Dt => dt,
@@ -531,7 +524,13 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                     .unwrap_or_else(|| panic!("penalize: unexpected scalar param {other:?}")),
             },
             ScalarBind::Spec(spec) if &**spec == "c_drain" => c_drain,
-            other => panic!("penalize: unexpected spec scalar {other:?}"),
+            // the porous dials, from the body's declared surface stack.
+            ScalarBind::Spec(spec) => match (&**spec, surface) {
+                ("porosity", symbi_ib::SurfaceSpec::Porous { porosity, .. }) => porosity,
+                ("k_eta_n", symbi_ib::SurfaceSpec::Porous { k_eta_n, .. }) => k_eta_n,
+                ("k_eta_t", symbi_ib::SurfaceSpec::Porous { k_eta_t, .. }) => k_eta_t,
+                other => panic!("penalize: unexpected spec scalar {other:?}"),
+            },
         }
     };
     let scratch = feedback_scratch(sim, n_delta + n_torque);
@@ -539,6 +538,26 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         if bodies.get(b).accretion_radius().is_none() {
             continue;
         }
+        // the body's surface stack picks the baked kernel. the regime picks
+        // the eos flavor: adiabatic recovers c_s from cons; iso reads the
+        // constant `cs` param and has no energy channel. the porous stack is
+        // baked for the adiabatic regime only — fail loud, never fall back
+        // silently to a different surface physics.
+        let name = match (bodies.get(b).surface, nrg.is_some()) {
+            (symbi_ib::SurfaceSpec::Drain, true) => {
+                symbi_ir::KernelId::PenalizeDrain { ndim: D as u8 }.name()
+            }
+            (symbi_ib::SurfaceSpec::Drain, false) => {
+                symbi_ir::KernelId::PenalizeDrainIso { ndim: D as u8 }.name()
+            }
+            (symbi_ib::SurfaceSpec::Porous { .. }, true) => {
+                symbi_ir::KernelId::PenalizePorous { ndim: D as u8 }.name()
+            }
+            (symbi_ib::SurfaceSpec::Porous { .. }, false) => panic!(
+                "penalize: the porous surface is baked for the adiabatic regime only \
+                 (an isothermal porous accretor needs the iso twin baked first)"
+            ),
+        };
         // the reduction/dispatch box from the kernel's declared support ball —
         // the design-48 consumer, identical clamping to the feedback drain.
         let names = super::binding::kernel_scalar_names(name);

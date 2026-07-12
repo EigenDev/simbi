@@ -144,8 +144,11 @@ pub enum Property<S: Scalar> {
     /// internal-energy relaxation toward the wall value (dirichlet
     /// temperature through the EOS). adiabatic wall = omit this property.
     IsothermalWall { inv_eta: S },
-    /// the porosity dial: p = 1 pure drain, p = 0 pure no-slip wall.
-    PorousAccretor { p: S, inv_tau: S, inv_eta: S },
+    /// the porosity dial: p = 1 pure drain, p = 0 pure wall. the wall channels
+    /// carry independent rates — free-slip (no-penetration only) with
+    /// `inv_eta_t = 0` (an exact off switch: the tangential velocity is
+    /// bit-untouched), no-slip with both finite.
+    PorousAccretor { p: S, inv_tau: S, inv_eta_n: S, inv_eta_t: S },
 }
 
 impl<S: Scalar> Property<S> {
@@ -168,11 +171,11 @@ impl<S: Scalar> Property<S> {
                 acc.lambda_e = acc.lambda_e + chi * inv_eta;
                 acc.e_target = kin.e_wall;
             }
-            Property::PorousAccretor { p, inv_tau, inv_eta } => {
+            Property::PorousAccretor { p, inv_tau, inv_eta_n, inv_eta_t } => {
                 acc.lambda_rho = acc.lambda_rho + p * chi * inv_tau;
-                let wall = (S::ONE - p) * chi * inv_eta;
-                acc.lambda_un = acc.lambda_un + wall;
-                acc.lambda_ut = acc.lambda_ut + wall;
+                let solidity = (S::ONE - p) * chi;
+                acc.lambda_un = acc.lambda_un + solidity * inv_eta_n;
+                acc.lambda_ut = acc.lambda_ut + solidity * inv_eta_t;
                 acc.u_solid = kin.u_solid;
             }
         }
@@ -381,7 +384,7 @@ mod tests {
     fn gas_loss_equals_body_gain_exactly() {
         let cons = sample_cons();
         let mut acc = Relax::none();
-        Property::PorousAccretor { p: 0.4, inv_tau: 8.0, inv_eta: 15.0 }
+        Property::PorousAccretor { p: 0.4, inv_tau: 8.0, inv_eta_n: 15.0, inv_eta_t: 15.0 }
             .contribute(0.9, &kin(), &mut acc);
         let (vol, dt) = (2.5e-3, 0.013);
         let (out, delta) = penalize_cell(&cons, &acc, normal(), dt, vol, 0);
@@ -511,6 +514,60 @@ mod tests {
             assert_eq!(out.mom[a].to_bits(), cons.mom[a].to_bits());
             assert_eq!(delta.force_delta[a], 0.0);
         }
+    }
+
+    // free-slip porous surface (design 50 zoo / the porosity-slip dial):
+    // inv_eta_t = 0 is an EXACT off switch — the tangential velocity is
+    // bit-untouched while the normal channel relaxes.
+    #[test]
+    fn free_slip_leaves_the_tangential_velocity_bit_untouched() {
+        // den a power of two: u = mom * (1/den) round-trips exactly, so the
+        // tangential projection compares bit-for-bit (the same precondition
+        // as the co-rotation gate).
+        let den = 4.0;
+        let u = Tensor::new([0.3, -0.2, 0.1]);
+        let e_int = 1.7;
+        let cons: Cons3 =
+            ConsG { den, mom: u.scale(den), nrg: den * (e_int + 0.5 * u.dot(&u)) };
+        let n = Tensor::new([1.0, 0.0, 0.0]);
+        let k = BodyKin::<f64, 3> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
+        let mut acc = Relax::none();
+        Property::PorousAccretor { p: 0.3, inv_tau: 0.0, inv_eta_n: 1e12, inv_eta_t: 0.0 }
+            .contribute(1.0, &k, &mut acc);
+        let (out, _) = penalize_cell(&cons, &acc, n, 10.0, 1.0, 0);
+        let u1 = out.mom.scale(1.0 / out.den);
+        // normal component driven to the (zero) target, tangential exact.
+        assert!(u1[0].abs() < 1e-12);
+        assert_eq!(u1[1].to_bits(), u[1].to_bits());
+        assert_eq!(u1[2].to_bits(), u[2].to_bits());
+    }
+
+    // the porosity endpoints: p = 1 accumulates EXACTLY the [Drain] relax
+    // (the wall term carries an exact (1 - p) = 0 factor), and p = 0
+    // accumulates a zero drain rate — no mass is removed, bit-exact.
+    #[test]
+    fn porosity_endpoints_reduce_exactly() {
+        let cons = sample_cons();
+        let k = kin();
+        let n = normal();
+        let (chi, dt) = (0.8, 0.02);
+
+        let mut porous = Relax::none();
+        Property::PorousAccretor { p: 1.0, inv_tau: 6.0, inv_eta_n: 11.0, inv_eta_t: 7.0 }
+            .contribute(chi, &k, &mut porous);
+        let mut drain = Relax::none();
+        Property::Drain { inv_tau: 6.0 }.contribute(chi, &k, &mut drain);
+        let (a, _) = penalize_cell(&cons, &porous, n, dt, 1.0, 0);
+        let (b, _) = penalize_cell(&cons, &drain, n, dt, 1.0, 0);
+        assert_eq!(a.den.to_bits(), b.den.to_bits());
+        assert_eq!(a.nrg.to_bits(), b.nrg.to_bits());
+
+        let mut sealed = Relax::none();
+        Property::PorousAccretor { p: 0.0, inv_tau: 6.0, inv_eta_n: 11.0, inv_eta_t: 7.0 }
+            .contribute(chi, &k, &mut sealed);
+        let (c, delta) = penalize_cell(&cons, &sealed, n, dt, 1.0, 0);
+        assert_eq!(c.den.to_bits(), cons.den.to_bits());
+        assert_eq!(delta.mass_delta, 0.0);
     }
 
     // the isothermal regime: no energy channel — the drain and wall still act,

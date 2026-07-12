@@ -277,3 +277,185 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
     }
     assert!(fired > 20, "the iso drain never fired");
 }
+
+// the [PorousAccretor] kernel (docs/design/50 zoo): the compiled kernel is
+// bit-identical to the f64 chain (guarded sphere normal -> PorousAccretor
+// contribute -> penalize_cell), free-slip (k_eta_t = 0) leaves the tangential
+// velocity bit-untouched THROUGH the compiled path, and porosity = 1 reduces
+// the porous kernel to the drain kernel bit-for-bit on the same inputs.
+#[test]
+fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
+    let (porous, ir) = kernel_by_name::<f64>("penalize_porous_2d").expect("porous kernel");
+    assert!(kernel_output_support_from_ir(ir).is_some());
+    let (drain, drain_ir) = kernel_by_name::<f64>("penalize_drain_2d").expect("drain kernel");
+
+    const P: f64 = 0.4;
+    const K_ETA_N: f64 = 30.0;
+    const K_ETA_T: f64 = 0.0; // free-slip
+    const VEL: [f64; 2] = [0.05, -0.03];
+
+    let n2 = N * N;
+    let (mut den, mut mx, mut my, mut nrg) =
+        (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    for jj in 0..N {
+        for ii in 0..N {
+            let (x, y) = (cell_center(ii), cell_center(jj));
+            let c = ii + jj * N;
+            den[c] = 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos();
+            mx[c] = den[c] * 0.3 * (x + y).cos();
+            my[c] = den[c] * -0.2 * (x - 2.0 * y).sin();
+            nrg[c] = 2.0 / (GAMMA - 1.0) + 0.5 * (mx[c] * mx[c] + my[c] * my[c]) / den[c];
+        }
+    }
+    let host_in = (den.clone(), mx.clone(), my.clone(), nrg.clone());
+
+    #[allow(clippy::type_complexity)]
+    let run = |kern: symbi_aot::KernelFn<f64>,
+               kern_ir,
+               p_val: f64|
+     -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let scalar = |name: &str| -> f64 {
+            match name {
+                "dt" => DT,
+                "gamma" => GAMMA,
+                "c_drain" => C_DRAIN,
+                "porosity" => p_val,
+                "k_eta_n" => K_ETA_N,
+                "k_eta_t" => K_ETA_T,
+                "x_lo_0" | "x_lo_1" => X_LO,
+                "dx_0" | "dx_1" => DX,
+                "map_kind_0" | "map_kind_1" => 0.0,
+                "body_0_pos_0" => POS[0],
+                "body_0_pos_1" => POS[1],
+                "body_0_racc" => RACC,
+                "body_0_vel_0" => VEL[0],
+                "body_0_vel_1" => VEL[1],
+                other => panic!("unexpected scalar '{other}'"),
+            }
+        };
+        let (mut ints, mut scalars) = (Vec::new(), Vec::new());
+        for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(kern_ir) {
+            let v = scalar(&bind.name());
+            if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        }
+        let lo = [0i32; 2];
+        let ext = [N as u32; 2];
+        let mut pm = vec![7.7; n2];
+        let mut pfx = vec![7.7; n2];
+        let mut pfy = vec![7.7; n2];
+        let mut pe = vec![7.7; n2];
+        let mut pt = vec![7.7; n2];
+        let mut den_o = host_in.0.clone();
+        let mut mx_o = host_in.1.clone();
+        let mut my_o = host_in.2.clone();
+        let mut nrg_o = host_in.3.clone();
+        {
+            let inputs = [
+                CpuField::from_layout(&host_in.0, &lo, &ext),
+                CpuField::from_layout(&host_in.1, &lo, &ext),
+                CpuField::from_layout(&host_in.2, &lo, &ext),
+                CpuField::from_layout(&host_in.3, &lo, &ext),
+            ];
+            let mut outs = [
+                CpuFieldMut::from_layout(&mut den_o, &lo, &ext),
+                CpuFieldMut::from_layout(&mut mx_o, &lo, &ext),
+                CpuFieldMut::from_layout(&mut my_o, &lo, &ext),
+                CpuFieldMut::from_layout(&mut nrg_o, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pm, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pe, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+            ];
+            kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+        }
+        (den_o, mx_o, my_o, nrg_o, pm, pfx, pfy, pe, pt)
+    };
+
+    let out = run(porous, ir, P);
+
+    // the f64 chain, mirrored to the bit (face-mid centroid, double-reciprocal
+    // volume, guarded normal).
+    let sphere = SdfExpr::<f64, 2>::sphere(POS, RACC);
+    let width = |i: usize| (X_LO + (i as f64 + 1.0) * DX) - (X_LO + i as f64 * DX);
+    let mid = |i: usize| ((X_LO + i as f64 * DX) + (X_LO + (i as f64 + 1.0) * DX)) * 0.5;
+    let mut fired = 0usize;
+    let mut tangential_checked = 0usize;
+    for jj in 0..N {
+        for ii in 0..N {
+            let c = ii + jj * N;
+            let cons = ConsG::<f64, 2, Adiabatic> {
+                den: host_in.0[c],
+                mom: Tensor::new([host_in.1[c], host_in.2[c]]),
+                nrg: host_in.3[c],
+            };
+            let x = [mid(ii), mid(jj)];
+            let dv = 1.0 / (1.0 / (width(ii) * width(jj)));
+            let ch = chi(sphere.dist(x), DX);
+            let mom_sq = cons.mom.dot(&cons.mom);
+            let cs = symbi_ib::drain::sound_speed_from_cons(cons.den, mom_sq, cons.nrg, GAMMA);
+            let inv_tau = cs / (C_DRAIN * DX);
+            let rate_scale = cs / DX;
+            let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
+            let r = x_rel.dot(&x_rel).sqrt();
+            let normal = x_rel.scale(1.0 / r.max(1e-300));
+            let kin = BodyKin::<f64, 2> {
+                u_solid: Tensor::new(VEL),
+                omega: Tensor::zeros(),
+                e_wall: 0.0,
+            };
+            let mut acc = Relax::none();
+            Property::PorousAccretor {
+                p: P,
+                inv_tau,
+                inv_eta_n: K_ETA_N * rate_scale,
+                inv_eta_t: K_ETA_T * rate_scale,
+            }
+            .contribute(ch, &kin, &mut acc);
+            let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
+
+            assert_eq!(out.0[c].to_bits(), expect.den.to_bits(), "den at ({ii},{jj})");
+            assert_eq!(out.1[c].to_bits(), expect.mom[0].to_bits(), "mom0 at ({ii},{jj})");
+            assert_eq!(out.2[c].to_bits(), expect.mom[1].to_bits(), "mom1 at ({ii},{jj})");
+            assert_eq!(out.3[c].to_bits(), expect.nrg.to_bits(), "nrg at ({ii},{jj})");
+            assert_eq!(out.4[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            assert_eq!(out.5[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
+            assert_eq!(out.6[c].to_bits(), delta.force_delta[1].to_bits(), "fy at ({ii},{jj})");
+            assert_eq!(out.7[c].to_bits(), delta.energy_delta.to_bits(), "energy at ({ii},{jj})");
+            let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
+            assert_eq!(out.8[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
+            if out.4[c] != 0.0 {
+                fired += 1;
+            }
+            // free-slip through the COMPILED path: inside the ball, the
+            // tangential projection of the velocity change is exactly the
+            // drain scaling's (u unchanged) — pin the tangential component of
+            // u against the pre-state where the drain leaves u invariant.
+            if ch > 0.5 && r > 1e-12 {
+                let u0 = cons.mom.scale(1.0 / cons.den);
+                let u1 = Tensor::new([out.1[c], out.2[c]]).scale(1.0 / out.0[c]);
+                let t = Tensor::new([-normal[1], normal[0]]);
+                let (du0, du1) = ((u0 - kin.u_solid).dot(&t), (u1 - kin.u_solid).dot(&t));
+                assert!(
+                    (du1 - du0).abs() <= 1e-13 * du0.abs().max(1e-30),
+                    "free-slip tangential drift at ({ii},{jj}): {du0} -> {du1}",
+                );
+                tangential_checked += 1;
+            }
+        }
+    }
+    assert!(fired > 20, "the porous drain never fired");
+    assert!(tangential_checked > 5, "the free-slip check never ran");
+
+    // porosity = 1: the porous kernel IS the drain kernel, bit for bit.
+    let porous_p1 = run(porous, ir, 1.0);
+    let drain_out = run(drain, drain_ir, 1.0);
+    for c in 0..n2 {
+        assert_eq!(porous_p1.0[c].to_bits(), drain_out.0[c].to_bits(), "p=1 den at {c}");
+        assert_eq!(porous_p1.1[c].to_bits(), drain_out.1[c].to_bits(), "p=1 mom0 at {c}");
+        assert_eq!(porous_p1.2[c].to_bits(), drain_out.2[c].to_bits(), "p=1 mom1 at {c}");
+        assert_eq!(porous_p1.3[c].to_bits(), drain_out.3[c].to_bits(), "p=1 nrg at {c}");
+        assert_eq!(porous_p1.4[c].to_bits(), drain_out.4[c].to_bits(), "p=1 mass at {c}");
+        assert_eq!(porous_p1.8[c].to_bits(), drain_out.8[c].to_bits(), "p=1 torque at {c}");
+    }
+}

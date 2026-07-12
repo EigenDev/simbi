@@ -149,6 +149,10 @@ struct BodyParams {
     softening: f64,
     accretion_radius: f64,
     sink_rate: f64,
+    /// the porous-surface dial (docs/design/50): None keeps the pure drain.
+    porosity: Option<f64>,
+    k_eta_n: f64,
+    k_eta_t: f64,
 }
 
 // =============================================================================
@@ -731,6 +735,9 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let softening = sub_f64(b, "gravitational", "softening_length", 0.0);
         let accretion_radius = sub_f64(b, "accretion", "accretion_radius", 0.0);
         let sink_rate = sub_f64(b, "accretion", "sink_rate", 0.0);
+        let porosity = sub_f64_opt(b, "accretion", "porosity");
+        let k_eta_n = sub_f64(b, "accretion", "k_eta_n", 0.0);
+        let k_eta_t = sub_f64(b, "accretion", "k_eta_t", 0.0);
         out.push(BodyParams {
             capability,
             mass: f("mass"),
@@ -740,6 +747,9 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             softening,
             accretion_radius,
             sink_rate,
+            porosity,
+            k_eta_n,
+            k_eta_t,
         });
     }
     out
@@ -748,13 +758,18 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
 /// read `body[group][key]` as f64 (the nested ImmersedBodyConfig sub-dicts like
 /// `gravitational` / `accretion`), returning `default` when absent or null.
 fn sub_f64(body: &Bound<'_, PyDict>, group: &str, key: &str, default: f64) -> f64 {
+    sub_f64_opt(body, group, key).unwrap_or(default)
+}
+
+/// like `sub_f64` but absent / null / non-numeric is `None` — for dials whose
+/// absence means a different code path (e.g. porosity: None = the pure drain).
+fn sub_f64_opt(body: &Bound<'_, PyDict>, group: &str, key: &str) -> Option<f64> {
     body.get_item(group)
         .ok()
         .flatten()
         .and_then(|g| g.downcast::<PyDict>().ok().cloned())
         .and_then(|gd| gd.get_item(key).ok().flatten())
         .and_then(|val| val.extract().ok())
-        .unwrap_or(default)
 }
 
 /// drain a python primitive-generator into a flat per-cell buffer. each yielded
@@ -1695,7 +1710,7 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
             b.velocity.get(ax).copied().unwrap_or(0.0)
         }));
         let body = if b.capability & ACCRETION != 0 {
-            Body::black_hole(
+            let bh = Body::black_hole(
                 idx,
                 pos,
                 vel,
@@ -1705,7 +1720,17 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                 b.sink_rate,
                 1.0,
                 b.accretion_radius,
-            )
+            );
+            // a declared porosity switches the surface stack from the pure
+            // drain to the porous penalization (docs/design/50 zoo).
+            match b.porosity {
+                Some(porosity) => bh.with_surface(symbi_ib::SurfaceSpec::Porous {
+                    porosity,
+                    k_eta_n: b.k_eta_n,
+                    k_eta_t: b.k_eta_t,
+                }),
+                None => bh,
+            }
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };

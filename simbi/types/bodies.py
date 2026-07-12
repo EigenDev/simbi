@@ -149,6 +149,14 @@ class AccretionProperties:
     total_accreted_mass: float = 0.0
     accretion_rate: float = 0.0
     sink_delta: float = 1.0  # 1 is standard sink, 0 is torque-free
+    # the porous surface dial (docs/design/50): None keeps the pure drain.
+    # porosity p scales the drain channel, (1 - p) the wall channels; the
+    # wall rates are k_eta_* c_s / dx (multiplicative dials, zero = channel
+    # off exactly, so k_eta_t = 0 is a free-slip surface). p = 0 is a sealed
+    # wall (zero mass receipts, exactly); p = 1 reduces to the pure drain.
+    porosity: float | None = None
+    k_eta_n: float = 0.0
+    k_eta_t: float = 0.0
 
 
 @dataclass(frozen=True)

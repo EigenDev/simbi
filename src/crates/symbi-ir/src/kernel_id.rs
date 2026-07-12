@@ -64,6 +64,12 @@ pub enum KernelId {
     PenalizeDrain { ndim: u8 },
     /// the isothermal twin: constant sound speed, no energy channel.
     PenalizeDrainIso { ndim: u8 },
+    /// the [PorousAccretor] penalization (docs/design/50 zoo): the porosity
+    /// dial p scales the drain, (1 - p) the wall channels; independent
+    /// normal/tangential wall rates (free-slip = tangential rate zero,
+    /// exactly). p = 1 reduces bit-exactly to `PenalizeDrain`. adiabatic,
+    /// cartesian.
+    PenalizePorous { ndim: u8 },
     /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
@@ -189,6 +195,9 @@ impl KernelId {
             KernelId::PenalizeDrainIso { ndim } => {
                 ["penalize_drain_iso_1d", "penalize_drain_iso_2d", "penalize_drain_iso_3d"]
                     [dim_ix(ndim)]
+            }
+            KernelId::PenalizePorous { ndim } => {
+                ["penalize_porous_1d", "penalize_porous_2d", "penalize_porous_3d"][dim_ix(ndim)]
             }
             KernelId::RefineProlongSweep { order, axis, ncomp, ndim } => {
                 match (order, axis, ncomp, ndim) {

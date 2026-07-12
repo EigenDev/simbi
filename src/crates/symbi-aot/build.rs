@@ -1608,6 +1608,8 @@ fn gen_penalize(out_dir: &str, ndim: u8) {
     emit_gv(out_dir, KernelId::PenalizeDrain { ndim }.name(), ndim, &k, &writes);
     let (k, writes) = symbi_discretize::penalize_drain_iso_gv(ndim as usize);
     emit_gv(out_dir, KernelId::PenalizeDrainIso { ndim }.name(), ndim, &k, &writes);
+    let (k, writes) = symbi_discretize::penalize_porous_gv(ndim as usize);
+    emit_gv(out_dir, KernelId::PenalizePorous { ndim }.name(), ndim, &k, &writes);
 }
 
 fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {

@@ -22,7 +22,7 @@ pub mod drain;
 pub mod motion;
 pub mod diagnostics;
 
-pub use body::{Body, BodyKind};
+pub use body::{Body, BodyKind, SurfaceSpec};
 pub use bondi::{accretion_coefficient, bondi_profile, mdot_bondi, sonic_radius, BondiState};
 pub use history::BodyHistory;
 pub use penalize::{moment, omega_cross, penalize_cell, BodyKin, Property, Relax};
