@@ -624,29 +624,17 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 penalize_name("penalize_drain_iso", coords_g, D)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, true) => {
-                assert!(
-                    coords_g == cart,
-                    "penalize: the porous surface is baked for cartesian only (a curvilinear \
-                     porous accretor needs the physical-frame normal)"
-                );
                 penalize_name("penalize_porous", coords_g, D)
             }
-            (symbi_ib::SurfaceSpec::Porous { .. }, false) => panic!(
-                "penalize: the porous surface is baked for the adiabatic regime only \
-                 (an isothermal porous accretor needs the iso twin baked first)"
-            ),
+            (symbi_ib::SurfaceSpec::Porous { .. }, false) => {
+                penalize_name("penalize_porous_iso", coords_g, D)
+            }
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, false) => {
-                assert!(
-                    coords_g == cart,
-                    "penalize: the torque-free surface is baked for cartesian only (a curvilinear \
-                     torque-free accretor needs the physical-frame normal)"
-                );
                 penalize_name("penalize_torque_free_iso", coords_g, D)
             }
-            (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => panic!(
-                "penalize: the torque-free surface is baked for the isothermal (thin-disk) \
-                 regime only (an adiabatic torque-free accretor needs the adiabatic twin baked)"
-            ),
+            (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => {
+                penalize_name("penalize_torque_free", coords_g, D)
+            }
         };
         let name: &str = &name_owned;
         // the reduction/dispatch box. on a Cartesian grid the kernel's declared

@@ -29,6 +29,37 @@ fn cell_center(i: usize) -> f64 {
     X_LO + (i as f64 + 0.5) * DX
 }
 
+/// run a penalize kernel: `inputs` are the in-place cons reads (3 for iso: den,
+/// mom0, mom1; 4 for adiabatic: + nrg), `n_out` the total output count (cons
+/// clones first, then the delta scratch). returns every output buffer.
+fn run_pen(
+    kern: symbi_aot::KernelFn<f64>,
+    ir: &str,
+    inputs: &[&[f64]],
+    n_out: usize,
+    scalar: impl Fn(&str) -> f64,
+) -> Vec<Vec<f64>> {
+    let n2 = inputs[0].len();
+    let (mut ints, mut scalars) = (Vec::new(), Vec::new());
+    for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
+        let v = scalar(&bind.name());
+        if is_int { ints.push(v as i32) } else { scalars.push(v) }
+    }
+    let lo = [0i32; 2];
+    let ext = [(n2 as f64).sqrt() as u32; 2];
+    let in_fields: Vec<CpuField<f64>> =
+        inputs.iter().map(|b| CpuField::from_layout(b, &lo, &ext)).collect();
+    let mut out: Vec<Vec<f64>> = (0..n_out)
+        .map(|k| if k < inputs.len() { inputs[k].to_vec() } else { vec![7.7; n2] })
+        .collect();
+    {
+        let mut out_fields: Vec<CpuFieldMut<f64>> =
+            out.iter_mut().map(|b| CpuFieldMut::from_layout(b, &lo, &ext)).collect();
+        kern(&in_fields, &mut out_fields, &ext, &lo, &ints, &scalars);
+    }
+    out
+}
+
 #[test]
 fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
     let (kernel, ir) = kernel_by_name::<f64>("penalize_drain_2d").expect("kernel in registry");
@@ -397,8 +428,14 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             assert_eq!(mx[c].to_bits(), out.mom[0].to_bits(), "mom0 at ({ii},{jj})");
             assert_eq!(my[c].to_bits(), out.mom[1].to_bits(), "mom1 at ({ii},{jj})");
             assert_eq!(pm[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            // lab-frame torque: rotate the physical force to Cartesian, cross with r_cart.
+            let e = metric.vector_to_cartesian(
+                Tensor::new([cr(ii), cphi(jj)]),
+                symbi_algebra::Physical::new(delta.force_delta),
+            );
+            let f_cart = Tensor::new([e[0], e[1]]);
             let x_rel = Tensor::new([xc[0] - CENTER[0], xc[1] - CENTER[1]]);
-            let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
+            let tq = symbi_ib::moment(&x_rel, &f_cart);
             assert_eq!(pt[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
             if pm[c] != 0.0 {
                 fired += 1;
@@ -406,6 +443,170 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
         }
     }
     assert!(fired > 20, "the cylindrical drain never fired — the gate is vacuous");
+}
+
+// the CYLINDRICAL (R, phi) torque-free accretor gate: the surface normal is
+// rotated into the physical frame (e_R for a centered accretor, so tangential ==
+// phi == the angular-momentum direction), and the torque is the lab-frame
+// r_cart x F_cart. bit-identical to the f64 chain, and xi = 0 reduces to the
+// cylindrical iso drain kernel bit-for-bit.
+#[test]
+fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
+    use symbi_geometry::{CylindricalRPhi, Metric};
+    use symbi_hydro::energy::IsoModel;
+    let (tf, ir) =
+        kernel_by_name::<f64>("penalize_torque_free_iso_cyl_2d").expect("cyl torque-free kernel");
+    assert!(kernel_output_support_from_ir(ir).is_some());
+    let (drain, drain_ir) =
+        kernel_by_name::<f64>("penalize_drain_iso_cyl_2d").expect("cyl drain kernel");
+
+    const CS: f64 = 0.8;
+    const R_LO: f64 = 0.0;
+    const DR: f64 = 0.05;
+    const PHI_LO: f64 = 0.0;
+    const DPHI: f64 = 0.2;
+    const CENTER: [f64; 2] = [0.0, 0.0]; // centered accretor on the axis
+    const RACC_C: f64 = 0.15;
+    const VEL: [f64; 2] = [0.0, 0.0];
+
+    let n2 = N * N;
+    let (mut den0, mut mx0, mut my0) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    for jj in 0..N {
+        for ii in 0..N {
+            let c = ii + jj * N;
+            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            den0[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
+            mx0[c] = den0[c] * 0.3 * (rr + pp).cos();
+            my0[c] = den0[c] * -0.2 * (rr - 2.0 * pp).sin();
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    let run = |kern: symbi_aot::KernelFn<f64>,
+               kern_ir,
+               xi_val: f64|
+     -> (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>) {
+        let scalar = |name: &str| -> f64 {
+            match name {
+                "dt" => DT,
+                "cs" => CS,
+                "c_drain" => C_DRAIN,
+                "xi" => xi_val,
+                "x_lo_0" => R_LO,
+                "x_lo_1" => PHI_LO,
+                "dx_0" => DR,
+                "dx_1" => DPHI,
+                "map_kind_0" | "map_kind_1" => 0.0,
+                "body_0_pos_0" => CENTER[0],
+                "body_0_pos_1" => CENTER[1],
+                "body_0_racc" => RACC_C,
+                "body_0_vel_0" => VEL[0],
+                "body_0_vel_1" => VEL[1],
+                other => panic!("unexpected scalar '{other}'"),
+            }
+        };
+        let (mut ints, mut scalars) = (Vec::new(), Vec::new());
+        for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(kern_ir) {
+            let v = scalar(&bind.name());
+            if is_int { ints.push(v as i32) } else { scalars.push(v) }
+        }
+        let lo = [0i32; 2];
+        let ext = [N as u32; 2];
+        let inputs = [
+            CpuField::from_layout(&den0, &lo, &ext),
+            CpuField::from_layout(&mx0, &lo, &ext),
+            CpuField::from_layout(&my0, &lo, &ext),
+        ];
+        let (mut d, mut mx, mut my) = (den0.clone(), mx0.clone(), my0.clone());
+        let (mut pm, mut pfx, mut pfy, mut pt) =
+            (vec![7.7; n2], vec![7.7; n2], vec![7.7; n2], vec![7.7; n2]);
+        {
+            let mut outs = [
+                CpuFieldMut::from_layout(&mut d, &lo, &ext),
+                CpuFieldMut::from_layout(&mut mx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut my, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pm, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfx, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pfy, &lo, &ext),
+                CpuFieldMut::from_layout(&mut pt, &lo, &ext),
+            ];
+            kern(&inputs, &mut outs, &[N as u32; 2], &[0i32; 2], &ints, &scalars);
+        }
+        (d, mx, my, pm, pfx, pfy, pt)
+    };
+
+    // (1) bit-identity against the f64 chain at xi = 0.7.
+    const XI: f64 = 0.7;
+    let out = run(tf, ir, XI);
+    let metric = CylindricalRPhi;
+    let sphere = SdfExpr::<f64, 2>::sphere(CENTER, RACC_C);
+    let rl = |i: usize| R_LO + i as f64 * DR;
+    let rh = |i: usize| R_LO + (i as f64 + 1.0) * DR;
+    let ir2 = |i: usize| (rh(i) * rh(i) - rl(i) * rl(i)) / 2.0;
+    let cnum = |i: usize| (rh(i) * rh(i) * rh(i) - rl(i) * rl(i) * rl(i)) / 3.0;
+    let cr = |i: usize| cnum(i) / ir2(i);
+    let cphi = |j: usize| ((PHI_LO + j as f64 * DPHI) + (PHI_LO + (j as f64 + 1.0) * DPHI)) * 0.5;
+    let iphi = |j: usize| (PHI_LO + (j as f64 + 1.0) * DPHI) - (PHI_LO + j as f64 * DPHI);
+    let min_w = DR.min(DPHI);
+    let mut fired = 0usize;
+    for jj in 0..N {
+        for ii in 0..N {
+            let c = ii + jj * N;
+            let cons = ConsG::<f64, 2, IsoModel> {
+                den: den0[c],
+                mom: Tensor::new([mx0[c], my0[c]]),
+                nrg: Default::default(),
+            };
+            let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
+            let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
+            let inv_tau = CS / (C_DRAIN * min_w);
+            // the physical-frame normal: Cartesian r_hat rotated into the ortho basis.
+            let xrel = [xc[0] - CENTER[0], xc[1] - CENTER[1]];
+            let r = (xrel[0] * xrel[0] + xrel[1] * xrel[1]).sqrt();
+            let invr = 1.0 / r.max(1e-300);
+            let nphys = metric.vector_from_cartesian(
+                Tensor::new([cr(ii), cphi(jj)]),
+                symbi_algebra::Embedded::new(Tensor::new([xrel[0] * invr, xrel[1] * invr])),
+            );
+            let normal = Tensor::new([nphys[0], nphys[1]]);
+            let kin = BodyKin::<f64, 2> {
+                u_solid: Tensor::new(VEL),
+                omega: Tensor::zeros(),
+                e_wall: 0.0,
+            };
+            let mut acc = Relax::none();
+            Property::TorqueFreeAccretor { inv_tau, xi: XI }.contribute(ch, &kin, &mut acc);
+            let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
+            let (expect, delta) = penalize_cell(&cons, &acc, normal, DT, dv, 0);
+            assert_eq!(out.0[c].to_bits(), expect.den.to_bits(), "den at ({ii},{jj})");
+            assert_eq!(out.1[c].to_bits(), expect.mom[0].to_bits(), "mom0 at ({ii},{jj})");
+            assert_eq!(out.2[c].to_bits(), expect.mom[1].to_bits(), "mom1 at ({ii},{jj})");
+            assert_eq!(out.3[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            assert_eq!(out.4[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
+            assert_eq!(out.5[c].to_bits(), delta.force_delta[1].to_bits(), "fy at ({ii},{jj})");
+            let e = metric.vector_to_cartesian(
+                Tensor::new([cr(ii), cphi(jj)]),
+                symbi_algebra::Physical::new(delta.force_delta),
+            );
+            let tq = symbi_ib::moment(&Tensor::new([xrel[0], xrel[1]]), &Tensor::new([e[0], e[1]]));
+            assert_eq!(out.6[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
+            if out.3[c] != 0.0 {
+                fired += 1;
+            }
+        }
+    }
+    assert!(fired > 20, "the cylindrical torque-free drain never fired");
+
+    // (2) xi = 0: the torque-free kernel IS the cylindrical iso drain, bit for bit.
+    let tf0 = run(tf, ir, 0.0);
+    let dr = run(drain, drain_ir, 0.0);
+    for c in 0..n2 {
+        assert_eq!(tf0.0[c].to_bits(), dr.0[c].to_bits(), "xi=0 den at {c}");
+        assert_eq!(tf0.1[c].to_bits(), dr.1[c].to_bits(), "xi=0 mom0 at {c}");
+        assert_eq!(tf0.2[c].to_bits(), dr.2[c].to_bits(), "xi=0 mom1 at {c}");
+        assert_eq!(tf0.3[c].to_bits(), dr.3[c].to_bits(), "xi=0 mass at {c}");
+        assert_eq!(tf0.6[c].to_bits(), dr.6[c].to_bits(), "xi=0 torque at {c}");
+    }
 }
 
 // the ISOTHERMAL torque-free accretor kernel. the compiled
@@ -728,4 +929,190 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
         assert_eq!(porous_p1.4[c].to_bits(), drain_out.4[c].to_bits(), "p=1 mass at {c}");
         assert_eq!(porous_p1.8[c].to_bits(), drain_out.8[c].to_bits(), "p=1 torque at {c}");
     }
+}
+
+// the ISOTHERMAL porous twin: porosity = 1 IS the isothermal drain, bit for bit
+// (the wall channels carry an exact (1 - p) = 0). proves the regime twin is wired.
+#[test]
+fn iso_porous_reduces_to_iso_drain_at_p1() {
+    let (porous, pir) = kernel_by_name::<f64>("penalize_porous_iso_2d").expect("iso porous");
+    let (drain, dir) = kernel_by_name::<f64>("penalize_drain_iso_2d").expect("iso drain");
+    let n2 = N * N;
+    let (mut den, mut mx, mut my) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    for jj in 0..N {
+        for ii in 0..N {
+            let (x, y) = (cell_center(ii), cell_center(jj));
+            let c = ii + jj * N;
+            den[c] = 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos();
+            mx[c] = den[c] * 0.3 * (x + y).cos();
+            my[c] = den[c] * -0.2 * (x - 2.0 * y).sin();
+        }
+    }
+    let sc = |name: &str| -> f64 {
+        match name {
+            "dt" => DT,
+            "cs" => 0.8,
+            "c_drain" => C_DRAIN,
+            "porosity" => 1.0,
+            "k_eta_n" => 30.0,
+            "k_eta_t" => 5.0,
+            "x_lo_0" | "x_lo_1" => X_LO,
+            "dx_0" | "dx_1" => DX,
+            "map_kind_0" | "map_kind_1" => 0.0,
+            "body_0_pos_0" => POS[0],
+            "body_0_pos_1" => POS[1],
+            "body_0_racc" => RACC,
+            "body_0_vel_0" => 0.05,
+            "body_0_vel_1" => -0.03,
+            other => panic!("unexpected '{other}'"),
+        }
+    };
+    let inp: [&[f64]; 3] = [&den, &mx, &my];
+    let p = run_pen(porous, pir, &inp, 7, &sc);
+    let d = run_pen(drain, dir, &inp, 7, &sc);
+    let mut fired = 0usize;
+    for c in 0..n2 {
+        for k in 0..4 {
+            assert_eq!(p[k][c].to_bits(), d[k][c].to_bits(), "p=1 out{k} at {c}");
+        }
+        if p[3][c] != 0.0 {
+            fired += 1;
+        }
+    }
+    assert!(fired > 20, "the iso porous drain never fired");
+}
+
+// the ADIABATIC torque-free twin: xi = 0 IS the adiabatic drain, bit for bit.
+#[test]
+fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
+    let (tf, tir) = kernel_by_name::<f64>("penalize_torque_free_2d").expect("adiabatic tf");
+    let (drain, dir) = kernel_by_name::<f64>("penalize_drain_2d").expect("adiabatic drain");
+    let n2 = N * N;
+    let (mut den, mut mx, mut my, mut nrg) =
+        (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    for jj in 0..N {
+        for ii in 0..N {
+            let (x, y) = (cell_center(ii), cell_center(jj));
+            let c = ii + jj * N;
+            den[c] = 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos();
+            mx[c] = den[c] * 0.3 * (x + y).cos();
+            my[c] = den[c] * -0.2 * (x - 2.0 * y).sin();
+            nrg[c] = den[c] * (1.8 + 0.5 * (0.3 * (x * y)).sin());
+        }
+    }
+    let sc = |name: &str| -> f64 {
+        match name {
+            "dt" => DT,
+            "gamma" => GAMMA,
+            "c_drain" => C_DRAIN,
+            "xi" => 0.0,
+            "x_lo_0" | "x_lo_1" => X_LO,
+            "dx_0" | "dx_1" => DX,
+            "map_kind_0" | "map_kind_1" => 0.0,
+            "body_0_pos_0" => POS[0],
+            "body_0_pos_1" => POS[1],
+            "body_0_racc" => RACC,
+            "body_0_vel_0" => 0.05,
+            "body_0_vel_1" => -0.03,
+            other => panic!("unexpected '{other}'"),
+        }
+    };
+    let inp: [&[f64]; 4] = [&den, &mx, &my, &nrg];
+    let t = run_pen(tf, tir, &inp, 9, &sc);
+    let d = run_pen(drain, dir, &inp, 9, &sc);
+    let mut fired = 0usize;
+    for c in 0..n2 {
+        for k in 0..5 {
+            assert_eq!(t[k][c].to_bits(), d[k][c].to_bits(), "xi=0 out{k} at {c}");
+        }
+        if t[4][c] != 0.0 {
+            fired += 1;
+        }
+    }
+    assert!(fired > 20, "the adiabatic torque-free drain never fired");
+}
+
+// OFF-CENTER body: with the body position given in Cartesian (the convention on
+// any grid), the cylindrical drain masks a physical ball around that Cartesian
+// point — a curved region in (R, phi), NOT the axis ring. bit-identical to the
+// f64 chain, proving the general (non-e_r) off-center case.
+#[test]
+fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
+    use symbi_geometry::{CylindricalRPhi, Metric};
+    use symbi_hydro::energy::IsoModel;
+    let (kernel, ir) = kernel_by_name::<f64>("penalize_drain_iso_cyl_2d").expect("cyl drain");
+    const CS: f64 = 0.8;
+    const R_LO: f64 = 0.0;
+    const DR: f64 = 0.05;
+    const PHI_LO: f64 = 0.0;
+    const DPHI: f64 = 0.2;
+    const CENTER: [f64; 2] = [0.3, 0.2]; // off-center Cartesian body position
+    const RACC_C: f64 = 0.18;
+
+    let n2 = N * N;
+    let (mut den, mut mx, mut my) = (vec![0.0; n2], vec![0.0; n2], vec![0.0; n2]);
+    for jj in 0..N {
+        for ii in 0..N {
+            let c = ii + jj * N;
+            let (rr, pp) = (R_LO + (ii as f64 + 0.5) * DR, PHI_LO + (jj as f64 + 0.5) * DPHI);
+            den[c] = 1.0 + 0.2 * (2.0 * rr).sin() * (1.5 * pp).cos();
+            mx[c] = den[c] * 0.3 * (rr + pp).cos();
+            my[c] = den[c] * -0.2 * (rr - 2.0 * pp).sin();
+        }
+    }
+    let sc = |name: &str| -> f64 {
+        match name {
+            "dt" => DT,
+            "cs" => CS,
+            "c_drain" => C_DRAIN,
+            "x_lo_0" => R_LO,
+            "x_lo_1" => PHI_LO,
+            "dx_0" => DR,
+            "dx_1" => DPHI,
+            "map_kind_0" | "map_kind_1" => 0.0,
+            "body_0_pos_0" => CENTER[0],
+            "body_0_pos_1" => CENTER[1],
+            "body_0_racc" => RACC_C,
+            other => panic!("unexpected '{other}'"),
+        }
+    };
+    let inp: [&[f64]; 3] = [&den, &mx, &my];
+    let o = run_pen(kernel, ir, &inp, 7, &sc);
+
+    let metric = CylindricalRPhi;
+    let sphere = SdfExpr::<f64, 2>::sphere(CENTER, RACC_C);
+    let rl = |i: usize| R_LO + i as f64 * DR;
+    let rh = |i: usize| R_LO + (i as f64 + 1.0) * DR;
+    let ir2 = |i: usize| (rh(i) * rh(i) - rl(i) * rl(i)) / 2.0;
+    let cnum = |i: usize| (rh(i) * rh(i) * rh(i) - rl(i) * rl(i) * rl(i)) / 3.0;
+    let cr = |i: usize| cnum(i) / ir2(i);
+    let cphi = |j: usize| ((PHI_LO + j as f64 * DPHI) + (PHI_LO + (j as f64 + 1.0) * DPHI)) * 0.5;
+    let iphi = |j: usize| (PHI_LO + (j as f64 + 1.0) * DPHI) - (PHI_LO + j as f64 * DPHI);
+    let min_w = DR.min(DPHI);
+    let mut fired = 0usize;
+    for jj in 0..N {
+        for ii in 0..N {
+            let c = ii + jj * N;
+            let cons = ConsG::<f64, 2, IsoModel> {
+                den: den[c],
+                mom: Tensor::new([mx[c], my[c]]),
+                nrg: Default::default(),
+            };
+            let xc = metric.to_cartesian(Tensor::new([cr(ii), cphi(jj)]));
+            let ch = chi(sphere.dist([xc[0], xc[1]]), min_w);
+            let inv_tau = CS / (C_DRAIN * min_w);
+            let kin =
+                BodyKin::<f64, 2> { u_solid: Tensor::zeros(), omega: Tensor::zeros(), e_wall: 0.0 };
+            let mut acc = Relax::none();
+            Property::Drain { inv_tau }.contribute(ch, &kin, &mut acc);
+            let dv = 1.0 / (1.0 / (ir2(ii) * iphi(jj) * 1.0));
+            let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), DT, dv, 0);
+            assert_eq!(o[0][c].to_bits(), out.den.to_bits(), "den at ({ii},{jj})");
+            assert_eq!(o[3][c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
+            if o[3][c] != 0.0 {
+                fired += 1;
+            }
+        }
+    }
+    assert!(fired > 8, "the off-center mask never fired around the Cartesian point");
 }

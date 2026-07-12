@@ -1789,6 +1789,10 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
     const ACCRETION: u64 = 2;
     let mut coll = BodyCollection::new();
     for (idx, b) in params.iter().enumerate() {
+        // the body position is CARTESIAN on every grid: the immersed-body kernels
+        // map the cell centroid to Cartesian and take |x_cart - position|, so a
+        // spherical/cylindrical run gives the body's (x, y, z), not a coordinate
+        // tuple. a centered accretor is the origin (0, 0, 0) either way.
         let pos = Tensor::new(std::array::from_fn(|ax| {
             b.position.get(ax).copied().unwrap_or(0.0)
         }));

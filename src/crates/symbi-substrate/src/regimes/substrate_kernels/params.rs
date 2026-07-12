@@ -9,7 +9,6 @@
 
 use symbi_algebra::OrderedNumeric;
 use symbi_ir::algebra::Scalar;
-use symbi_geometry::Geometry as _GeomChk;
 use symbi_ir::{BodyScalar, ScalarRef};
 // the typed scalar binding (`Ref` closed vocab | `Spec` open knob) now lives in symbi-ir next to
 // `ScalarRef`/`FieldBind`, so the serialized IR scalar manifest is born typed. the dispatch
@@ -234,22 +233,14 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    if sim.geom.coords == _GeomChk::Cartesian {
-        return true;
-    }
-    // off cartesian, only the DRAIN surface is baked (its mask distance maps the
-    // cell centroid to Cartesian; porous / torque-free still need the physical-frame
-    // normal). the penalize path owns accretion — and the legacy in-godunov sink is
-    // retired — only when every accreting body is a plain drain; a non-drain sink on
-    // a curvilinear grid keeps the legacy sink for the whole sim.
-    match sim.immersed.as_ref() {
-        Some(im) => (0..im.bodies.len()).all(|b| {
-            let body = im.bodies.get(b);
-            body.accretion_radius().is_none()
-                || matches!(body.surface, symbi_ib::SurfaceSpec::Drain)
-        }),
-        None => false,
-    }
+    // every immersed-boundary surface (drain / porous / torque-free) is baked for
+    // every chart — the mask distance maps the cell centroid to Cartesian and the
+    // wall / torque-free normal rotates into the physical frame — so the penalize
+    // path owns accretion on any grid and the legacy in-godunov sink is retired.
+    // an unsupported (surface, regime) pair fails loud in the dispatch, never
+    // silently degrades to the legacy sink.
+    let _ = sim;
+    true
 }
 
 pub(crate) fn resolve_body_scalars<const D: usize, const DOF: usize, Mem, Sc>(

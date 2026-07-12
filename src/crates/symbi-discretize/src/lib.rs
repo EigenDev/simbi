@@ -38,7 +38,8 @@ pub use coords::{Coords, Spacing, Spacetime};
 // types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use symbi_ir::{Gv, GvKernel};
 pub use gv_penalize::{
-    penalize_drain_gv, penalize_drain_iso_gv, penalize_porous_gv, penalize_torque_free_iso_gv,
+    penalize_drain_gv, penalize_drain_iso_gv, penalize_porous_gv, penalize_porous_iso_gv,
+    penalize_torque_free_gv, penalize_torque_free_iso_gv,
 };
 pub use gv_viscous::{
     viscous_iso_alpha_gv, viscous_iso_alpha_gv_3d, viscous_iso_gv, viscous_iso_gv_3d,
