@@ -10,7 +10,7 @@
 
 use symbi_aot::{kernel_by_name, CpuField, CpuFieldMut};
 use symbi_algebra::Tensor;
-use symbi_hydro::viscous::viscous_mom_update_2d;
+use symbi_hydro::viscous::{viscous_mom_update_2d, viscous_mom_update_3d};
 
 const N: usize = 24;
 const X_LO: f64 = -0.6;
@@ -215,4 +215,231 @@ fn compiled_viscous_iso_alpha_matches_the_f64_chain_bitwise() {
         }
     }
     assert!(checked > 20, "the alpha viscous operator never produced a nonzero force");
+}
+
+// the 3D constant-nu gate: the compiled 27-cell stencil kernel is bit-identical
+// to the f64 chain built from the same `viscous_mom_update_3d`.
+const N3: usize = 12;
+
+#[test]
+fn compiled_viscous_iso_3d_matches_the_f64_chain_bitwise() {
+    let (kernel, ir) = kernel_by_name::<f64>("viscous_iso_3d").expect("viscous 3d kernel");
+
+    let n3 = N3 * N3 * N3;
+    let at = |i: usize, j: usize, k: usize| i + j * N3 + k * N3 * N3;
+    let (mut rho, mut v0, mut v1, mut v2) =
+        (vec![0.0; n3], vec![0.0; n3], vec![0.0; n3], vec![0.0; n3]);
+    let (mut m0, mut m1, mut m2) = (vec![0.0; n3], vec![0.0; n3], vec![0.0; n3]);
+    for kk in 0..N3 {
+        for jj in 0..N3 {
+            for ii in 0..N3 {
+                let (x, y, z) = (cc(ii), cc(jj), cc(kk));
+                let c = at(ii, jj, kk);
+                rho[c] = 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos() * (z).sin();
+                v0[c] = 0.3 * (x + y - z).cos();
+                v1[c] = -0.2 * (x - 2.0 * y + z).sin();
+                v2[c] = 0.15 * (0.5 * x + y - 1.5 * z).cos();
+                m0[c] = rho[c] * v0[c];
+                m1[c] = rho[c] * v1[c];
+                m2[c] = rho[c] * v2[c];
+            }
+        }
+    }
+    let (m0_in, m1_in, m2_in) = (m0.clone(), m1.clone(), m2.clone());
+
+    let scalar = |name: &str| -> f64 {
+        match name {
+            "dt" => DT,
+            "nu" => NU,
+            "dx_0" | "dx_1" | "dx_2" => DX,
+            other => panic!("unexpected scalar '{other}'"),
+        }
+    };
+    let (mut ints, mut scalars) = (Vec::new(), Vec::new());
+    for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
+        let v = scalar(&bind.name());
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
+    }
+
+    let lo = [0i32; 3];
+    let ext = [N3 as u32; 3];
+    let disp_lo = [1i32; 3];
+    let disp_ext = [(N3 - 2) as u32; 3];
+    {
+        let inputs = [
+            CpuField::from_layout(&rho, &lo, &ext),
+            CpuField::from_layout(&v0, &lo, &ext),
+            CpuField::from_layout(&v1, &lo, &ext),
+            CpuField::from_layout(&v2, &lo, &ext),
+            CpuField::from_layout(&m0_in, &lo, &ext),
+            CpuField::from_layout(&m1_in, &lo, &ext),
+            CpuField::from_layout(&m2_in, &lo, &ext),
+        ];
+        let mut outs = [
+            CpuFieldMut::from_layout(&mut m0, &lo, &ext),
+            CpuFieldMut::from_layout(&mut m1, &lo, &ext),
+            CpuFieldMut::from_layout(&mut m2, &lo, &ext),
+        ];
+        kernel(&inputs, &mut outs, &disp_ext, &disp_lo, &ints, &scalars);
+    }
+
+    let mut checked = 0usize;
+    for kk in 1..N3 - 1 {
+        for jj in 1..N3 - 1 {
+            for ii in 1..N3 - 1 {
+                let mut vst = [[[Tensor::<f64, 3>::zeros(); 3]; 3]; 3];
+                let mut rst = [[[0.0f64; 3]; 3]; 3];
+                for dk in 0..3 {
+                    for dj in 0..3 {
+                        for di in 0..3 {
+                            let c = at(ii + di - 1, jj + dj - 1, kk + dk - 1);
+                            vst[dk][dj][di] = Tensor::new([v0[c], v1[c], v2[c]]);
+                            rst[dk][dj][di] = rho[c];
+                        }
+                    }
+                }
+                let dmom = viscous_mom_update_3d(&vst, &rst, &[[[NU; 3]; 3]; 3], [DX; 3], DT);
+                let c = at(ii, jj, kk);
+                assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj},{kk})");
+                assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj},{kk})");
+                assert_eq!(m2[c].to_bits(), (m2_in[c] + dmom[2]).to_bits(), "mom2 ({ii},{jj},{kk})");
+                if (m2[c] - m2_in[c]).abs() > 1e-14 {
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 20, "the 3D viscous operator never produced a nonzero z-force");
+}
+
+// the 3D alpha gate: nu(x,y) = alpha cs^2 / Omega_k(R) with R the CYLINDRICAL
+// radius (z does not enter), so every k-slice of the nu stencil is equal.
+#[test]
+fn compiled_viscous_iso_alpha_3d_matches_the_f64_chain_bitwise() {
+    let (kernel, ir) =
+        kernel_by_name::<f64>("viscous_iso_alpha_3d").expect("alpha viscous 3d kernel");
+
+    const ALPHA: f64 = 0.1;
+    const CS: f64 = 0.1;
+    const GM: f64 = 1.0;
+    const BODY: [f64; 2] = [0.05, -0.03];
+
+    let n3 = N3 * N3 * N3;
+    let at = |i: usize, j: usize, k: usize| i + j * N3 + k * N3 * N3;
+    let (mut rho, mut v0, mut v1, mut v2) =
+        (vec![0.0; n3], vec![0.0; n3], vec![0.0; n3], vec![0.0; n3]);
+    let (mut m0, mut m1, mut m2) = (vec![0.0; n3], vec![0.0; n3], vec![0.0; n3]);
+    for kk in 0..N3 {
+        for jj in 0..N3 {
+            for ii in 0..N3 {
+                let (x, y, z) = (cc(ii), cc(jj), cc(kk));
+                let c = at(ii, jj, kk);
+                rho[c] = 1.0 + 0.2 * (2.0 * x).sin() * (1.5 * y).cos() * (z).sin();
+                v0[c] = 0.3 * (x + y - z).cos();
+                v1[c] = -0.2 * (x - 2.0 * y + z).sin();
+                v2[c] = 0.15 * (0.5 * x + y - 1.5 * z).cos();
+                m0[c] = rho[c] * v0[c];
+                m1[c] = rho[c] * v1[c];
+                m2[c] = rho[c] * v2[c];
+            }
+        }
+    }
+    let (m0_in, m1_in, m2_in) = (m0.clone(), m1.clone(), m2.clone());
+
+    let scalar = |name: &str| -> f64 {
+        match name {
+            "dt" => DT,
+            "alpha" => ALPHA,
+            "cs" => CS,
+            "body_0_mass" => GM,
+            "body_0_pos_0" => BODY[0],
+            "body_0_pos_1" => BODY[1],
+            "dx_0" | "dx_1" | "dx_2" => DX,
+            "x_lo_0" | "x_lo_1" | "x_lo_2" => X_LO,
+            "map_kind_0" | "map_kind_1" | "map_kind_2" => 0.0,
+            other => panic!("unexpected scalar '{other}'"),
+        }
+    };
+    let (mut ints, mut scalars) = (Vec::new(), Vec::new());
+    for (bind, is_int) in symbi_ir::kernel_scalar_params_typed_from_ir(ir) {
+        let v = scalar(&bind.name());
+        if is_int {
+            ints.push(v as i32)
+        } else {
+            scalars.push(v)
+        }
+    }
+
+    let lo = [0i32; 3];
+    let ext = [N3 as u32; 3];
+    let disp_lo = [1i32; 3];
+    let disp_ext = [(N3 - 2) as u32; 3];
+    {
+        let inputs = [
+            CpuField::from_layout(&rho, &lo, &ext),
+            CpuField::from_layout(&v0, &lo, &ext),
+            CpuField::from_layout(&v1, &lo, &ext),
+            CpuField::from_layout(&v2, &lo, &ext),
+            CpuField::from_layout(&m0_in, &lo, &ext),
+            CpuField::from_layout(&m1_in, &lo, &ext),
+            CpuField::from_layout(&m2_in, &lo, &ext),
+        ];
+        let mut outs = [
+            CpuFieldMut::from_layout(&mut m0, &lo, &ext),
+            CpuFieldMut::from_layout(&mut m1, &lo, &ext),
+            CpuFieldMut::from_layout(&mut m2, &lo, &ext),
+        ];
+        kernel(&inputs, &mut outs, &disp_ext, &disp_lo, &ints, &scalars);
+    }
+
+    // cylindrical R: z does not enter Omega_k. the stencil position must match the
+    // kernel arithmetic bit-for-bit: the cell centroid is `(lo_face + hi_face)/2`
+    // with the uniform face `x_lo + i*dx`, and the offset cell sits at `centroid +
+    // (off)*dx` — NOT `x_lo + (i+off+0.5)*dx`, which rounds differently and the
+    // sqrt/division in nu(x) amplifies.
+    let face = |i_f: f64| X_LO + i_f * DX;
+    let centroid = |c: usize| (face(c as f64) + face(c as f64 + 1.0)) * 0.5;
+    let nu_at = |cx: f64, cy: f64| -> f64 {
+        let (rx, ry) = (cx - BODY[0], cy - BODY[1]);
+        let r = (rx * rx + ry * ry).sqrt().max(1e-30);
+        let omega_k = (GM / (r * r * r)).sqrt().max(1e-30);
+        ALPHA * CS * CS / omega_k
+    };
+
+    let mut checked = 0usize;
+    for kk in 1..N3 - 1 {
+        for jj in 1..N3 - 1 {
+            for ii in 1..N3 - 1 {
+                let mut vst = [[[Tensor::<f64, 3>::zeros(); 3]; 3]; 3];
+                let mut rst = [[[0.0f64; 3]; 3]; 3];
+                let mut nst = [[[0.0f64; 3]; 3]; 3];
+                for dk in 0..3 {
+                    for dj in 0..3 {
+                        for di in 0..3 {
+                            let (si, sj, sk) = (ii + di - 1, jj + dj - 1, kk + dk - 1);
+                            let c = at(si, sj, sk);
+                            vst[dk][dj][di] = Tensor::new([v0[c], v1[c], v2[c]]);
+                            rst[dk][dj][di] = rho[c];
+                            let xk = centroid(ii) + (di as f64 - 1.0) * DX;
+                            let yk = centroid(jj) + (dj as f64 - 1.0) * DX;
+                            nst[dk][dj][di] = nu_at(xk, yk);
+                        }
+                    }
+                }
+                let dmom = viscous_mom_update_3d(&vst, &rst, &nst, [DX; 3], DT);
+                let c = at(ii, jj, kk);
+                assert_eq!(m0[c].to_bits(), (m0_in[c] + dmom[0]).to_bits(), "mom0 ({ii},{jj},{kk})");
+                assert_eq!(m1[c].to_bits(), (m1_in[c] + dmom[1]).to_bits(), "mom1 ({ii},{jj},{kk})");
+                assert_eq!(m2[c].to_bits(), (m2_in[c] + dmom[2]).to_bits(), "mom2 ({ii},{jj},{kk})");
+                if (m2[c] - m2_in[c]).abs() > 1e-14 {
+                    checked += 1;
+                }
+            }
+        }
+    }
+    assert!(checked > 20, "the 3D alpha viscous operator never produced a nonzero z-force");
 }

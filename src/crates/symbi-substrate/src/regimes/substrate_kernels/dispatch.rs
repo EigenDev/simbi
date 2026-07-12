@@ -206,7 +206,7 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    assert_eq!(D, 2, "the viscous operator is baked for 2D only");
+    assert!(D == 2 || D == 3, "the viscous operator is baked for 2D and 3D cartesian");
     let geom = &sim.geom;
     let name = symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name();
     let scalars = super::params::scalars_for(name, |bind| match bind {
@@ -235,7 +235,7 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    assert_eq!(D, 2, "the alpha viscous operator is baked for 2D only");
+    assert!(D == 2 || D == 3, "the alpha viscous operator is baked for 2D and 3D cartesian");
     let im = sim
         .immersed
         .as_ref()

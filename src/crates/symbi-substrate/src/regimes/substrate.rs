@@ -151,10 +151,15 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         if gm <= 0.0 {
             return 0.0;
         }
+        // the orbital frequency is set by the CYLINDRICAL radius in the disk plane
+        // (the first two axes, x-y); the vertical z (axis 2 in 3D) does not enter
+        // Omega_k. nu grows outward, so nu_max sits at the largest in-plane radius,
+        // the farthest corner in x-y. matches the kernel's nu(x,y) exactly.
+        let plane = D.min(2);
         let mut r_max = 0.0_f64;
         for corner in 0..(1usize << D) {
             let mut d2 = 0.0;
-            for a in 0..D {
+            for a in 0..plane {
                 let sp = &geom.interior.spaces[a];
                 let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
                 let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
@@ -351,16 +356,21 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             self.cfl_number,
             None,
         );
-        // the parabolic viscous cap: an explicit diffusion step
-        // is stable for dt <= C_visc dx^2 / nu_max. inert when inviscid. for alpha
-        // the viscosity grows with radius, so nu_max is at the farthest corner.
+        // the parabolic viscous cap: an explicit momentum-diffusion step is
+        // stable for dt <= C_visc dx^2 / nu_max. the 2D Navier-Stokes normal
+        // stress carries a 4/3 factor (tau_xx = rho nu (4/3 d_x v_x - ...)), so
+        // the von-Neumann limit is ~0.21 dx^2/nu for the self-diffusion and lower
+        // once the cross terms couple x and y; C_visc = 0.1 sits safely below it
+        // (0.25, the plain-Laplacian value, is unstable and blows the velocity
+        // up). inert when inviscid. for alpha the viscosity grows with radius, so
+        // nu_max is at the domain corner farthest from the body.
         let nu_max = if self.alpha > 0.0 {
             self.alpha_nu_max(sim)
         } else {
             self.viscosity
         };
         if nu_max > 0.0 {
-            const C_VISC: f64 = 0.25;
+            const C_VISC: f64 = 0.1;
             let min_dx = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
             dt_hydro.min(C_VISC * min_dx * min_dx / nu_max)
         } else {
@@ -546,13 +556,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
 
     fn viscous(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
         // the Navier-Stokes shear; inert when inviscid. baked
-        // for 2D cartesian only — fail loud otherwise rather than silently drop
+        // for 2D and 3D cartesian — fail loud otherwise rather than silently drop
         // the transport a viscous run declared. alpha (spatially varying nu)
         // takes precedence over the constant-nu viscosity.
         if self.alpha <= 0.0 && self.viscosity <= 0.0 {
             return;
         }
-        assert_eq!(D, 2, "viscosity is baked for 2D isothermal only");
+        assert!(D == 2 || D == 3, "viscosity is baked for 2D and 3D isothermal only");
         assert!(
             sim.geom.coords == Geometry::Cartesian,
             "viscosity is baked for cartesian only"

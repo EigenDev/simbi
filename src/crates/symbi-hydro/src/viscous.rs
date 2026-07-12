@@ -48,6 +48,18 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     let two_thirds = S::from_f64(2.0 / 3.0);
     let half = S::from_f64(0.5);
 
+    // the face DYNAMIC viscosity is mu = rho_face * nu_face. the density uses the
+    // HARMONIC (series) mean of the two straddling cells — the physically correct
+    // average of a diffusion coefficient across a face, and the one that VANISHES
+    // as either cell empties (rho -> 0). a mass sink that retains momentum (the
+    // torque-free surface) leaves a mask cell with tiny rho and O(1) momentum, so
+    // v = mom/rho is enormous; the arithmetic mean would keep mu ~ rho_healthy and
+    // the stress mu*grad(v) would explode, whereas the harmonic mean gives mu ~
+    // rho_vacuum, so mu*grad(v) ~ nu*(momentum) stays bounded. the tiny denominator
+    // floor guards an empty-empty face against 0/0.
+    let tiny = S::from_f64(1e-300);
+    let harm = |a: S, b: S| -> S { two * a * b / (a + b + tiny) };
+
     // vx[jj][ii] / vy[jj][ii] accessors keep the face formulas readable.
     let vx = |jj: usize, ii: usize| v[jj][ii][0];
     let vy = |jj: usize, ii: usize| v[jj][ii][1];
@@ -55,8 +67,7 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     // --- x-face i+1/2 (between center [1][1] and [1][2]) ---
     // normal gradient: central across the face. transverse gradient: averaged
     // over the two straddling cells (a 4-point central difference in y).
-    // the face DYNAMIC viscosity mu = rho_face * nu_face.
-    let mu_xp = half * (rho[1][1] + rho[1][2]) * (half * (nu[1][1] + nu[1][2]));
+    let mu_xp = harm(rho[1][1], rho[1][2]) * (half * (nu[1][1] + nu[1][2]));
     let dvxdx = (vx(1, 2) - vx(1, 1)) / dx;
     let dvydx = (vy(1, 2) - vy(1, 1)) / dx;
     let dvxdy = ((vx(2, 1) - vx(0, 1)) + (vx(2, 2) - vx(0, 2))) / (four * dy);
@@ -66,7 +77,7 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     let txy_xp = mu_xp * (dvxdy + dvydx);
 
     // --- x-face i-1/2 (between [1][0] and center [1][1]) ---
-    let mu_xm = half * (rho[1][0] + rho[1][1]) * (half * (nu[1][0] + nu[1][1]));
+    let mu_xm = harm(rho[1][0], rho[1][1]) * (half * (nu[1][0] + nu[1][1]));
     let dvxdx = (vx(1, 1) - vx(1, 0)) / dx;
     let dvydx = (vy(1, 1) - vy(1, 0)) / dx;
     let dvxdy = ((vx(2, 0) - vx(0, 0)) + (vx(2, 1) - vx(0, 1))) / (four * dy);
@@ -76,7 +87,7 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     let txy_xm = mu_xm * (dvxdy + dvydx);
 
     // --- y-face j+1/2 (between center [1][1] and [2][1]) ---
-    let mu_yp = half * (rho[1][1] + rho[2][1]) * (half * (nu[1][1] + nu[2][1]));
+    let mu_yp = harm(rho[1][1], rho[2][1]) * (half * (nu[1][1] + nu[2][1]));
     let dvxdy = (vx(2, 1) - vx(1, 1)) / dy;
     let dvydy = (vy(2, 1) - vy(1, 1)) / dy;
     let dvxdx = ((vx(1, 2) - vx(1, 0)) + (vx(2, 2) - vx(2, 0))) / (four * dx);
@@ -86,7 +97,7 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     let tyy_yp = mu_yp * (two * dvydy - two_thirds * div);
 
     // --- y-face j-1/2 (between [0][1] and center [1][1]) ---
-    let mu_ym = half * (rho[0][1] + rho[1][1]) * (half * (nu[0][1] + nu[1][1]));
+    let mu_ym = harm(rho[0][1], rho[1][1]) * (half * (nu[0][1] + nu[1][1]));
     let dvxdy = (vx(1, 1) - vx(0, 1)) / dy;
     let dvydy = (vy(1, 1) - vy(0, 1)) / dy;
     let dvxdx = ((vx(1, 2) - vx(1, 0)) + (vx(0, 2) - vx(0, 0))) / (four * dx);
@@ -99,6 +110,90 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     let dmom_x = dt * ((txx_xp - txx_xm) / dx + (tyx_yp - tyx_ym) / dy);
     let dmom_y = dt * ((txy_xp - txy_xm) / dx + (tyy_yp - tyy_ym) / dy);
     Tensor::new([dmom_x, dmom_y])
+}
+
+/// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to axis `a`
+/// of the center cell (`hi` = the +a face i+1/2, else the -a face i-1/2), from
+/// the 3x3x3 velocity/density/viscosity stencil. the normal gradient is compact
+/// across the face; each transverse gradient is averaged over the two straddling
+/// cells. the face viscosity is the average of the two, so the column is
+/// single-valued and the differenced flux conserves.
+fn face_stress_3d<S: Scalar>(
+    v: &[[[Tensor<S, 3>; 3]; 3]; 3],
+    rho: &[[[S; 3]; 3]; 3],
+    nu: &[[[S; 3]; 3]; 3],
+    a: usize,
+    hi: bool,
+    dx: [S; 3],
+) -> [S; 3] {
+    let half = S::from_f64(0.5);
+    let two_thirds = S::from_f64(2.0 / 3.0);
+    let (la, ra) = if hi { (1usize, 2usize) } else { (0usize, 1usize) };
+    let mut lo = [1usize; 3];
+    lo[a] = la;
+    let mut ro = [1usize; 3];
+    ro[a] = ra;
+    let g = |o: [usize; 3], c: usize| v[o[2]][o[1]][o[0]][c];
+    let rr = |o: [usize; 3]| rho[o[2]][o[1]][o[0]];
+    let nn = |o: [usize; 3]| nu[o[2]][o[1]][o[0]];
+    // harmonic (series) density mean: vanishes as either cell empties so the
+    // stress stays bounded next to a momentum-retaining mass sink (see the 2D
+    // core). arithmetic nu mean (nu never blows up). tiny denom floor guards 0/0.
+    let tiny = S::from_f64(1e-300);
+    let (rl, rh_) = (rr(lo), rr(ro));
+    let mu = (S::from_f64(2.0) * rl * rh_ / (rl + rh_ + tiny)) * (half * (nn(lo) + nn(ro)));
+
+    // grad[j][k] = d v_j / d x_k at the face.
+    let mut grad = [[S::ZERO; 3]; 3];
+    for j in 0..3 {
+        grad[j][a] = (g(ro, j) - g(lo, j)) / dx[a];
+        for b in 0..3 {
+            if b == a {
+                continue;
+            }
+            let (mut lp, mut lm, mut rp, mut rm) = (lo, lo, ro, ro);
+            lp[b] = 2;
+            lm[b] = 0;
+            rp[b] = 2;
+            rm[b] = 0;
+            let two = S::from_f64(2.0);
+            let cl = (g(lp, j) - g(lm, j)) / (two * dx[b]);
+            let cr = (g(rp, j) - g(rm, j)) / (two * dx[b]);
+            grad[j][b] = half * (cl + cr);
+        }
+    }
+    let div = grad[0][0] + grad[1][1] + grad[2][2];
+    let mut tau = [S::ZERO; 3];
+    for i in 0..3 {
+        let mut t = grad[i][a] + grad[a][i];
+        if i == a {
+            t = t - two_thirds * div;
+        }
+        tau[i] = mu * t;
+    }
+    tau
+}
+
+/// the viscous momentum increment `dt * div(tau)` for the center cell of a 3x3x3
+/// velocity + density + viscosity stencil (3D, cartesian). `dmom_i = dt sum_a
+/// d_a tau_ia`, each face column single-valued so the update conserves. reduces
+/// exactly to `viscous_mom_update_2d` for a z-invariant flow with `v_z = 0`.
+pub fn viscous_mom_update_3d<S: Scalar>(
+    v: &[[[Tensor<S, 3>; 3]; 3]; 3],
+    rho: &[[[S; 3]; 3]; 3],
+    nu: &[[[S; 3]; 3]; 3],
+    dx: [S; 3],
+    dt: S,
+) -> Tensor<S, 3> {
+    let mut dmom = [S::ZERO; 3];
+    for a in 0..3 {
+        let sp = face_stress_3d(v, rho, nu, a, true, dx);
+        let sm = face_stress_3d(v, rho, nu, a, false, dx);
+        for i in 0..3 {
+            dmom[i] = dmom[i] + dt * (sp[i] - sm[i]) / dx[a];
+        }
+    }
+    Tensor::new(dmom)
 }
 
 #[cfg(test)]
@@ -186,5 +281,460 @@ mod tests {
         let expect_x = dt * 2.0 * a * rho * nu;
         assert!((d[0] - expect_x).abs() < 1e-14, "fx {} vs {expect_x}", d[0]);
         assert!(d[1].abs() < 1e-14, "fy {}", d[1]);
+    }
+
+    // a mass sink that retains momentum (the torque-free surface) leaves a mask
+    // cell with tiny rho and O(1) momentum, so v = mom/rho is enormous. an
+    // ARITHMETIC-mean face viscosity keeps mu ~ rho_healthy and the stress
+    // mu*grad(v) explodes (a >1e4x kick that FOFC cannot recover -> the freeze).
+    // the HARMONIC mean gives mu ~ rho_vacuum, so the stress ~ nu*(momentum): the
+    // momentum kick stays BOUNDED BY THE CELL'S OWN MOMENTUM at the viscous-CFL
+    // step -- no overshoot, no sign flip, the pathology diffuses away instead.
+    #[test]
+    fn vacuum_adjacent_stress_stays_bounded_by_momentum() {
+        let (nu, dt): (f64, f64) = (0.1, 1e-4);
+        let (dx, dy) = (0.01, 0.01);
+        // the viscous-CFL step for this nu, dx (the cap the driver would take).
+        let dt_visc = 0.1 * dx * dx / nu;
+        let dt = dt.min(dt_visc);
+
+        // a healthy disk stencil: rho ~ 1, a smooth shear.
+        let (vh, rh) = stencil(0.5, 0.5, dx, dy, |x, y| [x + 0.5 * y, -0.3 * x], |_, _| 1.0);
+
+        // the left neighbour is an evacuated mask cell: rho = 1e-4, momentum
+        // retained ~ (1, 0.5) -> v = mom/rho ~ (1e4, 5e3).
+        let (mut v, mut r) = (vh, rh);
+        let mom_mask = [1.0f64, 0.5];
+        r[1][0] = 1e-4;
+        v[1][0] = Tensor::new([mom_mask[0] / r[1][0], mom_mask[1] / r[1][0]]);
+        let f = viscous_mom_update_2d(&v, &r, &uni(nu), dx, dy, dt);
+
+        // the kick on the mask cell's momentum must not exceed the momentum itself
+        // (arithmetic-mean would give ~5x this bound -> overshoot -> breakdown).
+        let bound = mom_mask[0].abs().max(mom_mask[1].abs());
+        assert!(
+            f[0].abs() < bound && f[1].abs() < bound,
+            "vacuum-adjacent kick exceeded the retained momentum: f = ({}, {}), bound {bound}",
+            f[0],
+            f[1],
+        );
+    }
+
+    // -- stability + conservation battle tests --------------------------------
+    // integrate the operator on a periodic grid so EVERY Fourier mode is present;
+    // a diffusion that is stable and dissipative must decay every mode. a mode
+    // that grows (the checkerboard from a wide cross-stencil, or a CFL over the
+    // stability limit) shows up as a rising total kinetic energy.
+
+    // one explicit viscous step on an N x N periodic grid, constant density.
+    // v_new = v + dt div(tau) / rho, all reads from the old field (no hazard).
+    fn viscous_step_periodic(
+        v: &[Vec<[f64; 2]>],
+        rho: f64,
+        nu: f64,
+        dx: f64,
+        dt: f64,
+    ) -> Vec<Vec<[f64; 2]>> {
+        let n = v.len();
+        let nust = uni(nu);
+        let rst = uni(rho);
+        let mut out = v.to_vec();
+        for j in 0..n {
+            for i in 0..n {
+                let mut st = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+                for dj in 0..3 {
+                    for di in 0..3 {
+                        let ii = (i + di + n - 1) % n;
+                        let jj = (j + dj + n - 1) % n;
+                        st[dj][di] = Tensor::new(v[jj][ii]);
+                    }
+                }
+                let d = viscous_mom_update_2d(&st, &rst, &nust, dx, dx, dt);
+                out[j][i] = [v[j][i][0] + d[0] / rho, v[j][i][1] + d[1] / rho];
+            }
+        }
+        out
+    }
+
+    // total kinetic energy of the fluctuation about the (conserved) mean.
+    fn fluct_energy(v: &[Vec<[f64; 2]>]) -> f64 {
+        let n = v.len();
+        let (mut mx, mut my) = (0.0, 0.0);
+        for row in v {
+            for c in row {
+                mx += c[0];
+                my += c[1];
+            }
+        }
+        let inv = 1.0 / (n * n) as f64;
+        let (mx, my) = (mx * inv, my * inv);
+        let mut e = 0.0;
+        for row in v {
+            for c in row {
+                e += (c[0] - mx).powi(2) + (c[1] - my).powi(2);
+            }
+        }
+        e
+    }
+
+    fn seed_all_modes(n: usize) -> Vec<Vec<[f64; 2]>> {
+        use std::f64::consts::PI;
+        let mut v = vec![vec![[0.0; 2]; n]; n];
+        for j in 0..n {
+            for i in 0..n {
+                let (fi, fj) = (i as f64 / n as f64, j as f64 / n as f64);
+                let cb = if (i + j) % 2 == 0 { 1.0 } else { -1.0 };
+                // a low mode, a mid mode, and the checkerboard (nyquist) in BOTH
+                // components — the cross-stencil terms are exercised by having
+                // vy vary in x and vx vary in y.
+                v[j][i] = [
+                    (2.0 * PI * fi).sin() + 0.5 * (6.0 * PI * fj).cos() + 0.4 * cb,
+                    (2.0 * PI * fj).cos() + 0.5 * (6.0 * PI * fi).sin() + 0.4 * cb,
+                ];
+            }
+        }
+        v
+    }
+
+    // conservation: on a torus the flux divergence telescopes, so the summed
+    // momentum increment is zero to roundoff.
+    #[test]
+    fn periodic_box_conserves_total_momentum() {
+        let (n, dx, nu, rho, dt) = (12, 0.05, 0.1, 1.3, 1e-4);
+        let v = seed_all_modes(n);
+        let (mut sx, mut sy) = (0.0f64, 0.0f64);
+        let nust = uni(nu);
+        let rst = uni(rho);
+        for j in 0..n {
+            for i in 0..n {
+                let mut st = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+                for dj in 0..3 {
+                    for di in 0..3 {
+                        let ii = (i + di + n - 1) % n;
+                        let jj = (j + dj + n - 1) % n;
+                        st[dj][di] = Tensor::new(v[jj][ii]);
+                    }
+                }
+                let d = viscous_mom_update_2d(&st, &rst, &nust, dx, dx, dt);
+                sx += d[0];
+                sy += d[1];
+            }
+        }
+        assert!(sx.abs() < 1e-12 && sy.abs() < 1e-12, "momentum leak: {sx}, {sy}");
+    }
+
+    // stability: at the C_VISC = 0.1 cap the fluctuation energy decays MONOTONE
+    // over many steps (no mode grows — including the checkerboard). this is the
+    // guard the CFL constant fix is anchored on.
+    #[test]
+    fn viscous_diffusion_is_monotone_stable_at_the_cfl_cap() {
+        let (n, dx, nu, rho) = (16, 0.1, 0.1, 1.0);
+        let dt = 0.1 * dx * dx / nu; // C_VISC = 0.1
+        let mut v = seed_all_modes(n);
+        let mut prev = fluct_energy(&v);
+        let e0 = prev;
+        for step in 0..400 {
+            v = viscous_step_periodic(&v, rho, nu, dx, dt);
+            let cur = fluct_energy(&v);
+            assert!(
+                cur <= prev * (1.0 + 1e-10),
+                "energy grew at step {step}: {prev} -> {cur}"
+            );
+            prev = cur;
+        }
+        assert!(prev < 1e-3 * e0, "did not decay: {e0} -> {prev}");
+    }
+
+    // the limit is real: above ~0.21 dx^2/nu the highest mode amplifies. at
+    // 0.3 the fluctuation energy BLOWS UP — confirming C_VISC = 0.1 is the safe
+    // side and 0.25 (the plain-Laplacian value) was not.
+    #[test]
+    fn viscous_diffusion_blows_up_above_the_stability_limit() {
+        let (n, dx, nu, rho) = (16, 0.1, 0.1, 1.0);
+        let dt = 0.3 * dx * dx / nu; // above the ~0.21 limit
+        let mut v = seed_all_modes(n);
+        let e0 = fluct_energy(&v);
+        for _ in 0..80 {
+            v = viscous_step_periodic(&v, rho, nu, dx, dt);
+        }
+        assert!(
+            fluct_energy(&v) > 10.0 * e0,
+            "expected blow-up above the CFL limit, got {}",
+            fluct_energy(&v)
+        );
+    }
+
+    // -- spatially varying nu (the alpha case) --------------------------------
+    // a smooth nu(x) field and a smooth rho(x) field, periodic. the FACE nu is
+    // the average of the two straddling cells (single-valued), so conservation
+    // and stability must hold exactly as for constant nu.
+
+    fn seed_nu_field(n: usize, nu_min: f64, nu_max: f64) -> Vec<Vec<f64>> {
+        use std::f64::consts::PI;
+        let mut f = vec![vec![0.0; n]; n];
+        for j in 0..n {
+            for i in 0..n {
+                let (fi, fj) = (i as f64 / n as f64, j as f64 / n as f64);
+                let s = 0.5 * (1.0 + (2.0 * PI * fi).sin() * (2.0 * PI * fj).cos());
+                f[j][i] = nu_min + (nu_max - nu_min) * s;
+            }
+        }
+        f
+    }
+
+    fn viscous_step_varnu(
+        v: &[Vec<[f64; 2]>],
+        rho_field: &[Vec<f64>],
+        nu_field: &[Vec<f64>],
+        dx: f64,
+        dt: f64,
+    ) -> Vec<Vec<[f64; 2]>> {
+        let n = v.len();
+        let mut out = v.to_vec();
+        for j in 0..n {
+            for i in 0..n {
+                let mut vst = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+                let mut rst = [[0.0; 3]; 3];
+                let mut nst = [[0.0; 3]; 3];
+                for dj in 0..3 {
+                    for di in 0..3 {
+                        let ii = (i + di + n - 1) % n;
+                        let jj = (j + dj + n - 1) % n;
+                        vst[dj][di] = Tensor::new(v[jj][ii]);
+                        rst[dj][di] = rho_field[jj][ii];
+                        nst[dj][di] = nu_field[jj][ii];
+                    }
+                }
+                let d = viscous_mom_update_2d(&vst, &rst, &nst, dx, dx, dt);
+                let rho = rho_field[j][i];
+                out[j][i] = [v[j][i][0] + d[0] / rho, v[j][i][1] + d[1] / rho];
+            }
+        }
+        out
+    }
+
+    // conservation with a varying nu (and varying rho): the differenced face
+    // flux still telescopes, so the total momentum increment is zero.
+    #[test]
+    fn varying_nu_conserves_total_momentum() {
+        let (n, dx, dt) = (12, 0.05, 1e-4);
+        let v = seed_all_modes(n);
+        let nu_field = seed_nu_field(n, 0.02, 0.2);
+        let rho_field = seed_nu_field(n, 0.7, 1.4); // reuse: a smooth positive field
+        let (mut sx, mut sy) = (0.0f64, 0.0f64);
+        for j in 0..n {
+            for i in 0..n {
+                let mut vst = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+                let mut rst = [[0.0; 3]; 3];
+                let mut nst = [[0.0; 3]; 3];
+                for dj in 0..3 {
+                    for di in 0..3 {
+                        let ii = (i + di + n - 1) % n;
+                        let jj = (j + dj + n - 1) % n;
+                        vst[dj][di] = Tensor::new(v[jj][ii]);
+                        rst[dj][di] = rho_field[jj][ii];
+                        nst[dj][di] = nu_field[jj][ii];
+                    }
+                }
+                let d = viscous_mom_update_2d(&vst, &rst, &nst, dx, dx, dt);
+                sx += d[0];
+                sy += d[1];
+            }
+        }
+        assert!(sx.abs() < 1e-12 && sy.abs() < 1e-12, "leak: {sx}, {sy}");
+    }
+
+    // stability with a varying nu: the global cap dt = C_VISC dx^2 / nu_max keeps
+    // every cell below its local limit, so the fluctuation energy decays monotone.
+    #[test]
+    fn varying_nu_diffusion_is_monotone_stable() {
+        let (n, dx, rho) = (16, 0.1, 1.0);
+        let (nu_min, nu_max) = (0.01, 0.2);
+        let dt = 0.1 * dx * dx / nu_max; // cap on the MAX nu
+        let nu_field = seed_nu_field(n, nu_min, nu_max);
+        let rho_field = vec![vec![rho; n]; n];
+        let mut v = seed_all_modes(n);
+        let (mut prev, e0) = (fluct_energy(&v), fluct_energy(&v));
+        for step in 0..400 {
+            v = viscous_step_varnu(&v, &rho_field, &nu_field, dx, dt);
+            let cur = fluct_energy(&v);
+            assert!(cur <= prev * (1.0 + 1e-10), "grew at step {step}: {prev} -> {cur}");
+            prev = cur;
+        }
+        assert!(prev < 0.1 * e0, "did not decay: {e0} -> {prev}");
+    }
+
+    // -- 3D operator ----------------------------------------------------------
+    fn uni3(nu: f64) -> [[[f64; 3]; 3]; 3] {
+        [[[nu; 3]; 3]; 3]
+    }
+
+    fn stencil3(
+        p0: [f64; 3],
+        dx: [f64; 3],
+        vf: impl Fn(f64, f64, f64) -> [f64; 3],
+        rf: impl Fn(f64, f64, f64) -> f64,
+    ) -> ([[[Tensor<f64, 3>; 3]; 3]; 3], [[[f64; 3]; 3]; 3]) {
+        let mut v = [[[Tensor::<f64, 3>::zeros(); 3]; 3]; 3];
+        let mut r = [[[0.0; 3]; 3]; 3];
+        for kk in 0..3 {
+            for jj in 0..3 {
+                for ii in 0..3 {
+                    let x = p0[0] + (ii as f64 - 1.0) * dx[0];
+                    let y = p0[1] + (jj as f64 - 1.0) * dx[1];
+                    let z = p0[2] + (kk as f64 - 1.0) * dx[2];
+                    v[kk][jj][ii] = Tensor::new(vf(x, y, z));
+                    r[kk][jj][ii] = rf(x, y, z);
+                }
+            }
+        }
+        (v, r)
+    }
+
+    // a uniform translation has zero strain rate -> zero viscous force.
+    #[test]
+    fn uniform_flow_3d_books_zero_force() {
+        let dx = [0.05, 0.07, 0.06];
+        let (v, r) = stencil3([0.2, 0.1, 0.3], dx, |_, _, _| [1.3, -0.7, 0.4], |_, _, _| 1.1);
+        let d = viscous_mom_update_3d(&v, &r, &uni3(0.05), dx, 0.01);
+        assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14 && d[2].abs() < 1e-14, "{d:?}");
+    }
+
+    // a rigid rotation v = omega x r about an arbitrary axis is strain-free, so
+    // the symmetric stress and its divergence vanish. exercises every cross term.
+    #[test]
+    fn rigid_rotation_3d_books_zero_force() {
+        let (wx, wy, wz) = (0.3, 0.5, 0.7);
+        let dx = [0.05, 0.05, 0.05];
+        let (v, r) = stencil3(
+            [0.11, -0.07, 0.13],
+            dx,
+            |x, y, z| [wy * z - wz * y, wz * x - wx * z, wx * y - wy * x],
+            |_, _, _| 1.0,
+        );
+        let d = viscous_mom_update_3d(&v, &r, &uni3(0.02), dx, 0.01);
+        assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14 && d[2].abs() < 1e-14, "{d:?}");
+    }
+
+    // the load-bearing cross-check: a z-invariant flow with v_z = 0 must give
+    // exactly the (already battle-tested) 2D force in x, y and zero in z. ties
+    // the 3D operator to the validated 2D one bit-for-bit.
+    #[test]
+    fn reduces_to_the_2d_operator_for_planar_flow() {
+        let (a, b, c, nu, rho, dt) = (1.5, 0.8, -1.1, 0.02, 1.3, 0.01);
+        let (dx, dy) = (0.05, 0.06);
+        let vf2 = |x: f64, y: f64| [a * y * y + b * x * y, c * x * x];
+        let (v2, r2) = stencil(0.2, 0.13, dx, dy, vf2, |_, _| rho);
+        let d2 = viscous_mom_update_2d(&v2, &r2, &uni(nu), dx, dy, dt);
+
+        let dx3 = [dx, dy, 0.04];
+        let (v3, r3) = stencil3(
+            [0.2, 0.13, 0.5],
+            dx3,
+            |x, y, _| {
+                let p = vf2(x, y);
+                [p[0], p[1], 0.0]
+            },
+            |_, _, _| rho,
+        );
+        let d3 = viscous_mom_update_3d(&v3, &r3, &uni3(nu), dx3, dt);
+        assert!((d3[0] - d2[0]).abs() < 1e-15, "x: {} vs {}", d3[0], d2[0]);
+        assert!((d3[1] - d2[1]).abs() < 1e-15, "y: {} vs {}", d3[1], d2[1]);
+        assert!(d3[2].abs() < 1e-15, "z leak: {}", d3[2]);
+    }
+
+    fn seed_all_modes_3d(n: usize) -> Vec<[f64; 3]> {
+        use std::f64::consts::PI;
+        let mut v = vec![[0.0; 3]; n * n * n];
+        for k in 0..n {
+            for j in 0..n {
+                for i in 0..n {
+                    let (fi, fj, fk) = (i as f64 / n as f64, j as f64 / n as f64, k as f64 / n as f64);
+                    let cb = if (i + j + k) % 2 == 0 { 1.0 } else { -1.0 };
+                    v[(k * n + j) * n + i] = [
+                        (2.0 * PI * fi).sin() + 0.4 * cb,
+                        (2.0 * PI * fj).cos() + 0.4 * cb,
+                        (2.0 * PI * fk).sin() + 0.4 * cb,
+                    ];
+                }
+            }
+        }
+        v
+    }
+
+    fn viscous_step_periodic_3d(v: &[[f64; 3]], n: usize, rho: f64, nu: f64, dx: f64, dt: f64) -> Vec<[f64; 3]> {
+        let at = |i: usize, j: usize, k: usize| v[(k * n + j) * n + i];
+        let rst = uni3(rho);
+        let nst = uni3(nu);
+        let mut out = v.to_vec();
+        for k in 0..n {
+            for j in 0..n {
+                for i in 0..n {
+                    let mut st = [[[Tensor::<f64, 3>::zeros(); 3]; 3]; 3];
+                    for dk in 0..3 {
+                        for dj in 0..3 {
+                            for di in 0..3 {
+                                let ii = (i + di + n - 1) % n;
+                                let jj = (j + dj + n - 1) % n;
+                                let kk = (k + dk + n - 1) % n;
+                                st[dk][dj][di] = Tensor::new(at(ii, jj, kk));
+                            }
+                        }
+                    }
+                    let d = viscous_mom_update_3d(&st, &rst, &nst, [dx, dx, dx], dt);
+                    let c = at(i, j, k);
+                    out[(k * n + j) * n + i] = [c[0] + d[0] / rho, c[1] + d[1] / rho, c[2] + d[2] / rho];
+                }
+            }
+        }
+        out
+    }
+
+    fn fluct_energy_3d(v: &[[f64; 3]]) -> f64 {
+        let inv = 1.0 / v.len() as f64;
+        let mut m = [0.0; 3];
+        for c in v {
+            for d in 0..3 {
+                m[d] += c[d] * inv;
+            }
+        }
+        let mut e = 0.0;
+        for c in v {
+            for d in 0..3 {
+                e += (c[d] - m[d]).powi(2);
+            }
+        }
+        e
+    }
+
+    #[test]
+    fn periodic_box_3d_conserves_total_momentum() {
+        let (n, dx, nu, rho, dt) = (6, 0.05, 0.1, 1.2, 1e-4);
+        let v = seed_all_modes_3d(n);
+        let out = viscous_step_periodic_3d(&v, n, rho, nu, dx, dt);
+        let mut s = [0.0; 3];
+        for idx in 0..v.len() {
+            for d in 0..3 {
+                s[d] += (out[idx][d] - v[idx][d]) * rho;
+            }
+        }
+        assert!(s.iter().all(|x| x.abs() < 1e-12), "momentum leak: {s:?}");
+    }
+
+    // 3D stability: fluctuation energy decays monotone at the C_VISC = 0.1 cap,
+    // the checkerboard mode included.
+    #[test]
+    fn viscous_3d_is_monotone_stable_at_the_cfl_cap() {
+        let (n, dx, nu, rho) = (8, 0.1, 0.1, 1.0);
+        let dt = 0.1 * dx * dx / nu;
+        let mut v = seed_all_modes_3d(n);
+        let (mut prev, e0) = (fluct_energy_3d(&v), fluct_energy_3d(&v));
+        for step in 0..300 {
+            v = viscous_step_periodic_3d(&v, n, rho, nu, dx, dt);
+            let cur = fluct_energy_3d(&v);
+            assert!(cur <= prev * (1.0 + 1e-10), "grew at step {step}: {prev} -> {cur}");
+            prev = cur;
+        }
+        assert!(prev < 1e-2 * e0, "did not decay: {e0} -> {prev}");
     }
 }
