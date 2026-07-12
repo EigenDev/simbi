@@ -156,7 +156,9 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         // the outer R edge. cartesian forms it as the farthest domain corner from
         // the body in the disk plane (the first two axes; the vertical z in 3D does
         // not enter Omega_k) — matching the kernel's nu(x, y) exactly.
-        let r_max = if geom.coords == Geometry::Cylindrical {
+        let r_max = if geom.coords == Geometry::Cylindrical
+            || geom.coords == Geometry::Spherical
+        {
             let sp = &geom.interior.spaces[0];
             geom.x_lo[0] + geom.dx[0] * (sp.hi as f64)
         } else {

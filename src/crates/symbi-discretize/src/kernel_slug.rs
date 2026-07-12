@@ -65,11 +65,12 @@ pub fn penalize_name(base: &str, coords: Geometry, ndim: usize) -> String {
     format!("{base}{}_{ndim}d", geom_suffix(coords, ndim, ndim))
 }
 
-/// the general orthogonal viscous kernel name for a chart: `viscous_iso_ortho{chart}
-/// _{ndim}d`. one operator, one name per chart (cylindrical `_cyl`, spherical
-/// `_sph`); Cartesian keeps its own flat `viscous_iso` kernel.
-pub fn viscous_ortho_name(coords: Geometry, ndim: usize) -> String {
-    format!("viscous_iso_ortho{}_{ndim}d", geom_suffix(coords, ndim, ndim))
+/// the general orthogonal viscous kernel name for a chart: `{base}{chart}_{ndim}d`
+/// (`base` = `viscous_iso_ortho` for constant nu, `viscous_iso_alpha_ortho` for the
+/// alpha law). one operator, one name per chart (cylindrical `_cyl`, spherical
+/// `_sph`); Cartesian keeps its own flat kernels.
+pub fn viscous_ortho_name(base: &str, coords: Geometry, ndim: usize) -> String {
+    format!("{base}{}_{ndim}d", geom_suffix(coords, ndim, ndim))
 }
 
 /// the MHD curvilinear suffix, keyed on the GRID-AXIS SET (not DOF-vs-ndim). MHD

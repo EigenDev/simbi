@@ -171,6 +171,54 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
+/// trace the Shakura-Sunyaev ALPHA operator on a GENERAL 2D orthogonal chart: the
+/// same scale-factor operator as `viscous_iso_ortho_gv` but with a spatially
+/// varying `nu(R) = alpha c_s^2 / Omega_k(R)`, `Omega_k = sqrt(GM/R^3)`, `R` the
+/// RADIAL coordinate `x0` (the orbital radius on both cylindrical and spherical,
+/// the central mass on the axis). one alpha kernel for every curvilinear chart.
+pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+    const NDIM: u8 = 2;
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let alpha = Gv::scalar("alpha");
+    let cs = Gv::scalar("cs");
+    let gm = Gv::scalar("body_0_mass");
+    let dx1 = Gv::scalar("dx_0");
+    let dx2 = Gv::scalar("dx_1");
+
+    let (vst, rst) = prim_stencil();
+    let geo = cell_geometry_gv(
+        coords,
+        &vec![Spacing::Uniform; NDIM as usize],
+        &(0..NDIM as usize).collect::<Vec<_>>(),
+        NDIM as usize,
+    );
+    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+    let cs2 = cs * cs;
+    let floor = Gv::from_f64(1e-30);
+
+    let mut h1 = [[Gv::ZERO; 3]; 3];
+    let mut h2 = [[Gv::ZERO; 3]; 3];
+    let mut nust = [[Gv::ZERO; 3]; 3];
+    for dj in 0..3usize {
+        for di in 0..3usize {
+            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+            let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
+            h1[dj][di] = h[0];
+            h2[dj][di] = h[1];
+            // nu(R) = alpha cs^2 / Omega_k(R), R the radial coordinate x0.
+            let r = x0.max(floor);
+            let omega_k = (gm / (r * r * r)).sqrt().max(floor);
+            nust[dj][di] = alpha * cs2 / omega_k;
+        }
+    }
+
+    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+    let writes = accumulate_mom(dmom);
+    (end_trace(), writes)
+}
+
 /// trace the alpha-viscosity isothermal operator, 2D CYLINDRICAL (R, phi):
 /// `nu(R) = alpha c_s^2 / Omega_k(R)`, `Omega_k = sqrt(GM/R^3)` about the central
 /// mass on the axis (`GM` = body 0 mass). because R IS the orbital radius here,

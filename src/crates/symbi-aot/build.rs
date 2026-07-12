@@ -1710,7 +1710,9 @@ fn main() {
         for coords in [Coords::Cylindrical, Coords::Spherical] {
             let geom = coords.to_geometry();
             let (k, writes) = symbi_discretize::viscous_iso_ortho_gv(coords);
-            emit_gv(&out_dir, &viscous_ortho_name(geom, 2), 2, &k, &writes);
+            emit_gv(&out_dir, &viscous_ortho_name("viscous_iso_ortho", geom, 2), 2, &k, &writes);
+            let (k, writes) = symbi_discretize::viscous_iso_alpha_ortho_gv(coords);
+            emit_gv(&out_dir, &viscous_ortho_name("viscous_iso_alpha_ortho", geom, 2), 2, &k, &writes);
         }
     }
     gen_scalar_ghost_fill(&out_dir);
