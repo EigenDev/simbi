@@ -217,6 +217,25 @@ def magnetization(rho: Array, bfields: Sequence[Array]) -> Array:
 # =============================================================================
 # computation pipeline factory
 # =============================================================================
+def _broadcast_cell_centers(mesh: Any, ndim: int) -> tuple[Array, ...]:
+    """cell-center coordinate arrays reshaped to broadcast along their storage axis.
+
+    field arrays are stored in (x3, x2, x1) = (z, y, x) order, so x1 varies along
+    the last array axis, x2 the second-to-last, and x3 the first. a bare 1d
+    coordinate array broadcasts against the last axis only: correct for x1, but it
+    transposes x2/x3 against the data — silent on a square grid, a shape error on a
+    non-square one. each returned array carries singleton axes so it multiplies
+    against its own storage axis."""
+    x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
+    if ndim == 1:
+        return (x,)
+    y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+    if ndim == 2:
+        return x[None, :], y[:, None]
+    z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
+    return x[None, None, :], y[None, :, None], z[:, None, None]
+
+
 def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
     """
     create a pipeline of derived field computations.
@@ -545,8 +564,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def angular_momentum_density(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
-        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+        coords = _broadcast_cell_centers(mesh, ndim)
+        x, y = coords[0], coords[1]
         Sx = labframe_momentum(
             level_data["rho"],
             level_data["p"],
@@ -569,8 +588,8 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
 
     def specific_angular_momentum(level_data: dict[str, Array]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
-        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+        coords = _broadcast_cell_centers(mesh, ndim)
+        x, y = coords[0], coords[1]
         Sx = labframe_momentum(
             level_data["rho"],
             level_data["p"],
@@ -593,7 +612,7 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         den = level_data["rho"]
 
         if den.ndim == 3:
-            dz = mesh.x3v[1:] - mesh.x3v[:-1]
+            dz = (mesh.x3v[1:] - mesh.x3v[:-1])[:, None, None]
             Sigma = np.sum(den * dz, axis=0)
             Lz_int = np.sum(Lz * dz, axis=0)
             return np.asarray(Lz_int / (Sigma + np.finfo(float).tiny))
@@ -603,22 +622,22 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         den = level_data["rho"]
         if den.ndim == 3:
             mesh = getattr(level_data, "mesh")
-            dz = mesh.x3v[1:] - mesh.x3v[:-1]
+            dz = (mesh.x3v[1:] - mesh.x3v[:-1])[:, None, None]
             return np.asarray(np.sum(den * dz, axis=0))
         return np.asarray(den)
 
     def mass_flux(level_data: dict[str, Any]) -> Array:
         mesh = getattr(level_data, "mesh")
-        x = 0.5 * (mesh.x1v[1:] + mesh.x1v[:-1])
-        y = 0.5 * (mesh.x2v[1:] + mesh.x2v[:-1])
+        coords = _broadcast_cell_centers(mesh, ndim)
         vx, vy = level_data["v1"], level_data["v2"]
 
         if vx.ndim == 3:
-            z = 0.5 * (mesh.x3v[1:] + mesh.x3v[:-1])
+            x, y, z = coords
             r = np.sqrt(x**2 + y**2 + z**2)
             vz = level_data["v3"]
             vr = (x * vx + y * vy + z * vz) / (r + np.finfo(float).tiny)
         else:
+            x, y = coords[0], coords[1]
             r = np.sqrt(x**2 + y**2)
             vr = (x * vx + y * vy) / (r + np.finfo(float).tiny)
 

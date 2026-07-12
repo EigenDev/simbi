@@ -10,6 +10,7 @@ import warnings
 from typing import Optional
 
 from simbi.viz.checkpoint.checkpoint_utils import (
+    extract_timestep,
     glob_checkpoints,
 )
 

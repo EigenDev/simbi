@@ -15,6 +15,7 @@ from simbi.viz import (
     load_props_from_args,
     setup_viz_parser,
 )
+from simbi.viz.cli import filter_files
 
 from ..utils.formatter import HelpFormatter
 
@@ -58,6 +59,22 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         print(f"error: {exc}", file=sys.stderr)
         sys.exit(2)
 
+    # apply --tmin/--tmax/--stride to the checkpoint series before dispatch.
+    # without this the flags are parsed but never consumed: they leak into the
+    # plotter **kwargs and are ignored, so the series spans every input file.
+    args.files = filter_files(
+        args.files,
+        tmin=getattr(args, "tmin", None),
+        tmax=getattr(args, "tmax", None),
+        stride=getattr(args, "stride", 1),
+    )
+    if not args.files:
+        print(
+            "error: no files remain after --tmin/--tmax/--stride filtering",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     is_animation = getattr(args, "animate", False) or args.kind == "movie"
     is_overlay = getattr(args, "overlay", False)
     plot_type = config.plot.plot_type
@@ -85,6 +102,9 @@ def execute(args: Namespace, _: Optional[list] = None) -> None:
         "config",
         "props",
         "generate_config",
+        "tmin",
+        "tmax",
+        "stride",
     }
     pass_through_kwargs = {
         k: v for k, v in cli_args.items() if k not in processed_args

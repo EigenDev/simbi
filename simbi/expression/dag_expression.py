@@ -82,8 +82,10 @@ __all__ = [
     "sgn",
 ]
 
+# "phi" is the azimuth (x3) only: in 3d spherical (r, theta, phi) it must not
+# alias x2 (theta). a 2d-polar azimuthal coordinate is written "x2" or "theta".
 X1_ALIASES = ["x", "r", "x1"]
-X2_ALIASES = ["y", "theta", "x2", "phi"]
+X2_ALIASES = ["y", "theta", "x2"]
 X3_ALIASES = ["z", "phi", "x3"]
 
 # per-cell FLUID-STATE leaves — let a source read the local state, so the physics

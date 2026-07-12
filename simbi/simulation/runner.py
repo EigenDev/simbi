@@ -18,7 +18,10 @@ from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
+from simbi.types.bodies import ImmersedBodyConfig
 from simbi.types.input import BoundaryCondition
+
+from .problem import ConfigError
 from simbi.types.typing import (
     GasStateFunction,
     GasStateGenerator,
@@ -195,10 +198,22 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
     # add immersed bodies if present
     immersed = problem.immersed_bodies
     if immersed:
-        model_dict["immersed_bodies"] = [
-            dataclasses.asdict(b) if dataclasses.is_dataclass(b) else b
-            for b in immersed
-        ]
+        bodies_out = []
+        for idx, b in enumerate(immersed):
+            # raw dicts bypass every ImmersedBodyConfig field check: the rust
+            # binding reads each key with unwrap_or(default), so a typo'd or
+            # missing key becomes a silent backend default (mass 0, origin
+            # position, capability GRAVITATIONAL, pure-drain surface) rather than
+            # an error. require the validated dataclass.
+            if not isinstance(b, ImmersedBodyConfig):
+                raise ConfigError(
+                    f"immersed_bodies[{idx}] is a {type(b).__name__}, not an "
+                    f"ImmersedBodyConfig. construct an ImmersedBodyConfig so its "
+                    f"fields are validated before the backend, which silently "
+                    f"defaults any key it cannot read."
+                )
+            bodies_out.append(dataclasses.asdict(b))
+        model_dict["immersed_bodies"] = bodies_out
 
     # process bounds to separate x1, x2, x3 bounds
     bounds = problem.bounds

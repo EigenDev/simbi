@@ -29,6 +29,21 @@ def has_capability(
     return bool(body_capability & capability)
 
 
+# capability bits the rust binding actually honors: GRAVITATIONAL builds a
+# fixed-potential mass, ACCRETION a black-hole sink. ELASTIC / DEFORMABLE /
+# RIGID have no backend path (build_bodies falls through to passive gravity),
+# so a config declaring them is rejected rather than run as a silent lie.
+_WIRED_CAPABILITIES = BodyCapability.GRAVITATIONAL | BodyCapability.ACCRETION
+
+
+def _config_error(message: str) -> Exception:
+    """the house user-facing config error. imported lazily: simbi.simulation.
+    problem imports this module at load time, so a top-level import would cycle."""
+    from simbi.simulation.problem import ConfigError
+
+    return ConfigError(message)
+
+
 @dataclass(frozen=True)
 class BinaryComponentConfig:
     mass: float
@@ -158,6 +173,30 @@ class AccretionProperties:
     k_eta_n: float = 0.0
     k_eta_t: float = 0.0
 
+    def __post_init__(self) -> None:
+        if self.accretion_radius <= 0.0:
+            raise _config_error(
+                f"accretion_radius must be > 0: a sink of zero radius drains no "
+                f"gas. got {self.accretion_radius}."
+            )
+        if self.sink_rate < 0.0:
+            raise _config_error(
+                f"sink_rate must be >= 0: a negative drain rate injects mass. "
+                f"got {self.sink_rate}."
+            )
+        if self.porosity is not None and not (0.0 <= self.porosity <= 1.0):
+            raise _config_error(
+                f"porosity must be in [0, 1]: it weights the drain channel by p "
+                f"and the wall channels by (1 - p), so outside [0, 1] a channel "
+                f"weight is negative (anti-relaxation). got {self.porosity}."
+            )
+        if self.k_eta_n < 0.0 or self.k_eta_t < 0.0:
+            raise _config_error(
+                f"k_eta_n and k_eta_t must be >= 0: they are surface-friction "
+                f"rate dials; negative is anti-friction. got k_eta_n="
+                f"{self.k_eta_n}, k_eta_t={self.k_eta_t}."
+            )
+
 
 @dataclass(frozen=True)
 class RigidProperties:
@@ -217,6 +256,31 @@ class ImmersedBodyConfig:
     rigid: Optional[RigidProperties] = None
     deformable: Optional[DeformableProperties] = None
     elastic: Optional[ElasticProperties] = None
+
+    def __post_init__(self) -> None:
+        unsupported = self.capability & ~_WIRED_CAPABILITIES
+        if unsupported:
+            raise _config_error(
+                f"immersed-body capability {unsupported!r} is not wired to the "
+                f"backend; only GRAVITATIONAL and ACCRETION are honored. a body "
+                f"declaring it would run as a passive gravitating mass."
+            )
+        if (
+            has_capability(self.capability, BodyCapability.ACCRETION)
+            and self.accretion is None
+        ):
+            raise _config_error(
+                "capability ACCRETION requires an `accretion` property block; "
+                "without it the sink has zero accretion radius and drains nothing."
+            )
+        if (
+            has_capability(self.capability, BodyCapability.GRAVITATIONAL)
+            and self.gravitational is None
+        ):
+            raise _config_error(
+                "capability GRAVITATIONAL requires a `gravitational` property "
+                "block (the softening length)."
+            )
 
 
 __all__ = [
