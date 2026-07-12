@@ -1603,16 +1603,31 @@ fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, h
 // torque / accreted-mass contributions -> scratch fields a device reduction sums into
 // each body's BodyDelta. reads cons (pure); writes MAX_BODIES*(ndim+4) scratch outputs.
 fn gen_penalize(out_dir: &str, ndim: u8) {
+    use symbi_discretize::coords::Coords;
+    use symbi_discretize::kernel_slug::penalize_name;
     use symbi_ir::KernelId;
-    let (k, writes) = symbi_discretize::penalize_drain_gv(ndim as usize);
+    let nd = ndim as usize;
+    // cartesian: all four surfaces (KernelId names, unchanged).
+    let (k, writes) = symbi_discretize::penalize_drain_gv(Coords::Cartesian, nd);
     emit_gv(out_dir, KernelId::PenalizeDrain { ndim }.name(), ndim, &k, &writes);
-    let (k, writes) = symbi_discretize::penalize_drain_iso_gv(ndim as usize);
+    let (k, writes) = symbi_discretize::penalize_drain_iso_gv(Coords::Cartesian, nd);
     emit_gv(out_dir, KernelId::PenalizeDrainIso { ndim }.name(), ndim, &k, &writes);
-    let (k, writes) = symbi_discretize::penalize_porous_gv(ndim as usize);
+    let (k, writes) = symbi_discretize::penalize_porous_gv(nd);
     emit_gv(out_dir, KernelId::PenalizePorous { ndim }.name(), ndim, &k, &writes);
-    let (k, writes) = symbi_discretize::penalize_torque_free_iso_gv(ndim as usize);
+    let (k, writes) = symbi_discretize::penalize_torque_free_iso_gv(nd);
     emit_gv(out_dir, KernelId::PenalizeTorqueFreeIso { ndim }.name(), ndim, &k, &writes);
+    // curvilinear DRAIN variants (spherical + cylindrical): the mask distance maps
+    // the coordinate centroid to Cartesian. the porous / torque-free surfaces need
+    // the physical-frame normal, not yet baked off Cartesian.
+    for coords in [Coords::Spherical, Coords::Cylindrical] {
+        let geom = coords.to_geometry();
+        let (k, writes) = symbi_discretize::penalize_drain_gv(coords, nd);
+        emit_gv(out_dir, &penalize_name("penalize_drain", geom, nd), ndim, &k, &writes);
+        let (k, writes) = symbi_discretize::penalize_drain_iso_gv(coords, nd);
+        emit_gv(out_dir, &penalize_name("penalize_drain_iso", geom, nd), ndim, &k, &writes);
+    }
 }
+
 
 fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {
     let name = format!("body_feedback{}_{ndim}d", coords_suffix(coords));

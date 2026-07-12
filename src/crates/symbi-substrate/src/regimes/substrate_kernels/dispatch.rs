@@ -23,7 +23,7 @@ use symbi_sim::state::FieldStore;
 
 use super::binding::{bind_manifest, kernel_bindings, resolve_path};
 use super::exec::dispatch_fields;
-use super::layout::{geom_suffix, gr_chart_dof_tag, spacetime_slug};
+use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
     ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom, resolve_body_scalars,
     scalars_for,
@@ -568,9 +568,9 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let Some(im) = sim.immersed.as_ref() else { return };
-    if sim.geom.coords != symbi_geometry::Geometry::Cartesian {
-        return;
-    }
+    // the DRAIN surface is baked for every chart (the mask distance maps the cell
+    // centroid to Cartesian); porous / torque-free stay Cartesian until the
+    // physical-frame normal is baked off-chart. no blanket curvilinear early return.
     let nrg = sim.fields.cons.nrg_field();
     let geom = &sim.geom;
     let n_delta = if nrg.is_some() { D + 2 } else { D + 1 };
@@ -614,52 +614,74 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // constant `cs` param and has no energy channel. the porous stack is
         // baked for the adiabatic regime only — fail loud, never fall back
         // silently to a different surface physics.
-        let name = match (bodies.get(b).surface, nrg.is_some()) {
-            (symbi_ib::SurfaceSpec::Drain, true) => {
-                symbi_ir::KernelId::PenalizeDrain { ndim: D as u8 }.name()
-            }
+        // the kernel name carries the chart suffix ("" / "_sph" / "_cyl"); Cartesian
+        // reproduces the KernelId name exactly. only the drain is baked off-chart.
+        let cart = symbi_geometry::Geometry::Cartesian;
+        let coords_g = geom.coords;
+        let name_owned: String = match (bodies.get(b).surface, nrg.is_some()) {
+            (symbi_ib::SurfaceSpec::Drain, true) => penalize_name("penalize_drain", coords_g, D),
             (symbi_ib::SurfaceSpec::Drain, false) => {
-                symbi_ir::KernelId::PenalizeDrainIso { ndim: D as u8 }.name()
+                penalize_name("penalize_drain_iso", coords_g, D)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, true) => {
-                symbi_ir::KernelId::PenalizePorous { ndim: D as u8 }.name()
+                assert!(
+                    coords_g == cart,
+                    "penalize: the porous surface is baked for cartesian only (a curvilinear \
+                     porous accretor needs the physical-frame normal)"
+                );
+                penalize_name("penalize_porous", coords_g, D)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, false) => panic!(
                 "penalize: the porous surface is baked for the adiabatic regime only \
                  (an isothermal porous accretor needs the iso twin baked first)"
             ),
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, false) => {
-                symbi_ir::KernelId::PenalizeTorqueFreeIso { ndim: D as u8 }.name()
+                assert!(
+                    coords_g == cart,
+                    "penalize: the torque-free surface is baked for cartesian only (a curvilinear \
+                     torque-free accretor needs the physical-frame normal)"
+                );
+                penalize_name("penalize_torque_free_iso", coords_g, D)
             }
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => panic!(
                 "penalize: the torque-free surface is baked for the isothermal (thin-disk) \
                  regime only (an adiabatic torque-free accretor needs the adiabatic twin baked)"
             ),
         };
-        // the reduction/dispatch box from the kernel's declared support ball —
-        // the design-48 consumer, identical clamping to the feedback drain.
+        let name: &str = &name_owned;
+        // the reduction/dispatch box. on a Cartesian grid the kernel's declared
+        // support ball clamps to an index box (the design-48 consumer, identical to
+        // the feedback drain). off Cartesian the support ball is a COORDINATE ball,
+        // not an index-aligned box (a centered accretor masks a full phi-ring, whose
+        // index extent is every phi cell, NOT `center_phi +- r_cut`), so dispatch
+        // over the full interior — the mask is an exact zero outside the physical
+        // ball by tanh saturation, so this is correct, just unoptimized.
         let names = super::binding::kernel_scalar_names(name);
-        let bbox = super::binding::kernel_output_support(name)
-            .and_then(|support| {
-                support.eval_ball(&|pname: &str| {
-                    let (_, bind) = names
-                        .iter()
-                        .find(|(n, _)| n == pname)
-                        .unwrap_or_else(|| panic!("support param '{pname}' not in '{name}'"));
-                    bind_value(bind, b)
+        let bbox = if coords_g != cart {
+            Some(geom.interior.clone())
+        } else {
+            super::binding::kernel_output_support(name)
+                .and_then(|support| {
+                    support.eval_ball(&|pname: &str| {
+                        let (_, bind) = names
+                            .iter()
+                            .find(|(n, _)| n == pname)
+                            .unwrap_or_else(|| panic!("support param '{pname}' not in '{name}'"));
+                        bind_value(bind, b)
+                    })
                 })
-            })
-            .and_then(|(center, r_cut)| {
-                let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
-                    let s = &geom.interior.spaces[a];
-                    let lo_x = (center[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
-                    let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
-                    let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
-                    let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
-                    symbi_algebra::Space { name: s.name, lo, hi }
-                });
-                spaces.iter().all(|sp| sp.lo < sp.hi).then(|| Domain::new(spaces))
-            });
+                .and_then(|(center, r_cut)| {
+                    let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
+                        let s = &geom.interior.spaces[a];
+                        let lo_x = (center[a] - r_cut - geom.x_lo[a]) / geom.dx[a];
+                        let hi_x = (center[a] + r_cut - geom.x_lo[a]) / geom.dx[a];
+                        let lo = (lo_x.floor() as isize).clamp(s.lo, s.hi);
+                        let hi = (hi_x.ceil() as isize + 1).clamp(s.lo, s.hi);
+                        symbi_algebra::Space { name: s.name, lo, hi }
+                    });
+                    spaces.iter().all(|sp| sp.lo < sp.hi).then(|| Domain::new(spaces))
+                })
+        };
         let Some(bbox) = bbox else { continue };
 
         // in-place cons: every field input is also a write, so the manifest

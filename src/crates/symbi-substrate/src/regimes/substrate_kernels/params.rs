@@ -234,7 +234,22 @@ where
     Mem: MemorySpace,
     Sc: Scalar + OrderedNumeric,
 {
-    sim.geom.coords == _GeomChk::Cartesian
+    if sim.geom.coords == _GeomChk::Cartesian {
+        return true;
+    }
+    // off cartesian, only the DRAIN surface is baked (its mask distance maps the
+    // cell centroid to Cartesian; porous / torque-free still need the physical-frame
+    // normal). the penalize path owns accretion — and the legacy in-godunov sink is
+    // retired — only when every accreting body is a plain drain; a non-drain sink on
+    // a curvilinear grid keeps the legacy sink for the whole sim.
+    match sim.immersed.as_ref() {
+        Some(im) => (0..im.bodies.len()).all(|b| {
+            let body = im.bodies.get(b);
+            body.accretion_radius().is_none()
+                || matches!(body.surface, symbi_ib::SurfaceSpec::Drain)
+        }),
+        None => false,
+    }
 }
 
 pub(crate) fn resolve_body_scalars<const D: usize, const DOF: usize, Mem, Sc>(

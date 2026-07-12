@@ -49,6 +49,8 @@ symbi-ir         = { path = "../symbi-ir" }
 # carrier-equivalence tests: run the host physics (f<f64>) against the compiled
 # kernel (f traced at Gv) at the SAME baked iteration count.
 symbi-hydro      = { path = "../symbi-hydro" }
+# curvilinear penalize gate: the coordinate->Cartesian centroid map (Metric).
+symbi-geometry   = { path = "../symbi-geometry" }
 
 [features]
 # debug-emit-knobs: forwards to symbi-ir; also gates the SYMBI_GEN_SERIAL read in build.rs. off by default = canonical env-unset shape.

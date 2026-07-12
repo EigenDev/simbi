@@ -25,6 +25,7 @@
 
 use symbi_algebra::algebra::Numeric;
 use symbi_algebra::Tensor;
+use symbi_geometry::{Cylindrical, CylindricalRPhi, Metric, Spherical};
 use symbi_hydro::energy::Adiabatic;
 use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{penalize_cell, BodyKin, Property, Relax};
@@ -47,9 +48,35 @@ pub fn torque_axes(ndim: usize) -> std::ops::Range<usize> {
     }
 }
 
+/// map the coordinate cell centroid `(r, theta, phi)` / `(R, phi, z)` to Cartesian
+/// so the sphere SDF measures the PHYSICAL distance to the body. a coordinate-space
+/// subtraction is meaningless on a curved grid (`sqrt((r - r_b)^2 + (theta -
+/// theta_b)^2)` is not a distance); on a Cartesian grid this is the identity. the
+/// 2D cylindrical chart is the `(R, phi)` disk plane (`CylindricalRPhi`), matching
+/// the geometric-source dispatch — one metric for the whole codebase.
+fn centroid_to_cartesian(coords: Coords, ndim: usize, centroid: &[Gv]) -> Vec<Gv> {
+    fn run<M, const D: usize>(m: M, x: &[Gv]) -> Vec<Gv>
+    where
+        M: Metric<Gv, D>,
+    {
+        let xc = m.to_cartesian(Tensor::from_fn(|i| x[i]));
+        (0..D).map(|i| xc[i]).collect()
+    }
+    match (coords, ndim) {
+        (Coords::Cartesian, _) => centroid[..ndim].to_vec(),
+        (Coords::Spherical, 1) => run::<_, 1>(Spherical, centroid),
+        (Coords::Spherical, 2) => run::<_, 2>(Spherical, centroid),
+        (Coords::Spherical, 3) => run::<_, 3>(Spherical, centroid),
+        (Coords::Cylindrical, 1) => run::<_, 1>(Cylindrical, centroid),
+        (Coords::Cylindrical, 2) => run::<_, 2>(CylindricalRPhi, centroid),
+        (Coords::Cylindrical, 3) => run::<_, 3>(Cylindrical, centroid),
+        (c, d) => panic!("penalize centroid_to_cartesian: unsupported (coords {c:?}, ndim {d})"),
+    }
+}
+
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian,
 /// DOF = ndim. dimension-generic over 1..=3.
-pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
+pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     assert!((1..=3).contains(&ndim), "penalize_drain_gv: ndim must be 1..=3");
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -63,9 +90,9 @@ pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
         .collect();
     let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
 
-    // the cell centroid + volume from the shared geometry scaffold — the same
-    // coordinate map every other cartesian body kernel evaluates.
-    let geo = cell_geometry_gv(Coords::Cartesian, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
+    // the cell centroid + volume from the shared geometry scaffold — the coordinate
+    // map every other body kernel of this chart evaluates.
+    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
     let dv = Gv::ONE / geo.inv_volume;
     let mut min_w = Gv::scalar("dx_0");
     for ax in 1..ndim {
@@ -73,13 +100,14 @@ pub fn penalize_drain_gv(ndim: usize) -> (GvKernel, Writes) {
     }
 
     // the mask geometry as a traced SDF: phi = |x - body_pos| - r_mask, and
-    // chi = 0.5 (1 - tanh(phi / w)) == drain_mask(|x - c|, r_mask, w) bit for
-    // bit (same subtraction, same division, same tanh).
+    // chi = 0.5 (1 - tanh(phi / w)). the distance is PHYSICAL, so the coordinate
+    // centroid is mapped to Cartesian first (identity on a Cartesian grid).
     let center: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
     });
+    let x_cart = centroid_to_cartesian(coords, ndim, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { geo.centroid[a] } else { Gv::ZERO }
+        if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
     let r_mask = Gv::scalar("body_0_racc");
     let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
@@ -375,7 +403,7 @@ pub fn penalize_torque_free_iso_gv(ndim: usize) -> (GvKernel, Writes) {
 /// sound speed is the constant `cs` param, not recovered from cons), delta
 /// outputs mass + force only. same [Drain] stack, same integrator — the iso
 /// energy slot discards the e-channel by construction.
-pub fn penalize_drain_iso_gv(ndim: usize) -> (GvKernel, Writes) {
+pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!((1..=3).contains(&ndim), "penalize_drain_iso_gv: ndim must be 1..=3");
     begin_trace();
@@ -388,7 +416,7 @@ pub fn penalize_drain_iso_gv(ndim: usize) -> (GvKernel, Writes) {
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
 
-    let geo = cell_geometry_gv(Coords::Cartesian, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
+    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
     let dv = Gv::ONE / geo.inv_volume;
     let mut min_w = Gv::scalar("dx_0");
     for ax in 1..ndim {
@@ -398,8 +426,11 @@ pub fn penalize_drain_iso_gv(ndim: usize) -> (GvKernel, Writes) {
     let center: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO }
     });
+    // the mask distance is the PHYSICAL distance to the body: map the coordinate
+    // centroid to Cartesian (identity on a Cartesian grid), then the euclidean SDF.
+    let x_cart = centroid_to_cartesian(coords, ndim, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| {
-        if a < ndim { geo.centroid[a] } else { Gv::ZERO }
+        if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
     let r_mask = Gv::scalar("body_0_racc");
     let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };

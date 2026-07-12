@@ -56,6 +56,15 @@ pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
     }
 }
 
+/// the immersed-boundary penalize kernel name for a chart: `{base}{chart}_{ndim}d`
+/// (e.g. `penalize_drain_iso_cyl_2d`). the drain touches only the gridded momenta
+/// (dof == ndim, no swirl slot), so the suffix is "" / "_sph" / "_cyl". Cartesian
+/// reproduces the `KernelId` name exactly, so lifting curvilinear support leaves
+/// the Cartesian bake and dispatch untouched.
+pub fn penalize_name(base: &str, coords: Geometry, ndim: usize) -> String {
+    format!("{base}{}_{ndim}d", geom_suffix(coords, ndim, ndim))
+}
+
 /// the MHD curvilinear suffix, keyed on the GRID-AXIS SET (not DOF-vs-ndim). MHD
 /// B is ALWAYS a 3-vector, so both cylindrical 2D planes carry DOF = 3 and the
 /// DOF lift cannot tell them apart: r-z axisymmetric = axes `[0, 2]` (out-of-plane
