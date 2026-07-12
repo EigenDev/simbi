@@ -663,23 +663,27 @@ fn drift_row(frame: &mut Frame, area: Rect, label: &str, color: Color, hist: &[f
 }
 
 fn render_maxw_dt(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
-    let cols = Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(area);
-
-    let w_block = card("max W");
-    let w_inner = w_block.inner(cols[0]);
-    frame.render_widget(w_block, cols[0]);
-    let w_str = view
-        .max_w
-        .map(|w| format!("{w:.2}"))
-        .unwrap_or_else(|| "—".to_string());
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(w_str, fgb(VALUE)))),
-        w_inner,
-    );
+    // the max-W card applies only to relativistic regimes (the Lorentz factor is
+    // undefined for a non-relativistic gas, so `max_w` is None there). when absent,
+    // dt history takes the full row rather than a "—" placeholder holding half of it.
+    let dt_area = if let Some(w) = view.max_w {
+        let cols =
+            Layout::horizontal([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]).split(area);
+        let w_block = card("max W");
+        let w_inner = w_block.inner(cols[0]);
+        frame.render_widget(w_block, cols[0]);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(format!("{w:.2}"), fgb(VALUE)))),
+            w_inner,
+        );
+        cols[1]
+    } else {
+        area
+    };
 
     let dt_block = card("dt history");
-    let dt_inner = dt_block.inner(cols[1]);
-    frame.render_widget(dt_block, cols[1]);
+    let dt_inner = dt_block.inner(dt_area);
+    frame.render_widget(dt_block, dt_area);
     frame.render_widget(
         Sparkline::default().data(spark(&view.dt_hist)).style(fg(BLUE)),
         dt_inner,
@@ -920,7 +924,13 @@ mod tests {
         let d = dump(&v);
         assert!(!d.contains("div·B"));
         assert!(d.contains("conservation & constraints"));
-        assert!(d.contains("max W"));
+        // max W is relativistic-only: OMITTED (not a "—" placeholder) when max_w is
+        // None, so dt history takes the full row instead of squatting on half of it.
+        assert!(!d.contains("max W"));
+        assert!(d.contains("dt history"));
+        // present again once the run is relativistic.
+        v.max_w = Some(3.2);
+        assert!(dump(&v).contains("max W"));
     }
 
     /// each tab renders without panicking.

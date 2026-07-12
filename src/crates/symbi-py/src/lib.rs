@@ -1578,6 +1578,72 @@ fn problem_setup_rows(cfg: &Config) -> Vec<[String; 3]> {
         push("Numerics", "gpus", cfg.n_gpus.to_string());
     }
 
+    // SCALES: characteristic numbers the physics sets (present-only). timescales
+    // are quoted at a unit fiducial radius r = 1 (code units); Omega_k = sqrt(GM/r^3)
+    // uses the central body's mass. shown only when the run engages viscosity — the
+    // viscous dt cap in particular explains a step pinned far below the advective CFL.
+    if cfg.viscosity > 0.0 || cfg.alpha > 0.0 {
+        let pi = std::f64::consts::PI;
+        let min_dx = (0..cfg.dims).map(|ax| cfg.dx[ax]).fold(f64::INFINITY, f64::min);
+        // central mass + center: body 0 when present, else GM = 1 about the origin.
+        let gm = cfg.bodies.first().map(|b| b.mass).unwrap_or(1.0);
+        let center = cfg
+            .bodies
+            .first()
+            .map(|b| b.position.clone())
+            .unwrap_or_else(|| vec![0.0; cfg.dims]);
+        let omega_k = |r: f64| (gm / (r * r * r)).sqrt();
+        // outer radius: the farthest domain corner from the center in the disk plane
+        // (first two axes) — where alpha's nu(r) = alpha cs^2 / Omega_k(r) is largest,
+        // so it sets the viscous CFL cap (matches the substrate's nu_max).
+        let plane = cfg.dims.min(2);
+        let mut r_out2 = 0.0_f64;
+        for corner in 0..(1usize << plane) {
+            let mut d2 = 0.0;
+            for a in 0..plane {
+                let hi = cfg.x_lo[a] + cfg.dx[a] * cfg.n_cells[a] as f64;
+                let x = if corner & (1 << a) != 0 { hi } else { cfg.x_lo[a] };
+                let d = x - center.get(a).copied().unwrap_or(0.0);
+                d2 += d * d;
+            }
+            r_out2 = r_out2.max(d2);
+        }
+        let r_out = r_out2.sqrt().max(1e-30);
+        let is_alpha = cfg.alpha > 0.0;
+        let nu_at = |r: f64| {
+            if is_alpha {
+                cfg.alpha * cfg.cs * cfg.cs / omega_k(r)
+            } else {
+                cfg.viscosity
+            }
+        };
+        // the explicit parabolic CFL cap dt <= C_visc dx^2 / nu_max, C_visc = 0.1
+        // (the 2D/3D Navier-Stokes von-Neumann factor). nu_max at the outer radius.
+        let dt_cap = 0.1 * min_dx * min_dx / nu_at(r_out);
+        push(
+            "Scales",
+            if is_alpha { "alpha" } else { "nu" },
+            format!("{:.4}", if is_alpha { cfg.alpha } else { cfg.viscosity }),
+        );
+        push("Scales", "viscous dt cap", format!("{dt_cap:.2e}"));
+        // viscous diffusion time t_nu = r^2 / nu at the fiducial radius.
+        let nu1 = nu_at(1.0);
+        let t_nu = 1.0 / nu1;
+        if cfg.bodies.is_empty() {
+            push("Scales", "viscous time @r=1", format!("{t_nu:.3}"));
+        } else {
+            let t_orb = 2.0 * pi / omega_k(1.0);
+            push("Scales", "viscous time @r=1", format!("{t_nu:.2}  ({:.1} orbits)", t_nu / t_orb));
+            push("Scales", "orbital time @r=1", format!("{t_orb:.3}"));
+            // Reynolds = r v_kep / nu, Mach = v_kep / cs, with v_kep = Omega_k r at r=1.
+            let v_kep = omega_k(1.0);
+            push("Scales", "Reynolds @r=1", format!("{:.0}", v_kep / nu1));
+            if cfg.cs > 0.0 {
+                push("Scales", "Mach @r=1", format!("{:.1}", v_kep / cfg.cs));
+            }
+        }
+    }
+
     // RUN: the schedule + outputs.
     push("Run", "t_final", t_final_disp);
     push("Run", "checkpoint dt", cp);
