@@ -123,6 +123,16 @@ pub struct FieldSlice {
     pub vmin: f64,
     pub vmax: f64,
     pub cmap: Colormap,
+    /// physical-shape (polar) slice: letterbox to the slice's aspect ratio instead
+    /// of stretching to the panel (a circle drawn as an ellipse defeats the
+    /// projection). half-block halves are ~square, so slice aspect is preserved
+    /// in half-pixel space. index-space rectangles stretch to fill, as before.
+    pub preserve_aspect: bool,
+    /// colormap the field in log10 space (the `l` key, injected render-side like
+    /// `cmap`): density / pressure span decades in an accretion flow, and a linear
+    /// normalization paints everything but the peak one color. positive data only;
+    /// a non-positive range falls back to linear.
+    pub log_scale: bool,
 }
 
 fn fg(c: Color) -> Style {
@@ -273,6 +283,7 @@ fn render_footer(frame: &mut Frame, area: Rect) {
         ("\u{2191}\u{2193}", "scroll"),
         ("f", "field"),
         ("c", "cmap"),
+        ("l", "log"),
         ("w", "checkpoint"),
         ("q", "quit"),
     ];
@@ -403,12 +414,30 @@ fn colormap(t: f64, cmap: Colormap) -> Color {
     Color::Rgb(lerp(r0, r1), lerp(g0, g1), lerp(b0, b1))
 }
 
-/// nearest-sample the field at output pixel (px, py) in an out_w x out_h grid.
-fn sample(field: &FieldSlice, px: u16, py: u16, out_w: u16, out_h: u16) -> f64 {
-    let fx = (px as usize * field.width / (out_w.max(1) as usize)).min(field.width.saturating_sub(1));
-    let fy =
-        (py as usize * field.height / (out_h.max(1) as usize)).min(field.height.saturating_sub(1));
-    field.data.get(fy * field.width + fx).copied().unwrap_or(0.0) as f64
+/// average the slice over the fractional box [u0, u1) x [v0, v1) (unit slice
+/// coordinates), NaN-aware; entirely outside or all-NaN -> NaN. when the slice is
+/// FINER than the panel this is the panel-side block average: nearest sampling at
+/// a 2:1 downsample drops half the slice pixels and turns a thin bright ring into
+/// a dotted arc — the display-side twin of the producer's footprint supersampling.
+fn box_avg(field: &FieldSlice, u0: f64, u1: f64, v0: f64, v1: f64) -> f64 {
+    if u1 <= 0.0 || u0 >= 1.0 || v1 <= 0.0 || v0 >= 1.0 || field.data.is_empty() {
+        return f64::NAN;
+    }
+    let fx0 = ((u0.max(0.0) * field.width as f64) as usize).min(field.width - 1);
+    let fx1 = ((u1.min(1.0) * field.width as f64).ceil() as usize).clamp(fx0 + 1, field.width);
+    let fy0 = ((v0.max(0.0) * field.height as f64) as usize).min(field.height - 1);
+    let fy1 = ((v1.min(1.0) * field.height as f64).ceil() as usize).clamp(fy0 + 1, field.height);
+    let (mut sum, mut cnt) = (0.0f64, 0u32);
+    for fy in fy0..fy1 {
+        for fx in fx0..fx1 {
+            let v = field.data[fy * field.width + fx] as f64;
+            if !v.is_nan() {
+                sum += v;
+                cnt += 1;
+            }
+        }
+    }
+    if cnt == 0 { f64::NAN } else { sum / cnt as f64 }
 }
 
 /// render the field as a truecolor half-block heatmap: each terminal cell is the
@@ -425,12 +454,20 @@ fn cmap_name(c: Colormap) -> &'static str {
 }
 
 fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
+    // log10 colormap normalization needs a positive range; non-positive data falls
+    // back to linear rather than lying with a clamped scale.
+    let log_active = field.log_scale && field.vmax > 0.0;
     let block = Block::new()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(fg(BORDER_HERO))
         .title(Span::styled(
-            format!(" {} · {} ", field.label, cmap_name(field.cmap)),
+            format!(
+                " {} · {}{} ",
+                field.label,
+                cmap_name(field.cmap),
+                if log_active { " · log" } else { "" }
+            ),
             fgb(GOLD),
         ));
     let inner = block.inner(area);
@@ -449,17 +486,63 @@ fn render_field(frame: &mut Frame, area: Rect, field: &FieldSlice) {
     let heat_w = inner.width - bar_w;
     let heat_h = inner.height;
     let range = (field.vmax - field.vmin).max(1e-30);
-    let norm = |v: f64| (v - field.vmin) / range;
+    // the log floor: vmin when positive, else a fixed dynamic range below vmax so a
+    // zero-touching field (|B| with null points) still spans usable decades.
+    let log_lo = if field.vmin > 0.0 { field.vmin } else { field.vmax * 1e-8 };
+    let log_range = (field.vmax.ln() - log_lo.ln()).max(1e-30);
+    let norm = move |v: f64| {
+        if log_active {
+            (v.max(log_lo).ln() - log_lo.ln()) / log_range
+        } else {
+            (v - field.vmin) / range
+        }
+    };
+
+    // the target raster in half-pixel space (half-block halves are ~square). a
+    // physical-shape slice letterboxes: fit the slice's aspect into the panel and
+    // center it, so a circle renders circular; index-space slices stretch to fill.
+    let (hp_w, hp_h) = (heat_w as f64, (heat_h * 2) as f64);
+    let (tw, th, ox, oy) = if field.preserve_aspect {
+        let scale = (hp_w / field.width as f64).min(hp_h / field.height as f64);
+        let (tw, th) = (field.width as f64 * scale, field.height as f64 * scale);
+        (tw, th, (hp_w - tw) / 2.0, (hp_h - th) / 2.0)
+    } else {
+        (hp_w, hp_h, 0.0, 0.0)
+    };
+    // sample the slice at a half-pixel, honoring the letterbox; outside -> NaN.
+    let at = |px: u16, hy: u16| -> f64 {
+        let u0 = (px as f64 - ox) / tw;
+        let u1 = (px as f64 + 1.0 - ox) / tw;
+        let v0 = (hy as f64 - oy) / th;
+        let v1 = (hy as f64 + 1.0 - oy) / th;
+        box_avg(field, u0, u1, v0, v1)
+    };
 
     let buf = frame.buffer_mut();
     for cy in 0..heat_h {
         for cx in 0..heat_w {
-            let top = sample(field, cx, 2 * cy, heat_w, heat_h * 2);
-            let bot = sample(field, cx, 2 * cy + 1, heat_w, heat_h * 2);
+            let top = at(cx, 2 * cy);
+            let bot = at(cx, 2 * cy + 1);
             if let Some(cell) = buf.cell_mut((inner.x + cx, inner.y + cy)) {
-                cell.set_symbol("\u{2580}") // upper half block
-                    .set_fg(colormap(norm(top), field.cmap))
-                    .set_bg(colormap(norm(bot), field.cmap));
+                // NaN marks outside-domain pixels of a polar (physical-shape) slice:
+                // draw only the valid half via the matching half-block, so the
+                // annulus exterior and the excision hole stay blank.
+                match (top.is_nan(), bot.is_nan()) {
+                    (true, true) => {}
+                    (false, true) => {
+                        cell.set_symbol("\u{2580}") // upper half block
+                            .set_fg(colormap(norm(top), field.cmap));
+                    }
+                    (true, false) => {
+                        cell.set_symbol("\u{2584}") // lower half block
+                            .set_fg(colormap(norm(bot), field.cmap));
+                    }
+                    (false, false) => {
+                        cell.set_symbol("\u{2580}")
+                            .set_fg(colormap(norm(top), field.cmap))
+                            .set_bg(colormap(norm(bot), field.cmap));
+                    }
+                }
             }
         }
     }
@@ -962,6 +1045,45 @@ mod tests {
     /// the overview hero renders a field heatmap without panicking when a slice is
     /// present, and carries the field label in the panel title.
     #[test]
+    fn thin_ring_survives_panel_downsampling() {
+        // a one-pixel-wide bright horizontal line in a 200x200 slice, box-averaged
+        // down to a ~90-column panel: EVERY column's covering half-pixel must blend
+        // the line in (nearest sampling would drop it on ~half the columns).
+        let (w, h) = (200usize, 200usize);
+        let mut data = vec![1.0f32; w * h];
+        for i in 0..w {
+            data[100 * w + i] = 10.0;
+        }
+        let field = FieldSlice {
+            label: "ring".into(),
+            width: w,
+            height: h,
+            data,
+            vmin: 1.0,
+            vmax: 10.0,
+            cmap: Colormap::Inferno,
+            preserve_aspect: true,
+            log_scale: false,
+        };
+        // a 90x45 panel = 90x90 half-pixels; the line at v = 0.5 falls in half-row 45.
+        let (pw, phh) = (90usize, 90usize);
+        for px in 0..pw {
+            let u0 = px as f64 / pw as f64;
+            let u1 = (px + 1) as f64 / pw as f64;
+            let mut best = f64::NAN;
+            for hy in 43..48 {
+                let v0 = hy as f64 / phh as f64;
+                let v1 = (hy + 1) as f64 / phh as f64;
+                let v = super::box_avg(&field, u0, u1, v0, v1);
+                if !v.is_nan() && (best.is_nan() || v > best) {
+                    best = v;
+                }
+            }
+            assert!(best > 2.0, "column {px} lost the ring: best {best}");
+        }
+    }
+
+    #[test]
     fn field_heatmap_renders() {
         let backend = TestBackend::new(140, 40);
         let mut terminal = Terminal::new(backend).unwrap();
@@ -975,6 +1097,8 @@ mod tests {
             data,
             vmin: 0.0,
             vmax: 6.0,
+            preserve_aspect: false,
+            log_scale: false,
             cmap: Colormap::Inferno,
         });
         terminal.draw(|frame| render(frame, &v)).unwrap();

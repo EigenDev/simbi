@@ -233,6 +233,7 @@ where
             vmin,
             vmax,
             name: name.into(),
+            preserve_aspect: false,
         })
     }
 

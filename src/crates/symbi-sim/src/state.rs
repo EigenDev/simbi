@@ -2132,6 +2132,19 @@ where
             return None;
         }
         let (kind, name) = self.nth_field(index);
+        // a 2D ANGULAR chart draws in its physical shape: spherical (r, theta) as the
+        // meridional half-plane, the cylindrical (R, phi) disk plane as the disk. the
+        // (R, z) plane is already a faithful rectangle and 1D/3D keep the index view.
+        if D == 2 {
+            let angular = match self.geom.coords {
+                symbi_geometry::Geometry::Spherical => true,
+                symbi_geometry::Geometry::Cylindrical => self.geom.axes[1] == 1,
+                symbi_geometry::Geometry::Cartesian => false,
+            };
+            if angular {
+                return self.field_slice_polar(max_dim, kind, name);
+            }
+        }
         let interior = &self.geom.interior;
         let sp0 = &interior.spaces[0];
         let nx = sp0.size();
@@ -2175,6 +2188,7 @@ where
                 vmin,
                 vmax,
                 name: name.into(),
+                preserve_aspect: false,
             });
         };
 
@@ -2220,6 +2234,179 @@ where
             vmin,
             vmax,
             name: name.into(),
+            preserve_aspect: false,
+        })
+    }
+
+    /// the polar (physical-shape) decimation of a 2D angular chart, by INVERSE
+    /// sampling: each display pixel maps to (display radius, angle) -> nearest
+    /// grid cell -> field value, so cost is screen-bounded exactly like the
+    /// index-space decimation. pixels outside the annulus/wedge are NaN and the
+    /// renderer leaves them blank — the central hole marks the inner boundary.
+    ///
+    /// the display radius is the radial INDEX fraction, so a log-radial grid gets
+    /// a log-polar view (equal display area per cell shell — the inner decades of
+    /// an accretion run keep their visual weight) and a uniform grid a linear one,
+    /// with no coordinate-map inversion.
+    ///
+    /// spherical (r, theta): the meridional half-plane x = r sin(theta),
+    /// y = r cos(theta) (pole up). cylindrical (R, phi): the full disk
+    /// x = R cos(phi), y = R sin(phi), with the angle wrapped when the grid spans
+    /// the full circle and a NaN wedge otherwise.
+    fn field_slice_polar(
+        &self,
+        max_dim: usize,
+        kind: FieldKind,
+        name: &str,
+    ) -> Option<FieldDecimation> {
+        let interior = &self.geom.interior;
+        let sp0 = &interior.spaces[0];
+        let sp1 = interior.spaces.get(1)?;
+        let (nr, na) = (sp0.size(), sp1.size());
+        if nr == 0 || na == 0 {
+            return None;
+        }
+        let meridional = self.geom.coords == symbi_geometry::Geometry::Spherical;
+        let a_lo = self.geom.x_lo[1];
+        let a_hi = a_lo + na as f64 * self.geom.dx[1];
+        let two_pi = 2.0 * std::f64::consts::PI;
+        // the central hole: a fixed display fraction marking the inner radial
+        // boundary (excision surface, inner ghost) when the grid starts off zero.
+        let s0 = if self.geom.x_lo[0] > 0.0 { 0.08 } else { 0.0 };
+
+        // the TIGHT display bounding box of the annular sector, so a wedge fills
+        // its panel instead of floating in a mostly-NaN full-circle box: evaluate
+        // the sector's (x, y) at both radii for the angular endpoints and every
+        // quarter-turn extremum inside the span. meridional (x, y) = rho (sin, cos)
+        // with theta from the +y pole; disk (x, y) = rho (cos, sin).
+        let (mut x_min, mut x_max, mut y_min, mut y_max) =
+            (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        {
+            let mut angles = vec![a_lo, a_hi];
+            let mut k = (a_lo / std::f64::consts::FRAC_PI_2).ceil() as i64;
+            while (k as f64) * std::f64::consts::FRAC_PI_2 <= a_hi {
+                angles.push(k as f64 * std::f64::consts::FRAC_PI_2);
+                k += 1;
+            }
+            for &ang in &angles {
+                for rho in [s0, 1.0] {
+                    let (x, y) = if meridional {
+                        (rho * ang.sin(), rho * ang.cos())
+                    } else {
+                        (rho * ang.cos(), rho * ang.sin())
+                    };
+                    x_min = x_min.min(x);
+                    x_max = x_max.max(x);
+                    y_min = y_min.min(y);
+                    y_max = y_max.max(y);
+                }
+            }
+        }
+        let (span_x, span_y) = (x_max - x_min, y_max - y_min);
+        if span_x <= 0.0 || span_y <= 0.0 {
+            return None;
+        }
+
+        let m = max_dim.max(2);
+        // fit the sector's aspect into m: the renderer preserves it (letterbox).
+        let aspect = span_x / span_y;
+        let (out_w, out_h) = if aspect >= 1.0 {
+            (m, ((m as f64 / aspect) as usize).max(1))
+        } else {
+            (((m as f64 * aspect) as usize).max(1), m)
+        };
+        let mut data = Vec::with_capacity(out_w * out_h);
+        let mut vmin = f64::INFINITY;
+        let mut vmax = f64::NEG_INFINITY;
+        let mut c: [isize; D] = std::array::from_fn(|ax| {
+            let s = &interior.spaces[ax];
+            s.lo + (s.size() / 2) as isize
+        });
+        // one inverse sample: display point -> (radius fraction, angle) -> nearest cell.
+        let mut sample_at = |x_d: f64, y_d: f64| -> f64 {
+            let s = (x_d * x_d + y_d * y_d).sqrt();
+            if !(s0..=1.0).contains(&s) {
+                return f64::NAN;
+            }
+            let u_r = if s0 < 1.0 { (s - s0) / (1.0 - s0) } else { 0.0 };
+            let ang = if meridional {
+                // theta from the +y pole, in [0, pi] for x_d >= 0.
+                x_d.atan2(y_d)
+            } else {
+                // fold the atan2 branch into the grid's own angular span: a full
+                // circle wraps everywhere, a wedge leaves u_a > 1 (NaN) outside —
+                // including wedges that cross the cut.
+                a_lo + (y_d.atan2(x_d) - a_lo).rem_euclid(two_pi)
+            };
+            let u_a = (ang - a_lo) / (a_hi - a_lo);
+            if !(0.0..=1.0).contains(&u_a) {
+                return f64::NAN;
+            }
+            let ir = ((u_r * nr as f64) as usize).min(nr - 1);
+            let ia = ((u_a * na as f64) as usize).min(na - 1);
+            c[0] = sp0.lo + ir as isize;
+            c[1] = sp1.lo + ia as isize;
+            self.field_value(c, kind)
+        };
+        // supersample each pixel and average the in-domain sub-samples, with tap
+        // counts matched to the pixel's FOOTPRINT in cells: a display pixel spans
+        // ~nr/out radial cells (and, near the center, many angular cells), and any
+        // tap count below that lets a thin feature — a 2-cell blast shell — fall
+        // between taps on some rays, aliasing a smooth ring into a dotted arc.
+        // footprint-matched taps give the same block-average semantics as the
+        // index-space decimation; worst case a few million lookups per cadence,
+        // the same order as the one grid pass the rectangle path already pays.
+        let px = (span_x / out_w as f64).max(span_y / out_h as f64);
+        let clamp_taps = |t: f64| (t.ceil() as usize).clamp(3, 16);
+        // radial cells per pixel is uniform in the index-fraction display map; the
+        // radial direction rotates against the display axes around the arc, so the
+        // sub-grid is UNIFORM at this density in both axes (direction-agnostic).
+        let ss_r = clamp_taps(nr as f64 * px / (1.0 - s0).max(1e-12));
+        let ang_span = a_hi - a_lo;
+        for jj in 0..out_h {
+            for ii in 0..out_w {
+                // near the center a pixel also spans many ANGULAR cells: coverage
+                // du_a ~ px / (s * span) grows as 1/s. take the denser requirement.
+                let yc = y_max - (jj as f64 + 0.5) / out_h as f64 * span_y;
+                let xc = x_min + (ii as f64 + 0.5) / out_w as f64 * span_x;
+                let s_c = (xc * xc + yc * yc).sqrt().max(s0.max(1e-3));
+                let ss = ss_r.max(clamp_taps(na as f64 * px / (s_c * ang_span)));
+
+                let (mut sum, mut cnt) = (0.0f64, 0u32);
+                for sj in 0..ss {
+                    // rows top -> bottom = display y decreasing (pole / +y up).
+                    let y_d = y_max
+                        - (jj as f64 + (sj as f64 + 0.5) / ss as f64) / out_h as f64 * span_y;
+                    for si in 0..ss {
+                        let x_d = x_min
+                            + (ii as f64 + (si as f64 + 0.5) / ss as f64) / out_w as f64
+                                * span_x;
+                        let v = sample_at(x_d, y_d);
+                        if !v.is_nan() {
+                            sum += v;
+                            cnt += 1;
+                        }
+                    }
+                }
+                let v = if cnt == 0 { f64::NAN } else { sum / cnt as f64 };
+                if !v.is_nan() {
+                    vmin = vmin.min(v);
+                    vmax = vmax.max(v);
+                }
+                data.push(v as f32);
+            }
+        }
+        if !vmin.is_finite() {
+            return None;
+        }
+        Some(FieldDecimation {
+            width: out_w,
+            height: out_h,
+            data,
+            vmin,
+            vmax,
+            name: format!("{name} · {}", if meridional { "meridional" } else { "disk" }),
+            preserve_aspect: true,
         })
     }
 }
@@ -2243,6 +2430,10 @@ pub struct FieldDecimation {
     pub vmin: f64,
     pub vmax: f64,
     pub name: String,
+    /// true for a physical-shape (polar) slice: the renderer must letterbox to the
+    /// slice's aspect ratio instead of stretching to the panel — a circle drawn as
+    /// an ellipse defeats the projection. index-space rectangles stretch as before.
+    pub preserve_aspect: bool,
 }
 
 // =============================================================================

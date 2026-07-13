@@ -1324,6 +1324,8 @@ where
                             vmin: fd.vmin,
                             vmax: fd.vmax,
                             cmap: Colormap::Inferno,
+                            preserve_aspect: fd.preserve_aspect,
+                            log_scale: false,
                         }
                     })
             };

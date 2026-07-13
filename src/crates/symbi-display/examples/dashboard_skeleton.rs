@@ -205,6 +205,8 @@ impl App {
             vmin: mn as f64,
             vmax: mx as f64,
             cmap: Colormap::Inferno,
+            preserve_aspect: false,
+            log_scale: false,
         }
     }
 

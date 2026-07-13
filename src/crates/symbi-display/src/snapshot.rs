@@ -130,6 +130,8 @@ mod tests {
             vmin: v as f64,
             vmax: (v + 3.0) as f64,
             cmap: Colormap::Inferno,
+            preserve_aspect: false,
+            log_scale: false,
         }
     }
 

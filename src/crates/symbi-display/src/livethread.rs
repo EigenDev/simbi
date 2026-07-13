@@ -166,6 +166,7 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
     let mut tab = 0usize;
     let mut frame = 0u64;
     let mut cmap_idx = 0usize; // `c`-key colormap, applied render-side (no solver)
+    let mut log_scale = false; // `l`-key log10 colormap normalization, render-side
     let mut scroll = 0u16; // up/down scroll offset for a tall panel (the config listing); reset on tab
 
     // exit on shutdown OR a caught signal (so drawing never targets a terminal the
@@ -207,6 +208,9 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
                 Key::Char('w') => controls.force_cp.store(true, Ordering::SeqCst),
                 // c: cycle colormap (render-side, no solver round-trip).
                 Key::Char('c') => cmap_idx = (cmap_idx + 1) % COLORMAPS.len(),
+                // l: toggle log10 colormap normalization (render-side) — fields
+                // spanning decades (density, pressure) are unreadable linearly.
+                Key::Char('l') => log_scale = !log_scale,
                 // f: cycle the displayed field. bounded by the bundle length in
                 // attach mode (client-side switch), else the solver's field_count.
                 Key::Char('f') => {
@@ -246,6 +250,7 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
             v.paused = controls.paused.load(Ordering::SeqCst);
             if let Some(field) = v.field.as_mut() {
                 field.cmap = COLORMAPS[cmap_idx];
+                field.log_scale = log_scale;
             }
             let _ = terminal.draw(|f| live::render(f, v));
         }
