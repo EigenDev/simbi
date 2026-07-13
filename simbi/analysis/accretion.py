@@ -153,6 +153,26 @@ def steady_state_time(
     (t_B = 1 for the accretor problem)."""
     time = np.asarray(time, dtype=np.float64)
     series = np.asarray(series, dtype=np.float64)
+    if len(time) < 2:
+        # np.gradient needs two samples; a shorter series cannot settle.
+        return None
+    # a NaN sample poisons every window mean it touches, misdiagnosing a settled
+    # run as NOT SETTLED — filter with a data-quality warning instead.
+    finite = np.isfinite(series) & np.isfinite(time)
+    if not finite.all():
+        import warnings
+
+        warnings.warn(
+            f"steady_state_time: dropping {int((~finite).sum())} non-finite "
+            "sample(s) from the series before windowing",
+            stacklevel=2,
+        )
+        time = time[finite]
+        series = series[finite]
+        if dt is not None:
+            dt = np.asarray(dt, dtype=np.float64)[finite]
+        if len(time) < 2:
+            return None
     w = np.asarray(dt, dtype=np.float64) if dt is not None else np.gradient(time)
     for t in time:
         if t - 2.0 * window < time[0]:
@@ -263,7 +283,12 @@ def sphere_flux(
     noise. shells with no cells return nan."""
     r = np.sqrt(np.sum(pos**2, axis=1))
     vr = np.sum(pos * vel, axis=1) / np.maximum(r, 1e-300)
-    lz = rho * (pos[:, 0] * vel[:, 1] - pos[:, 1] * vel[:, 0])
+    # the z angular momentum needs a plane: 1d data carries mass flux only
+    # (Ldot stays 0 rather than an IndexError on the missing column).
+    if pos.shape[1] >= 2:
+        lz = rho * (pos[:, 0] * vel[:, 1] - pos[:, 1] * vel[:, 0])
+    else:
+        lz = np.zeros_like(rho)
     mdot = np.full(len(radii), np.nan)
     ldot = np.full(len(radii), np.nan)
     for i, rs in enumerate(np.asarray(radii, dtype=float)):

@@ -150,6 +150,11 @@ def plot(
     if vector_fields:
         vector_plot_data = create_plot_data(sim_data, vector_fields, config)
 
+        if len(vector_fields) != 2:
+            raise ValueError(
+                f"--vector-fields needs exactly 2 component names (vi, vj); got "
+                f"{len(vector_fields)}: {list(vector_fields)}"
+            )
         vi_levels = [
             f
             for f in vector_plot_data.fields
@@ -588,7 +593,7 @@ def plot_overlay(
             base_props = _get_props(component_props, "line", LinePlotProps)
             # override label to include file identifier
             props = LinePlotProps(
-                label=f"{field_data.name}",
+                label=f"{field_data.name} ({file_label})",
                 linewidth=base_props.linewidth,
                 marker=base_props.marker,
                 marker_size=base_props.marker_size,

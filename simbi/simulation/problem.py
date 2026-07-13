@@ -595,6 +595,12 @@ class SimbiProblem(BaseModel):
             import math
 
             anchor = self.checkpoint_log_anchor if self.checkpoint_log_anchor > 0.0 else self.start_time
+            if anchor <= 0.0:
+                raise ConfigError(
+                    "log-spaced checkpoints need a positive time anchor: set "
+                    "checkpoint_log_anchor (or a positive start_time) — the "
+                    "cadence is log10(end_time / anchor), undefined at 0"
+                )
             return math.log10(self.end_time / anchor) / num_outputs
         return 0.0
 

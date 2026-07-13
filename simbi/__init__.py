@@ -65,9 +65,19 @@ except ImportError:
 try:
     from .libs.cpu_ext import bondi_profile, bondi_sonic_radius, mdot_bondi
 except ImportError:
-    bondi_profile = None
-    bondi_sonic_radius = None
-    mdot_bondi = None
+    # a wheel built before these bindings existed: bind stubs that NAME the fix
+    # instead of None (calling None produces a bare TypeError far from the cause).
+    def _stale_wheel_stub(name):
+        def _stub(*_a, **_k):
+            raise RuntimeError(
+                f"simbi.{name} is not in the installed backend — the wheel predates "
+                "it. rebuild with `./dev.py build`."
+            )
+        return _stub
+
+    bondi_profile = _stale_wheel_stub("bondi_profile")
+    bondi_sonic_radius = _stale_wheel_stub("bondi_sonic_radius")
+    mdot_bondi = _stale_wheel_stub("mdot_bondi")
 
 # the installed package version (set by maturin from pyproject `[project] version`).
 try:

@@ -26,6 +26,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from simbi.functional import Err, Ok, Result
+from simbi.reader.logging import logger
 from simbi.types.bodies import Body
 from simbi.types.input import Metadata, normalize_regime
 
@@ -448,8 +449,11 @@ def read_level(
         if part_result.is_ok():
             partitions.append(part_result.value)
         else:
-            # log warning but continue
-            pass
+            # a corrupt partition is dropped but never silently: the stitched
+            # field would otherwise show unexplained zero holes.
+            logger.warning(
+                "dropping corrupt partition_%d: %s", partition_id, part_result.error
+            )
         partition_id += 1
 
     if not partitions:
@@ -681,8 +685,11 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
                 if level_result.is_ok():
                     levels.append(level_result.value)
                 else:
-                    # log warning but try next level
-                    pass
+                    # a corrupt level is dropped but never silently: an AMR
+                    # plot missing its fine level looks like missing physics.
+                    logger.warning(
+                        "dropping corrupt level_%d: %s", level_id, level_result.error
+                    )
                 level_id += 1
 
             if not levels:
@@ -694,6 +701,10 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
                 bodies_result = read_bodies(f["bodies"])
                 if bodies_result.is_ok():
                     bodies = bodies_result.value
+                else:
+                    logger.warning(
+                        "dropping corrupt bodies group: %s", bodies_result.error
+                    )
 
             return Ok(
                 Checkpoint(

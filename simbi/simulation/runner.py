@@ -294,29 +294,21 @@ def _is_mhd_generator(gen: Any) -> bool:
     return not callable(gen) and len(gen) == 4
 
 
-def _get_primitive_iterator(problem: SimbiProblem) -> GasStateGenerator:
-    """get fresh primitive state iterator from problem."""
-    initial_state = problem.initial_primitive_state()
-
-    if _is_mhd_generator(initial_state):
-        gas_gen_func = initial_state[0]
-        return gas_gen_func()
-    else:
-        gas_gen_func: GasStateFunction = initial_state
-        return gas_gen_func()
-
-
-def _get_bfield_iterators(
+def _get_iterators(
     problem: SimbiProblem,
-) -> list[StaggeredBFieldGenerator]:
-    """get fresh b-field iterators for mhd, or empty list for hydro."""
+) -> tuple[GasStateGenerator, list[StaggeredBFieldGenerator]]:
+    """the gas iterator + the staggered-B iterators (empty for hydro), from ONE
+    initial_primitive_state() call. the one-call contract matters: a STOCHASTIC
+    initial condition invoked twice hands the gas and the magnetic field
+    different random draws — silently inconsistent data unless the config
+    happens to fix its rng seed."""
     initial_state = problem.initial_primitive_state()
 
     if _is_mhd_generator(initial_state):
-        _, bx_gen, by_gen, bz_gen = initial_state
-        return [bx_gen(), by_gen(), bz_gen()]
-
-    return []
+        gas_gen_func, bx_gen, by_gen, bz_gen = initial_state
+        return gas_gen_func(), [bx_gen(), by_gen(), bz_gen()]
+    gas_gen_func: GasStateFunction = initial_state
+    return gas_gen_func(), []
 
 
 # =============================================================================
@@ -395,7 +387,8 @@ def run(
     if not data_dir.exists():
         data_dir.mkdir(parents=True, exist_ok=True)
 
-    # validate generator if requested
+    # deep generator validation stays opt-in (it consumes fresh iterators);
+    # the zero-cost first-tuple check below always runs.
     if validate:
         errors = _validate_generator(problem)
         if errors:
@@ -424,9 +417,14 @@ def run(
     if gpu_blocks is not None:
         exec_dict["gpu_block_dims"] = tuple(gpu_blocks)
 
-    # get fresh iterators
-    prim_iterator = _get_primitive_iterator(problem)
-    bfield_iterators = _get_bfield_iterators(problem)
+    # get fresh iterators — ONE initial_primitive_state() call for both, so a
+    # stochastic IC seeds gas and B from the same draw.
+    prim_iterator, bfield_iterators = _get_iterators(problem)
+    # first-tuple contract check, always on: one tuple costs nothing and catches
+    # the classic generator-contract violations (calling gen() instead of
+    # passing gen, wrong tuple arity, NaN or non-positive density/pressure)
+    # with a message naming the contract instead of a distant TypeError.
+    prim_iterator = _check_first_tuple(problem, prim_iterator)
 
     # get scale factor functions
     scale_factor = problem.scale_factor or (lambda t: 1.0)
@@ -440,6 +438,59 @@ def run(
         a=scale_factor,
         adot=scale_factor_derivative,
     )
+
+
+def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasStateGenerator:
+    """peek the generator's first yielded tuple, validate the contract, and
+    return an iterator that replays it: `initial_primitive_state` must return a
+    zero-argument callable (or the 4-tuple of them for MHD) whose iterator
+    yields per-cell numeric tuples (rho, v.., p) with finite entries and
+    positive density (and pressure, when the regime carries energy)."""
+    import itertools
+
+    name = type(problem).__name__
+    try:
+        first = next(it)
+    except StopIteration:
+        raise ValueError(
+            f"{name}.initial_primitive_state: the gas generator yielded nothing — "
+            "it must yield one (rho, v.., p) tuple per cell"
+        ) from None
+    except TypeError as exc:
+        raise ValueError(
+            f"{name}.initial_primitive_state: expected an ITERATOR of per-cell "
+            f"tuples; check that the config returns the generator function itself "
+            f"(not gen()) or vice versa at the call boundary: {exc}"
+        ) from None
+    # an energy regime yields (rho, v.., p); isothermal has no pressure entry,
+    # so its minimum is (rho, v).
+    min_len = 2 if getattr(problem, "isothermal", False) else 3
+    shape = "(rho, v..)" if min_len == 2 else "(rho, v.., p)"
+    if not hasattr(first, "__len__") or len(first) < min_len:
+        raise ValueError(
+            f"{name}.initial_primitive_state: each yield must be a {shape} "
+            f"sequence of >= {min_len} numbers, got {first!r}"
+        )
+    try:
+        vals = [float(v) for v in first]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{name}.initial_primitive_state: non-numeric entry in the first "
+            f"yielded tuple {first!r}: {exc}"
+        ) from None
+    import math
+
+    if any(not math.isfinite(v) for v in vals):
+        raise ValueError(
+            f"{name}.initial_primitive_state: non-finite entry in the first "
+            f"yielded tuple {tuple(vals)}"
+        )
+    if vals[0] <= 0.0:
+        raise ValueError(
+            f"{name}.initial_primitive_state: the first cell's density is "
+            f"{vals[0]} — density must be positive"
+        )
+    return itertools.chain([first], it)
 
 
 def _validate_generator(

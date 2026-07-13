@@ -4,6 +4,20 @@ from typing import Sequence
 import numpy as np
 
 from simbi.reader.adapter import SimData
+from simbi.reader.computation import FieldComputationError
+
+
+def _get_field_loud(data: SimData, field_name: str, level: int):
+    """get_field with a composite-path failure that NAMES the available fields
+    instead of a bare KeyError from deep inside the level walk."""
+    try:
+        return data.get_field(field_name, level)
+    except KeyError:
+        available = ", ".join(sorted(data.available_fields(0)))
+        raise FieldComputationError(
+            f"field '{field_name}' is not available at level {level}; "
+            f"available fields: {available}"
+        ) from None
 from simbi.types import MeshConfig
 
 from ..types import Array, FieldData
@@ -99,11 +113,11 @@ def create_composite_field(
 
     if not data.has_refinement() or len(active_levels - {0}) == 0:
         # Single level case
-        values = data.get_field(field_name, 0)
+        values = _get_field_loud(data, field_name, 0)
         return values, data_order_domain
 
     # Start with base level data
-    base_values = data.get_field(field_name, 0)
+    base_values = _get_field_loud(data, field_name, 0)
     composite = base_values.copy()
 
     hierarchy = data.hierarchy()
@@ -118,7 +132,7 @@ def create_composite_field(
         if level >= data.num_levels:
             continue
 
-        level_values = data.get_field(field_name, level)
+        level_values = _get_field_loud(data, field_name, level)
         level_mesh = data.level_mesh(level)
         ref_ratio = hierarchy.ref_ratios[level - 1]
 

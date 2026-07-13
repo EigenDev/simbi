@@ -260,6 +260,15 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         def get(self, key: str, default=None):
             return self._fields.get(key, default)
 
+        def __contains__(self, key: str) -> bool:
+            # without this, `key in ctx` falls back to integer __getitem__
+            # iteration and raises KeyError: 0 — which broke every b*_mean
+            # derived field on MHD checkpoints.
+            return key in self._fields
+
+        def __iter__(self):
+            return iter(self._fields)
+
         def __getattr__(self, name: str):
             # forward attribute access to mesh for convenience
             if hasattr(self.mesh, name):
@@ -681,7 +690,13 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         returns: sqrt(\\omega_x^2 + \\omega_y^2 + \\omega_z^2)
         """
         mesh = getattr(level_data, "mesh")
-        vx, vy, vz = get_velocities(level_data)
+        # get_velocities returns ndim entries: pad the out-of-plane components
+        # with zeros so the 2d (and 1d) branches below see a full 3-vector
+        # instead of a bare unpack ValueError.
+        vels = get_velocities(level_data)
+        while len(vels) < 3:
+            vels.append(np.zeros_like(vels[0]))
+        vx, vy, vz = vels
 
         # cell-centered coordinates
         coords = []
@@ -742,7 +757,13 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
         q < 0: strain-dominated regions (shear layers)
         """
         mesh = getattr(level_data, "mesh")
-        vx, vy, vz = get_velocities(level_data)
+        # get_velocities returns ndim entries: pad the out-of-plane components
+        # with zeros so the 2d (and 1d) branches below see a full 3-vector
+        # instead of a bare unpack ValueError.
+        vels = get_velocities(level_data)
+        while len(vels) < 3:
+            vels.append(np.zeros_like(vels[0]))
+        vx, vy, vz = vels
 
         # cell-centered coordinates
         coords = []

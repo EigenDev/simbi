@@ -322,6 +322,13 @@ class Expr:
                 return Expr(g, cache[nid])
             op, ins, attrs = g.get_node(nid)  # type: ignore[misc]
             c = [kid(i) for i in ins]
+            # the conditional differentiates PER BRANCH: the condition passes
+            # through untouched (comparisons are not differentiable and must not
+            # be recursed into), so it is handled before the eager child pass.
+            if op == "if_then_else":
+                res = Expr(g, g.add_node(op, ins[0], d(ins[1])._node_id, d(ins[2])._node_id))
+                cache[nid] = res._node_id
+                return res
             dc = [d(i) for i in ins]
             two = constant(2.0, g)
             one = constant(1.0, g)
@@ -376,8 +383,6 @@ class Expr:
                 res = sinh(c[0]) * dc[0]
             elif op == "tanh":
                 res = (one - kid(nid) ** two) * dc[0]
-            elif op in ("select", "where", "ternary"):  # per-branch (boundary delta is invisible)
-                res = Expr(g, g.add_node(op, ins[0], d(ins[1])._node_id, d(ins[2])._node_id))
             else:
                 raise ValueError(
                     f"diff: op '{op}' is not differentiable (comparisons/mod belong in a branch "

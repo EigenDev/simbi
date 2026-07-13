@@ -52,8 +52,21 @@ class SlicePlan:
 
 
 def find_slice_index(coord_array: Array, position: float) -> int:
-    """Find the index closest to the specified position in a coordinate array."""
-    return int(np.abs(coord_array - position).argmin())
+    """Find the index closest to the specified position in a coordinate array.
+
+    the coordinate array may be the VERTEX array (n+1 entries for n cells): a
+    position at or past the upper edge argmins to index n, which overflows the
+    n-cell values array. clamp to the last CELL index, and refuse a position
+    outside the domain with a message naming the bounds."""
+    lo, hi = float(coord_array[0]), float(coord_array[-1])
+    if not (min(lo, hi) <= position <= max(lo, hi)):
+        raise ValueError(
+            f"slice position {position} is outside the domain [{lo:g}, {hi:g}] "
+            "— check the --slice value"
+        )
+    idx = int(np.abs(coord_array - position).argmin())
+    # a vertex array has one more entry than the cell-value axis it indexes.
+    return min(idx, len(coord_array) - 2) if len(coord_array) >= 2 else 0
 
 
 def plan_slice(

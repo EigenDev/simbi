@@ -49,6 +49,21 @@ from .config import VisualizationConfig
 from .types import CoordSystem, FieldData
 
 
+# formatting/frame failures were historically swallowed silently (unlabeled
+# plots, frozen movies exiting 0); each distinct failure now warns ONCE with
+# the real exception so the defect is visible without spamming per frame.
+_WARNED: set[str] = set()
+
+
+def _warn_once(key: str, msg: str) -> None:
+    if key not in _WARNED:
+        _WARNED.add(key)
+        import warnings
+
+        warnings.warn(msg, stacklevel=3)
+
+
+
 def _normalize_render_output(
     result: Any,
 ) -> Tuple[dict, Optional[dict]]:
@@ -268,9 +283,11 @@ class Figure:
                 ylabel=None,
                 show_legend=True,
             )
-        except Exception:
-            # Formatting should never break rendering; swallow errors here.
-            pass
+        except Exception as exc:
+            # a silent formatting failure ships an unlabeled plot as a success —
+            # surface it: warn with the real error, then fail the static render.
+            _warn_once(f"figure-format:{type(exc).__name__}", f"figure formatting failed: {exc}")
+            raise
 
     def _format_colorbar(self, ax: Axes, artist: Any, field_data: FieldData):
         # deprecated: colorbar placement is now the responsibility of FigureFormatter.
@@ -505,8 +522,11 @@ class Figure:
                             artist
                         )
                         rendered_artists_frame.append((artists_dict, metadata))
-                except Exception:
-                    # do not break the animation loop for a single component failure
+                except Exception as exc:
+                    # one component's failure does not end the movie, but it is
+                    # never silent: a repeated per-frame render error is a frozen
+                    # artist masquerading as a finished animation.
+                    _warn_once("frame-component", f"frame component render failed: {exc}")
                     continue
 
             # update title with current time (only dynamic element)
@@ -518,8 +538,8 @@ class Figure:
                     assert self.fig is not None
                     time = getattr(frame_plot_data.fields[0], "time", None)
                     set_title(main_ax, self.fig, self.config.figure, time)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _warn_once("frame-title", f"frame title update failed: {exc}")
 
             # redraw canvas for this frame
             if self.fig is not None:
@@ -599,7 +619,8 @@ class Figure:
                             artist
                         )
                         rendered_artists_frame.append((artists_dict, metadata))
-                except Exception:
+                except Exception as exc:
+                    _warn_once("frame-component", f"frame component render failed: {exc}")
                     continue
 
             # apply full formatting once for first frame
@@ -617,16 +638,25 @@ class Figure:
                         ylabel=None,
                         show_legend=True,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _warn_once("frame-format", f"frame formatting failed: {exc}")
 
             if self.fig is not None:
                 try:
                     self.fig.canvas.draw_idle()
                 except Exception:
                     self.fig.canvas.draw()
-        except Exception:
-            pass
+            self._frame_failures = 0
+        except Exception as exc:
+            # a whole-frame failure repeated every frame is a frozen frame-0
+            # movie exiting 0: warn on the first, abort after a streak.
+            self._frame_failures = getattr(self, "_frame_failures", 0) + 1
+            _warn_once("frame-update", f"animation frame update failed: {exc}")
+            if self._frame_failures >= 10:
+                raise RuntimeError(
+                    f"animation aborted: {self._frame_failures} consecutive frame "
+                    f"failures (last: {exc})"
+                ) from exc
 
         # construct the animation
         self._anim = FuncAnimation(
@@ -751,7 +781,8 @@ class Figure:
                             artist
                         )
                         rendered_artists_frame.append((artists_dict, metadata))
-                except Exception:
+                except Exception as exc:
+                    _warn_once("frame-component", f"frame component render failed: {exc}")
                     continue
 
             # update title with current time
@@ -763,8 +794,8 @@ class Figure:
                     assert self.fig is not None
                     time = getattr(frame_plot_data.fields[0], "time", None)
                     set_title(main_ax, self.fig, config.figure, time)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _warn_once("frame-title", f"frame title update failed: {exc}")
 
             if self.fig is not None:
                 try:
@@ -821,7 +852,8 @@ class Figure:
                             artist
                         )
                         rendered_artists_frame.append((artists_dict, metadata))
-                except Exception:
+                except Exception as exc:
+                    _warn_once("frame-component", f"frame component render failed: {exc}")
                     continue
 
             # apply full formatting once for first frame
@@ -839,16 +871,25 @@ class Figure:
                         ylabel=None,
                         show_legend=True,
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _warn_once("frame-format", f"frame formatting failed: {exc}")
 
             if self.fig is not None:
                 try:
                     self.fig.canvas.draw_idle()
                 except Exception:
                     self.fig.canvas.draw()
-        except Exception:
-            pass
+            self._frame_failures = 0
+        except Exception as exc:
+            # a whole-frame failure repeated every frame is a frozen frame-0
+            # movie exiting 0: warn on the first, abort after a streak.
+            self._frame_failures = getattr(self, "_frame_failures", 0) + 1
+            _warn_once("frame-update", f"animation frame update failed: {exc}")
+            if self._frame_failures >= 10:
+                raise RuntimeError(
+                    f"animation aborted: {self._frame_failures} consecutive frame "
+                    f"failures (last: {exc})"
+                ) from exc
 
         # construct the animation
         self._anim = FuncAnimation(
