@@ -315,8 +315,16 @@ def load_component_props(
 
     for component, config in merged.items():
         if component not in PROPS_REGISTRY:
-            # warn but don't fail - might be for a different purpose
-            continue
+            # an unknown component silently dropping EVERY override under it
+            # (qaud.cmap=inferno) misleads worse than an error; suggest the fix.
+            import difflib
+
+            close = difflib.get_close_matches(component, PROPS_REGISTRY, n=1)
+            hint = f" (did you mean '{close[0]}'?)" if close else ""
+            raise ValueError(
+                f"unknown props component '{component}'{hint}; valid components: "
+                + ", ".join(sorted(PROPS_REGISTRY))
+            )
 
         try:
             props[component] = validate_props(component, config)

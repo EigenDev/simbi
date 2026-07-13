@@ -24,6 +24,7 @@ from numpy.typing import NDArray
 from pydantic import (
     BaseModel,
     ConfigDict,
+    PrivateAttr,
     ValidationError,
     computed_field,
     model_validator,
@@ -141,7 +142,50 @@ class SimbiProblem(BaseModel):
     3. optionally overriding computed properties for custom physics
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    # extra="forbid": a typo'd constructor kwarg (cfl_numbr=0.9) must fail loudly,
+    # not vanish while the field keeps its default. assignment constraints are
+    # enforced FIELD-ONLY via __setattr__ below — pydantic's validate_assignment
+    # would re-run every model validator per assignment, which recurses infinitely
+    # for the common pattern of a validator that assigns fields.
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+    # per-field TypeAdapter cache for the field-only assignment validation.
+    _field_adapters: ClassVar[dict[str, Any]] = {}
+
+    # the flags the user EXPLICITLY passed on the command line. from_cli fills it
+    # (possibly with the empty set — no flags passed); None marks a problem that
+    # never went through the cli, where model_fields_set carries the same fact.
+    # the checkpoint merge uses it to distinguish "user demanded --solver hllc"
+    # from "the class default happens to differ from the checkpoint".
+    _cli_explicit: Optional[set[str]] = PrivateAttr(default=None)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # enforce the FIELD's own constraints (type, ge/gt/le) on every assignment
+        # — an out-of-range value written in setup() or user code must not reach
+        # the backend — WITHOUT re-running the model validators (whole-model
+        # consistency is _finalize's job, once, after setup).
+        fields = type(self).model_fields
+        if name in fields:
+            key = f"{type(self).__qualname__}.{name}"
+            adapter = SimbiProblem._field_adapters.get(key)
+            if adapter is None:
+                from pydantic import TypeAdapter
+
+                info = fields[name]
+                adapter = TypeAdapter(
+                    Annotated[info.annotation, info],
+                    config=None if info.annotation is None else ConfigDict(arbitrary_types_allowed=True),
+                )
+                SimbiProblem._field_adapters[key] = adapter
+            try:
+                value = adapter.validate_python(value)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"invalid assignment to {type(self).__name__}.{name}: "
+                    + "; ".join(e["msg"] for e in exc.errors())
+                    + f" (got: {value!r})"
+                ) from None
+        super().__setattr__(name, value)
 
     # class-level storage for cli parser
     _cli_parser: ClassVar[Optional[argparse.ArgumentParser]] = None
@@ -862,11 +906,10 @@ class SimbiProblem(BaseModel):
             raise ValueError(
                 "plm_theta must be in (0, 2] when using PLM with the minmod limiter"
             )
-        # resolve the limiter choice to the `theta` value the reconstruction kernel reads (theta < 0
-        # selects van Leer in plm_theta_gv); minmod keeps the user's plm_theta compression. runs after
-        # the validation above so the user's plm_theta is range-checked first.
-        if self.limiter == Limiter.VAN_LEER:
-            self.plm_theta = -1.0
+        # the van leer limiter is spelled theta = -1 ONLY at the execution-dict
+        # boundary (runner.py); the validated model keeps the user's positive
+        # compression so the field's own gt=0 constraint holds on every path a
+        # model round-trips (assignment validation, checkpoint restore).
         return self
 
     def validate_refinement_config(self) -> None:
@@ -948,14 +991,20 @@ class SimbiProblem(BaseModel):
 
     def setup(self) -> None:
         """
-        override to compute dynamic fields before validation.
+        override to compute dynamic fields from other parameters.
 
-        this hook is called automatically during model construction, before
-        validation runs. use it to compute fields like bounds, resolution,
-        or refinement_regions based on other parameters.
+        this hook runs at the END of model validation (the last after-validator),
+        so every declared field has already been validated when it executes. a
+        field this hook computes (bounds, refinement_regions, ...) must therefore
+        be declared Optional with a None default — a required field with no value
+        fails validation before setup ever runs. assignments made here re-validate
+        against the field's own constraints (ge/gt/le), and the cross-field checks
+        re-run once setup returns.
 
         if you override this method in a subclass, call super().setup() first
         to ensure the full setup chain executes:
+
+            bounds: Annotated[Optional[list], ProblemParam(None, ...)]
 
             def setup(self) -> None:
                 super().setup()
@@ -986,6 +1035,9 @@ class SimbiProblem(BaseModel):
         do not override this method. override setup() instead.
         """
         self.__setup_base_reached = False
+        # field assignments inside setup() validate individually (the field-only
+        # __setattr__ check); the explicit re-runs below restore full cross-field
+        # consistency once every setup mutation has landed.
         self.setup()
 
         if not self.__setup_base_reached:
@@ -995,6 +1047,10 @@ class SimbiProblem(BaseModel):
                 stacklevel=2,
             )
 
+        self._coerce_refinement_types()
+        self._enforce_order_settings()
+        self._validate_isothermal()
+        self._validate_plm_theta()
         self.validate_refinement_config()
         return self
 
@@ -1115,7 +1171,18 @@ class SimbiProblem(BaseModel):
             )
         if parsed is None:
             raise ValueError("failed to parse cli arguments for problem")
-        return cls.from_namespace(parsed)
+        # record which flags the user EXPLICITLY passed: a second parse with every
+        # default suppressed leaves only the argv-provided dests in the namespace.
+        # the checkpoint merge reads this to tell a demanded override apart from a
+        # class default that merely differs from the checkpoint.
+        explicit_parser = argparse.ArgumentParser(add_help=False)
+        cls.setup_cli(explicit_parser)
+        for action in explicit_parser._actions:
+            action.default = argparse.SUPPRESS
+        explicit_ns, _ = explicit_parser.parse_known_args(argv)
+        problem = cls.from_namespace(parsed)
+        problem._cli_explicit = set(vars(explicit_ns))
+        return problem
 
     @classmethod
     def from_namespace(cls, namespace: argparse.Namespace) -> SimbiProblem:

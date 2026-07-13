@@ -23,7 +23,10 @@ def main() -> None:
     parser = SimbiParser()
     args, remaining = parser.parse_known_args()
 
-    if args.command == "plot" and remaining:
+    # `run` forwards leftover flags to the config's own parser (from_cli), which
+    # rejects unknowns itself; every OTHER subcommand consumes nothing, so a
+    # leftover flag there is a typo that must fail loudly, not silently drop.
+    if args.command != "run" and remaining:
         parser.error("unrecognized arguments: " + " ".join(remaining))
 
     if hasattr(args, "func"):

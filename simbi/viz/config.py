@@ -37,7 +37,7 @@ class FigureConfig(BaseModel):
     time_units: str = ""
     transparent: bool = False
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class PlotConfig(BaseModel):
@@ -51,7 +51,7 @@ class PlotConfig(BaseModel):
     # (divide by the field's own extremum). None = no normalization.
     norm: Optional[str] = None
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
     @field_validator("ndim")
     @classmethod
@@ -68,7 +68,7 @@ class RefinementConfig(BaseModel):
     active_levels: Optional[set[int]] = None
     render_mode: Literal["polygons", "pcolormesh"] = "polygons"
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class CoordinateConfig(BaseModel):
@@ -76,7 +76,7 @@ class CoordinateConfig(BaseModel):
 
     n_bins: int = 64
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class TimeSeriesConfig(BaseModel):
@@ -84,7 +84,7 @@ class TimeSeriesConfig(BaseModel):
 
     weight: Optional[str] = None
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
 
 class AnimationConfig(BaseModel):
@@ -94,7 +94,7 @@ class AnimationConfig(BaseModel):
     frame_rate: int = 30
     save_all_frames: bool = False
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 
     @field_validator("frame_rate")
     @classmethod
@@ -115,4 +115,4 @@ class VisualizationConfig(BaseModel):
     animation: AnimationConfig = Field(default_factory=AnimationConfig)
     theme: ThemeConfig = Field(default_factory=ThemeConfig)
 
-    model_config = {"frozen": True, "arbitrary_types_allowed": True}
+    model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}

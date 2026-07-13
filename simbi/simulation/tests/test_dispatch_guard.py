@@ -62,8 +62,11 @@ def test_baked_gr_spacetime_still_dispatches():
 class _NewtonianOnSchwarzschild(SodProblem):
     # a NON-relativistic regime (newtonian) with a curved spacetime: the non-relativistic kernel rows
     # are never baked with a spacetime slug, so the regime-vs-spacetime guard must reject this before
-    # dispatch rather than run flat gravity-free physics.
+    # dispatch rather than run flat gravity-free physics. the mass is positive so the earlier
+    # GR-parameter gate (a curved spacetime with M = 0 is rejected first) does not mask the
+    # regime-vs-spacetime rejection this test exercises.
     spacetime: Spacetime = Spacetime.SCHWARZSCHILD
+    schwarzschild_mass: float = 1.0
 
 
 @needs_backend

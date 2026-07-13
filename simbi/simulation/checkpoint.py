@@ -28,6 +28,7 @@ from simbi.types.input import (
     BoundaryCondition,
     CellSpacing,
     CoordSystem,
+    Limiter,
     Metadata,
     Reconstruction,
     Regime,
@@ -205,9 +206,19 @@ def metadata_to_config_dict(
         "solver": Solver(metadata.solver),
         "reconstruction": Reconstruction(metadata.reconstruction),
         "timestepping": TimeStepping(metadata.timestepping),
-        "plm_theta": float(metadata.plm_theta),
         "cfl_number": float(metadata.cfl),
         "checkpoint_index": int(metadata.checkpoint_index),
+    }
+
+    # the backend stores the KERNEL spelling of the limiter choice: plm_theta < 0
+    # means van leer (the model field itself is constrained to (0, 2], so the raw
+    # -1 must map back to the limiter selection, not into the field).
+    if float(metadata.plm_theta) < 0.0:
+        config["limiter"] = Limiter.VAN_LEER
+    else:
+        config["plm_theta"] = float(metadata.plm_theta)
+
+    config.update({
         "checkpoint_interval": float(metadata.checkpoint_interval),
         "x1_spacing": CellSpacing(metadata.x1_spacing),
         "x2_spacing": CellSpacing(metadata.x2_spacing),
@@ -215,7 +226,7 @@ def metadata_to_config_dict(
         "boundary_conditions": [
             BoundaryCondition(b) for b in metadata.boundary_conditions
         ],
-    }
+    })
 
     # amr fields if present
     if metadata.level_dts:
@@ -232,6 +243,22 @@ def metadata_to_config_dict(
     return config
 
 
+def _values_agree(a: Any, b: Any) -> bool:
+    """order- and container-insensitive equality for the restart conflict check:
+    a CLI tuple must match a checkpoint list, an enum its value string, a numpy
+    scalar its python twin. false only for a REAL disagreement."""
+    av = getattr(a, "value", a)
+    bv = getattr(b, "value", b)
+    if isinstance(av, (list, tuple)) and isinstance(bv, (list, tuple)):
+        return len(av) == len(bv) and all(_values_agree(x, y) for x, y in zip(av, bv))
+    if isinstance(av, float) or isinstance(bv, float):
+        try:
+            return float(av) == float(bv)
+        except (TypeError, ValueError):
+            return False
+    return av == bv
+
+
 def merge_with_checkpoint(
     problem: SimbiProblem,
     checkpoint_path: Path,
@@ -242,8 +269,9 @@ def merge_with_checkpoint(
     - checkpoint_safe=True fields: user value is kept
     - checkpoint_safe=False fields: checkpoint value is used
 
-    raises ValueError if user tries to override an immutable field
-    with a different value.
+    raises ConfigError if the user EXPLICITLY passed a flag for an immutable
+    field with a value that disagrees with the checkpoint (a class default that
+    differs is not an override — the checkpoint wins silently).
 
     args:
         problem: user-provided problem configuration
@@ -312,6 +340,19 @@ def merge_with_checkpoint(
             adapter = TypeAdapter(annotation)
             return adapter.validate_python(value)
         except (ValidationError, TypeError):
+            # a lower-dimensional run restores from the 3-padded checkpoint
+            # resolution (nx, 1, 1): trailing 1s carry no information, so a
+            # scalar field takes the leading entry.
+            if (
+                isinstance(value, (list, tuple))
+                and len(value) > 1
+                and all(v == 1 for v in value[1:])
+            ):
+                try:
+                    adapter = TypeAdapter(annotation)
+                    return adapter.validate_python(value[0])
+                except (ValidationError, TypeError):
+                    pass
             # validation failed - try unwrapping sequences
             if isinstance(value, (list, tuple)):
                 # if all elements are identical, extract first
@@ -330,6 +371,13 @@ def merge_with_checkpoint(
                         pass
             return value
 
+    # the flags the user EXPLICITLY chose: from_cli records the argv-provided
+    # dests; a directly-constructed problem carries the same fact in
+    # model_fields_set. a class default that merely differs from the checkpoint
+    # is NOT an override — the checkpoint wins silently, as before.
+    cli_explicit = getattr(problem, "_cli_explicit", None)
+    explicit = cli_explicit if cli_explicit is not None else problem.model_fields_set
+
     for field_name, field_info in type(problem).model_fields.items():
         user_value = normalize_value(getattr(problem, field_name))
 
@@ -338,9 +386,20 @@ def merge_with_checkpoint(
 
             if field_name in immutable_fields:
                 # must use checkpoint value, but coerce to field's expected type
-                merged_data[field_name] = coerce_to_field_type(
-                    checkpoint_value, field_info
-                )
+                coerced = coerce_to_field_type(checkpoint_value, field_info)
+                # an EXPLICIT user demand for a different value on an immutable
+                # field cannot be honored — refuse loudly instead of silently
+                # running the checkpoint's setting under the user's flag.
+                if field_name in explicit and not _values_agree(user_value, coerced):
+                    from .problem import ConfigError
+
+                    raise ConfigError(
+                        f"'{field_name}' cannot be changed on restart: the checkpoint "
+                        f"was written with {coerced!r} but the command line asks for "
+                        f"{user_value!r}. drop the flag to continue the run as "
+                        f"recorded, or start a fresh run (no --checkpoint) to change it."
+                    )
+                merged_data[field_name] = coerced
             else:
                 # user can override
                 merged_data[field_name] = user_value

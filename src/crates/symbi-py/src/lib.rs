@@ -4488,31 +4488,19 @@ fn check_horizon_containment(
         }
         other => return Err(format!("unknown GR spacetime '{other}'")),
     };
-    // the origin-interior cartesian slice is gated by its box bounds, not r_min.
-    if coord_system == "cartesian" {
-        return Ok(());
-    }
-    match spacetime {
-        "schwarzschild" => {
-            if r_min <= r_plus {
-                return Err(format!(
-                    "schwarzschild inner radius r_min = {r_min} <= r_+ = 2M = {r_plus}: the \
-                     metric is singular at and inside the horizon (lapse alpha = sqrt(1 - 2M/r) \
-                     is imaginary). use r_min > 2M, or the horizon-penetrating kerr_schild chart."
-                ));
-            }
-        }
-        "kerr_schild" | "kerr" => {
-            if r_min >= r_plus {
-                return Err(format!(
-                    "horizon-penetrating inner radius r_min = {r_min} >= r_+ = {r_plus}: the \
-                     domain does not swallow the horizon, so the inner boundary is in causal \
-                     contact with the exterior flow and the accretion-rate certificate is \
-                     ill-posed. set r_min < r_+ (the purpose of a horizon-penetrating chart)."
-                ));
-            }
-        }
-        _ => {}
+    // the radial-coordinate check applies to SPHERICAL charts only: coordinate
+    // slot 0 is the cylindrical R on a cylindrical chart (the spherical radius
+    // depends on the z bounds too) and a box coordinate on cartesian. and only
+    // the SINGULAR schwarzschild chart forbids a radius — a kerr-schild patch
+    // entirely outside the horizon is a legitimate chart choice (the metric is
+    // regular everywhere); the excision-request gate separately enforces the
+    // swallow-the-horizon geometry where excision demands it.
+    if coord_system == "spherical" && spacetime == "schwarzschild" && r_min <= r_plus {
+        return Err(format!(
+            "schwarzschild inner radius r_min = {r_min} <= r_+ = 2M = {r_plus}: the \
+             metric is singular at and inside the horizon (lapse alpha = sqrt(1 - 2M/r) \
+             is imaginary). use r_min > 2M, or the horizon-penetrating kerr_schild chart."
+        ));
     }
     Ok(())
 }
@@ -4619,19 +4607,20 @@ mod horizon_gate_tests {
     }
 
     #[test]
-    fn kerr_schild_must_swallow_the_horizon() {
-        // the horizon-penetrating config uses r_min = 1.5 < 2M = 2.
+    fn kerr_schild_allows_any_regular_patch() {
+        // the horizon-penetrating chart is regular everywhere: inside-horizon
+        // inner boundaries (the accretion configs) AND entirely-outside patches
+        // are both legitimate. only excision demands the swallow geometry, and
+        // its own request gate enforces that.
         assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 1.5).is_ok());
-        // an inner boundary at or outside r_+ leaves it causally connected to the exterior.
-        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 2.0).is_err());
-        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 3.0).is_err());
+        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "spherical", 3.0).is_ok());
+        // the cylindrical chart's slot 0 is R, not a spherical radius: exempt.
+        assert!(check_horizon_containment("kerr_schild", 1.0, 0.0, "cylindrical", 4.0).is_ok());
     }
 
     #[test]
-    fn kerr_horizon_shrinks_with_spin() {
-        // r_+ = M + sqrt(M^2 - a^2); a = 0.6, M = 1 -> r_+ = 1.8.
+    fn kerr_rejects_only_the_naked_singularity() {
         assert!(check_horizon_containment("kerr", 1.0, 0.6, "spherical", 1.7).is_ok());
-        assert!(check_horizon_containment("kerr", 1.0, 0.6, "spherical", 1.8).is_err());
         // |a| > M is a naked singularity: no horizon at all.
         assert!(check_horizon_containment("kerr", 1.0, 1.5, "spherical", 0.5).is_err());
     }
