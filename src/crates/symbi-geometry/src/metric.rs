@@ -1072,13 +1072,22 @@ pub struct SchwarzschildKSCartesian<S> {
 impl<S: Scalar> SchwarzschildKSCartesian<S> {
     /// (r, 2H) at a cartesian position: r = sqrt(sum x_i^2) the euclidean/kerr-schild radius,
     /// 2H = 2M/r. the number of gridded axes D is the slice (D = 2 -> the z = 0 equatorial plane).
+    ///
+    /// the radius is clamped to r >= M/2: the chart's coordinate singularity at r = 0 sits ON
+    /// the grid when the domain contains the origin, and the metric (h = 1 + 2M/r) and its
+    /// derivatives (christoffels ~ M/r^2) diverge there. the clamp bounds every metric quantity
+    /// (h <= 5, alpha >= 1/sqrt(5)) while `max(r, M/2)` is the BIT-EXACT identity for r > M/2 —
+    /// deep inside the horizon r_+ = 2M and below any excision surface, so no cell whose state
+    /// matters ever reads a clamped value. inside the clamp the metric is a constant, so its
+    /// autodiff derivative — hence the geodesic source — is exactly zero: a frozen metric has
+    /// no gravity, correct for cells the excision fill overwrites each step.
     #[inline]
     fn radius_two_h<const D: usize>(&self, x: Tensor<S, D>) -> (S, S) {
         let mut r2 = S::ZERO;
         for ii in 0..D {
             r2 = r2 + x[ii] * x[ii];
         }
-        let r = r2.sqrt();
+        let r = r2.sqrt().max(S::from_f64(0.5) * self.mass);
         (r, S::from_f64(2.0) * self.mass / r)
     }
 }
@@ -2851,6 +2860,70 @@ mod tests {
             assert!(close(det, 1.0 + two_h), "det = {det} vs 1+2H at r={r}");
             assert!(alpha > 0.0 && alpha.is_finite());
         }
+    }
+
+    #[test]
+    fn cartesian_ks_radius_clamp_is_the_identity_outside_m_over_2() {
+        // max(r, M/2) = r bitwise for r > M/2, so every metric quantity at a live radius equals
+        // the unclamped closed form exactly. sample just above the clamp and at typical radii.
+        let bh = SchwarzschildKSCartesian { mass: 1.0_f64 };
+        for &(px, py) in &[(0.36_f64, 0.36), (0.51, 0.0), (1.0, 0.4), (4.0, 4.0)] {
+            let x = Tensor::new([px, py]);
+            let r = (px * px + py * py).sqrt();
+            assert!(r > 0.5, "sample point must sit outside the clamp radius");
+            let alpha = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::lapse(&bh, x);
+            assert_eq!(alpha, 1.0 / (1.0 + 2.0 / r).sqrt(), "lapse at r={r}");
+            let sq = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::sqrt_det_gamma(&bh, x);
+            assert_eq!(sq, (1.0 + 2.0 / r).sqrt(), "sqrt_det_gamma at r={r}");
+            let beta = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::shift(&bh, x);
+            let s = (2.0 / r) / (1.0 + 2.0 / r) / r;
+            assert_eq!(beta[0], s * px, "shift_x at r={r}");
+            assert_eq!(beta[1], s * py, "shift_y at r={r}");
+        }
+    }
+
+    #[test]
+    fn cartesian_ks_is_bounded_and_frozen_inside_the_clamp() {
+        // inside r = M/2 the metric is the constant r = M/2 metric: h = 1 + 2M/(M/2) = 5,
+        // alpha = 1/sqrt(5). the origin itself (a face position when the domain contains it)
+        // evaluates cleanly — finite, no NaN, equal to the frozen values.
+        let bh = SchwarzschildKSCartesian { mass: 1.0_f64 };
+        let alpha_frozen = 1.0 / 5.0_f64.sqrt();
+        let sq_frozen = 5.0_f64.sqrt();
+        for &(px, py) in &[(0.0_f64, 0.0), (1e-300, 0.0), (0.1, 0.1), (0.3, 0.2)] {
+            let x = Tensor::new([px, py]);
+            let alpha = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::lapse(&bh, x);
+            let sq = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::sqrt_det_gamma(&bh, x);
+            let beta = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::shift(&bh, x);
+            let gm = <SchwarzschildKSCartesian<f64> as Metric<f64, 2>>::spatial_metric(&bh, x);
+            assert_eq!(alpha, alpha_frozen, "lapse frozen at ({px},{py})");
+            assert_eq!(sq, sq_frozen, "sqrt_det_gamma frozen at ({px},{py})");
+            for ii in 0..2 {
+                assert!(beta[ii].is_finite(), "shift finite at ({px},{py})");
+                for jj in 0..2 {
+                    assert!(gm[(ii, jj)].is_finite(), "metric finite at ({px},{py})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cartesian_ks_frozen_metric_has_zero_derivative() {
+        // the geodesic source is built from Dual derivatives of the metric; inside the clamp
+        // the metric is constant, so the tangent must be EXACTLY zero (no gravity in the
+        // frozen region), and nonzero outside where the true metric varies.
+        use symbi_ir::dual::Dual;
+        let bh = SchwarzschildKSCartesian { mass: Dual { value: 1.0_f64, tangent: 0.0 } };
+        let lapse_dx = |px: f64, py: f64| -> f64 {
+            let x = Tensor::new([
+                Dual { value: px, tangent: 1.0 }, // d/dx seed
+                Dual { value: py, tangent: 0.0 },
+            ]);
+            <SchwarzschildKSCartesian<Dual<f64>> as Metric<Dual<f64>, 2>>::lapse(&bh, x).tangent
+        };
+        assert_eq!(lapse_dx(0.2, 0.1), 0.0, "zero gradient inside the clamp");
+        assert_eq!(lapse_dx(0.0, 0.0), 0.0, "zero gradient at the origin");
+        assert!(lapse_dx(1.0, 0.4).abs() > 1e-3, "true gradient outside the clamp");
     }
 
     #[test]
