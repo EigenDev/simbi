@@ -572,8 +572,12 @@ pub(crate) fn fofc_ct_save<const D: usize, const DOF: usize, Mem, Sc>(
     fofc_copy_fields(&pairs);
 }
 
-/// FOFC: restore the stage-input cell B `bcell <- bcell_stage`, so the cell-B predictor + the
-/// recomputed edge EMF read the correct base (matching the high-order stage).
+/// FOFC: restore the stage-input cell B `bcell <- bcell_stage_input()`, so the cell-B
+/// predictor + the recomputed edge EMF read the correct base (matching the high-order
+/// stage). the accessor resolves the stage-0 elision: `snapshot_stage` (which captures
+/// `bcell -> bcell_stage`) is skipped at the first stage, where `bcell_n` — the
+/// step-entry snapshot, never elided — IS the stage input; a direct `bcell_stage`
+/// read there restores a stale field and the redone EMF leaks energy.
 pub(crate) fn fofc_restore_bcell_stage<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
 ) where
@@ -581,8 +585,9 @@ pub(crate) fn fofc_restore_bcell_stage<const D: usize, const DOF: usize, Mem, Sc
     Sc: Scalar + OrderedNumeric,
 {
     let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let src = sim.bcell_stage_input();
     let pairs: Vec<(&Field<Sc, D, Mem>, &Field<Sc, D, Mem>)> =
-        (0..DOF).map(|c| (&mhd.bcell_stage[c], &mhd.bcell[c])).collect();
+        (0..DOF).map(|c| (&src[c], &mhd.bcell[c])).collect();
     fofc_copy_fields(&pairs);
 }
 

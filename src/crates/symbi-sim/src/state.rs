@@ -1469,6 +1469,22 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
             &self.workspace.u_stage
         }
     }
+
+    /// the stage-INPUT cell B — the CT twin of [`Self::stage_input`]: `bcell_n`
+    /// (the step-entry snapshot, written unconditionally with `u_n`) at the first
+    /// stage of a multi-stage scheme, where the driver elides `snapshot_stage`
+    /// (which is what captures `bcell -> bcell_stage`); the `bcell_stage`
+    /// snapshot otherwise. the MHD FOFC redo restores `bcell` from this so the
+    /// recomputed edge EMF reads the true stage-input field — a direct
+    /// `bcell_stage` read at stage 0 hands it a stale buffer.
+    pub fn bcell_stage_input(&self) -> &crate::state::BcellFields<NDIM, DOF, Mem, Sc> {
+        let mhd = self.fields.mhd.as_ref().expect("bcell_stage_input requires MHD fields");
+        if self.workspace.stage_input_is_un.load(std::sync::atomic::Ordering::Relaxed) {
+            &mhd.bcell_n
+        } else {
+            &mhd.bcell_stage
+        }
+    }
 }
 
 /// **the storage seam (R3):** `SimStateGeneric` `Deref`s to its `FieldStore`. this is a
