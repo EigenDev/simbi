@@ -983,7 +983,23 @@ where
     // totals so the benchmark cadence can post the per-window delta (a limiter that fired is shown,
     // never silent). cumulative totals also close out the run summary.
     symbi::regimes::fofc::fofc_reset_stats();
+    // on a cartesian black-hole run, split the counters at the horizon r_+ = 2M:
+    // everything inside is causally disconnected (and the excised interior fires
+    // steadily by design), so the log stays on the EXTERIOR signal — the acceptance
+    // criterion for a production run is exterior events == 0.
+    symbi::regimes::fofc::fofc_set_horizon_radius(
+        if cfg.spacetime != "minkowski"
+            && cfg.coord_system == "cartesian"
+            && cfg.schwarzschild_mass > 0.0
+        {
+            2.0 * cfg.schwarzschild_mass
+        } else {
+            0.0
+        },
+    );
     let mut last_fofc: (u64, u64) = (0, 0);
+    let mut last_fofc_h: (u64, u64) = (0, 0);
+    let mut horizon_note_posted = false;
 
     // graceful-interrupt trap: a caught signal (Ctrl-C, scheduler eviction)
     // flips `stop_requested`; the loop then snapshots a restart checkpoint and breaks.
@@ -1236,14 +1252,31 @@ where
             // correction is expected; a freeze — where neither order recovered a cell — is rarer and
             // worth flagging). only posts when something fired, so a clean run stays quiet.
             let (fb_total, fz_total) = symbi::regimes::fofc::fofc_stats();
-            let (d_fb, d_fz) = (fb_total - last_fofc.0, fz_total - last_fofc.1);
-            if d_fb > 0 || d_fz > 0 {
+            let (fb_h, fz_h) = symbi::regimes::fofc::fofc_horizon_stats();
+            // the exterior deltas are the meaningful signal: fire inside the horizon
+            // (the excised interior, the metric-guard ring) is expected and steady,
+            // so it gets ONE note per run, not a line per window.
+            let (d_fb_ext, d_fz_ext) = (
+                (fb_total - fb_h) - (last_fofc.0 - last_fofc_h.0),
+                (fz_total - fz_h) - (last_fofc.1 - last_fofc_h.1),
+            );
+            let (d_fb_h, d_fz_h) = (fb_h - last_fofc_h.0, fz_h - last_fofc_h.1);
+            if d_fb_ext > 0 || d_fz_ext > 0 {
                 table.post_diagnostic(&format!(
-                    "FOFC: {d_fb} first-order fallback cell-steps{} since last window",
-                    if d_fz > 0 { format!(", {d_fz} freezes") } else { String::new() },
+                    "FOFC: {d_fb_ext} exterior first-order fallback cell-steps{} since last window",
+                    if d_fz_ext > 0 { format!(", {d_fz_ext} freezes") } else { String::new() },
                 ));
-                last_fofc = (fb_total, fz_total);
             }
+            if (d_fb_h > 0 || d_fz_h > 0) && !horizon_note_posted {
+                horizon_note_posted = true;
+                table.post_diagnostic(&format!(
+                    "FOFC: firing inside the horizon ({d_fb_h} cell-steps this window) — \
+                     causally disconnected, expected on an excised run; further interior \
+                     fire is tallied silently (run total at exit)"
+                ));
+            }
+            last_fofc = (fb_total, fz_total);
+            last_fofc_h = (fb_h, fz_h);
             let blocks: Vec<u64> = h
                 .levels
                 .iter()
@@ -1418,12 +1451,24 @@ where
     } else {
         table.post_error(&summary);
     }
-    // FOFC run total: report the deliberate fallbacks over the whole run (a quiet run shows nothing).
+    // FOFC run total: report the deliberate fallbacks over the whole run (a quiet run shows
+    // nothing). on a horizon-split run the exterior count is the acceptance criterion
+    // (exterior == 0 for a production run); the interior tally is informational.
     let (fb_total, fz_total) = symbi::regimes::fofc::fofc_stats();
+    let (fb_h, fz_h) = symbi::regimes::fofc::fofc_horizon_stats();
     if fb_total > 0 || fz_total > 0 {
-        table.post_diagnostic(&format!(
-            "FOFC total: {fb_total} first-order fallback cell-steps, {fz_total} freezes"
-        ));
+        if fb_h > 0 || fz_h > 0 {
+            table.post_diagnostic(&format!(
+                "FOFC total: exterior {} fallback cell-steps + {} freezes; inside the horizon \
+                 {fb_h} + {fz_h} (causally disconnected)",
+                fb_total - fb_h,
+                fz_total - fz_h,
+            ));
+        } else {
+            table.post_diagnostic(&format!(
+                "FOFC total: {fb_total} first-order fallback cell-steps, {fz_total} freezes"
+            ));
+        }
     }
     table.exit_frame(if final_finite { ExitKind::Success } else { ExitKind::Crash }, &summary);
     dump_profile_if_enabled(root.iteration, n_zones);

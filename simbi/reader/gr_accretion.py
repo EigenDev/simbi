@@ -211,6 +211,132 @@ def accretion_from_checkpoint(
     return shell_accretion(rho, v_contra, x1v, x2v, bh_mass, chart, radii=radii)
 
 
+def cartesian_ks_u_xy(
+    v_x: Array,
+    v_y: Array,
+    x: Array,
+    y: Array,
+    mass: float,
+) -> tuple[Array, Array, Array]:
+    """(u^x, u^y, W) from the stored CONTRAVARIANT valencia velocity on the cartesian
+    kerr-schild equatorial slice. the spatial metric is NON-diagonal,
+    gamma_ij = delta_ij + 2H l_i l_j with H = M/r and l = x_i/r, so the norm carries
+    the cross term; the shift is beta^i = (2H/(1+2H)) l^i and alpha = 1/sqrt(1+2H)."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    v_x = np.asarray(v_x, dtype=float)
+    v_y = np.asarray(v_y, dtype=float)
+    r = np.sqrt(x * x + y * y)
+    two_h = 2.0 * mass / r
+    lx, ly = x / r, y / r
+    v_dot_l = v_x * lx + v_y * ly
+    vv = v_x * v_x + v_y * v_y + two_h * v_dot_l * v_dot_l
+    if np.any(vv >= 1.0):
+        raise ValueError("valencia 3-velocity is superluminal: gamma_ij v^i v^j >= 1")
+    w = 1.0 / np.sqrt(1.0 - vv)
+    # beta^i/alpha = (2H/(1+2H)) l^i sqrt(1+2H) = 2H l^i / sqrt(1+2H).
+    beta_over_alpha = two_h / np.sqrt(1.0 + two_h)
+    u_x = w * (v_x - beta_over_alpha * lx)
+    u_y = w * (v_y - beta_over_alpha * ly)
+    return u_x, u_y, w
+
+
+def _bilinear(field: Array, xc: Array, yc: Array, xs: Array, ys: Array) -> Array:
+    """bilinear sample of `field` (storage (ny, nx), x fastest) at points (xs, ys),
+    given the cell-centre coordinate axes xc (nx,) and yc (ny,)."""
+    fx = np.clip((xs - xc[0]) / (xc[1] - xc[0]), 0.0, len(xc) - 1.0 - 1e-9)
+    fy = np.clip((ys - yc[0]) / (yc[1] - yc[0]), 0.0, len(yc) - 1.0 - 1e-9)
+    i0 = fx.astype(int)
+    j0 = fy.astype(int)
+    tx = fx - i0
+    ty = fy - j0
+    return (
+        field[j0, i0] * (1 - tx) * (1 - ty)
+        + field[j0, i0 + 1] * tx * (1 - ty)
+        + field[j0 + 1, i0] * (1 - tx) * ty
+        + field[j0 + 1, i0 + 1] * tx * ty
+    )
+
+
+def ring_accretion_rate(
+    rho: Array,
+    v_x: Array,
+    v_y: Array,
+    xc: Array,
+    yc: Array,
+    mass: float,
+    radii: Sequence[float],
+    *,
+    n_phi: int = 256,
+) -> Array:
+    """the rest-mass flux through coordinate circles on the cartesian kerr-schild
+    equatorial slice (per unit z-length, the 2D surrogate of Mdot):
+
+        Mdot(r_ex) = - oint sqrt(gamma) alpha rho W (v^i - beta^i/alpha) n_i dl
+                   = - oint rho (u^x x + u^y y) dphi
+
+    the second form uses the det-g-flat identity alpha sqrt(gamma) = 1 of the
+    kerr-schild chart and n_i dl = x_i dphi on a coordinate circle — no
+    densitization factors survive. fields are sampled onto each ring by bilinear
+    interpolation from the cell-centre grid (`xc`/`yc` the axis coordinates,
+    storage (ny, nx) with x fastest). in steady state the continuity equation
+    makes the result r_ex-independent for every ring outside the horizon."""
+    rho = np.asarray(rho, dtype=float)
+    phi = (np.arange(n_phi) + 0.5) * (2.0 * np.pi / n_phi)
+    dphi = 2.0 * np.pi / n_phi
+    out = np.empty(len(radii))
+    for kk, r_ex in enumerate(radii):
+        xs = r_ex * np.cos(phi)
+        ys = r_ex * np.sin(phi)
+        rho_s = _bilinear(rho, xc, yc, xs, ys)
+        vx_s = _bilinear(np.asarray(v_x, dtype=float), xc, yc, xs, ys)
+        vy_s = _bilinear(np.asarray(v_y, dtype=float), xc, yc, xs, ys)
+        u_x, u_y, _ = cartesian_ks_u_xy(vx_s, vy_s, xs, ys, mass)
+        out[kk] = -np.sum(rho_s * (u_x * xs + u_y * ys)) * dphi
+    return out
+
+
+def ring_accretion_from_checkpoint(
+    data: Any,
+    *,
+    mass: float | None = None,
+    radii: Sequence[float] | None = None,
+    n_phi: int = 256,
+) -> tuple[Array, dict[str, Any]]:
+    """the excision certificate from an opened cartesian kerr-schild checkpoint
+    (`SimData`): ring fluxes at `radii` (default: four radii between the horizon
+    and half the domain edge) + the r_ex-invariance summary. fails loud off the
+    cartesian kerr-schild chart or on a massless background."""
+    meta = data.metadata
+    if meta.spacetime != "kerr_schild" or meta.coord_system != "cartesian":
+        raise ValueError(
+            "ring_accretion_from_checkpoint: needs the cartesian kerr-schild slice; "
+            f"got (coords={meta.coord_system}, spacetime={meta.spacetime})"
+        )
+    bh_mass = mass if mass is not None else meta.schwarzschild_mass
+    if bh_mass <= 0.0:
+        raise ValueError(
+            "ring_accretion_from_checkpoint: black-hole mass must be positive; got "
+            f"{bh_mass} (pass mass=... for a checkpoint without the attr)"
+        )
+    mesh = data.mesh
+    x1v = np.asarray(mesh.x1v, dtype=float)
+    x2v = np.asarray(mesh.x2v, dtype=float)
+    xc = 0.5 * (x1v[:-1] + x1v[1:])
+    yc = 0.5 * (x2v[:-1] + x2v[1:])
+    rho = data.get_field("rho")
+    v_x = data.get_field("v1")
+    v_y = data.get_field("v2")
+
+    r_plus = 2.0 * bh_mass
+    if radii is None:
+        r_edge = 0.5 * min(abs(x1v[0]), x1v[-1], abs(x2v[0]), x2v[-1])
+        radii = list(np.linspace(1.25 * r_plus, max(r_edge, 1.5 * r_plus), 4))
+    mdot = ring_accretion_rate(rho, v_x, v_y, xc, yc, bh_mass, radii, n_phi=n_phi)
+    cert = rex_invariance(mdot, np.asarray(radii, dtype=float), list(radii))
+    return mdot, cert
+
+
 def rex_invariance(mdot: Array, r: Array, radii: Sequence[float]) -> dict[str, Any]:
     """the certificate: sample Mdot at `radii`, report the relative spread. a
     well-posed steady flow has a spread near truncation error. `mdot`/`r` are the

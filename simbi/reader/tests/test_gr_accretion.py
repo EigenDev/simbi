@@ -20,7 +20,10 @@ import pytest
 from simbi.reader.gr_accretion import (
     accretion_from_checkpoint,
     accretion_rate,
+    cartesian_ks_u_xy,
     rex_invariance,
+    ring_accretion_from_checkpoint,
+    ring_accretion_rate,
     shell_accretion,
 )
 
@@ -202,6 +205,112 @@ def test_accretion_from_checkpoint_rejects_flat_and_massless():
     )
     with pytest.raises(ValueError):
         accretion_from_checkpoint(massless)
+
+
+def _cartesian_ks_grid(n, half_width):
+    """cell-centre axes of an even-resolution origin-containing square (centers
+    straddle the origin, never on an axis)."""
+    dx = 2.0 * half_width / n
+    c = (np.arange(n) + 0.5) * dx - half_width
+    return c, c
+
+
+def _conserved_cartesian_ks_inflow(xc, yc, mass, mdot2d, v_r):
+    """a radial contravariant inflow v^i = v_r l^i on the cartesian KS slice with
+    EXACTLY constant 2D ring flux `mdot2d`: rho = -mdot2d / (2 pi r u^r), with u^r
+    from the (michel-validated) spherical-KS formula — the reducer must reproduce
+    it through the cartesian non-diagonal metric. cells too deep for the chosen
+    v_r to be subluminal are masked to an arbitrary value (never ring-sampled)."""
+    x = xc[None, :]
+    y = yc[:, None]
+    r = np.sqrt(x * x + y * y)
+    h = 1.0 + 2.0 * mass / r
+    beta_over_alpha = (2.0 * mass / (r + 2.0 * mass)) * np.sqrt(h)
+    valid = h * v_r**2 < 1.0
+    w = np.where(valid, 1.0 / np.sqrt(np.where(valid, 1.0 - h * v_r**2, 1.0)), 1.0)
+    u_r = w * (v_r - beta_over_alpha)
+    rho = np.where(valid, -mdot2d / (2.0 * np.pi * r * u_r), 1.0)
+    v_x = np.where(valid, v_r * x / r, 0.0)
+    v_y = np.where(valid, v_r * y / r, 0.0)
+    return rho, v_x, v_y
+
+
+def test_ring_reducer_recovers_a_conserved_cartesian_ks_inflow():
+    mass = 1.0
+    xc, yc = _cartesian_ks_grid(256, 8.0)
+    mdot_true = 0.42
+    rho, v_x, v_y = _conserved_cartesian_ks_inflow(xc, yc, mass, mdot_true, -0.2)
+
+    radii = [2.5, 3.5, 5.0, 6.5]
+    mdot = ring_accretion_rate(rho, v_x, v_y, xc, yc, mass, radii)
+    # bilinear ring sampling of the smooth profile: truncation-level recovery.
+    assert np.allclose(mdot, mdot_true, rtol=2e-3), mdot
+
+    cert = rex_invariance(mdot, np.asarray(radii), radii)
+    assert cert["relative_spread"] < 5e-3
+    assert abs(cert["mean"] - mdot_true) < 2e-3 * mdot_true
+
+
+def test_cartesian_u_matches_the_spherical_formula_for_radial_flow():
+    # for a radial contravariant velocity the cartesian conversion (non-diagonal
+    # gamma with the cross term) must reduce to the spherical-KS one:
+    # u . x = W (v_r - beta^r/alpha) r.
+    mass = 1.0
+    v_r = -0.25
+    for (x, y) in [(2.1, 0.3), (-1.5, 2.0), (0.7, -3.3)]:
+        r = math.hypot(x, y)
+        u_x, u_y, w = cartesian_ks_u_xy(
+            np.array([v_r * x / r]), np.array([v_r * y / r]),
+            np.array([x]), np.array([y]), mass,
+        )
+        h = 1.0 + 2.0 * mass / r
+        w_sph = 1.0 / math.sqrt(1.0 - h * v_r**2)
+        u_r_sph = w_sph * (v_r - (2.0 * mass / (r + 2.0 * mass)) * math.sqrt(h))
+        assert math.isclose(u_x[0] * x + u_y[0] * y, u_r_sph * r, rel_tol=1e-12), f"at ({x},{y})"
+        assert math.isclose(w[0], w_sph, rel_tol=1e-12)
+
+
+def test_ring_superluminal_is_rejected():
+    with pytest.raises(ValueError):
+        cartesian_ks_u_xy(
+            np.array([0.9]), np.array([0.0]), np.array([2.5]), np.array([0.0]), 1.0
+        )
+
+
+class _FakeCartMeta:
+    def __init__(self, spacetime, coord_system, mass):
+        self.spacetime = spacetime
+        self.coord_system = coord_system
+        self.schwarzschild_mass = mass
+
+
+def test_ring_accretion_from_checkpoint_wrapper():
+    mass = 1.0
+    n, half = 256, 8.0
+    xc, yc = _cartesian_ks_grid(n, half)
+    dx = 2.0 * half / n
+    x1v = np.linspace(-half, half, n + 1)
+    mdot_true = 0.42
+    rho, v_x, v_y = _conserved_cartesian_ks_inflow(xc, yc, mass, mdot_true, -0.2)
+    assert abs((xc[1] - xc[0]) - dx) < 1e-14
+
+    data = _FakeData(
+        {"rho": rho, "v1": v_x, "v2": v_y},
+        _FakeMesh(x1v, x1v),
+        _FakeCartMeta("kerr_schild", "cartesian", mass),
+    )
+    mdot, cert = ring_accretion_from_checkpoint(data, radii=[2.5, 3.5, 5.0, 6.5])
+    assert np.allclose(mdot, mdot_true, rtol=2e-3)
+    assert cert["relative_spread"] < 5e-3
+
+    # a spherical-chart checkpoint must be rejected (the ring form is cartesian-only).
+    sph = _FakeData(
+        {"rho": rho, "v1": v_x, "v2": v_y},
+        _FakeMesh(x1v, x1v),
+        _FakeCartMeta("kerr_schild", "spherical", mass),
+    )
+    with pytest.raises(ValueError):
+        ring_accretion_from_checkpoint(sph)
 
 
 def test_superluminal_velocity_is_rejected():

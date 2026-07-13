@@ -36,6 +36,18 @@ use symbi_ir::emit::ReductionOp;
 static FOFC_FALLBACK_CELLS: AtomicU64 = AtomicU64::new(0);
 static FOFC_FREEZE_CELLS: AtomicU64 = AtomicU64::new(0);
 
+// the horizon-region subtotals: events whose cell center lies inside the configured
+// horizon radius. on a black-hole run everything inside r_+ is causally disconnected
+// from the exterior, so fallbacks there (e.g. the ring at the metric-guard radius,
+// where the clamped metric's source is discontinuous) are expected and harmless —
+// the acceptance criterion for a production run is EXTERIOR events == 0, and that
+// signal must not be drowned by the interior's steady, legitimate firing.
+static FOFC_FALLBACK_CELLS_HORIZON: AtomicU64 = AtomicU64::new(0);
+static FOFC_FREEZE_CELLS_HORIZON: AtomicU64 = AtomicU64::new(0);
+// the horizon radius (f64 bits) for the region split; 0.0 = no split (flat runs,
+// and charts without a euclidean cell-center radius).
+static FOFC_HORIZON_RADIUS_BITS: AtomicU64 = AtomicU64::new(0);
+
 /// the cumulative (fallback-cell, freeze-cell) FOFC event totals since the last `fofc_reset_stats`.
 /// each is a sum over substages of the per-substage flagged/frozen interior-cell count.
 pub fn fofc_stats() -> (u64, u64) {
@@ -45,10 +57,82 @@ pub fn fofc_stats() -> (u64, u64) {
     )
 }
 
+/// the (fallback, freeze) subtotals whose cells lie INSIDE the configured horizon radius —
+/// the causally disconnected region of a black-hole run. exterior counts are the totals
+/// minus these. both zero when no horizon radius is configured.
+pub fn fofc_horizon_stats() -> (u64, u64) {
+    (
+        FOFC_FALLBACK_CELLS_HORIZON.load(Ordering::Relaxed),
+        FOFC_FREEZE_CELLS_HORIZON.load(Ordering::Relaxed),
+    )
+}
+
+/// configure the horizon radius for the FOFC region split: events at euclidean cell-center
+/// radius |x| < r_h book into the horizon subtotals. CARTESIAN charts only (the euclidean
+/// center radius is meaningless on an angular grid); 0 disables the split. host-memory runs
+/// only — a device run keeps global counts (the masked count would force a device round-trip).
+pub fn fofc_set_horizon_radius(r_h: f64) {
+    FOFC_HORIZON_RADIUS_BITS.store(r_h.to_bits(), Ordering::Relaxed);
+}
+
 /// zero the FOFC event counters (call at run start / after reading a window delta).
 pub fn fofc_reset_stats() {
     FOFC_FALLBACK_CELLS.store(0, Ordering::Relaxed);
     FOFC_FREEZE_CELLS.store(0, Ordering::Relaxed);
+    FOFC_FALLBACK_CELLS_HORIZON.store(0, Ordering::Relaxed);
+    FOFC_FREEZE_CELLS_HORIZON.store(0, Ordering::Relaxed);
+}
+
+/// count the flagged cells (flag > 0.5) whose cell center |x| lies inside `r_h`, on a
+/// uniform cartesian grid with origin `x_lo` and spacing `dx`. the boundary test is a
+/// diagnostic split, not a physics operation — half-cell classification error at the
+/// horizon is irrelevant (the interior fire sits deep inside, the exterior gate cares
+/// about cells well outside).
+pub fn horizon_flagged_count<const D: usize, Mem, Sc>(
+    flag: &Field<Sc, D, Mem>,
+    interior: &symbi_algebra::Domain<D>,
+    x_lo: &[f64; D],
+    dx: &[f64; D],
+    r_h: f64,
+) -> u64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let view = flag.view();
+    let mut count = 0u64;
+    for c in interior.iter() {
+        let mut r2 = 0.0f64;
+        for a in 0..D {
+            let x = x_lo[a] + (c[a] as f64 + 0.5) * dx[a];
+            r2 += x * x;
+        }
+        if r2 < r_h * r_h && (*view.at(c)).to_f64() > 0.5 {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// book a per-substage flagged count into a horizon subtotal, when the split is active:
+/// a configured radius, a cartesian chart, and host-resident memory.
+fn book_horizon_events<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    flag: &Field<Sc, D, Mem>,
+    counter: &AtomicU64,
+) where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    let r_h = f64::from_bits(FOFC_HORIZON_RADIUS_BITS.load(Ordering::Relaxed));
+    if r_h <= 0.0
+        || Mem::IS_DEVICE_ACCESSIBLE
+        || sim.geom.coords != symbi_geometry::Geometry::Cartesian
+    {
+        return;
+    }
+    let n = horizon_flagged_count(flag, &sim.geom.interior, &sim.geom.x_lo, &sim.geom.dx, r_h);
+    counter.fetch_add(n, Ordering::Relaxed);
 }
 
 /// consecutive substages the FOFC freeze tier may fire before the run halts. the freeze is the
@@ -348,6 +432,8 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         return;
     }
     FOFC_FALLBACK_CELLS.fetch_add(fallback_cells as u64, Ordering::Relaxed);
+    // the horizon-region subtotal (inert without a configured split radius).
+    book_horizon_events(sim, flag, &FOFC_FALLBACK_CELLS_HORIZON);
     // boundary-consistent ghosts for the flag: a face straddling the periodic wrap (or any boundary)
     // must take ONE first-order decision from both of its cells, else the splice re-creates the very
     // non-conservation it exists to remove.
@@ -386,6 +472,8 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     let froze = fofc_freeze_count(sim, prefix, dof_sfx, scratch, cons, prim);
     if froze > 0.5 {
         FOFC_FREEZE_CELLS.fetch_add(froze as u64, Ordering::Relaxed);
+        // the freeze flag lives in `scratch` after fofc_freeze_count.
+        book_horizon_events(sim, scratch, &FOFC_FREEZE_CELLS_HORIZON);
         let streak = freeze_streak.fetch_add(1, Ordering::Relaxed) + 1;
         assert!(
             streak < FOFC_FREEZE_HALT_STREAK,
@@ -401,4 +489,34 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         None => fofc_select(sim, prefix, dof_sfx, &ws.u_stage, cons, prim),
     }
     c2p();
+}
+
+#[cfg(test)]
+mod horizon_split_tests {
+    use super::horizon_flagged_count;
+    use symbi_algebra::{Domain, Space};
+    use symbi_grid::Field;
+    use symbi_xpu::HostMemory;
+
+    #[test]
+    fn masked_count_splits_by_cell_center_radius() {
+        // a 16x16 grid on (-2, 2)^2: flag one cell deep inside r_h = 1 and one far
+        // outside; only the inside one books into the horizon subtotal.
+        let n = 16isize;
+        let dom = Domain::new([
+            Space { name: "i", lo: 0, hi: n },
+            Space { name: "j", lo: 0, hi: n },
+        ]);
+        let flag = Field::<f64, 2, HostMemory>::zeros(&dom).unwrap();
+        let (x_lo, dx) = ([-2.0, -2.0], [0.25, 0.25]);
+        // cell [8, 8] center = (0.125, 0.125), r ~ 0.18 < 1: inside.
+        flag.set([8, 8], 1.0);
+        // cell [15, 15] center = (1.875, 1.875), r ~ 2.65 > 1: outside.
+        flag.set([15, 15], 1.0);
+        assert_eq!(horizon_flagged_count(&flag, &dom, &x_lo, &dx, 1.0), 1);
+        // no split radius -> nothing books.
+        assert_eq!(horizon_flagged_count(&flag, &dom, &x_lo, &dx, 0.0), 0);
+        // a radius covering the grid books both.
+        assert_eq!(horizon_flagged_count(&flag, &dom, &x_lo, &dx, 10.0), 2);
+    }
 }
