@@ -25,6 +25,7 @@
 pub mod coords;
 pub mod kernel_slug;
 pub mod gv;
+pub mod gv_excise;
 pub mod gv_refinement;
 pub mod gv_immersed;
 pub mod gv_penalize;
@@ -37,6 +38,7 @@ pub use coords::{Coords, Spacing, Spacetime};
 // 2026-05-30; symbi-core was folded in). re-export them so the builder return
 // types (GvKernel) stay nameable by downstream callers (symbi-aot/build.rs).
 pub use symbi_ir::{Gv, GvKernel};
+pub use gv_excise::{excise_fill_gv, excise_p2c_gv, excise_writeback_gv};
 pub use gv_penalize::{
     penalize_drain_gv, penalize_drain_iso_gv, penalize_porous_gv, penalize_porous_iso_gv,
     penalize_torque_free_gv, penalize_torque_free_iso_gv,

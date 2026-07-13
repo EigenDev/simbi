@@ -1710,6 +1710,17 @@ fn main() {
             emit_gv(&out_dir, &viscous_ortho_name("viscous_iso_alpha_ortho", geom, 2), 2, &k, &writes);
         }
     }
+    // horizon excision (cartesian kerr-schild 2d): the onion-sweep fill pair
+    // (chart-agnostic prim propagation on the uniform grid) + the valencia
+    // conserved rebuild at the cell's own metric.
+    {
+        let (k, writes) = symbi_discretize::excise_fill_gv();
+        emit_gv(&out_dir, "excise_fill_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_writeback_gv();
+        emit_gv(&out_dir, "excise_writeback_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_p2c_gv();
+        emit_gv(&out_dir, "excise_p2c_cart_ks_2d", 2, &k, &writes);
+    }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.
     gen_geometry_probe(&out_dir, 1, Coords::Cartesian, &[Spacing::Uniform], "geom_cart_unif_1d");

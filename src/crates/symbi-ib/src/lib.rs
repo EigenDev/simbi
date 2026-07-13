@@ -13,6 +13,7 @@
 
 pub mod body;
 pub mod bondi;
+pub mod excise;
 pub mod history;
 pub mod penalize;
 pub mod sdf;
@@ -24,6 +25,7 @@ pub mod diagnostics;
 
 pub use body::{Body, BodyKind, SurfaceSpec};
 pub use bondi::{accretion_coefficient, bondi_profile, mdot_bondi, sonic_radius, BondiState};
+pub use excise::{onion_fill_cell, onion_pass_count};
 pub use history::BodyHistory;
 pub use penalize::{moment, omega_cross, penalize_cell, BodyKin, Property, Relax};
 pub use sdf::SdfExpr;
