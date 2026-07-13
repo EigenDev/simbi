@@ -515,9 +515,11 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     // every body pass shares this OnceLock (feedback grav D, drain D+5,
-    // penalize D+2): allocate the family maximum once so the first caller's
-    // size never starves a later pass.
-    let n_alloc = n.max(D + 5);
+    // penalize D+2, excise 4, the per-body feedback reduction MAX_BODIES x
+    // (D+5)): allocate the family maximum once so the first caller's size never
+    // starves a later pass — the feedback reduction is the largest member, so
+    // the max must include its MAX_BODIES factor.
+    let n_alloc = n.max(symbi_ib::MAX_BODIES * (D + 5));
     let scratch = sim.workspace.body_scratch.get_or_init(|| {
         (0..n_alloc)
             .map(|_| {

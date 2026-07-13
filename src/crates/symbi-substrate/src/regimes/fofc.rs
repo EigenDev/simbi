@@ -447,7 +447,12 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
         fofc_copy(sim, prefix, dof_sfx, "restore", (&sim.fields.flux[dir], prim), (&ws.flux_ho[dir], prim));
     }
     ct_save(); // MHD: bflux -> bflux_ho + efield -> efield_ho (the HO induction flux + edge EMF)
-    fofc_copy(sim, prefix, dof_sfx, "restore", (&ws.u_stage, prim), (cons, prim));
+    // the stage input via THE accessor: at the first stage of a multi-stage scheme
+    // the driver elides the cons -> u_stage copy (u_n IS the stage input), so a
+    // direct ws.u_stage read restores from a stale (first step: zeroed) buffer —
+    // the redo then rebuilds the flow from garbage and the freeze tier both
+    // fires where it should not and parachutes into zeros where it fires.
+    fofc_copy(sim, prefix, dof_sfx, "restore", (sim.stage_input(), prim), (cons, prim));
     ct_restore(); // MHD: bcell <- bcell_stage (stage-input cell B, the correct EMF/predictor base)
     c2p();
     for dir in 0..D {
@@ -486,7 +491,7 @@ pub(crate) fn fofc_orchestrate<const D: usize, const DOF: usize, Mem, Sc>(
     }
     match body_freeze {
         Some((dt_eff, gamma)) => fofc_select_with_body(sim, prefix, dt_eff, gamma),
-        None => fofc_select(sim, prefix, dof_sfx, &ws.u_stage, cons, prim),
+        None => fofc_select(sim, prefix, dof_sfx, sim.stage_input(), cons, prim),
     }
     c2p();
 }
