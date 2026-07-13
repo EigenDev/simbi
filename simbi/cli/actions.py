@@ -72,6 +72,11 @@ class RegisterGPUBlockDimensions(Action):
         values: Sequence[int] | None,
         option_string: str | None = None,
     ):
+        if values is not None and any(v <= 0 for v in values):
+            parser.error(
+                f"{option_string or 'gpu block dims'}: every block dimension must "
+                f"be a positive integer (got {list(values)})"
+            )
         if values is not None and len(values) == 3:
             os.environ["BLOCK_X"] = str(values[0])
             os.environ["BLOCK_Y"] = str(values[1])
@@ -85,8 +90,9 @@ class RegisterGPUBlockDimensions(Action):
             os.environ["BLOCK_Y"] = "1"
             os.environ["BLOCK_Z"] = "1"
         else:
-            raise ValueError(
-                "GPU block dimensions must be specified as 1, 2, or 3 integers."
+            parser.error(
+                f"{option_string or 'gpu block dims'}: specify 1, 2, or 3 "
+                "positive integers"
             )
 
 

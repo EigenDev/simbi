@@ -32,7 +32,7 @@ def main() -> None:
     if hasattr(args, "func"):
         try:
             args.func(args, remaining)
-        except (ConfigError, FieldComputationError) as exc:
+        except (ConfigError, FieldComputationError, FileNotFoundError, OSError) as exc:
             # a user-facing error: print the formatted message and exit
             # non-zero WITHOUT the rich traceback (which buries the message).
             print(f"\nerror: {exc}", file=sys.stderr)

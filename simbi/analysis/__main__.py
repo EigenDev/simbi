@@ -49,14 +49,43 @@ def main() -> int:
     p.add_argument("--window", type=float, default=5.0)
     a = p.parse_args()
 
-    if a.gamma is None:
-        import h5py
+    def fail(msg: str) -> int:
+        print(f"error: {msg}", file=sys.stderr)
+        return 2
 
-        with h5py.File(a.checkpoint, "r") as f:
-            # the eos parameter travels in the checkpoint metadata; the flag
-            # exists only to override a file written before it did.
-            a.gamma = float(_find_attr(f, "gamma"))
-    d = load_body_diagnostics(a.checkpoint)
+    try:
+        if a.gamma is None:
+            import h5py
+
+            with h5py.File(a.checkpoint, "r") as f:
+                # the eos parameter travels in the checkpoint metadata; the flag
+                # exists only to override a file written before it did.
+                a.gamma = float(_find_attr(f, "gamma"))
+        d = load_body_diagnostics(a.checkpoint)
+    except (FileNotFoundError, OSError) as exc:
+        return fail(f"cannot open checkpoint '{a.checkpoint}': {exc}")
+    except KeyError as exc:
+        if "body_diagnostics" in str(exc):
+            return fail(
+                "this checkpoint has no `body_diagnostics` group — it is written "
+                "only by runs with accreting bodies. for older runs, use the "
+                "cadence-sampled diagnostics.dat instead "
+                "(simbi.analysis.load_diagnostics_dat)."
+            )
+        return fail(f"checkpoint metadata missing: {exc} (pass --gamma explicitly)")
+
+    n_bodies = d.mass_delta.shape[1] if d.mass_delta.ndim == 2 else 1
+    if not (0 <= a.body < n_bodies):
+        return fail(
+            f"--body {a.body} out of range: this run recorded {n_bodies} "
+            f"bod{'ies' if n_bodies != 1 else 'y'} (0..{n_bodies - 1})"
+        )
+    if len(d.time) < 2:
+        return fail(
+            f"the diagnostics series holds {len(d.time)} sample(s) — too short "
+            "to analyze; run further past the first checkpoint, or lower the "
+            "checkpoint cadence"
+        )
     series = d.mdot[:, a.body]
     print(f"series: {len(d.time)} steps, t in [{d.time[0]:.3f}, {d.time[-1]:.3f}]")
 

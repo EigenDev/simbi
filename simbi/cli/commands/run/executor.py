@@ -88,7 +88,9 @@ def run_config(args: Namespace, argv: Optional[Sequence[str]] = None) -> None:
     problem_classes = _discover_problem_classes(script)
 
     if not problem_classes:
-        raise ValueError(
+        from simbi.simulation.problem import ConfigError
+
+        raise ConfigError(
             f"no SimbiProblem subclasses found in {script}. "
             "ensure your config defines a class that inherits from SimbiProblem."
         )
