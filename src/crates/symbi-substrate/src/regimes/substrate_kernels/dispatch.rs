@@ -198,6 +198,129 @@ pub fn dispatch_body_source<const D: usize, const DOF: usize, Mem, Sc>(
 /// cartesian; the caller gates on `nu > 0`. reads `prim.rho` / `prim.vel` (current
 /// post-c2p) at the halo-1 3x3 stencil and writes `cons.mom` at the center cell —
 /// hazard-free in place because the stencil is on the read-only primitives.
+/// horizon excision (cartesian kerr-schild 2d): overwrite every cell inside the
+/// excision sphere |x| < r_exc about the chart origin with a zero-gradient copy of
+/// its outward neighbor's primitives, then rebuild the conserved state with the
+/// cell's own metric. runs as onion_pass_count sweeps of the fill/writeback pair
+/// (values propagate one diagonal cell inward per sweep) + one conserved rebuild,
+/// dispatched over the sphere's index bbox. inside the horizon every characteristic
+/// points inward, so the filled cells are numerical padding the exterior never sees.
+pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    r_exc: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    symbi_sim::driver::prof("excise", || dispatch_excise_inner(sim, gamma, r_exc));
+}
+
+fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    r_exc: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let geom = &sim.geom;
+    assert_eq!(D, 2, "excision is baked for the 2d cartesian kerr-schild slice");
+    assert_eq!(DOF, D, "excision needs the full velocity DOF");
+    assert_eq!(
+        geom.coords,
+        symbi_geometry::Geometry::Cartesian,
+        "excision is a cartesian-chart operation (spherical charts hide the horizon behind r_min)"
+    );
+    assert_eq!(
+        geom.spacetime,
+        symbi_geometry::Spacetime::KerrSchild,
+        "excision requires the horizon-penetrating kerr-schild chart"
+    );
+
+    // the sphere's index bbox about the chart origin, one cell of margin so every
+    // cell whose centroid is inside r_exc is covered, clamped to the interior.
+    let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
+        let s = &geom.interior.spaces[a];
+        let lo_x = (-r_exc - geom.x_lo[a]) / geom.dx[a];
+        let hi_x = (r_exc - geom.x_lo[a]) / geom.dx[a];
+        let lo = (lo_x.floor() as isize - 1).clamp(s.lo, s.hi);
+        let hi = (hi_x.ceil() as isize + 2).clamp(s.lo, s.hi);
+        symbi_algebra::Space { name: s.name, lo, hi }
+    });
+    if spaces.iter().any(|sp| sp.lo >= sp.hi) {
+        return;
+    }
+    let bbox = Domain::new(spaces);
+
+    let resolve = |bind: &ScalarBind| -> Sc {
+        Sc::from_f64(match bind {
+            ScalarBind::Ref(ScalarRef::Gamma) => gamma,
+            ScalarBind::Ref(ScalarRef::SchwarzschildMass) => geom
+                .spacetime_scalars
+                .iter()
+                .find(|(n, _)| n == "schwarzschild_mass")
+                .map(|(_, v)| *v)
+                .expect("excise: the kerr-schild metric supplies schwarzschild_mass"),
+            ScalarBind::Spec(s) if &**s == "excision_radius" => r_exc,
+            ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
+                .unwrap_or_else(|| panic!("excise: unexpected scalar {sref:?}")),
+            other => panic!("excise: unexpected scalar {other:?}"),
+        })
+    };
+    let fill_scalars = scalars_for("excise_fill_2d", &resolve);
+    let wb_scalars = scalars_for("excise_writeback_2d", &resolve);
+    let p2c_scalars = scalars_for("excise_p2c_cart_ks_2d", &resolve);
+
+    let pre = sim.fields.prim.pre_field().expect("excision requires prim.pre (GR hydro)");
+    let prim: [&Field<Sc, D, Mem>; 4] =
+        [&sim.fields.prim.rho, &sim.fields.prim.vel[0], &sim.fields.prim.vel[1], pre];
+    let scratch = feedback_scratch(sim, 4);
+    let scratch_refs: [&Field<Sc, D, Mem>; 4] =
+        std::array::from_fn(|kk| &scratch[kk]);
+
+    // K sweeps of fill (prim -> scratch) + writeback (scratch -> prim): the parallel
+    // stencil never reads a value written by the same sweep. min-width from the
+    // uniform cartesian grid.
+    let min_dx = geom.dx.iter().cloned().fold(f64::INFINITY, f64::min);
+    for _ in 0..symbi_ib::excise::onion_pass_count(r_exc, min_dx) {
+        dispatch_fields::<Sc, Mem, D>(
+            "excise_fill_2d",
+            &geom.allocated,
+            &bbox,
+            &prim,
+            &scratch_refs,
+            &[],
+            &fill_scalars,
+        );
+        dispatch_fields::<Sc, Mem, D>(
+            "excise_writeback_2d",
+            &geom.allocated,
+            &bbox,
+            &scratch_refs,
+            &prim,
+            &[],
+            &wb_scalars,
+        );
+    }
+    // the conserved rebuild: prim reads, cons in-place (live cells pass through).
+    let cons: [&Field<Sc, D, Mem>; 4] = [
+        &sim.fields.cons.den,
+        &sim.fields.cons.mom[0],
+        &sim.fields.cons.mom[1],
+        sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR hydro)"),
+    ];
+    dispatch_fields::<Sc, Mem, D>(
+        "excise_p2c_cart_ks_2d",
+        &geom.allocated,
+        &bbox,
+        &prim,
+        &cons,
+        &[],
+        &p2c_scalars,
+    );
+}
+
 pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,

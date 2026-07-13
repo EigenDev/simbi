@@ -621,3 +621,9 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosit
         self
     }
 }
+
+// horizon excision is a GR-chart operation; the isothermal (flat) set ignores it.
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    symbi_sim::substrate_seam::WithExcision for IsoSubstrateKernelSet<Mem, Sc, D>
+{
+}

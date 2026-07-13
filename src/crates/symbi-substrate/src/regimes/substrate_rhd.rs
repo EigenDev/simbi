@@ -43,13 +43,22 @@ use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Spacetime;
 use symbi_hydro::source_spec::BuiltSource;
 use symbi_sim::state::FieldStore;
-use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
+use symbi_sim::substrate_seam::{KernelSet, WithExcision, WithViscosity};
 
 /// a D-generic RHD `KernelSet`, every method substrate-generated.
 // viscosity is isothermal-only; RHD uses the no-op default.
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for RhdSubstrateKernelSet<Mem, Sc, D>
 {
+}
+
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithExcision
+    for RhdSubstrateKernelSet<Mem, Sc, D>
+{
+    fn with_excision(mut self, r_exc: f64) -> Self {
+        self.excision_radius = r_exc;
+        self
+    }
 }
 
 pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
@@ -83,6 +92,9 @@ pub struct RhdSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     pub gradient_bcs: Vec<GradientBc>,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
+    /// the horizon-excision sphere radius about the chart origin (cartesian
+    /// kerr-schild only); 0 disables the excision pass entirely.
+    pub excision_radius: f64,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
@@ -102,6 +114,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             boundary_dags: Vec::new(),
             gradient_bcs: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
+            excision_radius: 0.0,
         }
     }
 
@@ -288,6 +301,14 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 return;
             }
             dispatch_runtime_source(sim, rs, weight);
+        }
+    }
+
+    fn excise(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        // inert unless a positive excision radius was configured; the dispatch
+        // asserts the baked combination (2d cartesian kerr-schild) fail-loud.
+        if self.excision_radius > 0.0 {
+            crate::regimes::substrate_kernels::dispatch_excise(sim, self.gamma, self.excision_radius);
         }
     }
 

@@ -46,7 +46,7 @@ use symbi_io::Metadata;
 use symbi_sim::checkpoint::write_hierarchy_checkpoint;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::state::CtMethod;
-use symbi_sim::substrate_seam::WithViscosity;
+use symbi_sim::substrate_seam::{WithExcision, WithViscosity};
 
 // =============================================================================
 // parsed configuration — a plain-rust mirror of the python exec_dict. the
@@ -96,6 +96,9 @@ struct Config {
     dlogt: f64,
     viscosity: f64,
     alpha: f64,
+    // horizon-excision sphere radius about the chart origin (cartesian kerr-schild
+    // 2d only); 0 disables excision. must sit inside the horizon r_+ = 2M.
+    excision_radius: f64,
     x1_spacing: String,
     start_time: f64,
     // the LOG-checkpoint anchor (positive reference for log-spaced cadence). distinct from
@@ -661,6 +664,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         dlogt: get_f64_or(dict, "dlogt", 0.0),
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         alpha: get_f64_or(dict, "alpha", 0.0),
+        excision_radius: get_f64_or(dict, "excision_radius", 0.0),
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
         start_time: get_f64_or(dict, "start_time", 0.0),
         checkpoint_log_anchor: get_f64_or(dict, "checkpoint_log_anchor", 0.0),
@@ -2175,7 +2179,8 @@ macro_rules! build_and_run_hydro {
             .theta(theta)
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
-            .with_viscosity(cfg.viscosity);
+            .with_viscosity(cfg.viscosity)
+            .with_excision(cfg.excision_radius);
         // attach a user source expression (force/cooling/relax/raw) when present.
         // lowered against THIS regime's spec via the source front door — the bridge rejects
         // force/cooling/relax on relativistic regimes (use raw). the base level attaches it here;
@@ -4465,6 +4470,89 @@ fn check_horizon_containment(
     Ok(())
 }
 
+/// the excision-request gate: a positive excision radius is only meaningful on the
+/// baked combination — the 2d cartesian kerr-schild slice with the sphere strictly
+/// inside the horizon r_+ = 2M (excising exterior gas would delete causally connected
+/// flow) and strictly above the metric-guard radius M/2 (below it the metric is frozen
+/// and the fill would read constant-metric cells as if they were physical). refinement
+/// and multi-gpu paths do not carry the excision pass.
+fn check_excision_request(
+    excision_radius: f64,
+    spacetime: &str,
+    coord_system: &str,
+    dims: usize,
+    mass: f64,
+    refinement_enabled: bool,
+    n_gpus: usize,
+) -> Result<(), String> {
+    if excision_radius <= 0.0 {
+        return Ok(());
+    }
+    if spacetime != "kerr_schild" || coord_system != "cartesian" || dims != 2 {
+        return Err(format!(
+            "excision_radius = {excision_radius} requires the 2d cartesian kerr-schild chart; \
+             got (dims={dims}, coords={coord_system}, spacetime={spacetime}). spherical charts \
+             hide the horizon behind r_min instead."
+        ));
+    }
+    let r_plus = 2.0 * mass;
+    if excision_radius >= r_plus {
+        return Err(format!(
+            "excision_radius = {excision_radius} >= r_+ = 2M = {r_plus}: the excision sphere \
+             must sit strictly inside the horizon (excised cells are causally disconnected \
+             ONLY there)."
+        ));
+    }
+    if excision_radius <= 0.5 * mass {
+        return Err(format!(
+            "excision_radius = {excision_radius} <= M/2 = {}: the metric is clamped constant \
+             below M/2, so the excision surface must sit above it (recommended ~0.7 r_+ = {}).",
+            0.5 * mass,
+            1.4 * mass
+        ));
+    }
+    if refinement_enabled {
+        return Err("excision does not run on refined (FMR) levels; disable refinement".into());
+    }
+    if n_gpus > 1 {
+        return Err("excision does not run on the multi-gpu decomposed path; use gpus = 1".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod excision_gate_tests {
+    use super::check_excision_request;
+
+    #[test]
+    fn zero_radius_is_always_fine() {
+        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, true, 4).is_ok());
+    }
+
+    #[test]
+    fn excision_needs_the_cartesian_ks_slice() {
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_ok());
+        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, false, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, false, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, false, 1).is_err());
+    }
+
+    #[test]
+    fn excision_sphere_must_sit_between_the_guard_and_the_horizon() {
+        // M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
+        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_err());
+        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_err());
+        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_ok());
+        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_ok());
+    }
+
+    #[test]
+    fn excision_rejects_refinement_and_multi_gpu() {
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, true, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 2).is_err());
+    }
+}
+
 #[cfg(test)]
 mod horizon_gate_tests {
     use super::check_horizon_containment;
@@ -4577,6 +4665,19 @@ fn run_simulation(
         cfg.kerr_spin,
         &cfg.coord_system,
         cfg.x_lo[0],
+    )
+    .map_err(PyValueError::new_err)?;
+    // an excision request is only meaningful on the baked 2d cartesian kerr-schild
+    // slice, with the sphere strictly between the metric-guard radius M/2 and the
+    // horizon r_+ = 2M.
+    check_excision_request(
+        cfg.excision_radius,
+        &cfg.spacetime,
+        &cfg.coord_system,
+        cfg.dims,
+        cfg.schwarzschild_mass,
+        cfg.refinement_enabled,
+        cfg.n_gpus,
     )
     .map_err(PyValueError::new_err)?;
     // mesh refinement is cartesian + uniform-spacing ONLY: the coarse-fine prolongation/restriction

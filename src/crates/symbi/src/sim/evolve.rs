@@ -212,6 +212,15 @@ where
         // inert when inviscid (the kernel-set gates on nu > 0).
         prof("viscous", || kernels.viscous(sim, sim.dt));
 
+        // horizon excision, ONCE per step after the RK combination: overwrite the
+        // causally disconnected cells inside the excision sphere (within the
+        // black-hole horizon on the cartesian kerr-schild chart) with a
+        // zero-gradient outward primitive copy + local conserved rebuild, so the
+        // next step's stencils read bounded, smooth values at the excision rim.
+        // inert at zero radius (the kernel-set gates on r_exc > 0); profiled
+        // inside the dispatch.
+        kernels.excise(sim);
+
         if sim.has_bodies() {
             // the IBM surface physics (docs/design/50), ONCE per step AFTER the
             // full RK combination: applied inside the stage blend, a stage's

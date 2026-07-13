@@ -124,6 +124,13 @@ where
     /// shear operator, applied post-step once the primitive velocity is current.
     /// default: no-op (inviscid regimes, and sets without a baked viscous kernel).
     fn viscous(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
+
+    /// horizon excision: overwrite the causally disconnected cells inside the
+    /// excision sphere (|x| < r_exc about the chart origin, inside the black-hole
+    /// horizon) with a zero-gradient copy of their outward neighbors' primitives
+    /// + a local conserved rebuild, once per step after the RK combination.
+    /// default: no-op (flat backgrounds, and regimes without the baked kernels).
+    fn excise(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 }
 
 /// stash the config's constant-nu viscosity onto a kernel set.
@@ -138,6 +145,16 @@ pub trait WithViscosity: Sized {
     /// stash the Shakura-Sunyaev alpha. default no-op;
     /// IsoSubstrateKernelSet stores it.
     fn with_alpha(self, _alpha: f64) -> Self {
+        self
+    }
+}
+
+/// stash the config's horizon-excision radius onto a kernel set. same
+/// non-const-generic shape as [`WithViscosity`]; the default is a no-op
+/// (regimes without the baked excision kernels ignore it);
+/// `RhdSubstrateKernelSet` overrides it to store the value.
+pub trait WithExcision: Sized {
+    fn with_excision(self, _r_exc: f64) -> Self {
         self
     }
 }

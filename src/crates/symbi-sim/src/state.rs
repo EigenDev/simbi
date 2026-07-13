@@ -1608,30 +1608,56 @@ where
         let cons = if matches!(self.geom.spacetime, symbi_geometry::Spacetime::Minkowski) {
             <R as Regime<Sc, DOF>>::to_conserved(&self.physics.regime, &self.physics.eos, prim)
         } else {
-            // the volume-weighted radial centroid r_vw = (3/4)(rh^4 - rl^4)/(rh^3 - rl^3) — the exact
-            // spherical cell centroid the in-kernel `cell_geometry_gv` uses, from the cell's radial
-            // faces (map-aware, so log-radial grids match too). radial axis is 0 for the GR (spherical)
-            // backgrounds; angular slots take the plain cell centers.
-            let rl = self.geom.face_coord(coord, 0)[0];
-            let mut coord_hi = coord;
-            coord_hi[0] += 1;
-            let rh = self.geom.face_coord(coord_hi, 0)[0];
-            let r_vw = 0.75 * (rh.powi(4) - rl.powi(4)) / (rh.powi(3) - rl.powi(3));
-            let x_center = self.geom.cell_coord(coord);
-            let x_dof: Tensor<Sc, DOF> = Tensor::new(std::array::from_fn(|k| {
-                if k == 0 {
-                    Sc::from_f64(r_vw)
-                } else if k < D {
-                    Sc::from_f64(x_center[k])
-                } else if k == 1 {
-                    // an ungridded POLAR slot (DOF-lifted vectors on a 1D radial grid) takes the
-                    // exact equatorial pi/2 — the same convention as the in-kernel metric points;
-                    // zero would degenerate gamma_{phi phi} = r^2 sin^2(theta).
-                    Sc::from_f64(std::f64::consts::FRAC_PI_2)
-                } else {
-                    Sc::ZERO
-                }
-            }));
+            // the metric point must be the SAME point the in-kernel geometry evaluates at
+            // (`cell_geometry_gv`), so the covariant storage <-> metric-aware c2p round-trip
+            // is exact per cell. the spelling is CHART-dependent:
+            //   cartesian  — the face midpoint (lo + hi)/2 on every gridded axis; slot 0 is
+            //                a plain length coordinate, NOT a radius (the spherical
+            //                volume-weighted formula applied to x mislocates the metric by
+            //                O(dx^2/x), and degenerates on a sign-straddling cell of an
+            //                origin-containing box).
+            //   spherical  — the volume-weighted radial centroid r_vw = (3/4)(rh^4 - rl^4)/
+            //                (rh^3 - rl^3) from the cell's radial faces (map-aware, so
+            //                log-radial grids match too); angular slots take cell centers.
+            let x_dof: Tensor<Sc, DOF> = if matches!(
+                <M as Metric<Sc, DOF>>::geometry(&self.physics.metric),
+                symbi_geometry::Geometry::Cartesian
+            ) {
+                Tensor::new(std::array::from_fn(|k| {
+                    if k < D {
+                        let lo = self.geom.face_coord(coord, k)[k];
+                        let mut coord_hi = coord;
+                        coord_hi[k] += 1;
+                        let hi = self.geom.face_coord(coord_hi, k)[k];
+                        Sc::from_f64((lo + hi) * 0.5)
+                    } else {
+                        // the cartesian kerr-schild D = 2 instantiation is the z = 0
+                        // equatorial slice; an ungridded slot sits on the plane.
+                        Sc::ZERO
+                    }
+                }))
+            } else {
+                let rl = self.geom.face_coord(coord, 0)[0];
+                let mut coord_hi = coord;
+                coord_hi[0] += 1;
+                let rh = self.geom.face_coord(coord_hi, 0)[0];
+                let r_vw = 0.75 * (rh.powi(4) - rl.powi(4)) / (rh.powi(3) - rl.powi(3));
+                let x_center = self.geom.cell_coord(coord);
+                Tensor::new(std::array::from_fn(|k| {
+                    if k == 0 {
+                        Sc::from_f64(r_vw)
+                    } else if k < D {
+                        Sc::from_f64(x_center[k])
+                    } else if k == 1 {
+                        // an ungridded POLAR slot (DOF-lifted vectors on a 1D radial grid) takes
+                        // the exact equatorial pi/2 — the same convention as the in-kernel metric
+                        // points; zero would degenerate gamma_{phi phi} = r^2 sin^2(theta).
+                        Sc::from_f64(std::f64::consts::FRAC_PI_2)
+                    } else {
+                        Sc::ZERO
+                    }
+                }))
+            };
             let sm = SpatialMetric::new(
                 Gamma::new(<M as Metric<Sc, DOF>>::spatial_metric(&self.physics.metric, x_dof)),
                 GammaInv::new(<M as Metric<Sc, DOF>>::spatial_metric_inv(&self.physics.metric, x_dof)),

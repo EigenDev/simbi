@@ -54,6 +54,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosit
 {
 }
 
+// horizon excision is a GR-chart operation; the adiabatic (flat) set ignores it.
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    symbi_sim::substrate_seam::WithExcision for AdiabaticSubstrateKernelSet<Mem, Sc, D>
+{
+}
+
 pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
     pub gamma: f64,
     pub cfl_number: f64,
