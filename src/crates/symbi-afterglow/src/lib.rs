@@ -30,6 +30,7 @@
 pub mod bm;
 pub mod constants;
 pub mod coords;
+pub mod deposit;
 pub mod event;
 pub mod ingest;
 pub mod lightcurve;
@@ -48,9 +49,9 @@ pub use observe::{
     DOPPLER_BAND, DOPPLER_BOLOMETRIC, ObserverLightcurve, PolarizationCurve, SkyImage,
     compute_lightcurve_from_events, compute_polarization_from_events, compute_skymap,
 };
+pub use deposit::{VelComponents, compute_skymap_deposit, compute_skymap_deposit_spherical};
 pub use transfer::{
-    compute_skymap_deposit_spherical, generate_photon_events, generate_photon_events_spherical,
-    monte_carlo_radiative_transfer,
+    generate_photon_events, generate_photon_events_spherical, monte_carlo_radiative_transfer,
 };
 
 use units::{EnergyDensity, Frequency, Length, MassDensity, Time, Velocity};

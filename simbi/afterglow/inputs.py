@@ -93,6 +93,22 @@ def build_mesh(data: Any) -> dict[str, Any]:
     return mesh
 
 
+def build_velocity(data: Any) -> dict[str, NDArray]:
+    """
+    the three-velocity component arrays ("v1".."vD", units of c) present in a checkpoint,
+    flat float64 — the deposit imager uses them to capture lateral spreading (a jet's
+    theta-velocity changes the observer-direction doppler). components beyond the
+    checkpoint's dimensionality do not exist and are omitted (the imager treats missing
+    components as zero, radial flow).
+    """
+    out: dict[str, NDArray] = {}
+    for ax in range(1, int(data.metadata.dimensions) + 1):
+        out[f"v{ax}"] = np.ascontiguousarray(
+            np.asarray(data.get_field(f"v{ax}"), dtype=np.float64).ravel()
+        )
+    return out
+
+
 def build_qscales(scale_name: str) -> dict[str, float]:
     """
     build the rust contract `qscales` dict (code -> cgs multipliers) from a

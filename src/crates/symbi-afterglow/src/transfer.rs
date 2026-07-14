@@ -28,14 +28,14 @@
 //  monte_carlo_radiative_transfer(&mut ev, &cond, &scales, &fields, &mesh, seed, true, false);
 // =============================================================================
 
-use crate::constants::{C_LIGHT, H_PLANCK, M_P, PI, SIGMA_THOMSON};
+use crate::constants::{H_PLANCK, M_P, PI, SIGMA_THOMSON};
 use crate::event::PhotonEvent;
 use crate::rng::Rng;
 use crate::synchrotron::{
-    beta, critical_lorentz, delta_doppler, emissivity, gyration_frequency, lorentz_factor,
-    minimum_lorentz, nu, shock_bfield, spectral_shape,
+    band_integrated_shape, beta, critical_lorentz, delta_doppler, emissivity, gyration_frequency,
+    lorentz_factor, minimum_lorentz, nu, power_integral, shock_bfield, spectral_segments,
 };
-use crate::units::{Energy, EnergyDensity, Frequency, Length, MagneticField, NumberDensity};
+use crate::units::{Energy, EnergyDensity, Length, MagneticField, NumberDensity, PowerDensity};
 use crate::{HydroFields, Mesh, QuantScales, SimConditions};
 
 // the comoving emission spectrum is sampled over this many decades on each side of the
@@ -56,7 +56,7 @@ fn norm(a: [f64; 3]) -> f64 {
 /// cells extrapolate the local ratio). works for ANY radial spacing — log-spaced sim meshes or
 /// the quasi-linear Blandford-McKee shell alike — so the shell volume is correct either way.
 #[inline]
-fn radial_shell_edges(x1: &[f64], i: usize) -> (f64, f64) {
+pub(crate) fn radial_shell_edges(x1: &[f64], i: usize) -> (f64, f64) {
     let ni = x1.len();
     let lo = if i > 0 {
         (x1[i - 1] * x1[i]).sqrt()
@@ -73,18 +73,6 @@ fn radial_shell_edges(x1: &[f64], i: usize) -> (f64, f64) {
         x1[0]
     };
     (lo, hi)
-}
-
-/// the integral of `nu^a` over [lo, hi] (the a = -1 case is the logarithm).
-#[inline]
-fn power_integral(a: f64, lo: f64, hi: f64) -> f64 {
-    if hi <= lo {
-        0.0
-    } else if (a + 1.0).abs() < 1.0e-9 {
-        (hi / lo).ln()
-    } else {
-        (hi.powf(a + 1.0) - lo.powf(a + 1.0)) / (a + 1.0)
-    }
 }
 
 /// draw a frequency from `nu^a` on [lo, hi] by inverse-CDF of a uniform deviate `v`.
@@ -112,27 +100,15 @@ fn sample_emission_frequency(
     nu_m: f64,
     rng: &mut Rng,
 ) -> f64 {
-    // F_nu ~ nu^a exponents, low -> high frequency (same shape `powerlaw_flux` evaluates).
-    let slow_cool = nu_c > nu_m;
-    let a_mid = if slow_cool { -0.5 * (p - 1.0) } else { -0.5 };
-    let exps = [1.0 / 3.0, a_mid, -0.5 * p];
-
-    // segment bounds: the breaks split [nu_lo, nu_hi] at b1 = lower break, b2 = upper break.
-    let b1 = nu_m.min(nu_c).clamp(nu_lo, nu_hi);
-    let b2 = nu_m.max(nu_c).clamp(nu_lo, nu_hi);
-    let bounds = [nu_lo, b1, b2, nu_hi];
-
-    // amplitudes by continuity across the breaks (A_0 = 1; absolute scale is irrelevant).
-    let mut amp = [1.0, 0.0, 0.0];
-    amp[1] = amp[0] * bounds[1].powf(exps[0] - exps[1]);
-    amp[2] = amp[1] * bounds[2].powf(exps[1] - exps[2]);
+    // the segment structure is the SAME decomposition the band-energy integral uses
+    // (synchrotron::spectral_segments), so the sampled packet frequencies and the packet
+    // energy normalization describe one spectrum by construction.
+    let seg = spectral_segments(p, nu_lo, nu_hi, nu_c, nu_m);
 
     // integrated energy per segment -> segment selection probabilities.
-    let w = [
-        amp[0] * power_integral(exps[0], bounds[0], bounds[1]),
-        amp[1] * power_integral(exps[1], bounds[1], bounds[2]),
-        amp[2] * power_integral(exps[2], bounds[2], bounds[3]),
-    ];
+    let w: [f64; 3] = core::array::from_fn(|k| {
+        seg.amps[k] * power_integral(seg.exps[k], seg.bounds[k], seg.bounds[k + 1])
+    });
     let total = w[0] + w[1] + w[2];
     if !(total > 0.0) {
         return (nu_lo * nu_hi).sqrt();
@@ -144,7 +120,7 @@ fn sample_emission_frequency(
         u -= w[k];
         k += 1;
     }
-    sample_power_segment(exps[k], bounds[k], bounds[k + 1], rng.uniform())
+    sample_power_segment(seg.exps[k], seg.bounds[k], seg.bounds[k + 1], rng.uniform())
 }
 
 /// the lab-frame propagation direction of a photon emitted isotropically along `nprime`
@@ -184,10 +160,40 @@ pub(crate) struct CellState {
     pub(crate) w: f64,
     pub(crate) nu_c: f64,
     pub(crate) nu_m: f64,
-    pub(crate) gamma_min: f64,
 }
 
 impl CellState {
+    /// the sampled comoving band [nu_lo, nu_hi] [Hz]: SPECTRUM_DECADES decades beyond the
+    /// outer/inner spectral break, broad enough to cover the observable bands after boosting.
+    /// the frequency sampler and the packet energy normalization both use THIS band, so the
+    /// equal-weight packets sum to exactly the band-integrated emitted energy.
+    pub(crate) fn band(&self) -> (f64, f64) {
+        let lo_break = self.nu_c.min(self.nu_m);
+        // an effectively-uncooled cell (emitter time -> 0 gives gamma_c -> inf) has no finite
+        // cooling break; the ~nu^{-(p-1)/2} segment then diverges with the band top, so cap
+        // the upper break a fixed 2x SPECTRUM_DECADES above the lower one.
+        let hi_break = self
+            .nu_c
+            .max(self.nu_m)
+            .min(lo_break * 10.0_f64.powf(2.0 * SPECTRUM_DECADES));
+        (
+            lo_break * 10.0_f64.powf(-SPECTRUM_DECADES),
+            hi_break * 10.0_f64.powf(SPECTRUM_DECADES),
+        )
+    }
+
+    /// the comoving synchrotron power density radiated in the sampled band [erg/(s cm^3)]:
+    /// `emissivity x int spectral_shape dnu` — the SAME per-Hz emissivity the deterministic
+    /// deposit integrates, so the monte-carlo catalog and the deposit share one normalization.
+    /// (a bolometric (4/3) sigma_T c gamma^2 u_B budget is NOT equivalent: for p < 3 the
+    /// gamma^2 average is dominated by the tail up to gamma_c and a gamma_min^2 truncation
+    /// underestimates the radiated power by (p-1)/(3-p) (gamma_c/gamma_min)^{3-p}.)
+    pub(crate) fn band_power_density(&self, p: f64) -> PowerDensity {
+        let (nu_lo, nu_hi) = self.band();
+        emissivity(self.bfield, self.n_e, p)
+            * band_integrated_shape(p, nu_lo, nu_hi, self.nu_c, self.nu_m)
+    }
+
     /// build from PHYSICAL cgs quantities: proper mass density `rho` [g/cm^3], pressure `pre`
     /// [erg/cm^3], speed `beta` (units of c), adiabatic index, microphysics, and the emitter-frame
     /// time `t_emitter_s` [s] (sets the cooling break). this is the geometry-agnostic entry shared
@@ -217,14 +223,13 @@ impl CellState {
             w,
             nu_c: nu(gamma_crit, nu_g).value(),
             nu_m: nu(gamma_min, nu_g).value(),
-            gamma_min,
         }
     }
 }
 
 /// compute the cell state for the radial mesh path: `gamma_beta` is the four-velocity magnitude;
 /// `t_prime_s` is the lab snapshot time (the emitter-frame time is t_prime_s / W).
-fn cell_state(
+pub(crate) fn cell_state(
     cond: &SimConditions,
     scales: &QuantScales,
     fields: &HydroFields,
@@ -267,9 +272,9 @@ pub(crate) fn emit_packets(
     max_events: u64,
     cell_id: u32,
 ) {
-    // sample comoving frequencies over a broad band bracketing the spectral breaks.
-    let nu_lo = cell.nu_c.min(cell.nu_m) * 10.0_f64.powf(-SPECTRUM_DECADES);
-    let nu_hi = cell.nu_c.max(cell.nu_m) * 10.0_f64.powf(SPECTRUM_DECADES);
+    // sample comoving frequencies over the SAME band the packet energy was integrated over,
+    // so the equal-weight packets tile exactly the band-integrated emitted energy.
+    let (nu_lo, nu_hi) = cell.band();
     let beta_vec = [
         cell.beta * vhat[0],
         cell.beta * vhat[1],
@@ -362,83 +367,102 @@ pub fn generate_photon_events(
         (max_events / total_cells).max(4)
     };
 
-    // <gamma^2> for a power law N(gamma)~gamma^-p above gamma_min: (p-1)/(p-3) gamma_min^2 for
-    // p>3, else gamma_min^2 (the high-gamma integral does not converge, use the lower bound).
-    let power_law_factor = if p > 3.0 { (p - 1.0) / (p - 3.0) } else { 1.0 };
-
-    let energy_prefactor = (4.0 / 3.0) * SIGMA_THOMSON * C_LIGHT;
-
     for ii in 0..ni {
         if events.len() as u64 >= max_events {
             break;
         }
-        let r_center = (x1[ii] * scales.length).value();
         let (x1l, x1r) = radial_shell_edges(x1, ii);
 
         for jj in 0..nj {
             let dx2 = if nj > 1 { x2[1] - x2[0] } else { 2.0 * PI };
-            let dcos = if nj > 1 {
-                (x2[jj].cos() - (x2[jj] + dx2).cos()).abs()
+            // mu bounds of the polar cell (mu = cos theta decreases with theta).
+            let (mu_hi, mu_lo) = if nj > 1 {
+                (x2[jj].cos(), (x2[jj] + dx2).cos())
             } else {
-                2.0
+                (1.0, -1.0)
             };
+            let dcos = (mu_hi - mu_lo).abs();
             let jreal = if mesh.data_dim > 1 { jj } else { 0 };
 
             for kk in 0..n_azimuth {
                 if events.len() as u64 >= max_events {
                     break;
                 }
-                // resolved phi cells in 3d, else REVOLVE the axisymmetric data: phi at the
-                // azimuth-cell center, dphi = 2pi / n_azimuth (summing over kk recovers 2pi).
-                let (sin_phi, cos_phi, dx3) = if resolved_phi {
+                // resolved phi cells in 3d, else REVOLVE the axisymmetric data: dphi =
+                // 2pi / n_azimuth (summing over kk recovers 2pi).
+                let (phi_lo, dx3) = if resolved_phi {
                     let a = x3.unwrap();
                     let d = if a.len() > 1 { a[1] - a[0] } else { 2.0 * PI };
-                    (a[kk].sin(), a[kk].cos(), d)
+                    (a[kk] - 0.5 * d, d)
                 } else {
-                    let phi = (kk as f64 + 0.5) * 2.0 * PI / n_azimuth as f64;
-                    (phi.sin(), phi.cos(), 2.0 * PI / n_azimuth as f64)
+                    let d = 2.0 * PI / n_azimuth as f64;
+                    (kk as f64 * d, d)
                 };
                 let kreal = if resolved_phi { kk } else { 0 };
-                let rhat = [x2[jj].sin() * cos_phi, x2[jj].sin() * sin_phi, x2[jj].cos()];
 
                 let idx = kreal * ni * nj + jreal * ni + ii;
                 let cell = cell_state(cond, scales, fields, idx, p, t_prime_s);
 
                 let dvolume = (dx3 * dcos * (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l))
                     * scales.length.cubed();
-                let u_b: EnergyDensity = cell.bfield.squared() / (8.0 * PI);
-                let gamma_e_sq_avg = cell.gamma_min * cell.gamma_min * power_law_factor;
 
-                // total radiated energy from the cell over dt [erg]; split into packet weights.
-                let total_energy: Energy = energy_prefactor
-                    * (cell.beta * cell.beta)
-                    * u_b
-                    * cell.n_e
-                    * dvolume
-                    * dt
-                    * gamma_e_sq_avg;
+                // total comoving energy radiated in the sampled band over the represented lab
+                // interval: (band-integrated SPN98 emissivity) x dV_lab x dt_lab. the proper
+                // volume is W dV_lab and the comoving interval is dt_lab / W, so the lorentz
+                // factors cancel and the lab pair is exact. split into equal packet weights.
+                let total_energy: Energy = cell.band_power_density(p) * dvolume * dt;
                 let packet_weight = (total_energy / photons_target as f64).value();
 
-                // radial flow: cell at r_center along rhat, velocity also along rhat.
-                let position = [r_center * rhat[0], r_center * rhat[1], r_center * rhat[2]];
-                emit_packets(
-                    &mut events,
-                    &mut rng,
-                    &cell,
-                    p,
-                    t_prime_s,
-                    position,
-                    rhat,
-                    packet_weight,
-                    photons_target,
-                    max_events,
-                    idx as u32,
-                );
+                // each packet's position is sampled CONTINUOUSLY within the cell (volume-weighted
+                // radius, uniform mu and phi): cell-centered positions would quantize the EATS
+                // arrival time t_em - r.n/c onto the angular grid, biasing any observer window
+                // narrower than the lattice spacing. radial flow: velocity along the sampled rhat.
+                for _ in 0..photons_target {
+                    if events.len() as u64 >= max_events {
+                        break;
+                    }
+                    let mu = mu_lo + rng.uniform() * (mu_hi - mu_lo);
+                    let sin_theta = (1.0 - mu * mu).max(0.0).sqrt();
+                    let phi = phi_lo + rng.uniform() * dx3;
+                    let u = rng.uniform();
+                    let r3 = x1l * x1l * x1l + u * (x1r * x1r * x1r - x1l * x1l * x1l);
+                    let r = r3.cbrt() * scales.length.value();
+                    let rhat = [sin_theta * phi.cos(), sin_theta * phi.sin(), mu];
+                    let position = [r * rhat[0], r * rhat[1], r * rhat[2]];
+                    emit_packets(
+                        &mut events,
+                        &mut rng,
+                        &cell,
+                        p,
+                        t_prime_s,
+                        position,
+                        rhat,
+                        packet_weight,
+                        1,
+                        max_events,
+                        idx as u32,
+                    );
+                }
             }
         }
     }
 
     events
+}
+
+/// the (n_mu, n_phi) angular tessellation that fits `max_events` over `ni` radial cells at
+/// `photons_per_dir` packets per direction — sized so EVERY radial cell emits. a fixed
+/// tessellation larger than the budget would make the `max_events` cap truncate the radial
+/// loop, silently dropping the outer shells (where the shock lives). packet positions are
+/// jittered uniformly within each (mu, phi) cell, so a coarse tessellation still covers the
+/// full sphere without bias.
+pub fn spherical_tessellation_for_budget(ni: usize, photons_per_dir: u64, max_events: u64) -> (u64, u64) {
+    let ni = ni.max(1) as u64;
+    let ppd = photons_per_dir.max(1);
+    let per_cell = (max_events / (ni * ppd)).max(8);
+    let n_mu = ((per_cell as f64 / 2.0).sqrt().floor() as u64).max(2);
+    let n_phi = (per_cell / n_mu).max(2);
+    (n_mu, n_phi)
 }
 
 /// generate photon packets from a 1D RADIAL profile over a SYNTHESIZED equal-solid-angle
@@ -474,8 +498,6 @@ pub fn generate_photon_events_spherical(
     let t_prime = cond.current_time * scales.time;
     let t_prime_s = t_prime.value();
     let dt = cond.dt * scales.time;
-    let power_law_factor = if p > 3.0 { (p - 1.0) / (p - 3.0) } else { 1.0 };
-    let energy_prefactor = (4.0 / 3.0) * SIGMA_THOMSON * C_LIGHT;
 
     // equal-solid-angle direction grid: mu = cos(theta) uniform on [cos(theta_max), 1].
     let mu_lo = theta_max.cos();
@@ -486,192 +508,66 @@ pub fn generate_photon_events_spherical(
         if events.len() as u64 >= max_events {
             break;
         }
-        let r_center = (x1[ii] * scales.length).value();
         let (x1l, x1r) = radial_shell_edges(x1, ii);
 
         let cell = cell_state(cond, scales, fields, ii, p, t_prime_s);
-        let u_b: EnergyDensity = cell.bfield.squared() / (8.0 * PI);
-        let gamma_e_sq_avg = cell.gamma_min * cell.gamma_min * power_law_factor;
 
         // patch volume = (radial shell) x (solid angle dmu*dphi); same energy in every direction
-        // because the profile is radial, so the packet weight is computed once per radius.
+        // because the profile is radial, so the packet weight is computed once per radius. the
+        // energy is the band-integrated SPN98 emissivity x dV_lab x dt_lab (proper volume W dV
+        // and comoving interval dt/W cancel), the SAME normalization the deposit integrates.
         let dvolume = ((1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * dmu * dphi)
             * scales.length.cubed();
-        let total_energy: Energy = energy_prefactor
-            * (cell.beta * cell.beta)
-            * u_b
-            * cell.n_e
-            * dvolume
-            * dt
-            * gamma_e_sq_avg;
+        let total_energy: Energy = cell.band_power_density(p) * dvolume * dt;
         let packet_weight = (total_energy / photons_per_dir as f64).value();
 
         for km in 0..n_mu {
             if events.len() as u64 >= max_events {
                 break;
             }
-            // mu at the cell center (never exactly 1, which would put the strongly-beamed forward
-            // material onto the image center as a spike); the azimuth phi is jittered within its
-            // cell to break the rigid-grid "spoke" artifacts without disturbing the radial profile.
-            let mu = mu_lo + (km as f64 + 0.5) * dmu;
-            let sin_theta = (1.0 - mu * mu).max(0.0).sqrt();
             for kp in 0..n_phi {
                 if events.len() as u64 >= max_events {
                     break;
                 }
-                let phi = (kp as f64 + rng.uniform()) * dphi;
-                let rhat = [sin_theta * phi.cos(), sin_theta * phi.sin(), mu];
-                let position = [r_center * rhat[0], r_center * rhat[1], r_center * rhat[2]];
-                emit_packets(
-                    &mut events,
-                    &mut rng,
-                    &cell,
-                    p,
-                    t_prime_s,
-                    position,
-                    rhat,
-                    packet_weight,
-                    photons_per_dir,
-                    max_events,
-                    ii as u32,
-                );
+                // every packet's position is sampled CONTINUOUSLY within its (r, mu, phi) cell —
+                // volume-weighted in radius, uniform in mu (solid angle) and phi. cell-centered
+                // positions would quantize the EATS arrival time t_em - r mu / c onto an n_mu
+                // lattice, so an observer window narrower than the lattice spacing catches either
+                // a whole mu-ring or nothing: a large flux bias and a hollow image center (the
+                // mu -> 1 forward material has no lattice point). continuous sampling makes every
+                // arrival window catch a packet share proportional to its width, leaving only
+                // shot noise.
+                for _ in 0..photons_per_dir {
+                    if events.len() as u64 >= max_events {
+                        break;
+                    }
+                    let mu = mu_lo + (km as f64 + rng.uniform()) * dmu;
+                    let sin_theta = (1.0 - mu * mu).max(0.0).sqrt();
+                    let phi = (kp as f64 + rng.uniform()) * dphi;
+                    let u = rng.uniform();
+                    let r3 = x1l * x1l * x1l + u * (x1r * x1r * x1r - x1l * x1l * x1l);
+                    let r = r3.cbrt() * scales.length.value();
+                    let rhat = [sin_theta * phi.cos(), sin_theta * phi.sin(), mu];
+                    let position = [r * rhat[0], r * rhat[1], r * rhat[2]];
+                    emit_packets(
+                        &mut events,
+                        &mut rng,
+                        &cell,
+                        p,
+                        t_prime_s,
+                        position,
+                        rhat,
+                        packet_weight,
+                        1,
+                        max_events,
+                        ii as u32,
+                    );
+                }
             }
         }
     }
 
     events
-}
-
-/// DETERMINISTIC sky-map deposition for a spherically-symmetric (1d radial) blast — the noise-free
-/// alternative to the monte-carlo photon path (Zrake, Xie & MacFadyen 2018, eq. 1-2). instead of
-/// SAMPLING photon packets, each (radius, direction) patch deposits its lab-frame monochromatic
-/// synchrotron emissivity DIRECTLY onto the sky-plane pixel it projects to, gated by the
-/// equal-arrival-time surface. no shot noise -> a continuous gradient at any photon-free resolution.
-///
-/// the image accumulates, per pixel, `delta^doppler_power * j'_nu'(nu') * dV * dt_lab` summed over
-/// the patches whose EATS arrival lands in `[obs_time_s +/- half_window_s]`: `j'_nu'` is the COMOVING
-/// emissivity (`emissivity` x `spectral_shape`) at the comoving frequency `nu' = nu(1+z)/delta`, `dV`
-/// the patch lab volume, `dt_lab` the lab-time interval this snapshot represents. the caller divides
-/// by pixel area, the observer-time window, and 4 pi d_L^2 to reach a flux density (calibrated to
-/// agree with the monte-carlo path on F_nu). axisymmetric geometry: a 1d radial profile tessellated
-/// over `n_mu x n_phi` equal-solid-angle directions.
-#[allow(clippy::too_many_arguments)]
-pub fn compute_skymap_deposit_spherical(
-    cond: &SimConditions,
-    scales: &QuantScales,
-    fields: &HydroFields,
-    x1: &[f64],
-    observer_direction: [f64; 3],
-    obs_time_s: f64,
-    half_window_s: f64,
-    frequency_hz: f64,
-    redshift: f64,
-    doppler_power: f64,
-    n_pix: usize,
-    half_width: f64,
-    emit_dt_s: f64,
-    theta_max: f64,
-    n_mu: usize,
-    n_phi: usize,
-) -> Vec<f64> {
-    let mut image = vec![0.0; n_pix * n_pix];
-    let ni = x1.len();
-    if ni == 0 || n_pix == 0 || half_width <= 0.0 {
-        return image;
-    }
-    // n_mu / n_phi / theta_max / observer_direction are legacy/irrelevant: a SPHERE looks the same
-    // from any angle, and the azimuth is integrated ANALYTICALLY (no tessellation). kept for the
-    // binding signature.
-    let _ = (theta_max, n_mu, n_phi, observer_direction);
-    let p = cond.p;
-    let t_prime_s = (cond.current_time * scales.time).value();
-    let one_plus_z = 1.0 + redshift;
-    let c = C_LIGHT.value();
-
-    // a SPHERICALLY-SYMMETRIC blast is azimuthally symmetric on the sky: the image is a function of
-    // the projected radius rho ALONE. so accumulate the 1D RADIAL flux profile and render it as
-    // image[x,y] = profile(sqrt(x^2+y^2)) -- the azimuth integral is the analytic factor 2*pi, with
-    // NO per-azimuth loop. the EATS at t_obs selects, per shell radius r, the cone cos(alpha)=r.n/r
-    // in the arrival window; that ring projects to rho = r*sin(alpha). cost is O(n_radii*n_cos) +
-    // O(n_pix^2), independent of how thin the shock is (millions of zones at high gamma stay fast).
-    let proj_lo = c * (t_prime_s - (obs_time_s + half_window_s) / one_plus_z);
-    let proj_hi = c * (t_prime_s - (obs_time_s - half_window_s) / one_plus_z);
-
-    let n_rho = n_pix;
-    let mut radial_flux = vec![0.0; n_rho];
-
-    for ii in 0..ni {
-        let r = (x1[ii] * scales.length).value();
-        if r <= 0.0 {
-            continue;
-        }
-        // cos(alpha) = r.n / r in the EATS window [proj_lo, proj_hi]/r, clamped to a real cone.
-        let cos_lo = (proj_lo / r).max(-1.0);
-        let cos_hi = (proj_hi / r).min(1.0);
-        if cos_lo >= cos_hi {
-            continue; // this shell never crosses the arrival window
-        }
-
-        let (x1l, x1r) = radial_shell_edges(x1, ii);
-        let cell = cell_state(cond, scales, fields, ii, p, t_prime_s);
-        // Zrake's j'_nu' is the ISOTROPIC (per-steradian) comoving emissivity; `emissivity` is the
-        // angle-integrated form, so divide by 4 pi. lab transform j_nu = delta^2 j'_nu' (the
-        // j_nu/nu^2 invariant), applied below as delta^doppler_power.
-        let j_peak = emissivity(cell.bfield, cell.n_e, p).value() / (4.0 * PI); // [erg/(s Hz cm^3 sr)]
-        let nu_c = Frequency::new(cell.nu_c);
-        let nu_m = Frequency::new(cell.nu_m);
-        let shell_vol =
-            (1.0 / 3.0) * (x1r * x1r * x1r - x1l * x1l * x1l) * scales.length.cubed().value();
-
-        // sample the cos band across its projected RADIAL width at ~pixel resolution.
-        let width_px = ((cos_hi - cos_lo) * r) / (2.0 * half_width) * n_pix as f64;
-        let n_cos = (width_px.ceil() as usize).clamp(2, n_pix);
-        let dcos = (cos_hi - cos_lo) / n_cos as f64;
-
-        for kc in 0..n_cos {
-            let cos_a = cos_lo + (kc as f64 + 0.5) * dcos;
-            let sin_a = (1.0 - cos_a * cos_a).max(0.0).sqrt();
-            let delta = 1.0 / (cell.w * (1.0 - cell.beta * cos_a));
-            let nu_prime = Frequency::new(frequency_hz * one_plus_z / delta);
-            let j_nu = j_peak * spectral_shape(p, nu_prime, nu_c, nu_m);
-            // the FULL ring at rho = r*sin_a: its azimuth integral is the factor 2*pi (dV = shell_vol
-            // dcos dpsi, integrated over psi -> shell_vol dcos 2*pi).
-            let ring_flux =
-                delta.powf(doppler_power) * j_nu * shell_vol * dcos * 2.0 * PI * emit_dt_s;
-            let rho = r * sin_a;
-            let bin = (rho / half_width * n_rho as f64) as usize;
-            if bin < n_rho {
-                radial_flux[bin] += ring_flux;
-            }
-        }
-    }
-
-    // render the radial profile onto the 2D grid: each pixel takes its radial bin's flux shared
-    // equally among the pixels in that bin, so image.sum() == total flux and image/pixel_area is the
-    // surface brightness (the calibration is unchanged). azimuthally exact -> no spokes.
-    let px = 2.0 * half_width / n_pix as f64;
-    let mut count = vec![0u32; n_rho];
-    for iy in 0..n_pix {
-        let y = -half_width + (iy as f64 + 0.5) * px;
-        for ix in 0..n_pix {
-            let x = -half_width + (ix as f64 + 0.5) * px;
-            let bin = ((x * x + y * y).sqrt() / half_width * n_rho as f64) as usize;
-            if bin < n_rho {
-                count[bin] += 1;
-            }
-        }
-    }
-    for iy in 0..n_pix {
-        let y = -half_width + (iy as f64 + 0.5) * px;
-        for ix in 0..n_pix {
-            let x = -half_width + (ix as f64 + 0.5) * px;
-            let bin = ((x * x + y * y).sqrt() / half_width * n_rho as f64) as usize;
-            if bin < n_rho && count[bin] > 0 {
-                image[iy * n_pix + ix] = radial_flux[bin] / count[bin] as f64;
-            }
-        }
-    }
-    image
 }
 
 /// synchrotron self-absorption optical depth over `path_length` (dimensionless). the SSA
@@ -778,6 +674,7 @@ pub fn monte_carlo_radiative_transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::C_LIGHT;
     use crate::synchrotron::powerlaw_flux;
     use crate::units::{
         EnergyDensity, Frequency, Length, MassDensity, SpectralPower, Time, Velocity,
@@ -1032,6 +929,164 @@ mod tests {
         assert!(
             mus.iter().any(|&m| m > 0.5) && mus.iter().any(|&m| m < -0.5),
             "both hemispheres"
+        );
+    }
+
+    // a budget-sized tessellation reaches the OUTERMOST radial cell: with a tessellation
+    // larger than the budget, the max_events cap truncates the ascending radius loop and the
+    // outer shells (the shock, in a blast-wave profile) silently never emit — a large flux
+    // bias toward the blast interior.
+    #[test]
+    fn budget_tessellation_covers_all_radii() {
+        let cond = conditions();
+        let sc = scales();
+        let ni = 500;
+        let x1: Vec<f64> = (0..ni).map(|i| 1.0e17 * (1.0 + 1.0e-4 * i as f64)).collect();
+        let (rho, gb, pre) = (vec![1.0e-24; ni], vec![2.0; ni], vec![1.0e-6; ni]);
+        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+
+        let budget = 50_000_u64;
+        let (n_mu, n_phi) = spherical_tessellation_for_budget(ni, 1, budget);
+        let ev = generate_photon_events_spherical(
+            &cond, &sc, &fields, &x1, 3, PI, n_mu, n_phi, 1, budget,
+        );
+        assert!(!ev.is_empty());
+        let r_max_seen = ev.iter().map(|e| e.radius()).fold(0.0_f64, f64::max);
+        let (x1l_last, _) = radial_shell_edges(&x1, ni - 1);
+        assert!(
+            r_max_seen >= x1l_last,
+            "outermost shell never emitted: max packet radius {r_max_seen} < shell edge {x1l_last}"
+        );
+    }
+
+    // packet positions are sampled CONTINUOUSLY within their (r, mu, phi) cells, so EATS
+    // arrival times t_obs = t_em - r.n/c fill their span instead of sitting on the angular
+    // lattice. cell-centered positions quantize the arrivals into n_mu discrete rings ~span/n_mu
+    // apart; an observer window narrower than that spacing then catches either one full ring or
+    // nothing — a 200x flux bias and a hollow image. the gate: windows much narrower than the
+    // old lattice spacing must each catch a packet share proportional to their width.
+    #[test]
+    fn spherical_arrival_times_are_continuous() {
+        let cond = conditions();
+        let sc = scales();
+        let ni = 8;
+        let x1: Vec<f64> = (0..ni).map(|i| 1.0e17 * (1.0 + 0.001 * i as f64)).collect();
+        let (rho, gb, pre) = (vec![1.0e-24; ni], vec![10.0; ni], vec![1.0e-6; ni]);
+        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+
+        let n_mu = 16;
+        let ev = generate_photon_events_spherical(
+            &cond, &sc, &fields, &x1, 11, PI, n_mu, 32, 8, 1_000_000,
+        );
+        assert!(!ev.is_empty());
+
+        // observer along +z: arrival = t_em - z/c; the span is set by the sphere diameter.
+        let c = C_LIGHT.value();
+        let arrivals: Vec<f64> = ev.iter().map(|e| e.t_emission - e.z / c).collect();
+        let lo = arrivals.iter().cloned().fold(f64::INFINITY, f64::min);
+        let hi = arrivals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        let span = hi - lo;
+        assert!(span > 0.0);
+
+        // 8 windows, each 1/8 of the OLD lattice spacing (span/n_mu), spread across the span:
+        // continuous sampling puts packets in EVERY one; lattice sampling leaves most empty.
+        let w = span / (n_mu as f64 * 8.0);
+        for k in 0..8 {
+            let center = lo + span * (k as f64 + 0.5) / 8.0;
+            let n_in = arrivals
+                .iter()
+                .filter(|&&t| (t - center).abs() <= 0.5 * w)
+                .count();
+            assert!(
+                n_in > 0,
+                "window {k} at {center} (width {w}) caught no packets: arrivals are latticed"
+            );
+        }
+
+        // the packet radii fill the shells rather than sitting at the cell centers.
+        let radii: Vec<f64> = ev.iter().map(|e| e.radius()).collect();
+        let distinct = {
+            let mut r = radii.clone();
+            r.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            r.dedup_by(|a, b| (*a - *b).abs() < 1.0e-3);
+            r.len()
+        };
+        assert!(
+            distinct > 4 * ni,
+            "only {distinct} distinct radii for {ni} shells: radii are latticed"
+        );
+    }
+
+    // THE UNIFICATION GATE: the monte-carlo packet catalog and the deterministic deposit
+    // measure the SAME flux density, because both are normalized by the SPN98 per-Hz
+    // emissivity (packets carry the band-integrated energy, importance-sampled in frequency;
+    // the deposit integrates emissivity x shape directly). one wide observer-time bin over the
+    // full arrival span, one frequency, z = 0: F_mc / F_deposit = 1 up to shot noise. (the two
+    // paths previously used unrelated normalizations — a bolometric gamma_min^2 budget vs the
+    // spectral emissivity — and disagreed by ~50x.)
+    #[test]
+    fn monte_carlo_flux_matches_deposit() {
+        let cond = conditions();
+        let sc = scales();
+        let ni = 16;
+        let x1: Vec<f64> = (0..ni).map(|i| 1.0e17 * (1.0 + 0.01 * i as f64)).collect();
+        let (rho, gb, pre) = (vec![1.0e-24; ni], vec![2.0; ni], vec![1.0e-6; ni]);
+        let fields = HydroFields { rho: &rho, gamma_beta: &gb, pre: &pre };
+
+        let nu0 = 1.0e9;
+        let d_l = 1.0e26;
+        let c = C_LIGHT.value();
+        let day = 86_400.0;
+
+        // one observer-time bin covering the whole shell's arrival span [t_em - r/c, t_em + r/c].
+        let r_max = x1[ni - 1];
+        let t_lo_s = cond.current_time - 1.05 * r_max / c;
+        let t_hi_s = cond.current_time + 1.05 * r_max / c;
+
+        // monte-carlo flux [mJy] from the packet catalog.
+        let ev = generate_photon_events_spherical(
+            &cond, &sc, &fields, &x1, 42, PI, 64, 64, 4, u64::MAX,
+        );
+        let lc = crate::observe::compute_lightcurve_from_events(
+            &ev,
+            [0.0, 0.0, 1.0],
+            &[nu0],
+            0.0,
+            d_l,
+            &[t_lo_s / day, t_hi_s / day],
+            3.0,
+            0.2,
+        );
+        let f_mc = lc.fluxes[0];
+
+        // deposit flux [mJy]: image sum / (4 pi d_L^2 dt_obs), same window and frequency.
+        let n_pix = 96;
+        let img = crate::deposit::compute_skymap_deposit_spherical(
+            &cond,
+            &sc,
+            &fields,
+            &x1,
+            [0.0, 0.0, 1.0],
+            0.5 * (t_lo_s + t_hi_s),
+            0.5 * (t_hi_s - t_lo_s),
+            nu0,
+            0.0,
+            2.0,
+            n_pix,
+            1.3e17,
+            cond.dt,
+            PI,
+            64,
+            128,
+        );
+        let f_dep =
+            img.iter().sum::<f64>() / (4.0 * PI * d_l * d_l * (t_hi_s - t_lo_s)) * 1.0e26;
+
+        assert!(f_mc > 0.0 && f_dep > 0.0, "both paths must see flux: mc {f_mc} dep {f_dep}");
+        let ratio = f_mc / f_dep;
+        assert!(
+            (0.8..1.25).contains(&ratio),
+            "unified emissivity: F_mc / F_deposit = {ratio} (mc {f_mc} mJy, deposit {f_dep} mJy)"
         );
     }
 

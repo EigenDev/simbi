@@ -22,12 +22,11 @@
 //  let events = generate_events_from_cells(&cells, &micro, seed, 4, max_events);
 // =============================================================================
 
-use crate::constants::{C_LIGHT, PI, SIGMA_THOMSON};
 use crate::coords::Coords;
 use crate::event::PhotonEvent;
 use crate::rng::Rng;
 use crate::transfer::{CellState, emit_packets};
-use crate::units::{Energy, EnergyDensity, Time, Volume};
+use crate::units::{Energy, Time, Volume};
 
 /// a geometry-neutral hydro cell, in the global Cartesian frame the afterglow works in.
 #[derive(Clone, Copy, Debug)]
@@ -98,8 +97,6 @@ pub fn generate_events_from_cells(
 ) -> Vec<PhotonEvent> {
     let mut rng = Rng::seed(seed);
     let mut events = Vec::new();
-    let energy_prefactor = (4.0 / 3.0) * SIGMA_THOMSON * C_LIGHT;
-    let power_law_factor = if micro.p > 3.0 { (micro.p - 1.0) / (micro.p - 3.0) } else { 1.0 };
 
     for (id, c) in cells.iter().enumerate() {
         if events.len() as u64 >= max_events {
@@ -121,16 +118,11 @@ pub fn generate_events_from_cells(
             c.t_emission / w,
         );
 
-        // emitted synchrotron energy over dt -> equal-weight packets (same form as the radial path).
-        let u_b: EnergyDensity = cell.bfield.squared() / (8.0 * PI);
-        let gamma_e_sq_avg = cell.gamma_min * cell.gamma_min * power_law_factor;
-        let total_energy: Energy = energy_prefactor
-            * (beta * beta)
-            * u_b
-            * cell.n_e
-            * Volume::new(c.volume)
-            * Time::new(micro.dt)
-            * gamma_e_sq_avg;
+        // emitted comoving energy in the sampled band over the represented lab interval:
+        // (band-integrated SPN98 emissivity) x dV_lab x dt_lab — the same normalization the
+        // radial generators and the deterministic deposit use. equal-weight packets.
+        let total_energy: Energy =
+            cell.band_power_density(micro.p) * Volume::new(c.volume) * Time::new(micro.dt);
         let packet_weight = (total_energy / photons_per_cell as f64).value();
 
         emit_packets(
@@ -145,6 +137,7 @@ pub fn generate_events_from_cells(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::C_LIGHT;
     use crate::observe::compute_skymap;
     use std::f64::consts::PI;
 
@@ -216,7 +209,7 @@ mod tests {
                 rho: 1e-24, pre: 1e-3, volume: 1e45, t_emission: t_emit,
             };
             let ev = generate_events_from_cells(&[cell], &micro(), 2, 200, 1_000_000);
-            let img = compute_skymap(&ev, obs, t_arr_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0);
+            let img = compute_skymap(&ev, obs, t_arr_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0, 0.0, 0.1);
             img.intensity.iter().sum::<f64>()
         };
         // lateral velocity toward the observer (+x) beams more flux at it than away (-x) — a

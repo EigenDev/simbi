@@ -133,6 +133,75 @@ pub fn spectral_shape(p: f64, nu_prime: Frequency, nu_c: Frequency, nu_m: Freque
     }
 }
 
+/// the piecewise power-law decomposition of `spectral_shape` restricted to `[nu_lo, nu_hi]`:
+/// three segments split at the (band-clamped) spectral breaks, each an exact `A nu^a` with the
+/// SAME normalization as `spectral_shape` (amplitudes anchored at the true, unclamped breaks, so
+/// `amps[k] * nu^exps[k] == spectral_shape(nu)` inside segment k). this is the single source of
+/// the spectrum's segment structure — the frequency sampler and the band-energy integral both
+/// consume it, so the monte-carlo packets and the deterministic deposit share one emissivity.
+/// frequencies are raw f64 [Hz] (the amplitudes carry the compensating Hz^-a).
+pub struct SpectralSegments {
+    pub bounds: [f64; 4],
+    pub exps:   [f64; 3],
+    pub amps:   [f64; 3],
+}
+
+pub fn spectral_segments(
+    p: f64,
+    nu_lo: f64,
+    nu_hi: f64,
+    nu_c: f64,
+    nu_m: f64,
+) -> SpectralSegments {
+    let slow_cool = nu_c > nu_m;
+    let mid = if slow_cool { -0.5 * (p - 1.0) } else { -0.5 };
+    let exps = [1.0 / 3.0, mid, -0.5 * p];
+    // true break locations (b1 = spectral peak where the shape is 1). an INFINITE break (no
+    // cooling within the emitter time) leaves its segment empty; anchor its amplitude at the
+    // band top so the algebra stays finite (the amplitude of an empty segment never enters).
+    let b1 = nu_m.min(nu_c);
+    let b2 = nu_m.max(nu_c);
+    let b1a = if b1.is_finite() { b1 } else { nu_hi };
+    let b2a = if b2.is_finite() { b2 } else { nu_hi };
+    // amplitudes by continuity, anchored so shape(b1) = 1 (spectral_shape's normalization).
+    let a0 = b1a.powf(-exps[0]);
+    let a1 = a0 * b1a.powf(exps[0] - exps[1]);
+    let a2 = a1 * b2a.powf(exps[1] - exps[2]);
+    SpectralSegments {
+        bounds: [nu_lo, b1a.clamp(nu_lo, nu_hi), b2a.clamp(nu_lo, nu_hi), nu_hi],
+        exps,
+        amps: [a0, a1, a2],
+    }
+}
+
+/// the integral of `nu^a` over [lo, hi] (the a = -1 case is the logarithm).
+#[inline]
+pub(crate) fn power_integral(a: f64, lo: f64, hi: f64) -> f64 {
+    if hi <= lo {
+        0.0
+    } else if (a + 1.0).abs() < 1.0e-9 {
+        (hi / lo).ln()
+    } else {
+        (hi.powf(a + 1.0) - lo.powf(a + 1.0)) / (a + 1.0)
+    }
+}
+
+/// the band-integrated spectral shape `int spectral_shape(nu) dnu` over `[nu_lo, nu_hi]` [Hz].
+/// `emissivity * band_integrated_shape` is the total per-volume synchrotron power radiated in
+/// the band — the normalization that ties a monte-carlo packet budget to the per-Hz emissivity
+/// the deterministic deposit uses.
+pub fn band_integrated_shape(p: f64, nu_lo: f64, nu_hi: f64, nu_c: f64, nu_m: f64) -> Frequency {
+    // NaN-safe rejection: a degenerate or non-finite band integrates to zero.
+    if !(nu_lo.is_finite() && nu_hi.is_finite()) || nu_hi <= nu_lo || nu_lo <= 0.0 {
+        return Frequency::new(0.0);
+    }
+    let seg = spectral_segments(p, nu_lo, nu_hi, nu_c, nu_m);
+    let total: f64 = (0..3)
+        .map(|k| seg.amps[k] * power_integral(seg.exps[k], seg.bounds[k], seg.bounds[k + 1]))
+        .sum();
+    Frequency::new(total)
+}
+
 /// the broken-power-law synchrotron spectrum (Sari, Piran & Narayan 1998): scale the peak power
 /// `power_max` by the spectral shape at the (emitter-frame) frequency `nu_prime`, given the
 /// cooling break `nu_c` and the injection break `nu_m`. slow cooling is nu_c > nu_m. the frequency
@@ -239,6 +308,70 @@ mod tests {
         let f = |hz: f64| powerlaw_flux(pm, p, Frequency::new(hz), nu_c, nu_m).value();
         let slope = (f(1.0e12) / f(1.0e11)).log10();
         assert!((slope - (-0.5)).abs() < 1e-6);
+    }
+
+    // the segment decomposition reproduces spectral_shape POINTWISE in every segment and for
+    // both cooling orders — the single-source guarantee that lets the sampler and the band
+    // integral share the deposit's spectrum.
+    #[test]
+    fn segments_match_spectral_shape_pointwise() {
+        for &(nu_m, nu_c) in &[(1.0e10_f64, 1.0e14_f64), (1.0e14, 1.0e10)] {
+            let p = 2.5;
+            let (nu_lo, nu_hi) = (1.0e6, 1.0e18);
+            let seg = spectral_segments(p, nu_lo, nu_hi, nu_c, nu_m);
+            for k in 0..3 {
+                if seg.bounds[k + 1] <= seg.bounds[k] {
+                    continue;
+                }
+                for frac in [0.1, 0.5, 0.9] {
+                    let nu = seg.bounds[k] * (seg.bounds[k + 1] / seg.bounds[k]).powf(frac);
+                    let from_seg = seg.amps[k] * nu.powf(seg.exps[k]);
+                    let from_shape = spectral_shape(
+                        p,
+                        Frequency::new(nu),
+                        Frequency::new(nu_c),
+                        Frequency::new(nu_m),
+                    );
+                    assert!(
+                        (from_seg / from_shape - 1.0).abs() < 1e-9,
+                        "segment {k} at nu={nu}: {from_seg} vs {from_shape}"
+                    );
+                }
+            }
+        }
+    }
+
+    // the analytic band integral agrees with brute-force log-grid quadrature of spectral_shape,
+    // including a band that clips the breaks.
+    #[test]
+    fn band_integral_matches_quadrature() {
+        let p = 2.5;
+        for &(nu_m, nu_c, nu_lo, nu_hi) in &[
+            (1.0e10_f64, 1.0e14_f64, 1.0e6_f64, 1.0e18_f64),
+            (1.0e14, 1.0e10, 1.0e6, 1.0e18),
+            (1.0e10, 1.0e14, 1.0e12, 1.0e13), // interior band, no breaks inside
+        ] {
+            let analytic =
+                band_integrated_shape(p, nu_lo, nu_hi, nu_c, nu_m).value();
+            let n = 200_000;
+            let lg_lo = nu_lo.ln();
+            let dlg = (nu_hi / nu_lo).ln() / n as f64;
+            let mut quad = 0.0;
+            for i in 0..n {
+                let nu = (lg_lo + (i as f64 + 0.5) * dlg).exp();
+                quad += spectral_shape(
+                    p,
+                    Frequency::new(nu),
+                    Frequency::new(nu_c),
+                    Frequency::new(nu_m),
+                ) * nu
+                    * dlg; // dnu = nu dlg
+            }
+            assert!(
+                (analytic / quad - 1.0).abs() < 5.0e-3,
+                "band [{nu_lo},{nu_hi}]: analytic {analytic} vs quadrature {quad}"
+            );
+        }
     }
 
     // a smoke test that the typed primitives compose end-to-end with realistic CGS magnitudes.

@@ -195,6 +195,11 @@ pub fn compute_lightcurve_from_events(
 ///
 /// `doppler_power` is the one physics knob: 3 for specific intensity (I_nu/nu^3 invariant),
 /// 4 bolometric — calibrate against the analytic Granot-Sari image.
+///
+/// `frequency_hz > 0` selects the OBSERVED frequency band `nu0 +/- frac_bandwidth/2 * nu0`
+/// per packet (nu_obs = delta * nu_emit / (1+z), the same selection the light curve uses), so
+/// the image is the monochromatic per-Hz flux map a `1/dnu` calibration expects. 0 disables
+/// banding (an all-band energy image — divide by a bandwidth at your peril).
 #[allow(clippy::too_many_arguments)]
 pub fn compute_skymap(
     events: &[PhotonEvent],
@@ -207,6 +212,8 @@ pub fn compute_skymap(
     doppler_power: f64,
     n_pix: usize,
     fixed_half_width: f64,
+    frequency_hz: f64,
+    frac_bandwidth: f64,
 ) -> SkyImage {
     let n = normalize(observer_direction);
     // an orthonormal basis (e1, e2) spanning the sky plane perpendicular to n.
@@ -240,6 +247,15 @@ pub fn compute_skymap(
         let b = evt.beta_vec;
         let beta_dot_n = b[0] * n[0] + b[1] * n[1] + b[2] * n[2];
         let delta = 1.0 / (evt.lorentz_factor() * (1.0 - beta_dot_n));
+
+        // monochromatic band on the OBSERVED frequency (identical to the light curve's
+        // selection), so the accumulated energy corresponds to the calibration bandwidth.
+        if frequency_hz > 0.0 {
+            let nu_obs = delta * evt.nu_emit / one_plus_z;
+            if (nu_obs - frequency_hz).abs() > 0.5 * frequency_hz * frac_bandwidth {
+                continue;
+            }
+        }
         let weight = evt.energy_weight * evt.stokes_i * delta.powf(doppler_power);
 
         let proj1 = evt.x * e1[0] + evt.y * e1[1] + evt.z * e1[2];
@@ -477,7 +493,7 @@ mod tests {
                 }
             }
         }
-        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], 0.0, 1.0e9, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0);
+        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], 0.0, 1.0e9, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0, 0.0, 0.1);
         let nonzero: Vec<f64> = img.intensity.iter().copied().filter(|&v| v > 0.0).collect();
         let mean = nonzero.iter().sum::<f64>() / nonzero.len() as f64;
         let maxv = img.intensity.iter().copied().fold(0.0, f64::max);
@@ -491,7 +507,7 @@ mod tests {
         // shell radius R, R/c ~ 38.6 day; select theta ~ 60 deg (z = 0.5 R -> arrival -19.3 day).
         let r = 1.0e17;
         let evts = shell_events(r, 10.0, 240, 240);
-        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], -19.3, 4.0, 0.0, 1.0e30, 0.0, 3.0, 64, 0.0);
+        let img = compute_skymap(&evts, [0.0, 0.0, 1.0], -19.3, 4.0, 0.0, 1.0e30, 0.0, 3.0, 64, 0.0, 0.0, 0.1);
         let prof = img.radial_profile(10);
         let peak = argmax(&prof);
         assert!(peak >= 5, "ring should peak off-center (got ring {peak}): {prof:?}");
@@ -520,7 +536,7 @@ mod tests {
             }]
         };
         let total = |g: f64| {
-            let img = compute_skymap(&one(g), [0.0, 0.0, 1.0], arrival_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0);
+            let img = compute_skymap(&one(g), [0.0, 0.0, 1.0], arrival_day, 4.0, 0.0, 1.0e30, 0.0, 3.0, 16, 0.0, 0.0, 0.1);
             img.intensity.iter().sum::<f64>()
         };
         assert!(total(10.0) > total(2.0), "delta^3 should favor the faster fluid");

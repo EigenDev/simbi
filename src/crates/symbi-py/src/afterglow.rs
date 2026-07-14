@@ -32,9 +32,9 @@ use symbi_afterglow::event::PhotonEvent;
 use symbi_afterglow::observe::{
     compute_lightcurve_from_events, compute_skymap as observe_compute_skymap,
 };
+use symbi_afterglow::deposit::{VelComponents, compute_skymap_deposit};
 use symbi_afterglow::transfer::{
-    compute_skymap_deposit_spherical, generate_photon_events, generate_photon_events_spherical,
-    monte_carlo_radiative_transfer,
+    generate_photon_events, generate_photon_events_spherical, monte_carlo_radiative_transfer,
 };
 use symbi_afterglow::units::{Frequency, Length};
 use symbi_afterglow::{HydroFields, Mesh, QuantScales, SimConditions};
@@ -207,12 +207,19 @@ fn generate_photon_events_py(
     let md = mesh_data(mesh)?;
 
     let events = if md.data_dim <= 1 {
-        // the spherical BMK path: synthesize a full sphere from the 1d radial profile.
-        // angular resolution and per-direction packet budget are derived from the cap so
-        // a user only sets max_events; full sphere (theta_max = pi).
+        // the spherical BMK path: synthesize a full sphere from the 1d radial profile, with
+        // the angular tessellation SIZED FROM THE BUDGET so every radial cell emits (see
+        // `spherical_tessellation_for_budget`); full sphere (theta_max = pi).
         let ppd = if photons_per_cell > 0 { photons_per_cell } else { 1 };
+        let (n_mu, n_phi) =
+            symbi_afterglow::transfer::spherical_tessellation_for_budget(
+                md.x1.len(),
+                ppd,
+                max_events,
+            );
         generate_photon_events_spherical(
-            &cond, &scales, &hf, &md.x1, seed, std::f64::consts::PI, 64, 128, ppd, max_events,
+            &cond, &scales, &hf, &md.x1, seed, std::f64::consts::PI, n_mu, n_phi, ppd,
+            max_events,
         )
     } else {
         let mesh = Mesh {
@@ -280,9 +287,12 @@ fn monte_carlo_radiative_transfer_py(
 ///
 /// returns (intensity flat row-major [n_pix*n_pix], n_pix, half_width [cm]); the caller
 /// reshapes to [n_pix, n_pix]. doppler_power: 3 = specific intensity, 4 = bolometric.
+/// `frequency > 0` selects the observed band nu0 +/- frac_bandwidth/2 * nu0 per packet
+/// (nu_obs = delta nu_emit / (1+z)) so a `1/dnu` calibration reaches a true per-Hz flux;
+/// 0 accumulates every packet (an all-band energy image).
 #[pyfunction]
 #[pyo3(name = "skymap_from_events")]
-#[pyo3(signature = (events, observer_direction, observer_time, time_window=0.1, energy_min=0.0, energy_max=1.0e30, redshift=0.0, doppler_power=3.0, n_pix=256, half_width=0.0))]
+#[pyo3(signature = (events, observer_direction, observer_time, time_window=0.1, energy_min=0.0, energy_max=1.0e30, redshift=0.0, doppler_power=3.0, n_pix=256, half_width=0.0, frequency=0.0, frac_bandwidth=0.1))]
 #[allow(clippy::too_many_arguments)]
 fn skymap_from_events_py(
     events: &PhotonEvents,
@@ -295,6 +305,8 @@ fn skymap_from_events_py(
     doppler_power: f64,
     n_pix: usize,
     half_width: f64,
+    frequency: f64,
+    frac_bandwidth: f64,
 ) -> PyResult<(Vec<f64>, usize, f64)> {
     if observer_direction.len() != 3 {
         return Err(PyValueError::new_err(
@@ -314,6 +326,8 @@ fn skymap_from_events_py(
         doppler_power,
         n_pix,
         half_width,
+        frequency,
+        frac_bandwidth,
     );
     Ok((img.intensity, img.n_pix, img.half_width))
 }
@@ -580,18 +594,23 @@ fn lightcurve_from_events_py(
     Ok((lc.times, lc.fluxes, lc.frequencies))
 }
 
-/// DETERMINISTIC (noise-free) sky-map deposition for a 1d spherical blast — Zrake+2018 eq. 1-2.
-/// deposits each cell's lab-frame monochromatic emissivity onto the sky plane (no photon sampling),
-/// gated by the EATS window. `sim_cond["dt"]` carries the snapshot's lab-time interval (the same
+/// DETERMINISTIC (noise-free) sky-map deposition for a spherical-mesh blast in 1/2/3D —
+/// Zrake+2018 eq. 1-2. deposits each cell's lab-frame monochromatic emissivity onto the sky
+/// plane (no photon sampling), gated by the EATS window: a 1d radial profile uses the exact
+/// analytic-azimuth path; 2d (r, theta) and 3d (r, theta, phi) meshes sweep each cell's
+/// azimuth arcs at pixel resolution. optional `fields["v1"/"v2"/"v3"]` three-velocity
+/// components (units of c) capture lateral spreading; absent, the flow is radial from
+/// `gamma_beta`. `sim_cond["dt"]` carries the snapshot's lab-time interval (the same
 /// trapezoidal weight the photon generator uses), `obs_time`/`time_window` are in DAYS, and
-/// `half_width` [cm] is the caller-fixed image extent (so frames over many snapshots share a grid).
-/// returns the raw deposit image (row-major `[iy*n_pix+ix]`); the caller calibrates to mJy/mas^2.
+/// `half_width` [cm] is the caller-fixed image extent (so frames over many snapshots share a
+/// grid). returns the raw deposit image (row-major `[iy*n_pix+ix]`); the caller calibrates to
+/// mJy/mas^2 via F_nu = image.sum() / (4 pi d_L^2 dt_obs).
 #[pyfunction]
-#[pyo3(name = "skymap_deposit_spherical")]
+#[pyo3(name = "skymap_deposit")]
 #[pyo3(signature = (sim_cond, qscales, fields, mesh, observer_direction, obs_time, time_window,
                     frequency, redshift, half_width, n_pix=256, doppler_power=2.0))]
 #[allow(clippy::too_many_arguments)]
-fn skymap_deposit_spherical_py(
+fn skymap_deposit_py(
     sim_cond: &Bound<'_, PyDict>,
     qscales: &Bound<'_, PyDict>,
     fields: &Bound<'_, PyDict>,
@@ -623,15 +642,49 @@ fn skymap_deposit_spherical_py(
     let hf = HydroFields { rho: &rho, gamma_beta: &gamma_beta, pre: &pre };
     let md = mesh_data(mesh)?;
 
+    // optional three-velocity components for lateral spreading (v1 mandatory if any given).
+    let opt_field = |key: &str| -> Option<Vec<f64>> {
+        fields
+            .get_item(key)
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<Vec<f64>>().ok())
+    };
+    let v1 = opt_field("v1");
+    let v2 = opt_field("v2");
+    let v3 = opt_field("v3");
+    for (name, v) in [("v1", &v1), ("v2", &v2), ("v3", &v3)] {
+        if let Some(a) = v {
+            if a.len() != rho.len() {
+                return Err(PyValueError::new_err(format!(
+                    "fields['{name}'] length {} != rho length {}",
+                    a.len(),
+                    rho.len()
+                )));
+            }
+        }
+    }
+    let vels = v1.as_ref().map(|v1| VelComponents {
+        v1,
+        v2: v2.as_deref(),
+        v3: v3.as_deref(),
+    });
+
     const SECONDS_PER_DAY: f64 = 86_400.0;
     let nhat = [observer_direction[0], observer_direction[1], observer_direction[2]];
     let emit_dt_s = (cond.dt * scales.time).value();
     let obs_time_s = obs_time * SECONDS_PER_DAY;
     let half_window_s = 0.5 * time_window * SECONDS_PER_DAY;
 
-    Ok(compute_skymap_deposit_spherical(
-        &cond, &scales, &hf, &md.x1, nhat, obs_time_s, half_window_s, frequency, redshift,
-        doppler_power, n_pix, half_width, emit_dt_s, std::f64::consts::PI, 256, 50,
+    let mesh = Mesh {
+        x1: &md.x1,
+        x2: &md.x2,
+        x3: md.x3.as_deref(),
+        data_dim: md.data_dim,
+    };
+    Ok(compute_skymap_deposit(
+        &cond, &scales, &hf, &mesh, vels, nhat, obs_time_s, half_window_s, frequency, redshift,
+        doppler_power, n_pix, half_width, emit_dt_s,
     ))
 }
 
@@ -646,6 +699,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(read_photon_events_py, m)?)?;
     m.add_function(wrap_pyfunction!(photon_event_count_py, m)?)?;
     m.add_function(wrap_pyfunction!(read_photon_events_chunk_py, m)?)?;
-    m.add_function(wrap_pyfunction!(skymap_deposit_spherical_py, m)?)?;
+    m.add_function(wrap_pyfunction!(skymap_deposit_py, m)?)?;
     Ok(())
 }

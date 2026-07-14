@@ -263,6 +263,8 @@ pub type SpectralPower = Energy;
 pub type SpectralFlux = Quantity<P2, Z0, N4>;
 /// spectral emissivity, erg/(s cm^3 Hz) = erg/cm^3 (energy-density dimensions).
 pub type SpectralEmissivity = EnergyDensity;
+/// power per unit volume, erg/(s cm^3) — a band-integrated emissivity.
+pub type PowerDensity = Quantity<P2, N2, N6>;
 
 #[cfg(test)]
 mod tests {

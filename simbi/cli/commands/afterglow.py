@@ -38,15 +38,19 @@ def _report_spec_sources(near, observer_arg):
     )
 
 
-def _generate_catalog(path, args, rad_hydro, observer, manifest):
-    """generate a photon catalog in-process from a hydro checkpoint. returns the handle."""
+def _generate_catalog(path, args, rad_hydro, observer, manifest, emit_dt=None):
+    """generate a photon catalog in-process from a hydro checkpoint. `emit_dt` is the lab-time
+    interval [code units] this snapshot REPRESENTS in a multi-checkpoint array (its trapezoidal
+    share of the snapshot-time axis); omitted, the CFL step is the lone-snapshot fallback —
+    weighting an array member by the CFL dt undercounts its emitted energy by the cadence/CFL
+    ratio, typically ~1e5. returns the handle."""
     from simbi.reader import read_simulation
 
     from ...afterglow.inputs import build_fields, build_mesh
 
     data = read_simulation(path)
     sim_cond = {
-        "dt": data.metadata.dt,
+        "dt": emit_dt if emit_dt and emit_dt > 0.0 else data.metadata.dt,
         "theta_obs": np.deg2rad(args.observer_angle),
         "adiabatic_index": data.metadata.gamma,
         "current_time": data.metadata.time,
@@ -78,7 +82,7 @@ def _load_catalog(path, args, rad_hydro, observer, manifest):
     return _generate_catalog(path, args, rad_hydro, observer, manifest)
 
 
-def _iter_event_handles(path, args, rad_hydro, observer, manifest, chunk_size=4_000_000):
+def _iter_event_handles(path, args, rad_hydro, observer, manifest, chunk_size=4_000_000, emit_dt=None):
     """yield PhotonEvents handles for one input: a saved catalog is read in row-CHUNKS of
     `chunk_size` (O(chunk) memory, not O(file)), each yielded then discarded; a hydro
     checkpoint yields a single generated handle. additive reductions (skymap/lightcurve)
@@ -96,7 +100,7 @@ def _iter_event_handles(path, args, rad_hydro, observer, manifest, chunk_size=4_
             finally:
                 del cat
     else:
-        yield _generate_catalog(path, args, rad_hydro, observer, manifest)
+        yield _generate_catalog(path, args, rad_hydro, observer, manifest, emit_dt=emit_dt)
 
 
 def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, doppler_power):
@@ -104,7 +108,14 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
     memory is O(n_pix^2) regardless of checkpoint count (fine time binning -> smooth images
     without holding every photon). the shared field of view is --fov [mas] (one pass) or a
     two-pass auto (pass 1 finds the max extent, pass 2 accumulates). returns (image_2d, half_cm)."""
+    from ...afterglow.generate import _read_snapshot_time, _snapshot_emission_durations
+
     n_pix = args.n_pix
+    # each checkpoint emits over its trapezoidal share of the snapshot-time axis, not the CFL dt.
+    hydro = sorted((p for p in paths if not _is_event_catalog(p)), key=_read_snapshot_time)
+    durations = dict(
+        zip(hydro, _snapshot_emission_durations([_read_snapshot_time(p) for p in hydro]))
+    )
 
     def _reduce(path, half_width_cm):
         # accumulate over the input's event handles: a saved catalog streams in row-chunks
@@ -113,10 +124,13 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
         # the per-chunk grids differ but only the max extent `hw` is used, not the sum.
         total = None
         hw_max = 0.0
-        for cat in _iter_event_handles(path, args, rad_hydro, observer, manifest):
+        for cat in _iter_event_handles(
+            path, args, rad_hydro, observer, manifest, emit_dt=durations.get(path)
+        ):
             intensity, _, hw = rad_hydro.skymap_from_events(
                 cat, nhat, obs_time, time_window=args.time_window, redshift=observer.redshift,
                 doppler_power=doppler_power, n_pix=n_pix, half_width=half_width_cm,
+                frequency=float(observer.frequencies[0]), frac_bandwidth=0.1,
             )
             arr = np.asarray(intensity)
             total = arr if total is None else total + arr
@@ -147,10 +161,22 @@ def _stream_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, d
 def _combine_catalogs(paths, args, rad_hydro, observer, manifest):
     """load each input (checkpoint or catalog) and merge into ONE handle, so a movie can
     span the epochs the user provides. each checkpoint carries its own scale_factor_a, so
-    the lab-frame radii are epoch-consistent."""
+    the lab-frame radii are epoch-consistent; each emits over its trapezoidal share of the
+    snapshot-time axis (not the CFL dt)."""
+    from ...afterglow.generate import _read_snapshot_time, _snapshot_emission_durations
+
+    hydro = sorted((p for p in paths if not _is_event_catalog(p)), key=_read_snapshot_time)
+    durations = dict(
+        zip(hydro, _snapshot_emission_durations([_read_snapshot_time(p) for p in hydro]))
+    )
     catalog = None
     for path in paths:
-        part = _load_catalog(path, args, rad_hydro, observer, manifest)
+        if _is_event_catalog(path):
+            part = _load_catalog(path, args, rad_hydro, observer, manifest)
+        else:
+            part = _generate_catalog(
+                path, args, rad_hydro, observer, manifest, emit_dt=durations.get(path)
+            )
         if catalog is None:
             catalog = part
         else:
@@ -235,11 +261,12 @@ def _progress(iterable, total, label):
 def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, frequency):
     """DETERMINISTIC deposition over the snapshot ARRAY: each hydro checkpoint deposits its lab-frame
     emissivity onto a SHARED sky grid via the EATS, accumulated. noise-free (no photon sampling) ->
-    a continuous gradient. requires hydro checkpoints (1d spherical). returns (image_2d, half_cm)."""
+    a continuous gradient. spherical checkpoints in 1/2/3D; the velocity components ride along so
+    a laterally-spreading jet beams correctly. returns (image_2d, half_cm)."""
     from simbi.reader import read_simulation
 
     from ...afterglow.generate import _read_snapshot_time, _snapshot_emission_durations
-    from ...afterglow.inputs import build_fields, build_mesh
+    from ...afterglow.inputs import build_fields, build_mesh, build_velocity
 
     n_pix = args.n_pix
     qscales = manifest.to_qscales()
@@ -280,8 +307,10 @@ def _deposit_skymap(paths, args, rad_hydro, observer, manifest, obs_time, nhat, 
             "d_L": observer.luminosity_distance_cm(),
             "nus": [float(frequency)],
         }
-        img = rad_hydro.skymap_deposit_spherical(
-            sim_cond, qscales, build_fields(data), build_mesh(data), list(nhat),
+        # velocity components ride with the fields so lateral spreading beams correctly.
+        fields = build_fields(data) | build_velocity(data)
+        img = rad_hydro.skymap_deposit(
+            sim_cond, qscales, fields, build_mesh(data), list(nhat),
             float(obs_time), float(args.time_window), float(frequency), observer.redshift,
             float(half_width_cm), n_pix, 2.0,
         )
@@ -720,12 +749,13 @@ def setup_skymap_parser(subparsers) -> None:
     parser.add_argument(
         "--method",
         choices=["mc", "deposit"],
-        default="mc",
-        help="reduction method. 'mc' (default): monte-carlo photon catalog -- works on events "
-        "files OR checkpoints, and carries scattering/absorption/polarization, but needs many "
-        "photons + smoothing for clean images. 'deposit': DETERMINISTIC cell deposition "
-        "(zrake+2018) -- noise-free, publication-clean images from hydro CHECKPOINTS (1d "
-        "spherical), optically-thin synchrotron only.",
+        default=None,
+        help="reduction method; auto-selected when omitted (deposit for hydro checkpoints, "
+        "mc for a saved events catalog). 'deposit': DETERMINISTIC cell deposition "
+        "(zrake+2018) -- noise-free, publication-clean images from spherical checkpoints in "
+        "1/2/3D, optically-thin synchrotron only. 'mc': monte-carlo photon catalog -- works "
+        "on events files OR checkpoints and carries scattering/absorption/polarization, but "
+        "needs many photons + smoothing for clean images.",
     )
 
     parser.add_argument(
@@ -1002,9 +1032,16 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
     if getattr(args, "linear", False):
         args.log_decades = None
 
+    # method auto-selection: deposit is the default imager for hydro checkpoints (noise-free);
+    # a saved events catalog has no cells to deposit, so it routes to the mc reducer.
+    method = getattr(args, "method", None)
+    if method is None:
+        method = "mc" if _is_event_catalog(args.inputs[0]) else "deposit"
+        print(f"method: {method} (auto; override with --method)")
+
     # DETERMINISTIC deposition path (zrake+2018): no photon catalog, no shot noise. operates on
     # the hydro CHECKPOINT array directly, depositing each cell's emissivity onto a shared grid.
-    if getattr(args, "method", "mc") == "deposit":
+    if method == "deposit":
         if _is_event_catalog(args.inputs[0]):
             raise SystemExit(
                 "--method deposit needs hydro CHECKPOINTS, not an events file (it deposits cell "
@@ -1096,6 +1133,7 @@ def execute_skymap(args: Namespace, remaining: Optional[list] = None) -> None:
         intensity, npx, hw = rad_hydro.skymap_from_events(
             catalog, nh, obs_time, time_window=args.time_window, redshift=observer.redshift,
             doppler_power=doppler_power, n_pix=args.n_pix, half_width=0.0,
+            frequency=float(observer.frequencies[0]), frac_bandwidth=0.1,
         )
         return np.asarray(intensity).reshape(npx, npx), hw
 
@@ -1286,6 +1324,8 @@ def execute_movie(args: Namespace, remaining: Optional[list] = None) -> None:
             redshift=observer.redshift,
             doppler_power=doppler_power,
             n_pix=args.n_pix,
+            frequency=float(nu),
+            frac_bandwidth=0.1,
         )
         img = np.array(intensity).reshape(n_pix, n_pix)
         sb, flux_mjy = calibrate_skymap(img, half_width, observer, window, nu)

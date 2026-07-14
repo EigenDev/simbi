@@ -49,9 +49,24 @@ def stream_lightcurve(
 
     from .inputs import build_fields, build_mesh
 
+    from .generate import _read_snapshot_time, _snapshot_emission_durations
+
     nhat = [float(np.sin(theta_obs)), 0.0, float(np.cos(theta_obs))]
     edges = [float(t) for t in time_edges]
     freqs = [float(f) for f in frequencies]
+
+    # each hydro checkpoint emits over the lab-time interval it REPRESENTS (its trapezoidal
+    # share of the snapshot-time axis), not the CFL step — weighting by the CFL dt would
+    # undercount the emitted energy by (checkpoint cadence) / (CFL dt), typically ~1e5.
+    hydro_paths = sorted(
+        (p for p in checkpoints if not _is_event_catalog(p)), key=_read_snapshot_time
+    )
+    durations = dict(
+        zip(
+            hydro_paths,
+            _snapshot_emission_durations([_read_snapshot_time(p) for p in hydro_paths]),
+        )
+    )
 
     times: Any = None
     total: Any = None
@@ -77,8 +92,9 @@ def stream_lightcurve(
                 del catalog  # release this chunk before the next
         else:
             data = read_simulation(path)
+            emit_dt = durations.get(path, 0.0)
             sim_cond = {
-                "dt": data.metadata.dt,
+                "dt": emit_dt if emit_dt > 0.0 else data.metadata.dt,
                 "theta_obs": theta_obs,
                 "adiabatic_index": data.metadata.gamma,
                 "current_time": data.metadata.time,
