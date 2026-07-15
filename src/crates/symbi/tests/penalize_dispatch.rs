@@ -432,3 +432,55 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
         "the runtime-JIT'd iso box wall never penalized: {f:?}"
     );
 }
+
+// a SPINNING rigid box in initially-STILL fluid must drag the gas around: the no-slip surface
+// relaxes the velocity toward omega x r, so the wall imparts angular momentum and books a nonzero
+// reaction torque about z. an identical NON-spinning wall in still fluid imparts ~nothing.
+#[test]
+fn spinning_box_wall_imparts_torque_to_still_fluid() {
+    use symbi_ib::sdf::SdfExpr;
+    use symbi_ib::SurfaceSpec;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let build = |omega: f64| -> Sim {
+        let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+            .cells([N, N])
+            .origin([-L, -L])
+            .spacing([dx, dx])
+            .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+            .allocate()
+            .expect("sim")
+            .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+            .build()
+            .with_bodies(BodyCollection::new().add(
+                Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
+                    .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
+                    .with_spin(omega),
+            ));
+        // an elongated box, so the spin grabs the fluid.
+        sim.immersed.as_mut().unwrap().shapes[0] =
+            Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.1, 1.0]));
+        sim
+    };
+
+    let spinning = build(5.0);
+    dispatch_penalize(&spinning, 1e-3, GAMMA, 1.0);
+    let d = spinning.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert_eq!(d[0].mass_delta, 0.0, "a sealed spinning wall removes no mass");
+    let tau = d[0].torque_delta[2];
+    assert!(tau.abs() > 1e-6, "the spinning wall imparted no torque to the still fluid: {tau}");
+
+    // baseline: the SAME wall, not spinning, leaves still fluid still — negligible torque.
+    let still = build(0.0);
+    dispatch_penalize(&still, 1e-3, GAMMA, 1.0);
+    let d0 = still.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert!(
+        d0[0].torque_delta[2].abs() < 1e-12,
+        "a non-spinning wall in still fluid should impart no torque: {}",
+        d0[0].torque_delta[2],
+    );
+    assert!(
+        tau.abs() > 1e3 * d0[0].torque_delta[2].abs().max(1e-30),
+        "the spin torque must dominate the still baseline",
+    );
+}

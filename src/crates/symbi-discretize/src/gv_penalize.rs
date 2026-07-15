@@ -32,6 +32,7 @@ use symbi_ib::penalize::{penalize_cell, BodyKin, Property, Relax};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::Writes;
 use symbi_ir::{Gv, GvKernel, ParamExpr, Support};
+use symbi_ir::algebra::Scalar as _; // brings Gv::sin/cos (the rotation matrix) into scope
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -173,6 +174,21 @@ fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> Sdf
         None => SdfExpr::<Gv, 3>::Sphere { center, radius: Gv::scalar("body_0_racc") },
         Some(s) => s.lift(&|c| Gv::from_f64(c)).translated(center),
     }
+}
+
+/// the SPINNING body's mask: the shape lifted to Gv constants, rotated by the RUNTIME orientation
+/// `R(body_0_angle)` about z, then translated to the runtime body position. `R` is built from `Gv`
+/// cos/sin of the runtime angle scalar, so the mask (and its Dual-autodiff normal) track the spin as
+/// `body_0_angle` advances each step. rotation about z covers a 2D run and a 3D spin about z.
+fn body_mask_sdf_spinning(center: [Gv; 3], shape: &SdfExpr<f64, 3>) -> SdfExpr<Gv, 3> {
+    let a = Gv::scalar("body_0_angle");
+    let (cos, sin) = (a.cos(), a.sin());
+    let rot: [[Gv; 3]; 3] = [
+        [cos, Gv::ZERO - sin, Gv::ZERO],
+        [sin, cos, Gv::ZERO],
+        [Gv::ZERO, Gv::ZERO, Gv::ONE],
+    ];
+    shape.lift(&|c| Gv::from_f64(c)).rotated(rot).translated(center)
 }
 
 /// the dispatch output support for a body penalization kernel: the mask ball padded by
@@ -322,7 +338,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
 /// tangential, exact and finite. at p = 1 every wall factor carries an exact
 /// (1 - p) = 0 and the kernel reduces bit-for-bit to `penalize_drain`.
 pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, None)
+    penalize_porous_inner(coords, ndim, None, false)
 }
 
 /// the arbitrary-shape porous wall: the same relaxation stack as `penalize_porous_gv`, but the
@@ -334,13 +350,25 @@ pub fn penalize_porous_gv_shaped(
     ndim: usize,
     shape: &SdfExpr<f64, 3>,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, Some(shape))
+    penalize_porous_inner(coords, ndim, Some(shape), false)
+}
+
+/// the SPINNING arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
+/// rotated by the runtime orientation `R(body_0_angle)` and the surface velocity carries the spin
+/// `omega x r` (`body_0_omega`), so the wall drags the gas around as it turns.
+pub fn penalize_porous_gv_spinning(
+    coords: Coords,
+    ndim: usize,
+    shape: &SdfExpr<f64, 3>,
+) -> (GvKernel, Writes) {
+    penalize_porous_inner(coords, ndim, Some(shape), true)
 }
 
 fn penalize_porous_inner(
     coords: Coords,
     ndim: usize,
     shape: Option<&SdfExpr<f64, 3>>,
+    spin: bool,
 ) -> (GvKernel, Writes) {
     assert!((1..=3).contains(&ndim), "penalize_porous_gv: ndim must be 1..=3");
     begin_trace();
@@ -372,7 +400,11 @@ fn penalize_porous_inner(
     let x: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
-    let sdf = body_mask_sdf_shaped(center, shape);
+    let sdf = if spin {
+        body_mask_sdf_spinning(center, shape.expect("a spinning wall must have a shape"))
+    } else {
+        body_mask_sdf_shaped(center, shape)
+    };
     let phi = sdf.dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
 
@@ -409,7 +441,22 @@ fn penalize_porous_inner(
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
         if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
     }));
-    let kin = BodyKin::<Gv, 3> { u_solid, omega: Tensor::zeros(), e_wall: Gv::ZERO };
+    // a spinning wall's surface moves at u_solid + omega x r; omega is about z (`body_0_omega`).
+    let omega = if spin {
+        Tensor::<Gv, 3>::new([Gv::ZERO, Gv::ZERO, Gv::scalar("body_0_omega")])
+    } else {
+        Tensor::zeros()
+    };
+    let base_kin = BodyKin::<Gv, 3> { u_solid, omega, e_wall: Gv::ZERO };
+    // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
+    // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
+    // static path keeps the bare translational u_solid, bit-identical to before.
+    let kin = if spin {
+        let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+        base_kin.at(&x_rel)
+    } else {
+        base_kin
+    };
     let mut acc = Relax::<Gv, 3>::none();
     Property::PorousAccretor {
         p: porosity,
@@ -565,7 +612,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
 /// constant `cs` param (no energy channel), delta outputs mass + force only.
 /// `p = 1` reduces bit-for-bit to `penalize_drain_iso`.
 pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, None)
+    penalize_porous_iso_inner(coords, ndim, None, false)
 }
 
 /// the arbitrary-shape ISO porous wall: the energy-free counterpart of
@@ -575,13 +622,23 @@ pub fn penalize_porous_iso_gv_shaped(
     ndim: usize,
     shape: &SdfExpr<f64, 3>,
 ) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, Some(shape))
+    penalize_porous_iso_inner(coords, ndim, Some(shape), false)
+}
+
+/// the SPINNING ISO porous wall: the energy-free counterpart of `penalize_porous_gv_spinning`.
+pub fn penalize_porous_iso_gv_spinning(
+    coords: Coords,
+    ndim: usize,
+    shape: &SdfExpr<f64, 3>,
+) -> (GvKernel, Writes) {
+    penalize_porous_iso_inner(coords, ndim, Some(shape), true)
 }
 
 fn penalize_porous_iso_inner(
     coords: Coords,
     ndim: usize,
     shape: Option<&SdfExpr<f64, 3>>,
+    spin: bool,
 ) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!((1..=3).contains(&ndim), "penalize_porous_iso_gv: ndim must be 1..=3");
@@ -610,7 +667,11 @@ fn penalize_porous_iso_inner(
     });
     let x_cart = centroid_to_cartesian(coords, ndim, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sdf = body_mask_sdf_shaped(center, shape);
+    let sdf = if spin {
+        body_mask_sdf_spinning(center, shape.expect("a spinning wall must have a shape"))
+    } else {
+        body_mask_sdf_shaped(center, shape)
+    };
     let chi = symbi_ib::sdf::chi(sdf.dist(x), min_w);
     let inv_tau = cs / (c_drain * min_w);
     let rate_scale = cs / min_w;
@@ -637,7 +698,21 @@ fn penalize_porous_iso_inner(
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
         if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
     }));
-    let kin = BodyKin::<Gv, 3> { u_solid, omega: Tensor::zeros(), e_wall: Gv::ZERO };
+    let omega = if spin {
+        Tensor::<Gv, 3>::new([Gv::ZERO, Gv::ZERO, Gv::scalar("body_0_omega")])
+    } else {
+        Tensor::zeros()
+    };
+    let base_kin = BodyKin::<Gv, 3> { u_solid, omega, e_wall: Gv::ZERO };
+    // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
+    // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
+    // static path keeps the bare translational u_solid, bit-identical to before.
+    let kin = if spin {
+        let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+        base_kin.at(&x_rel)
+    } else {
+        base_kin
+    };
     let mut acc = Relax::<Gv, 3>::none();
     Property::PorousAccretor {
         p: porosity,

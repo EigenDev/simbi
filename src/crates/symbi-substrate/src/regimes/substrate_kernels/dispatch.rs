@@ -726,12 +726,13 @@ struct ShapedPenalizeKernel {
 fn shaped_penalize_kernel(
     ndim: usize,
     has_energy: bool,
+    spin: bool,
     shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
 ) -> Option<std::sync::Arc<ShapedPenalizeKernel>> {
     use std::sync::{Arc, OnceLock, RwLock};
     static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    let key = format!("{ndim}|{has_energy}|{shape:?}");
+    let key = format!("{ndim}|{has_energy}|{spin}|{shape:?}");
     if let Some(k) = cache.read().unwrap().get(&key) {
         return k.clone();
     }
@@ -740,10 +741,11 @@ fn shaped_penalize_kernel(
         return k.clone();
     }
     let cart = symbi_discretize::Coords::Cartesian;
-    let (gvk, writes) = if has_energy {
-        symbi_discretize::penalize_porous_gv_shaped(cart, ndim, shape)
-    } else {
-        symbi_discretize::penalize_porous_iso_gv_shaped(cart, ndim, shape)
+    let (gvk, writes) = match (has_energy, spin) {
+        (true, false) => symbi_discretize::penalize_porous_gv_shaped(cart, ndim, shape),
+        (true, true) => symbi_discretize::penalize_porous_gv_spinning(cart, ndim, shape),
+        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(cart, ndim, shape),
+        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(cart, ndim, shape),
     };
     let built = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok().map(|kernel| {
         Arc::new(ShapedPenalizeKernel {
@@ -785,19 +787,25 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         "arbitrary-shape immersed body {b}: Cartesian only (curvilinear shaped walls are a follow-on)",
     );
     let has_energy = sim.fields.cons.nrg_field().is_some();
-    let sk = shaped_penalize_kernel(D, has_energy, shape).unwrap_or_else(|| {
+    // a nonzero prescribed spin selects the rotating kernel (runtime R(angle) mask + omega x r wall).
+    let spin = im.bodies.get(b).omega != 0.0;
+    let sk = shaped_penalize_kernel(D, has_energy, spin, shape).unwrap_or_else(|| {
         panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
     });
 
-    // the bbox: the shape's body-local bounding ball translated to the runtime body position,
-    // padded by the chi saturation width, floored/ceiled to an index box (same law as the AOT path).
+    // the bbox: the shape's bounding ball, padded, floored/ceiled to an index box. a STATIC body
+    // uses the tight ball translated to the body position (center pos+lc, radius lr). a SPINNING
+    // body sweeps its shape through every orientation about the body center, so the mask reaches
+    // |lc| + lr from the position (center pos) — a conservative, orientation-independent box.
     let (lc, lr) = shape.bounding_ball().expect("shaped body must be bounded");
     let pos = im.bodies.get(b).position;
     let min_dx = (0..D).map(|a| sim.geom.dx[a]).fold(f64::INFINITY, f64::min);
-    let r_cut = lr + symbi_discretize::ibm::DRAIN_SUPPORT_WIDTHS * min_dx;
+    let lc_norm = (0..D).map(|a| lc[a] * lc[a]).sum::<f64>().sqrt();
+    let reach = if spin { lr + lc_norm } else { lr };
+    let r_cut = reach + symbi_discretize::ibm::DRAIN_SUPPORT_WIDTHS * min_dx;
     let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
         let s = &sim.geom.interior.spaces[a];
-        let center = pos[a] + lc[a];
+        let center = if spin { pos[a] } else { pos[a] + lc[a] };
         let lo_x = (center - r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
         let hi_x = (center + r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
         symbi_algebra::Space {

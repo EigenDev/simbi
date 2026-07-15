@@ -234,12 +234,20 @@ class RigidProperties:
     k_eta_n: float = 1.0
     k_eta_t: float = 1.0
     shape: Optional[Shape] = None
+    # prescribed angular velocity about z (radians/time). nonzero makes a SHAPED wall spin: its
+    # mask rotates as R(omega*t) and its no-slip surface drags the gas at omega x r.
+    omega: float = 0.0
 
     def __post_init__(self) -> None:
         if self.shape is not None and not isinstance(self.shape, Shape):
             raise _config_error(
                 f"rigid shape must be a Shape (Shape.sphere/box/union/...), got "
                 f"{type(self.shape).__name__}."
+            )
+        if self.omega != 0.0 and self.shape is None:
+            raise _config_error(
+                "a spinning rigid wall (omega != 0) needs a `shape`: a rotationally symmetric "
+                "sphere's mask does not change under rotation (spinning spheres are a follow-on)."
             )
         if self.k_eta_n <= 0.0:
             raise _config_error(

@@ -93,6 +93,11 @@ pub fn apply_body_deltas<const D: usize>(
             bodies.get_mut(ii).velocity = advanced[ii].velocity;
         }
     }
+    // advance every body's prescribed spin (angle += omega*dt); a shaped rigid wall's mask +
+    // surface velocity track the orientation. omega = 0 bodies are unchanged.
+    for ii in 0..bodies.len() {
+        bodies.get_mut(ii).advance_spin(dt);
+    }
 }
 
 /// rotate an N-dimensional vector by theta in the xy-plane.

@@ -75,6 +75,12 @@ pub struct Body<S: Scalar, const D: usize> {
     /// the surface physics: which penalization stack acts at the boundary.
     /// kinematics stay on `kind`; this picks the baked kernel.
     pub surface: SurfaceSpec,
+    /// the body's orientation angle about z (radians), advanced each step by `omega`. only a
+    /// shaped rigid wall reads it (it rotates the mask + normal); zero for every other body.
+    pub angle: S,
+    /// the prescribed angular velocity about z (radians/time). nonzero makes a shaped wall SPIN:
+    /// its mask rotates and its surface drags the gas at `omega x r`.
+    pub omega: S,
 }
 
 // -- factory functions --
@@ -90,6 +96,8 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             two_way_coupling: false,
             kind,
             surface: SurfaceSpec::Drain,
+            angle: S::ZERO,
+            omega: S::ZERO,
         }
     }
 
@@ -97,6 +105,18 @@ impl<S: Scalar, const D: usize> Body<S, D> {
     pub fn with_surface(mut self, surface: SurfaceSpec) -> Self {
         self.surface = surface;
         self
+    }
+
+    /// prescribe a constant angular velocity about z (fluent). a nonzero spin makes a shaped rigid
+    /// wall rotate its mask + drag the gas at its surface.
+    pub fn with_spin(mut self, omega: S) -> Self {
+        self.omega = omega;
+        self
+    }
+
+    /// advance the orientation by the prescribed spin over `dt`: `angle += omega * dt`.
+    pub fn advance_spin(&mut self, dt: S) {
+        self.angle = self.angle + self.omega * dt;
     }
 
     pub fn passive(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,

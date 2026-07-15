@@ -46,6 +46,10 @@ pub enum BodyScalar {
     Delta,
     Pos(u8),
     Vel(u8),
+    /// the body's orientation angle about z (radians), advanced by the prescribed spin.
+    Angle,
+    /// the body's angular velocity about z (radians/time), the prescribed spin rate.
+    Omega,
 }
 
 impl BodyScalar {
@@ -59,6 +63,8 @@ impl BodyScalar {
             BodyScalar::Delta => "delta".to_string(),
             BodyScalar::Pos(ax) => format!("pos_{ax}"),
             BodyScalar::Vel(ax) => format!("vel_{ax}"),
+            BodyScalar::Angle => "angle".to_string(),
+            BodyScalar::Omega => "omega".to_string(),
         }
     }
 
@@ -75,6 +81,8 @@ impl BodyScalar {
             "racc" => Some(BodyScalar::Racc),
             "sink" => Some(BodyScalar::Sink),
             "delta" => Some(BodyScalar::Delta),
+            "angle" => Some(BodyScalar::Angle),
+            "omega" => Some(BodyScalar::Omega),
             _ => None,
         }
     }

@@ -172,6 +172,8 @@ struct BodyParams {
     /// or None for the analytic sphere. a `Some` routes the body to the runtime-JIT'd
     /// arbitrary-shape penalization kernel.
     shape_json: Option<String>,
+    /// the prescribed spin rate about z (radians/time); nonzero makes a shaped wall rotate.
+    omega: f64,
     /// whether the gas reaction force acts back on the body. black-hole sinks
     /// always feel feedback; this dial adds it to non-accreting gravitating
     /// masses (BodyCollection gates feedback on this flag OR the sink kind).
@@ -776,6 +778,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let inertia = sub_f64(b, "rigid", "inertia", 0.0);
         let no_slip = sub_bool(b, "rigid", "apply_no_slip", true);
         let shape_json = get_shape_json(b);
+        let omega = sub_f64(b, "rigid", "omega", 0.0);
         let (k_eta_n, k_eta_t) = if is_rigid {
             (
                 sub_f64(b, "rigid", "k_eta_n", 1.0),
@@ -800,6 +803,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             inertia,
             no_slip,
             shape_json,
+            omega,
             two_way_coupling,
         });
     }
@@ -1953,6 +1957,7 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                     k_eta_n: b.k_eta_n,
                     k_eta_t: b.k_eta_t,
                 })
+                .with_spin(b.omega)
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };
@@ -2125,6 +2130,7 @@ mod diagnostics_tests {
             inertia: 0.0,
             no_slip: true,
             shape_json: None,
+            omega: 0.0,
             two_way_coupling: true,
         }];
         let coll = build_bodies::<2>(&params);
@@ -2152,6 +2158,7 @@ mod diagnostics_tests {
             inertia: 1.0,
             no_slip: false,
             shape_json: None,
+            omega: 0.0,
             two_way_coupling: false,
         }];
         let coll = build_bodies::<2>(&params);
@@ -2192,6 +2199,7 @@ mod diagnostics_tests {
             inertia: 1.0,
             no_slip: true,
             shape_json,
+            omega: 0.0,
             two_way_coupling: false,
         };
         let params = vec![
@@ -2203,6 +2211,34 @@ mod diagnostics_tests {
         let shapes = build_body_shapes(&params);
         assert!(matches!(shapes[0], Some(symbi_ib::sdf::SdfExpr::Cuboid { .. })));
         assert!(shapes[1].is_none());
+    }
+
+    // the prescribed spin rate reaches the built body (Body::with_spin), so a shaped wall rotates.
+    #[test]
+    fn build_bodies_carries_spin() {
+        let params = vec![BodyParams {
+            capability: 1 << 4,
+            mass: 0.0,
+            radius: 0.3,
+            position: vec![0.0, 0.0],
+            velocity: vec![0.0, 0.0],
+            softening: 0.0,
+            accretion_radius: 0.0,
+            sink_rate: 0.0,
+            porosity: None,
+            k_eta_n: 1.0,
+            k_eta_t: 1.0,
+            torque_free_xi: None,
+            inertia: 1.0,
+            no_slip: true,
+            shape_json: Some(
+                r#"{"kind":"box","center":[0.0,0.0,0.0],"half_extents":[0.2,0.1,1.0]}"#.to_string(),
+            ),
+            omega: 3.5,
+            two_way_coupling: false,
+        }];
+        let coll = build_bodies::<2>(&params);
+        assert_eq!(coll.get(0).omega, 3.5);
     }
 }
 

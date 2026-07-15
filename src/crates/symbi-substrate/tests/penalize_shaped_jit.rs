@@ -8,7 +8,10 @@
 // the moving arbitrary-shape body would have no host execution path.
 // =============================================================================
 use symbi_discretize::coords::Coords;
-use symbi_discretize::{penalize_porous_gv_shaped, penalize_porous_iso_gv_shaped};
+use symbi_discretize::{
+    penalize_porous_gv_shaped, penalize_porous_gv_spinning, penalize_porous_iso_gv_shaped,
+    penalize_porous_iso_gv_spinning,
+};
 use symbi_ib::sdf::SdfExpr;
 
 #[test]
@@ -45,6 +48,18 @@ fn shaped_rotated_penalize_jit_compiles() {
         symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok(),
         "the rotated shaped penalize kernel is outside the JIT subset",
     );
+}
+
+#[test]
+fn spinning_penalize_jit_compiles() {
+    // the SPINNING wall: the mask is rotated by R(body_0_angle) built from Gv cos/sin (runtime
+    // angle), and the surface velocity carries omega x r. both the adiabatic and iso kernels must
+    // JIT — cos/sin are in the cranelift subset.
+    let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]);
+    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, &shape);
+    assert!(symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(), "adiabatic spinning kernel not JIT-able");
+    let (k, w) = penalize_porous_iso_gv_spinning(Coords::Cartesian, 2, &shape);
+    assert!(symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(), "iso spinning kernel not JIT-able");
 }
 
 #[test]
