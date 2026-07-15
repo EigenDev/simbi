@@ -464,7 +464,6 @@ class Figure:
             # create new PlotData with composed fields (PlotData is frozen)
             frame_plot_data = PlotData(
                 fields=composed_fields,
-                body_collection=frame_plot_data.body_collection,
                 time=frame_plot_data.time,
                 dimensions=composed_fields[0].ndim if composed_fields else 0,
                 coord_system=frame_plot_data.coord_system,
@@ -569,7 +568,6 @@ class Figure:
 
             frame_plot_data = PlotData(
                 fields=composed_fields,
-                body_collection=frame_plot_data.body_collection,
                 time=frame_plot_data.time,
                 dimensions=composed_fields[0].ndim if composed_fields else 0,
                 coord_system=frame_plot_data.coord_system,

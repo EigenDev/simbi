@@ -191,7 +191,6 @@ class PlotData(BaseModel):
 
     Attributes:
         fields: Sequence of FieldData objects to visualize
-        bodies: optional mapping of body name -> Body metadata
         time: simulation time (float)
         dimensions: Number of spatial dimensions in the simulation
         coord_system: Coordinate system used
@@ -199,8 +198,6 @@ class PlotData(BaseModel):
     """
 
     fields: Sequence[FieldData]
-    # BodyCollection - avoid circular import
-    body_collection: Optional[object] = None
     time: Optional[float] = None
     dimensions: Optional[int] = None
     coord_system: Optional[CoordSystem] = None

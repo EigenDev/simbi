@@ -5,9 +5,9 @@
 # includes Body, ImmersedBodyConfig, BinaryConfig, and property dataclasses.
 # =============================================================================
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import IntFlag
-from typing import Any, Optional, Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -139,23 +139,6 @@ class GravitationalSystemConfig(BodySystemConfig):
 
 
 @dataclass(frozen=True)
-class BodyData:
-    mass: float
-    radius: float
-    position: tuple[float, ...]
-    velocity: tuple[float, ...]
-    # Type-specific fields would need handling
-
-
-@dataclass(frozen=True)
-class BodyDiagnostics:
-    force_components: dict[str, Array]  # force_1, force_2, force_3
-    torque_components: dict[str, Array]  # torque_1, torque_2, torque_3
-    cumulative_mass_delta: Array
-    accretion_rate: Array
-
-
-@dataclass(frozen=True)
 class GravitationalProperties:
     softening_length: float
 
@@ -284,44 +267,6 @@ class RigidProperties:
 
 
 @dataclass(frozen=True)
-class DeformableProperties:
-    yield_stress: float
-    plastic_strain: float
-
-
-@dataclass(frozen=True)
-class ElasticProperties:
-    elastic_modulus: float
-    poisson_ratio: float
-
-
-@dataclass(frozen=True)
-class Unionable:
-    def __or__(self, other: Any) -> Any:
-        return self.__class__(**asdict(self) | asdict(other))
-
-
-@dataclass(frozen=True)
-class BaseBody(Unionable):
-    mass: float
-    radius: float
-    position: tuple[float, ...]
-    velocity: tuple[float, ...]
-    capabilities: BodyCapability
-
-
-@dataclass(frozen=True)
-class Body(BaseBody):
-    force: tuple[float, ...] = field(default_factory=lambda: (0.0, 0.0, 0.0))
-    torque: tuple[float, ...] = field(default_factory=lambda: (0.0, 0.0, 0.0))
-    gravitational: Optional[GravitationalProperties] = None
-    accretion: Optional[AccretionProperties] = None
-    rigid: Optional[RigidProperties] = None
-    deformable: Optional[DeformableProperties] = None
-    elastic: Optional[ElasticProperties] = None
-
-
-@dataclass(frozen=True)
 class ImmersedBodyConfig:
     capability: BodyCapability
     mass: float
@@ -333,8 +278,6 @@ class ImmersedBodyConfig:
     gravitational: Optional[GravitationalProperties] = None
     accretion: Optional[AccretionProperties] = None
     rigid: Optional[RigidProperties] = None
-    deformable: Optional[DeformableProperties] = None
-    elastic: Optional[ElasticProperties] = None
 
     def __post_init__(self) -> None:
         unsupported = self.capability & ~_WIRED_CAPABILITIES

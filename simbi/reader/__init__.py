@@ -34,7 +34,7 @@ def read_simulation(filename: str, unpad: bool = True) -> SimData:
     compatibility wrapper for old read_simulation api.
 
     loads a checkpoint file and returns a SimData adapter that provides
-    the legacy interface (.metadata, .bodies, .get_field, etc).
+    the legacy interface (.metadata, .get_field, etc).
 
     args:
         filename: path to checkpoint file

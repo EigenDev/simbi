@@ -5,16 +5,10 @@
 # =============================================================================
 from .bodies import (
     AccretionProperties,
-    BaseBody,
     BinaryComponentConfig,
     BinaryConfig,
-    Body,
     BodyCapability,
-    BodyData,
-    BodyDiagnostics,
     BodySystemConfig,
-    DeformableProperties,
-    ElasticProperties,
     GravitationalProperties,
     GravitationalSystemConfig,
     ImmersedBodyConfig,
@@ -85,11 +79,7 @@ __all__ = [
     "LevelData",
     "HierarchyData",
     # body types
-    "Body",
     "BodyCapability",
-    "BodyData",
-    "BodyDiagnostics",
-    "BaseBody",
     "BodySystemConfig",
     "ImmersedBodyConfig",
     "GravitationalSystemConfig",
@@ -98,7 +88,5 @@ __all__ = [
     "GravitationalProperties",
     "AccretionProperties",
     "RigidProperties",
-    "ElasticProperties",
-    "DeformableProperties",
     "Shape",
 ]

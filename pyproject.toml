@@ -77,6 +77,16 @@ module-name = "simbi.libs.cpu_ext"
 # so a wheel that links the system libraries is correct and matches `maturin develop`.
 skip-auditwheel = true
 
+[tool.pytest.ini_options]
+# the default run is the fast pure-python logic suite. grid-evolving tests are
+# auto-tagged `simulation` (see simbi/conftest.py) and filtered out here; run
+# them with `pytest -m simulation`, or the whole suite with `pytest -m ""`.
+testpaths = ["simbi"]
+addopts = "-m 'not simulation'"
+markers = [
+    "simulation: evolves a real grid through the built rust cpu_ext backend; excluded from the default run",
+]
+
 [tool.mypy]
 ignore_missing_imports = true
 warn_unused_configs = true

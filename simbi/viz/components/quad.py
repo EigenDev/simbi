@@ -5,7 +5,7 @@ This component is a simple renderer. It expects to be given
 a single, 2D FieldData object and will render it as a pcolormesh.
 """
 
-from typing import Literal, Optional, Sequence
+from typing import Literal, Optional
 
 import matplotlib.colors as mcolors
 import numpy as np
@@ -14,13 +14,10 @@ from matplotlib.collections import QuadMesh
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
-from simbi.reader.io import BodyCollection
 
 from ..config import FigureConfig
 from ..types import Array, ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
-
-LOGICAL_AXIS_MAP = {"x1": 0, "x2": 1, "x3": 2}
 
 
 class QuadPlotProps(ComponentProps):
@@ -89,9 +86,7 @@ class QuadPlotComponent(Component):
     Expects 2D FieldData.
     """
 
-    def __init__(
-        self, props: QuadPlotProps, bodies: Optional[BodyCollection] = None
-    ):
+    def __init__(self, props: QuadPlotProps):
         self.props = props
         self._mesh: Optional[QuadMesh] = None
         self._mirror_mesh: Optional[QuadMesh] = None  # For polar plots
@@ -100,7 +95,6 @@ class QuadPlotComponent(Component):
         self.last_x = np.array([])
         self.last_y = np.array([])
         self._mesh_lines: list = []
-        self.bodies: Optional[BodyCollection] = bodies
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
         self.fig = fig
@@ -181,13 +175,6 @@ class QuadPlotComponent(Component):
         if self.props.show_mesh_grid:
             self._draw_mesh_grid(x, y)
 
-        if style.draw_bodies and self.bodies:
-            self.draw_bodies(
-                self.bodies,
-                zorder=10,
-                axes=data.axis_names if data.axis_names else ["x1", "x2"],
-            )
-
         self.last_x = x
         self.last_y = y
 
@@ -241,35 +228,6 @@ class QuadPlotComponent(Component):
             self._mesh.set_array(values.ravel())
             if self._mirror_mesh:
                 self._mirror_mesh.set_array(values.ravel())
-
-    def draw_bodies(
-        self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
-    ) -> None:
-        """Draw immersed bodies on the plot."""
-        # This function can be simplified as it no longer
-        # needs projection logic (that's handled by the slice)
-        import matplotlib.patches as mpatches
-
-        for patch in self.ax.patches:
-            patch.remove()
-        n_i = LOGICAL_AXIS_MAP[axes[0]]
-        n_j = LOGICAL_AXIS_MAP[axes[1]]
-
-        for body in body_collection.bodies:
-            radius = body.radius
-            if body.accretion is not None:
-                radius = body.accretion.accretion_radius
-            position = (body.position[n_i], body.position[n_j])  # Assumes 2D
-
-            circle = mpatches.Circle(
-                position,
-                radius,
-                color="black",
-                linestyle="--",
-                alpha=0.5,
-                zorder=zorder,
-            )
-            self.ax.add_patch(circle)
 
     def _draw_mesh_grid(self, x: Array, y: Array) -> None:
         """Draw cell boundaries on the mesh."""

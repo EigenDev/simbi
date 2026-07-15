@@ -16,18 +16,6 @@ def _calculate_time_series_value(
     """
     Calculates a single scalar value for a given field at a given time.
     """
-    # Check for special analysis fields
-    if field_name in ["mdot", "maccr"]:
-        if data.body_collection is None:
-            raise ValueError("No bodies in this run.")
-
-        prop = (
-            "accretion_rate" if field_name == "mdot" else "total_accreted_mass"
-        )
-        return np.array(
-            [getattr(v.accretion, prop) for v in data.body_collection.bodies]
-        )
-
     # Standard field calculation
     field = data.get_field(field_name, level=0)  # Default to base level
 
@@ -104,27 +92,12 @@ def create_time_series_data(
         data = load_data(file_path)
         times.append(data.metadata.time)
 
-        if i == 0 and data.body_collection:
-            nbodies = list(data.body_collection.bodies)
-            body_names = [f"M_{i}" for i in range(len(nbodies))]
-
         for name in field_names:
             value = _calculate_time_series_value(data, name, weight_field)
             field_values_over_time[name].append(value)
 
     final_fields: list[FieldData] = []
     time_array = np.array(times)
-
-    # if there are two bodies, we label the less massive one M_2
-    # and the more massive one M_1
-    if len(body_names) == 2 and data.body_collection is not None:
-        masses = []
-        for body in data.body_collection.bodies:
-            masses.append(body.mass)
-        if masses[0] > masses[1]:
-            body_names = ["M_1", "M_2"]
-        else:
-            body_names = ["M_2", "M_1"]
 
     for name in field_names:
         values_array = np.array(field_values_over_time[name])
@@ -167,7 +140,6 @@ def create_time_series_data(
 
     return PlotData(
         fields=final_fields,
-        body_collection=None,  # Not relevant for time series
         time=None,  # Not relevant
         dimensions=1,
         coord_system=None,  # Not relevant

@@ -129,7 +129,7 @@ def test_restart_conflict_on_explicit_immutable_flag(monkeypatch, tmp_path):
         subcycling_mode = "none"
 
     monkeypatch.setattr(
-        cp, "load_checkpoint_metadata", lambda _p: (_Meta(), None, (512,))
+        cp, "load_checkpoint_metadata", lambda _p: (_Meta(), (512,))
     )
 
     demanded = GrBondiKS.from_cli(["--solver", "hllc"])

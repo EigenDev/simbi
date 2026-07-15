@@ -192,7 +192,6 @@ def create_plot_data(
     # Package and return the (potentially un-stitched) fields
     return PlotData(
         fields=sliced_fields,
-        body_collection=data.body_collection,
         time=data.metadata.time,
         dimensions=sliced_fields[0].ndim if sliced_fields else 0,
         coord_system=CoordSystem(data.metadata.coord_system),

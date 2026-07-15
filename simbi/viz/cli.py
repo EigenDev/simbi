@@ -356,25 +356,6 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
 
     # =========================================================================
-    # special features
-    # =========================================================================
-    parser.add_argument(
-        "--draw-bodies",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="draw immersed bodies on hydro plots",
-    )
-
-    # =========================================================================
-    # body diagnostics mode
-    # =========================================================================
-    parser.add_argument(
-        "--bodies",
-        action="store_true",
-        help="enable body diagnostics mode (use --props body_diagnostics.* for options)",
-    )
-
-    # =========================================================================
     # coordinate binning options
     # =========================================================================
     parser.add_argument(

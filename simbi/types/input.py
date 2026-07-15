@@ -12,7 +12,7 @@ from typing import Any, ClassVar, Optional
 import numpy as np
 from numpy.typing import NDArray
 
-from .bodies import Body, BodySystemConfig, ImmersedBodyConfig
+from .bodies import BodySystemConfig, ImmersedBodyConfig
 
 Array = NDArray[np.floating]
 IArray = NDArray[np.signedinteger]
@@ -339,7 +339,6 @@ class ProcessedData:
     hierarchy: Optional[HierarchyData] = None
     levels: Optional[list[LevelData]] = None
 
-    bodies: dict[str, Body] | None = None
     body_system: BodySystemConfig | list[ImmersedBodyConfig] | None = None
 
     @property

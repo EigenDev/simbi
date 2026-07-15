@@ -107,8 +107,6 @@ def plot(
         coord_system=CoordSystem(sim_data.metadata.coord_system),
     )
 
-    bodies = scalar_plot_data.body_collection
-
     # dispatch scalar components
     for field_data in final_fields:
         component: Component
@@ -116,7 +114,7 @@ def plot(
         if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
             # polygon plot (1d array of patches)
             props = _get_props(component_props, "polygon", PolygonPlotProps)
-            component = PolygonPlotComponent(props, bodies)
+            component = PolygonPlotComponent(props)
 
         elif field_data.ndim == 1:
             # line plot
@@ -126,10 +124,10 @@ def plot(
         elif field_data.ndim == 2:
             if use_polygons:
                 props = _get_props(component_props, "polygon", PolygonPlotProps)
-                component = PolygonPlotComponent(props, bodies)
+                component = PolygonPlotComponent(props)
             else:
                 props = _get_props(component_props, "quad", QuadPlotProps)
-                component = QuadPlotComponent(props, bodies)
+                component = QuadPlotComponent(props)
 
         elif field_data.ndim == 3:
             raise ValueError(
@@ -263,15 +261,13 @@ def animate(
         coord_system=CoordSystem(sim_data.metadata.coord_system),
     )
 
-    bodies = scalar_plot_data.body_collection
-
     # dispatch scalar components
     for field_data in final_fields:
         component: Component
 
         if field_data.ndim == 1 and field_data.name.endswith("_polygons"):
             props = _get_props(component_props, "polygon", PolygonPlotProps)
-            component = PolygonPlotComponent(props, bodies)
+            component = PolygonPlotComponent(props)
 
         elif field_data.ndim == 1:
             props = _get_props(component_props, "line", LinePlotProps)
@@ -280,10 +276,10 @@ def animate(
         elif field_data.ndim == 2:
             if use_polygons:
                 props = _get_props(component_props, "polygon", PolygonPlotProps)
-                component = PolygonPlotComponent(props, bodies)
+                component = PolygonPlotComponent(props)
             else:
                 props = _get_props(component_props, "quad", QuadPlotProps)
-                component = QuadPlotComponent(props, bodies)
+                component = QuadPlotComponent(props)
 
         elif field_data.ndim == 3:
             raise ValueError(

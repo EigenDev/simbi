@@ -32,7 +32,6 @@ class FigureConfig(BaseModel):
     xscale: Literal["linear", "log", "symlog", "asinh"] = "linear"
     yscale: Literal["linear", "log", "symlog", "asinh"] = "linear"
     title: Optional[str] = None
-    draw_bodies: bool = False
     time_scale: Optional[float] = None
     time_units: str = ""
     transparent: bool = False

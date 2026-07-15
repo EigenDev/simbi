@@ -13,15 +13,11 @@ from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
 from pydantic import ValidationInfo, field_validator
 
-from simbi.reader.io import BodyCollection
-from simbi.types.bodies import Body
 
 from ..config import FigureConfig
 from ..types import ColorRange, FieldData, RenderResult
 from .interface import Component, ComponentProps
 from .quad import _create_color_normalization
-
-LOGICAL_AXIS_MAP = {"x1": 0, "x2": 1, "x3": 2}
 
 
 class PolygonPlotProps(ComponentProps):
@@ -66,15 +62,12 @@ class PolygonPlotComponent(Component):
     Expects 1D FieldData adhering to the "Polygon Contract".
     """
 
-    def __init__(
-        self, props: PolygonPlotProps, bodies: Optional[BodyCollection] = None
-    ):
+    def __init__(self, props: PolygonPlotProps):
         self.props = props
         self._poly_collection: Optional[PolyCollection] = None
         self._level_artists: list = []
         self._initialized: bool = False
         self._first_render: bool = True
-        self.bodies: Optional[dict[str, Body]] = bodies
 
     def initialize(self, fig: Figure, ax: Axes) -> None:
         self.fig = fig
@@ -170,13 +163,6 @@ class PolygonPlotComponent(Component):
 
         self.ax.set_aspect("equal", adjustable="box")
 
-        if style.draw_bodies and self.bodies:
-            self.draw_bodies(
-                self.bodies,
-                zorder=10,
-                axes=data.axis_names if data.axis_names else ["x1", "x2"],
-            )
-
         if self.props.show_level_bounds and data.level_bounds:
             self._draw_level_bounds(data.level_bounds)
 
@@ -184,35 +170,6 @@ class PolygonPlotComponent(Component):
             artists={"collection": self._poly_collection},
             metadata={"mappable": self._poly_collection},
         )
-
-    def draw_bodies(
-        self, body_collection: BodyCollection, zorder: int, axes: Sequence[str]
-    ) -> None:
-        """Draw immersed bodies on the plot."""
-        # This function can be simplified as it no longer
-        # needs projection logic (that's handled by the slice)
-        import matplotlib.patches as mpatches
-
-        for patch in self.ax.patches:
-            patch.remove()
-        n_i = LOGICAL_AXIS_MAP[axes[0]]
-        n_j = LOGICAL_AXIS_MAP[axes[1]]
-
-        for body in body_collection.bodies:
-            radius = body.radius
-            if body.accretion is not None:
-                radius = body.accretion.accretion_radius
-            position = (body.position[n_i], body.position[n_j])  # Assumes 2D
-
-            circle = mpatches.Circle(
-                position,
-                radius,
-                color="black",
-                linestyle="--",
-                alpha=0.5,
-                zorder=zorder,
-            )
-            self.ax.add_patch(circle)
 
     def _draw_level_bounds(
         self, level_bounds: Sequence[tuple[float, float, float, float]]

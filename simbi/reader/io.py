@@ -27,7 +27,6 @@ from numpy.typing import NDArray
 
 from simbi.functional import Err, Ok, Result
 from simbi.reader.logging import logger
-from simbi.types.bodies import Body
 from simbi.types.input import Metadata, normalize_regime
 
 # =============================================================================
@@ -159,23 +158,11 @@ class LevelData:
 
 
 @dataclass(frozen=True)
-class BodyCollection:
-    """collection of bodies in the simulation."""
-
-    count: int
-    system_name: str
-    reference_frame: str
-    bodies: list[Body]
-    binary_params: Optional[dict] = None
-
-
-@dataclass(frozen=True)
 class Checkpoint:
     """complete checkpoint state."""
 
     metadata: Metadata
     levels: list[LevelData]
-    bodies: Optional[BodyCollection] = None
 
     @property
     def num_levels(self) -> int:
@@ -536,116 +523,6 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
         return Err(f"failed to read metadata: {e}")
 
 
-def read_bodies(bodies_group: h5py.Group) -> Result[BodyCollection, str]:
-    """read body collection."""
-    from simbi.types.bodies import (
-        AccretionProperties,
-        Body,
-        BodyCapability,
-        GravitationalProperties,
-        RigidProperties,
-    )
-
-    try:
-        count = int(bodies_group.attrs["count"])
-        system_name = (
-            bodies_group.attrs["system_name"].decode("utf-8")
-            if isinstance(bodies_group.attrs["system_name"], bytes)
-            else str(bodies_group.attrs["system_name"])
-        )
-        reference_frame = (
-            bodies_group.attrs["reference_frame"].decode("utf-8")
-            if isinstance(bodies_group.attrs["reference_frame"], bytes)
-            else str(bodies_group.attrs["reference_frame"])
-        )
-
-        # read binary params if present
-        binary_params = None
-        if "binary_params" in bodies_group:
-            bp = bodies_group["binary_params"]
-            binary_params = {
-                "total_mass": float(bp.attrs["total_mass"]),
-                "semi_major": float(bp.attrs["semi_major"]),
-                "eccentricity": float(bp.attrs["eccentricity"]),
-                "mass_ratio": float(bp.attrs["mass_ratio"]),
-                "orbital_period": float(bp.attrs["orbital_period"]),
-                "is_circular_orbit": bool(bp.attrs["is_circular_orbit"]),
-                "prescribed_motion": bool(bp.attrs["prescribed_motion"]),
-            }
-
-        # read individual bodies
-        bodies = []
-        for ii in range(count):
-            body_key = f"body_{ii}"
-            if body_key not in bodies_group:
-                continue
-
-            bg = bodies_group[body_key]
-
-            # core properties
-            mass = float(bg.attrs["mass"])
-            radius = float(bg.attrs["radius"])
-            capabilities = BodyCapability(int(bg.attrs["capabilities"]))
-            position = tuple(bg["position"][()])
-            velocity = tuple(bg["velocity"][()])
-            force = tuple(bg["force"][()])
-            torque = tuple(bg["torque"][()])
-
-            # capability-specific data
-            gravitational = None
-            if "gravitational" in bg:
-                grav_g = bg["gravitational"]
-                gravitational = GravitationalProperties(
-                    softening_length=float(grav_g.attrs["softening_length"])
-                )
-
-            accretion = None
-            if "accretion" in bg:
-                accr_g = bg["accretion"]
-                accretion = AccretionProperties(
-                    sink_rate=float(accr_g.attrs["sink_rate"]),
-                    accretion_radius=float(accr_g.attrs["accretion_radius"]),
-                    total_accreted_mass=float(
-                        accr_g.attrs["total_accreted_mass"]
-                    ),
-                    accretion_rate=float(accr_g.attrs["accretion_rate"]),
-                )
-
-            rigid = None
-            if "rigid" in bg:
-                rigid_g = bg["rigid"]
-                rigid = RigidProperties(
-                    inertia=float(rigid_g.attrs["inertia"]),
-                    apply_no_slip=bool(rigid_g.attrs["apply_no_slip"]),
-                )
-
-            body = Body(
-                mass=mass,
-                radius=radius,
-                position=position,
-                velocity=velocity,
-                force=force,
-                torque=torque,
-                capabilities=capabilities,
-                gravitational=gravitational,
-                accretion=accretion,
-                rigid=rigid,
-            )
-            bodies.append(body)
-
-        return Ok(
-            BodyCollection(
-                count=count,
-                system_name=system_name,
-                reference_frame=reference_frame,
-                bodies=bodies,
-                binary_params=binary_params,
-            )
-        )
-    except Exception as e:
-        return Err(f"failed to read bodies: {e}")
-
-
 # =============================================================================
 # top-level reader
 # =============================================================================
@@ -695,22 +572,10 @@ def read_checkpoint(filename: str) -> Result[Checkpoint, str]:
             if not levels:
                 return Err("no valid levels found")
 
-            # read bodies if present
-            bodies = None
-            if "bodies" in f:
-                bodies_result = read_bodies(f["bodies"])
-                if bodies_result.is_ok():
-                    bodies = bodies_result.value
-                else:
-                    logger.warning(
-                        "dropping corrupt bodies group: %s", bodies_result.error
-                    )
-
             return Ok(
                 Checkpoint(
                     metadata=meta_result.value,
                     levels=levels,
-                    bodies=bodies,
                 )
             )
 

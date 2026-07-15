@@ -376,7 +376,6 @@ def create_coordinate_profile_data(
 
     return PlotData(
         fields=final_fields,
-        body_collection=data.body_collection,
         time=data.metadata.time,
         dimensions=1,  # The result is always 1D
         coord_system=CoordSystem(data.metadata.coord_system),

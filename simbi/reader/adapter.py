@@ -167,11 +167,6 @@ class SimData:
         """check if AMR is present."""
         return self._checkpoint.has_refinement
 
-    @property
-    def body_collection(self):
-        """access bodies (if present)."""
-        return self._checkpoint.bodies
-
     def hierarchy(self):
         """access AMR hierarchy info."""
         # TODO: implement once hierarchy parsing is added to io
