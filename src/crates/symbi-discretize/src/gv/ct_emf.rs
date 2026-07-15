@@ -307,6 +307,36 @@ pub fn rmhd_ct_curl_cyl_rz_gv(dir: usize, spacing: &[Spacing]) -> (GvKernel, Vec
     (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
 }
 
+/// the 2.5D CYLINDRICAL r-z OHMIC RESISTIVE edge EMF: adds `eta * J_phi` to the out-of-plane edge
+/// EMF `ephi` (efield[0]) IN PLACE, where `J_phi` is the MIMETIC ADJOINT of the cylindrical induction
+/// curl `rmhd_ct_curl_cyl_rz_gv` — so `-curl(eta * J)` is a negative-definite Laplacian (stable
+/// diffusion). CANDIDATE form (metric-free, from `J = W_E^-1 C^T W_F` with the natural cyl weights
+/// `w_r ∝ r_edge, w_z ∝ r_c, w_E ∝ r_edge`, whose r-factors cancel); the ADJOINT ORACLE
+/// `⟨C E, B⟩_F = ⟨E, J B⟩_E` validates or corrects it to machine precision. `B_r` = bface[0],
+/// `B_z` = bface[1]. `eta = 0` is an exact no-op.
+pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ephi = Gv::field("ephi", "ephi");
+    let eta = Gv::scalar("eta");
+    // register the geom scalars in the canonical order (both r and z faces), matching the curl ABI.
+    for ax in 0..2 {
+        let _ = gv_axis_face_at(ax, spacing[ax], 0);
+        let _ = gv_axis_face_at(ax, spacing[ax], 1);
+    }
+    let inv_dr = Gv::ONE / (gv_axis_face_at(0, spacing[0], 1) - gv_axis_face_at(0, spacing[0], 0));
+    let inv_dz = Gv::ONE / (gv_axis_face_at(1, spacing[1], 1) - gv_axis_face_at(1, spacing[1], 0));
+    let br = Gv::field("br", "br");
+    let bz = Gv::field("bz", "bz");
+    let br_zm = gv_field_at("br", "br", 2, &[0, -1]); // B_r at the neighbour below in z (axis 1)
+    let bz_rm = gv_field_at("bz", "bz", 2, &[-1, 0]); // B_z at the neighbour behind in r (axis 0)
+    // J_phi = (curl B)_phi = dB_r/dz - dB_z/dr (backward differences). this sign makes -curl(eta J) a
+    // NEGATIVE-definite Laplacian (magnetic energy decays); the flipped sign would grow it. matches
+    // the cartesian resistive convention J = +(curl B).
+    let jphi = inv_dz * (br - br_zm) - inv_dr * (bz - bz_rm);
+    let ephi_new = ephi + eta * jphi;
+    (end_trace(), vec![("ephi_new".to_string(), "ephi".into(), ephi_new.node())])
+}
+
 
 /// the 2.5D cylindrical r-phi DISK CT curl from the single out-of-plane edge EMF E_z
 /// (efield[0]), in-place on `b` (bface[dir]). DERIVED from the cyl curl restricted to E_z with

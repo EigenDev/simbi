@@ -15,7 +15,8 @@
 use std::fs;
 
 use symbi_discretize::GvKernel;
-use symbi_discretize::{rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_flux_gv};
+use symbi_discretize::{rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv, rmhd_flux_gv};
+use symbi_discretize::Spacing;
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
 use symbi_ir::{emit_kernel_from_lowering, KernelEmitInputs};
@@ -76,4 +77,9 @@ fn main() {
         let (r3_k, r3_w) = rmhd_resistive_emf_3d_dir_gv(dir);
         emit_gv(&out_dir, &format!("rmhd_resistive_emf_3d_{dir}"), 3, r3_k, r3_w);
     }
+
+    // the cylindrical r-z resistive EMF: the mimetic adjoint of the cyl induction curl, carrying the
+    // face-position geom scalars through the CUDA lowering — the GPU gate for curvilinear resistive MHD.
+    let (rcyl_k, rcyl_w) = rmhd_resistive_emf_cyl_rz_gv(&[Spacing::Uniform; 2]);
+    emit_gv(&out_dir, "rmhd_resistive_emf_cyl_rz", 2, rcyl_k, rcyl_w);
 }

@@ -989,12 +989,8 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // resistive diffusion `eta * lap(B)`, div-B-clean via the SAME curl. `eta = 0` (ideal MHD), a
     // non-2.5D grid, or a curvilinear chart skips it — the 3D + curvilinear resistive EMFs are
     // follow-ons.
-    if eta > 0.0 && sim.geom.coords == symbi_geometry::Geometry::Cartesian {
-        match D {
-            2 => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta),
-            3 => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
-            _ => {}
-        }
+    if eta > 0.0 {
+        apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
     }
 
     // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
@@ -1002,6 +998,34 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
 
     // face->cell B interpolation + the magnetic-energy correction on cons.nrg, in place.
     bcell_from_bface::<D, DOF, Mem, Sc>(sim, has_energy);
+}
+
+/// dispatch the Ohmic resistive edge EMF `efield += eta * J` for the running chart, where `J` is the
+/// mimetic ADJOINT of the induction curl. cartesian C is metric-free so its adjoint is a plain
+/// staggered difference; a curvilinear chart carries the metric into C so its adjoint carries the
+/// TRANSPOSED metric weights — a distinct kernel PER CHART. built: cartesian 2.5D/3D and cylindrical
+/// r-z (axisymmetric poloidal field). EXPLICIT LIMITATION, fail-loud (never a hidden floor): any other
+/// chart has no adjoint-verified resistive curl, so refuse rather than silently run as if ideal.
+pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    eta: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use symbi_geometry::Geometry::{Cartesian, Cylindrical};
+    let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
+    match (sim.geom.coords, D) {
+        (Cartesian, 2) => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta),
+        (Cartesian, 3) => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
+        (Cylindrical, 2) if sfx == "_cyl_rz" => resistive_emf_cyl_rz::<D, DOF, Mem, Sc>(sim, eta),
+        (coords, d) => panic!(
+            "resistive MHD (resistivity > 0) has an adjoint-verified resistive curl for the \
+             cartesian 2.5D/3D and cylindrical r-z charts only; the {coords:?} chart in {d}D \
+             (suffix {sfx:?}) needs its own transposed-metric adjoint of ct_curl, not yet built. \
+             use a supported chart or set resistivity = 0."
+        ),
+    }
 }
 
 /// add the 2.5D Cartesian Ohmic resistive edge EMF `eta * J_z` to `efield[0]` in place, from the
@@ -1085,13 +1109,53 @@ fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
+/// add the 2.5D cylindrical r-z Ohmic resistive edge EMF `eta * J_phi` to the corner `efield[0]`
+/// (`E_phi`) in place, from the poloidal face field (`B_r = bface[0]`, `B_z = bface[1]`). `J_phi` is
+/// the MIMETIC ADJOINT of the cyl-rz induction curl, so once the curl consumes the augmented EMF the
+/// resistive operator `-curl(eta J)` is negative-definite (stable Ohmic decay), div-B-clean via the
+/// same curl. binds the face-position geom scalars by manifest (log-radial aware), like the curl.
+fn resistive_emf_cyl_rz<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    eta: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let name = "rmhd_resistive_emf_cyl_rz";
+    let scalars = scalars_for(name, |bind| match bind {
+        ScalarBind::Spec(s) if &**s == "eta" => Sc::from_f64(eta),
+        ScalarBind::Ref(sref) => Sc::from_f64(
+            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *sref)
+                .unwrap_or_else(|| panic!("resistive_emf_cyl_rz: unexpected scalar {sref:?}")),
+        ),
+        o => panic!("resistive_emf_cyl_rz: unexpected scalar {o:?}"),
+    });
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        match s {
+            "ephi" => &mhd.efield[0],
+            "br" => &mhd.bface[0],
+            "bz" => &mhd.bface[1],
+            o => panic!("resistive_emf_cyl_rz: unknown manifest slot '{o}'"),
+        }
+    };
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    for (bind, is_out) in kernel_field_binds(name).iter() {
+        let fld = slot(&bind.name());
+        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+    }
+    dispatch_fields_each::<Sc, Mem, D>(name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
+}
+
 /// the CT curl `bface -= dt*curl(efield)` per IN-PLANE face axis (`dir`), from that face's incident
 /// edge EMFs. cartesian binds the transverse inverse-widths; curvilinear the per-cell geom weights;
 /// GR the densitized coordinate lengths + metric scalars. a face with no incident edges (e.g. Bx in
 /// 1.5D) is not updated. reads `efield` (whatever is currently there — the HO averaged EMF in the HO
 /// path, or the FOFC-spliced EMF in the C2 redo), writes `bface` in place. extracted from
 /// `post_godunov` so the FOFC redo can curl the restored `bface_n` from the spliced EMF.
-pub(crate) fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
+pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
 ) where

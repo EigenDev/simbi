@@ -42,7 +42,7 @@ use symbi_discretize::{
     neumann_ghost_fill_gv, robin_ghost_fill_gv,
     nmhd_wave_speed_map_gv,
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
-    rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_ct_curl_3d_dir_gv,
+    rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv, rmhd_ct_curl_3d_dir_gv,
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
@@ -1315,6 +1315,14 @@ fn gen_rmhd_ct_curl_cyl_rz(out_dir: &str, dir: u8, geom: &Geom) {
     emit_gv(out_dir, &format!("rmhd_ct_curl_2d_{dir}_cyl_rz"), 2, &k, &writes);
 }
 
+// the 2.5D cylindrical r-z Ohmic resistive edge EMF: adds eta * J_phi to the corner E_phi, where
+// J_phi is the mimetic adjoint of the cyl-rz induction curl. single edge (no dir). the radial
+// spacing is a runtime map_kind scalar, matching the curl.
+fn gen_rmhd_resistive_emf_cyl_rz(out_dir: &str, geom: &Geom) {
+    let (k, writes) = rmhd_resistive_emf_cyl_rz_gv(&geom.spacing);
+    emit_gv(out_dir, "rmhd_resistive_emf_cyl_rz", 2, &k, &writes);
+}
+
 // the 2.5D SPHERICAL (r-theta plane) CT curl B-update along in-plane face axis `dir` (0 -> B_r,
 // 1 -> B_theta), from the single out-of-plane corner EMF E_phi. dir=0 carries the spherical
 // (1/(r sin th)) d_th(sin th .) area metric; dir=1 the (1/r) d_r(r .) metric. name matches the
@@ -2371,6 +2379,7 @@ fn main() {
         for dir in 0..2 {
             gen_rmhd_ct_curl_cyl_rz(&out_dir, dir, &cyl);
         }
+        gen_rmhd_resistive_emf_cyl_rz(&out_dir, &cyl);
         gen_rmhd_bcell_godunov_euler(&out_dir, cyl.clone(), 2);
         gen_rmhd_bcell_godunov_rk2(&out_dir, cyl.clone(), 2);
         // RMHD regime physics: HLLE quartic flux (normal coord_n = axes[dir]) + CFL map +
