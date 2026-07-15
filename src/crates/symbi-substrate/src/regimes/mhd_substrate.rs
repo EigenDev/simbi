@@ -1023,17 +1023,21 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     match (sim.geom.coords, D) {
         (Cartesian, 2) => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta),
-        (Cartesian, 3) => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
-        // cyl r-z is metric-free in-plane (h = (1,1)); the covariant ortho kernel serves cyl r-phi and
-        // spherical r-theta (h_2 = r), all adjoint-verified by the geometry-agnostic oracle.
+        // the resistive J is METRIC-FREE for every orthogonal chart (the metric lives in the induction
+        // curl + the physical energy weights), so the plain difference curl is the adjoint in 3D
+        // cartesian AND 3D curvilinear (identity axes -> the cyclic curl is right-handed for all of
+        // cartesian / spherical / cylindrical); the geometry-agnostic oracle verifies each.
+        (Cartesian, 3) | (Spherical, 3) | (Cylindrical, 3) => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
+        // 2.5D: cyl r-z is metric-free in-plane and left-handed (its own kernel); the ortho kernel
+        // serves the right-handed cyl r-phi and spherical r-theta.
         (Cylindrical, 2) if sfx == "_cyl_rz" => resistive_emf_cyl_rz::<D, DOF, Mem, Sc>(sim, eta),
         (Cylindrical, 2) if sfx == "_cyl_rphi" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_cyl_rphi"),
         (Spherical, 2) if sfx == "_sph" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_sph"),
         (coords, d) => panic!(
             "resistive MHD (resistivity > 0) has an adjoint-verified resistive curl for the cartesian \
-             2.5D/3D, cylindrical r-z/r-phi, and spherical r-theta charts only; the {coords:?} chart in \
-             {d}D (suffix {sfx:?}) needs its own covariant resistive curl, not yet built. use a \
-             supported chart or set resistivity = 0."
+             2.5D/3D, cylindrical r-z/r-phi, spherical r-theta, and 3D spherical/cylindrical charts \
+             only; the {coords:?} chart in {d}D (suffix {sfx:?}) is not yet built. use a supported \
+             chart or set resistivity = 0."
         ),
     }
 }
