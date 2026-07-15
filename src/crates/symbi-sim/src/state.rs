@@ -1388,6 +1388,12 @@ pub struct ImmersedBodies<const NDIM: usize> {
     /// as the `body_diagnostics` group, consumed by the steady-state detector.
     /// restarts empty on load; earlier segments live in earlier checkpoints.
     pub history: symbi_ib::BodyHistory<NDIM>,
+    /// per-body immersed-boundary SHAPE (body-local CSG signed distance), parallel to
+    /// `bodies`. `None` = the analytic sphere of radius `body.radius` (the AOT penalization
+    /// kernel). `Some(sdf)` = an arbitrary shape whose penalization kernel is runtime-built +
+    /// JIT-compiled per distinct geometry (the sphere geometry is baked constants; the body
+    /// position stays a runtime scalar, so a moving body rides the same kernel).
+    pub shapes: Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>>,
 }
 
 /// the simulation's mutable SUBSTANCE: every buffer + grid + time-state a kernel reads
@@ -1959,6 +1965,8 @@ where
             bodies,
             diagnostics: symbi_ib::DiagnosticAccumulator::new(n),
             history: symbi_ib::BodyHistory::new(n),
+            // default: every body is its analytic sphere; a config shape is attached separately.
+            shapes: vec![None; n],
         });
     }
 

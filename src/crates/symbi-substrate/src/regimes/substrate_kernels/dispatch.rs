@@ -709,6 +709,153 @@ pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
+/// a runtime-built + cranelift-JIT'd penalization kernel for an arbitrary CSG shape. the shape
+/// geometry is baked into the kernel as constants; the body position + porous dials stay runtime
+/// scalars, so a MOVING body reuses the same compiled kernel. HOST + f64 + Cartesian + energy
+/// regime only (the JIT buffer ABI is raw f64) — device / iso / curvilinear shaped walls fall out
+/// of the AOT sphere path and are a follow-on.
+struct ShapedPenalizeKernel {
+    kernel: symbi_jit::CompiledKernel,
+    scalar_params: Vec<super::params::ScalarBind>,
+}
+
+/// build (or fetch from the process cache) the shaped porous kernel for a distinct geometry. keyed
+/// by the shape's structural repr + dimension: the same shape across bodies OR across steps of a
+/// moving body compiles ONCE. `None` if the shape is unbounded (a complement) or falls outside the
+/// cranelift JIT subset.
+fn shaped_penalize_kernel(ndim: usize, shape: &symbi_ib::sdf::SdfExpr<f64, 3>) -> Option<std::sync::Arc<ShapedPenalizeKernel>> {
+    use std::sync::{Arc, OnceLock, RwLock};
+    static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    let key = format!("{ndim}|{shape:?}");
+    if let Some(k) = cache.read().unwrap().get(&key) {
+        return k.clone();
+    }
+    let mut w = cache.write().unwrap();
+    if let Some(k) = w.get(&key) {
+        return k.clone();
+    }
+    let (gvk, writes) = symbi_discretize::penalize_porous_gv_shaped(symbi_discretize::Coords::Cartesian, ndim, shape);
+    let built = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok().map(|kernel| {
+        Arc::new(ShapedPenalizeKernel {
+            kernel,
+            scalar_params: gvk.scalar_params.iter().map(|s| super::params::ScalarBind::from_name(s)).collect(),
+        })
+    });
+    w.insert(key, built.clone());
+    built
+}
+
+/// run the runtime-JIT'd shaped porous wall for one body: bind the cons fields (in-place) + the
+/// per-body delta scratch as raw f64 bases, resolve the kernel's scalar manifest through the shared
+/// per-body resolver, JIT-run over the body's bounding-ball bbox, then reduce the deltas into the
+/// feedback accumulator exactly as the AOT path does. self-contained so the bit-identical AOT
+/// sphere loop is left untouched.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    im: &symbi_sim::state::ImmersedBodies<D>,
+    b: usize,
+    shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
+    n_delta: usize,
+    n_torque: usize,
+    scratch: &[Field<Sc, D, Mem>],
+    bind_value: impl Fn(&super::params::ScalarBind, usize) -> f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    use super::layout::{alloc_layout, exec_layout};
+    // the JIT buffer ABI is raw f64 on host; Cartesian only (the shape is a physical-frame CSG).
+    assert!(
+        !Mem::IS_DEVICE_ACCESSIBLE && std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
+        "arbitrary-shape immersed body {b}: host + f64 only (device / non-f64 shaped walls are a follow-on)",
+    );
+    assert!(
+        sim.geom.coords == symbi_geometry::Geometry::Cartesian,
+        "arbitrary-shape immersed body {b}: Cartesian only (curvilinear shaped walls are a follow-on)",
+    );
+    let has_energy = sim.fields.cons.nrg_field().is_some();
+    assert!(has_energy, "arbitrary-shape immersed body {b}: energy regime only (iso shaped wall not yet baked)");
+    let sk = shaped_penalize_kernel(D, shape).unwrap_or_else(|| {
+        panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
+    });
+
+    // the bbox: the shape's body-local bounding ball translated to the runtime body position,
+    // padded by the chi saturation width, floored/ceiled to an index box (same law as the AOT path).
+    let (lc, lr) = shape.bounding_ball().expect("shaped body must be bounded");
+    let pos = im.bodies.get(b).position;
+    let min_dx = (0..D).map(|a| sim.geom.dx[a]).fold(f64::INFINITY, f64::min);
+    let r_cut = lr + symbi_discretize::ibm::DRAIN_SUPPORT_WIDTHS * min_dx;
+    let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
+        let s = &sim.geom.interior.spaces[a];
+        let center = pos[a] + lc[a];
+        let lo_x = (center - r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
+        let hi_x = (center + r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
+        symbi_algebra::Space {
+            name: s.name,
+            lo: (lo_x.floor() as isize).clamp(s.lo, s.hi),
+            hi: ((hi_x.ceil() as isize) + 1).clamp(s.lo, s.hi),
+        }
+    });
+    if spaces.iter().any(|sp| sp.lo >= sp.hi) {
+        return; // the body's support does not intersect this partition's interior.
+    }
+    let bbox = Domain::new(spaces);
+
+    // in-place cons bases (read + write the SAME buffers) + the delta scratch as OUTPUT bases, in
+    // the kernel's declared write order: den, mom_0.., nrg, then the n_delta + n_torque scratch.
+    let cons_ptr = |f: &Field<Sc, D, Mem>| f.as_ptr() as *const f64;
+    let cons_ptr_mut = |f: &Field<Sc, D, Mem>| f.as_ptr() as *mut f64;
+    let nrg = sim.fields.cons.nrg_field().expect("energy regime");
+    let mut in_bases: Vec<*const f64> = Vec::with_capacity(D + 2);
+    in_bases.push(cons_ptr(&sim.fields.cons.den));
+    for c in 0..DOF {
+        in_bases.push(cons_ptr(&sim.fields.cons.mom[c]));
+    }
+    in_bases.push(cons_ptr(nrg));
+    let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque);
+    out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
+    for c in 0..DOF {
+        out_bases.push(cons_ptr_mut(&sim.fields.cons.mom[c]));
+    }
+    out_bases.push(cons_ptr_mut(nrg));
+    for s in scratch[..n_delta + n_torque].iter() {
+        out_bases.push(cons_ptr_mut(s));
+    }
+    let scalars: Vec<f64> = sk.scalar_params.iter().map(|bind| bind_value(bind, b)).collect();
+
+    let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
+    let (grid, dlo) = exec_layout(&bbox);
+    // SAFETY: shared allocated layout; the cons.* fields are bound as the SAME base in `in_bases`
+    // and `out_bases` (in-place, read-before-write per cell); every scratch output is a distinct
+    // allocation; distinct cells write distinct flat indices on distinct rayon threads.
+    unsafe {
+        sk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases);
+    }
+
+    // reduce the per-body deltas over the bbox and book them, exactly as the AOT path does.
+    let mass = field_reduce(&scratch[0], &bbox, ReductionOp::Add);
+    let mut force = symbi_algebra::Tensor::<f64, D>::zeros();
+    for a in 0..D {
+        force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
+    }
+    let energy = field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add);
+    let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
+    for k in 0..n_torque {
+        let axis = if n_torque == 1 { 2 } else { k };
+        torque[axis] = field_reduce(&scratch[n_delta + k], &bbox, ReductionOp::Add);
+    }
+    im.diagnostics.accumulate(symbi_ib::BodyDelta {
+        idx: b,
+        force_delta: force,
+        torque_delta: torque,
+        mass_delta: mass,
+        prev_mass_delta: 0.0,
+        energy_delta: energy,
+    });
+}
+
 fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -760,6 +907,12 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // penalize every body that runs a surface stack (accretor OR rigid wall); a body
         // with no mask (passive / purely gravitational) contributes no penalization.
         if bodies.get(b).mask_radius().is_none() {
+            continue;
+        }
+        // an arbitrary-shape body runs the runtime-JIT'd shaped kernel (built + cached per distinct
+        // geometry); a body with no shape is the analytic sphere via the AOT kernel below.
+        if let Some(shape) = im.shapes.get(b).and_then(|s| s.as_ref()) {
+            dispatch_penalize_shaped_body(sim, im, b, shape, n_delta, n_torque, scratch, &bind_value);
             continue;
         }
         // the body's surface stack picks the baked kernel. the regime picks

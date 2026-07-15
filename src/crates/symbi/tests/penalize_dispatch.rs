@@ -346,3 +346,46 @@ fn rigid_wall_non_accreting_penalizes_without_draining() {
         "the non-accreting rigid wall never penalized — the mask_radius gate skipped it: {f:?}"
     );
 }
+
+// an ARBITRARY-SHAPE rigid body: a box, not a sphere. its penalization kernel is runtime-built +
+// cranelift-JIT'd (the box geometry baked as constants, the body position a runtime scalar), then
+// executed over the shape's bounding box through the standalone `run_parallel_raw`. it must
+// penalize (the wall pushes back) while removing exactly zero mass — the full host runtime-JIT path
+// end to end.
+#[test]
+fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
+    use symbi_ib::sdf::SdfExpr;
+    use symbi_ib::SurfaceSpec;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|[x, y]| Prim {
+            rho: 1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos(),
+            vel: Tensor::new([0.25, -0.15]),
+            pre: 1.0,
+        })
+        .build()
+        .with_bodies(BodyCollection::new().add(
+            Body::rigid_sphere(0, Tensor::new([0.1, -0.05]), Tensor::zeros(), 1.0, 0.2, 1.0, true)
+                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
+        ));
+    // attach the arbitrary shape: a box in the body-local frame (a 0.3 x 0.3 square in the z=0
+    // plane), NOT the sphere the AOT kernel would use.
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.15, 0.15, 1.0]));
+
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
+    let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert_eq!(d[0].mass_delta, 0.0, "a sealed shaped wall removes no mass, exactly");
+    let f = d[0].force_delta;
+    assert!(
+        (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
+        "the runtime-JIT'd box wall never penalized: {f:?}"
+    );
+}
