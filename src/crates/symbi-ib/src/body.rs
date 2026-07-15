@@ -215,6 +215,18 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         }
     }
 
+    /// the penalization mask radius: the geometric scale the SDF mask and dispatch support
+    /// use. an accretor masks to its accretion radius; a rigid sphere masks to its physical
+    /// radius (the wall sits at the body surface). None if the body runs no surface
+    /// penalization (passive / purely gravitational), which gates it out of the penalize step.
+    pub fn mask_radius(&self) -> Option<S> {
+        match self.kind {
+            BodyKind::BlackHole { accretion_radius, .. } => Some(accretion_radius),
+            BodyKind::RigidSphere { .. } => Some(self.radius),
+            _ => None,
+        }
+    }
+
     /// sink rate, or None if the body has no accretion capability.
     pub fn sink_rate(&self) -> Option<S> {
         match self.kind {

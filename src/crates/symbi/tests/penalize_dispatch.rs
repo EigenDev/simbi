@@ -307,3 +307,42 @@ fn porous_surface_endpoints_hold_through_the_dispatch() {
     let d = porous.immersed.as_ref().unwrap().diagnostics.consolidate();
     assert!(d[0].mass_delta > 0.0, "the half-open surface never drained");
 }
+
+// a RIGID (non-accreting) body reaches the penalize dispatch through the mask_radius
+// gate — the old accretion_radius gate would have skipped it. it penalizes (the wall
+// pushes back) while removing exactly zero mass, and the feedback ledger consolidates a
+// non-black-hole body without panicking.
+#[test]
+fn rigid_wall_non_accreting_penalizes_without_draining() {
+    use symbi_ib::SurfaceSpec;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let rigid = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|[x, y]| Prim {
+            rho: 1.0 + 0.1 * (2.0 * x).sin() * (1.5 * y).cos(),
+            vel: Tensor::new([0.2, -0.15]),
+            pre: 1.0,
+        })
+        .build()
+        .with_bodies(BodyCollection::new().add(
+            // rigid sphere: no accretion capability, so accretion_radius() is None; it
+            // masks to its physical radius. no-slip wall on both channels.
+            Body::rigid_sphere(0, Tensor::new([0.1, -0.05]), Tensor::zeros(), 1.0, 0.12, 1.0, true)
+                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
+        ));
+    assert_eq!(rigid.immersed.as_ref().unwrap().bodies.get(0).accretion_radius(), None);
+    dispatch_penalize(&rigid, 1e-3, GAMMA, 1.0);
+    let d = rigid.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert_eq!(d[0].mass_delta, 0.0, "a rigid wall removes no mass, exactly");
+    let f = d[0].force_delta;
+    assert!(
+        (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
+        "the non-accreting rigid wall never penalized — the mask_radius gate skipped it: {f:?}"
+    );
+}

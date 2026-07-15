@@ -162,6 +162,12 @@ struct BodyParams {
     /// torque-free accretor (xi in [0, 1]); None keeps the pure drain. mutually
     /// exclusive with porosity.
     torque_free_xi: Option<f64>,
+    /// rigid-wall moment of inertia (capability RIGID) — carried for the future
+    /// two-way rotational coupling; unused by a static obstacle.
+    inertia: f64,
+    /// rigid-wall no-slip flag: true relaxes the tangential velocity to the body
+    /// (no slip), false is a free-slip wall (the tangential channel is off).
+    no_slip: bool,
     /// whether the gas reaction force acts back on the body. black-hole sinks
     /// always feel feedback; this dial adds it to non-accreting gravitating
     /// masses (BodyCollection gates feedback on this flag OR the sink kind).
@@ -757,9 +763,22 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let accretion_radius = sub_f64(b, "accretion", "accretion_radius", 0.0);
         let sink_rate = sub_f64(b, "accretion", "sink_rate", 0.0);
         let porosity = sub_f64_opt(b, "accretion", "porosity");
-        let k_eta_n = sub_f64(b, "accretion", "k_eta_n", 0.0);
-        let k_eta_t = sub_f64(b, "accretion", "k_eta_t", 0.0);
         let torque_free_xi = sub_f64_opt(b, "accretion", "torque_free_xi");
+        // the rigid wall (capability RIGID = 1<<4) is the drain-off porous surface; its
+        // dials live in the `rigid` block (a rigid body has no `accretion` block). free
+        // slip (apply_no_slip False) zeroes the tangential channel exactly.
+        const RIGID_BIT: u64 = 1 << 4;
+        let is_rigid = capability & RIGID_BIT != 0;
+        let inertia = sub_f64(b, "rigid", "inertia", 0.0);
+        let no_slip = sub_bool(b, "rigid", "apply_no_slip", true);
+        let (k_eta_n, k_eta_t) = if is_rigid {
+            (
+                sub_f64(b, "rigid", "k_eta_n", 1.0),
+                if no_slip { sub_f64(b, "rigid", "k_eta_t", 1.0) } else { 0.0 },
+            )
+        } else {
+            (sub_f64(b, "accretion", "k_eta_n", 0.0), sub_f64(b, "accretion", "k_eta_t", 0.0))
+        };
         out.push(BodyParams {
             capability,
             mass: f("mass"),
@@ -773,6 +792,8 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             k_eta_n,
             k_eta_t,
             torque_free_xi,
+            inertia,
+            no_slip,
             two_way_coupling,
         });
     }
@@ -794,6 +815,17 @@ fn sub_f64_opt(body: &Bound<'_, PyDict>, group: &str, key: &str) -> Option<f64> 
         .and_then(|g| g.downcast::<PyDict>().ok().cloned())
         .and_then(|gd| gd.get_item(key).ok().flatten())
         .and_then(|val| val.extract().ok())
+}
+
+/// read a bool from a body sub-block (`body[group][key]`); absent / non-bool -> `default`.
+fn sub_bool(body: &Bound<'_, PyDict>, group: &str, key: &str, default: bool) -> bool {
+    body.get_item(group)
+        .ok()
+        .flatten()
+        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|gd| gd.get_item(key).ok().flatten())
+        .and_then(|val| val.extract().ok())
+        .unwrap_or(default)
 }
 
 /// drain a python primitive-generator into a flat per-cell buffer. each yielded
@@ -1838,6 +1870,7 @@ fn build_theta(cfg: &Config) -> f64 {
 /// feedback flag is carried from config.
 fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D> {
     const ACCRETION: u64 = 2;
+    const RIGID: u64 = 1 << 4;
     let mut coll = BodyCollection::new();
     for (idx, b) in params.iter().enumerate() {
         // the body position is CARTESIAN on every grid: the immersed-body kernels
@@ -1878,6 +1911,17 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                 }),
                 (None, None) => bh,
             }
+        } else if b.capability & RIGID != 0 {
+            // a rigid wall: the drain-off porous surface. porosity 0 seals the drain
+            // channel (no mass removed); the normal channel (k_eta_n) enforces
+            // no-penetration and the tangential channel (k_eta_t, zero for free slip)
+            // enforces no-slip, both relaxing the gas velocity toward the body.
+            Body::rigid_sphere(idx, pos, vel, b.mass, b.radius, b.inertia, b.no_slip)
+                .with_surface(symbi_ib::SurfaceSpec::Porous {
+                    porosity: 0.0,
+                    k_eta_n: b.k_eta_n,
+                    k_eta_t: b.k_eta_t,
+                })
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };
@@ -2047,10 +2091,50 @@ mod diagnostics_tests {
             k_eta_n: 0.0,
             k_eta_t: 0.0,
             torque_free_xi: None,
+            inertia: 0.0,
+            no_slip: true,
             two_way_coupling: true,
         }];
         let coll = build_bodies::<2>(&params);
         assert!(coll.get(0).two_way_coupling);
+    }
+
+    // a RIGID-capability body builds a non-accreting rigid sphere with the drain-off
+    // porous wall (porosity 0), so it penalizes but removes no mass; free slip
+    // (no_slip false) zeroes the tangential channel.
+    #[test]
+    fn build_bodies_rigid_is_drain_off_porous_wall() {
+        let params = vec![BodyParams {
+            capability: 1 << 4, // RIGID
+            mass: 0.0,
+            radius: 0.3,
+            position: vec![0.0, 0.0],
+            velocity: vec![0.0, 0.0],
+            softening: 0.0,
+            accretion_radius: 0.0,
+            sink_rate: 0.0,
+            porosity: None,
+            k_eta_n: 2.0,
+            k_eta_t: 0.0, // free slip: the parse zeroes the tangential dial
+            torque_free_xi: None,
+            inertia: 1.0,
+            no_slip: false,
+            two_way_coupling: false,
+        }];
+        let coll = build_bodies::<2>(&params);
+        let body = coll.get(0);
+        // the wall masks to the body's physical radius (not an accretion radius).
+        assert_eq!(body.accretion_radius(), None);
+        assert_eq!(body.mask_radius(), Some(0.3));
+        // the surface is the sealed (porosity 0) porous wall, tangential channel off.
+        match body.surface {
+            symbi_ib::SurfaceSpec::Porous { porosity, k_eta_n, k_eta_t } => {
+                assert_eq!(porosity, 0.0);
+                assert_eq!(k_eta_n, 2.0);
+                assert_eq!(k_eta_t, 0.0);
+            }
+            other => panic!("rigid body must be a porous wall, got {other:?}"),
+        }
     }
 }
 

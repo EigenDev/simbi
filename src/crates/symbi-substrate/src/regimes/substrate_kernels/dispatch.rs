@@ -757,7 +757,9 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let scratch = feedback_scratch(sim, n_delta + n_torque);
     for b in 0..bodies.len() {
-        if bodies.get(b).accretion_radius().is_none() {
+        // penalize every body that runs a surface stack (accretor OR rigid wall); a body
+        // with no mask (passive / purely gravitational) contributes no penalization.
+        if bodies.get(b).mask_radius().is_none() {
             continue;
         }
         // the body's surface stack picks the baked kernel. the regime picks

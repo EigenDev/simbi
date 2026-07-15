@@ -30,10 +30,12 @@ def has_capability(
 
 
 # capability bits the rust binding actually honors: GRAVITATIONAL builds a
-# fixed-potential mass, ACCRETION a black-hole sink. ELASTIC / DEFORMABLE /
-# RIGID have no backend path (build_bodies falls through to passive gravity),
-# so a config declaring them is rejected rather than run as a silent lie.
-_WIRED_CAPABILITIES = BodyCapability.GRAVITATIONAL | BodyCapability.ACCRETION
+# fixed-potential mass, ACCRETION a black-hole sink, RIGID a drain-off wall
+# (the porous surface with porosity 0). ELASTIC / DEFORMABLE have no backend
+# path, so a config declaring them is rejected rather than run as a silent lie.
+_WIRED_CAPABILITIES = (
+    BodyCapability.GRAVITATIONAL | BodyCapability.ACCRETION | BodyCapability.RIGID
+)
 
 
 def _config_error(message: str) -> Exception:
@@ -216,8 +218,30 @@ class AccretionProperties:
 
 @dataclass(frozen=True)
 class RigidProperties:
+    # a rigid immersed wall: the drain-off porous surface (porosity 0). the wall
+    # relaxes the gas velocity toward the body velocity on two channels at rates
+    # k_eta_* c_s / dx: k_eta_n (normal, no-penetration) always acts; k_eta_t
+    # (tangential) acts only under no-slip (apply_no_slip False = free slip, so
+    # the tangential channel is switched off exactly). inertia carries the body's
+    # moment of inertia for the (future) two-way rotational coupling.
     inertia: float
     apply_no_slip: bool
+    k_eta_n: float = 1.0
+    k_eta_t: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.k_eta_n <= 0.0:
+            raise _config_error(
+                f"rigid k_eta_n must be > 0: it is the normal (no-penetration) "
+                f"wall-relaxation rate dial; zero leaves the wall permeable. got "
+                f"{self.k_eta_n}."
+            )
+        if self.k_eta_t < 0.0:
+            raise _config_error(
+                f"rigid k_eta_t must be >= 0: it is the tangential (no-slip) "
+                f"wall-relaxation rate dial; negative is anti-friction. got "
+                f"{self.k_eta_t}."
+            )
 
 
 @dataclass(frozen=True)
@@ -278,8 +302,16 @@ class ImmersedBodyConfig:
         if unsupported:
             raise _config_error(
                 f"immersed-body capability {unsupported!r} is not wired to the "
-                f"backend; only GRAVITATIONAL and ACCRETION are honored. a body "
-                f"declaring it would run as a passive gravitating mass."
+                f"backend; only GRAVITATIONAL, ACCRETION, and RIGID are honored. a "
+                f"body declaring it would run as a passive gravitating mass."
+            )
+        if (
+            has_capability(self.capability, BodyCapability.RIGID)
+            and self.rigid is None
+        ):
+            raise _config_error(
+                "capability RIGID requires a `rigid` property block (the wall "
+                "no-slip flag and stiffness dials); without it the wall is undefined."
             )
         if (
             has_capability(self.capability, BodyCapability.ACCRETION)

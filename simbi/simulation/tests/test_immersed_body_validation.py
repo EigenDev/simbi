@@ -6,7 +6,7 @@
 # (which reads every key with a silent default). covers:
 #   - AccretionProperties physical bounds
 #   - a capability bit requires its property block
-#   - unwired capabilities (ELASTIC / DEFORMABLE / RIGID) are rejected
+#   - unwired capabilities (ELASTIC / DEFORMABLE) are rejected
 #   - raw body dicts are rejected in favor of the validated dataclass
 # =============================================================================
 
@@ -20,6 +20,7 @@ from simbi.types.bodies import (
     BodyCapability,
     GravitationalProperties,
     ImmersedBodyConfig,
+    RigidProperties,
 )
 
 
@@ -140,7 +141,7 @@ def test_gravitational_without_block_rejected() -> None:
 
 @pytest.mark.parametrize(
     "cap",
-    [BodyCapability.ELASTIC, BodyCapability.DEFORMABLE, BodyCapability.RIGID],
+    [BodyCapability.ELASTIC, BodyCapability.DEFORMABLE],
 )
 def test_unwired_capability_rejected(cap: BodyCapability) -> None:
     with pytest.raises(ConfigError, match="not wired"):
@@ -152,6 +153,36 @@ def test_unwired_capability_rejected(cap: BodyCapability) -> None:
             radius=0.0,
             gravitational=_grav(),
         )
+
+
+def test_rigid_without_block_rejected() -> None:
+    with pytest.raises(ConfigError, match="requires a `rigid` property block"):
+        ImmersedBodyConfig(
+            capability=BodyCapability.RIGID,
+            mass=0.0,
+            velocity=(0.0, 0.0, 0.0),
+            position=(0.0, 0.0, 0.0),
+            radius=0.3,
+        )
+
+
+@pytest.mark.parametrize("k_eta_n", [0.0, -1.0])
+def test_rigid_permeable_normal_wall_rejected(k_eta_n: float) -> None:
+    # k_eta_n is the normal (no-penetration) rate dial; zero or negative leaves
+    # the wall permeable, which is not a rigid boundary.
+    with pytest.raises(ConfigError, match="k_eta_n must be > 0"):
+        RigidProperties(inertia=1.0, apply_no_slip=True, k_eta_n=k_eta_n)
+
+
+def test_valid_rigid_obstacle_constructs() -> None:
+    ImmersedBodyConfig(
+        capability=BodyCapability.RIGID,
+        mass=0.0,
+        velocity=(0.0, 0.0, 0.0),
+        position=(0.0, 0.0, 0.0),
+        radius=0.3,
+        rigid=RigidProperties(inertia=1.0, apply_no_slip=False),
+    )
 
 
 def test_valid_accretor_constructs() -> None:

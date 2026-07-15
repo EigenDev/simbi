@@ -154,6 +154,28 @@ fn lab_torque(
     symbi_ib::moment(&x_rel, &f)
 }
 
+/// the immersed body's mask geometry as a traced SDF, centered at `center` (the body
+/// position `body_0_pos_*` in Cartesian): a sphere of radius `body_0_racc`. this is the
+/// ONE seam every penalization kernel (drain / porous-wall / torque-free, adiabatic and
+/// iso) shares — the mask cannot drift between kernels, and an arbitrary-shape (CSG) body
+/// varies the geometry HERE while every surface stack is left untouched.
+fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
+    SdfExpr::<Gv, 3>::Sphere { center, radius: Gv::scalar("body_0_racc") }
+}
+
+/// the dispatch output support for a body penalization kernel: the mask ball padded by
+/// `DRAIN_SUPPORT_WIDTHS` cell widths, beyond which the tanh chi (and hence every delta and
+/// the in-place cons write) is unchanged-valued. derived from the SAME `body_0_pos_*` /
+/// `body_0_racc` the mask SDF traces, so support and mask describe one geometry.
+fn body_support(ndim: usize) -> Support {
+    let center_p: Vec<ParamExpr> =
+        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
+    let radius_p = ParamExpr::param("body_0_racc")
+        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
+            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
+    Support::ball(center_p, radius_p)
+}
+
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian,
 /// DOF = ndim. dimension-generic over 1..=3.
 pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
@@ -189,8 +211,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     let x: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
-    let r_mask = Gv::scalar("body_0_racc");
-    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let sphere = body_mask_sdf(center);
     let phi = sphere.dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
 
@@ -253,12 +274,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     // the delta outputs vanish exactly beyond the tanh saturation radius; the
     // in-place cons writes are unchanged-value there, so the ball bounds
     // everything the reduction needs (dispatch may clip to it).
-    let center_p: Vec<ParamExpr> =
-        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-    let radius_p = ParamExpr::param("body_0_racc")
-        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    let kernel = end_trace().with_output_support(body_support(ndim));
     (kernel, writes)
 }
 
@@ -304,8 +320,7 @@ pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     let x: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
-    let r_mask = Gv::scalar("body_0_racc");
-    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let sphere = body_mask_sdf(center);
     let phi = sphere.dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
 
@@ -376,12 +391,7 @@ pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
         ));
     }
 
-    let center_p: Vec<ParamExpr> =
-        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-    let radius_p = ParamExpr::param("body_0_racc")
-        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    let kernel = end_trace().with_output_support(body_support(ndim));
     (kernel, writes)
 }
 
@@ -427,8 +437,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
     let x: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
-    let r_mask = Gv::scalar("body_0_racc");
-    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     let inv_tau = cs / (c_drain * min_w);
 
@@ -485,12 +494,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
         ));
     }
 
-    let center_p: Vec<ParamExpr> =
-        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-    let radius_p = ParamExpr::param("body_0_racc")
-        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    let kernel = end_trace().with_output_support(body_support(ndim));
     (kernel, writes)
 }
 
@@ -526,8 +530,7 @@ pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes)
     });
     let x_cart = centroid_to_cartesian(coords, ndim, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let r_mask = Gv::scalar("body_0_racc");
-    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     let inv_tau = cs / (c_drain * min_w);
     let rate_scale = cs / min_w;
@@ -574,12 +577,7 @@ pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes)
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
     }
 
-    let center_p: Vec<ParamExpr> =
-        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-    let radius_p = ParamExpr::param("body_0_racc")
-        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    let kernel = end_trace().with_output_support(body_support(ndim));
     (kernel, writes)
 }
 
@@ -613,8 +611,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes
     });
     let x_cart = centroid_to_cartesian(coords, ndim, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let r_mask = Gv::scalar("body_0_racc");
-    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
 
     let mut mom_sq = Gv::ZERO;
@@ -662,12 +659,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
     }
 
-    let center_p: Vec<ParamExpr> =
-        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-    let radius_p = ParamExpr::param("body_0_racc")
-        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    let kernel = end_trace().with_output_support(body_support(ndim));
     (kernel, writes)
 }
 
@@ -704,8 +696,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) 
     let x: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
-    let r_mask = Gv::scalar("body_0_racc");
-    let sphere = SdfExpr::<Gv, 3>::Sphere { center, radius: r_mask };
+    let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
     let inv_tau = cs / (c_drain * min_w);
 
@@ -750,11 +741,6 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) 
         ));
     }
 
-    let center_p: Vec<ParamExpr> =
-        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-    let radius_p = ParamExpr::param("body_0_racc")
-        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    let kernel = end_trace().with_output_support(Support::ball(center_p, radius_p));
+    let kernel = end_trace().with_output_support(body_support(ndim));
     (kernel, writes)
 }

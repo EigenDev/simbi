@@ -207,8 +207,9 @@ pub(crate) fn body_scalar<const D: usize>(
         // gravity: mass=0 for a non-gravitating body so it exerts no pull.
         BodyScalar::Mass => if body.has_gravity() { body.mass } else { 0.0 },
         BodyScalar::Soft => body.softening().unwrap_or(1.0),
-        // accretion: sink=0 for a non-accreting body so it removes no mass.
-        BodyScalar::Racc => body.accretion_radius().unwrap_or(1.0),
+        // the penalization mask radius: the accretor's accretion radius or the rigid
+        // body's physical radius; 1.0 for a body with no mask (never penalized).
+        BodyScalar::Racc => body.mask_radius().unwrap_or(1.0),
         BodyScalar::Sink => body.sink_rate().unwrap_or(0.0),
         BodyScalar::Delta => body.sink_delta().unwrap_or(1.0),
     }
