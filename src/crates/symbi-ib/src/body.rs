@@ -82,11 +82,12 @@ pub enum BodyKind<S: Scalar> {
     },
 }
 
-/// the penalization stack a body's surface runs (docs/design/50 property
-/// algebra). config-static — parameters, never state, never checkpointed.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// the hydrodynamic penalization stack a body's surface runs (docs/design/50
+/// property algebra). config-static — parameters, never state, never checkpointed.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum SurfaceSpec {
     /// the uniform-scaling drain: the validated accretor (p = 1).
+    #[default]
     Drain,
     /// the porosity dial: `porosity` scales the drain channel, (1 - porosity)
     /// the wall channels; the wall rates are `k_eta_* c_s / dx`
@@ -98,6 +99,30 @@ pub enum SurfaceSpec {
     /// no net angular momentum to the body (the Dittmann sink). `xi in [0, 1]`:
     /// `xi = 0` is the standard drain, `xi = 1` fully torque-free. isothermal.
     TorqueFree { xi: f64 },
+}
+
+/// the magnetic coupling a body's surface runs — the MHD analog of `SurfaceSpec`.
+/// config-static, never state, never checkpointed. `None` is transparent to the
+/// magnetic field: a hydro run and an MHD run with a non-magnetic body evolve
+/// identically, and a subgrid sink drains only the plasma while the flux is left to
+/// constrained transport. the flux-anchor / resistive / beta-floor couplings land in
+/// later work.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum MagneticSpec {
+    /// no magnetic coupling: the body does not act on the magnetic field.
+    #[default]
+    None,
+}
+
+/// the full surface-coupling stack a body runs: the hydrodynamic surface physics and,
+/// for MHD, the magnetic coupling — one per subsystem, each relaxing toward its own
+/// declared target. config-static.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct BodySpec {
+    /// the hydrodynamic surface: drain / porous wall / torque-free (design 50 channels).
+    pub surface: SurfaceSpec,
+    /// the magnetic surface coupling (MHD); default `None` is transparent to B.
+    pub magnetic: MagneticSpec,
 }
 
 /// a physical body embedded in the simulation grid.
@@ -112,9 +137,10 @@ pub struct Body<S: Scalar, const D: usize> {
     pub radius: S,
     pub two_way_coupling: bool,
     pub kind: BodyKind<S>,
-    /// the surface physics: which penalization stack acts at the boundary.
-    /// kinematics stay on `kind`; this picks the baked kernel.
-    pub surface: SurfaceSpec,
+    /// the surface-coupling stack: the hydrodynamic surface physics (`spec.surface`)
+    /// and the magnetic coupling (`spec.magnetic`). kinematics stay on `kind`; this
+    /// picks the baked kernel.
+    pub spec: BodySpec,
     /// the body's ORIENTATION as a row-major rotation matrix `R` (init identity), advanced each step
     /// by the angular velocity. a shaped rigid wall's mask is `shape.rotated(R)` and its Dual-normal
     /// tracks it. every non-rotating body keeps the identity.
@@ -141,7 +167,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             mass, radius,
             two_way_coupling: false,
             kind,
-            surface: SurfaceSpec::Drain,
+            spec: BodySpec::default(),
             orientation: [
                 [S::ONE, S::ZERO, S::ZERO],
                 [S::ZERO, S::ONE, S::ZERO],
@@ -152,9 +178,15 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         }
     }
 
-    /// declare the surface stack (fluent; the default is the drain).
+    /// declare the hydrodynamic surface stack (fluent; the default is the drain).
     pub fn with_surface(mut self, surface: SurfaceSpec) -> Self {
-        self.surface = surface;
+        self.spec.surface = surface;
+        self
+    }
+
+    /// declare the magnetic coupling (fluent; the default is `None`, transparent to B).
+    pub fn with_magnetic(mut self, magnetic: MagneticSpec) -> Self {
+        self.spec.magnetic = magnetic;
         self
     }
 
@@ -460,6 +492,23 @@ mod tests {
         let b = Body::passive(0, V2::zeros(), V2::zeros(), 1.0, 0.1)
             .with_two_way_coupling(true);
         assert!(b.two_way_coupling);
+    }
+
+    #[test]
+    fn body_spec_defaults_to_the_drain_and_no_magnetic_coupling() {
+        // base() relies on the default being the drain (the accretor) with a magnetic
+        // coupling of None -- transparent to B, so an MHD run with a non-magnetic body
+        // is bit-identical to the hydro path.
+        let b = Body::<f64, 2>::passive(0, V2::zeros(), V2::zeros(), 1.0, 0.1);
+        assert_eq!(b.spec, BodySpec::default());
+        assert_eq!(b.spec.surface, SurfaceSpec::Drain);
+        assert_eq!(b.spec.magnetic, MagneticSpec::None);
+        // the builders route through `spec`, and the surface stack is untouched by the
+        // magnetic declaration.
+        let wall = SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 };
+        let b = b.with_surface(wall).with_magnetic(MagneticSpec::None);
+        assert_eq!(b.spec.surface, wall);
+        assert_eq!(b.spec.magnetic, MagneticSpec::None);
     }
 
     #[test]

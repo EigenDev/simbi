@@ -925,7 +925,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     };
     let bodies = &im.bodies;
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
-        let surface = bodies.get(b).surface;
+        let surface = bodies.get(b).spec.surface;
         match bind {
             ScalarBind::Ref(sref) => match *sref {
                 ScalarRef::Dt => dt,
@@ -967,7 +967,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         // reproduces the KernelId name exactly. only the drain is baked off-chart.
         let cart = symbi_geometry::Geometry::Cartesian;
         let coords_g = geom.coords;
-        let name_owned: String = match (bodies.get(b).surface, nrg.is_some()) {
+        let name_owned: String = match (bodies.get(b).spec.surface, nrg.is_some()) {
             (symbi_ib::SurfaceSpec::Drain, true) => penalize_name("penalize_drain", coords_g, D),
             (symbi_ib::SurfaceSpec::Drain, false) => {
                 penalize_name("penalize_drain_iso", coords_g, D)

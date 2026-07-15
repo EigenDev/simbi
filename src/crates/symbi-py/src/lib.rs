@@ -2206,7 +2206,7 @@ mod diagnostics_tests {
         assert_eq!(body.accretion_radius(), None);
         assert_eq!(body.mask_radius(), Some(0.3));
         // the surface is the sealed (porosity 0) porous wall, tangential channel off.
-        match body.surface {
+        match body.spec.surface {
             symbi_ib::SurfaceSpec::Porous { porosity, k_eta_n, k_eta_t } => {
                 assert_eq!(porosity, 0.0);
                 assert_eq!(k_eta_n, 2.0);
