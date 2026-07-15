@@ -216,6 +216,7 @@ pub(crate) fn body_scalar<const D: usize>(
         // drags the gas at `omega x r`. zero for every non-spinning body.
         BodyScalar::Angle => body.angle,
         BodyScalar::Omega => body.omega,
+        BodyScalar::Axis(ax) => body.spin_axis[ax as usize],
     }
 }
 

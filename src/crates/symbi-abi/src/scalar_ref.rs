@@ -46,10 +46,12 @@ pub enum BodyScalar {
     Delta,
     Pos(u8),
     Vel(u8),
-    /// the body's orientation angle about z (radians), advanced by the prescribed spin.
+    /// the body's orientation angle (radians) about `spin_axis`, advanced by the prescribed spin.
     Angle,
-    /// the body's angular velocity about z (radians/time), the prescribed spin rate.
+    /// the body's prescribed spin RATE (radians/time) about `spin_axis`.
     Omega,
+    /// the `k`-th component of the body's (unit) spin axis.
+    Axis(u8),
 }
 
 impl BodyScalar {
@@ -65,6 +67,7 @@ impl BodyScalar {
             BodyScalar::Vel(ax) => format!("vel_{ax}"),
             BodyScalar::Angle => "angle".to_string(),
             BodyScalar::Omega => "omega".to_string(),
+            BodyScalar::Axis(ax) => format!("axis_{ax}"),
         }
     }
 
@@ -74,6 +77,9 @@ impl BodyScalar {
         }
         if let Some(ax) = field.strip_prefix("vel_") {
             return ax.parse().ok().map(BodyScalar::Vel);
+        }
+        if let Some(ax) = field.strip_prefix("axis_") {
+            return ax.parse().ok().map(BodyScalar::Axis);
         }
         match field {
             "mass" => Some(BodyScalar::Mass),

@@ -4,6 +4,7 @@
 # type definitions for immersed bodies and gravitational systems.
 # includes Body, ImmersedBodyConfig, BinaryConfig, and property dataclasses.
 # =============================================================================
+import math
 from dataclasses import asdict, dataclass, field
 from enum import IntFlag
 from typing import Any, Optional, Sequence
@@ -234,11 +235,18 @@ class RigidProperties:
     k_eta_n: float = 1.0
     k_eta_t: float = 1.0
     shape: Optional[Shape] = None
-    # prescribed angular velocity about z (radians/time). nonzero makes a SHAPED wall spin: its
-    # mask rotates as R(omega*t) and its no-slip surface drags the gas at omega x r.
+    # prescribed spin RATE (radians/time) about `spin_axis`. nonzero makes a SHAPED wall spin: its
+    # mask rotates as Rodrigues(axis, omega*t) and its no-slip surface drags the gas at
+    # (omega * axis) x r. the axis is normalized here; default z (the 2D in-plane spin).
     omega: float = 0.0
+    spin_axis: tuple[float, float, float] = (0.0, 0.0, 1.0)
 
     def __post_init__(self) -> None:
+        norm = math.sqrt(sum(x * x for x in self.spin_axis))
+        if self.omega != 0.0 and norm == 0.0:
+            raise _config_error("a spinning wall needs a nonzero spin_axis.")
+        if norm > 0.0:
+            object.__setattr__(self, "spin_axis", tuple(x / norm for x in self.spin_axis))
         if self.shape is not None and not isinstance(self.shape, Shape):
             raise _config_error(
                 f"rigid shape must be a Shape (Shape.sphere/box/union/...), got "

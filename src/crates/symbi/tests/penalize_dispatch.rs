@@ -472,6 +472,47 @@ fn two_way_spin_is_dragged_to_a_stop() {
     assert!(omega > 0.0, "one step should not reverse the spin: {omega}");
 }
 
+// ARBITRARY-AXIS 3D spin: a box spinning about the X axis (not the default z) in still 3D fluid
+// must book its reaction torque about X — proving the mask uses Rodrigues(axis, angle) and the wall
+// velocity is omega x r about the config axis, not hardwired to z.
+#[test]
+fn spinning_box_about_x_axis_imparts_torque_3d() {
+    use symbi_ib::sdf::SdfExpr;
+    use symbi_ib::SurfaceSpec;
+    type Sim3 = SimState<Newtonian, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let n = 24;
+    let dx = 2.0 * L / n as f64;
+    let mut sim = Sim3::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([n, n, n])
+        .origin([-L, -L, -L])
+        .spacing([dx, dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("3d sim")
+        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 })
+        .build()
+        .with_bodies(BodyCollection::new().add(
+            Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.4, 1.0, true)
+                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
+                .with_spin(5.0)
+                .with_spin_axis(Tensor::new([1.0, 0.0, 0.0])),
+        ));
+    // a box elongated in y, so spinning about x sweeps its arms through z and grabs the gas.
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.1, 0.3, 0.1]));
+
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
+    let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert_eq!(d[0].mass_delta, 0.0, "a sealed spinning wall removes no mass");
+    let tau = d[0].torque_delta;
+    assert!(tau[0].abs() > 1e-6, "spin about x should book a torque about x: {tau:?}");
+    // the reaction is about the spin axis (x), NOT z — the default axis is not hardwired.
+    assert!(
+        tau[0].abs() > 10.0 * tau[2].abs(),
+        "the x-axis spin torque must dominate the z component: {tau:?}"
+    );
+}
+
 // an arbitrary-shape rigid wall on a CURVILINEAR (r-phi disk) grid: the mask distance is physical
 // (the coordinate centroid maps to Cartesian), and off-Cartesian the dispatch runs the whole
 // interior. a box at an off-origin Cartesian point must penalize the flow (mass 0, force nonzero).

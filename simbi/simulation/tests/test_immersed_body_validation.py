@@ -212,6 +212,33 @@ def test_rigid_shape_must_be_a_shape() -> None:
         RigidProperties(inertia=1.0, apply_no_slip=True, shape={"kind": "box"})
 
 
+def test_spin_axis_normalizes_and_defaults_to_z() -> None:
+    from simbi.types.shape import Shape
+
+    assert RigidProperties(inertia=1.0, apply_no_slip=True).spin_axis == (0.0, 0.0, 1.0)
+    r = RigidProperties(
+        inertia=1.0,
+        apply_no_slip=True,
+        shape=Shape.box((0.0, 0.0, 0.0), (0.2, 0.1, 1.0)),
+        omega=5.0,
+        spin_axis=(2.0, 0.0, 0.0),
+    )
+    assert r.spin_axis == (1.0, 0.0, 0.0)  # normalized
+
+
+def test_zero_spin_axis_with_omega_rejected() -> None:
+    from simbi.types.shape import Shape
+
+    with pytest.raises(ConfigError, match="nonzero spin_axis"):
+        RigidProperties(
+            inertia=1.0,
+            apply_no_slip=True,
+            shape=Shape.box((0.0, 0.0, 0.0), (0.2, 0.1, 1.0)),
+            omega=5.0,
+            spin_axis=(0.0, 0.0, 0.0),
+        )
+
+
 def test_valid_accretor_constructs() -> None:
     ImmersedBodyConfig(
         capability=BodyCapability.ACCRETION | BodyCapability.GRAVITATIONAL,

@@ -88,7 +88,12 @@ pub fn apply_body_deltas<const D: usize>(
             if body.two_way_coupling {
                 if let Some(inertia) = body.inertia() {
                     if inertia > 0.0 {
-                        body.omega = body.omega + delta.torque_delta[2] / inertia;
+                        // the fixed-axis rotor feels only the torque component ALONG its axis
+                        // (the axle absorbs the rest): I*domega = tau . spin_axis.
+                        let n = body.spin_axis;
+                        let tau = delta.torque_delta;
+                        let tau_axis = tau[0] * n[0] + tau[1] * n[1] + tau[2] * n[2];
+                        body.omega = body.omega + tau_axis / inertia;
                     }
                 }
             }

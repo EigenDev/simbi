@@ -78,9 +78,12 @@ pub struct Body<S: Scalar, const D: usize> {
     /// the body's orientation angle about z (radians), advanced each step by `omega`. only a
     /// shaped rigid wall reads it (it rotates the mask + normal); zero for every other body.
     pub angle: S,
-    /// the prescribed angular velocity about z (radians/time). nonzero makes a shaped wall SPIN:
-    /// its mask rotates and its surface drags the gas at `omega x r`.
+    /// the prescribed spin RATE about `spin_axis` (radians/time). nonzero makes a shaped wall SPIN:
+    /// its mask rotates and its surface drags the gas at `(omega * spin_axis) x r`.
     pub omega: S,
+    /// the (unit) spin axis. the shape rotates by `Rodrigues(spin_axis, angle)` and the surface
+    /// velocity is `omega * spin_axis x r`. defaults to z; a 2D run only feels the z component.
+    pub spin_axis: Tensor<S, 3>,
 }
 
 // -- factory functions --
@@ -98,6 +101,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             surface: SurfaceSpec::Drain,
             angle: S::ZERO,
             omega: S::ZERO,
+            spin_axis: Tensor::new([S::ZERO, S::ZERO, S::ONE]),
         }
     }
 
@@ -107,10 +111,17 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// prescribe a constant angular velocity about z (fluent). a nonzero spin makes a shaped rigid
-    /// wall rotate its mask + drag the gas at its surface.
+    /// prescribe a constant spin RATE about the current `spin_axis` (fluent). a nonzero spin makes a
+    /// shaped rigid wall rotate its mask + drag the gas at its surface.
     pub fn with_spin(mut self, omega: S) -> Self {
         self.omega = omega;
+        self
+    }
+
+    /// set the (unit) spin axis (fluent; the caller passes a normalized axis). the shape rotates
+    /// about it and the surface velocity is `omega * axis x r`. default is z.
+    pub fn with_spin_axis(mut self, axis: Tensor<S, 3>) -> Self {
+        self.spin_axis = axis;
         self
     }
 

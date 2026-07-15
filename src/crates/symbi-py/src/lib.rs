@@ -172,8 +172,10 @@ struct BodyParams {
     /// or None for the analytic sphere. a `Some` routes the body to the runtime-JIT'd
     /// arbitrary-shape penalization kernel.
     shape_json: Option<String>,
-    /// the prescribed spin rate about z (radians/time); nonzero makes a shaped wall rotate.
+    /// the prescribed spin rate (radians/time) about `spin_axis`; nonzero makes a shaped wall rotate.
     omega: f64,
+    /// the (unit) spin axis; default z.
+    spin_axis: [f64; 3],
     /// whether the gas reaction force acts back on the body. black-hole sinks
     /// always feel feedback; this dial adds it to non-accreting gravitating
     /// masses (BodyCollection gates feedback on this flag OR the sink kind).
@@ -779,6 +781,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let no_slip = sub_bool(b, "rigid", "apply_no_slip", true);
         let shape_json = get_shape_json(b);
         let omega = sub_f64(b, "rigid", "omega", 0.0);
+        let spin_axis = sub_vec3(b, "rigid", "spin_axis", [0.0, 0.0, 1.0]);
         let (k_eta_n, k_eta_t) = if is_rigid {
             (
                 sub_f64(b, "rigid", "k_eta_n", 1.0),
@@ -804,6 +807,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             no_slip,
             shape_json,
             omega,
+            spin_axis,
             two_way_coupling,
         });
     }
@@ -836,6 +840,22 @@ fn get_shape_json(body: &Bound<'_, PyDict>) -> Option<String> {
     let wire = shape.get_item("wire").ok().flatten()?;
     let json = wire.py().import("json").ok()?;
     json.call_method1("dumps", (wire,)).ok()?.extract().ok()
+}
+
+/// read a 3-vector from a body sub-block (`body[group][key]` = `[x, y, z]`); absent / wrong-arity
+/// -> `default`.
+fn sub_vec3(body: &Bound<'_, PyDict>, group: &str, key: &str, default: [f64; 3]) -> [f64; 3] {
+    let v: Option<Vec<f64>> = body
+        .get_item(group)
+        .ok()
+        .flatten()
+        .and_then(|g| g.downcast::<PyDict>().ok().cloned())
+        .and_then(|gd| gd.get_item(key).ok().flatten())
+        .and_then(|val| val.extract().ok());
+    match v {
+        Some(v) if v.len() == 3 => [v[0], v[1], v[2]],
+        _ => default,
+    }
 }
 
 /// read a bool from a body sub-block (`body[group][key]`); absent / non-bool -> `default`.
@@ -1958,6 +1978,7 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                     k_eta_t: b.k_eta_t,
                 })
                 .with_spin(b.omega)
+                .with_spin_axis(Tensor::new(b.spin_axis))
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };
@@ -2131,6 +2152,7 @@ mod diagnostics_tests {
             no_slip: true,
             shape_json: None,
             omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
             two_way_coupling: true,
         }];
         let coll = build_bodies::<2>(&params);
@@ -2159,6 +2181,7 @@ mod diagnostics_tests {
             no_slip: false,
             shape_json: None,
             omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
             two_way_coupling: false,
         }];
         let coll = build_bodies::<2>(&params);
@@ -2200,6 +2223,7 @@ mod diagnostics_tests {
             no_slip: true,
             shape_json,
             omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
             two_way_coupling: false,
         };
         let params = vec![
@@ -2235,6 +2259,7 @@ mod diagnostics_tests {
                 r#"{"kind":"box","center":[0.0,0.0,0.0],"half_extents":[0.2,0.1,1.0]}"#.to_string(),
             ),
             omega: 3.5,
+            spin_axis: [0.0, 0.0, 1.0],
             two_way_coupling: false,
         }];
         let coll = build_bodies::<2>(&params);
