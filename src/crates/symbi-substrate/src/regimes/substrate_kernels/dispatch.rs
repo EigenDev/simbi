@@ -711,9 +711,9 @@ pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// a runtime-built + cranelift-JIT'd penalization kernel for an arbitrary CSG shape. the shape
 /// geometry is baked into the kernel as constants; the body position + porous dials stay runtime
-/// scalars, so a MOVING body reuses the same compiled kernel. HOST + f64 + Cartesian + energy
-/// regime only (the JIT buffer ABI is raw f64) — device / iso / curvilinear shaped walls fall out
-/// of the AOT sphere path and are a follow-on.
+/// scalars, so a MOVING body reuses the same compiled kernel. HOST + f64 + Cartesian, both the
+/// energy-bearing and isothermal regimes (the JIT buffer ABI is raw f64) — device / non-f64 /
+/// curvilinear shaped walls are a follow-on.
 struct ShapedPenalizeKernel {
     kernel: symbi_jit::CompiledKernel,
     scalar_params: Vec<super::params::ScalarBind>,

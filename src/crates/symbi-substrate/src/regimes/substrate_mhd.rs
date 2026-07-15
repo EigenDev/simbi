@@ -135,6 +135,10 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// consecutive substages on which the FOFC last-resort freeze tier fired; a genuine unrecoverable
     /// poison freezes every stage, while the rare correct parachute is isolated (see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
+    /// the Ohmic resistivity `eta` (the induction diffusivity `dB/dt += eta * lap(B)`, added as a
+    /// resistive edge EMF before the CT curl). 0 = ideal MHD (bit-identical). the resistive CFL
+    /// `dt <= 1/2 dx^2 / eta` folds into the wave-speed reduction.
+    pub resistivity: f64,
     _r: PhantomData<R>,
 }
 
@@ -147,7 +151,7 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), _r: PhantomData }
+        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, _r: PhantomData }
     }
 
     /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
@@ -165,6 +169,13 @@ where
     /// (the `build_user_source` output of a `SourceConfig`). applied two-pass in
     /// `source_apply`. has_energy is read from the regime spec (rmhd/nmhd carry it,
     /// imhd does not), so the source pass writes only the slots the regime owns.
+    /// declare the Ohmic resistivity `eta` (fluent; default 0 = ideal MHD). the resistive edge EMF
+    /// `eta * J` rides the CT curl and the resistive CFL `dt <= 1/2 dx^2 / eta` bounds the step.
+    pub fn with_resistivity(mut self, eta: f64) -> Self {
+        self.resistivity = eta;
+        self
+    }
+
     pub fn with_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, R::SPEC.has_energy));
         self
@@ -522,6 +533,13 @@ where
             dispatch_named(sim, pre_bind, Some(&self.cfl_scratch), 0, &sname, &geom.interior, &[], &sscalars);
         }
         let mut lambda_max = crate::regimes::substrate_gpu::field_max_reduce(&self.cfl_scratch, &geom.interior);
+        // OHMIC RESISTIVE CFL: explicit induction diffusion is stable for `dt <= dx^2 / (2 D eta)`;
+        // fold the equivalent rate `2 D eta / min(dx)^2` (an inverse timescale, like the wave rate)
+        // into lambda_max so the shared `dt = cfl / lambda_max` bounds the step. 0 off resistive MHD.
+        if self.resistivity > 0.0 {
+            let dx_min = geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
+            lambda_max = lambda_max.max(2.0 * (D as f64) * self.resistivity / (dx_min * dx_min));
+        }
         // DRIVEN-INFLOW CFL CAP: the per-cell wave-speed map only scans the INTERIOR, so a driven
         // boundary's inflow state (which lives in the ghost band) is invisible to it — a relativistic
         // wind from a cold-ambient inner boundary would size dt off the slow interior and then get
@@ -568,7 +586,7 @@ where
         crate::regimes::mhd_substrate::efield(sim, method, self.solver, Self::kernel_prefix(), self.eos_param, self.theta);
     }
     fn post_godunov(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64, stage: u8) {
-        crate::regimes::mhd_substrate::post_godunov(sim, R::SPEC.has_energy, dt, stage);
+        crate::regimes::mhd_substrate::post_godunov(sim, R::SPEC.has_energy, dt, stage, self.resistivity);
     }
 
     fn has_additive_source(&self) -> bool {

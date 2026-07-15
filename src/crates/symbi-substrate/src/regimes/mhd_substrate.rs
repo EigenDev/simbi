@@ -922,6 +922,7 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     has_energy: bool,
     dt: f64,
     stage: u8,
+    eta: f64,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -984,11 +985,58 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         fofc_copy_fields(&pairs);
     }
 
+    // OHMIC RESISTIVITY (2.5D cartesian): add `eta * J` to the edge EMF so the curl carries the
+    // resistive diffusion `eta * lap(B)`, div-B-clean via the SAME curl. `eta = 0` (ideal MHD), a
+    // non-2.5D grid, or a curvilinear chart skips it — the 3D + curvilinear resistive EMFs are
+    // follow-ons.
+    if eta > 0.0 && D == 2 && sim.geom.coords == symbi_geometry::Geometry::Cartesian {
+        resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta);
+    }
+
     // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
     ct_curl::<D, DOF, Mem, Sc>(sim, dt);
 
     // face->cell B interpolation + the magnetic-energy correction on cons.nrg, in place.
     bcell_from_bface::<D, DOF, Mem, Sc>(sim, has_energy);
+}
+
+/// add the 2.5D Cartesian Ohmic resistive edge EMF `eta * J_z` to `efield[0]` in place, from the
+/// staggered face field. the curl then consumes the augmented EMF, so `bface` picks up the resistive
+/// diffusion with no new monopole (`div(curl) = 0`). exec over the edge (efield) domain.
+fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    eta: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
+    let name = "rmhd_resistive_emf_2d";
+    let scalars = scalars_for(name, |bind| {
+        Sc::from_f64(match bind {
+            ScalarBind::Spec(s) if &**s == "eta" => eta,
+            ScalarBind::Spec(s) if &**s == "idx" => id[0],
+            ScalarBind::Spec(s) if &**s == "idy" => id[1],
+            ScalarBind::Ref(symbi_ir::ScalarRef::InvDx(ax)) => id[*ax as usize],
+            o => panic!("resistive_emf_2d: unexpected scalar {o:?}"),
+        })
+    });
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        match s {
+            "ez" => &mhd.efield[0],
+            "bx" => &mhd.bface[0],
+            "by" => &mhd.bface[1],
+            o => panic!("resistive_emf_2d: unknown manifest slot '{o}'"),
+        }
+    };
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    for (bind, is_out) in kernel_field_binds(name).iter() {
+        let fld = slot(&bind.name());
+        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+    }
+    dispatch_fields_each::<Sc, Mem, D>(name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
 }
 
 /// the CT curl `bface -= dt*curl(efield)` per IN-PLANE face axis (`dir`), from that face's incident

@@ -212,6 +212,29 @@ pub fn rmhd_ct_curl_2d_dir_gv(dir: usize) -> (GvKernel, Vec<(String, FieldBind, 
     (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
 }
 
+/// the 2.5D CARTESIAN OHMIC RESISTIVE edge EMF: adds the anomalous/Ohmic contribution `eta * J_z`
+/// to the out-of-plane edge EMF `ez` (efield[0]) IN PLACE, where `J_z = dB_y/dx - dB_x/dy` is the
+/// current on the z-edge from the staggered face field (`bx` = bface[0], `by` = bface[1]). the
+/// difference stencil is the ADJOINT of the `E -> B` induction curl (`rmhd_ct_curl_2d_dir_gv`): its
+/// `+1` neighbour offsets become the `-1` offsets here, so the composed `curl(eta * curl(B))` is a
+/// NEGATIVE-definite discrete Laplacian — the field DIFFUSES (decays as `exp(-eta k^2 t)`), never
+/// anti-diffuses. the same div-B-clean curl then consumes `ez`, so the update carries no new
+/// monopole (`div(curl) = 0` — the existing symbolic proof covers it). `eta = 0` is an exact no-op.
+pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ez = Gv::field("ez", "ez");
+    let eta = Gv::scalar("eta");
+    let idx = Gv::scalar("idx");
+    let idy = Gv::scalar("idy");
+    let bx = Gv::field("bx", "bx");
+    let by = Gv::field("by", "by");
+    let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbour below in y
+    let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbour behind in x
+    let jz = idx * (by - by_im) - idy * (bx - bx_jm);
+    let ez_new = ez + eta * jz;
+    (end_trace(), vec![("ez_new".to_string(), "ez".into(), ez_new.node())])
+}
+
 
 /// the 2.5D cylindrical r-z (axisymmetric) CT curl from the single out-of-plane edge EMF
 /// E_phi (efield[0]), in-place on `b` (bface[dir]). DERIVED from the 3D cyl curl restricted
