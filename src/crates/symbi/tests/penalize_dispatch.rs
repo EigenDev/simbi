@@ -433,6 +433,47 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
     );
 }
 
+// an arbitrary-shape rigid wall on a CURVILINEAR (r-phi disk) grid: the mask distance is physical
+// (the coordinate centroid maps to Cartesian), and off-Cartesian the dispatch runs the whole
+// interior. a box at an off-origin Cartesian point must penalize the flow (mass 0, force nonzero).
+#[test]
+fn shaped_box_rigid_wall_cylindrical_penalizes() {
+    use std::f64::consts::PI;
+    use symbi_geometry::Cylindrical;
+    use symbi_ib::sdf::SdfExpr;
+    use symbi_ib::SurfaceSpec;
+    type CylSim = SimState<Newtonian, 2, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+    let (nr, nphi) = (40usize, 32usize);
+    let mut sim = CylSim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
+        .cells([nr, nphi])
+        .origin([1.0, 0.0])
+        .spacing([0.1, 2.0 * PI / nphi as f64])
+        .boundaries(Boundaries::per_axis([
+            [BoundaryType::Outflow, BoundaryType::Outflow],
+            [BoundaryType::Periodic, BoundaryType::Periodic],
+        ]))
+        .allocate()
+        .expect("cyl sim")
+        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.2, 0.0]), pre: 1.0 })
+        .build()
+        .with_bodies(BodyCollection::new().add(
+            // the body sits at a Cartesian point inside the annulus (physical radius ~2.06).
+            Body::rigid_sphere(0, Tensor::new([2.0, 0.5]), Tensor::zeros(), 1.0, 0.5, 1.0, true)
+                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
+        ));
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.4, 1.0]));
+
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
+    let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert_eq!(d[0].mass_delta, 0.0, "a sealed shaped wall on a cyl grid removes no mass");
+    let f = d[0].force_delta;
+    assert!(
+        (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
+        "the curvilinear box wall never penalized: {f:?}"
+    );
+}
+
 // a SPINNING rigid box in initially-STILL fluid must drag the gas around: the no-slip surface
 // relaxes the velocity toward omega x r, so the wall imparts angular momentum and books a nonzero
 // reaction torque about z. an identical NON-spinning wall in still fluid imparts ~nothing.

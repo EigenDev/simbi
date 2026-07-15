@@ -51,6 +51,20 @@ fn shaped_rotated_penalize_jit_compiles() {
 }
 
 #[test]
+fn shaped_penalize_jit_compiles_curvilinear() {
+    // the mask distance is physical: on a spherical / cylindrical grid the kernel maps the
+    // coordinate centroid to Cartesian first. that path (centroid_to_cartesian +
+    // vector_from_cartesian) must lie in the JIT subset for a shaped body.
+    let shape = SdfExpr::<f64, 3>::cuboid([1.5, 0.0, 0.0], [0.3, 0.3, 0.3]);
+    let (k, w) = penalize_porous_gv_shaped(Coords::Spherical, 2, &shape);
+    assert!(symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(), "spherical shaped kernel not JIT-able");
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cylindrical, 2, &shape);
+    assert!(symbi_jit::compile_gv_kernel(&k, &w, 2).is_ok(), "cylindrical shaped kernel not JIT-able");
+    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cylindrical, 3, &shape);
+    assert!(symbi_jit::compile_gv_kernel(&k, &w, 3).is_ok(), "cylindrical iso shaped kernel not JIT-able");
+}
+
+#[test]
 fn spinning_penalize_jit_compiles() {
     // the SPINNING wall: the mask is rotated by R(body_0_angle) built from Gv cos/sin (runtime
     // angle), and the surface velocity carries omega x r. both the adiabatic and iso kernels must

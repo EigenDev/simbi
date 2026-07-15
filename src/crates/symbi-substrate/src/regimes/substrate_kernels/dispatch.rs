@@ -724,6 +724,7 @@ struct ShapedPenalizeKernel {
 /// moving body compiles ONCE. `None` if the shape is unbounded (a complement) or falls outside the
 /// cranelift JIT subset.
 fn shaped_penalize_kernel(
+    coords: symbi_discretize::Coords,
     ndim: usize,
     has_energy: bool,
     spin: bool,
@@ -732,7 +733,7 @@ fn shaped_penalize_kernel(
     use std::sync::{Arc, OnceLock, RwLock};
     static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    let key = format!("{ndim}|{has_energy}|{spin}|{shape:?}");
+    let key = format!("{coords:?}|{ndim}|{has_energy}|{spin}|{shape:?}");
     if let Some(k) = cache.read().unwrap().get(&key) {
         return k.clone();
     }
@@ -740,12 +741,13 @@ fn shaped_penalize_kernel(
     if let Some(k) = w.get(&key) {
         return k.clone();
     }
-    let cart = symbi_discretize::Coords::Cartesian;
+    // the mask distance is PHYSICAL: the kernel maps the coordinate centroid to Cartesian (baked
+    // per chart), so a spherical / cylindrical grid measures the true distance to the shape.
     let (gvk, writes) = match (has_energy, spin) {
-        (true, false) => symbi_discretize::penalize_porous_gv_shaped(cart, ndim, shape),
-        (true, true) => symbi_discretize::penalize_porous_gv_spinning(cart, ndim, shape),
-        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(cart, ndim, shape),
-        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(cart, ndim, shape),
+        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, shape),
+        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, shape),
+        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, shape),
+        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, shape),
     };
     let built = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok().map(|kernel| {
         Arc::new(ShapedPenalizeKernel {
@@ -782,42 +784,53 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         !Mem::IS_DEVICE_ACCESSIBLE && std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
         "arbitrary-shape immersed body {b}: host + f64 only (device / non-f64 shaped walls are a follow-on)",
     );
-    assert!(
-        sim.geom.coords == symbi_geometry::Geometry::Cartesian,
-        "arbitrary-shape immersed body {b}: Cartesian only (curvilinear shaped walls are a follow-on)",
-    );
+    // the chart the kernel bakes: the mask distance is physical (coordinate centroid mapped to
+    // Cartesian), so spherical / cylindrical grids measure the true distance to the body.
+    let coords = match sim.geom.coords {
+        symbi_geometry::Geometry::Cartesian => symbi_discretize::Coords::Cartesian,
+        symbi_geometry::Geometry::Spherical => symbi_discretize::Coords::Spherical,
+        symbi_geometry::Geometry::Cylindrical => symbi_discretize::Coords::Cylindrical,
+    };
+    let cartesian = matches!(coords, symbi_discretize::Coords::Cartesian);
     let has_energy = sim.fields.cons.nrg_field().is_some();
     // a nonzero prescribed spin selects the rotating kernel (runtime R(angle) mask + omega x r wall).
     let spin = im.bodies.get(b).omega != 0.0;
-    let sk = shaped_penalize_kernel(D, has_energy, spin, shape).unwrap_or_else(|| {
+    let sk = shaped_penalize_kernel(coords, D, has_energy, spin, shape).unwrap_or_else(|| {
         panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
     });
 
-    // the bbox: the shape's bounding ball, padded, floored/ceiled to an index box. a STATIC body
-    // uses the tight ball translated to the body position (center pos+lc, radius lr). a SPINNING
-    // body sweeps its shape through every orientation about the body center, so the mask reaches
-    // |lc| + lr from the position (center pos) — a conservative, orientation-independent box.
-    let (lc, lr) = shape.bounding_ball().expect("shaped body must be bounded");
-    let pos = im.bodies.get(b).position;
-    let min_dx = (0..D).map(|a| sim.geom.dx[a]).fold(f64::INFINITY, f64::min);
-    let lc_norm = (0..D).map(|a| lc[a] * lc[a]).sum::<f64>().sqrt();
-    let reach = if spin { lr + lc_norm } else { lr };
-    let r_cut = reach + symbi_discretize::ibm::DRAIN_SUPPORT_WIDTHS * min_dx;
-    let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
-        let s = &sim.geom.interior.spaces[a];
-        let center = if spin { pos[a] } else { pos[a] + lc[a] };
-        let lo_x = (center - r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
-        let hi_x = (center + r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
-        symbi_algebra::Space {
-            name: s.name,
-            lo: (lo_x.floor() as isize).clamp(s.lo, s.hi),
-            hi: ((hi_x.ceil() as isize) + 1).clamp(s.lo, s.hi),
+    // the bbox. on a CARTESIAN grid the shape's bounding ball floors/ceils to an index box: a
+    // STATIC body uses the tight ball at the body position (center pos+lc, radius lr); a SPINNING
+    // body sweeps its shape through every orientation, so the mask reaches |lc| + lr from the
+    // position (center pos). OFF-Cartesian the support is a COORDINATE ball, not index-aligned (a
+    // centered body masks a full theta/phi ring), so dispatch over the whole interior — the mask is
+    // an exact zero outside the physical ball by tanh saturation, so this is correct, just
+    // unoptimized (the same choice the AOT sphere path makes off-Cartesian).
+    let bbox = if cartesian {
+        let (lc, lr) = shape.bounding_ball().expect("shaped body must be bounded");
+        let pos = im.bodies.get(b).position;
+        let min_dx = (0..D).map(|a| sim.geom.dx[a]).fold(f64::INFINITY, f64::min);
+        let lc_norm = (0..D).map(|a| lc[a] * lc[a]).sum::<f64>().sqrt();
+        let reach = if spin { lr + lc_norm } else { lr };
+        let r_cut = reach + symbi_discretize::ibm::DRAIN_SUPPORT_WIDTHS * min_dx;
+        let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
+            let s = &sim.geom.interior.spaces[a];
+            let center = if spin { pos[a] } else { pos[a] + lc[a] };
+            let lo_x = (center - r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
+            let hi_x = (center + r_cut - sim.geom.x_lo[a]) / sim.geom.dx[a];
+            symbi_algebra::Space {
+                name: s.name,
+                lo: (lo_x.floor() as isize).clamp(s.lo, s.hi),
+                hi: ((hi_x.ceil() as isize) + 1).clamp(s.lo, s.hi),
+            }
+        });
+        if spaces.iter().any(|sp| sp.lo >= sp.hi) {
+            return; // the body's support does not intersect this partition's interior.
         }
-    });
-    if spaces.iter().any(|sp| sp.lo >= sp.hi) {
-        return; // the body's support does not intersect this partition's interior.
-    }
-    let bbox = Domain::new(spaces);
+        Domain::new(spaces)
+    } else {
+        sim.geom.interior.clone()
+    };
 
     // in-place cons bases (read + write the SAME buffers) + the delta scratch as OUTPUT bases, in
     // the kernel's declared write order: den, mom_0.., nrg, then the n_delta + n_torque scratch.
