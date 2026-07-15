@@ -417,6 +417,10 @@ class Figure:
         output_path = output_path or "animation.mp4"
         nframes = len(files)
 
+        # the immersed-body silhouette artists from the PREVIOUS frame, removed before
+        # the next frame's overlay so a tumbling body does not smear across the movie.
+        self._body_artists: list = []
+
         # build a map of the original component payload \"signatures\" so we can
         # request the same plotted fields for each frame.
         component_signatures: List[object] = []
@@ -527,6 +531,24 @@ class Figure:
                     # artist masquerading as a finished animation.
                     _warn_once("frame-component", f"frame component render failed: {exc}")
                     continue
+
+            # per-frame immersed-body overlay: remove the previous frame's silhouettes
+            # and redraw at THIS frame's poses (read from this frame's checkpoint), so a
+            # spinning / tumbling body tracks its rotation across the movie.
+            if getattr(self.config.figure, "draw_bodies", False):
+                for art in self._body_artists:
+                    try:
+                        art.remove()
+                    except Exception:
+                        pass
+                from simbi.viz.bodies import overlay_bodies_on_slice
+
+                self._body_artists = overlay_bodies_on_slice(
+                    self.axes.get("main") if hasattr(self, "axes") else None,
+                    file_path,
+                    self.config.plot.slice,
+                    sim_data.metadata.coord_system,
+                )
 
             # update title with current time (only dynamic element)
             main_ax = self.axes.get("main") if hasattr(self, "axes") else None

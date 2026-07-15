@@ -159,16 +159,17 @@ def draw_body(
     facecolor: str = "0.15",
     edgecolor: str = "white",
     alpha: float = 0.9,
-) -> None:
+) -> list:
     """shade one body's silhouette on `ax` for the cut `plane` (world-axis names), with
     the third axis held at `at`. `extent = (umin, umax, vmin, vmax)` defaults to the axis
     limits. a shapeless body (analytic sphere) is drawn as a marker at its projected
-    position."""
+    position. returns the matplotlib artists created (so an animation can remove them
+    before the next frame)."""
     ua, va = _AXIS_INDEX[plane[0]], _AXIS_INDEX[plane[1]]
     pos = [body.position[k] if k < len(body.position) else 0.0 for k in range(3)]
     if body.shape is None:
-        ax.plot(pos[ua], pos[va], "o", color=facecolor, markersize=6)
-        return
+        (marker,) = ax.plot(pos[ua], pos[va], "o", color=facecolor, markersize=6)
+        return [marker]
     if extent is None:
         umin, umax = ax.get_xlim()
         vmin, vmax = ax.get_ylim()
@@ -177,8 +178,9 @@ def draw_body(
     us = np.linspace(umin, umax, nu)
     vs = np.linspace(vmin, vmax, nv)
     mask = body_mask(body, us, vs, plane=plane, at=at).astype(float)
-    ax.contourf(us, vs, mask, levels=[0.5, 1.5], colors=[facecolor], alpha=alpha)
-    ax.contour(us, vs, mask, levels=[0.5], colors=[edgecolor], linewidths=1.0)
+    fill = ax.contourf(us, vs, mask, levels=[0.5, 1.5], colors=[facecolor], alpha=alpha)
+    outline = ax.contour(us, vs, mask, levels=[0.5], colors=[edgecolor], linewidths=1.0)
+    return [fill, outline]
 
 
 def overlay_bodies(
@@ -187,14 +189,37 @@ def overlay_bodies(
     plane: tuple[str, str] = ("x", "y"),
     at: float = 0.0,
     **kwargs,
-) -> list[BodyPose]:
+) -> list:
     """load every body from `checkpoint_path` and shade its silhouette on `ax` for the
-    cut `plane` at `at` (call after plotting a field). returns the loaded poses (e.g. to
-    annotate omega). extra kwargs pass to `draw_body`."""
-    bodies = load_bodies(checkpoint_path)
-    for body in bodies:
-        draw_body(ax, body, plane=plane, at=at, **kwargs)
-    return bodies
+    cut `plane` at `at` (call after plotting a field). returns the matplotlib artists
+    created, flattened across bodies, for removal in an animation. extra kwargs pass to
+    `draw_body`."""
+    artists: list = []
+    for body in load_bodies(checkpoint_path):
+        artists.extend(draw_body(ax, body, plane=plane, at=at, **kwargs))
+    return artists
+
+
+def overlay_bodies_on_slice(
+    ax,
+    checkpoint_path: str,
+    slice_spec: Optional[dict[str, float]],
+    coord_system: str,
+    **kwargs,
+) -> list:
+    """overlay every body's silhouette on `ax`, matching a field `--slice` (via
+    `slice_to_plane`). cartesian only -- the body signed-distance is cartesian, so it
+    does not align with a polar/spherical field plot -- and skipped for a 1-D
+    (double-sliced) field, which has no silhouette. returns the created artists (empty
+    when nothing is drawn), the single gated entry point for both the static plot and
+    the per-frame animation overlay."""
+    if ax is None or coord_system != "cartesian":
+        return []
+    plane_at = slice_to_plane(slice_spec)
+    if plane_at is None:
+        return []
+    plane, at = plane_at
+    return overlay_bodies(ax, checkpoint_path, plane=plane, at=at, **kwargs)
 
 
 __all__ = [
@@ -203,5 +228,6 @@ __all__ = [
     "body_mask",
     "draw_body",
     "overlay_bodies",
+    "overlay_bodies_on_slice",
     "slice_to_plane",
 ]
