@@ -342,6 +342,22 @@ where
         true
     }
 
+    fn penalize(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
+        // the design-50 immersed-body penalization under MHD, via the 1/2|B|^2 sandwich: strip
+        // the magnetic energy so the (unchanged) hydro drain acts on the GAS energy alone, run
+        // it, then restore the field energy. the drain never touches bcell, so B and 1/2|B|^2
+        // are exactly invariant and the flux is left to constrained transport. host-only (the
+        // immersed dispatch is host + f64); with no body the shifts would be a wasted no-op.
+        if !Mem::IS_HOST_ACCESSIBLE || sim.immersed.is_none() {
+            return;
+        }
+        crate::regimes::mhd_substrate::shift_magnetic_energy(sim, -1.0);
+        // eos_param is gamma (has_energy MHD); c_drain uses the adiabatic default 1.0 (plumbing
+        // it from config is a follow-on).
+        crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param, 1.0);
+        crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
+    }
+
     fn c2p(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         let st = spacetime_slug(sim.geom.spacetime);
         let cname = if st.is_empty() {
