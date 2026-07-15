@@ -843,9 +843,12 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     // iso has no energy channel: the kernel neither reads nor writes nrg, so it drops from the
     // in/out bases (and the writes order the kernel was compiled with).
     let nrg = sim.fields.cons.nrg_field();
+    // the penalize kernel binds the D IN-PLANE momentum components (its `ndim`), not the full DOF: a
+    // 2.5D MHD store carries a 3-vector momentum on a 2-axis grid, and binding all DOF would misalign
+    // nrg onto mom[2] and corrupt the energy. D == DOF for hydro and full 3D MHD.
     let mut in_bases: Vec<*const f64> = Vec::with_capacity(D + 2);
     in_bases.push(cons_ptr(&sim.fields.cons.den));
-    for c in 0..DOF {
+    for c in 0..D {
         in_bases.push(cons_ptr(&sim.fields.cons.mom[c]));
     }
     if let Some(n) = nrg {
@@ -853,7 +856,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     }
     let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque);
     out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
-    for c in 0..DOF {
+    for c in 0..D {
         out_bases.push(cons_ptr_mut(&sim.fields.cons.mom[c]));
     }
     if let Some(n) = nrg {
@@ -1046,9 +1049,13 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
 
         // in-place cons: every field input is also a write, so the manifest
         // folds them into the output group — the input list is empty and the
-        // output order is den, mom.., nrg, then the D+2 delta scratch.
+        // output order is den, mom.., nrg, then the D+2 delta scratch. the penalize kernel handles the
+        // D IN-PLANE momentum components (its `ndim`), NOT the full DOF: a 2.5D MHD store carries a
+        // 3-vector momentum (DOF=3) on a 2-axis grid, and binding all DOF would shift `nrg` onto
+        // mom[2] and corrupt the energy globally. the out-of-plane momentum is left undrained (a
+        // separate DOF-aware penalize kernel is the follow-on); D == DOF for hydro and full 3D MHD.
         let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for comp in 0..DOF {
+        for comp in 0..D {
             outputs.push(&sim.fields.cons.mom[comp]);
         }
         if let Some(nrg) = nrg {
