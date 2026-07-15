@@ -59,6 +59,39 @@ fn host_scale_factor(coords: symbi_geometry::Geometry, ci: usize, pos: &[f64; 3]
     }
 }
 
+/// the MAX inverse PHYSICAL cell width over the interior, `max_{cell, axis} 1/(h_a * dx_a)` (i.e. the
+/// reciprocal of the SMALLEST physical cell). the diagonal-metric scale factors are extremized at the
+/// coordinate boundaries (min r, pole-closest theta), so the smallest physical cell sits at a domain
+/// CORNER — evaluate the `2^D` corner cells, O(1). the resistive diffusion crosses PHYSICAL widths, so
+/// a curvilinear grid (small r / near the poles) is stiffer than its coordinate spacing suggests;
+/// Cartesian falls through to `1/dx` (h = 1).
+fn max_inv_physical_width<const D: usize>(geom: &symbi_sim::state::PartitionGeometry<D>) -> f64 {
+    let mut max_inv = 0.0f64;
+    for corner in 0..(1usize << D) {
+        let coord: [isize; D] = std::array::from_fn(|d| {
+            let s = &geom.interior.spaces[d];
+            if (corner >> d) & 1 == 0 { s.lo } else { s.hi - 1 }
+        });
+        // physical cell-center per COORDINATE axis (for the scale factors), mirroring driven_inflow_lambda.
+        let mut pos = [0.0f64; 3];
+        for d in 0..D {
+            let c = match &geom.maps {
+                Some(m) => m[d].center(coord[d]),
+                None => geom.x_lo[d] + (coord[d] as f64 + 0.5) * geom.dx[d],
+            };
+            pos[geom.axes[d]] = c;
+        }
+        for d in 0..D {
+            let h = host_scale_factor(geom.coords, geom.axes[d], &pos);
+            let iw = 1.0 / (h * geom.cell_width(coord, d));
+            if iw > max_inv {
+                max_inv = iw;
+            }
+        }
+    }
+    max_inv
+}
+
 /// the relativistic driven-inflow CFL bound: `max` over the interior cells adjacent to every
 /// DRIVEN boundary face of `1 / (h_d * width_d)` (the inverse physical cell width, the steepest
 /// per-axis). a relativistic signal travels at most `c = 1`, so this is the `lambda` a wind
@@ -549,8 +582,11 @@ where
         });
         let eta_eff = self.resistivity.max(body_eta_max);
         if eta_eff > 0.0 {
-            let dx_min = geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
-            lambda_max = lambda_max.max(2.0 * (D as f64) * eta_eff / (dx_min * dx_min));
+            // the diffusion crosses PHYSICAL cell widths h*dx, not coordinate dx; on a curvilinear grid
+            // the smallest physical cell (min r / near the poles) sets the tightest bound. inv_w =
+            // 1/min_physical_width, so 2 D eta / width_min^2 = 2 D eta * inv_w^2.
+            let inv_w = max_inv_physical_width(geom);
+            lambda_max = lambda_max.max(2.0 * (D as f64) * eta_eff * inv_w * inv_w);
         }
         // DRIVEN-INFLOW CFL CAP: the per-cell wave-speed map only scans the INTERIOR, so a driven
         // boundary's inflow state (which lives in the ghost band) is invisible to it — a relativistic
