@@ -85,24 +85,13 @@ pub fn apply_body_deltas<const D: usize>(
             // L_delta (torque_delta is the per-step angular momentum the gas exchanged, so no extra
             // dt). a shaped two-way wall's mask + surface velocity then track the evolved omega; a
             // free spinner is dragged toward the local flow's rotation. gated on two_way + inertia>0.
-            if body.two_way_coupling {
-                if let Some(inertia) = body.inertia() {
-                    if inertia > 0.0 {
-                        // free 3D rotation (isotropic inertia): I*domega = torque, the FULL reaction
-                        // torque vector. the angular velocity reorients freely, so an asymmetric
-                        // shape tumbles as the flow torque tracks its changing orientation.
-                        for a in 0..3 {
-                            body.omega[a] = body.omega[a] + delta.torque_delta[a] / inertia;
-                        }
-                    }
-                }
-                // TRANSLATIONAL reaction: mass * dv = force_delta (the momentum the gas exchanged),
-                // so the body accelerates under the drag it exerts on the flow.
-                if body.mass > 0.0 {
-                    let m = body.mass;
-                    for a in 0..D {
-                        body.velocity[a] = body.velocity[a] + delta.force_delta[a] / m;
-                    }
+            // TRANSLATIONAL reaction: mass * dv = force_delta (the momentum the gas exchanged), so a
+            // two-way body accelerates under the drag it exerts on the flow. the ROTATIONAL reaction
+            // is applied in the orientation advance below (Euler's equations from `body.torque`).
+            if body.two_way_coupling && body.mass > 0.0 {
+                let m = body.mass;
+                for a in 0..D {
+                    body.velocity[a] = body.velocity[a] + delta.force_delta[a] / m;
                 }
             }
             if let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = &mut body.kind {
@@ -129,9 +118,11 @@ pub fn apply_body_deltas<const D: usize>(
                 body.position[a] = body.position[a] + body.velocity[a] * dt;
             }
         }
-        // advance the prescribed spin (angle += omega*dt); a shaped wall's mask + surface velocity
-        // track it. omega = 0 bodies are unchanged.
-        body.advance_spin(dt);
+        // advance the full rigid-body rotation (Euler's equations + orientation roll). a two-way
+        // body feels the reaction torque (world-frame per-step angular momentum on `body.torque`); a
+        // prescribed body evolves torque-free, still precessing if its inertia is anisotropic.
+        let torque = if body.two_way_coupling { body.torque } else { Tensor::zeros() };
+        body.advance_rotation(torque, dt);
     }
 }
 
@@ -225,7 +216,8 @@ mod tests {
             true,
         )
         .with_angular_velocity(Tensor::new([0.0, 0.0, 1.0]));
-        b.advance_spin(std::f64::consts::FRAC_PI_2);
+        // isotropic + torque-free: omega is constant, so the orientation rolls by omega*dt about z.
+        b.advance_rotation(Tensor::zeros(), std::f64::consts::FRAC_PI_2);
         let r = b.orientation;
         assert!(approx(r[0][0], 0.0) && approx(r[0][1], -1.0) && approx(r[0][2], 0.0));
         assert!(approx(r[1][0], 1.0) && approx(r[1][1], 0.0) && approx(r[1][2], 0.0));
@@ -248,6 +240,35 @@ mod tests {
         let w = coll.get(0).omega;
         assert!(approx(w[0], 2.0), "omega should tilt toward x (free tumbling): {w:?}");
         assert!(approx(w[2], 5.0), "the z spin is unchanged by the x torque: {w:?}");
+    }
+
+    #[test]
+    fn anisotropic_torque_free_body_precesses() {
+        // torque-free motion of an ANISOTROPIC body spinning about a non-principal axis: Euler's
+        // gyroscopic term `omega x (I omega)` makes omega precess — it develops a z component it did
+        // not start with. an ISOTROPIC body (equal moments) has a zero gyroscopic term and does not.
+        let mut aniso = crate::Body::<f64, 3>::rigid_sphere(
+            0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.1, 1.0, true,
+        )
+        .with_inertia_principal([1.0, 2.0, 3.0])
+        .with_angular_velocity(Tensor::new([1.0, 1.0, 0.0]));
+        aniso.advance_rotation(Tensor::zeros(), 0.05); // torque-free
+        assert!(
+            aniso.omega[2].abs() > 1e-6,
+            "an anisotropic body should precess (omega gains a z component): {:?}",
+            aniso.omega,
+        );
+
+        let mut iso = crate::Body::<f64, 3>::rigid_sphere(
+            0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.1, 1.0, true,
+        )
+        .with_angular_velocity(Tensor::new([1.0, 1.0, 0.0])); // isotropic default (1,1,1)
+        iso.advance_rotation(Tensor::zeros(), 0.05);
+        assert!(
+            iso.omega[2].abs() < 1e-15,
+            "an isotropic body must not precess (zero gyroscopic term): {:?}",
+            iso.omega,
+        );
     }
 
     #[test]

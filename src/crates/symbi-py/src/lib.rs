@@ -176,6 +176,8 @@ struct BodyParams {
     omega: f64,
     /// the (unit) spin axis; default z.
     spin_axis: [f64; 3],
+    /// optional principal moments (I1,I2,I3); all-zero = unspecified (isotropic from `inertia`).
+    inertia_principal: [f64; 3],
     /// whether the gas reaction force acts back on the body. black-hole sinks
     /// always feel feedback; this dial adds it to non-accreting gravitating
     /// masses (BodyCollection gates feedback on this flag OR the sink kind).
@@ -782,6 +784,8 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let shape_json = get_shape_json(b);
         let omega = sub_f64(b, "rigid", "omega", 0.0);
         let spin_axis = sub_vec3(b, "rigid", "spin_axis", [0.0, 0.0, 1.0]);
+        // all-zero sentinel = unspecified (isotropic); a valid tensor has all moments > 0.
+        let inertia_principal = sub_vec3(b, "rigid", "inertia_principal", [0.0, 0.0, 0.0]);
         let (k_eta_n, k_eta_t) = if is_rigid {
             (
                 sub_f64(b, "rigid", "k_eta_n", 1.0),
@@ -808,6 +812,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             shape_json,
             omega,
             spin_axis,
+            inertia_principal,
             two_way_coupling,
         });
     }
@@ -1971,13 +1976,21 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
             // channel (no mass removed); the normal channel (k_eta_n) enforces
             // no-penetration and the tangential channel (k_eta_t, zero for free slip)
             // enforces no-slip, both relaxing the gas velocity toward the body.
-            Body::rigid_sphere(idx, pos, vel, b.mass, b.radius, b.inertia, b.no_slip)
-                .with_surface(symbi_ib::SurfaceSpec::Porous {
-                    porosity: 0.0,
-                    k_eta_n: b.k_eta_n,
-                    k_eta_t: b.k_eta_t,
-                })
-                .with_spin_about(b.omega, Tensor::new(b.spin_axis))
+            {
+                let mut body = Body::rigid_sphere(idx, pos, vel, b.mass, b.radius, b.inertia, b.no_slip)
+                    .with_surface(symbi_ib::SurfaceSpec::Porous {
+                        porosity: 0.0,
+                        k_eta_n: b.k_eta_n,
+                        k_eta_t: b.k_eta_t,
+                    })
+                    .with_spin_about(b.omega, Tensor::new(b.spin_axis));
+                // anisotropic principal moments override the isotropic default when specified
+                // (all-zero sentinel = unspecified).
+                if b.inertia_principal.iter().any(|&m| m > 0.0) {
+                    body = body.with_inertia_principal(b.inertia_principal);
+                }
+                body
+            }
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };
@@ -2152,6 +2165,7 @@ mod diagnostics_tests {
             shape_json: None,
             omega: 0.0,
             spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: true,
         }];
         let coll = build_bodies::<2>(&params);
@@ -2181,6 +2195,7 @@ mod diagnostics_tests {
             shape_json: None,
             omega: 0.0,
             spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
         }];
         let coll = build_bodies::<2>(&params);
@@ -2223,6 +2238,7 @@ mod diagnostics_tests {
             shape_json,
             omega: 0.0,
             spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
         };
         let params = vec![
@@ -2259,6 +2275,7 @@ mod diagnostics_tests {
             ),
             omega: 3.5,
             spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
         }];
         let coll = build_bodies::<2>(&params);

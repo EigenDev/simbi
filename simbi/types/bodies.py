@@ -235,6 +235,10 @@ class RigidProperties:
     k_eta_n: float = 1.0
     k_eta_t: float = 1.0
     shape: Optional[Shape] = None
+    # optional PRINCIPAL MOMENTS of inertia (I1, I2, I3) in the body frame. None = isotropic
+    # (`inertia` on all three axes). unequal moments make an asymmetric body precess/tumble under
+    # Euler's gyroscopic term (a torque-free wobble).
+    inertia_principal: Optional[tuple[float, float, float]] = None
     # prescribed spin RATE (radians/time) about `spin_axis`. nonzero makes a SHAPED wall spin: its
     # mask rotates as Rodrigues(axis, omega*t) and its no-slip surface drags the gas at
     # (omega * axis) x r. the axis is normalized here; default z (the 2D in-plane spin).
@@ -269,6 +273,14 @@ class RigidProperties:
                 f"wall-relaxation rate dial; negative is anti-friction. got "
                 f"{self.k_eta_t}."
             )
+        if self.inertia_principal is not None:
+            if len(self.inertia_principal) != 3 or any(
+                m <= 0.0 for m in self.inertia_principal
+            ):
+                raise _config_error(
+                    f"inertia_principal must be three positive moments (I1, I2, I3); got "
+                    f"{self.inertia_principal}."
+                )
 
 
 @dataclass(frozen=True)

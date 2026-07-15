@@ -37,6 +37,25 @@ fn matmul3<S: Scalar>(a: [[S; 3]; 3], b: [[S; 3]; 3]) -> [[S; 3]; 3] {
     })
 }
 
+/// the transpose of a 3x3 matrix (row-major).
+fn transpose3<S: Scalar>(m: [[S; 3]; 3]) -> [[S; 3]; 3] {
+    std::array::from_fn(|i| std::array::from_fn(|j| m[j][i]))
+}
+
+/// the 3x3 matrix-vector product `m * v`.
+fn matvec3<S: Scalar>(m: [[S; 3]; 3], v: [S; 3]) -> [S; 3] {
+    std::array::from_fn(|i| m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2])
+}
+
+/// the 3-vector cross product `a x b`.
+fn cross3<S: Scalar>(a: [S; 3], b: [S; 3]) -> [S; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
 /// capability-specific data for a body.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BodyKind<S: Scalar> {
@@ -101,9 +120,13 @@ pub struct Body<S: Scalar, const D: usize> {
     /// tracks it. every non-rotating body keeps the identity.
     pub orientation: [[S; 3]; 3],
     /// the ANGULAR VELOCITY vector `omega` (world frame, radians/time). a shaped wall's surface drags
-    /// the gas at `omega x r`; a two-way body's omega evolves FREELY from the reaction torque
-    /// (I domega = torque), so an asymmetric body tumbles. zero for every non-spinning body.
+    /// the gas at `omega x r`; a two-way body's omega evolves from the reaction torque via Euler's
+    /// equations, so an asymmetric body tumbles. zero for every non-spinning body.
     pub omega: Tensor<S, 3>,
+    /// the PRINCIPAL MOMENTS of inertia `(I1, I2, I3)` in the body frame (along the shape's local
+    /// axes). anisotropic (unequal) moments make Euler's gyroscopic term nonzero -> torque-free
+    /// precession/nutation (an asymmetric body wobbles). default isotropic (1, 1, 1).
+    pub inertia_body: [S; 3],
 }
 
 // -- factory functions --
@@ -125,6 +148,7 @@ impl<S: Scalar, const D: usize> Body<S, D> {
                 [S::ZERO, S::ZERO, S::ONE],
             ],
             omega: Tensor::zeros(),
+            inertia_body: [S::ONE, S::ONE, S::ONE],
         }
     }
 
@@ -155,16 +179,44 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// advance the orientation over `dt` by the angular velocity: `R <- Rodrigues(omega_hat,
-    /// |omega|*dt) R`. the exponential map keeps `R` orthonormal (a product of rotations); `omega =
-    /// 0` is the identity update (theta = 0).
-    pub fn advance_spin(&mut self, dt: S) {
-        let w = self.omega;
+    /// set the principal moments of inertia `(I1, I2, I3)` in the body frame (fluent). unequal
+    /// moments make an asymmetric body precess/tumble under Euler's gyroscopic term.
+    pub fn with_inertia_principal(mut self, moments: [S; 3]) -> Self {
+        self.inertia_body = moments;
+        self
+    }
+
+    /// advance the FULL rigid-body rotation over `dt` under the external per-step angular-momentum
+    /// increment `torque_world` (world frame): integrate Euler's equations with the DIAGONAL
+    /// body-frame inertia — `dL_body = tau_body - (omega_body x L_body) dt` — then roll the
+    /// orientation by the updated angular velocity `R <- Rodrigues(omega_hat, |omega|*dt) R`. the
+    /// gyroscopic term `omega x L` drives torque-free precession of an ANISOTROPIC body; ISOTROPIC
+    /// inertia zeros it and this reduces to `omega += torque / I`. `omega = 0`, `torque = 0` is a
+    /// no-op.
+    pub fn advance_rotation(&mut self, torque_world: Tensor<S, 3>, dt: S) {
+        let r = self.orientation;
+        let rt = transpose3(r);
+        let i = self.inertia_body;
+        // body-frame angular velocity + momentum, and the external torque increment in the body frame.
+        let wb = matvec3(rt, [self.omega[0], self.omega[1], self.omega[2]]);
+        let lb = [i[0] * wb[0], i[1] * wb[1], i[2] * wb[2]];
+        let tb = matvec3(rt, [torque_world[0], torque_world[1], torque_world[2]]);
+        // Euler: L_body advances by the external torque minus the gyroscopic moment omega_body x L_body.
+        let g = cross3(wb, lb);
+        let lb_new = [
+            lb[0] + tb[0] - g[0] * dt,
+            lb[1] + tb[1] - g[1] * dt,
+            lb[2] + tb[2] - g[2] * dt,
+        ];
+        let wb_new = [lb_new[0] / i[0], lb_new[1] / i[1], lb_new[2] / i[2]];
+        self.omega = Tensor::new(matvec3(r, wb_new));
+        // roll the orientation by the updated angular velocity.
+        let w = [self.omega[0], self.omega[1], self.omega[2]];
         let wmag = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
         let inv = S::ONE / wmag.max(S::from_f64(1e-300));
         let axis = [w[0] * inv, w[1] * inv, w[2] * inv];
         let dr = rodrigues_matrix(axis, wmag * dt);
-        self.orientation = matmul3(dr, self.orientation);
+        self.orientation = matmul3(dr, r);
     }
 
     pub fn passive(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
@@ -201,8 +253,11 @@ impl<S: Scalar, const D: usize> Body<S, D> {
 
     pub fn rigid_sphere(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
                         mass: S, radius: S, inertia: S, no_slip: bool) -> Self {
-        Self::base(idx, position, velocity, mass, radius,
-                   BodyKind::RigidSphere { inertia, no_slip })
+        let mut b = Self::base(idx, position, velocity, mass, radius,
+                   BodyKind::RigidSphere { inertia, no_slip });
+        // isotropic by default: the scalar inertia on all three principal axes.
+        b.inertia_body = [inertia, inertia, inertia];
+        b
     }
 }
 
