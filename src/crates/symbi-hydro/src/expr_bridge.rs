@@ -210,8 +210,10 @@ pub fn lower_dag_to_builtsource(
 /// into the axiomatic `BuiltSource`(s), wrapping the user's free field in the conservation law
 /// per `kind`. returns `(target_field, BuiltSource)` pairs ready to splice into the godunov source
 /// dispatch — `"force"` yields momentum (+ energy, if the regime has it), `"cooling"` yields a
-/// lone energy sink, `"raw"` writes the outputs straight to `target` (the escape hatch). the
-/// user never authors conservative components for force/cooling, so the coupling is unbreakable.
+/// lone energy sink, `"inject"` writes the full conserved vector [den, mom, (nrg)] additively from
+/// one config (mass+momentum+energy deposition), `"raw"` writes the outputs straight to a single
+/// `target` (the escape hatch). the user never authors conservative components for force/cooling,
+/// so the coupling is unbreakable.
 ///
 /// VALIDATION is regime-driven via `spec` (the static `RegimeSpec`), so an ill-posed config fails
 /// HERE — before attach, never as a mid-evolve panic:
@@ -223,8 +225,9 @@ pub fn lower_dag_to_builtsource(
 /// - `raw` targets must be a substrate conserved slot (`den | mom | nrg`), and `nrg` requires
 ///   `has_energy`.
 /// - arity: `force` declares one acceleration per dim (`outputs.len() == dim`); `cooling` a single
-///   rate; `relax` `[kappa, v_ref_0 .. v_ref_{dim-1}]` (`1 + dim`). (the `dim == sim DOF` cross-check
-///   is the const-generic apply path's, where DOF is known.)
+///   rate; `relax` `[kappa, v_ref_0 .. v_ref_{dim-1}]` (`1 + dim`); `inject` `[den, mom_0 ..
+///   mom_{dim-1}, nrg]` (`2 + dim` on energy regimes, `1 + dim` on iso). (the `dim == sim DOF`
+///   cross-check is the const-generic apply path's, where DOF is known.)
 ///
 /// the **`region`** axis (docs/design/32): if `cfg.region` names a mask node `chi(x)`, the
 /// contribution is multiplied by it. the conservation lifts are LINEAR in the field, so masking the
@@ -363,6 +366,41 @@ pub fn build_user_source(
             }
             Ok(out)
         }
+        "inject" => {
+            // additive deposition of the FULL conserved vector in one config: outputs =
+            // [S_den, S_mom_0..S_mom_{D-1}, (S_nrg on energy regimes)], each written straight to
+            // its conserved slot (identity, like `raw`, but spanning every slot at once). this is
+            // the mass+momentum+energy injection (a jet/wind depositing all three) that a
+            // single-slot `raw` cannot express. relativistic-safe: the user supplies conserved
+            // components directly (no newtonian law wrap), so no `reject_relativistic` — the
+            // components ARE the regime's conserved rates (D=rho*W, S=rho*h*W^2*v, tau in rhd).
+            let want = if spec.has_energy { 2 + cfg.dim } else { 1 + cfg.dim };
+            if n_out != want {
+                return Err(format!(
+                    "'inject' needs [den, mom_0..mom_{}{}]: outputs.len() = {n_out}, expected {want}",
+                    cfg.dim.saturating_sub(1),
+                    if spec.has_energy { ", nrg" } else { "" },
+                ));
+            }
+            mask_field(&mut field, region, 0..n_out); // region masks every conserved channel
+            let mut out = vec![
+                (
+                    "den".to_string(),
+                    crate::source_spec::user_inject_slot_source(&field, 0..1),
+                ),
+                (
+                    "mom".to_string(),
+                    crate::source_spec::user_inject_slot_source(&field, 1..1 + cfg.dim),
+                ),
+            ];
+            if spec.has_energy {
+                out.push((
+                    "nrg".to_string(),
+                    crate::source_spec::user_inject_slot_source(&field, 1 + cfg.dim..2 + cfg.dim),
+                ));
+            }
+            Ok(out)
+        }
         "raw" => {
             let target = cfg
                 .target
@@ -383,7 +421,7 @@ pub fn build_user_source(
             Ok(vec![(target, field)])
         }
         other => {
-            Err(format!("unknown source kind '{other}' (expected force | cooling | relax | sponge | raw)"))
+            Err(format!("unknown source kind '{other}' (expected force | cooling | relax | sponge | inject | raw)"))
         }
     }
 }
@@ -569,6 +607,125 @@ mod tests {
         );
         let err = expect_err(&cfg, &RHD_SPEC);
         assert!(err.contains("relativistic"), "expected relativistic rejection, got: {err}");
+    }
+
+    #[test]
+    fn inject_on_newtonian_writes_all_conserved_slots() {
+        // one config depositing mass+momentum+energy: outputs = [S_den, S_mom_0, S_mom_1, S_nrg]
+        // = [1, 2, 3, 4], each written IDENTITY to its conserved slot (no law wrap, like raw but
+        // spanning every slot at once). the multi-channel deposition a single-slot raw cannot do.
+        let cfg = cfg_from(
+            r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2,3], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
+                           {"op":"CONSTANT","value":3.0}, {"op":"CONSTANT","value":4.0} ] }"#,
+        );
+        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("inject ok on newtonian");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        // den: single output = 1.
+        let (_, den) = &built[0];
+        assert_eq!(den.outputs.len(), 1);
+        assert!((eval_lowered(den, den.outputs[0], &[]) - 1.0).abs() < 1e-12);
+        // mom: D=2 outputs = [2, 3], in order.
+        let (_, mom) = &built[1];
+        assert_eq!(mom.outputs.len(), 2);
+        assert!((eval_lowered(mom, mom.outputs[0], &[]) - 2.0).abs() < 1e-12);
+        assert!((eval_lowered(mom, mom.outputs[1], &[]) - 3.0).abs() < 1e-12);
+        // nrg: single output = 4.
+        let (_, nrg) = &built[2];
+        assert_eq!(nrg.outputs.len(), 1);
+        assert!((eval_lowered(nrg, nrg.outputs[0], &[]) - 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn inject_on_iso_drops_energy_channel() {
+        // iso has no energy: outputs = [S_den, S_mom_0, S_mom_1] (1+dim); the nrg slot is NOT emitted.
+        let cfg = cfg_from(
+            r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
+                           {"op":"CONSTANT","value":3.0} ] }"#,
+        );
+        let built = build_user_source(&cfg, &ISO_NEWTONIAN_SPEC).expect("inject ok on iso");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom"]);
+    }
+
+    #[test]
+    fn inject_on_relativistic_is_accepted() {
+        // inject supplies CONSERVED components directly (like raw, no newtonian law wrap), so it is
+        // valid on a relativistic regime where force/cooling/relax are rejected. rhd has energy:
+        // [D_dot, S_dot_0, tau_dot] at dim=1 -> 3 outputs.
+        let cfg = cfg_from(
+            r#"{ "kind":"inject", "dim":1, "outputs":[0,1,2], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
+                           {"op":"CONSTANT","value":3.0} ] }"#,
+        );
+        let built = build_user_source(&cfg, &RHD_SPEC).expect("inject ok on rhd (raw-like)");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+    }
+
+    #[test]
+    fn inject_relativistic_2d_engine_channels() {
+        // the Duffell & MacFadyen 2015 collimated engine on SRHD (dim=2): one nozzle power
+        // S_0 drives three coupled conserved-rate channels — S_den = S_0/eta_0, S_mom_r =
+        // S_0*sqrt(1-1/gamma_0^2), S_mom_theta = 0 (purely radial), S_nrg = S_0. here S_0=10,
+        // eta_0=100 (node DIVIDE -> 0.1), S_mom_r=9.998, mirroring the axis_jet source shape.
+        let cfg = cfg_from(
+            r#"{ "kind":"inject", "dim":2, "outputs":[2,3,4,0], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":10.0}, {"op":"CONSTANT","value":100.0},
+                           {"op":"DIVIDE","left":0,"right":1}, {"op":"CONSTANT","value":9.998},
+                           {"op":"CONSTANT","value":0.0} ] }"#,
+        );
+        let built = build_user_source(&cfg, &RHD_SPEC).expect("2d engine inject ok on rhd");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        // S_den = S_0/eta_0 = 10/100 = 0.1 (the DIVIDE channel).
+        let (_, den) = &built[0];
+        assert_eq!(den.outputs.len(), 1);
+        assert!((eval_lowered(den, den.outputs[0], &[]) - 0.1).abs() < 1e-12);
+        // S_mom = [S_mom_r, S_mom_theta] = [9.998, 0]; the theta channel is exactly zero.
+        let (_, mom) = &built[1];
+        assert_eq!(mom.outputs.len(), 2);
+        assert!((eval_lowered(mom, mom.outputs[0], &[]) - 9.998).abs() < 1e-12);
+        assert!(eval_lowered(mom, mom.outputs[1], &[]).abs() < 1e-12);
+        // S_nrg = S_0 = 10.
+        let (_, nrg) = &built[2];
+        assert!((eval_lowered(nrg, nrg.outputs[0], &[]) - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn inject_relativistic_3d_engine_channels() {
+        // the 3d (r, theta, phi) SRHD engine: 5 outputs [S_den, S_mom_r, S_mom_theta, S_mom_phi,
+        // S_nrg]. the radial nozzle leaves both transverse momentum channels zero, so the mom slot
+        // carries 3 components [S_mom_r, 0, 0]. mirrors the blade / threed_jet source shape.
+        let cfg = cfg_from(
+            r#"{ "kind":"inject", "dim":3, "outputs":[2,3,4,5,0], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":10.0}, {"op":"CONSTANT","value":100.0},
+                           {"op":"DIVIDE","left":0,"right":1}, {"op":"CONSTANT","value":9.998},
+                           {"op":"CONSTANT","value":0.0}, {"op":"CONSTANT","value":0.0} ] }"#,
+        );
+        let built = build_user_source(&cfg, &RHD_SPEC).expect("3d engine inject ok on rhd");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den", "mom", "nrg"]);
+        let (_, den) = &built[0];
+        assert!((eval_lowered(den, den.outputs[0], &[]) - 0.1).abs() < 1e-12);
+        // mom carries all three spatial components; only the radial one is nonzero.
+        let (_, mom) = &built[1];
+        assert_eq!(mom.outputs.len(), 3);
+        assert!((eval_lowered(mom, mom.outputs[0], &[]) - 9.998).abs() < 1e-12);
+        assert!(eval_lowered(mom, mom.outputs[1], &[]).abs() < 1e-12);
+        assert!(eval_lowered(mom, mom.outputs[2], &[]).abs() < 1e-12);
+        let (_, nrg) = &built[2];
+        assert!((eval_lowered(nrg, nrg.outputs[0], &[]) - 10.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn inject_wrong_arity_is_rejected() {
+        // energy regime at dim=2 needs [den, mom_0, mom_1, nrg] = 4 outputs; supplying 3 is
+        // rejected pre-attach, never a mid-evolve panic.
+        let cfg = cfg_from(
+            r#"{ "kind":"inject", "dim":2, "outputs":[0,1,2], "params":[],
+                 "nodes":[ {"op":"CONSTANT","value":1.0}, {"op":"CONSTANT","value":2.0},
+                           {"op":"CONSTANT","value":3.0} ] }"#,
+        );
+        let err = expect_err(&cfg, &NEWTONIAN_SPEC);
+        assert!(err.contains("inject"), "expected inject arity rejection, got: {err}");
     }
 
     #[test]
@@ -761,6 +918,25 @@ mod tests {
         // it genuinely DEPENDS on pressure: doubling pre doubles the rate.
         let s2 = eval_lowered(nrg, nrg.outputs[0], &[("p0", 0.25), ("rho", 2.0), ("pre", 6.0)]);
         assert!((s2 - (-3.0)).abs() < 1e-12, "rate must scale with pressure: got {s2}");
+    }
+
+    #[test]
+    fn raw_source_targets_density_slot() {
+        // a density-only injection (pure mass loading, no momentum/energy) — a baryon source
+        // rate S_den = p0 * rho written straight to the `den` slot. the single-slot path for
+        // mass loading (the full-vector path is `inject`).
+        let cfg = cfg_from(
+            r#"{ "kind":"raw", "dim":1, "outputs":[2], "params":[0.5], "target":"den",
+                 "nodes":[ {"op":"PARAMETER","param_idx":0}, {"op":"VARIABLE_RHO"},
+                           {"op":"MULTIPLY","left":0,"right":1} ] }"#,
+        );
+        let built = build_user_source(&cfg, &NEWTONIAN_SPEC).expect("raw den ok");
+        assert_eq!(built.iter().map(|(t, _)| t.as_str()).collect::<Vec<_>>(), ["den"]);
+        let (tgt, den) = &built[0];
+        assert_eq!(tgt, "den");
+        // S_den = p0 * rho; p0=0.5, rho=2 -> 1.
+        let s = eval_lowered(den, den.outputs[0], &[("p0", 0.5), ("rho", 2.0)]);
+        assert!((s - 1.0).abs() < 1e-12, "raw den rate must be p0*rho: got {s}");
     }
 
     #[test]

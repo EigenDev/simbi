@@ -938,6 +938,19 @@ pub fn user_sponge_energy_source(field: &BuiltSource, d: usize, inv_gm1: f64) ->
     })
 }
 
+/// identity passthrough of a contiguous OUTPUT SUBRANGE of a lowered user `field` as a standalone
+/// source: the selected outputs are written STRAIGHT to their conserved slot with no
+/// conservation-law wrap (like `raw`, but for a slice of the outputs rather than the whole field).
+/// this is the mechanism that splits ONE multi-output injection field across the den/mom/nrg slots,
+/// so a single config additively deposits mass, momentum, and energy at once. `outputs` selects
+/// which of `field`'s outputs feed this slot (den: `0..1`; mom: `1..1+D`; nrg: `1+D..2+D`).
+pub fn user_inject_slot_source(field: &BuiltSource, outputs: std::ops::Range<usize>) -> BuiltSource {
+    lift_to_built(|| {
+        let f = splice_field_into_trace(field);
+        f[outputs].to_vec()
+    })
+}
+
 // ---- example user source: uniform external acceleration ---------------------
 //
 //   S_mom_k = ρ * g_ext_k                  (D outputs)

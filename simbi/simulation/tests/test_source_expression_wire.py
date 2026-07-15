@@ -30,6 +30,25 @@ def test_serialize_source_emits_sourceconfig_schema() -> None:
     json.dumps(cfg)
 
 
+def test_serialize_source_inject_emits_full_conserved_vector() -> None:
+    # a mass+momentum+energy deposition (jet/wind) in one config: outputs =
+    # [S_den, S_mom_0..S_mom_{D-1}, S_nrg]. the wire carries every channel; the
+    # rust build_user_source splits them across the den/mom/nrg slots.
+    g = expr.ExprGraph()
+    s_den = expr.constant(1.0, g)
+    s_mom0 = expr.constant(2.0, g)
+    s_mom1 = expr.constant(3.0, g)
+    s_nrg = expr.constant(4.0, g)
+    cfg = g.compile([s_den, s_mom0, s_mom1, s_nrg]).serialize_source(
+        expr.SourceKind.INJECT, dim=2
+    )
+    assert cfg["kind"] == "inject"
+    assert cfg["dim"] == 2
+    assert cfg["outputs"] == [0, 1, 2, 3]  # den, mom_0, mom_1, nrg
+    assert [n["op"] for n in cfg["nodes"]] == ["CONSTANT"] * 4
+    json.dumps(cfg)
+
+
 def test_serialize_source_region_and_target_optional() -> None:
     g = expr.ExprGraph()
     out = expr.constant(1.0, g)
