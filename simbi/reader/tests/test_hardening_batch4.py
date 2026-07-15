@@ -53,6 +53,36 @@ def test_slice_position_outside_domain_is_loud():
         find_slice_index(verts, 1.5)
 
 
+def test_nonsquare_slice_keeps_domain_aligned_with_values():
+    # a NON-SQUARE 3D field sliced on x3 must leave the vertex coordinate arrays
+    # aligned with the value grid: pcolormesh(flat) needs len(domain[0]) == rows+1 and
+    # len(domain[1]) == cols+1. reordering the domain into logical order without a
+    # matching value transpose silently swapped these on a non-square grid (a square
+    # grid hid it because the two lengths were equal).
+    from simbi.viz.pipeline.transforms import execute_slice, plan_slice
+
+    # vertex arrays, in data-axis order [x3, x2, x1]; distinct lengths + ranges.
+    x1 = np.linspace(-2.0, 6.0, 161)  # 160 cells
+    x2 = np.linspace(-2.0, 2.0, 97)  # 96 cells
+    x3 = np.linspace(-1.0, 1.0, 21)  # 20 cells
+    domain = [x3, x2, x1]
+    values = np.arange(20 * 96 * 160, dtype=float).reshape(20, 96, 160)
+
+    plan = plan_slice(domain, {"x3": 0.0})
+    sliced_values, new_domain = execute_slice(values, domain, plan)
+
+    assert sliced_values.shape == (96, 160)  # (x2, x1) — value axis order preserved
+    # domain[0] is the outer/vertical (x2, [-2,2]); domain[1] the inner/horizontal (x1, [-2,6]).
+    assert len(new_domain[0]) == sliced_values.shape[0] + 1  # 97 == 96 + 1
+    assert len(new_domain[1]) == sliced_values.shape[1] + 1  # 161 == 160 + 1
+    assert new_domain[0].max() == 2.0 and new_domain[1].max() == 6.0
+    # the value grid is not transposed: it is exactly the x3 plane.
+    s = int(np.abs(x3 - 0.0).argmin())
+    assert np.array_equal(sliced_values, values[s, :, :])
+    # labels stay in forward logical order so the labeler names the horizontal axis x1.
+    assert plan.final_axis_names == ["x1", "x2"]
+
+
 def test_stale_wheel_stub_names_the_fix(monkeypatch):
     import simbi
 

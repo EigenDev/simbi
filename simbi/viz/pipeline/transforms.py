@@ -116,34 +116,27 @@ def plan_slice(
         index_tuple_list[axis_index] = slice_index
         sliced_axes_indices.add(axis_index)
 
-    # Determine which axes remain and their *logical* order
-    remaining_indices = sorted(list(set(range(ndim)) - sliced_axes_indices))
-
-    # Get logical names of remaining axes, e.g., ["x1", "x2"]
-    # We sort this to ensure the final plot is always in a
-    # predictable order (e.g., x1, then x2, then x3).
-    remaining_logical_names = sorted(
-        [INV_AXIS_MAP[i] for i in remaining_indices],
-        key=lambda name: name,  # Sorts alphabetically: x1, x2, x3
-    )
-
-    # Get original domain indices in the new logical order
-    # e.g., [2, 1] (index for "x1", index for "x2")
-    final_domain_indices = [AXIS_MAP[name] for name in remaining_logical_names]
-
-    # Create the transpose order
-    # This maps the sliced data's axes to the new logical order
-    # e.g., if remaining_indices is [1, 2] (for ny, nx)
-    # and final_domain_indices is [2, 1] (for x1, x2)
-    # We need to map axis 1 -> new axis 0 (nx)
-    # and axis 0 -> new axis 1 (ny)
-    # The transpose_order is [1, 0]
+    # the surviving axes in DATA-AXIS order (ascending index). `sliced_values` keeps its
+    # axes in exactly this order, so the DOMAIN must stay in the same order for
+    # domain[k] to be the coordinate array of values axis k -- the plotter reads
+    # domain[0] as the outer/slower axis (vertical) and domain[1] as the inner/faster
+    # (horizontal), matching the unsliced/native path. reordering the domain into logical
+    # (x1,x2,x3) order WITHOUT a matching value transpose is what transposed a non-square
+    # slice: the domain claimed (x1,x2) while the values stayed (x2,x1), so the coordinate
+    # lengths no longer matched the value grid.
+    remaining_indices = sorted(set(range(ndim)) - sliced_axes_indices)
+    final_domain_indices = remaining_indices
     transpose_order = tuple(range(len(remaining_indices)))
+    # AXIS LABELS, by contrast, are the logical names in forward (x1,x2,x3) order: the
+    # labeler pairs axis_names[0] with the horizontal axis, which is domain[1] = the
+    # inner axis = the lowest-numbered surviving logical axis. this mirrors the native
+    # convention (domain reversed, names forward), so a slice labels like an unsliced plot.
+    final_axis_names = sorted(INV_AXIS_MAP[i] for i in remaining_indices)
     return SlicePlan(
         index_tuple=tuple(index_tuple_list),
         final_domain_indices=final_domain_indices,
         transpose_order=transpose_order,
-        final_axis_names=remaining_logical_names,
+        final_axis_names=final_axis_names,
     )
 
 
