@@ -42,7 +42,7 @@ use symbi_discretize::{
     neumann_ghost_fill_gv, robin_ghost_fill_gv,
     nmhd_wave_speed_map_gv,
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
-    rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_ct_curl_3d_dir_gv,
+    rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_ct_curl_3d_dir_gv,
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
@@ -1004,6 +1004,12 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // eta = 0 -> an exact no-op, so ideal MHD is unchanged.
     let (k, writes) = rmhd_resistive_emf_2d_gv();
     emit_gv(out_dir, "rmhd_resistive_emf_2d", 2, &k, &writes);
+    // the 3D Cartesian resistive edge EMF, one kernel per edge direction (eta * J_dir added to the
+    // dir-edge's EMF); the dispatch loops the three edges.
+    for dir in 0..3 {
+        let (k, writes) = rmhd_resistive_emf_3d_dir_gv(dir);
+        emit_gv(out_dir, &format!("rmhd_resistive_emf_3d_{dir}"), 3, &k, &writes);
+    }
 }
 
 // the RMHD face flux along a given sweep `dir` at 3D (per-dir kernel; the

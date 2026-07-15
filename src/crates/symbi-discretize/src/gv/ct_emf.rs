@@ -235,6 +235,35 @@ pub fn rmhd_resistive_emf_2d_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>
     (end_trace(), vec![("ez_new".to_string(), "ez".into(), ez_new.node())])
 }
 
+/// the 3D CARTESIAN OHMIC RESISTIVE edge EMF along edge `dir`: adds `eta * J_dir` to that edge's EMF
+/// (`emf` = efield[slot]) IN PLACE, where `J_dir = dB_p2/dx_p1 - dB_p1/dx_p2` is the current on the
+/// dir-edge from the two transverse face components (`b_p1` = bface[p1], `b_p2` = bface[p2],
+/// p1=(dir+1)%3, p2=(dir+2)%3). the `-1` difference offsets are the ADJOINT of the per-dir induction
+/// curl `rmhd_ct_curl_3d_dir_gv` (whose `+1` reads they mirror), so the composed
+/// `curl(eta * curl(B))` is the negative-definite discrete Laplacian — the field diffuses, never
+/// anti-diffuses. the same div-B-clean 3D curl consumes the augmented EMF. `eta = 0` is a no-op.
+pub fn rmhd_resistive_emf_3d_dir_gv(dir: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let p1 = (dir + 1) % 3;
+    let p2 = (dir + 2) % 3;
+    let emf = Gv::field("emf", "emf");
+    let eta = Gv::scalar("eta");
+    let id_p1 = Gv::scalar("id_p1");
+    let id_p2 = Gv::scalar("id_p2");
+    let b_p1 = Gv::field("b_p1", "b_p1");
+    let b_p2 = Gv::field("b_p2", "b_p2");
+    let back = |ax: usize| -> [i32; 3] {
+        let mut o = [0, 0, 0];
+        o[ax] = -1;
+        o
+    };
+    let b_p1_m = gv_field_at("b_p1", "b_p1", 3, &back(p2)); // dB_p1/dx_p2, backward
+    let b_p2_m = gv_field_at("b_p2", "b_p2", 3, &back(p1)); // dB_p2/dx_p1, backward
+    let j = id_p1 * (b_p2 - b_p2_m) - id_p2 * (b_p1 - b_p1_m);
+    let emf_new = emf + eta * j;
+    (end_trace(), vec![("emf_new".to_string(), "emf".into(), emf_new.node())])
+}
+
 
 /// the 2.5D cylindrical r-z (axisymmetric) CT curl from the single out-of-plane edge EMF
 /// E_phi (efield[0]), in-place on `b` (bface[dir]). DERIVED from the 3D cyl curl restricted

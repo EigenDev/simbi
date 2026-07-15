@@ -989,8 +989,12 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // resistive diffusion `eta * lap(B)`, div-B-clean via the SAME curl. `eta = 0` (ideal MHD), a
     // non-2.5D grid, or a curvilinear chart skips it — the 3D + curvilinear resistive EMFs are
     // follow-ons.
-    if eta > 0.0 && D == 2 && sim.geom.coords == symbi_geometry::Geometry::Cartesian {
-        resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta);
+    if eta > 0.0 && sim.geom.coords == symbi_geometry::Geometry::Cartesian {
+        match D {
+            2 => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta),
+            3 => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
+            _ => {}
+        }
     }
 
     // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
@@ -1037,6 +1041,48 @@ fn resistive_emf_2d<const D: usize, const DOF: usize, Mem, Sc>(
         if *is_out { outputs.push(fld); } else { inputs.push(fld); }
     }
     dispatch_fields_each::<Sc, Mem, D>(name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
+}
+
+/// the 3D Cartesian Ohmic resistive edge EMF: for each of the three CT edges, add `eta * J_dir` to
+/// that edge's EMF from the two transverse face components, before the curl consumes it. one kernel
+/// per edge (the offsets are baked per direction); div-B-clean via the shared curl.
+fn resistive_emf_3d<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    eta: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let id: Vec<f64> = (0..D).map(|d| 1.0 / sim.geom.dx[d]).collect();
+    for edge in ct_edges(&sim.geom.axes) {
+        let dir = edge.name_k;
+        let (p1, p2) = ((dir + 1) % 3, (dir + 2) % 3);
+        let name = format!("rmhd_resistive_emf_3d_{dir}");
+        let scalars = scalars_for(&name, |bind| {
+            Sc::from_f64(match bind {
+                ScalarBind::Spec(s) if &**s == "eta" => eta,
+                ScalarBind::Spec(s) if &**s == "id_p1" => id[p1],
+                ScalarBind::Spec(s) if &**s == "id_p2" => id[p2],
+                o => panic!("resistive_emf_3d: unexpected scalar {o:?}"),
+            })
+        });
+        let slot = |s: &str| -> &Field<Sc, D, Mem> {
+            match s {
+                "emf" => &mhd.efield[edge.slot],
+                "b_p1" => &mhd.bface[p1],
+                "b_p2" => &mhd.bface[p2],
+                o => panic!("resistive_emf_3d: unknown manifest slot '{o}'"),
+            }
+        };
+        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        for (bind, is_out) in kernel_field_binds(&name).iter() {
+            let fld = slot(&bind.name());
+            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        }
+        dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[edge.slot].domain(), &inputs, &outputs, &[], &scalars);
+    }
 }
 
 /// the CT curl `bface -= dt*curl(efield)` per IN-PLANE face axis (`dir`), from that face's incident
