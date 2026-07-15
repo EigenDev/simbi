@@ -67,6 +67,33 @@ def test_rotated_rejects_non_3x3() -> None:
         Shape.sphere((0.0, 0.0, 0.0), 1.0).rotated([[1.0, 0.0], [0.0, 1.0]])
 
 
+def test_signed_distance_matches_analytic() -> None:
+    import math
+
+    sphere = Shape.sphere((0.0, 0.0, 0.0), 1.0)
+    assert abs(sphere.signed_distance((0.0, 0.0, 0.0)) + 1.0) < 1e-12  # center: -radius
+    assert abs(sphere.signed_distance((2.0, 0.0, 0.0)) - 1.0) < 1e-12  # outside by 1
+    assert sphere.contains((0.5, 0.0, 0.0)) and not sphere.contains((1.5, 0.0, 0.0))
+
+    box = Shape.box((0.0, 0.0, 0.0), (0.5, 0.3, 0.2))
+    assert abs(box.signed_distance((0.0, 0.0, 0.0)) + 0.2) < 1e-12  # inside, nearest face at z=0.2
+    assert abs(box.signed_distance((0.6, 0.0, 0.0)) - 0.1) < 1e-12  # outside in x by 0.1
+
+    union = Shape.sphere((0.0, 0.0, 0.0), 1.0).union(Shape.box((3.0, 0.0, 0.0), (0.5, 0.5, 0.5)))
+    assert union.contains((0.0, 0.0, 0.0)) and union.contains((3.0, 0.0, 0.0))
+    assert not union.contains((1.6, 0.0, 0.0))
+
+    # a box rotated 90deg about z: its 0.5 x-extent maps onto y, the 0.2 onto x.
+    rot = Shape.box((0.0, 0.0, 0.0), (0.5, 0.2, 0.3)).rotated_z(math.pi / 2)
+    assert rot.contains((0.0, 0.4, 0.0))  # inside the long (now-y) extent
+    assert not rot.contains((0.4, 0.0, 0.0))  # outside the short (now-x) extent
+
+    # from_wire round-trips the evaluation.
+    assert Shape.from_wire(box.to_wire()).signed_distance((0.6, 0.0, 0.0)) == box.signed_distance(
+        (0.6, 0.0, 0.0)
+    )
+
+
 def test_degenerate_dimensions_rejected() -> None:
     with pytest.raises(ValueError, match="radius must be > 0"):
         Shape.sphere((0.0, 0.0, 0.0), 0.0)

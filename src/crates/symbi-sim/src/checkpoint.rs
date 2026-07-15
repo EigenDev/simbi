@@ -592,11 +592,14 @@ where
 
 /// the materialized per-body state buffers a write borrows (Snapshot-style).
 struct BodyStateSnap {
-    pos: Vec<f64>,      // [nb, D]
-    vel: Vec<f64>,      // [nb, D]
-    mass: Vec<f64>,     // [nb]
-    accreted: Vec<f64>, // [nb] cumulative (0 for non-sinks)
-    rate: Vec<f64>,     // [nb] instantaneous (0 for non-sinks)
+    pos: Vec<f64>,         // [nb, D]
+    vel: Vec<f64>,         // [nb, D]
+    mass: Vec<f64>,        // [nb]
+    accreted: Vec<f64>,    // [nb] cumulative (0 for non-sinks)
+    rate: Vec<f64>,        // [nb] instantaneous (0 for non-sinks)
+    orientation: Vec<f64>, // [nb, 3, 3] row-major rotation matrix (evolved spin state)
+    omega: Vec<f64>,       // [nb, 3] angular-velocity vector
+    shape_json: Vec<String>, // per-body CSG wire (empty = the analytic sphere), for viz
     nb: usize,
 }
 
@@ -610,13 +613,33 @@ fn body_state_snap<const D: usize>(
         mass: Vec::with_capacity(nb),
         accreted: Vec::with_capacity(nb),
         rate: Vec::with_capacity(nb),
+        orientation: Vec::with_capacity(nb * 9),
+        omega: Vec::with_capacity(nb * 3),
+        shape_json: Vec::with_capacity(nb),
         nb,
     };
     for b in 0..nb {
+        // the CSG shape wire (empty for the analytic sphere) — a self-describing silhouette for viz.
+        snap.shape_json.push(
+            im.shapes
+                .get(b)
+                .and_then(|s| s.as_ref())
+                .map(|s| s.to_json())
+                .unwrap_or_default(),
+        );
         let body = im.bodies.get(b);
         for a in 0..D {
             snap.pos.push(body.position[a]);
             snap.vel.push(body.velocity[a]);
+        }
+        // the evolved rigid-body rotation: the orientation matrix (row-major) + angular velocity.
+        for i in 0..3 {
+            for j in 0..3 {
+                snap.orientation.push(body.orientation[i][j]);
+            }
+        }
+        for k in 0..3 {
+            snap.omega.push(body.omega[k]);
         }
         snap.mass.push(body.mass);
         let (acc, rate) = match body.kind {
@@ -633,7 +656,7 @@ fn body_state_snap<const D: usize>(
 
 fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
     let nb = snap.nb;
-    Tree::new("bodies")
+    let mut t = Tree::new("bodies")
         .with_attr("n_bodies", nb as u64)
         .with_dataset(Dataset::new("position", vec![nb, D], DataRef::F64(&snap.pos)))
         .with_dataset(Dataset::new("velocity", vec![nb, D], DataRef::F64(&snap.vel)))
@@ -644,6 +667,18 @@ fn body_state_group<const D: usize>(snap: &BodyStateSnap) -> Tree<'_> {
             DataRef::F64(&snap.accreted),
         ))
         .with_dataset(Dataset::new("accretion_rate", vec![nb], DataRef::F64(&snap.rate)))
+        .with_dataset(Dataset::new(
+            "orientation",
+            vec![nb, 3, 3],
+            DataRef::F64(&snap.orientation),
+        ))
+        .with_dataset(Dataset::new("omega", vec![nb, 3], DataRef::F64(&snap.omega)));
+    // the per-body CSG shape wire as a string attr (empty = analytic sphere); viz reconstructs the
+    // body silhouette from it + the position/orientation.
+    for (b, wire) in snap.shape_json.iter().enumerate() {
+        t.push_attr(format!("shape_{b}"), wire.clone());
+    }
+    t
 }
 
 fn build_tree<'a, R, const D: usize, const DOF: usize, M, E, S, Mem>(
@@ -1016,6 +1051,25 @@ where
                 *accretion_rate = rate[b];
             }
         }
+        // restore the evolved rigid-body rotation (orientation matrix + angular velocity) so a
+        // spinning / tumbling body resumes its exact pose. checkpoints written before these datasets
+        // existed keep the config values (identity orientation, prescribed omega).
+        let get_opt = |name: &str| -> Option<Vec<f64>> {
+            bodies_g.find_dataset(name)?.data.as_f64().map(|d| d.to_vec())
+        };
+        if let (Some(orient), Some(omega)) = (get_opt("orientation"), get_opt("omega")) {
+            for b in 0..nb {
+                let body = im.bodies.get_mut(b);
+                for i in 0..3 {
+                    for j in 0..3 {
+                        body.orientation[i][j] = orient[b * 9 + i * 3 + j];
+                    }
+                }
+                for k in 0..3 {
+                    body.omega[k] = omega[b * 3 + k];
+                }
+            }
+        }
     }
 
     Ok(meta)
@@ -1314,6 +1368,9 @@ mod tests {
             body.position = symbi_algebra::Tensor::new([0.7, 0.3]); // orbit advanced
             body.velocity = symbi_algebra::Tensor::new([-0.1, 0.2]);
             body.mass = 1.25;
+            // an evolved rotation state (a spinning/tumbling body): R_z(90) + a tilted omega.
+            body.orientation = [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
+            body.omega = symbi_algebra::Tensor::new([0.1, -0.2, 0.3]);
             if let symbi_ib::BodyKind::BlackHole {
                 total_accreted_mass, accretion_rate, ..
             } = &mut body.kind
@@ -1335,6 +1392,9 @@ mod tests {
         assert_eq!(b.position[1], 0.3);
         assert_eq!(b.velocity[0], -0.1);
         assert_eq!(b.mass, 1.25);
+        // the evolved rotation survives the restart (else a tumbling body resets to identity/config).
+        assert_eq!(b.orientation, [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
+        assert_eq!([b.omega[0], b.omega[1], b.omega[2]], [0.1, -0.2, 0.3]);
         match b.kind {
             symbi_ib::BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } => {
                 assert_eq!(total_accreted_mass, 0.042);

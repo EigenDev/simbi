@@ -82,5 +82,47 @@ class Shape:
     def to_wire(self) -> dict[str, Any]:
         return self.wire
 
+    @staticmethod
+    def from_wire(wire: dict[str, Any]) -> "Shape":
+        """reconstruct a Shape from its serialized wire (e.g. loaded from a checkpoint)."""
+        return Shape(wire)
+
+    def signed_distance(self, point: Sequence[float]) -> float:
+        """the signed distance to the shape in its BODY-LOCAL frame: negative inside, positive
+        outside, zero on the surface. mirrors the rust `SdfExpr::dist`. to evaluate at a body's pose,
+        map the world point in first: `shape.signed_distance(R.T @ (x_world - position))`."""
+        return _sdf_dist(self.wire, [float(point[0]), float(point[1]), float(point[2])])
+
+    def contains(self, point: Sequence[float]) -> bool:
+        """whether `point` (body-local frame) is inside the shape."""
+        return self.signed_distance(point) <= 0.0
+
+
+def _sdf_dist(node: dict[str, Any], x: list[float]) -> float:
+    # the carrier-generic CSG distance, mirroring symbi-ib/src/sdf.rs::dist (min/max/affine + sqrt).
+    kind = node["kind"]
+    if kind == "sphere":
+        c, r = node["center"], node["radius"]
+        return math.sqrt(sum((x[a] - c[a]) ** 2 for a in range(3))) - r
+    if kind == "box":
+        c, h = node["center"], node["half_extents"]
+        q = [abs(x[a] - c[a]) - h[a] for a in range(3)]
+        outside = math.sqrt(sum(max(qi, 0.0) ** 2 for qi in q))
+        return outside + min(max(q), 0.0)
+    if kind == "union":
+        return min(_sdf_dist(node["a"], x), _sdf_dist(node["b"], x))
+    if kind == "intersect":
+        return max(_sdf_dist(node["a"], x), _sdf_dist(node["b"], x))
+    if kind == "complement":
+        return -_sdf_dist(node["inner"], x)
+    if kind == "translated":
+        o = node["offset"]
+        return _sdf_dist(node["inner"], [x[a] - o[a] for a in range(3)])
+    if kind == "rotated":
+        r = node["rot"]  # 3x3 row-major; map the point into the inner frame via R^T
+        xr = [sum(r[j][i] * x[j] for j in range(3)) for i in range(3)]
+        return _sdf_dist(node["inner"], xr)
+    raise ValueError(f"unknown shape kind {kind!r}")
+
 
 __all__ = ["Shape"]

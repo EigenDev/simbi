@@ -205,6 +205,35 @@ impl SdfExpr<f64, 3> {
         Self::from_value(&v)
     }
 
+    /// serialize the CSG tree to its json wire form (the inverse of `from_json`): the string a
+    /// checkpoint persists so a reader can reconstruct + draw the body silhouette.
+    pub fn to_json(&self) -> String {
+        self.to_value().to_string()
+    }
+
+    fn to_value(&self) -> serde_json::Value {
+        use serde_json::json;
+        match self {
+            SdfExpr::Sphere { center, radius } => {
+                json!({"kind": "sphere", "center": center, "radius": radius})
+            }
+            SdfExpr::Cuboid { center, half_extents } => {
+                json!({"kind": "box", "center": center, "half_extents": half_extents})
+            }
+            SdfExpr::Union(a, b) => json!({"kind": "union", "a": a.to_value(), "b": b.to_value()}),
+            SdfExpr::Intersect(a, b) => {
+                json!({"kind": "intersect", "a": a.to_value(), "b": b.to_value()})
+            }
+            SdfExpr::Complement(inner) => json!({"kind": "complement", "inner": inner.to_value()}),
+            SdfExpr::Translated { inner, offset } => {
+                json!({"kind": "translated", "inner": inner.to_value(), "offset": offset})
+            }
+            SdfExpr::Rotated { inner, rot } => {
+                json!({"kind": "rotated", "inner": inner.to_value(), "rot": rot})
+            }
+        }
+    }
+
     fn from_value(v: &serde_json::Value) -> Result<Self, String> {
         let kind = v.get("kind").and_then(|k| k.as_str()).ok_or("shape: missing string 'kind'")?;
         let vec3 = |key: &str| -> Result<[f64; 3], String> {
@@ -555,6 +584,16 @@ mod tests {
         let native = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3])
             .rotated([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
         assert_eq!(s, native);
+    }
+
+    #[test]
+    fn to_json_round_trips_through_from_json() {
+        // the persisted shape wire reconstructs the exact tree (checkpoint -> viz).
+        let s = SdfExpr::<f64, 3>::cuboid([0.1, 0.2, 0.3], [0.5, 0.4, 0.3])
+            .union(SdfExpr::sphere([1.0, 0.0, 0.0], 0.6))
+            .rotated([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+            .translated([2.0, 0.0, 0.0]);
+        assert_eq!(SdfExpr::<f64, 3>::from_json(&s.to_json()).expect("round trip"), s);
     }
 
     #[test]
