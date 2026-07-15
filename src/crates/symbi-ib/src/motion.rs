@@ -81,17 +81,15 @@ pub fn apply_body_deltas<const D: usize>(
             let body = bodies.get_mut(delta.idx);
             body.force = delta.force_delta;
             body.torque = delta.torque_delta;
-            // two-way ROTATIONAL coupling: the reaction torque changes the body's spin, I*domega =
-            // L_delta (torque_delta is the per-step angular momentum the gas exchanged, so no extra
-            // dt). a shaped two-way wall's mask + surface velocity then track the evolved omega; a
-            // free spinner is dragged toward the local flow's rotation. gated on two_way + inertia>0.
-            // TRANSLATIONAL reaction: mass * dv = force_delta (the momentum the gas exchanged), so a
-            // two-way body accelerates under the drag it exerts on the flow. the ROTATIONAL reaction
-            // is applied in the orientation advance below (Euler's equations from `body.torque`).
+            // TRANSLATIONAL reaction: force_delta is the drag FORCE the gas exerts on the body
+            // (momentum-transfer rate = absorbed_momentum * volume / dt). the body gains the impulse
+            // over the step divided by its mass: dv = force_delta * dt / mass. gated on two_way +
+            // mass > 0. the ROTATIONAL reaction (torque_delta, likewise a torque = rate) is integrated
+            // over dt in the orientation advance below via Euler's equations.
             if body.two_way_coupling && body.mass > 0.0 {
                 let m = body.mass;
                 for a in 0..D {
-                    body.velocity[a] = body.velocity[a] + delta.force_delta[a] / m;
+                    body.velocity[a] = body.velocity[a] + delta.force_delta[a] * dt / m;
                 }
             }
             if let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = &mut body.kind {
@@ -235,11 +233,27 @@ mod tests {
                 .with_two_way_coupling(true),
         );
         let mut delta = crate::BodyDelta::<f64, 3>::new(0);
-        delta.torque_delta = Tensor::new([2.0, 0.0, 0.0]); // inertia = 1, so domega_x = 2
+        delta.torque_delta = Tensor::new([2.0, 0.0, 0.0]); // torque about x; I = 1, dt = 1e-3
         apply_body_deltas(&mut coll, &[delta], 1e-3);
         let w = coll.get(0).omega;
-        assert!(approx(w[0], 2.0), "omega should tilt toward x (free tumbling): {w:?}");
+        // Euler integrates I domega = torque dt, so domega_x = 2 * 1e-3 = 2e-3; z spin untouched.
+        assert!(approx(w[0], 2e-3), "omega should tilt toward x (free tumbling): {w:?}");
         assert!(approx(w[2], 5.0), "the z spin is unchanged by the x torque: {w:?}");
+    }
+
+    #[test]
+    fn two_way_force_accelerates_by_the_impulse_over_mass() {
+        // force_delta is the drag FORCE; the body gains the impulse over the step, dv = F dt / mass,
+        // NOT F / mass -- a large force over a tiny step is a small velocity kick, not a huge one.
+        let mut coll = BodyCollection::new().add(
+            crate::Body::<f64, 3>::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 4.0, 0.1, 1.0, true)
+                .with_two_way_coupling(true),
+        );
+        let mut delta = crate::BodyDelta::<f64, 3>::new(0);
+        delta.force_delta = Tensor::new([8.0, 0.0, 0.0]); // F = 8, mass = 4, dt = 1e-3
+        apply_body_deltas(&mut coll, &[delta], 1e-3);
+        // dv = F dt / m = 8 * 1e-3 / 4 = 2e-3 (NOT F/m = 2).
+        assert!(approx(coll.get(0).velocity[0], 2e-3), "{:?}", coll.get(0).velocity);
     }
 
     #[test]

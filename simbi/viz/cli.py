@@ -299,6 +299,12 @@ def setup_parser(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--dpi", type=int, default=300, help="output dpi")
     parser.add_argument(
+        "--draw-bodies",
+        action="store_true",
+        help="overlay each immersed body's silhouette (at its evolved pose) on the "
+        "field plot; follows --slice (cartesian only)",
+    )
+    parser.add_argument(
         "--xlims",
         nargs=2,
         type=float,

@@ -94,20 +94,57 @@ def _sdf_dist_np(node: dict[str, Any], x, y, z):
     raise ValueError(f"unknown shape kind {kind!r}")
 
 
-def body_mask(body: BodyPose, xs: np.ndarray, ys: np.ndarray, z: float = 0.0) -> np.ndarray:
-    """the inside-body indicator on the `(xs, ys)` grid, sliced at `z`, at the body's pose. shape
-    `(len(ys), len(xs))`. a world point maps into the body frame as `x_local = R^T (x - position)`."""
+# world-axis name -> index, accepting both the cartesian (x/y/z) and the coordinate
+# (x1/x2/x3) spellings the field `--slice` uses.
+_AXIS_INDEX = {"x": 0, "y": 1, "z": 2, "x1": 0, "x2": 1, "x3": 2}
+
+
+def slice_to_plane(
+    slice_spec: Optional[dict[str, float]],
+) -> Optional[tuple[tuple[str, str], float]]:
+    """map a field `--slice` spec to the body-overlay cut plane. a single fixed axis
+    (e.g. {"x3": 0.0}) leaves the two remaining world axes -- in ascending index order,
+    matching the field's own slice reduction -- as the plotted plane; returns
+    `((horizontal, vertical), fixed_value)`. no slice -> the x-y plane at z = 0. returns
+    None when the spec fixes two axes (the field reduces to a 1-D line, so a body
+    silhouette is undefined)."""
+    if not slice_spec:
+        return ("x", "y"), 0.0
+    fixed = [(_AXIS_INDEX[k], v) for k, v in slice_spec.items()]
+    if len(fixed) != 1:
+        return None
+    fixed_axis, at = fixed[0]
+    names = ("x", "y", "z")
+    plane = tuple(names[a] for a in (0, 1, 2) if a != fixed_axis)
+    return plane, at  # type: ignore[return-value]
+
+
+def body_mask(
+    body: BodyPose,
+    us: np.ndarray,
+    vs: np.ndarray,
+    plane: tuple[str, str] = ("x", "y"),
+    at: float = 0.0,
+) -> np.ndarray:
+    """the inside-body indicator on the 2-D cut `plane` (a pair of world-axis names;
+    `us` runs the horizontal axis, `vs` the vertical), with the third world axis held at
+    `at`, evaluated at the body's pose. shape `(len(vs), len(us))`. a world point maps
+    into the body frame as `x_local = R^T (x - position)`."""
     if body.shape is None:
-        return np.zeros((len(ys), len(xs)), dtype=bool)
-    xg, yg = np.meshgrid(xs, ys)
-    zg = np.full_like(xg, z)
-    px, py = body.position[0], body.position[1]
-    pz = body.position[2] if len(body.position) > 2 else 0.0
-    dx, dy, dz = xg - px, yg - py, zg - pz
+        return np.zeros((len(vs), len(us)), dtype=bool)
+    ua, va = _AXIS_INDEX[plane[0]], _AXIS_INDEX[plane[1]]
+    fixed_axis = 3 - ua - va  # the remaining index of {0, 1, 2}
+    ug, vg = np.meshgrid(us, vs)
+    world = [np.zeros_like(ug), np.zeros_like(ug), np.zeros_like(ug)]
+    world[ua] = ug
+    world[va] = vg
+    world[fixed_axis] = np.full_like(ug, at)
+    pos = [body.position[k] if k < len(body.position) else 0.0 for k in range(3)]
+    d = [world[k] - pos[k] for k in range(3)]
     r = body.orientation
-    xl = r[0][0] * dx + r[1][0] * dy + r[2][0] * dz
-    yl = r[0][1] * dx + r[1][1] * dy + r[2][1] * dz
-    zl = r[0][2] * dx + r[1][2] * dy + r[2][2] * dz
+    xl = r[0][0] * d[0] + r[1][0] * d[1] + r[2][0] * d[2]
+    yl = r[0][1] * d[0] + r[1][1] * d[1] + r[2][1] * d[2]
+    zl = r[0][2] * d[0] + r[1][2] * d[1] + r[2][2] * d[2]
     return _sdf_dist_np(body.shape.wire, xl, yl, zl) <= 0.0
 
 
@@ -115,38 +152,56 @@ def draw_body(
     ax,
     body: BodyPose,
     extent: Optional[tuple[float, float, float, float]] = None,
-    nx: int = 240,
-    ny: int = 240,
-    z: float = 0.0,
+    nu: int = 240,
+    nv: int = 240,
+    plane: tuple[str, str] = ("x", "y"),
+    at: float = 0.0,
     facecolor: str = "0.15",
     edgecolor: str = "white",
     alpha: float = 0.9,
 ) -> None:
-    """shade one body's silhouette on `ax`. `extent = (xmin, xmax, ymin, ymax)` (defaults to the
-    axis limits); `z` is the slice plane for a 3D shape. a shapeless body (analytic sphere) is drawn
-    as a marker at its position."""
+    """shade one body's silhouette on `ax` for the cut `plane` (world-axis names), with
+    the third axis held at `at`. `extent = (umin, umax, vmin, vmax)` defaults to the axis
+    limits. a shapeless body (analytic sphere) is drawn as a marker at its projected
+    position."""
+    ua, va = _AXIS_INDEX[plane[0]], _AXIS_INDEX[plane[1]]
+    pos = [body.position[k] if k < len(body.position) else 0.0 for k in range(3)]
     if body.shape is None:
-        ax.plot(body.position[0], body.position[1], "o", color=facecolor, markersize=6)
+        ax.plot(pos[ua], pos[va], "o", color=facecolor, markersize=6)
         return
     if extent is None:
-        xmin, xmax = ax.get_xlim()
-        ymin, ymax = ax.get_ylim()
+        umin, umax = ax.get_xlim()
+        vmin, vmax = ax.get_ylim()
     else:
-        xmin, xmax, ymin, ymax = extent
-    xs = np.linspace(xmin, xmax, nx)
-    ys = np.linspace(ymin, ymax, ny)
-    mask = body_mask(body, xs, ys, z=z).astype(float)
-    ax.contourf(xs, ys, mask, levels=[0.5, 1.5], colors=[facecolor], alpha=alpha)
-    ax.contour(xs, ys, mask, levels=[0.5], colors=[edgecolor], linewidths=1.0)
+        umin, umax, vmin, vmax = extent
+    us = np.linspace(umin, umax, nu)
+    vs = np.linspace(vmin, vmax, nv)
+    mask = body_mask(body, us, vs, plane=plane, at=at).astype(float)
+    ax.contourf(us, vs, mask, levels=[0.5, 1.5], colors=[facecolor], alpha=alpha)
+    ax.contour(us, vs, mask, levels=[0.5], colors=[edgecolor], linewidths=1.0)
 
 
-def overlay_bodies(ax, checkpoint_path: str, **kwargs) -> list[BodyPose]:
-    """load every body from `checkpoint_path` and shade its silhouette on `ax` (call after plotting a
-    field). returns the loaded poses (e.g. to annotate omega). extra kwargs pass to `draw_body`."""
+def overlay_bodies(
+    ax,
+    checkpoint_path: str,
+    plane: tuple[str, str] = ("x", "y"),
+    at: float = 0.0,
+    **kwargs,
+) -> list[BodyPose]:
+    """load every body from `checkpoint_path` and shade its silhouette on `ax` for the
+    cut `plane` at `at` (call after plotting a field). returns the loaded poses (e.g. to
+    annotate omega). extra kwargs pass to `draw_body`."""
     bodies = load_bodies(checkpoint_path)
     for body in bodies:
-        draw_body(ax, body, **kwargs)
+        draw_body(ax, body, plane=plane, at=at, **kwargs)
     return bodies
 
 
-__all__ = ["BodyPose", "load_bodies", "body_mask", "draw_body", "overlay_bodies"]
+__all__ = [
+    "BodyPose",
+    "load_bodies",
+    "body_mask",
+    "draw_body",
+    "overlay_bodies",
+    "slice_to_plane",
+]

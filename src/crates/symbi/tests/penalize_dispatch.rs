@@ -435,7 +435,7 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
 
 // TWO-WAY rotational coupling: a free (two_way) spinner in STILL fluid is dragged toward rest —
 // the reaction torque of the gas it spins up decelerates it. one evolve step (dispatch fills the
-// torque diagnostic, apply_body_deltas integrates I*domega = L_delta) must reduce omega, not
+// torque diagnostic, apply_body_deltas integrates I domega = torque dt) must reduce omega, not
 // reverse it. this also pins the sign of the coupling.
 #[test]
 fn two_way_spin_is_dragged_to_a_stop() {
@@ -474,8 +474,8 @@ fn two_way_spin_is_dragged_to_a_stop() {
 }
 
 // force-driven TRANSLATION: a two-way rigid obstacle in a +x flow is pushed downstream — the drag
-// it exerts on the gas reacts back (mass*dv = force_delta), so its velocity and position advance in
-// the flow direction over one evolve step.
+// it exerts on the gas reacts back (mass dv = force_delta dt), so its velocity and position advance
+// in the flow direction over one evolve step.
 #[test]
 fn two_way_body_is_pushed_downstream_by_the_flow() {
     use symbi_ib::sdf::SdfExpr;

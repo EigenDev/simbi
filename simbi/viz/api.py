@@ -184,12 +184,33 @@ def plot(
 
     figure.render()
 
+    if config.figure.draw_bodies:
+        _overlay_bodies(figure, files[0], config, sim_data)
+
     if save_as:
         figure.save(save_as)
     if show:
         plt.show()
 
     return figure
+
+
+def _overlay_bodies(figure, checkpoint_path, config, sim_data) -> None:
+    """draw each immersed body's silhouette on the rendered field axis, matching the
+    field's slice plane. the body signed-distance is cartesian, so a polar/spherical
+    field plot (whose axes are not world x/y) is skipped; a doubly-sliced (1-D) field
+    has no silhouette and is skipped too."""
+    from .bodies import overlay_bodies, slice_to_plane
+
+    if sim_data.metadata.coord_system != "cartesian":
+        return
+    plane_at = slice_to_plane(config.plot.slice)
+    if plane_at is None:
+        return
+    plane, at = plane_at
+    ax = figure.axes.get("main") if figure.axes else None
+    if ax is not None:
+        overlay_bodies(ax, checkpoint_path, plane=plane, at=at)
 
 
 def animate(

@@ -35,6 +35,9 @@ class FigureConfig(BaseModel):
     time_scale: Optional[float] = None
     time_units: str = ""
     transparent: bool = False
+    # overlay each immersed body's silhouette on the field plot (cartesian only; the
+    # body signed-distance is cartesian, so it does not align with a polar/spherical plot).
+    draw_bodies: bool = False
 
     model_config = {"frozen": True, "arbitrary_types_allowed": True, "extra": "forbid"}
 

@@ -12,7 +12,7 @@ import h5py
 import numpy as np
 
 from simbi.types.shape import Shape
-from simbi.viz.bodies import body_mask, load_bodies
+from simbi.viz.bodies import body_mask, load_bodies, slice_to_plane
 
 
 def _write_bodies(path, position, orientation, omega, shape_wire) -> None:
@@ -69,3 +69,31 @@ def test_body_mask_tracks_orientation(tmp_path) -> None:
 
     assert at(0.0, 0.4)  # the 0.5 extent now runs along y
     assert not at(0.4, 0.0)  # the 0.2 extent now runs along x
+
+
+def test_slice_to_plane_maps_the_field_cut() -> None:
+    assert slice_to_plane(None) == (("x", "y"), 0.0)
+    assert slice_to_plane({"x3": 0.0}) == (("x", "y"), 0.0)  # look down z
+    assert slice_to_plane({"x2": 0.5}) == (("x", "z"), 0.5)  # look down y
+    assert slice_to_plane({"x1": 1.0}) == (("y", "z"), 1.0)  # look down x
+    assert slice_to_plane({"x3": 0.0, "x2": 0.1}) is None  # 1-D line: no silhouette
+
+
+def test_body_mask_on_an_xz_plane_sees_the_thin_dimension(tmp_path) -> None:
+    # a thin card (thin in z): the x-z cut resolves its thin extent, the x-y cut its face.
+    card = Shape.box((0.0, 0.0, 0.0), (0.45, 0.22, 0.06))
+    path = str(tmp_path / "card.h5")
+    _write_bodies(path, [0.0, 0.0, 0.0], np.eye(3), [0.0, 0.0, 0.0], card.to_wire())
+    b = load_bodies(path)[0]
+
+    us = np.linspace(-1.0, 1.0, 401)  # x
+    vs = np.linspace(-0.5, 0.5, 401)  # z
+    m = body_mask(b, us, vs, plane=("x", "z"), at=0.0)  # y = 0
+
+    def at(x, z):
+        return m[int(np.argmin(np.abs(vs - z))), int(np.argmin(np.abs(us - x)))]
+
+    assert at(0.0, 0.0)  # card center
+    assert at(0.4, 0.05)  # inside the thin z half-extent 0.06
+    assert not at(0.0, 0.1)  # 0.1 > 0.06 -> outside in z
+    assert not at(0.5, 0.0)  # 0.5 > 0.45 -> outside in x

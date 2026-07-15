@@ -186,13 +186,12 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// advance the FULL rigid-body rotation over `dt` under the external per-step angular-momentum
-    /// increment `torque_world` (world frame): integrate Euler's equations with the DIAGONAL
-    /// body-frame inertia — `dL_body = tau_body - (omega_body x L_body) dt` — then roll the
-    /// orientation by the updated angular velocity `R <- Rodrigues(omega_hat, |omega|*dt) R`. the
-    /// gyroscopic term `omega x L` drives torque-free precession of an ANISOTROPIC body; ISOTROPIC
-    /// inertia zeros it and this reduces to `omega += torque / I`. `omega = 0`, `torque = 0` is a
-    /// no-op.
+    /// advance the FULL rigid-body rotation over `dt` under the external torque `torque_world` (world
+    /// frame): integrate Euler's equations with the DIAGONAL body-frame inertia —
+    /// `dL_body = (tau_body - omega_body x L_body) dt` — then roll the orientation by the updated
+    /// angular velocity `R <- Rodrigues(omega_hat, |omega|*dt) R`. the gyroscopic term `omega x L`
+    /// drives torque-free precession of an ANISOTROPIC body; ISOTROPIC inertia zeros it and this
+    /// reduces to `omega += torque * dt / I`. `omega = 0`, `torque = 0` is a no-op.
     pub fn advance_rotation(&mut self, torque_world: Tensor<S, 3>, dt: S) {
         let r = self.orientation;
         let rt = transpose3(r);
@@ -201,12 +200,13 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         let wb = matvec3(rt, [self.omega[0], self.omega[1], self.omega[2]]);
         let lb = [i[0] * wb[0], i[1] * wb[1], i[2] * wb[2]];
         let tb = matvec3(rt, [torque_world[0], torque_world[1], torque_world[2]]);
-        // Euler: L_body advances by the external torque minus the gyroscopic moment omega_body x L_body.
+        // Euler over dt: L_body advances by the external torque minus the gyroscopic moment
+        // omega_body x L_body, both integrated over the step: dL_body = (tau_body - omega x L) dt.
         let g = cross3(wb, lb);
         let lb_new = [
-            lb[0] + tb[0] - g[0] * dt,
-            lb[1] + tb[1] - g[1] * dt,
-            lb[2] + tb[2] - g[2] * dt,
+            lb[0] + (tb[0] - g[0]) * dt,
+            lb[1] + (tb[1] - g[1]) * dt,
+            lb[2] + (tb[2] - g[2]) * dt,
         ];
         let wb_new = [lb_new[0] / i[0], lb_new[1] / i[1], lb_new[2] / i[2]];
         self.omega = Tensor::new(matvec3(r, wb_new));

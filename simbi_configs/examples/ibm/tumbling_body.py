@@ -120,10 +120,12 @@ class TumblingBody(SimbiProblem):
     @computed_field
     @property
     def immersed_bodies(self) -> list[ImmersedBodyConfig]:
-        # a flat elongated card: long in x, medium in y, thin in z. the unequal
-        # principal moments make it precess/nutate (Euler's gyroscopic term), and
-        # its asymmetry lets the flow torque tumble it.
-        card = Shape.box((0.0, 0.0, 0.0), (0.45, 0.22, 0.06))
+        # a flat elongated card: long in x, medium in y, thinnest in z. the unequal
+        # principal moments make it precess/nutate (Euler's gyroscopic term), and its
+        # asymmetry lets the flow torque tumble it. the z half-extent 0.15 spans ~7
+        # cells (dz = 4/96 = 0.0417): the penalization needs several cells across the
+        # thinnest solid dimension, or the wall leaks and FOFC freezes the interior.
+        card = Shape.box((0.0, 0.0, 0.0), (0.45, 0.22, 0.15))
         return [
             ImmersedBodyConfig(
                 capability=BodyCapability.RIGID,

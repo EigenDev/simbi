@@ -85,6 +85,7 @@ def figure_config_from_args(args: Namespace) -> FigureConfig:
         time_scale=getattr(args, "time_scale", None),
         time_units=getattr(args, "time_units", ""),
         transparent=getattr(args, "transparent", False),
+        draw_bodies=getattr(args, "draw_bodies", False),
     )
 
 
