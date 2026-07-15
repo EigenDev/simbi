@@ -43,6 +43,22 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     dy: S,
     dt: S,
 ) -> Tensor<S, 2> {
+    viscous_update_2d(v, rho, nu, dx, dy, dt).0
+}
+
+/// the viscous increment for the ADIABATIC regime: the momentum `dt * div(tau)` (bit-identical to
+/// `viscous_mom_update_2d`) PLUS the total-energy increment `dt * div(tau . v)` — the divergence of
+/// the viscous energy flux `F_a = tau_ab v_b`, evaluated on the SAME four faces with the
+/// face-interpolated velocity. the conservative flux form conserves total energy exactly, and the
+/// irreversible heating `Phi = tau : grad(v) >= 0` emerges in the internal energy `e = E - rho v^2/2`.
+pub fn viscous_update_2d<S: Scalar>(
+    v: &[[Tensor<S, 2>; 3]; 3],
+    rho: &[[S; 3]; 3],
+    nu: &[[S; 3]; 3],
+    dx: S,
+    dy: S,
+    dt: S,
+) -> (Tensor<S, 2>, S) {
     let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
     let two_thirds = S::from_f64(2.0 / 3.0);
@@ -109,7 +125,16 @@ pub fn viscous_mom_update_2d<S: Scalar>(
     // conservative flux divergence: d_x tau_x. + d_y tau_y.
     let dmom_x = dt * ((txx_xp - txx_xm) / dx + (tyx_yp - tyx_ym) / dy);
     let dmom_y = dt * ((txy_xp - txy_xm) / dx + (tyy_yp - tyy_ym) / dy);
-    Tensor::new([dmom_x, dmom_y])
+
+    // the viscous ENERGY flux F_a = tau_ab v_b at each face, with v face-interpolated (arithmetic
+    // mean of the straddling cells — the velocity is primitive). div F onto the total energy.
+    let fx_xp = txx_xp * (half * (vx(1, 1) + vx(1, 2))) + txy_xp * (half * (vy(1, 1) + vy(1, 2)));
+    let fx_xm = txx_xm * (half * (vx(1, 0) + vx(1, 1))) + txy_xm * (half * (vy(1, 0) + vy(1, 1)));
+    let fy_yp = tyx_yp * (half * (vx(1, 1) + vx(2, 1))) + tyy_yp * (half * (vy(1, 1) + vy(2, 1)));
+    let fy_ym = tyx_ym * (half * (vx(0, 1) + vx(1, 1))) + tyy_ym * (half * (vy(0, 1) + vy(1, 1)));
+    let dnrg = dt * ((fx_xp - fx_xm) / dx + (fy_yp - fy_ym) / dy);
+
+    (Tensor::new([dmom_x, dmom_y]), dnrg)
 }
 
 /// the cylindrical `(R, phi)` PHYSICAL-frame deviatoric stress `(tau_RR, tau_pp,
@@ -491,6 +516,26 @@ mod tests {
         let (v, r) = stencil(0.1, 0.3, 0.05, 0.05, |_, y| [s * y, 0.0], |_, _| 1.0);
         let d = viscous_mom_update_2d(&v, &r, &uni(0.02), 0.05, 0.05, 0.01);
         assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14, "{d:?}");
+    }
+
+    // the ADIABATIC energy twin: a linear shear vx = S y has a CONSTANT stress (zero force) but a
+    // nonzero viscous HEATING Phi = tau : grad(v) = mu S^2 = rho nu S^2 (>= 0), booked into the total
+    // energy via div(tau . v). the momentum stays zero; the energy increment is the exact dissipation.
+    #[test]
+    fn linear_shear_heats_at_the_dissipation_rate() {
+        let (s, nu, rho, dt) = (0.9, 0.02, 1.3, 0.01);
+        let (dx, dy) = (0.05, 0.05);
+        let (v, r) = stencil(0.1, 0.3, dx, dy, |_, y| [s * y, 0.0], |_, _| rho);
+        let (dmom, dnrg) = viscous_update_2d(&v, &r, &uni(nu), dx, dy, dt);
+        // constant stress -> no force.
+        assert!(dmom[0].abs() < 1e-14 && dmom[1].abs() < 1e-14, "force should vanish: {dmom:?}");
+        // heating: dnrg = dt * rho nu S^2, exactly (linear field -> exact central differences).
+        let expected = dt * rho * nu * s * s;
+        assert!(
+            (dnrg - expected).abs() < 1e-14,
+            "viscous heating off: dnrg = {dnrg}, expected rho nu S^2 dt = {expected}"
+        );
+        assert!(dnrg > 0.0, "viscous heating must be positive (irreversible dissipation)");
     }
 
     // positive check: vx = a y^2 gives a varying stress tau_yx = rho nu (2 a y),

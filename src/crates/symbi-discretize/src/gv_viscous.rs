@@ -83,6 +83,31 @@ pub fn viscous_iso_gv() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
+/// trace the constant-nu ADIABATIC viscous operator, 2D cartesian: the SAME `dt div(tau)` momentum
+/// update as `viscous_iso_gv` PLUS the total-energy increment `dt div(tau . v)` — the viscous energy
+/// flux divergence — accumulated onto `cons.nrg`. total energy is conserved (flux form) and the
+/// irreversible heating warms the gas. runs post-c2p (prim current).
+pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let nu = Gv::scalar("nu");
+    let dx = Gv::scalar("dx_0");
+    let dy = Gv::scalar("dx_1");
+
+    let (vst, rst) = prim_stencil();
+    let nust = [[nu; 3]; 3];
+    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
+    let mom0_c = Gv::field("mom0", FieldRef::cons_mom(0));
+    let mom1_c = Gv::field("mom1", FieldRef::cons_mom(1));
+    let nrg_c = Gv::field("nrg", FieldRef::cons_nrg());
+    let writes = vec![
+        ("mom_out_0".to_string(), FieldRef::cons_mom(0).into(), (mom0_c + dmom[0]).node()),
+        ("mom_out_1".to_string(), FieldRef::cons_mom(1).into(), (mom1_c + dmom[1]).node()),
+        ("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg_c + dnrg).node()),
+    ];
+    (end_trace(), writes)
+}
+
 /// the scale factors `(h1, h2)` at a coordinate point, per chart (Cartesian -> 1;
 /// cylindrical (R, phi) -> (1, R); spherical (r, theta) -> (1, r)). the const-D
 /// metric bridge mirrors the geometric-source dispatch — one metric family. shared with the covariant

@@ -47,11 +47,20 @@ use symbi_sim::substrate_seam::{KernelSet, WithViscosity};
 use symbi_sim::state::FieldStore;
 
 /// a D-generic adiabatic (ideal-gas Euler) `KernelSet`, every method substrate-generated.
-// the constant-nu viscous operator is isothermal-only; the
-// adiabatic set uses the no-op default (viscosity is ignored, not stored).
+// the ADIABATIC viscous operator books BOTH the Navier-Stokes shear force AND the viscous heating
+// (div(tau.v) onto the total energy); constant-nu, cartesian 2D. alpha (needs a reference sound speed
+// on a varying-cs gas) is a follow-on.
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
+    fn with_viscosity(mut self, nu: f64) -> Self {
+        self.viscosity = nu;
+        self
+    }
+    fn with_alpha(self, _alpha: f64) -> Self {
+        panic!("adiabatic alpha viscosity is not built (nu = alpha cs^2 / Omega needs a reference \
+                sound speed on a varying-cs gas); use constant-nu with_viscosity, or the isothermal regime");
+    }
 }
 
 // horizon excision is a GR-chart operation; the adiabatic (flat) set ignores it.
@@ -108,6 +117,10 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     pub solver: Solver,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
+    /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear PLUS the
+    /// viscous heating (div(tau.v) onto the total energy) and caps dt at C_visc dx^2 / nu. cartesian
+    /// 2D only for now (the adiabatic energy-flux kernel); alpha + curvilinear + 3D are follow-ons.
+    pub viscosity: f64,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSubstrateKernelSet<Mem, Sc, D> {
@@ -115,7 +128,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate adiabatic CFL scratch field");
         // theta defaults to 1.0 (plain minmod) — exact prior behavior; set `theta` to tune.
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, c_drain: 1.0, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0) }
+        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, c_drain: 1.0, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0), viscosity: 0.0 }
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
@@ -276,7 +289,32 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // adiabatic shares the iso wave-speed map (cs = sqrt(gamma*p/rho), gamma=1.4 vs 1);
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
         let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        cfl_wave_speed(sim, pre, &self.cfl_scratch, "iso", self.gamma, self.cfl_number, None)
+        let dt = cfl_wave_speed(sim, pre, &self.cfl_scratch, "iso", self.gamma, self.cfl_number, None);
+        // the parabolic viscous cap: an explicit momentum-diffusion step is stable for
+        // dt <= C_visc dx^2 / nu (C_visc = 0.1 below the ~0.21 von-Neumann limit of the 4/3 normal
+        // stress). cartesian 2D only, so the coordinate dx IS the physical cell width. inert inviscid.
+        if self.viscosity > 0.0 {
+            const C_VISC: f64 = 0.1;
+            let min_dx = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
+            dt.min(C_VISC * min_dx * min_dx / self.viscosity)
+        } else {
+            dt
+        }
+    }
+
+    fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        if self.viscosity <= 0.0 {
+            return;
+        }
+        // the adiabatic viscous operator (shear force + viscous heating onto the total energy) is
+        // built for cartesian 2D only; fail loud rather than silently drop the transport or the heat.
+        assert!(
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2,
+            "adiabatic viscosity (with energy heating) is built for cartesian 2D only; the {:?} chart \
+             in {D}D is a follow-on. use a cartesian 2D grid, the isothermal regime, or set nu = 0.",
+            sim.geom.coords
+        );
+        crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
     }
 
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {

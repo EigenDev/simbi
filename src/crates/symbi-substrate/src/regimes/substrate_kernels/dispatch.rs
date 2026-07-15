@@ -333,13 +333,23 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     // cartesian uses the flat face-difference kernel (2D/3D); every curvilinear
     // chart routes through the ONE general orthogonal kernel (scale-factor form),
     // which reads the cell geometry, so the geom scalars resolve as usual.
+    // the ADIABATIC regime (has_energy) books the viscous HEATING too (div(tau.v) onto nrg), so it
+    // selects the energy-carrying kernel; the isothermal regime keeps the momentum-only iso kernel.
+    let has_energy = sim.fields.cons.nrg_field().is_some();
     let name: String = match geom.coords {
         symbi_geometry::Geometry::Cartesian => {
             assert!(D == 2 || D == 3, "cartesian viscosity is baked for 2D/3D");
-            symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name().to_string()
+            if has_energy {
+                assert_eq!(D, 2, "adiabatic (energy-heating) viscosity is baked for cartesian 2D only");
+                "viscous_adiabatic_2d".to_string()
+            } else {
+                symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name().to_string()
+            }
         }
         symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {
             assert_eq!(D, 2, "curvilinear viscosity is baked for 2D only");
+            assert!(!has_energy, "adiabatic viscosity on a curvilinear chart (the energy flux) is not \
+                                  yet built; use cartesian 2D or the isothermal regime");
             super::layout::viscous_ortho_name("viscous_iso_ortho", geom.coords, D)
         }
     };

@@ -1751,6 +1751,9 @@ fn main() {
         use symbi_ir::KernelId;
         let (k, writes) = symbi_discretize::viscous_iso_gv();
         emit_gv(&out_dir, KernelId::ViscousIso { ndim: 2 }.name(), 2, &k, &writes);
+        // the ADIABATIC twin: same div(tau) momentum + the viscous energy flux div(tau.v) onto nrg.
+        let (k, writes) = symbi_discretize::viscous_adiabatic_gv();
+        emit_gv(&out_dir, "viscous_adiabatic_2d", 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_alpha_gv();
         emit_gv(&out_dir, KernelId::ViscousIsoAlpha { ndim: 2 }.name(), 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_gv_3d();
