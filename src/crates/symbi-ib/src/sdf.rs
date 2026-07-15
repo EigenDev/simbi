@@ -165,6 +165,58 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
     }
 }
 
+impl SdfExpr<f64, 3> {
+    /// parse a config-authored shape from its json wire form (python's `Shape.to_wire`
+    /// serialized with `json.dumps`). the tree is CSG over 3-space primitives:
+    ///   {"kind":"sphere","center":[x,y,z],"radius":r}
+    ///   {"kind":"box","center":[x,y,z],"half_extents":[hx,hy,hz]}
+    ///   {"kind":"union"|"intersect","a":<shape>,"b":<shape>}
+    ///   {"kind":"complement","inner":<shape>}
+    ///   {"kind":"translated","inner":<shape>,"offset":[x,y,z]}
+    /// coordinates are the body-LOCAL frame; the penalization kernel translates the whole
+    /// tree to the runtime body position. an unknown kind or a malformed field fails loud.
+    pub fn from_json(s: &str) -> Result<Self, String> {
+        let v: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("shape json: {e}"))?;
+        Self::from_value(&v)
+    }
+
+    fn from_value(v: &serde_json::Value) -> Result<Self, String> {
+        let kind = v.get("kind").and_then(|k| k.as_str()).ok_or("shape: missing string 'kind'")?;
+        let vec3 = |key: &str| -> Result<[f64; 3], String> {
+            let arr = v
+                .get(key)
+                .and_then(|a| a.as_array())
+                .ok_or_else(|| format!("shape '{kind}': missing array '{key}'"))?;
+            if arr.len() != 3 {
+                return Err(format!("shape '{kind}': '{key}' must have 3 components, got {}", arr.len()));
+            }
+            let mut out = [0.0; 3];
+            for (i, e) in arr.iter().enumerate() {
+                out[i] = e.as_f64().ok_or_else(|| format!("shape '{kind}': '{key}[{i}]' not a number"))?;
+            }
+            Ok(out)
+        };
+        let scalar = |key: &str| -> Result<f64, String> {
+            v.get(key).and_then(|s| s.as_f64()).ok_or_else(|| format!("shape '{kind}': missing number '{key}'"))
+        };
+        let child = |key: &str| -> Result<Self, String> {
+            Self::from_value(v.get(key).ok_or_else(|| format!("shape '{kind}': missing sub-shape '{key}'"))?)
+        };
+        match kind {
+            "sphere" => Ok(SdfExpr::Sphere { center: vec3("center")?, radius: scalar("radius")? }),
+            "box" => Ok(SdfExpr::Cuboid { center: vec3("center")?, half_extents: vec3("half_extents")? }),
+            "union" => Ok(SdfExpr::Union(Box::new(child("a")?), Box::new(child("b")?))),
+            "intersect" => Ok(SdfExpr::Intersect(Box::new(child("a")?), Box::new(child("b")?))),
+            "complement" => Ok(SdfExpr::Complement(Box::new(child("inner")?))),
+            "translated" => Ok(SdfExpr::Translated {
+                inner: Box::new(child("inner")?),
+                offset: vec3("offset")?,
+            }),
+            other => Err(format!("shape: unknown kind '{other}' (sphere | box | union | intersect | complement | translated)")),
+        }
+    }
+}
+
 impl<const D: usize> SdfExpr<f64, D> {
     /// the enclosing ball of the body: every point with `dist(x) <= 0` lies
     /// within `radius` of `center`. `None` when the body is unbounded (any
@@ -387,5 +439,39 @@ mod tests {
         let (c, r) = enclosing_ball(([0.0, 0.0], 2.0), ([0.5, 0.0], 0.1));
         assert_eq!(r, 2.0);
         assert_eq!(c, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn from_json_parses_csg_and_equals_native() {
+        // the EXACT wire python's Shape.sphere(...).union(Shape.box(...)) emits.
+        let wire = r#"{"kind":"union",
+            "a":{"kind":"sphere","center":[0.0,0.0,0.0],"radius":1.0},
+            "b":{"kind":"box","center":[2.0,0.0,0.0],"half_extents":[0.5,0.5,0.5]}}"#;
+        let s = SdfExpr::<f64, 3>::from_json(wire).expect("parse csg wire");
+        let native = SdfExpr::<f64, 3>::sphere([0.0; 3], 1.0)
+            .union(SdfExpr::cuboid([2.0, 0.0, 0.0], [0.5; 3]));
+        assert_eq!(s, native, "wire must reconstruct the native tree");
+        // inside the sphere and inside the box are both interior (dist < 0); the gap between is out.
+        assert!(s.dist([0.0, 0.0, 0.0]) < 0.0);
+        assert!(s.dist([2.0, 0.0, 0.0]) < 0.0);
+        assert!(s.dist([1.3, 0.0, 0.0]) > 0.0);
+        // the bounding ball encloses every interior point.
+        let (c, r) = s.bounding_ball().expect("csg is bounded");
+        for x in [[0.0, 0.0, 0.0], [2.4, 0.0, 0.0]] {
+            let d: f64 = (0..3).map(|a| (x[a] - c[a]).powi(2)).sum::<f64>().sqrt();
+            assert!(d <= r + 1e-12, "interior point {x:?} escapes the bounding ball");
+        }
+    }
+
+    #[test]
+    fn from_json_rejects_malformed_shapes() {
+        // unknown primitive.
+        assert!(SdfExpr::<f64, 3>::from_json(r#"{"kind":"torus","center":[0,0,0]}"#).is_err());
+        // wrong arity on a vector.
+        assert!(SdfExpr::<f64, 3>::from_json(r#"{"kind":"sphere","center":[0,0],"radius":1.0}"#).is_err());
+        // missing scalar field.
+        assert!(SdfExpr::<f64, 3>::from_json(r#"{"kind":"sphere","center":[0,0,0]}"#).is_err());
+        // missing sub-shape.
+        assert!(SdfExpr::<f64, 3>::from_json(r#"{"kind":"complement"}"#).is_err());
     }
 }

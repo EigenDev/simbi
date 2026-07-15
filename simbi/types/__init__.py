@@ -20,6 +20,7 @@ from .bodies import (
     ImmersedBodyConfig,
     RigidProperties,
 )
+from .shape import Shape
 from .input import (
     Array,
     BoundaryCondition,
@@ -99,4 +100,5 @@ __all__ = [
     "RigidProperties",
     "ElasticProperties",
     "DeformableProperties",
+    "Shape",
 ]
