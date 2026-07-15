@@ -1019,19 +1019,62 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    use symbi_geometry::Geometry::{Cartesian, Cylindrical};
+    use symbi_geometry::Geometry::{Cartesian, Cylindrical, Spherical};
     let sfx = mhd_geom_suffix(sim.geom.coords, &sim.geom.axes);
     match (sim.geom.coords, D) {
         (Cartesian, 2) => resistive_emf_2d::<D, DOF, Mem, Sc>(sim, eta),
         (Cartesian, 3) => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
+        // cyl r-z is metric-free in-plane (h = (1,1)); the covariant ortho kernel serves cyl r-phi and
+        // spherical r-theta (h_2 = r), all adjoint-verified by the geometry-agnostic oracle.
         (Cylindrical, 2) if sfx == "_cyl_rz" => resistive_emf_cyl_rz::<D, DOF, Mem, Sc>(sim, eta),
+        (Cylindrical, 2) if sfx == "_cyl_rphi" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_cyl_rphi"),
+        (Spherical, 2) if sfx == "_sph" => resistive_emf_ortho::<D, DOF, Mem, Sc>(sim, eta, "_sph"),
         (coords, d) => panic!(
-            "resistive MHD (resistivity > 0) has an adjoint-verified resistive curl for the \
-             cartesian 2.5D/3D and cylindrical r-z charts only; the {coords:?} chart in {d}D \
-             (suffix {sfx:?}) needs its own transposed-metric adjoint of ct_curl, not yet built. \
-             use a supported chart or set resistivity = 0."
+            "resistive MHD (resistivity > 0) has an adjoint-verified resistive curl for the cartesian \
+             2.5D/3D, cylindrical r-z/r-phi, and spherical r-theta charts only; the {coords:?} chart in \
+             {d}D (suffix {sfx:?}) needs its own covariant resistive curl, not yet built. use a \
+             supported chart or set resistivity = 0."
         ),
     }
+}
+
+/// dispatch the COVARIANT orthogonal-chart resistive edge EMF (`rmhd_resistive_emf{sfx}`): the DEC
+/// codifferential written through the chart's Lamé scale factors, binding the poloidal face field
+/// (`b0`/`b1`) + the log-aware face-position geom scalars. serves cyl r-phi and spherical r-theta.
+fn resistive_emf_ortho<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    eta: f64,
+    sfx: &str,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+    let (x_lo_k, dx_k) = kernel_geom(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, sim.geom.coords, sim.motion.a);
+    let name = format!("rmhd_resistive_emf{sfx}");
+    let scalars = scalars_for(&name, |bind| match bind {
+        ScalarBind::Spec(s) if &**s == "eta" => Sc::from_f64(eta),
+        ScalarBind::Ref(sref) => Sc::from_f64(
+            geom_scalar(&x_lo_k, &dx_k, &sim.geom.maps, *sref)
+                .unwrap_or_else(|| panic!("resistive_emf_ortho: unexpected scalar {sref:?}")),
+        ),
+        o => panic!("resistive_emf_ortho: unexpected scalar {o:?}"),
+    });
+    let slot = |s: &str| -> &Field<Sc, D, Mem> {
+        match s {
+            "e" => &mhd.efield[0],
+            "b0" => &mhd.bface[0],
+            "b1" => &mhd.bface[1],
+            o => panic!("resistive_emf_ortho: unknown manifest slot '{o}'"),
+        }
+    };
+    let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+    for (bind, is_out) in kernel_field_binds(&name).iter() {
+        let fld = slot(&bind.name());
+        if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+    }
+    dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
 }
 
 /// dispatch the immersed-body LOCALIZED resistive edge EMF for every body running

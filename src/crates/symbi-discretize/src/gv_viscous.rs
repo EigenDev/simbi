@@ -85,8 +85,9 @@ pub fn viscous_iso_gv() -> (GvKernel, Writes) {
 
 /// the scale factors `(h1, h2)` at a coordinate point, per chart (Cartesian -> 1;
 /// cylindrical (R, phi) -> (1, R); spherical (r, theta) -> (1, r)). the const-D
-/// metric bridge mirrors the geometric-source dispatch — one metric family.
-fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv> {
+/// metric bridge mirrors the geometric-source dispatch — one metric family. shared with the covariant
+/// resistive EMF (the DEC codifferential is the same Lamé-coefficient machinery as the viscous stress).
+pub(crate) fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv> {
     fn run<M, const D: usize>(m: M, x: &[Gv]) -> Vec<Gv>
     where
         M: Metric<Gv, D> + DiagonalMetric<Gv, D>,

@@ -337,6 +337,58 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(Stri
     (end_trace(), vec![("ephi_new".to_string(), "ephi".into(), ephi_new.node())])
 }
 
+/// the COVARIANT 2.5D orthogonal-chart OHMIC RESISTIVE edge EMF: adds `eta * J_out` to the
+/// out-of-plane corner EMF, where `J_out = (1/(h_i h_j)) [d_i(h_j B_j) - d_j(h_i B_i)]` is the physical
+/// curl of the poloidal field in the running orthogonal chart, `h_i` the chart's Lamé scale factors
+/// (`Metric::scale_factors`). this is the DEC codifferential — the mimetic ADJOINT of the induction
+/// curl — written through the scale factors, so ONE kernel covers every 2.5D orthogonal chart:
+/// cyl r-z (`h = (1, 1)`) recovers the metric-free `d_z B_r - d_r B_z`; cyl r-phi and spherical r-theta
+/// (`h_2 = r`) grow the `(1/r) d_r(r .)` factor. the geometry-agnostic adjoint oracle validates each
+/// chart; `-curl(eta J)` is negative-definite (magnetic energy decays). `eta = 0` is an exact no-op.
+/// `B_i` = bface[i]; scale factors are sampled at the staggered face/corner positions of each term.
+pub fn rmhd_resistive_emf_ortho_gv(coords: Coords, spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let e = Gv::field("e", "e"); // the out-of-plane corner EMF
+    let eta = Gv::scalar("eta");
+    // pin the geom scalars in canonical order (both axes' faces), matching the curl ABI.
+    for ax in 0..2 {
+        let _ = gv_axis_face_at(ax, spacing[ax], 0);
+        let _ = gv_axis_face_at(ax, spacing[ax], 1);
+    }
+    let dx0 = gv_axis_face_at(0, spacing[0], 1) - gv_axis_face_at(0, spacing[0], 0);
+    let dx1 = gv_axis_face_at(1, spacing[1], 1) - gv_axis_face_at(1, spacing[1], 0);
+    let inv_dx0 = Gv::ONE / dx0;
+    let inv_dx1 = Gv::ONE / dx1;
+    let b0 = Gv::field("b0", "b0"); // bface[0], normal to in-plane axis 0
+    let b1 = Gv::field("b1", "b1"); // bface[1], normal to in-plane axis 1
+    let b0_jm = gv_field_at("b0", "b0", 2, &[0, -1]); // B_0 one cell back in axis 1
+    let b1_im = gv_field_at("b1", "b1", 2, &[-1, 0]); // B_1 one cell back in axis 0
+    // the coordinate centroid; the corner (edge) sits half a cell below it on each axis, and the
+    // staggered face positions are fixed coordinate offsets from it (scale factors read there).
+    let geo = cell_geometry_gv(coords, spacing, &[0usize, 1usize], 2);
+    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+    let half = Gv::from_f64(0.5);
+    let sf = |x0: Gv, x1: Gv| crate::gv_viscous::scale_factors_at(coords, 2, &[x0, x1]);
+    // prefactor 1/(h0 h1) at the corner (x0_face, x1_face).
+    let hc = sf(c0 - half * dx0, c1 - half * dx1);
+    let inv_h = Gv::ONE / (hc[0] * hc[1]);
+    // d_0(h1 B1): B1 lives at (x0_center, x1_face); sample h1 there, difference along axis 0.
+    let h1_ij = sf(c0, c1 - half * dx1)[1];
+    let h1_im = sf(c0 - dx0, c1 - half * dx1)[1];
+    let d0 = inv_dx0 * (h1_ij * b1 - h1_im * b1_im);
+    // d_1(h0 B0): B0 lives at (x0_face, x1_center); sample h0 there, difference along axis 1.
+    let h0_ij = sf(c0 - half * dx0, c1)[0];
+    let h0_jm = sf(c0 - half * dx0, c1 - dx1)[0];
+    let d1 = inv_dx1 * (h0_ij * b0 - h0_jm * b0_jm);
+    let jout = inv_h * (d0 - d1);
+    // E += eta*jout: the adjoint sign for a RIGHT-HANDED (axis0, axis1, out-of-plane) triple — cyl
+    // r-phi `(r, phi, z)` and spherical r-theta `(r, theta, phi)`. (cyl r-z's `(r, z, phi)` triple is
+    // left-handed and uses its own oppositely-signed kernel.) oracle-pinned to make -curl(eta J)
+    // negative-definite so the magnetic energy decays.
+    let e_new = e + eta * jout;
+    (end_trace(), vec![("e_new".to_string(), "e".into(), e_new.node())])
+}
+
 
 /// the 2.5D cylindrical r-phi DISK CT curl from the single out-of-plane edge EMF E_z
 /// (efield[0]), in-place on `b` (bface[dir]). DERIVED from the cyl curl restricted to E_z with

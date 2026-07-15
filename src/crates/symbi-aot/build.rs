@@ -42,7 +42,7 @@ use symbi_discretize::{
     neumann_ghost_fill_gv, robin_ghost_fill_gv,
     nmhd_wave_speed_map_gv,
     rmhd_average_efield_gv, rmhd_bcell_from_bface_gv, rmhd_bcell_godunov_euler_gv,
-    rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv, rmhd_ct_curl_3d_dir_gv,
+    rmhd_bcell_godunov_rk2_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_resistive_emf_3d_dir_gv, rmhd_resistive_emf_cyl_rz_gv, rmhd_resistive_emf_ortho_gv, rmhd_ct_curl_3d_dir_gv,
     rmhd_ct_curl_2d_sph_gv, rmhd_ct_curl_cyl_rz_gv, rmhd_ct_curl_cyl_rphi_gv, rmhd_edge_emf_gv, rmhd_edge_emf_uct_gv, nmhd_edge_emf_uct_hllc_gv, nmhd_edge_emf_uct_hlld_gv, imhd_edge_emf_uct_hlld_gv, rmhd_edge_emf_uct_hlld_gv,
     rmhd_ghost_fill_gv, rmhd_save_efield_gv, rmhd_wave_speed_map_gv, rmhd_wave_speeds_cell_gv, nmhd_wave_speeds_cell_gv,
     imhd_wave_speeds_cell_gv,
@@ -1327,6 +1327,16 @@ fn gen_rmhd_resistive_emf_cyl_rz(out_dir: &str, geom: &Geom) {
     emit_gv(out_dir, "rmhd_resistive_emf_cyl_rz", 2, &k, &writes);
 }
 
+// the 2.5D COVARIANT orthogonal-chart Ohmic resistive edge EMF: the DEC codifferential (the mimetic
+// adjoint of the induction curl) written through the chart's Lamé scale factors, so one builder serves
+// every orthogonal chart. `coords` selects the IN-PLANE metric: Cylindrical -> (1, r) for the r-phi
+// disk, Spherical -> (1, r) for the r-theta wedge. named by the target chart suffix ("_cyl_rphi" /
+// "_sph") so the dispatch's mhd_geom_suffix resolves it.
+fn gen_rmhd_resistive_emf_ortho(out_dir: &str, coords: Coords, suffix: &str, geom: &Geom) {
+    let (k, writes) = rmhd_resistive_emf_ortho_gv(coords, &geom.spacing);
+    emit_gv(out_dir, &format!("rmhd_resistive_emf{suffix}"), 2, &k, &writes);
+}
+
 // the 2.5D SPHERICAL (r-theta plane) CT curl B-update along in-plane face axis `dir` (0 -> B_r,
 // 1 -> B_theta), from the single out-of-plane corner EMF E_phi. dir=0 carries the spherical
 // (1/(r sin th)) d_th(sin th .) area metric; dir=1 the (1/r) d_r(r .) metric. name matches the
@@ -2467,6 +2477,10 @@ fn main() {
         for dir in 0..2 {
             gen_rmhd_ct_curl_2d_sph(&out_dir, dir, &sph);
         }
+        // the resistive adjoint is METRIC-FREE (the induction curl's metric is absorbed by the
+        // physical face-area weights of the energy inner product); the chart enters only the CFL/energy
+        // norm, not J. so the ortho kernel is baked with the Cartesian in-plane metric (h = 1).
+        gen_rmhd_resistive_emf_ortho(&out_dir, Coords::Cartesian, "_sph", &sph);
         gen_rmhd_bcell_godunov_euler(&out_dir, sph.clone(), 2);
         gen_rmhd_bcell_godunov_rk2(&out_dir, sph.clone(), 2);
         gen_rmhd_wave_speed_map(&out_dir, 2, sph.clone());
@@ -2502,6 +2516,9 @@ fn main() {
         for dir in 0..2 {
             gen_rmhd_ct_curl_cyl_rphi(&out_dir, dir, &cyl);
         }
+        // metric-free J (see the spherical block): the cyl r-phi induction curl's (1/r) is absorbed
+        // by the physical weights, so the resistive adjoint is the Cartesian difference curl.
+        gen_rmhd_resistive_emf_ortho(&out_dir, Coords::Cartesian, "_cyl_rphi", &cyl);
         gen_rmhd_bcell_godunov_euler(&out_dir, cyl.clone(), 2);
         gen_rmhd_bcell_godunov_rk2(&out_dir, cyl.clone(), 2);
         // the FLUX is REUSED from cartesian (axes [0,1] = identity -> coord_n == dir -> bit-
