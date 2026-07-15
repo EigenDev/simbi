@@ -389,3 +389,46 @@ fn shaped_box_rigid_wall_penalizes_via_runtime_jit() {
         "the runtime-JIT'd box wall never penalized: {f:?}"
     );
 }
+
+// the ISO shaped wall: an arbitrary-shape rigid obstacle in an energy-free flow (the common
+// obstacle case). the runtime-JIT'd iso kernel drops the nrg channel; the sealed wall still
+// penalizes (force) and removes no mass.
+#[test]
+fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
+    use symbi_hydro::eos::Isothermal;
+    use symbi_hydro::energy::IsoModel;
+    use symbi_hydro::isothermal::IsoNewtonian;
+    use symbi_hydro::state::PrimG;
+    use symbi_ib::sdf::SdfExpr;
+    use symbi_ib::SurfaceSpec;
+    type ISim = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let mut sim = ISim::build(IsoNewtonian, Isothermal { cs: 1.0 }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|_| PrimG::<f64, 2, IsoModel> {
+            rho: 1.5,
+            vel: Tensor::new([0.2, -0.1]),
+            pre: Default::default(),
+        })
+        .build()
+        .with_bodies(BodyCollection::new().add(
+            Body::rigid_sphere(0, Tensor::new([0.1, -0.05]), Tensor::zeros(), 1.0, 0.2, 1.0, true)
+                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 }),
+        ));
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.15, 0.15, 1.0]));
+
+    dispatch_penalize(&sim, 1e-3, 1.0, 1.0);
+    let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    assert_eq!(d[0].mass_delta, 0.0, "a sealed iso shaped wall removes no mass, exactly");
+    let f = d[0].force_delta;
+    assert!(
+        (f[0] * f[0] + f[1] * f[1]).sqrt() > 1e-8,
+        "the runtime-JIT'd iso box wall never penalized: {f:?}"
+    );
+}

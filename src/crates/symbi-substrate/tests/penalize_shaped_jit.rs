@@ -8,7 +8,7 @@
 // the moving arbitrary-shape body would have no host execution path.
 // =============================================================================
 use symbi_discretize::coords::Coords;
-use symbi_discretize::penalize_porous_gv_shaped;
+use symbi_discretize::{penalize_porous_gv_shaped, penalize_porous_iso_gv_shaped};
 use symbi_ib::sdf::SdfExpr;
 
 #[test]
@@ -32,4 +32,16 @@ fn shaped_porous_penalize_jit_compiles_2d() {
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.4, 0.6, 1.0]);
     let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, &shape);
     assert!(symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok());
+}
+
+#[test]
+fn shaped_iso_porous_penalize_jit_compiles() {
+    // the energy-free shaped wall (iso obstacle flows): same CSG normal, no nrg channel.
+    let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
+        .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
+    let (kernel, writes) = penalize_porous_iso_gv_shaped(Coords::Cartesian, 2, &shape);
+    assert!(
+        symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok(),
+        "the iso shaped penalize kernel is outside the JIT subset",
+    );
 }

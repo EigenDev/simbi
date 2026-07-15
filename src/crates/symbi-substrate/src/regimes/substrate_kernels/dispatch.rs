@@ -723,11 +723,15 @@ struct ShapedPenalizeKernel {
 /// by the shape's structural repr + dimension: the same shape across bodies OR across steps of a
 /// moving body compiles ONCE. `None` if the shape is unbounded (a complement) or falls outside the
 /// cranelift JIT subset.
-fn shaped_penalize_kernel(ndim: usize, shape: &symbi_ib::sdf::SdfExpr<f64, 3>) -> Option<std::sync::Arc<ShapedPenalizeKernel>> {
+fn shaped_penalize_kernel(
+    ndim: usize,
+    has_energy: bool,
+    shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
+) -> Option<std::sync::Arc<ShapedPenalizeKernel>> {
     use std::sync::{Arc, OnceLock, RwLock};
     static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    let key = format!("{ndim}|{shape:?}");
+    let key = format!("{ndim}|{has_energy}|{shape:?}");
     if let Some(k) = cache.read().unwrap().get(&key) {
         return k.clone();
     }
@@ -735,7 +739,12 @@ fn shaped_penalize_kernel(ndim: usize, shape: &symbi_ib::sdf::SdfExpr<f64, 3>) -
     if let Some(k) = w.get(&key) {
         return k.clone();
     }
-    let (gvk, writes) = symbi_discretize::penalize_porous_gv_shaped(symbi_discretize::Coords::Cartesian, ndim, shape);
+    let cart = symbi_discretize::Coords::Cartesian;
+    let (gvk, writes) = if has_energy {
+        symbi_discretize::penalize_porous_gv_shaped(cart, ndim, shape)
+    } else {
+        symbi_discretize::penalize_porous_iso_gv_shaped(cart, ndim, shape)
+    };
     let built = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok().map(|kernel| {
         Arc::new(ShapedPenalizeKernel {
             kernel,
@@ -776,8 +785,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         "arbitrary-shape immersed body {b}: Cartesian only (curvilinear shaped walls are a follow-on)",
     );
     let has_energy = sim.fields.cons.nrg_field().is_some();
-    assert!(has_energy, "arbitrary-shape immersed body {b}: energy regime only (iso shaped wall not yet baked)");
-    let sk = shaped_penalize_kernel(D, shape).unwrap_or_else(|| {
+    let sk = shaped_penalize_kernel(D, has_energy, shape).unwrap_or_else(|| {
         panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
     });
 
@@ -807,19 +815,25 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     // the kernel's declared write order: den, mom_0.., nrg, then the n_delta + n_torque scratch.
     let cons_ptr = |f: &Field<Sc, D, Mem>| f.as_ptr() as *const f64;
     let cons_ptr_mut = |f: &Field<Sc, D, Mem>| f.as_ptr() as *mut f64;
-    let nrg = sim.fields.cons.nrg_field().expect("energy regime");
+    // iso has no energy channel: the kernel neither reads nor writes nrg, so it drops from the
+    // in/out bases (and the writes order the kernel was compiled with).
+    let nrg = sim.fields.cons.nrg_field();
     let mut in_bases: Vec<*const f64> = Vec::with_capacity(D + 2);
     in_bases.push(cons_ptr(&sim.fields.cons.den));
     for c in 0..DOF {
         in_bases.push(cons_ptr(&sim.fields.cons.mom[c]));
     }
-    in_bases.push(cons_ptr(nrg));
+    if let Some(n) = nrg {
+        in_bases.push(cons_ptr(n));
+    }
     let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque);
     out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
     for c in 0..DOF {
         out_bases.push(cons_ptr_mut(&sim.fields.cons.mom[c]));
     }
-    out_bases.push(cons_ptr_mut(nrg));
+    if let Some(n) = nrg {
+        out_bases.push(cons_ptr_mut(n));
+    }
     for s in scratch[..n_delta + n_torque].iter() {
         out_bases.push(cons_ptr_mut(s));
     }
@@ -840,7 +854,11 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     for a in 0..D {
         force[a] = field_reduce(&scratch[1 + a], &bbox, ReductionOp::Add);
     }
-    let energy = field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add);
+    let energy = if has_energy {
+        field_reduce(&scratch[D + 1], &bbox, ReductionOp::Add)
+    } else {
+        0.0
+    };
     let mut torque = symbi_algebra::Tensor::<f64, 3>::zeros();
     for k in 0..n_torque {
         let axis = if n_torque == 1 { 2 } else { k };

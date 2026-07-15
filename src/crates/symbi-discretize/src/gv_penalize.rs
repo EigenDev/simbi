@@ -565,6 +565,24 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
 /// constant `cs` param (no energy channel), delta outputs mass + force only.
 /// `p = 1` reduces bit-for-bit to `penalize_drain_iso`.
 pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
+    penalize_porous_iso_inner(coords, ndim, None)
+}
+
+/// the arbitrary-shape ISO porous wall: the energy-free counterpart of
+/// `penalize_porous_gv_shaped` — mask + normal from the config CSG, no energy channel.
+pub fn penalize_porous_iso_gv_shaped(
+    coords: Coords,
+    ndim: usize,
+    shape: &SdfExpr<f64, 3>,
+) -> (GvKernel, Writes) {
+    penalize_porous_iso_inner(coords, ndim, Some(shape))
+}
+
+fn penalize_porous_iso_inner(
+    coords: Coords,
+    ndim: usize,
+    shape: Option<&SdfExpr<f64, 3>>,
+) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!((1..=3).contains(&ndim), "penalize_porous_iso_gv: ndim must be 1..=3");
     begin_trace();
@@ -592,15 +610,25 @@ pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes)
     });
     let x_cart = centroid_to_cartesian(coords, ndim, &geo.centroid);
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
-    let sphere = body_mask_sdf(center);
-    let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
+    let sdf = body_mask_sdf_shaped(center, shape);
+    let chi = symbi_ib::sdf::chi(sdf.dist(x), min_w);
     let inv_tau = cs / (c_drain * min_w);
     let rate_scale = cs / min_w;
 
-    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-    let r = x_rel.dot(&x_rel).sqrt();
-    let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
-    let n_cart: Vec<Gv> = (0..ndim).map(|a| x_rel[a] * inv_r).collect();
+    // sphere normal r_hat (guarded), or the CSG SDF gradient for a shaped wall (see the adiabatic
+    // `penalize_porous_gv`).
+    let n_cart: Vec<Gv> = match shape {
+        None => {
+            let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+            let r = x_rel.dot(&x_rel).sqrt();
+            let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
+            (0..ndim).map(|a| x_rel[a] * inv_r).collect()
+        }
+        Some(_) => {
+            let n = sdf.normal(x);
+            (0..ndim).map(|a| n[a]).collect()
+        }
+    };
     let n_phys = vector_from_cartesian(coords, ndim, &geo.centroid, &n_cart);
     let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
         if a < ndim { n_phys[a] } else { Gv::ZERO }
@@ -639,7 +667,7 @@ pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes)
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
     }
 
-    let kernel = end_trace().with_output_support(body_support(ndim));
+    let kernel = end_trace().with_output_support(body_support_shaped(ndim, shape));
     (kernel, writes)
 }
 
