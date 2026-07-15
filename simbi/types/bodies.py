@@ -1,13 +1,15 @@
 # =============================================================================
 # bodies.py
 #
-# type definitions for immersed bodies and gravitational systems.
-# includes Body, ImmersedBodyConfig, BinaryConfig, and property dataclasses.
+# type definitions for immersed bodies and gravitational systems: the immutable
+# config dataclasses (ImmersedBodyConfig, GravitationalSystemConfig, BinaryConfig,
+# and the property blocks) plus `to_backend` / `body_payload` -- the single pure
+# serialization the rust body factory reads.
 # =============================================================================
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import IntFlag
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 from numpy.typing import NDArray
@@ -99,9 +101,11 @@ class BinaryConfig:
 
 @dataclass(frozen=True)
 class BodySystemConfig:
-    """Configuration for generic body system."""
+    """base body-system config. `to_backend` is the serialization SSOT the backend
+    body-system factory reads; the fieldless base contributes no keys."""
 
-    pass
+    def to_backend(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
@@ -115,8 +119,9 @@ class GravitationalSystemConfig(BodySystemConfig):
     # Only used if system_type="binary"
     binary_config: BinaryConfig
 
-    def to_dict(self) -> dict:
-        """custom serialization for c++ factory with proper nested structure."""
+    def to_backend(self) -> dict[str, Any]:
+        """the backend body-system wire: the nested `binary_config` the gravitational
+        factory reads. one of the two `to_backend` serializers `body_payload` composes."""
         result = {
             "prescribed_motion": self.prescribed_motion,
             "reference_frame": self.reference_frame,
@@ -335,8 +340,46 @@ class ImmersedBodyConfig:
                 "block (the softening length)."
             )
 
+    def to_backend(self) -> dict[str, Any]:
+        """the backend body wire: the nested dict the rust `BodyParams` reads --
+        top-level capability / mass / radius / position / velocity / two_way_coupling,
+        and the `gravitational` / `accretion` / `rigid` property groups (with
+        `rigid.shape.wire` for a shaped wall). the field tree IS the contract, so the
+        serialization is the identity asdict; the key set is pinned by test so a field
+        rename cannot silently become a backend unwrap_or default."""
+        return asdict(self)
+
+
+def body_payload(
+    body_system: Optional[BodySystemConfig],
+    immersed_bodies: Sequence[ImmersedBodyConfig],
+) -> dict[str, Any]:
+    """the backend body fragment -- `{body_system?, immersed_bodies?}`, the keys the
+    rust body factory reads. pure: config values in, a plain dict out. an absent body
+    kind contributes no key (a missing key is read as body-free). each immersed body
+    must be a validated ImmersedBodyConfig: a raw dict would let the backend read every
+    field through a silent unwrap_or default, turning a typo into a wrong-physics run
+    rather than an error."""
+    payload: dict[str, Any] = {}
+    if body_system is not None and is_dataclass(body_system):
+        payload["body_system"] = body_system.to_backend()
+    serialized: list[dict[str, Any]] = []
+    for idx, body in enumerate(immersed_bodies):
+        if not isinstance(body, ImmersedBodyConfig):
+            raise _config_error(
+                f"immersed_bodies[{idx}] is a {type(body).__name__}, not an "
+                f"ImmersedBodyConfig. construct an ImmersedBodyConfig so its fields "
+                f"are validated before the backend, which silently defaults any key "
+                f"it cannot read."
+            )
+        serialized.append(body.to_backend())
+    if serialized:
+        payload["immersed_bodies"] = serialized
+    return payload
+
 
 __all__ = [
+    "body_payload",
     "ImmersedBodyConfig",
     "GravitationalSystemConfig",
     "BinaryConfig",

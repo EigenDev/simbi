@@ -186,8 +186,6 @@ def test_valid_rigid_obstacle_constructs() -> None:
 
 
 def test_shaped_rigid_obstacle_carries_the_csg_wire() -> None:
-    import dataclasses
-
     from simbi.types.shape import Shape
 
     b = ImmersedBodyConfig(
@@ -203,7 +201,7 @@ def test_shaped_rigid_obstacle_carries_the_csg_wire() -> None:
         ),
     )
     # the shape reaches the backend at body["rigid"]["shape"]["wire"] (get_shape_json).
-    wire = dataclasses.asdict(b)["rigid"]["shape"]["wire"]
+    wire = b.to_backend()["rigid"]["shape"]["wire"]
     assert wire["kind"] == "box"
 
 

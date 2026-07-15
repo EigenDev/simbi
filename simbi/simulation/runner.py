@@ -11,17 +11,15 @@
 # =============================================================================
 from __future__ import annotations
 
-import dataclasses
 import importlib
 import os
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
-from simbi.types.bodies import ImmersedBodyConfig
+from simbi.types.bodies import body_payload
 from simbi.types.input import BoundaryCondition
 
-from .problem import ConfigError
 from simbi.types.typing import (
     GasStateFunction,
     GasStateGenerator,
@@ -184,36 +182,13 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
             nvars += 1
         model_dict["nvars"] = nvars
 
-    # add body system if present
-    body_system = problem.body_system
-    if body_system and dataclasses.is_dataclass(body_system):
-        # use custom serialization if available (for proper c++ factory format)
-        if hasattr(body_system, "to_dict"):
-            model_dict["body_system"] = body_system.to_dict()
-        else:
-            model_dict["body_system"] = dataclasses.asdict(body_system)
-    elif not body_system:
-        model_dict.pop("body_system", None)
-
-    # add immersed bodies if present
-    immersed = problem.immersed_bodies
-    if immersed:
-        bodies_out = []
-        for idx, b in enumerate(immersed):
-            # raw dicts bypass every ImmersedBodyConfig field check: the rust
-            # binding reads each key with unwrap_or(default), so a typo'd or
-            # missing key becomes a silent backend default (mass 0, origin
-            # position, capability GRAVITATIONAL, pure-drain surface) rather than
-            # an error. require the validated dataclass.
-            if not isinstance(b, ImmersedBodyConfig):
-                raise ConfigError(
-                    f"immersed_bodies[{idx}] is a {type(b).__name__}, not an "
-                    f"ImmersedBodyConfig. construct an ImmersedBodyConfig so its "
-                    f"fields are validated before the backend, which silently "
-                    f"defaults any key it cannot read."
-                )
-            bodies_out.append(dataclasses.asdict(b))
-        model_dict["immersed_bodies"] = bodies_out
+    # bodies: model_dump carries the raw computed-field values; replace them with
+    # the backend wire from the single serialization SSOT (simbi.types.bodies).
+    model_dict.pop("body_system", None)
+    model_dict.pop("immersed_bodies", None)
+    model_dict.update(
+        body_payload(problem.body_system, problem.immersed_bodies)
+    )
 
     # process bounds to separate x1, x2, x3 bounds
     bounds = problem.bounds
