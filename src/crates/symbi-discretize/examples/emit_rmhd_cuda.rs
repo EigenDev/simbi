@@ -15,7 +15,7 @@
 use std::fs;
 
 use symbi_discretize::GvKernel;
-use symbi_discretize::{rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_flux_gv};
+use symbi_discretize::{rmhd_c2p_gv, rmhd_ct_curl_2d_dir_gv, rmhd_resistive_emf_2d_gv, rmhd_flux_gv};
 use symbi_ir::emit::{Precision, Target, TargetConfig};
 use symbi_ir::graph::NodeId;
 use symbi_ir::{emit_kernel_from_lowering, KernelEmitInputs};
@@ -67,4 +67,9 @@ fn main() {
         let (ct_k, ct_w) = rmhd_ct_curl_2d_dir_gv(dir);
         emit_gv(&out_dir, &format!("rmhd_ct_curl_2d_{dir}"), 2, ct_k, ct_w);
     }
+
+    // the Ohmic resistive edge EMF (eta * J_z added to Ez) — the SAME Gv trace the CPU bakes, so
+    // the CUDA lowering is the GPU portability gate for generic resistive MHD.
+    let (res_k, res_w) = rmhd_resistive_emf_2d_gv();
+    emit_gv(&out_dir, "rmhd_resistive_emf_2d", 2, res_k, res_w);
 }
