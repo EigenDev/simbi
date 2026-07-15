@@ -472,6 +472,43 @@ fn two_way_spin_is_dragged_to_a_stop() {
     assert!(omega > 0.0, "one step should not reverse the spin: {omega}");
 }
 
+// force-driven TRANSLATION: a two-way rigid obstacle in a +x flow is pushed downstream — the drag
+// it exerts on the gas reacts back (mass*dv = force_delta), so its velocity and position advance in
+// the flow direction over one evolve step.
+#[test]
+fn two_way_body_is_pushed_downstream_by_the_flow() {
+    use symbi_ib::sdf::SdfExpr;
+    use symbi_ib::SurfaceSpec;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.3, 0.0]), pre: 1.0 })
+        .build()
+        .with_bodies(BodyCollection::new().add(
+            Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, 1.0, true)
+                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
+                .with_two_way_coupling(true),
+        ));
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.2, 0.2, 1.0]));
+
+    let dt = 1e-3;
+    dispatch_penalize(&sim, dt, GAMMA, 1.0);
+    let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    symbi_ib::apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);
+    let b = sim.immersed.as_ref().unwrap().bodies.get(0);
+    assert!(b.velocity[0] > 0.0, "the +x flow should accelerate the body downstream: {}", b.velocity[0]);
+    assert!(b.position[0] > 0.0, "the body should drift downstream: {}", b.position[0]);
+    // the transverse push is negligible for a symmetric obstacle in an axis-aligned flow.
+    assert!(b.velocity[1].abs() < b.velocity[0], "the drift is predominantly downstream");
+}
+
 // ARBITRARY-AXIS 3D spin: a box spinning about the X axis (not the default z) in still 3D fluid
 // must book its reaction torque about X — proving the mask uses Rodrigues(axis, angle) and the wall
 // velocity is omega x r about the config axis, not hardwired to z.

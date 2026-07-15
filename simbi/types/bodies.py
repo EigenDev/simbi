@@ -358,6 +358,11 @@ class ImmersedBodyConfig:
                     f"a two-way rigid wall needs inertia > 0 (I domega = torque); got "
                     f"{self.rigid.inertia}."
                 )
+            if self.mass <= 0.0:
+                raise _config_error(
+                    f"a two-way rigid wall needs mass > 0 (mass dv = drag, the flow pushes it "
+                    f"downstream); got {self.mass}."
+                )
         if (
             has_capability(self.capability, BodyCapability.ACCRETION)
             and self.accretion is None

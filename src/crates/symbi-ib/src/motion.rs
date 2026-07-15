@@ -96,6 +96,14 @@ pub fn apply_body_deltas<const D: usize>(
                         body.omega = body.omega + tau_axis / inertia;
                     }
                 }
+                // TRANSLATIONAL reaction: mass * dv = force_delta (the momentum the gas exchanged),
+                // so the body accelerates under the drag it exerts on the flow.
+                if body.mass > 0.0 {
+                    let m = body.mass;
+                    for a in 0..D {
+                        body.velocity[a] = body.velocity[a] + delta.force_delta[a] / m;
+                    }
+                }
             }
             if let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = &mut body.kind {
                 *total_accreted_mass += delta.mass_delta;
@@ -103,16 +111,27 @@ pub fn apply_body_deltas<const D: usize>(
             }
         }
     }
-    if let Some(advanced) = advance_binary(bodies, dt) {
+    // a PRESCRIBED binary orbit (fixed-potential) governs position/velocity when present and takes
+    // precedence over the force-driven update below.
+    let binary = advance_binary(bodies, dt);
+    if let Some(advanced) = &binary {
         for ii in 0..advanced.len().min(bodies.len()) {
             bodies.get_mut(ii).position = advanced[ii].position;
             bodies.get_mut(ii).velocity = advanced[ii].velocity;
         }
     }
-    // advance every body's prescribed spin (angle += omega*dt); a shaped rigid wall's mask +
-    // surface velocity track the orientation. omega = 0 bodies are unchanged.
     for ii in 0..bodies.len() {
-        bodies.get_mut(ii).advance_spin(dt);
+        let body = bodies.get_mut(ii);
+        // force-driven TRANSLATION: a two-way body drifts under the velocity the gas reaction gave
+        // it (position += velocity * dt). skipped when a prescribed binary orbit governs motion.
+        if binary.is_none() && body.two_way_coupling {
+            for a in 0..D {
+                body.position[a] = body.position[a] + body.velocity[a] * dt;
+            }
+        }
+        // advance the prescribed spin (angle += omega*dt); a shaped wall's mask + surface velocity
+        // track it. omega = 0 bodies are unchanged.
+        body.advance_spin(dt);
     }
 }
 
