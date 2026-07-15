@@ -49,6 +49,11 @@ pub enum SdfExpr<S, const D: usize> {
     /// sign flip: inside becomes outside. unbounded — no bounding ball.
     Complement(Box<SdfExpr<S, D>>),
     Translated { inner: Box<SdfExpr<S, D>>, offset: [S; D] },
+    /// a rigid rotation of the inner shape about the body-local origin. `rot` is the body's
+    /// orientation matrix R (row-major); a world point maps into the inner's frame as `R^T x`,
+    /// so `dist(x) = inner.dist(R^T x)`. rotation is an isometry, so the signed distance is exact
+    /// and the bounding-ball radius is unchanged (its center rotates by R).
+    Rotated { inner: Box<SdfExpr<S, D>>, rot: [[S; D]; D] },
 }
 
 impl<S: Scalar, const D: usize> SdfExpr<S, D> {
@@ -74,6 +79,11 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
 
     pub fn translated(self, offset: [S; D]) -> Self {
         SdfExpr::Translated { inner: Box::new(self), offset }
+    }
+
+    /// rotate the shape by the orientation matrix `rot` (row-major) about the body-local origin.
+    pub fn rotated(self, rot: [[S; D]; D]) -> Self {
+        SdfExpr::Rotated { inner: Box::new(self), rot }
     }
 
     /// the signed distance at `x`: negative inside, positive outside, zero on
@@ -113,6 +123,17 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
             SdfExpr::Translated { inner, offset } => {
                 inner.dist(std::array::from_fn(|a| x[a] - offset[a]))
             }
+            SdfExpr::Rotated { inner, rot } => {
+                // map the world point into the inner frame: (R^T x)_i = sum_j rot[j][i] * x[j].
+                let xr: [S; D] = std::array::from_fn(|i| {
+                    let mut s = S::ZERO;
+                    for j in 0..D {
+                        s = s + rot[j][i] * x[j];
+                    }
+                    s
+                });
+                inner.dist(xr)
+            }
         }
     }
 
@@ -136,6 +157,10 @@ impl<S: Scalar, const D: usize> SdfExpr<S, D> {
             SdfExpr::Translated { inner, offset } => SdfExpr::Translated {
                 inner: Box::new(inner.lift(f)),
                 offset: offset.map(|o| f(o)),
+            },
+            SdfExpr::Rotated { inner, rot } => SdfExpr::Rotated {
+                inner: Box::new(inner.lift(f)),
+                rot: rot.map(|row| row.map(|e| f(e))),
             },
         }
     }
@@ -202,6 +227,26 @@ impl SdfExpr<f64, 3> {
         let child = |key: &str| -> Result<Self, String> {
             Self::from_value(v.get(key).ok_or_else(|| format!("shape '{kind}': missing sub-shape '{key}'"))?)
         };
+        let mat3 = |key: &str| -> Result<[[f64; 3]; 3], String> {
+            let rows = v
+                .get(key)
+                .and_then(|a| a.as_array())
+                .ok_or_else(|| format!("shape '{kind}': missing 3x3 matrix '{key}'"))?;
+            if rows.len() != 3 {
+                return Err(format!("shape '{kind}': '{key}' must have 3 rows, got {}", rows.len()));
+            }
+            let mut out = [[0.0; 3]; 3];
+            for (i, row) in rows.iter().enumerate() {
+                let cols = row.as_array().ok_or_else(|| format!("shape '{kind}': '{key}[{i}]' not a row"))?;
+                if cols.len() != 3 {
+                    return Err(format!("shape '{kind}': '{key}[{i}]' must have 3 columns, got {}", cols.len()));
+                }
+                for (j, e) in cols.iter().enumerate() {
+                    out[i][j] = e.as_f64().ok_or_else(|| format!("shape '{kind}': '{key}[{i}][{j}]' not a number"))?;
+                }
+            }
+            Ok(out)
+        };
         match kind {
             "sphere" => Ok(SdfExpr::Sphere { center: vec3("center")?, radius: scalar("radius")? }),
             "box" => Ok(SdfExpr::Cuboid { center: vec3("center")?, half_extents: vec3("half_extents")? }),
@@ -211,6 +256,10 @@ impl SdfExpr<f64, 3> {
             "translated" => Ok(SdfExpr::Translated {
                 inner: Box::new(child("inner")?),
                 offset: vec3("offset")?,
+            }),
+            "rotated" => Ok(SdfExpr::Rotated {
+                inner: Box::new(child("inner")?),
+                rot: mat3("rot")?,
             }),
             other => Err(format!("shape: unknown kind '{other}' (sphere | box | union | intersect | complement | translated)")),
         }
@@ -246,6 +295,12 @@ impl<const D: usize> SdfExpr<f64, D> {
             SdfExpr::Translated { inner, offset } => {
                 let (c, r) = inner.bounding_ball()?;
                 Some((std::array::from_fn(|a| c[a] + offset[a]), r))
+            }
+            SdfExpr::Rotated { inner, rot } => {
+                // rotation is an isometry: the radius is unchanged, the center rotates by R.
+                let (c, r) = inner.bounding_ball()?;
+                let rc = std::array::from_fn(|i| (0..D).map(|j| rot[i][j] * c[j]).sum());
+                Some((rc, r))
             }
         }
     }
@@ -461,6 +516,45 @@ mod tests {
             let d: f64 = (0..3).map(|a| (x[a] - c[a]).powi(2)).sum::<f64>().sqrt();
             assert!(d <= r + 1e-12, "interior point {x:?} escapes the bounding ball");
         }
+    }
+
+    #[test]
+    fn rotated_shape_is_an_isometry() {
+        // 90 deg about z: R = [[0,-1,0],[1,0,0],[0,0,1]] (row-major).
+        let r = [[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]];
+        let cube = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]);
+        let rot = cube.clone().rotated(r);
+        // rotating the query point by R leaves the distance unchanged: rot.dist(R p) == box.dist(p).
+        for p in [[0.3, 0.0, 0.0], [0.0, 0.4, 0.1], [0.6, 0.6, 0.0]] {
+            let rp = [-p[1], p[0], p[2]]; // R p for 90 deg about z
+            assert!(
+                (rot.dist(rp) - cube.dist(p)).abs() < 1e-12,
+                "rotation is not an isometry: {} vs {}",
+                rot.dist(rp),
+                cube.dist(p),
+            );
+        }
+        // a centered shape: the bounding ball is unchanged (radius fixed, center at the origin).
+        let (c, rr) = rot.bounding_ball().unwrap();
+        let (_, r0) = cube.bounding_ball().unwrap();
+        assert!((rr - r0).abs() < 1e-12);
+        assert!(c.iter().all(|&x| x.abs() < 1e-12));
+        // the 0.5-extent rotates onto +y; just outside that face the normal is +y, unit length.
+        let n = rot.normal([0.0, 0.55, 0.0]);
+        let mag = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        assert!((mag - 1.0).abs() < 1e-9, "normal not unit: {mag}");
+        assert!(n[1] > 0.9, "outward normal of the rotated +y face should be +y: {n:?}");
+    }
+
+    #[test]
+    fn from_json_parses_a_rotated_shape() {
+        let wire = r#"{"kind":"rotated",
+            "inner":{"kind":"box","center":[0.0,0.0,0.0],"half_extents":[0.5,0.2,0.3]},
+            "rot":[[0.0,-1.0,0.0],[1.0,0.0,0.0],[0.0,0.0,1.0]]}"#;
+        let s = SdfExpr::<f64, 3>::from_json(wire).expect("parse rotated");
+        let native = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3])
+            .rotated([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]);
+        assert_eq!(s, native);
     }
 
     #[test]

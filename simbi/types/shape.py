@@ -12,6 +12,7 @@
 # =============================================================================
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Sequence
 
@@ -62,6 +63,21 @@ class Shape:
     def translated(self, offset: Sequence[float]) -> "Shape":
         """shift the whole tree by `offset` in the body-local frame."""
         return Shape({"kind": "translated", "inner": self.wire, "offset": _vec3("offset", offset)})
+
+    def rotated(self, rot: Sequence[Sequence[float]]) -> "Shape":
+        """rotate the whole tree by the 3x3 row-major orientation matrix `rot` about the
+        body-local origin. a world point maps into the shape's frame as R^T x."""
+        m = [list(row) for row in rot]
+        if len(m) != 3 or any(len(row) != 3 for row in m):
+            raise ValueError(f"rotation must be a 3x3 matrix, got {[len(r) for r in m]}")
+        return Shape(
+            {"kind": "rotated", "inner": self.wire, "rot": [[float(x) for x in row] for row in m]}
+        )
+
+    def rotated_z(self, angle: float) -> "Shape":
+        """rotate the shape by `angle` radians about the z axis — the in-plane spin of a 2D run."""
+        c, s = math.cos(angle), math.sin(angle)
+        return self.rotated([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
     def to_wire(self) -> dict[str, Any]:
         return self.wire

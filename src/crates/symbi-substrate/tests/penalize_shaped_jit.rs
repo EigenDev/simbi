@@ -35,6 +35,19 @@ fn shaped_porous_penalize_jit_compiles_2d() {
 }
 
 #[test]
+fn shaped_rotated_penalize_jit_compiles() {
+    // a ROTATED box (static tilt): the Rotated node is affine (multiply/add), so it must lie in
+    // the JIT subset — the same runtime kernel bakes the orientation matrix as constants.
+    let tilt = [[0.7071, -0.7071, 0.0], [0.7071, 0.7071, 0.0], [0.0, 0.0, 1.0]];
+    let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.2, 0.3]).rotated(tilt);
+    let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 2, &shape);
+    assert!(
+        symbi_jit::compile_gv_kernel(&kernel, &writes, 2).is_ok(),
+        "the rotated shaped penalize kernel is outside the JIT subset",
+    );
+}
+
+#[test]
 fn shaped_iso_porous_penalize_jit_compiles() {
     // the energy-free shaped wall (iso obstacle flows): same CSG normal, no nrg channel.
     let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])

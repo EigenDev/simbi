@@ -45,6 +45,28 @@ def test_translate_complement_intersect_compose() -> None:
     assert hollow["kind"] == "complement"
 
 
+def test_rotated_z_emits_the_orientation_matrix() -> None:
+    import math
+
+    s = Shape.box((0.0, 0.0, 0.0), (0.5, 0.2, 0.3)).rotated_z(math.pi / 2)
+    w = s.to_wire()
+    assert w["kind"] == "rotated"
+    assert w["inner"]["kind"] == "box"
+    # 90 deg about z: [[0,-1,0],[1,0,0],[0,0,1]] (within float tolerance).
+    rot = w["rot"]
+    assert abs(rot[0][0]) < 1e-12 and abs(rot[0][1] + 1.0) < 1e-12
+    assert abs(rot[1][0] - 1.0) < 1e-12 and abs(rot[1][1]) < 1e-12
+    assert rot[2] == [0.0, 0.0, 1.0]
+    import json
+
+    json.dumps(w)
+
+
+def test_rotated_rejects_non_3x3() -> None:
+    with pytest.raises(ValueError, match="3x3 matrix"):
+        Shape.sphere((0.0, 0.0, 0.0), 1.0).rotated([[1.0, 0.0], [0.0, 1.0]])
+
+
 def test_degenerate_dimensions_rejected() -> None:
     with pytest.raises(ValueError, match="radius must be > 0"):
         Shape.sphere((0.0, 0.0, 0.0), 0.0)
