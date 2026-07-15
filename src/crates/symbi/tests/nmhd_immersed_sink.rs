@@ -29,12 +29,11 @@ type Sim = SimState<NewtonianMhd, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMem
 const N: usize = 24;
 const L: f64 = 1.0;
 const GAMMA: f64 = 5.0 / 3.0;
-const B0: f64 = 0.5; // uniform Bx (div-free), so 1/2|B|^2 is a uniform, nonzero field
 
-fn make_sim() -> Sim {
+fn make_sim(b0: f64) -> Sim {
     let dx = 2.0 * L / N as f64;
-    // uniform gas threaded by a uniform Bx: nothing evolves the field on its own, so any
-    // change to 1/2|B|^2 after the drain is the sink wrongly touching the field.
+    // uniform gas threaded by a uniform Bx = b0 (div-free): nothing evolves the field on its own,
+    // so any change to 1/2|B|^2 after the drain is the sink wrongly touching the field.
     Sim::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
         .cells([N, N, N])
         .origin([-L, -L, -L])
@@ -42,11 +41,11 @@ fn make_sim() -> Sim {
         .boundaries(Boundaries::uniform(BoundaryType::Outflow))
         .allocate()
         .expect("nmhd sim construction failed")
-        .set_initial(|_| MhdPrim {
+        .set_initial(move |_| MhdPrim {
             hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
-            mag: Tensor::new([B0, 0.0, 0.0]),
+            mag: Tensor::new([b0, 0.0, 0.0]),
         })
-        .seed_faces(|axis, _| if axis == 0 { B0 } else { 0.0 })
+        .seed_faces(move |axis, _| if axis == 0 { b0 } else { 0.0 })
         .build()
 }
 
@@ -104,8 +103,8 @@ fn cell_state(s: &Sim) -> Vec<(f64, f64, f64)> {
     v
 }
 
-fn setup() -> Sim {
-    let mut sim = make_sim();
+fn setup(b0: f64) -> Sim {
+    let mut sim = make_sim(b0);
     // a shaped subgrid sink at the origin: a pure-drain porous wall (porosity 1 = the drain
     // channel active, wall channels off), so it removes plasma by a uniform scaling. the shape
     // routes it to the runtime-JIT'd kernel.
@@ -123,7 +122,7 @@ const MIN_DRAINED_CELLS: usize = 8;
 
 #[test]
 fn nmhd_sink_drains_plasma_and_leaves_the_field_untouched() {
-    let sim = setup();
+    let sim = setup(0.5);
     let mass0 = total_mass(&sim);
     let mag_e0 = magnetic_energy(&sim);
     let bcell0 = bcell_snapshot(&sim);
@@ -171,7 +170,7 @@ fn nmhd_naive_drain_without_the_sandwich_corrupts_the_gas_energy() {
     // it scales the total energy -- magnetic part included -- so the recovered gas energy is
     // low and the specific internal energy DROPS. this is exactly what the sandwich prevents;
     // if this ever stops dropping, the sandwich has become a silent no-op.
-    let sim = setup();
+    let sim = setup(0.5);
     let before = cell_state(&sim);
     dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
     let after = cell_state(&sim);
@@ -197,5 +196,32 @@ fn nmhd_naive_drain_without_the_sandwich_corrupts_the_gas_energy() {
         corrupted >= MIN_DRAINED_CELLS,
         "the naive drain left the gas energy intact ({corrupted} of {drained} corrupted) -- \
          the sandwich test would not bite"
+    );
+}
+
+#[test]
+fn c_fast_makes_a_low_beta_sink_stiffer() {
+    // the fast-magnetosonic rate: the wall relaxes on c_fast = sqrt(c_s^2 + c_a^2), c_a^2 =
+    // |B|^2/rho, so the SAME sink in the SAME gas drains MORE per step in a strong (low-beta)
+    // field than a weak one. here c_s ~ 1.3; b0 = 5 gives c_a ~ 5, a several-fold stiffer wall.
+    // the gas state is identical for both (same rho/p/v), so the only difference is the rate --
+    // if c_a^2 were dropped from it, the two would drain identically.
+    let drained = |b0: f64| -> f64 {
+        let sim = setup(b0);
+        let m0 = total_mass(&sim);
+        let sub = NewtonianMhdSubstrateKernelSet3D::<HostMemory, f64>::new(
+            GAMMA,
+            0.3,
+            1.0,
+            &sim.geom.allocated,
+        );
+        sub.penalize(&sim, 1e-3);
+        m0 - total_mass(&sim)
+    };
+    let weak = drained(0.01); // c_a ~ 0 -> c_fast ~ c_s
+    let strong = drained(5.0); // c_a ~ 5 -> c_fast ~ 4x c_s
+    assert!(
+        strong > 1.5 * weak,
+        "the low-beta sink was not stiffer: weak-field drained {weak}, strong-field drained {strong}"
     );
 }

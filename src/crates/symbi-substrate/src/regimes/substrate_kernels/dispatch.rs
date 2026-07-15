@@ -924,6 +924,28 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         _ => 0,
     };
     let bodies = &im.bodies;
+    // the max Alfven speed squared c_a^2 = |B|^2 / rho over the interior lifts the wall/drain
+    // relaxation from the sound speed to the FAST MAGNETOSONIC speed (bound to the kernel's `c_a2`
+    // scalar), so the wall stays a signal-crossing stiff in the low-beta regions a magnetized sink
+    // accumulates. 0 off MHD, where the rate reduces to c_s exactly and a hydro run is unchanged.
+    let c_a2_max: f64 = sim.fields.mhd.as_ref().map_or(0.0, |mhd| {
+        let den = sim.fields.cons.den.view();
+        let bcell: Vec<_> = (0..DOF).map(|k| mhd.bcell[k].view()).collect();
+        let mut m = 0.0_f64;
+        for c in geom.interior.iter() {
+            let rho = (*den.at(c)).to_f64();
+            if rho <= 0.0 {
+                continue;
+            }
+            let mut bsq = 0.0;
+            for view in &bcell {
+                let b = (*view.at(c)).to_f64();
+                bsq += b * b;
+            }
+            m = m.max(bsq / rho);
+        }
+        m
+    });
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
         let surface = bodies.get(b).spec.surface;
         match bind {
@@ -935,6 +957,7 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                     .unwrap_or_else(|| panic!("penalize: unexpected scalar param {other:?}")),
             },
             ScalarBind::Spec(spec) if &**spec == "c_drain" => c_drain,
+            ScalarBind::Spec(spec) if &**spec == "c_a2" => c_a2_max,
             // the porous dials, from the body's declared surface stack.
             ScalarBind::Spec(spec) => match (&**spec, surface) {
                 ("porosity", symbi_ib::SurfaceSpec::Porous { porosity, .. }) => porosity,

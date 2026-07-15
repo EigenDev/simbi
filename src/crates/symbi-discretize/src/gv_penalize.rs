@@ -33,6 +33,14 @@ use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::Writes;
 use symbi_ir::{Gv, GvKernel, ParamExpr, Support};
 
+/// the wall/drain relaxation signal speed: the FAST MAGNETOSONIC speed `sqrt(c_s^2 + c_a^2)`,
+/// with `c_a^2 = |B|^2 / rho` bound as the runtime `c_a2` scalar (the max over the interior, so the
+/// wall stays a signal-crossing stiff in the low-beta regions a magnetized sink accumulates).
+/// `c_a2 = 0` off MHD reduces it to the sound speed exactly, so a hydro run is unchanged.
+fn signal_speed(cs: Gv) -> Gv {
+    (cs * cs + Gv::scalar("c_a2")).sqrt()
+}
+
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
 use symbi_ir::{begin_trace, end_trace};
@@ -266,7 +274,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
         mom_sq = mom_sq + *m * *m;
     }
     let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
-    let inv_tau = cs / (c_drain * min_w);
+    let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
     // the property stack (docs/design/50): [Drain]. contribute at Gv, then
     // the SAME integrator the f64 oracle runs.
@@ -409,8 +417,8 @@ fn penalize_porous_inner(
         mom_sq = mom_sq + *m * *m;
     }
     let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
-    let inv_tau = cs / (c_drain * min_w);
-    let rate_scale = cs / min_w;
+    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let rate_scale = signal_speed(cs) / min_w;
 
     // the outward surface normal in the cell's PHYSICAL frame (the Cartesian normal rotated into
     // the orthonormal basis; identity on a Cartesian grid). the sphere path is r_hat =
@@ -550,7 +558,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
     });
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
-    let inv_tau = cs / (c_drain * min_w);
+    let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
     // the outward surface normal in the cell's PHYSICAL frame: the Cartesian
     // r_hat from the body center rotated into the orthonormal basis (identity on
@@ -675,8 +683,8 @@ fn penalize_porous_iso_inner(
         body_mask_sdf_shaped(center, shape)
     };
     let chi = symbi_ib::sdf::chi(sdf.dist(x), min_w);
-    let inv_tau = cs / (c_drain * min_w);
-    let rate_scale = cs / min_w;
+    let inv_tau = signal_speed(cs) / (c_drain * min_w);
+    let rate_scale = signal_speed(cs) / min_w;
 
     // sphere normal r_hat (guarded), or the CSG SDF gradient for a shaped wall (see the adiabatic
     // `penalize_porous_gv`).
@@ -792,7 +800,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes
         mom_sq = mom_sq + *m * *m;
     }
     let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
-    let inv_tau = cs / (c_drain * min_w);
+    let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
     let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
     let r = x_rel.dot(&x_rel).sqrt();
@@ -871,7 +879,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) 
     });
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
-    let inv_tau = cs / (c_drain * min_w);
+    let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
     let kin = BodyKin::<Gv, 3> {
         u_solid: Tensor::zeros(),
