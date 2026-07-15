@@ -1977,8 +1977,7 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
                     k_eta_n: b.k_eta_n,
                     k_eta_t: b.k_eta_t,
                 })
-                .with_spin(b.omega)
-                .with_spin_axis(Tensor::new(b.spin_axis))
+                .with_spin_about(b.omega, Tensor::new(b.spin_axis))
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };
@@ -2263,7 +2262,9 @@ mod diagnostics_tests {
             two_way_coupling: false,
         }];
         let coll = build_bodies::<2>(&params);
-        assert_eq!(coll.get(0).omega, 3.5);
+        // omega = rate * spin_axis = 3.5 * (0,0,1).
+        let w = coll.get(0).omega;
+        assert!(w[0] == 0.0 && w[1] == 0.0 && (w[2] - 3.5).abs() < 1e-12, "spin omega = {w:?}");
     }
 }
 

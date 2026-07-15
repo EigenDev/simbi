@@ -46,12 +46,10 @@ pub enum BodyScalar {
     Delta,
     Pos(u8),
     Vel(u8),
-    /// the body's orientation angle (radians) about `spin_axis`, advanced by the prescribed spin.
-    Angle,
-    /// the body's prescribed spin RATE (radians/time) about `spin_axis`.
-    Omega,
-    /// the `k`-th component of the body's (unit) spin axis.
-    Axis(u8),
+    /// the `k`-th component of the body's angular-velocity vector (world frame).
+    Omega(u8),
+    /// the `k`-th (row-major, 0..9) component of the body's orientation rotation matrix.
+    Rot(u8),
 }
 
 impl BodyScalar {
@@ -65,9 +63,8 @@ impl BodyScalar {
             BodyScalar::Delta => "delta".to_string(),
             BodyScalar::Pos(ax) => format!("pos_{ax}"),
             BodyScalar::Vel(ax) => format!("vel_{ax}"),
-            BodyScalar::Angle => "angle".to_string(),
-            BodyScalar::Omega => "omega".to_string(),
-            BodyScalar::Axis(ax) => format!("axis_{ax}"),
+            BodyScalar::Omega(k) => format!("omega_{k}"),
+            BodyScalar::Rot(k) => format!("rot_{k}"),
         }
     }
 
@@ -78,8 +75,11 @@ impl BodyScalar {
         if let Some(ax) = field.strip_prefix("vel_") {
             return ax.parse().ok().map(BodyScalar::Vel);
         }
-        if let Some(ax) = field.strip_prefix("axis_") {
-            return ax.parse().ok().map(BodyScalar::Axis);
+        if let Some(k) = field.strip_prefix("omega_") {
+            return k.parse().ok().map(BodyScalar::Omega);
+        }
+        if let Some(k) = field.strip_prefix("rot_") {
+            return k.parse().ok().map(BodyScalar::Rot);
         }
         match field {
             "mass" => Some(BodyScalar::Mass),
@@ -87,8 +87,6 @@ impl BodyScalar {
             "racc" => Some(BodyScalar::Racc),
             "sink" => Some(BodyScalar::Sink),
             "delta" => Some(BodyScalar::Delta),
-            "angle" => Some(BodyScalar::Angle),
-            "omega" => Some(BodyScalar::Omega),
             _ => None,
         }
     }

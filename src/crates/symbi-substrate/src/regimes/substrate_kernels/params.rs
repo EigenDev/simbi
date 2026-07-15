@@ -214,9 +214,11 @@ pub(crate) fn body_scalar<const D: usize>(
         BodyScalar::Delta => body.sink_delta().unwrap_or(1.0),
         // the prescribed-spin orientation + rate; a shaped wall rotates its mask by `angle` and
         // drags the gas at `omega x r`. zero for every non-spinning body.
-        BodyScalar::Angle => body.angle,
-        BodyScalar::Omega => body.omega,
-        BodyScalar::Axis(ax) => body.spin_axis[ax as usize],
+        BodyScalar::Omega(k) => body.omega[k as usize],
+        BodyScalar::Rot(k) => {
+            let k = k as usize;
+            body.orientation[k / 3][k % 3]
+        }
     }
 }
 

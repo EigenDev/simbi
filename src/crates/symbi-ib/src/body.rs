@@ -16,6 +16,27 @@
 use symbi_algebra::Tensor;
 use symbi_ir::algebra::Scalar;
 
+/// the Rodrigues rotation matrix about unit axis `n` by `theta` (row-major):
+/// `R = cos(theta) I + sin(theta) [n]_x + (1 - cos(theta)) n n^T`.
+fn rodrigues_matrix<S: Scalar>(n: [S; 3], theta: S) -> [[S; 3]; 3] {
+    let c = theta.cos();
+    let s = theta.sin();
+    let u = S::ONE - c;
+    let (nx, ny, nz) = (n[0], n[1], n[2]);
+    [
+        [c + u * nx * nx, u * nx * ny - s * nz, u * nx * nz + s * ny],
+        [u * ny * nx + s * nz, c + u * ny * ny, u * ny * nz - s * nx],
+        [u * nz * nx - s * ny, u * nz * ny + s * nx, c + u * nz * nz],
+    ]
+}
+
+/// the 3x3 matrix product `a * b` (row-major).
+fn matmul3<S: Scalar>(a: [[S; 3]; 3], b: [[S; 3]; 3]) -> [[S; 3]; 3] {
+    std::array::from_fn(|i| {
+        std::array::from_fn(|j| a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j])
+    })
+}
+
 /// capability-specific data for a body.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum BodyKind<S: Scalar> {
@@ -75,15 +96,14 @@ pub struct Body<S: Scalar, const D: usize> {
     /// the surface physics: which penalization stack acts at the boundary.
     /// kinematics stay on `kind`; this picks the baked kernel.
     pub surface: SurfaceSpec,
-    /// the body's orientation angle about z (radians), advanced each step by `omega`. only a
-    /// shaped rigid wall reads it (it rotates the mask + normal); zero for every other body.
-    pub angle: S,
-    /// the prescribed spin RATE about `spin_axis` (radians/time). nonzero makes a shaped wall SPIN:
-    /// its mask rotates and its surface drags the gas at `(omega * spin_axis) x r`.
-    pub omega: S,
-    /// the (unit) spin axis. the shape rotates by `Rodrigues(spin_axis, angle)` and the surface
-    /// velocity is `omega * spin_axis x r`. defaults to z; a 2D run only feels the z component.
-    pub spin_axis: Tensor<S, 3>,
+    /// the body's ORIENTATION as a row-major rotation matrix `R` (init identity), advanced each step
+    /// by the angular velocity. a shaped rigid wall's mask is `shape.rotated(R)` and its Dual-normal
+    /// tracks it. every non-rotating body keeps the identity.
+    pub orientation: [[S; 3]; 3],
+    /// the ANGULAR VELOCITY vector `omega` (world frame, radians/time). a shaped wall's surface drags
+    /// the gas at `omega x r`; a two-way body's omega evolves FREELY from the reaction torque
+    /// (I domega = torque), so an asymmetric body tumbles. zero for every non-spinning body.
+    pub omega: Tensor<S, 3>,
 }
 
 // -- factory functions --
@@ -99,9 +119,12 @@ impl<S: Scalar, const D: usize> Body<S, D> {
             two_way_coupling: false,
             kind,
             surface: SurfaceSpec::Drain,
-            angle: S::ZERO,
-            omega: S::ZERO,
-            spin_axis: Tensor::new([S::ZERO, S::ZERO, S::ONE]),
+            orientation: [
+                [S::ONE, S::ZERO, S::ZERO],
+                [S::ZERO, S::ONE, S::ZERO],
+                [S::ZERO, S::ZERO, S::ONE],
+            ],
+            omega: Tensor::zeros(),
         }
     }
 
@@ -111,23 +134,37 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self
     }
 
-    /// prescribe a constant spin RATE about the current `spin_axis` (fluent). a nonzero spin makes a
-    /// shaped rigid wall rotate its mask + drag the gas at its surface.
-    pub fn with_spin(mut self, omega: S) -> Self {
+    /// set the angular-velocity vector `omega` (world frame; fluent). a nonzero spin makes a shaped
+    /// rigid wall rotate its mask + drag the gas at its surface.
+    pub fn with_angular_velocity(mut self, omega: Tensor<S, 3>) -> Self {
         self.omega = omega;
         self
     }
 
-    /// set the (unit) spin axis (fluent; the caller passes a normalized axis). the shape rotates
-    /// about it and the surface velocity is `omega * axis x r`. default is z.
-    pub fn with_spin_axis(mut self, axis: Tensor<S, 3>) -> Self {
-        self.spin_axis = axis;
+    /// convenience: a spin RATE about `axis` (any nonzero vector, normalized here). fluent.
+    pub fn with_spin_about(mut self, rate: S, axis: Tensor<S, 3>) -> Self {
+        let n = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let s = rate / n.max(S::from_f64(1e-300));
+        self.omega = Tensor::new([axis[0] * s, axis[1] * s, axis[2] * s]);
         self
     }
 
-    /// advance the orientation by the prescribed spin over `dt`: `angle += omega * dt`.
+    /// convenience: a spin RATE about z. fluent.
+    pub fn with_spin(mut self, rate: S) -> Self {
+        self.omega = Tensor::new([S::ZERO, S::ZERO, rate]);
+        self
+    }
+
+    /// advance the orientation over `dt` by the angular velocity: `R <- Rodrigues(omega_hat,
+    /// |omega|*dt) R`. the exponential map keeps `R` orthonormal (a product of rotations); `omega =
+    /// 0` is the identity update (theta = 0).
     pub fn advance_spin(&mut self, dt: S) {
-        self.angle = self.angle + self.omega * dt;
+        let w = self.omega;
+        let wmag = (w[0] * w[0] + w[1] * w[1] + w[2] * w[2]).sqrt();
+        let inv = S::ONE / wmag.max(S::from_f64(1e-300));
+        let axis = [w[0] * inv, w[1] * inv, w[2] * inv];
+        let dr = rodrigues_matrix(axis, wmag * dt);
+        self.orientation = matmul3(dr, self.orientation);
     }
 
     pub fn passive(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,

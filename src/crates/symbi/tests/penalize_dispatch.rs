@@ -467,7 +467,8 @@ fn two_way_spin_is_dragged_to_a_stop() {
     dispatch_penalize(&sim, dt, GAMMA, 1.0);
     let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
     symbi_ib::apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);
-    let omega = sim.immersed.as_ref().unwrap().bodies.get(0).omega;
+    // spin was about z, so the drag reduces the z component of the angular-velocity vector.
+    let omega = sim.immersed.as_ref().unwrap().bodies.get(0).omega[2];
     assert!(omega < OMEGA0, "the free spinner should decelerate from drag: {OMEGA0} -> {omega}");
     assert!(omega > 0.0, "one step should not reverse the spin: {omega}");
 }
@@ -531,8 +532,7 @@ fn spinning_box_about_x_axis_imparts_torque_3d() {
         .with_bodies(BodyCollection::new().add(
             Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.4, 1.0, true)
                 .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
-                .with_spin(5.0)
-                .with_spin_axis(Tensor::new([1.0, 0.0, 0.0])),
+                .with_spin_about(5.0, Tensor::new([1.0, 0.0, 0.0])),
         ));
     // a box elongated in y, so spinning about x sweeps its arms through z and grabs the gas.
     sim.immersed.as_mut().unwrap().shapes[0] =

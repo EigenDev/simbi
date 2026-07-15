@@ -88,12 +88,12 @@ pub fn apply_body_deltas<const D: usize>(
             if body.two_way_coupling {
                 if let Some(inertia) = body.inertia() {
                     if inertia > 0.0 {
-                        // the fixed-axis rotor feels only the torque component ALONG its axis
-                        // (the axle absorbs the rest): I*domega = tau . spin_axis.
-                        let n = body.spin_axis;
-                        let tau = delta.torque_delta;
-                        let tau_axis = tau[0] * n[0] + tau[1] * n[1] + tau[2] * n[2];
-                        body.omega = body.omega + tau_axis / inertia;
+                        // free 3D rotation (isotropic inertia): I*domega = torque, the FULL reaction
+                        // torque vector. the angular velocity reorients freely, so an asymmetric
+                        // shape tumbles as the flow torque tracks its changing orientation.
+                        for a in 0..3 {
+                            body.omega[a] = body.omega[a] + delta.torque_delta[a] / inertia;
+                        }
                     }
                 }
                 // TRANSLATIONAL reaction: mass * dv = force_delta (the momentum the gas exchanged),
@@ -210,6 +210,44 @@ mod tests {
         let r = rotate_2d(v, 2.0 * std::f64::consts::PI);
         assert!(approx(r[0], 3.0));
         assert!(approx(r[1], 4.0));
+    }
+
+    #[test]
+    fn advance_spin_integrates_the_orientation() {
+        // spin about z at rate 1, advanced 90 deg: R becomes R_z(pi/2) = [[0,-1,0],[1,0,0],[0,0,1]].
+        let mut b = crate::Body::<f64, 3>::rigid_sphere(
+            0,
+            Tensor::zeros(),
+            Tensor::zeros(),
+            1.0,
+            0.1,
+            1.0,
+            true,
+        )
+        .with_angular_velocity(Tensor::new([0.0, 0.0, 1.0]));
+        b.advance_spin(std::f64::consts::FRAC_PI_2);
+        let r = b.orientation;
+        assert!(approx(r[0][0], 0.0) && approx(r[0][1], -1.0) && approx(r[0][2], 0.0));
+        assert!(approx(r[1][0], 1.0) && approx(r[1][1], 0.0) && approx(r[1][2], 0.0));
+        assert!(approx(r[2][0], 0.0) && approx(r[2][1], 0.0) && approx(r[2][2], 1.0));
+    }
+
+    #[test]
+    fn two_way_off_axis_torque_tilts_omega_free_tumbling() {
+        // a body spinning about z hit by a reaction torque about x: free 3D rotation integrates the
+        // FULL torque vector, so omega tilts off z (gains an x component). a fixed-axis rotor could
+        // not — this is what lets an asymmetric body tumble.
+        let mut coll = BodyCollection::new().add(
+            crate::Body::<f64, 3>::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.1, 1.0, true)
+                .with_angular_velocity(Tensor::new([0.0, 0.0, 5.0]))
+                .with_two_way_coupling(true),
+        );
+        let mut delta = crate::BodyDelta::<f64, 3>::new(0);
+        delta.torque_delta = Tensor::new([2.0, 0.0, 0.0]); // inertia = 1, so domega_x = 2
+        apply_body_deltas(&mut coll, &[delta], 1e-3);
+        let w = coll.get(0).omega;
+        assert!(approx(w[0], 2.0), "omega should tilt toward x (free tumbling): {w:?}");
+        assert!(approx(w[2], 5.0), "the z spin is unchanged by the x torque: {w:?}");
     }
 
     #[test]

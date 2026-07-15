@@ -32,7 +32,6 @@ use symbi_ib::penalize::{penalize_cell, BodyKin, Property, Relax};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::Writes;
 use symbi_ir::{Gv, GvKernel, ParamExpr, Support};
-use symbi_ir::algebra::Scalar as _; // brings Gv::sin/cos (the rotation matrix) into scope
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
@@ -176,32 +175,15 @@ fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> Sdf
     }
 }
 
-/// the Rodrigues rotation matrix `R(n, theta)` about the unit axis `n` by `theta` (row-major):
-/// `R = cos(theta) I + sin(theta) [n]_x + (1 - cos(theta)) n n^T`. reduces exactly to the z-rotation
-/// at `n = (0, 0, 1)`. built from `Gv` cos/sin so a runtime `theta` (and axis) drives it.
-fn rodrigues_gv(n: [Gv; 3], theta: Gv) -> [[Gv; 3]; 3] {
-    let c = theta.cos();
-    let s = theta.sin();
-    let u = Gv::ONE - c;
-    let (nx, ny, nz) = (n[0], n[1], n[2]);
-    [
-        [c + u * nx * nx, u * nx * ny - s * nz, u * nx * nz + s * ny],
-        [u * ny * nx + s * nz, c + u * ny * ny, u * ny * nz - s * nx],
-        [u * nz * nx - s * ny, u * nz * ny + s * nx, c + u * nz * nz],
-    ]
-}
-
 /// the SPINNING body's mask: the shape lifted to Gv constants, rotated by the RUNTIME orientation
-/// `Rodrigues(body_0_axis, body_0_angle)`, then translated to the runtime body position. the axis +
-/// angle are runtime scalars, so ONE kernel handles any fixed spin axis and its mask (and the
-/// Dual-autodiff normal) track the spin as `body_0_angle` advances.
+/// matrix `R` (the body's full 3D orientation, integrated on the CPU from its angular velocity and
+/// read here as the 9 row-major scalars `body_0_rot_0..8`), then translated to the runtime body
+/// position. one kernel handles ANY orientation, so a freely-tumbling body reuses it; the mask + its
+/// Dual-autodiff normal track `R` as it evolves.
 fn body_mask_sdf_spinning(center: [Gv; 3], shape: &SdfExpr<f64, 3>) -> SdfExpr<Gv, 3> {
-    let axis = [
-        Gv::scalar("body_0_axis_0"),
-        Gv::scalar("body_0_axis_1"),
-        Gv::scalar("body_0_axis_2"),
-    ];
-    let rot = rodrigues_gv(axis, Gv::scalar("body_0_angle"));
+    let rot: [[Gv; 3]; 3] = std::array::from_fn(|i| {
+        std::array::from_fn(|j| Gv::scalar(&format!("body_0_rot_{}", i * 3 + j)))
+    });
     shape.lift(&|c| Gv::from_f64(c)).rotated(rot).translated(center)
 }
 
@@ -457,13 +439,12 @@ fn penalize_porous_inner(
     }));
     // a spinning wall's surface moves at u_solid + omega x r; omega is about z (`body_0_omega`).
     let omega = if spin {
-        // the angular-velocity vector = rate * axis, so the surface velocity omega x r spins about
-        // the (arbitrary) fixed axis.
-        let rate = Gv::scalar("body_0_omega");
+        // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
+        // about the (evolving) rotation axis.
         Tensor::<Gv, 3>::new([
-            rate * Gv::scalar("body_0_axis_0"),
-            rate * Gv::scalar("body_0_axis_1"),
-            rate * Gv::scalar("body_0_axis_2"),
+            Gv::scalar("body_0_omega_0"),
+            Gv::scalar("body_0_omega_1"),
+            Gv::scalar("body_0_omega_2"),
         ])
     } else {
         Tensor::zeros()
@@ -720,13 +701,12 @@ fn penalize_porous_iso_inner(
         if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
     }));
     let omega = if spin {
-        // the angular-velocity vector = rate * axis, so the surface velocity omega x r spins about
-        // the (arbitrary) fixed axis.
-        let rate = Gv::scalar("body_0_omega");
+        // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
+        // about the (evolving) rotation axis.
         Tensor::<Gv, 3>::new([
-            rate * Gv::scalar("body_0_axis_0"),
-            rate * Gv::scalar("body_0_axis_1"),
-            rate * Gv::scalar("body_0_axis_2"),
+            Gv::scalar("body_0_omega_0"),
+            Gv::scalar("body_0_omega_1"),
+            Gv::scalar("body_0_omega_2"),
         ])
     } else {
         Tensor::zeros()

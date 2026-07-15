@@ -797,7 +797,8 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     // prescribed spin OR two-way coupling — a two-way body must run the spinning kernel even at
     // omega = 0 so the reaction torque can spin it up from rest.
     let body = im.bodies.get(b);
-    let spin = body.omega != 0.0 || body.two_way_coupling;
+    let w = body.omega;
+    let spin = w[0] != 0.0 || w[1] != 0.0 || w[2] != 0.0 || body.two_way_coupling;
     let sk = shaped_penalize_kernel(coords, D, has_energy, spin, shape).unwrap_or_else(|| {
         panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
     });
