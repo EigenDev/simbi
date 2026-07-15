@@ -11,6 +11,8 @@ from typing import Any, Optional, Sequence
 import numpy as np
 from numpy.typing import NDArray
 
+from .shape import Shape
+
 Array = NDArray[np.floating]
 
 
@@ -223,13 +225,22 @@ class RigidProperties:
     # k_eta_* c_s / dx: k_eta_n (normal, no-penetration) always acts; k_eta_t
     # (tangential) acts only under no-slip (apply_no_slip False = free slip, so
     # the tangential channel is switched off exactly). inertia carries the body's
-    # moment of inertia for the (future) two-way rotational coupling.
+    # moment of inertia for the (future) two-way rotational coupling. `shape` is an
+    # optional signed-distance CSG (body-local frame): None is the analytic sphere of
+    # radius `body.radius`; a Shape gives an arbitrary rigid wall whose penalization
+    # kernel is runtime-built + JIT-compiled per distinct geometry.
     inertia: float
     apply_no_slip: bool
     k_eta_n: float = 1.0
     k_eta_t: float = 1.0
+    shape: Optional[Shape] = None
 
     def __post_init__(self) -> None:
+        if self.shape is not None and not isinstance(self.shape, Shape):
+            raise _config_error(
+                f"rigid shape must be a Shape (Shape.sphere/box/union/...), got "
+                f"{type(self.shape).__name__}."
+            )
         if self.k_eta_n <= 0.0:
             raise _config_error(
                 f"rigid k_eta_n must be > 0: it is the normal (no-penetration) "

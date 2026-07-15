@@ -1970,6 +1970,21 @@ where
         });
     }
 
+    /// attach per-body immersed-boundary shapes (parallel to the body collection); `None` entries
+    /// keep the analytic sphere. a no-op when the sim has no bodies. the length must match.
+    pub fn attach_body_shapes(&mut self, shapes: Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>>) {
+        if let Some(im) = self.immersed.as_mut() {
+            assert_eq!(
+                shapes.len(),
+                im.shapes.len(),
+                "attach_body_shapes: {} shapes for {} bodies",
+                shapes.len(),
+                im.shapes.len(),
+            );
+            im.shapes = shapes;
+        }
+    }
+
     /// whether this simulation has immersed bodies.
     pub fn has_bodies(&self) -> bool {
         self.immersed.as_ref().map_or(false, |im| !im.bodies.is_empty())

@@ -168,6 +168,10 @@ struct BodyParams {
     /// rigid-wall no-slip flag: true relaxes the tangential velocity to the body
     /// (no slip), false is a free-slip wall (the tangential channel is off).
     no_slip: bool,
+    /// the rigid-wall SHAPE as a `SdfExpr` json wire (`body["rigid"]["shape"]["wire"]`),
+    /// or None for the analytic sphere. a `Some` routes the body to the runtime-JIT'd
+    /// arbitrary-shape penalization kernel.
+    shape_json: Option<String>,
     /// whether the gas reaction force acts back on the body. black-hole sinks
     /// always feel feedback; this dial adds it to non-accreting gravitating
     /// masses (BodyCollection gates feedback on this flag OR the sink kind).
@@ -771,6 +775,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
         let is_rigid = capability & RIGID_BIT != 0;
         let inertia = sub_f64(b, "rigid", "inertia", 0.0);
         let no_slip = sub_bool(b, "rigid", "apply_no_slip", true);
+        let shape_json = get_shape_json(b);
         let (k_eta_n, k_eta_t) = if is_rigid {
             (
                 sub_f64(b, "rigid", "k_eta_n", 1.0),
@@ -794,6 +799,7 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             torque_free_xi,
             inertia,
             no_slip,
+            shape_json,
             two_way_coupling,
         });
     }
@@ -815,6 +821,17 @@ fn sub_f64_opt(body: &Bound<'_, PyDict>, group: &str, key: &str) -> Option<f64> 
         .and_then(|g| g.downcast::<PyDict>().ok().cloned())
         .and_then(|gd| gd.get_item(key).ok().flatten())
         .and_then(|val| val.extract().ok())
+}
+
+/// read the rigid-wall shape CSG (`body["rigid"]["shape"]["wire"]`) and return it as a json string
+/// ready for `SdfExpr::from_json`; None when no shape is declared (the analytic sphere). the dict
+/// crosses the boundary through `json.dumps`, matching the source-expression wire convention.
+fn get_shape_json(body: &Bound<'_, PyDict>) -> Option<String> {
+    let rigid = body.get_item("rigid").ok().flatten()?.downcast::<PyDict>().ok()?.clone();
+    let shape = rigid.get_item("shape").ok().flatten()?.downcast::<PyDict>().ok()?.clone();
+    let wire = shape.get_item("wire").ok().flatten()?;
+    let json = wire.py().import("json").ok()?;
+    json.call_method1("dumps", (wire,)).ok()?.extract().ok()
 }
 
 /// read a bool from a body sub-block (`body[group][key]`); absent / non-bool -> `default`.
@@ -1868,6 +1885,20 @@ fn build_theta(cfg: &Config) -> f64 {
 /// body becomes a black-hole sink (gravity + accretion onto the body);
 /// otherwise it is a fixed-potential gravitating mass. the `two_way_coupling`
 /// feedback flag is carried from config.
+/// parse each body's optional shape wire into an `SdfExpr`, parallel to `build_bodies`. `None` =
+/// the analytic sphere; a malformed shape json fails loud at build, never a silent sphere.
+fn build_body_shapes(params: &[BodyParams]) -> Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>> {
+    params
+        .iter()
+        .map(|b| {
+            b.shape_json.as_ref().map(|j| {
+                symbi_ib::sdf::SdfExpr::<f64, 3>::from_json(j)
+                    .unwrap_or_else(|e| panic!("immersed body shape: {e}"))
+            })
+        })
+        .collect()
+}
+
 fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D> {
     const ACCRETION: u64 = 2;
     const RIGID: u64 = 1 << 4;
@@ -2093,6 +2124,7 @@ mod diagnostics_tests {
             torque_free_xi: None,
             inertia: 0.0,
             no_slip: true,
+            shape_json: None,
             two_way_coupling: true,
         }];
         let coll = build_bodies::<2>(&params);
@@ -2119,10 +2151,13 @@ mod diagnostics_tests {
             torque_free_xi: None,
             inertia: 1.0,
             no_slip: false,
+            shape_json: None,
             two_way_coupling: false,
         }];
         let coll = build_bodies::<2>(&params);
         let body = coll.get(0);
+        // shape stays None here: the rigid body defaults to its analytic sphere.
+        assert!(build_body_shapes(&params)[0].is_none());
         // the wall masks to the body's physical radius (not an accretion radius).
         assert_eq!(body.accretion_radius(), None);
         assert_eq!(body.mask_radius(), Some(0.3));
@@ -2135,6 +2170,39 @@ mod diagnostics_tests {
             }
             other => panic!("rigid body must be a porous wall, got {other:?}"),
         }
+    }
+
+    // a shape wire on a rigid body parses to the corresponding SdfExpr (the runtime-JIT'd
+    // arbitrary wall); the bodyless / shapeless entries stay None.
+    #[test]
+    fn build_body_shapes_parses_the_wire() {
+        let rigid = |shape_json: Option<String>| BodyParams {
+            capability: 1 << 4,
+            mass: 0.0,
+            radius: 0.3,
+            position: vec![0.0, 0.0],
+            velocity: vec![0.0, 0.0],
+            softening: 0.0,
+            accretion_radius: 0.0,
+            sink_rate: 0.0,
+            porosity: None,
+            k_eta_n: 1.0,
+            k_eta_t: 1.0,
+            torque_free_xi: None,
+            inertia: 1.0,
+            no_slip: true,
+            shape_json,
+            two_way_coupling: false,
+        };
+        let params = vec![
+            rigid(Some(
+                r#"{"kind":"box","center":[0.0,0.0,0.0],"half_extents":[0.5,0.3,0.2]}"#.to_string(),
+            )),
+            rigid(None),
+        ];
+        let shapes = build_body_shapes(&params);
+        assert!(matches!(shapes[0], Some(symbi_ib::sdf::SdfExpr::Cuboid { .. })));
+        assert!(shapes[1].is_none());
     }
 }
 
@@ -2302,7 +2370,9 @@ macro_rules! build_and_run_hydro {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
+            sim
         };
         let theta = build_theta(cfg);
         let sub = sim
@@ -2397,6 +2467,7 @@ macro_rules! build_and_run_hydro {
         // sink applies once). the sink sphere must lie inside the finest level (asserted there).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
             hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
         }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
@@ -4164,7 +4235,9 @@ macro_rules! build_and_run_iso {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
+            sim
         };
         // iso is HLLE-only; the substrate front door gives the kernel-set directly.
         let theta = build_theta(cfg);
@@ -4260,6 +4333,7 @@ macro_rules! build_and_run_iso {
         // proxy (finest-owns-bodies, so the sink applies once).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
             hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
         }
 
         // locally isothermal + refinement: the per-cell cs^2(x) "temperature"

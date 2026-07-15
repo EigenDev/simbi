@@ -185,6 +185,33 @@ def test_valid_rigid_obstacle_constructs() -> None:
     )
 
 
+def test_shaped_rigid_obstacle_carries_the_csg_wire() -> None:
+    import dataclasses
+
+    from simbi.types.shape import Shape
+
+    b = ImmersedBodyConfig(
+        capability=BodyCapability.RIGID,
+        mass=0.0,
+        velocity=(0.0, 0.0, 0.0),
+        position=(0.0, 0.0, 0.0),
+        radius=0.3,
+        rigid=RigidProperties(
+            inertia=1.0,
+            apply_no_slip=True,
+            shape=Shape.box((0.0, 0.0, 0.0), (0.2, 0.2, 1.0)),
+        ),
+    )
+    # the shape reaches the backend at body["rigid"]["shape"]["wire"] (get_shape_json).
+    wire = dataclasses.asdict(b)["rigid"]["shape"]["wire"]
+    assert wire["kind"] == "box"
+
+
+def test_rigid_shape_must_be_a_shape() -> None:
+    with pytest.raises(ConfigError, match="shape must be a Shape"):
+        RigidProperties(inertia=1.0, apply_no_slip=True, shape={"kind": "box"})
+
+
 def test_valid_accretor_constructs() -> None:
     ImmersedBodyConfig(
         capability=BodyCapability.ACCRETION | BodyCapability.GRAVITATIONAL,

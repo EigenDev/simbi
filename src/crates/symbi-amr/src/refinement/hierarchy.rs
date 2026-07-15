@@ -503,6 +503,14 @@ where
         self
     }
 
+    /// attach per-body immersed-boundary shapes to the FINEST level, which owns the full
+    /// (wall / accreting) bodies; coarser levels carry gravity-only proxies with no surface, so
+    /// they need no shape. `None` entries keep the analytic sphere.
+    pub fn attach_body_shapes(&mut self, shapes: Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>>) {
+        let finest = self.levels.len() - 1;
+        self.levels[finest].state.attach_body_shapes(shapes);
+    }
+
     /// every accreting body's sink sphere must lie inside the finest level's
     /// interior — a sink straddling a coarse-fine boundary corrupts the mass
     /// accounting the refluxing protects.
