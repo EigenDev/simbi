@@ -82,4 +82,9 @@ fn main() {
     // face-position geom scalars through the CUDA lowering — the GPU gate for curvilinear resistive MHD.
     let (rcyl_k, rcyl_w) = rmhd_resistive_emf_cyl_rz_gv(&[Spacing::Uniform; 2]);
     emit_gv(&out_dir, "rmhd_resistive_emf_cyl_rz", 2, rcyl_k, rcyl_w);
+
+    // the immersed-body localized resistive EMF: the masked current eta*chi(x)*J with the body-mask
+    // SDF (tanh mollifier + body position scalars) traced in-kernel — the GPU gate for resistive sinks.
+    let (rbody_k, rbody_w) = symbi_discretize::body_resistive_emf_2d_gv(symbi_discretize::coords::Coords::Cartesian);
+    emit_gv(&out_dir, "body_resistive_emf_2d", 2, rbody_k, rbody_w);
 }

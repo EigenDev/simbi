@@ -30,7 +30,7 @@ use symbi_aot::{Buf, BufHandle, CpuField, CpuFieldMut, KernelInvocation};
 
 use symbi_algebra::Domain;
 use crate::kernels::support::{to_bc_array, GhostFillDriver};
-use crate::regimes::substrate_kernels::{expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug, ScalarBind, Solver};
+use crate::regimes::substrate_kernels::{body_scalar, expect_kernel, dispatch_fields_each, dispatch_named, geom_scalar, kernel_field_binds, kernel_geom, mhd_geom_suffix, scalars_for, spacetime_slug, ScalarBind, Solver};
 use symbi_sim::state::FieldStore;
 use symbi_sim::state::CtMethod;
 
@@ -993,6 +993,12 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
         apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
     }
 
+    // body-localized Ohmic resistivity: each immersed body running `MagneticSpec::Resistive` adds its
+    // masked `eta*chi*J` to the same edge EMF before the curl. no-op with no immersed body / no
+    // resistive body. rides the SAME curl, so it is div-B-clean and dissipation-only exactly like the
+    // uniform resistivity above.
+    body_resistive_emf::<D, DOF, Mem, Sc>(sim);
+
     // the curl bface update: `bface -= dt*curl(efield)` per in-plane face axis.
     ct_curl::<D, DOF, Mem, Sc>(sim, dt);
 
@@ -1025,6 +1031,63 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
              (suffix {sfx:?}) needs its own transposed-metric adjoint of ct_curl, not yet built. \
              use a supported chart or set resistivity = 0."
         ),
+    }
+}
+
+/// dispatch the immersed-body LOCALIZED resistive edge EMF for every body running
+/// `MagneticSpec::Resistive { eta }`: `efield[0] += eta*chi(x)*J_z` over the body's mask, added to the
+/// same edge EMF the curl consumes (div-B-clean, dissipation-only). the field threading the body is
+/// dissipated; the exterior flux (where `chi = 0`) is untouched. EXPLICIT LIMITATION, fail-loud: the
+/// masked adjoint J + body-mask SDF are the cartesian 2.5D pair only; a resistive body on any other
+/// chart/dimension panics rather than silently ignoring the coupling.
+pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    let Some(im) = sim.immersed.as_ref() else { return };
+    let bodies = &im.bodies;
+    for b in 0..bodies.len() {
+        let symbi_ib::MagneticSpec::Resistive { eta } = bodies.get(b).spec.magnetic else { continue };
+        if eta <= 0.0 {
+            continue;
+        }
+        assert!(
+            D == 2 && sim.geom.coords == symbi_geometry::Geometry::Cartesian,
+            "MagneticSpec::Resistive (a resistive immersed body) has a masked-adjoint resistive EMF for \
+             the cartesian 2.5D chart only; the {:?} chart in {D}D needs its own body-mask + adjoint \
+             pair, not yet built. use a cartesian 2.5D grid or drop the magnetic coupling.",
+            sim.geom.coords
+        );
+        let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
+        let name = "body_resistive_emf_2d";
+        let scalars = scalars_for(name, |bind| {
+            Sc::from_f64(match bind {
+                ScalarBind::Spec(s) if &**s == "eta" => eta,
+                ScalarBind::Ref(ScalarRef::Body { idx: 0, field }) => {
+                    body_scalar::<D>(Some(bodies), b as u8, *field)
+                }
+                ScalarBind::Ref(other) => geom_scalar(&sim.geom.x_lo, &sim.geom.dx, &sim.geom.maps, *other)
+                    .unwrap_or_else(|| panic!("body_resistive_emf: unexpected scalar {other:?}")),
+                o => panic!("body_resistive_emf: unexpected scalar {o:?}"),
+            })
+        });
+        let slot = |s: &str| -> &Field<Sc, D, Mem> {
+            match s {
+                "ez" => &mhd.efield[0],
+                "bx" => &mhd.bface[0],
+                "by" => &mhd.bface[1],
+                o => panic!("body_resistive_emf: unknown manifest slot '{o}'"),
+            }
+        };
+        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+        for (bind, is_out) in kernel_field_binds(name).iter() {
+            let fld = slot(&bind.name());
+            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        }
+        dispatch_fields_each::<Sc, Mem, D>(name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
     }
 }
 

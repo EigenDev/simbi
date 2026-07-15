@@ -112,6 +112,12 @@ pub enum MagneticSpec {
     /// no magnetic coupling: the body does not act on the magnetic field.
     #[default]
     None,
+    /// localized Ohmic resistivity: a diffusivity `eta` masked by the body indicator `chi` adds the
+    /// resistive edge EMF `eta*chi*J` before constrained transport, dissipating the magnetic field
+    /// THREADING the body while leaving the exterior flux untouched. div-B-clean (the shared curl
+    /// consumes it) and unconditionally dissipative (`-C diag(eta*chi) C^T` is negative-definite for
+    /// `eta >= 0`), so the body can only shed field, never amplify it.
+    Resistive { eta: f64 },
 }
 
 /// the full surface-coupling stack a body runs: the hydrodynamic surface physics and,

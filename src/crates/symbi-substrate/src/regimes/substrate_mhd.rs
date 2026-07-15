@@ -536,9 +536,21 @@ where
         // OHMIC RESISTIVE CFL: explicit induction diffusion is stable for `dt <= dx^2 / (2 D eta)`;
         // fold the equivalent rate `2 D eta / min(dx)^2` (an inverse timescale, like the wave rate)
         // into lambda_max so the shared `dt = cfl / lambda_max` bounds the step. 0 off resistive MHD.
-        if self.resistivity > 0.0 {
+        // the resistive rate is set by the STIFFEST diffusivity present: the uniform bulk resistivity
+        // OR any immersed body's localized `MagneticSpec::Resistive` eta (chi <= 1, so the body eta is
+        // its own upper bound). fold the max so a resistive sink cannot outrun the diffusion limit.
+        let body_eta_max = sim.immersed.as_ref().map_or(0.0, |im| {
+            (0..im.bodies.len())
+                .filter_map(|b| match im.bodies.get(b).spec.magnetic {
+                    symbi_ib::MagneticSpec::Resistive { eta } => Some(eta),
+                    _ => None,
+                })
+                .fold(0.0_f64, f64::max)
+        });
+        let eta_eff = self.resistivity.max(body_eta_max);
+        if eta_eff > 0.0 {
             let dx_min = geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
-            lambda_max = lambda_max.max(2.0 * (D as f64) * self.resistivity / (dx_min * dx_min));
+            lambda_max = lambda_max.max(2.0 * (D as f64) * eta_eff / (dx_min * dx_min));
         }
         // DRIVEN-INFLOW CFL CAP: the per-cell wave-speed map only scans the INTERIOR, so a driven
         // boundary's inflow state (which lives in the ghost band) is invisible to it — a relativistic

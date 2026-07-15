@@ -43,6 +43,7 @@ fn signal_speed(cs: Gv) -> Gv {
 
 use crate::coords::{Coords, Spacing};
 use crate::gv::cell_geometry_gv;
+use crate::gv::gv_field_at;
 use symbi_ir::{begin_trace, end_trace};
 
 /// the 3-space axes whose torque component can be nonzero at dimension
@@ -226,6 +227,47 @@ fn body_support_shaped(ndim: usize, shape: Option<&SdfExpr<f64, 3>>) -> Support 
             Support::ball(center_p, ParamExpr::constant(lr) + pad)
         }
     }
+}
+
+/// the 2.5D immersed-body OHMIC RESISTIVE edge EMF: adds a body-LOCALIZED resistive current
+/// `eta * chi(x) * J_z` to the out-of-plane edge EMF `ez` (efield[0]) IN PLACE, where `J_z =
+/// dB_y/dx - dB_x/dy` is the SAME adjoint current as the generic resistive kernel and `chi` is the
+/// body mask (`0.5(1 - tanh(phi/w))`, 1 inside the body, 0 outside, mollified over one cell). the
+/// localized resistivity dissipates the magnetic field THREADING the body while leaving the exterior
+/// flux untouched. div-B-clean: the same curl consumes the augmented EMF (`div(curl) = 0`). STABILITY:
+/// the composed operator `-curl(eta chi J)` is `-C diag(eta chi) C^T`, negative-definite for ANY
+/// `eta chi >= 0` — the mask only reweights the edges of the already-adjoint current, so the body can
+/// only DISSIPATE, never amplify. `chi` is sampled at the E_z CORNER (the edge location), half a cell
+/// below the traced cell centroid on each in-plane axis.
+pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
+    let ndim = 2usize;
+    begin_trace();
+    let ez = Gv::field("ez", "ez");
+    let eta = Gv::scalar("eta");
+    let bx = Gv::field("bx", "bx");
+    let by = Gv::field("by", "by");
+    let bx_jm = gv_field_at("bx", "bx", 2, &[0, -1]); // B_x at the neighbour below in y
+    let by_im = gv_field_at("by", "by", 2, &[-1, 0]); // B_y at the neighbour behind in x
+    let dx0 = Gv::scalar("dx_0");
+    let dx1 = Gv::scalar("dx_1");
+    let jz = (Gv::ONE / dx0) * (by - by_im) - (Gv::ONE / dx1) * (bx - bx_jm);
+
+    // the geometry scaffold yields the cell centroid; the E_z corner is half a cell below it on each
+    // in-plane axis. sample the body mask at that corner so the dissipation registers with the edge.
+    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
+    let half = Gv::from_f64(0.5);
+    let corner = vec![geo.centroid[0] - half * dx0, geo.centroid[1] - half * dx1];
+    let x_cart = centroid_to_cartesian(coords, ndim, &corner);
+    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
+    let center: [Gv; 3] =
+        std::array::from_fn(|a| if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO });
+    let min_w = dx0.min(dx1);
+    let phi = body_mask_sdf(center).dist(x);
+    let chi = symbi_ib::sdf::chi(phi, min_w);
+
+    let ez_new = ez + eta * chi * jz;
+    let kernel = end_trace().with_output_support(body_support(ndim));
+    (kernel, vec![("ez_new".to_string(), "ez".into(), ez_new.node())])
 }
 
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian,

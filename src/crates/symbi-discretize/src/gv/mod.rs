@@ -208,7 +208,7 @@ fn gv_register_field(key: &str, runtime: &str) {
 /// load field `key` at `coord + offsets` (per-axis integer offset; all-zero = the cell coord) —
 /// the gv multi-axis OFFSET stencil (the CT staggered gather). registers the field (deduped),
 /// builds the integer coord arithmetic + `load_at`. like `field_shifted` but a full offset vector.
-fn gv_field_at(key: &str, runtime: &str, ndim: usize, offsets: &[i32]) -> Gv {
+pub(crate) fn gv_field_at(key: &str, runtime: &str, ndim: usize, offsets: &[i32]) -> Gv {
     Gv::of(with_trace(|t| {
         t.register_field(key, runtime);
         let comps: Vec<NodeId> = (0..ndim)

@@ -1004,6 +1004,10 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
     // eta = 0 -> an exact no-op, so ideal MHD is unchanged.
     let (k, writes) = rmhd_resistive_emf_2d_gv();
     emit_gv(out_dir, "rmhd_resistive_emf_2d", 2, &k, &writes);
+    // the immersed-body LOCALIZED resistive edge EMF: adds eta * chi(x) * J_z, dissipating the field
+    // threading a resistive body (chi = the body mask) while leaving the exterior flux untouched.
+    let (k, writes) = symbi_discretize::body_resistive_emf_2d_gv(Coords::Cartesian);
+    emit_gv(out_dir, "body_resistive_emf_2d", 2, &k, &writes);
     // the 3D Cartesian resistive edge EMF, one kernel per edge direction (eta * J_dir added to the
     // dir-edge's EMF); the dispatch loops the three edges.
     for dir in 0..3 {
