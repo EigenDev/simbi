@@ -332,6 +332,24 @@ class ImmersedBodyConfig:
                 "capability RIGID requires a `rigid` property block (the wall "
                 "no-slip flag and stiffness dials); without it the wall is undefined."
             )
+        # a two-way rigid wall spins up from the gas reaction torque (I domega = torque). that
+        # needs a shape (a sphere's mask is rotation-invariant, so it never reaches the spinning
+        # kernel) and a positive moment of inertia; otherwise the coupling is a silent no-op.
+        if (
+            has_capability(self.capability, BodyCapability.RIGID)
+            and self.two_way_coupling
+            and self.rigid is not None
+        ):
+            if self.rigid.shape is None:
+                raise _config_error(
+                    "a two-way rigid wall spins from the gas reaction torque; it needs a `shape` "
+                    "(a rotationally symmetric sphere never spins up)."
+                )
+            if self.rigid.inertia <= 0.0:
+                raise _config_error(
+                    f"a two-way rigid wall needs inertia > 0 (I domega = torque); got "
+                    f"{self.rigid.inertia}."
+                )
         if (
             has_capability(self.capability, BodyCapability.ACCRETION)
             and self.accretion is None

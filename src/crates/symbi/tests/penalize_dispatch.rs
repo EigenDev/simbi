@@ -433,6 +433,45 @@ fn shaped_box_rigid_wall_iso_penalizes_via_runtime_jit() {
     );
 }
 
+// TWO-WAY rotational coupling: a free (two_way) spinner in STILL fluid is dragged toward rest —
+// the reaction torque of the gas it spins up decelerates it. one evolve step (dispatch fills the
+// torque diagnostic, apply_body_deltas integrates I*domega = L_delta) must reduce omega, not
+// reverse it. this also pins the sign of the coupling.
+#[test]
+fn two_way_spin_is_dragged_to_a_stop() {
+    use symbi_ib::sdf::SdfExpr;
+    use symbi_ib::SurfaceSpec;
+    type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
+    let dx = 2.0 * L / N as f64;
+    const OMEGA0: f64 = 3.0;
+    const INERTIA: f64 = 10.0;
+    let mut sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N, N])
+        .origin([-L, -L])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("sim")
+        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
+        .build()
+        .with_bodies(BodyCollection::new().add(
+            Body::rigid_sphere(0, Tensor::zeros(), Tensor::zeros(), 1.0, 0.3, INERTIA, true)
+                .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 50.0, k_eta_t: 50.0 })
+                .with_spin(OMEGA0)
+                .with_two_way_coupling(true),
+        ));
+    sim.immersed.as_mut().unwrap().shapes[0] =
+        Some(SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.25, 0.1, 1.0]));
+
+    let dt = 1e-3;
+    dispatch_penalize(&sim, dt, GAMMA, 1.0);
+    let deltas = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    symbi_ib::apply_body_deltas(&mut sim.immersed.as_mut().unwrap().bodies, &deltas, dt);
+    let omega = sim.immersed.as_ref().unwrap().bodies.get(0).omega;
+    assert!(omega < OMEGA0, "the free spinner should decelerate from drag: {OMEGA0} -> {omega}");
+    assert!(omega > 0.0, "one step should not reverse the spin: {omega}");
+}
+
 // an arbitrary-shape rigid wall on a CURVILINEAR (r-phi disk) grid: the mask distance is physical
 // (the coordinate centroid maps to Cartesian), and off-Cartesian the dispatch runs the whole
 // interior. a box at an off-origin Cartesian point must penalize the flow (mass 0, force nonzero).

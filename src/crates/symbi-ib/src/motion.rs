@@ -81,6 +81,17 @@ pub fn apply_body_deltas<const D: usize>(
             let body = bodies.get_mut(delta.idx);
             body.force = delta.force_delta;
             body.torque = delta.torque_delta;
+            // two-way ROTATIONAL coupling: the reaction torque changes the body's spin, I*domega =
+            // L_delta (torque_delta is the per-step angular momentum the gas exchanged, so no extra
+            // dt). a shaped two-way wall's mask + surface velocity then track the evolved omega; a
+            // free spinner is dragged toward the local flow's rotation. gated on two_way + inertia>0.
+            if body.two_way_coupling {
+                if let Some(inertia) = body.inertia() {
+                    if inertia > 0.0 {
+                        body.omega = body.omega + delta.torque_delta[2] / inertia;
+                    }
+                }
+            }
             if let BodyKind::BlackHole { total_accreted_mass, accretion_rate, .. } = &mut body.kind {
                 *total_accreted_mass += delta.mass_delta;
                 *accretion_rate = if dt > 0.0 { delta.mass_delta / dt } else { 0.0 };
