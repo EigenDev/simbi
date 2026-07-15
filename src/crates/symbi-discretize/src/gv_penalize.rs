@@ -270,18 +270,22 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     (kernel, vec![("ez_new".to_string(), "ez".into(), ez_new.node())])
 }
 
-/// trace the [Drain]-stack penalization for the adiabatic regime, cartesian,
-/// DOF = ndim. dimension-generic over 1..=3.
-pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "penalize_drain_gv: ndim must be 1..=3");
+/// trace the [Drain]-stack penalization for the adiabatic regime, cartesian. `ndim` is the SPATIAL
+/// grid dimension (geometry, mask, force receipt); `dof` is the MOMENTUM count (the conserved
+/// 3-vector's active components). `dof == ndim` for hydro and full 3D MHD; `dof = 3, ndim = 2` for
+/// 2.5D MHD, where the out-of-plane momentum must be drained too (else its velocity blows up as the
+/// density is evacuated). dimension-generic over 1..=3.
+pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, Writes) {
+    assert!((1..=3).contains(&ndim) && (ndim..=3).contains(&dof), "penalize_drain_gv: need 1<=ndim<=dof<=3");
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
     let c_drain = Gv::scalar("c_drain");
 
-    // conserved reads (in-place: the same fields are the writes).
+    // conserved reads (in-place: the same fields are the writes). the momentum runs over dof (all
+    // active components), so a 2.5D MHD sink drains the out-of-plane momentum and its kinetic energy.
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ndim)
+    let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
     let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
@@ -329,7 +333,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
@@ -340,7 +344,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
-    for a in 0..ndim {
+    for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8).into(),
@@ -383,8 +387,8 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
 /// (|x_rel| = 0) degrades to a zero normal — its whole du is treated as
 /// tangential, exact and finite. at p = 1 every wall factor carries an exact
 /// (1 - p) = 0 and the kernel reduces bit-for-bit to `penalize_drain`.
-pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, None, false)
+pub fn penalize_porous_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, Writes) {
+    penalize_porous_inner(coords, ndim, dof, None, false)
 }
 
 /// the arbitrary-shape porous wall: the same relaxation stack as `penalize_porous_gv`, but the
@@ -394,9 +398,10 @@ pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
 pub fn penalize_porous_gv_shaped(
     coords: Coords,
     ndim: usize,
+    dof: usize,
     shape: &SdfExpr<f64, 3>,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, Some(shape), false)
+    penalize_porous_inner(coords, ndim, dof, Some(shape), false)
 }
 
 /// the SPINNING arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
@@ -405,18 +410,20 @@ pub fn penalize_porous_gv_shaped(
 pub fn penalize_porous_gv_spinning(
     coords: Coords,
     ndim: usize,
+    dof: usize,
     shape: &SdfExpr<f64, 3>,
 ) -> (GvKernel, Writes) {
-    penalize_porous_inner(coords, ndim, Some(shape), true)
+    penalize_porous_inner(coords, ndim, dof, Some(shape), true)
 }
 
 fn penalize_porous_inner(
     coords: Coords,
     ndim: usize,
+    dof: usize,
     shape: Option<&SdfExpr<f64, 3>>,
     spin: bool,
 ) -> (GvKernel, Writes) {
-    assert!((1..=3).contains(&ndim), "penalize_porous_gv: ndim must be 1..=3");
+    assert!((1..=3).contains(&ndim) && (ndim..=3).contains(&dof), "penalize_porous_gv: need 1<=ndim<=dof<=3");
     begin_trace();
     let dt = Gv::scalar("dt");
     let gamma = Gv::scalar("gamma");
@@ -425,8 +432,11 @@ fn penalize_porous_inner(
     let k_eta_n = Gv::scalar("k_eta_n");
     let k_eta_t = Gv::scalar("k_eta_t");
 
+    // the wall normal + velocity target are ndim (in-plane); the momentum runs over dof so the
+    // out-of-plane component is carried as a purely TANGENTIAL velocity (relaxed by k_eta_t) and its
+    // kinetic energy enters c_s. drained/walled in 2.5D MHD, absent for hydro (dof == ndim).
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ndim)
+    let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
     let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
@@ -519,7 +529,7 @@ fn penalize_porous_inner(
     .contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
@@ -527,7 +537,7 @@ fn penalize_porous_inner(
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
-    for a in 0..ndim {
+    for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8).into(),
@@ -566,7 +576,7 @@ fn penalize_porous_inner(
 /// energy channel (iso, the thin-disk regime); delta outputs mass + force +
 /// torque. the velocity target is the body's translational velocity
 /// `body_0_vel_*` (the accretion is torque-free RELATIVE to the moving sink).
-pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
+pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!(
         (1..=3).contains(&ndim),
@@ -579,7 +589,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
     let xi = Gv::scalar("xi");
 
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ndim)
+    let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
 
@@ -624,7 +634,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
@@ -632,7 +642,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
-    for a in 0..ndim {
+    for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8).into(),
@@ -663,8 +673,8 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Wr
 /// `penalize_porous_gv` but for the isothermal regime — the sound speed is the
 /// constant `cs` param (no energy channel), delta outputs mass + force only.
 /// `p = 1` reduces bit-for-bit to `penalize_drain_iso`.
-pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, None, false)
+pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, Writes) {
+    penalize_porous_iso_inner(coords, ndim, dof, None, false)
 }
 
 /// the arbitrary-shape ISO porous wall: the energy-free counterpart of
@@ -672,28 +682,31 @@ pub fn penalize_porous_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes)
 pub fn penalize_porous_iso_gv_shaped(
     coords: Coords,
     ndim: usize,
+    dof: usize,
     shape: &SdfExpr<f64, 3>,
 ) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, Some(shape), false)
+    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), false)
 }
 
 /// the SPINNING ISO porous wall: the energy-free counterpart of `penalize_porous_gv_spinning`.
 pub fn penalize_porous_iso_gv_spinning(
     coords: Coords,
     ndim: usize,
+    dof: usize,
     shape: &SdfExpr<f64, 3>,
 ) -> (GvKernel, Writes) {
-    penalize_porous_iso_inner(coords, ndim, Some(shape), true)
+    penalize_porous_iso_inner(coords, ndim, dof, Some(shape), true)
 }
 
 fn penalize_porous_iso_inner(
     coords: Coords,
     ndim: usize,
+    dof: usize,
     shape: Option<&SdfExpr<f64, 3>>,
     spin: bool,
 ) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
-    assert!((1..=3).contains(&ndim), "penalize_porous_iso_gv: ndim must be 1..=3");
+    assert!((1..=3).contains(&ndim) && (ndim..=3).contains(&dof), "penalize_porous_iso_gv: need 1<=ndim<=dof<=3");
     begin_trace();
     let dt = Gv::scalar("dt");
     let cs = Gv::scalar("cs");
@@ -703,7 +716,7 @@ fn penalize_porous_iso_inner(
     let k_eta_t = Gv::scalar("k_eta_t");
 
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ndim)
+    let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
 
@@ -781,7 +794,7 @@ fn penalize_porous_iso_inner(
     .contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
@@ -808,7 +821,7 @@ fn penalize_porous_iso_inner(
 /// `penalize_torque_free_iso_gv` but for the adiabatic regime — the sound speed
 /// is recovered from the conserved state and the energy channel is carried (delta
 /// outputs mass + force + energy + torque). `xi = 0` reduces to `penalize_drain`.
-pub fn penalize_torque_free_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
+pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, Writes) {
     assert!((1..=3).contains(&ndim), "penalize_torque_free_gv: ndim must be 1..=3");
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -817,7 +830,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes
     let xi = Gv::scalar("xi");
 
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ndim)
+    let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
     let nrg = Gv::field("nrg", symbi_ir::FieldRef::cons_nrg());
@@ -861,7 +874,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
@@ -890,7 +903,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes
 /// sound speed is the constant `cs` param, not recovered from cons), delta
 /// outputs mass + force only. same [Drain] stack, same integrator — the iso
 /// energy slot discards the e-channel by construction.
-pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
+pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, Writes) {
     use symbi_hydro::energy::IsoModel;
     assert!((1..=3).contains(&ndim), "penalize_drain_iso_gv: ndim must be 1..=3");
     begin_trace();
@@ -899,7 +912,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) 
     let c_drain = Gv::scalar("c_drain");
 
     let den = Gv::field("den", symbi_ir::FieldRef::cons_den());
-    let mom: Vec<Gv> = (0..ndim)
+    let mom: Vec<Gv> = (0..dof)
         .map(|c| Gv::field(&format!("mom_{c}"), symbi_ir::FieldRef::cons_mom(c as u8)))
         .collect();
 
@@ -932,7 +945,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) 
     Property::Drain { inv_tau }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
         den,
-        mom: Tensor::new(std::array::from_fn(|a| if a < ndim { mom[a] } else { Gv::ZERO })),
+        mom: Tensor::new(std::array::from_fn(|a| if a < dof { mom[a] } else { Gv::ZERO })),
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
@@ -941,7 +954,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) 
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
-    for a in 0..ndim {
+    for a in 0..dof {
         writes.push((
             format!("mom_out_{a}"),
             symbi_ir::FieldRef::cons_mom(a as u8).into(),

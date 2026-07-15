@@ -726,6 +726,7 @@ struct ShapedPenalizeKernel {
 fn shaped_penalize_kernel(
     coords: symbi_discretize::Coords,
     ndim: usize,
+    dof: usize,
     has_energy: bool,
     spin: bool,
     shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
@@ -733,7 +734,7 @@ fn shaped_penalize_kernel(
     use std::sync::{Arc, OnceLock, RwLock};
     static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    let key = format!("{coords:?}|{ndim}|{has_energy}|{spin}|{shape:?}");
+    let key = format!("{coords:?}|{ndim}|{dof}|{has_energy}|{spin}|{shape:?}");
     if let Some(k) = cache.read().unwrap().get(&key) {
         return k.clone();
     }
@@ -744,10 +745,10 @@ fn shaped_penalize_kernel(
     // the mask distance is PHYSICAL: the kernel maps the coordinate centroid to Cartesian (baked
     // per chart), so a spherical / cylindrical grid measures the true distance to the shape.
     let (gvk, writes) = match (has_energy, spin) {
-        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, shape),
-        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, shape),
-        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, shape),
-        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, shape),
+        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape),
+        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape),
+        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape),
+        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape),
     };
     let built = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok().map(|kernel| {
         Arc::new(ShapedPenalizeKernel {
@@ -799,7 +800,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     let body = im.bodies.get(b);
     let w = body.omega;
     let spin = w[0] != 0.0 || w[1] != 0.0 || w[2] != 0.0 || body.two_way_coupling;
-    let sk = shaped_penalize_kernel(coords, D, has_energy, spin, shape).unwrap_or_else(|| {
+    let sk = shaped_penalize_kernel(coords, D, DOF, has_energy, spin, shape).unwrap_or_else(|| {
         panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
     });
 
@@ -843,12 +844,11 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     // iso has no energy channel: the kernel neither reads nor writes nrg, so it drops from the
     // in/out bases (and the writes order the kernel was compiled with).
     let nrg = sim.fields.cons.nrg_field();
-    // the penalize kernel binds the D IN-PLANE momentum components (its `ndim`), not the full DOF: a
-    // 2.5D MHD store carries a 3-vector momentum on a 2-axis grid, and binding all DOF would misalign
-    // nrg onto mom[2] and corrupt the energy. D == DOF for hydro and full 3D MHD.
+    // the shaped kernel is JIT-built with dof = DOF (see shaped_penalize_kernel), so it reads/writes
+    // all DOF momentum components; bind them all. the delta scratch stays D (the in-plane force).
     let mut in_bases: Vec<*const f64> = Vec::with_capacity(D + 2);
     in_bases.push(cons_ptr(&sim.fields.cons.den));
-    for c in 0..D {
+    for c in 0..DOF {
         in_bases.push(cons_ptr(&sim.fields.cons.mom[c]));
     }
     if let Some(n) = nrg {
@@ -856,7 +856,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     }
     let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque);
     out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
-    for c in 0..D {
+    for c in 0..DOF {
         out_bases.push(cons_ptr_mut(&sim.fields.cons.mom[c]));
     }
     if let Some(n) = nrg {
@@ -1011,6 +1011,10 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 penalize_name("penalize_torque_free", coords_g, D)
             }
         };
+        // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
+        // components; hydro / full 3D MHD (DOF == D) keep the base name. the baked matrix covers
+        // cartesian all-surfaces + curvilinear drain; anything else fails loud as an unbaked kernel.
+        let name_owned = if DOF != D { format!("{name_owned}_dof{DOF}") } else { name_owned };
         let name: &str = &name_owned;
         // the reduction/dispatch box. on a Cartesian grid the kernel's declared
         // support ball clamps to an index box (the design-48 consumer, identical to
@@ -1047,15 +1051,12 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         };
         let Some(bbox) = bbox else { continue };
 
-        // in-place cons: every field input is also a write, so the manifest
-        // folds them into the output group — the input list is empty and the
-        // output order is den, mom.., nrg, then the D+2 delta scratch. the penalize kernel handles the
-        // D IN-PLANE momentum components (its `ndim`), NOT the full DOF: a 2.5D MHD store carries a
-        // 3-vector momentum (DOF=3) on a 2-axis grid, and binding all DOF would shift `nrg` onto
-        // mom[2] and corrupt the energy globally. the out-of-plane momentum is left undrained (a
-        // separate DOF-aware penalize kernel is the follow-on); D == DOF for hydro and full 3D MHD.
+        // in-place cons: every field input is also a write, so the manifest folds them into the output
+        // group — the input list is empty and the output order is den, mom.., nrg, then the D+2 delta
+        // scratch. the DOF-aware kernel (selected via `_dof{DOF}` above) writes all DOF momentum
+        // components, so bind all DOF; the force receipt scratch stays D (the in-plane reaction).
         let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-        for comp in 0..D {
+        for comp in 0..DOF {
             outputs.push(&sim.fields.cons.mom[comp]);
         }
         if let Some(nrg) = nrg {
