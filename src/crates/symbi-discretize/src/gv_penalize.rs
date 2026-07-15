@@ -157,23 +157,55 @@ fn lab_torque(
 /// the immersed body's mask geometry as a traced SDF, centered at `center` (the body
 /// position `body_0_pos_*` in Cartesian): a sphere of radius `body_0_racc`. this is the
 /// ONE seam every penalization kernel (drain / porous-wall / torque-free, adiabatic and
-/// iso) shares — the mask cannot drift between kernels, and an arbitrary-shape (CSG) body
-/// varies the geometry HERE while every surface stack is left untouched.
+/// iso) shares — the mask cannot drift between kernels.
 fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
-    SdfExpr::<Gv, 3>::Sphere { center, radius: Gv::scalar("body_0_racc") }
+    body_mask_sdf_shaped(center, None)
+}
+
+/// the mask geometry with an optional config CSG. `None`: a sphere of runtime radius
+/// `body_0_racc` (the AOT kernel). `Some(shape)`: the shape — authored in the body-LOCAL
+/// frame as f64 constants — lifted to Gv constants and TRANSLATED to the runtime center. so a
+/// MOVING body rides the same kernel: only `body_0_pos_*` changes per step; the shape geometry
+/// is baked, never a runtime knob. (rotation would compose a runtime orientation transform on
+/// `x` before the shape; translation alone is the moving-body core.)
+fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> SdfExpr<Gv, 3> {
+    match shape {
+        None => SdfExpr::<Gv, 3>::Sphere { center, radius: Gv::scalar("body_0_racc") },
+        Some(s) => s.lift(&|c| Gv::from_f64(c)).translated(center),
+    }
 }
 
 /// the dispatch output support for a body penalization kernel: the mask ball padded by
 /// `DRAIN_SUPPORT_WIDTHS` cell widths, beyond which the tanh chi (and hence every delta and
-/// the in-place cons write) is unchanged-valued. derived from the SAME `body_0_pos_*` /
-/// `body_0_racc` the mask SDF traces, so support and mask describe one geometry.
+/// the in-place cons write) is unchanged-valued. derived from the SAME geometry the mask SDF
+/// traces, so support and mask describe one region.
 fn body_support(ndim: usize) -> Support {
-    let center_p: Vec<ParamExpr> =
-        (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-    let radius_p = ParamExpr::param("body_0_racc")
-        + ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
-            * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    Support::ball(center_p, radius_p)
+    body_support_shaped(ndim, None)
+}
+
+/// the support for an optionally-shaped body. `None`: the sphere ball at `body_0_pos_*` of
+/// runtime radius `body_0_racc`. `Some(shape)`: the shape's bounding ball — a body-LOCAL
+/// constant center + radius — translated to the runtime body position. a complement is
+/// unbounded and has no ball, so a shaped body must be bounded.
+fn body_support_shaped(ndim: usize, shape: Option<&SdfExpr<f64, 3>>) -> Support {
+    let pad = ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
+        * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
+    match shape {
+        None => {
+            let center_p: Vec<ParamExpr> =
+                (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
+            Support::ball(center_p, ParamExpr::param("body_0_racc") + pad)
+        }
+        Some(s) => {
+            let (lc, lr) = s
+                .bounding_ball()
+                .expect("a shaped immersed body must be bounded (a complement has no support ball)");
+            let center_p: Vec<ParamExpr> = (0..ndim)
+                .map(|a| ParamExpr::param(&format!("body_0_pos_{a}")) + ParamExpr::constant(lc[a]))
+                .collect();
+            Support::ball(center_p, ParamExpr::constant(lr) + pad)
+        }
+    }
 }
 
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian,
@@ -290,6 +322,26 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
 /// tangential, exact and finite. at p = 1 every wall factor carries an exact
 /// (1 - p) = 0 and the kernel reduces bit-for-bit to `penalize_drain`.
 pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
+    penalize_porous_inner(coords, ndim, None)
+}
+
+/// the arbitrary-shape porous wall: the same relaxation stack as `penalize_porous_gv`, but the
+/// mask AND the surface normal come from the config CSG `shape` (body-local, translated to the
+/// runtime body position) instead of the sphere. built at sim SETUP, once the body's shape is
+/// known — the AOT bake cannot know a per-body CSG.
+pub fn penalize_porous_gv_shaped(
+    coords: Coords,
+    ndim: usize,
+    shape: &SdfExpr<f64, 3>,
+) -> (GvKernel, Writes) {
+    penalize_porous_inner(coords, ndim, Some(shape))
+}
+
+fn penalize_porous_inner(
+    coords: Coords,
+    ndim: usize,
+    shape: Option<&SdfExpr<f64, 3>>,
+) -> (GvKernel, Writes) {
     assert!((1..=3).contains(&ndim), "penalize_porous_gv: ndim must be 1..=3");
     begin_trace();
     let dt = Gv::scalar("dt");
@@ -320,8 +372,8 @@ pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     let x: [Gv; 3] = std::array::from_fn(|a| {
         if a < ndim { x_cart[a] } else { Gv::ZERO }
     });
-    let sphere = body_mask_sdf(center);
-    let phi = sphere.dist(x);
+    let sdf = body_mask_sdf_shaped(center, shape);
+    let phi = sdf.dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
 
     let mut mom_sq = Gv::ZERO;
@@ -332,13 +384,23 @@ pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
     let inv_tau = cs / (c_drain * min_w);
     let rate_scale = cs / min_w;
 
-    // the outward surface normal in the cell's PHYSICAL frame: the Cartesian r_hat
-    // rotated into the orthonormal basis (identity on Cartesian; e_r for a centered
-    // accretor). |x_rel| = 0 degrades to a zero normal (guarded), never a NaN.
-    let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
-    let r = x_rel.dot(&x_rel).sqrt();
-    let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
-    let n_cart: Vec<Gv> = (0..ndim).map(|a| x_rel[a] * inv_r).collect();
+    // the outward surface normal in the cell's PHYSICAL frame (the Cartesian normal rotated into
+    // the orthonormal basis; identity on a Cartesian grid). the sphere path is r_hat =
+    // x_rel/|x_rel|, with |x_rel| = 0 guarded to a zero normal (its whole du is tangential,
+    // finite). the shaped path is the exact CSG gradient — the SDF outward unit normal via Dual
+    // autodiff — which is the arbitrary surface's normal everywhere the distance is smooth.
+    let n_cart: Vec<Gv> = match shape {
+        None => {
+            let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
+            let r = x_rel.dot(&x_rel).sqrt();
+            let inv_r = Gv::ONE / r.max(Gv::from_f64(1e-300));
+            (0..ndim).map(|a| x_rel[a] * inv_r).collect()
+        }
+        Some(_) => {
+            let n = sdf.normal(x);
+            (0..ndim).map(|a| n[a]).collect()
+        }
+    };
     let n_phys = vector_from_cartesian(coords, ndim, &geo.centroid, &n_cart);
     let normal = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
         if a < ndim { n_phys[a] } else { Gv::ZERO }
@@ -391,7 +453,7 @@ pub fn penalize_porous_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) {
         ));
     }
 
-    let kernel = end_trace().with_output_support(body_support(ndim));
+    let kernel = end_trace().with_output_support(body_support_shaped(ndim, shape));
     (kernel, writes)
 }
 
@@ -743,4 +805,41 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize) -> (GvKernel, Writes) 
 
     let kernel = end_trace().with_output_support(body_support(ndim));
     (kernel, writes)
+}
+
+#[cfg(test)]
+mod shaped_tests {
+    use super::*;
+    use symbi_ib::sdf::SdfExpr;
+
+    // a shaped porous kernel bakes the CSG geometry as CONSTANTS and keeps only the body
+    // POSITION as a runtime scalar — so a moving body rides the same kernel, updating just
+    // `body_0_pos_*` per step. the sphere kernel instead reads a runtime `body_0_racc`.
+    #[test]
+    fn shaped_porous_kernel_bakes_geometry_and_keeps_position_runtime() {
+        let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
+            .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
+        let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, &shape);
+        assert!(!kernel.graph.has_errors(), "shaped porous kernel traced with graph errors");
+        assert!(
+            kernel.scalar_params.iter().any(|p| p == "body_0_pos_0"),
+            "the runtime body position must remain a scalar (a moving body updates it)",
+        );
+        assert!(
+            !kernel.scalar_params.iter().any(|p| p == "body_0_racc"),
+            "shaped kernel must bake geometry, not read the sphere radius: {:?}",
+            kernel.scalar_params,
+        );
+        for p in ["porosity", "k_eta_n", "k_eta_t", "body_0_vel_0", "dt"] {
+            assert!(kernel.scalar_params.iter().any(|s| s == p), "missing runtime param {p}");
+        }
+        assert!(!writes.is_empty(), "the shaped kernel emitted no writes");
+    }
+
+    // the unshaped path is the sphere: `body_0_racc` IS a runtime scalar (the AOT kernel).
+    #[test]
+    fn unshaped_porous_kernel_reads_the_runtime_radius() {
+        let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3);
+        assert!(kernel.scalar_params.iter().any(|p| p == "body_0_racc"));
+    }
 }
