@@ -3003,18 +3003,6 @@ macro_rules! build_and_run_hydro_decomposed_refined {
 
         // refined decomposition v1 = plain hydro. these combinations each need their own cross-level
         // multi-tile handling; refuse rather than silently ignore.
-        if !cfg.bodies.is_empty() {
-            return Err("gpus>1 + refinement does not yet support immersed bodies; set gpus=1".to_string());
-        }
-        if cfg.source_json.is_some() {
-            return Err("gpus>1 + refinement does not yet support user sources; set gpus=1".to_string());
-        }
-        if cfg.mesh_motion {
-            return Err("gpus>1 + refinement does not yet support mesh motion; set gpus=1".to_string());
-        }
-        if !cfg.driven_exprs.is_empty() {
-            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
-        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -3075,8 +3063,45 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                // register the DRIVEN (DYNAMIC) boundary DAGs on the tile root AND every fine
+                // level, in Driven-id order: an edge tile's exterior faces carry Driven(id)
+                // from the physical-boundary copy above, and a fine level flush against one
+                // inherits it; interior faces and cuts are CoarseFine and never consult the
+                // dags. each level evaluates the coordinate prescription at its own GLOBAL
+                // coordinates (tiles and their hierarchies share the global origin).
+                let register = |mut ks: <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet|
+                    -> <Sim as symbi::prelude::SimSubstrate<DefaultMemory, f64, $d>>::KernelSet {
+                    for json in &cfg.driven_exprs {
+                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                            .expect("tile boundary parse");
+                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                            &bcfg,
+                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                        )
+                        .expect("tile boundary lower");
+                        ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
+                    }
+                    // the SAME user source on the tile root and every fine level: each level of
+                    // each tile evaluates S at its own GLOBAL coordinates, so a position-dependent
+                    // force is correct across cuts AND level seams; the canonical per-level stage
+                    // drives source_apply. already validated at the front door.
+                    if let Some(json) = &cfg.source_json {
+                        let scfg = symbi_hydro::SourceConfig::from_json(json)
+                            .expect("tile source parse");
+                        let built = symbi_hydro::expr_bridge::build_user_source(
+                            &scfg,
+                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                        )
+                        .expect("tile source lower");
+                        ks = ks
+                            .attach_runtime_source(built, scfg.params.clone())
+                            .expect("tile source attach");
+                    }
+                    ks
+                };
+                let sub = register(sub);
                 let make = |s: &Sim| {
-                    s.substrate().theta(theta).with_solver(solver).expect("fine kernel set")
+                    register(s.substrate().theta(theta).with_solver(solver).expect("fine kernel set"))
                 };
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
@@ -3087,6 +3112,16 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         .map_err(|e| format!("tile {flat} fine seed: {e:?}"))?;
                     h
                 };
+                // immersed bodies on every tile hierarchy at their GLOBAL positions: the finest
+                // level owns the full (accreting) bodies, coarser levels a gravity-only proxy —
+                // finest-owns-bodies per tile. the decomposed driver sums the backward feedback
+                // across tiles and advances every tile's bodies identically; the clipped sink
+                // containment (sphere overlap with a tile must lie inside ITS fine level) is
+                // asserted each step.
+                if !cfg.bodies.is_empty() {
+                    h = h.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
+                    h.attach_body_shapes(build_body_shapes(&cfg.bodies));
+                }
                 h.prime();
                 Ok(h)
             })?;

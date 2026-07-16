@@ -515,27 +515,155 @@ where
     /// interior — a sink straddling a coarse-fine boundary corrupts the mass
     /// accounting the refluxing protects.
     fn assert_sinks_inside_finest(&self) {
+        // a 1-level hierarchy has no coarse-fine boundary for a sink to straddle.
+        if self.levels.len() < 2 {
+            return;
+        }
+        self.assert_sinks_inside_finest_clipped();
+    }
+
+    /// the sink containment invariant, clipped to this hierarchy's root: only the part of
+    /// the sink sphere that overlaps the root interior must lie inside the finest level —
+    /// on a decomposed tile the sphere may span cuts (each owning tile drains its own
+    /// cells), and a tile the sphere does not touch carries no constraint. a 1-level
+    /// hierarchy has no coarse-fine boundary to straddle; the decomposed driver separately
+    /// forbids sphere overlap on an UNREFINED tile of a refined run (a coarse drain the
+    /// refluxing does not protect).
+    pub fn assert_sinks_inside_finest_clipped(&self) {
+        if self.levels.len() < 2 {
+            return;
+        }
+        let root = &self.levels[0].state;
         let finest = &self.levels[self.levels.len() - 1].state;
         let Some(im) = finest.immersed.as_ref() else {
             return;
         };
-        let geom = &finest.geom;
+        let rg = &root.geom;
+        let fg = &finest.geom;
         im.bodies.visit_accretion(|body| {
             let racc: f64 = body.accretion_radius().unwrap_or(0.0);
+            // sphere-box overlap against the ROOT interior, per axis.
+            let mut clip_lo = [0.0f64; NDIM];
+            let mut clip_hi = [0.0f64; NDIM];
+            let mut overlaps = true;
             for ax in 0..NDIM {
-                let lo = geom.x_lo[ax] + geom.interior.spaces[ax].lo as f64 * geom.dx[ax];
-                let hi = geom.x_lo[ax] + geom.interior.spaces[ax].hi as f64 * geom.dx[ax];
+                let rlo = rg.x_lo[ax] + rg.interior.spaces[ax].lo as f64 * rg.dx[ax];
+                let rhi = rg.x_lo[ax] + rg.interior.spaces[ax].hi as f64 * rg.dx[ax];
                 let p: f64 = body.position[ax];
+                clip_lo[ax] = (p - racc).max(rlo);
+                clip_hi[ax] = (p + racc).min(rhi);
+                overlaps &= clip_lo[ax] < clip_hi[ax];
+            }
+            if !overlaps {
+                return;
+            }
+            for ax in 0..NDIM {
+                let flo = fg.x_lo[ax] + fg.interior.spaces[ax].lo as f64 * fg.dx[ax];
+                let fhi = fg.x_lo[ax] + fg.interior.spaces[ax].hi as f64 * fg.dx[ax];
                 assert!(
-                    p - racc >= lo && p + racc <= hi,
-                    "refinement: body {} sink sphere [{:.4}, {:.4}] leaves the finest level \
-                     [{lo:.4}, {hi:.4}] on axis {ax}",
+                    clip_lo[ax] >= flo && clip_hi[ax] <= fhi,
+                    "refinement x decomposition: body {} sink sphere clip [{:.4}, {:.4}] leaves                      this tile's finest level [{flo:.4}, {fhi:.4}] on axis {ax}",
                     body.idx,
-                    p - racc,
-                    p + racc
+                    clip_lo[ax],
+                    clip_hi[ax]
                 );
             }
         });
+    }
+
+    /// true when any accretion sphere overlaps this hierarchy's root interior — the
+    /// decomposed driver's guard input: on a refined run an UNREFINED tile must not
+    /// drain (its coarse cells are outside every reflux-protected fine region).
+    pub fn accretion_overlaps_root(&self) -> bool {
+        let root = &self.levels[0].state;
+        let Some(im) = root.immersed.as_ref() else {
+            return false;
+        };
+        let rg = &root.geom;
+        let mut hit = false;
+        im.bodies.visit_accretion(|body| {
+            let racc: f64 = body.accretion_radius().unwrap_or(0.0);
+            let mut overlaps = true;
+            for ax in 0..NDIM {
+                let rlo = rg.x_lo[ax] + rg.interior.spaces[ax].lo as f64 * rg.dx[ax];
+                let rhi = rg.x_lo[ax] + rg.interior.spaces[ax].hi as f64 * rg.dx[ax];
+                let p: f64 = body.position[ax];
+                overlaps &= (p - racc).max(rlo) < (p + racc).min(rhi);
+            }
+            hit |= overlaps;
+        });
+        hit
+    }
+
+    /// the LOCAL half of the decomposed body step: reduce this tile's finest-level
+    /// backward feedback (force/torque/accreted mass receipts) into its diagnostics
+    /// accumulator. the caller consolidates the partials across tiles and applies the
+    /// identical global delta everywhere via `apply_global_body_deltas`.
+    pub fn finest_body_feedback(&mut self, dt: f64) {
+        if !self.levels[0].state.has_bodies() {
+            return;
+        }
+        let fi = self.levels.len() - 1;
+        let finest = &mut self.levels[fi];
+        let needs_fb = finest
+            .state
+            .immersed
+            .as_ref()
+            .is_some_and(|im| im.bodies.needs_feedback());
+        if needs_fb {
+            prof("body_feedback", || finest.kernels.body_feedback(&finest.state, dt));
+        }
+    }
+
+    /// drain this tile's finest-level body-delta partials (consolidated diagnostics),
+    /// resetting the accumulator. empty when the tile carries no bodies.
+    pub fn take_body_deltas(&mut self) -> Vec<symbi_ib::BodyDelta<f64, NDIM>> {
+        let fi = self.levels.len() - 1;
+        let Some(im) = self.levels[fi].state.immersed.as_mut() else {
+            return Vec::new();
+        };
+        let deltas = im.diagnostics.consolidate();
+        im.diagnostics.reset();
+        deltas
+    }
+
+    /// the GLOBAL half of the decomposed body step: apply the cross-tile-summed deltas +
+    /// the prescribed orbit advance to this tile's finest bodies (identical input on every
+    /// tile -> identical body state, the lockstep contract), record the global per-step
+    /// exchange in the history, sync the advanced positions/velocities to the coarser
+    /// levels, and re-check the clipped sink containment.
+    pub fn apply_global_body_deltas(
+        &mut self,
+        deltas: &[symbi_ib::BodyDelta<f64, NDIM>],
+        dt: f64,
+        time: f64,
+    ) {
+        if !self.levels[0].state.has_bodies() {
+            return;
+        }
+        let fi = self.levels.len() - 1;
+        {
+            let finest = &mut self.levels[fi].state;
+            let im = finest.immersed.as_mut().unwrap();
+            symbi_ib::apply_body_deltas(&mut im.bodies, deltas, dt);
+            im.history.push(time, dt, deltas);
+        }
+        let truth: Vec<_> = {
+            let bodies = &self.levels[fi].state.immersed.as_ref().unwrap().bodies;
+            (0..bodies.len())
+                .map(|bb| (bodies.get(bb).position, bodies.get(bb).velocity))
+                .collect()
+        };
+        for ll in 0..fi {
+            if let Some(im) = self.levels[ll].state.immersed.as_mut() {
+                for (bb, (pos, vel)) in truth.iter().enumerate() {
+                    let body = im.bodies.get_mut(bb);
+                    body.position = *pos;
+                    body.velocity = *vel;
+                }
+            }
+        }
+        self.assert_sinks_inside_finest_clipped();
     }
 
     /// march the hierarchy to t_final: the root's cfl sets dt, advance_level
@@ -1554,12 +1682,50 @@ pub fn evolve_hierarchy_decomposed<R, const NDIM: usize, const DOF: usize, M, E,
                 symbi_xpu::with_device(fg.devices[k], || tiles[i].level_restrict_reflux(0, 0.0));
             }
         }
-        // the root clock (hydro-only: motion / bodies in the root post-step are deferred).
+        // the root clock (mesh motion in the root post-step remains deferred).
         for i in 0..n {
             symbi_xpu::with_device(devices[i], || {
                 tiles[i].levels[0].state.time += gdt;
                 tiles[i].levels[0].state.iteration += 1;
             });
+        }
+        // per-step immersed-body bookkeeping, the hierarchy form of the flat decomposed
+        // body step: each tile's FINEST level reduces its LOCAL feedback partials (the
+        // tile finest interiors partition the sink region — coarser levels carry a
+        // gravity-only proxy and never drain), the deltas are summed across tiles into
+        // the true global reaction, and the identical global delta + prescribed advance
+        // is applied to every tile's bodies. identical input -> identical body state,
+        // so all tiles stay in lockstep.
+        if tiles.iter().any(|h| h.levels[0].state.has_bodies()) {
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || tiles[i].finest_body_feedback(gdt));
+            }
+            drain_devices::<Mem>(devices);
+            let mut global: Vec<symbi_ib::BodyDelta<f64, NDIM>> = Vec::new();
+            for i in 0..n {
+                for d in tiles[i].take_body_deltas() {
+                    match global.iter_mut().find(|g| g.idx == d.idx) {
+                        Some(g) => {
+                            g.force_delta = g.force_delta + d.force_delta;
+                            g.torque_delta = g.torque_delta + d.torque_delta;
+                            g.mass_delta += d.mass_delta;
+                        }
+                        None => global.push(d),
+                    }
+                }
+            }
+            let t_now = t + gdt;
+            let any_refined = tiles.iter().any(|h| h.levels.len() > 1);
+            for i in 0..n {
+                symbi_xpu::with_device(devices[i], || {
+                    tiles[i].apply_global_body_deltas(&global, gdt, t_now)
+                });
+                assert!(
+                    !(any_refined && tiles[i].levels.len() == 1 && tiles[i].accretion_overlaps_root()),
+                    "refinement x decomposition: a sink sphere overlaps UNREFINED tile {i} — the \
+                     refined patch must cover the sink on every tile it touches"
+                );
+            }
         }
         // the restrict/c2p recomputed root prim over the allocated domain (incl. the cut halo from
         // stale halo cons, and the cut-adjacent reflux ghosts); refresh for the next step's stage 0.
