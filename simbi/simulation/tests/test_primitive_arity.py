@@ -68,3 +68,11 @@ def test_undetermined_regime_tolerates_a_longer_tuple() -> None:
     prob = KeplerianRingTest()
     out = _check_first_tuple(prob, iter([(1.0, 0.0, 0.0, 1.0)]))
     assert next(out) == (1.0, 0.0, 0.0, 1.0)
+
+
+def test_undetermined_floor_scales_with_dimensionality() -> None:
+    # only the trailing pressure is optional; velocities never are. a 2d
+    # isothermal tuple missing v2 must be rejected by the lower-bound check.
+    prob = KeplerianRingTest()
+    with pytest.raises(ValueError, match=">= 3"):
+        _check_first_tuple(prob, iter([(1.0, 0.0)]))

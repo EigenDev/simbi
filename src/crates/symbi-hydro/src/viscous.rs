@@ -627,6 +627,98 @@ mod tests {
         assert!(d[0].abs() < 1e-14 && d[1].abs() < 1e-14, "{d:?}");
     }
 
+    // the CURVED-shear probe the linear tests miss: an axisymmetric keplerian field
+    // v_phi = sqrt(GM/r) (constant rho, div v = 0) has a PURELY AZIMUTHAL analytic
+    // viscous force F = rho nu laplacian(v), F_phi = -3/4 rho nu sqrt(GM) r^{-5/2},
+    // F_r = 0. a consistent operator reproduces it with O(dx^2) error and NO angular
+    // (grid-aligned m=4) variation. this prints the operator's actual behavior.
+    #[test]
+    fn keplerian_disk_viscous_force_probe() {
+        let (gm, nu) = (1.0_f64, 1.0_f64);
+        let vphi = |r: f64| (gm / r).sqrt();
+        let force_at = |r: f64, phi: f64, dx: f64| -> (f64, f64) {
+            let (cx, cy) = (r * phi.cos(), r * phi.sin());
+            let (v, rho) = stencil(cx, cy, dx, dx, |x, y| {
+                let rr = (x * x + y * y).sqrt();
+                let vp = vphi(rr);
+                [-vp * y / rr, vp * x / rr]
+            }, |_, _| 1.0);
+            let d = viscous_mom_update_2d(&v, &rho, &uni(nu), dx, dx, 1.0);
+            let fr = (d[0] * cx + d[1] * cy) / r;
+            let fphi = (-d[0] * cy + d[1] * cx) / r;
+            (fr, fphi)
+        };
+        let analytic = |r: f64| -0.75 * nu * gm.sqrt() * r.powf(-2.5);
+        let mut prev_err = f64::INFINITY;
+        for &(r, dx) in &[(4.0, 0.05), (4.0, 0.025), (4.0, 0.0125)] {
+            let fref = analytic(r);
+            let (mut frmax, mut pmin, mut pmax) = (0.0_f64, f64::INFINITY, f64::NEG_INFINITY);
+            for k in 0..64 {
+                let phi = std::f64::consts::TAU * k as f64 / 64.0;
+                let (fr, fp) = force_at(r, phi, dx);
+                frmax = frmax.max(fr.abs());
+                pmin = pmin.min(fp);
+                pmax = pmax.max(fp);
+            }
+            let spread = (pmax - pmin) / fref.abs();
+            let radial = frmax / fref.abs();
+            let err = ((0.5 * (pmin + pmax) - fref) / fref).abs();
+            // the operator is axisymmetric: NO grid-aligned (m=4) angular variation in the
+            // azimuthal force, NO spurious radial force, and the error converges with dx.
+            assert!(spread < 0.01, "azimuthal force varies with angle (grid m=4): spread={spread} at dx={dx}");
+            assert!(radial < 0.01, "spurious radial viscous force on an axisymmetric field: {radial} at dx={dx}");
+            assert!(err < prev_err, "viscous force does not converge: err={err} at dx={dx}");
+            prev_err = err;
+        }
+    }
+
+    // the SAME keplerian field but with the disk's RADIAL density profile (cavity
+    // carve-out at r_cav). the analytic viscous force stays axisymmetric (F depends
+    // on r only) for ANY rho(r), so any angular (m=4) variation in the discrete force
+    // is a grid-anisotropy BUG in the density coupling. probes the cavity edge where
+    // rho jumps ~5 decades — exactly where the sim's X originates.
+    #[test]
+    fn keplerian_disk_with_cavity_density_probe() {
+        let (gm, nu, r_cav) = (1.0_f64, 1.0_f64, 2.5_f64);
+        let vphi = |r: f64| (gm / r).sqrt();
+        let sigma = |r: f64| (1.0 - 1e-5) * (-(r_cav / r).powi(12)).exp() + 1e-5;
+        let probe = |r: f64, dx: f64| -> (f64, f64, f64) {
+            let (mut frmax, mut pmin, mut pmax) = (0.0_f64, f64::INFINITY, f64::NEG_INFINITY);
+            for k in 0..64 {
+                let phi = std::f64::consts::TAU * k as f64 / 64.0;
+                let (cx, cy) = (r * phi.cos(), r * phi.sin());
+                let (v, rho) = stencil(cx, cy, dx, dx, |x, y| {
+                    let rr = (x * x + y * y).sqrt();
+                    let vp = vphi(rr);
+                    [-vp * y / rr, vp * x / rr]
+                }, |x, y| sigma((x * x + y * y).sqrt()));
+                let d = viscous_mom_update_2d(&v, &rho, &uni(nu), dx, dx, 1.0);
+                let fr = (d[0] * cx + d[1] * cy) / r;
+                let fphi = (-d[0] * cy + d[1] * cx) / r;
+                frmax = frmax.max(fr.abs());
+                pmin = pmin.min(fphi);
+                pmax = pmax.max(fphi);
+            }
+            (frmax, pmin, pmax)
+        };
+        // from the cavity edge outward the force is O(1)-scaled and must be axisymmetric:
+        // any angular (grid m=4) variation or spurious radial force is a density-coupling
+        // anisotropy bug. measured at dx=0.02: spread <= 0.13%, |F_r| <= 0.06% of |F_phi|.
+        for &r in &[2.5, 3.0, 4.0] {
+            let (frmax, pmin, pmax) = probe(r, 0.02);
+            let scale = pmax.abs().max(pmin.abs()).max(1e-30);
+            let spread = (pmax - pmin) / scale;
+            assert!(spread < 0.01, "angular force spread {spread} at r={r} (grid anisotropy in the density coupling)");
+            assert!(frmax / scale < 0.01, "spurious radial force {frmax} at r={r} ({}% of |F_phi|)", 100.0 * frmax / scale);
+        }
+        // deep in the cavity (r below the carve-out radius) the density sits on the 1e-5
+        // floor and the residual force is dynamically negligible in ABSOLUTE terms — the
+        // relative spread there is meaningless (noise over noise).
+        let (frmax, pmin, pmax) = probe(2.0, 0.02);
+        assert!(pmin.abs().max(pmax.abs()) < 1e-4, "cavity-floor azimuthal force not negligible: [{pmin:.3e},{pmax:.3e}]");
+        assert!(frmax < 1e-4, "cavity-floor radial force not negligible: {frmax:.3e}");
+    }
+
     // null 3: a linear shear vx = S y has a CONSTANT stress -> zero divergence ->
     // zero force (constant rho). the force appears only when the stress varies.
     #[test]

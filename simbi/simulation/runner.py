@@ -463,12 +463,18 @@ def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasState
                 f"(e.g. pressure) into an ignored slot."
             )
     else:
-        min_len = 2 if getattr(problem, "isothermal", False) else 3
-        shape = "(rho, v..)" if min_len == 2 else "(rho, v.., p)"
+        # velocities are never optional: every regime carries at least one velocity
+        # per spatial dimension (curvilinear/relativistic charts may carry MORE —
+        # transverse components — which is why this is a floor, not an exact width).
+        # only the trailing pressure is optional, and only for isothermal.
+        isothermal = getattr(problem, "isothermal", False)
+        ndim = getattr(problem, "dimensionality", 1)
+        min_len = 1 + ndim + (0 if isothermal else 1)
+        shape = "(rho, v..)" if isothermal else "(rho, v.., p)"
         if len(first) < min_len:
             raise ValueError(
                 f"{name}.initial_primitive_state: each yield must be a {shape} "
-                f"sequence of >= {min_len} numbers, got {first!r}"
+                f"sequence of >= {min_len} numbers for a {ndim}d run, got {first!r}"
             )
     try:
         vals = [float(v) for v in first]

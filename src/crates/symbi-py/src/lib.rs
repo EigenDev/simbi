@@ -128,7 +128,9 @@ struct Config {
     // when present the time loop evaluates it exactly each (sub)stage (no linearization).
     motion_json: Option<String>,
     // driven (DYNAMIC) boundary prescriptions as `SourceConfig` json, in Driven-id order
-    // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). MHD path only.
+    // (driven_exprs[id] <-> the face marked BoundaryType::Driven(id)). lowered against each
+    // regime's spec at sim build: every regime prescribes the full ghost primitive state; the
+    // MHD build additionally prescribes the ghost cell B. rejected with mesh refinement.
     driven_exprs: Vec<String>,
     // gradient (Neumann / Robin) boundary coefficients, in registry order (gradient_bcs[id] <-> the
     // face marked BoundaryType::Neumann(id) / Robin(id)). the convenience prescribed-gradient wall.

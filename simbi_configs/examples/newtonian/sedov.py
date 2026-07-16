@@ -118,7 +118,11 @@ class SedovTaylor(SimbiProblem):
     @model_validator(mode="after")
     def compute_defaults(self) -> "SedovTaylor":
         """compute resolution and bounds based on input parameters."""
-        if self.resolution is None or self.bounds is None:
+        # the resolution field cannot default to None (its type is a zone tuple),
+        # so the (0, 0) placeholder marks "derive from zones per decade" — a zero
+        # zone count is never a runnable grid.
+        resolution_unset = self.resolution is None or not all(self.resolution)
+        if resolution_unset or self.bounds is None:
             # set theta boundaries based on full_sphere flag
             theta_min = 0
             theta_max = math.pi if self.full_sphere else 0.5 * math.pi
@@ -128,7 +132,7 @@ class SedovTaylor(SimbiProblem):
                     (theta_min, theta_max),
                 ]
 
-            if self.resolution is None:
+            if resolution_unset:
                 # calculate number of radial zones based on zones per decade
                 ndec = math.log10(self.rend / self.rinit)
                 nr = round(self.zpd * ndec)
