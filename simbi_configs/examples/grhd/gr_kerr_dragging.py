@@ -1,7 +1,7 @@
 # =============================================================================
 # gr_kerr_dragging.py
 #
-# the FRAME-DRAGGING manifold probe (design 44 phase C): a uniform gas on the
+# the FRAME-DRAGGING probe: a uniform gas on the
 # ZERO-ANGULAR-MOMENTUM (S_phi = 0) manifold of a spinning kerr background,
 # advected radially. on this manifold v^phi = -q v^r with q = gamma_{r phi} /
 # gamma_{phi phi}, so the angular-momentum variable w = v^phi + q v^r vanishes

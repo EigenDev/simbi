@@ -2,7 +2,7 @@
 # gr_cartesian_field_loop.py
 #
 # a poloidal magnetic field loop on a CARTESIAN kerr-schild (x, y) patch off the
-# origin (design 45 GRMHD) — the constrained-transport probe for the non-spherical
+# origin — the constrained-transport probe for the non-spherical
 # GR chart. the cartesian kerr-schild spatial metric is NON-DIAGONAL
 # (gamma_ij = delta_ij + 2M x_i x_j / r^3, r = sqrt(x^2 + y^2)), so sqrt(det gamma)
 # = sqrt(1 + 2M/r) and the CT densitizes the corner EMF with it. a compact loop is

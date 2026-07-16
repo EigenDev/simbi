@@ -1,7 +1,7 @@
 # =============================================================================
 # gr_cartesian_ks_bh.py
 #
-# a schwarzschild black hole in the CARTESIAN kerr-schild chart (design 45) — the
+# a schwarzschild black hole in the CARTESIAN kerr-schild chart — the
 # (x, y) equatorial slice of the horizon-penetrating spacetime, on a cartesian
 # patch OFF the origin so no interior excision is needed. the metric is
 # gamma_ij = delta_ij + 2M x_i x_j / r^3 (NON-diagonal), alpha = 1/sqrt(1 + 2M/r),
@@ -13,7 +13,7 @@
 # the metric is EXACTLY symmetric under x <-> y (r = sqrt(x^2 + y^2) is symmetric,
 # and gamma_ij / beta^i map into each other under the index swap), so a symmetric
 # initial state on a square patch with symmetric boundaries must evolve x <-> y
-# symmetrically to ROUNDOFF. this is the oracle-free correctness gate for the whole
+# symmetrically to ROUNDOFF. the symmetry itself is the correctness gate for the whole
 # chart-generic GR chain: any coordinate-role bug (an axis treated as radial, a
 # shift applied on one axis only) breaks the symmetry exactly. horizon-penetrating,
 # no floors.

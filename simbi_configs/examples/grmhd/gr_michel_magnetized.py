@@ -1,7 +1,7 @@
 # =============================================================================
 # gr_michel_magnetized.py
 #
-# the magnetized michel monopole — the GRMHD wiring gate (design 44 phase A): the
+# the magnetized michel monopole — the GRMHD wiring gate: the
 # exact michel (1972) transonic hydro profile threaded by a radial monopole field
 # sqrt(gamma) B^r = const on the schwarzschild grid. a radial field aligned with a
 # radial flow exerts ZERO lorentz force (E = -v x B = 0, J = 0), so the stationary

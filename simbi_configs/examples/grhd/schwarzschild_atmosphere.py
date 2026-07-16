@@ -7,7 +7,8 @@
 # mass scalar binds). the domain sits OUTSIDE the horizon r = 2M.
 #
 # without the geodesic gravity source the gas does not yet accrete; this is the
-# kernel-plumbing smoke test on the path to the michel accretion oracle (B.6).
+# kernel-plumbing smoke test: every schwarzschild source and flux term fires on a
+# static atmosphere before any accretion physics is asked of them.
 # =============================================================================
 
 from typing import Annotated

@@ -1,7 +1,7 @@
 # =============================================================================
 # gr_fishbone_moncrief_mhd.py
 #
-# the MAGNETIZED Fishbone-Moncrief torus (design 44 phase C, the MRI target): the
+# the MAGNETIZED Fishbone-Moncrief torus (the MRI seed configuration): the
 # GrFishboneMoncrief hydro torus threaded with a WEAK poloidal seed field, run on
 # the spinning-kerr RMHD kernel path (tetrad HLLD flux + UCT-HLLD sharp CT +
 # frame-dragging w-reconstruction + B^phi dragging ghost). the field is seeded

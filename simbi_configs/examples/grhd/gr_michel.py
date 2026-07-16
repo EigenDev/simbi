@@ -6,7 +6,7 @@
 # (p = K rho^gamma with one global K), so it solves the adiabatic GRHD equations,
 # and it is STATIONARY: a correct scheme must hold the profile, with the residual
 # shrinking at the truncation order under grid refinement. this makes the config
-# the accuracy oracle for the schwarzschild valencia path (flux densitization,
+# the accuracy benchmark for the schwarzschild valencia path (flux densitization,
 # geodesic sources, banyuls-font wave speeds), complementing the uniform-gas
 # transient in gr_bondi.py which tests development, not accuracy.
 #

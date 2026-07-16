@@ -865,6 +865,17 @@ where
 
         self.advance_level(0, dt, 0.0);
 
+        // horizon excision, ONCE per step after the full RK combination (the same
+        // point the single-grid loop applies it): overwrite the causally
+        // disconnected cells inside the excision sphere with a zero-gradient
+        // outward primitive copy + local conserved rebuild. inert at zero radius
+        // (the kernel set gates on r_exc > 0); the excision request gate rejects
+        // refined runs, so the root level is the only carrier.
+        {
+            let l = &self.levels[0];
+            l.kernels.excise(&l.state);
+        }
+
         let root = &mut self.levels[0];
         // homologous linear advance ONLY when there is no traced motion law.
         if root.state.motion_law.is_none() && root.state.motion.homologous {

@@ -1,7 +1,7 @@
 # =============================================================================
 # gr_cylindrical_ks_bh.py
 #
-# a schwarzschild black hole in the CYLINDRICAL kerr-schild chart (design 45 phase 2)
+# a schwarzschild black hole in the CYLINDRICAL kerr-schild chart
 # — the 2.5D axisymmetric (R, z) grid carrying the azimuthal v_phi DOF, the natural
 # chart for relativistic jets and accretion disks around a hole. the metric is
 # gamma_RR = 1 + 2H R^2/r^2, gamma_zz = 1 + 2H z^2/r^2, gamma_Rz = 2H Rz/r^2,
@@ -14,7 +14,7 @@
 # the metric is EXACTLY symmetric under z -> -z (r = sqrt(R^2 + z^2) is even in z, and
 # gamma_Rz / beta^z flip sign with the z-momentum), so a z-symmetric initial state on a
 # grid symmetric about z = 0 must evolve z-REFLECTION symmetrically to roundoff: rho / p
-# even in z, v_z ODD, v_R / v_phi even. this is the oracle-free correctness gate for the
+# even in z, v_z ODD, v_R / v_phi even. the symmetry itself is the correctness gate for the
 # cylindrical chart — the analog of the cartesian x <-> y test — catching any
 # coordinate-role or one-axis-shift bug (e.g. the densitization lapse using R as the
 # radius instead of sqrt(R^2 + z^2)). horizon-penetrating, no floors.

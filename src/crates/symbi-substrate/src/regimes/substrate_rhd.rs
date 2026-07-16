@@ -312,7 +312,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn excise(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // inert unless a positive excision radius was configured; the dispatch
-        // asserts the baked combination (2d cartesian kerr-schild) fail-loud.
+        // asserts the baked combination (2d/3d cartesian kerr-schild) fail-loud.
         if self.excision_radius > 0.0 {
             crate::regimes::substrate_kernels::dispatch_excise(sim, self.gamma, self.excision_radius);
         }

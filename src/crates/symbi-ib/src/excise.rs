@@ -47,6 +47,37 @@ pub fn onion_fill_cell<S: Scalar, const NF: usize>(
     })
 }
 
+/// the 3d onion sweep: every excised cell (|x| < r_exc) takes the primitive state of
+/// its outward CORNER-diagonal neighbor, selected by (sign(x), sign(y), sign(z)) — the
+/// step strictly increases |x| on every axis, so repeated sweeps are monotone
+/// rim -> center and terminate at live donors. `diags` are the 8 corner neighbors in
+/// z-fastest sign order: [mmm, mmp, mpm, mpp, pmm, pmp, ppm, ppp] (p = +1, m = -1 on
+/// the (x, y, z) axes respectively).
+pub fn onion_fill_cell_3d<S: Scalar, const NF: usize>(
+    own: [S; NF],
+    diags: &[[S; NF]; 8],
+    x_c: [S; 3],
+    r_exc: S,
+) -> [S; NF] {
+    let x_pos = x_c[0].cmp_ge(S::ZERO);
+    let y_pos = x_c[1].cmp_ge(S::ZERO);
+    let z_pos = x_c[2].cmp_ge(S::ZERO);
+    let r = (x_c[0] * x_c[0] + x_c[1] * x_c[1] + x_c[2] * x_c[2]).sqrt();
+    let excised = r.cmp_lt(r_exc);
+    std::array::from_fn(|kk| {
+        // three-level sign select down the corner tree: z within each (x, y) pair,
+        // then y within each x half, then x.
+        let pp = S::select(z_pos, diags[7][kk], diags[6][kk]);
+        let pm = S::select(z_pos, diags[5][kk], diags[4][kk]);
+        let mp = S::select(z_pos, diags[3][kk], diags[2][kk]);
+        let mm = S::select(z_pos, diags[1][kk], diags[0][kk]);
+        let px = S::select(y_pos, pp, pm);
+        let mx = S::select(y_pos, mp, mm);
+        let outward = S::select(x_pos, px, mx);
+        S::select(excised, outward, own[kk])
+    })
+}
+
 /// the sweep count that guarantees every excised cell holds a rim-propagated
 /// value: the deepest cell sits `r_exc / min_dx` cells from the rim along the
 /// slowest (single-axis-dominant) path, plus margin for the staircase corners.
@@ -158,5 +189,59 @@ mod tests {
                 assert_eq!(out[ii][jj], out[jj][ii], "symmetry broken at ({ii},{jj})");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_3d {
+    use super::*;
+
+    #[test]
+    fn uniform_state_is_preserved_bitwise_3d() {
+        let u = [1.3_f64, -0.2, 0.7, 0.1, 4.0e-3];
+        let diags = [u; 8];
+        for &(x, y, z) in &[(0.1_f64, 0.1, 0.1), (5.0, 5.0, 5.0), (-0.3, 0.2, -0.4)] {
+            let got = onion_fill_cell_3d(u, &diags, [x, y, z], 1.4);
+            assert_eq!(got, u, "at ({x},{y},{z})");
+        }
+    }
+
+    #[test]
+    fn excised_cell_takes_the_outward_corner_per_octant() {
+        // donor values encode their corner: 100*sx + 10*sy + sz with s in {1(+), 2(-)}.
+        let own = [0.0_f64];
+        let val = |sx: i32, sy: i32, sz: i32| -> [f64; 1] {
+            [(100 * if sx > 0 { 1 } else { 2 } + 10 * if sy > 0 { 1 } else { 2 }
+                + if sz > 0 { 1 } else { 2 }) as f64]
+        };
+        // z-fastest sign order: mmm, mmp, mpm, mpp, pmm, pmp, ppm, ppp.
+        let diags = [
+            val(-1, -1, -1),
+            val(-1, -1, 1),
+            val(-1, 1, -1),
+            val(-1, 1, 1),
+            val(1, -1, -1),
+            val(1, -1, 1),
+            val(1, 1, -1),
+            val(1, 1, 1),
+        ];
+        let r_exc = 10.0;
+        for &(x, y, z) in &[
+            (1.0_f64, 1.0, 1.0),
+            (1.0, 1.0, -1.0),
+            (1.0, -1.0, 1.0),
+            (1.0, -1.0, -1.0),
+            (-1.0, 1.0, 1.0),
+            (-1.0, 1.0, -1.0),
+            (-1.0, -1.0, 1.0),
+            (-1.0, -1.0, -1.0),
+        ] {
+            let got = onion_fill_cell_3d(own, &diags, [x, y, z], r_exc)[0];
+            let want = val(x.signum() as i32, y.signum() as i32, z.signum() as i32)[0];
+            assert_eq!(got, want, "octant ({x},{y},{z}) picked the wrong corner donor");
+        }
+        // a live cell (outside r_exc) keeps its own state.
+        let live = onion_fill_cell_3d(own, &diags, [20.0, 20.0, 20.0], r_exc)[0];
+        assert_eq!(live, 0.0, "live cell must keep its own value");
     }
 }

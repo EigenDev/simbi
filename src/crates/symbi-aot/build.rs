@@ -1787,7 +1787,7 @@ fn main() {
             emit_gv(&out_dir, &viscous_ortho_name("viscous_iso_alpha_ortho", geom, 2), 2, &k, &writes);
         }
     }
-    // horizon excision (cartesian kerr-schild 2d): the onion-sweep fill pair
+    // horizon excision (cartesian kerr-schild, 2d + 3d): the onion-sweep fill pair
     // (chart-agnostic prim propagation on the uniform grid) + the valencia
     // conserved rebuild at the cell's own metric.
     {
@@ -1797,6 +1797,12 @@ fn main() {
         emit_gv(&out_dir, "excise_writeback_2d", 2, &k, &writes);
         let (k, writes) = symbi_discretize::excise_p2c_gv();
         emit_gv(&out_dir, "excise_p2c_cart_ks_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_fill_3d_gv();
+        emit_gv(&out_dir, "excise_fill_3d", 3, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_writeback_3d_gv();
+        emit_gv(&out_dir, "excise_writeback_3d", 3, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_p2c_3d_gv();
+        emit_gv(&out_dir, "excise_p2c_cart_ks_3d", 3, &k, &writes);
     }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.
@@ -1856,14 +1862,13 @@ fn main() {
     // (flat cartesian face measure + the covariant geodesic source), the state-independent light-cone
     // CFL (the diagonal Banyuls-Font form does not apply to a non-diagonal metric), and the
     // metric-aware c2p / per-sweep flux (the shift rides every sweep's fan). tagged `_ks` (cartesian
-    // suffix is empty). 2D only (the equatorial slice; the 3D lift is unbaked).
-    {
-        let ks = Geom::cart(2).kerr_schild();
-        gen_godunov_stage(&out_dir, 2, "rhd", true, ks.clone(), None);
-        gen_rhd_wave_speed_map(&out_dir, 2, ks.clone());
-        gen_rhd_c2p_gr(&out_dir, 2, 20, ks.clone());
-        for dir in 0..2 {
-            gen_rhd_face_flux_gr(&out_dir, 2, dir, ks.clone());
+    // suffix is empty). baked for the 2D equatorial slice and the full 3D box.
+    for (ks, ndim) in [(Geom::cart(2).kerr_schild(), 2u8), (Geom::cart(3).kerr_schild(), 3u8)] {
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, ks.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, ndim, ks.clone());
+        gen_rhd_c2p_gr(&out_dir, ndim, 20, ks.clone());
+        for dir in 0..ndim {
+            gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks.clone());
         }
     }
     // GR CYLINDRICAL kerr-schild (design 45): the natural chart for AXISYMMETRIC relativistic

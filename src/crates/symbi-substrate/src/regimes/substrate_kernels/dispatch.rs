@@ -225,7 +225,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     Sc: Scalar + OrderedNumeric,
 {
     let geom = &sim.geom;
-    assert_eq!(D, 2, "excision is baked for the 2d cartesian kerr-schild slice");
+    assert!(D == 2 || D == 3, "excision is baked for the 2d and 3d cartesian kerr-schild charts");
     assert_eq!(DOF, D, "excision needs the full velocity DOF");
     assert_eq!(
         geom.coords,
@@ -268,16 +268,23 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
             other => panic!("excise: unexpected scalar {other:?}"),
         })
     };
-    let fill_scalars = scalars_for("excise_fill_2d", &resolve);
-    let wb_scalars = scalars_for("excise_writeback_2d", &resolve);
-    let p2c_scalars = scalars_for("excise_p2c_cart_ks_2d", &resolve);
+    let fill_name = format!("excise_fill_{D}d");
+    let wb_name = format!("excise_writeback_{D}d");
+    let p2c_name = format!("excise_p2c_cart_ks_{D}d");
+    let fill_scalars = scalars_for(&fill_name, &resolve);
+    let wb_scalars = scalars_for(&wb_name, &resolve);
+    let p2c_scalars = scalars_for(&p2c_name, &resolve);
 
+    // the primitive set is rho + D velocities + pre; the conserved set den + D momenta + nrg.
     let pre = sim.fields.prim.pre_field().expect("excision requires prim.pre (GR hydro)");
-    let prim: [&Field<Sc, D, Mem>; 4] =
-        [&sim.fields.prim.rho, &sim.fields.prim.vel[0], &sim.fields.prim.vel[1], pre];
-    let scratch = feedback_scratch(sim, 4);
-    let scratch_refs: [&Field<Sc, D, Mem>; 4] =
-        std::array::from_fn(|kk| &scratch[kk]);
+    let mut prim: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
+    for kk in 0..D {
+        prim.push(&sim.fields.prim.vel[kk]);
+    }
+    prim.push(pre);
+    let nf = D + 2;
+    let scratch = feedback_scratch(sim, nf);
+    let scratch_refs: Vec<&Field<Sc, D, Mem>> = (0..nf).map(|kk| &scratch[kk]).collect();
 
     // K sweeps of fill (prim -> scratch) + writeback (scratch -> prim): the parallel
     // stencil never reads a value written by the same sweep. min-width from the
@@ -285,7 +292,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     let min_dx = geom.dx.iter().cloned().fold(f64::INFINITY, f64::min);
     for _ in 0..symbi_ib::excise::onion_pass_count(r_exc, min_dx) {
         dispatch_fields::<Sc, Mem, D>(
-            "excise_fill_2d",
+            &fill_name,
             &geom.allocated,
             &bbox,
             &prim,
@@ -294,7 +301,7 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
             &fill_scalars,
         );
         dispatch_fields::<Sc, Mem, D>(
-            "excise_writeback_2d",
+            &wb_name,
             &geom.allocated,
             &bbox,
             &scratch_refs,
@@ -304,14 +311,13 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
         );
     }
     // the conserved rebuild: prim reads, cons in-place (live cells pass through).
-    let cons: [&Field<Sc, D, Mem>; 4] = [
-        &sim.fields.cons.den,
-        &sim.fields.cons.mom[0],
-        &sim.fields.cons.mom[1],
-        sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR hydro)"),
-    ];
+    let mut cons: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+    for kk in 0..D {
+        cons.push(&sim.fields.cons.mom[kk]);
+    }
+    cons.push(sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR hydro)"));
     dispatch_fields::<Sc, Mem, D>(
-        "excise_p2c_cart_ks_2d",
+        &p2c_name,
         &geom.allocated,
         &bbox,
         &prim,

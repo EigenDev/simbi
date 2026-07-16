@@ -2,7 +2,7 @@
 # gr_disk_ks_bh.py
 #
 # a schwarzschild black hole seen by an equatorial (R, phi) accretion DISK in the
-# cylindrical kerr-schild chart (design 45) — the razor-thin z = 0 slice. on the
+# cylindrical kerr-schild chart — the razor-thin z = 0 slice. on the
 # equator the spherical and cylindrical radii coincide (r = R), so the kerr-schild
 # off-diagonal vanishes and the metric is DIAGONAL: gamma = diag(1 + 2M/R, R^2),
 # alpha = 1/sqrt(1 + 2M/R), shift beta^R = 2M/(R + 2M) (beta^phi = 0), alpha sqrt(gamma)
@@ -11,7 +11,7 @@
 # at rest free-falls radially under the covariant geodesic source.
 #
 # the metric is AXISYMMETRIC (phi-independent: it never reads phi), so a phi-uniform
-# initial state must stay phi-uniform to roundoff — the oracle-free correctness gate for
+# initial state must stay phi-uniform to roundoff — the symmetry itself is the gate for
 # the disk chart, catching any azimuthal coordinate-role bug. horizon-penetrating, no floors.
 #
 # usage:

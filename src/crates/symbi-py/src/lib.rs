@@ -97,8 +97,8 @@ struct Config {
     viscosity: f64,
     alpha: f64,
     resistivity: f64,
-    // horizon-excision sphere radius about the chart origin (cartesian kerr-schild
-    // 2d only); 0 disables excision. must sit inside the horizon r_+ = 2M.
+    // horizon-excision sphere radius about the chart origin (cartesian kerr-schild,
+    // 2d or 3d); 0 disables excision. must sit inside the horizon r_+ = 2M.
     excision_radius: f64,
     x1_spacing: String,
     start_time: f64,
@@ -3421,6 +3421,7 @@ macro_rules! hydro_dispatch {
                     && !matches!(
                         (d, c, $cfg.spacetime.as_str()),
                         (2, "cartesian", "kerr_schild")
+                            | (3, "cartesian", "kerr_schild")
                             | (1, "spherical", "schwarzschild")
                             | (2, "spherical", "schwarzschild")
                             | (1, "spherical", "kerr_schild")
@@ -3446,6 +3447,13 @@ macro_rules! hydro_dispatch {
             // axis). guarded BEFORE the flat cartesian arm; 2D equatorial slice, DOF = 2 (no swirl).
             (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
                 $cfg, $prims, $regime, $regime_ty, 2, 2,
+                SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
+                SchwarzschildKSCartesian<f64>
+            ),
+            // GR (kerr-schild) CARTESIAN 3D: the full horizon-penetrating box — no polar axis
+            // anywhere, so a torus resolves its poles like any other direction. DOF = NDIM = 3.
+            (3, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 3, 3,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
             ),
@@ -5202,8 +5210,8 @@ fn check_horizon_containment(
     Ok(())
 }
 
-/// the excision-request gate: a positive excision radius is only meaningful on the
-/// baked combination — the 2d cartesian kerr-schild slice with the sphere strictly
+/// the excision-request gate: a positive excision radius is only meaningful on a
+/// baked combination — the 2d or 3d cartesian kerr-schild chart with the sphere strictly
 /// inside the horizon r_+ = 2M (excising exterior gas would delete causally connected
 /// flow) and strictly above the metric-guard radius M/2 (below it the metric is frozen
 /// and the fill would read constant-metric cells as if they were physical). refinement
@@ -5220,11 +5228,11 @@ fn check_excision_request(
     if excision_radius <= 0.0 {
         return Ok(());
     }
-    if spacetime != "kerr_schild" || coord_system != "cartesian" || dims != 2 {
+    if spacetime != "kerr_schild" || coord_system != "cartesian" || !matches!(dims, 2 | 3) {
         return Err(format!(
-            "excision_radius = {excision_radius} requires the 2d cartesian kerr-schild chart; \
-             got (dims={dims}, coords={coord_system}, spacetime={spacetime}). spherical charts \
-             hide the horizon behind r_min instead."
+            "excision_radius = {excision_radius} requires the 2d or 3d cartesian kerr-schild \
+             chart; got (dims={dims}, coords={coord_system}, spacetime={spacetime}). spherical \
+             charts hide the horizon behind r_min instead."
         ));
     }
     let r_plus = 2.0 * mass;
