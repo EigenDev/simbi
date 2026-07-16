@@ -172,6 +172,12 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// resistive edge EMF before the CT curl). 0 = ideal MHD (bit-identical). the resistive CFL
     /// `dt <= 1/2 dx^2 / eta` folds into the wave-speed reduction.
     pub resistivity: f64,
+    /// constant kinematic viscosity `nu` (the Navier-Stokes shear on the velocity, ORTHOGONAL to the
+    /// resistive diffusion of B). 0 = inviscid. >0 runs the viscous force + (energy regime) the viscous
+    /// heating onto the total energy; B is untouched, so the heat warms the gas with 1/2 B^2 preserved.
+    /// finite magnetic Prandtl number Pm = nu / eta. cartesian; full 3D (D==DOF) now, 2.5D pending the
+    /// DOF-aware kernel. caps dt at C_visc dx^2 / nu.
+    pub viscosity: f64,
     _r: PhantomData<R>,
 }
 
@@ -184,7 +190,7 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, _r: PhantomData }
+        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, viscosity: 0.0, _r: PhantomData }
     }
 
     /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
@@ -365,6 +371,23 @@ where
     }
 }
 
+impl<R, Mem, Sc, const D: usize> symbi_sim::substrate_seam::WithViscosity
+    for MhdSubstrateKernelSet<R, Mem, Sc, D>
+where
+    R: Regime<Sc, D>,
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    fn with_viscosity(mut self, nu: f64) -> Self {
+        self.viscosity = nu;
+        self
+    }
+    fn with_alpha(self, _alpha: f64) -> Self {
+        panic!("MHD alpha viscosity is not built (needs a reference sound speed); use constant-nu \
+                with_viscosity");
+    }
+}
+
 impl<R, Mem, Sc, const D: usize> KernelSet<D, 3, Mem, Sc>
     for MhdSubstrateKernelSet<R, Mem, Sc, D>
 where
@@ -372,6 +395,24 @@ where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
+    fn viscous(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
+        if self.viscosity <= 0.0 {
+            return;
+        }
+        // viscosity acts on the velocity (orthogonal to the resistive diffusion of B); the energy
+        // regime also books the viscous heating onto the total energy (B untouched -> the gas heats,
+        // 1/2 B^2 preserved). full 3D MHD (D=DOF=3) uses the plain 3D kernel; 2.5D MHD (D=2, DOF=3)
+        // uses the DOF-aware `_dof3` kernel (dispatched by DOF!=D) so the toroidal velocity diffuses.
+        // cartesian only.
+        assert!(
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian && (D == 2 || D == 3),
+            "MHD viscosity is built for cartesian charts only (2.5D or full 3D); the {:?} chart in {D}D \
+             needs the curvilinear viscous energy flux, not yet built. use a cartesian grid or nu = 0.",
+            sim.geom.coords
+        );
+        crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
+    }
+
     fn flux(&self, sim: &FieldStore<D, 3, Mem, Sc>, dir: usize) {
         // the production sweep: the configured solver + slope limiter.
         let gr_solver = if matches!(self.solver, Solver::Hlld) { "_hlld" } else { "" };
@@ -603,7 +644,18 @@ where
         if !crate::regimes::substrate_kernels::state_finite_over_allocated(sim, pre_bind, &self.cfl_scratch) {
             lambda_max = f64::INFINITY;
         }
-        cfl_from_lambda(lambda_max, self.cfl_number)
+        let dt = cfl_from_lambda(lambda_max, self.cfl_number);
+        // the parabolic viscous cap dt <= C_visc dx^2 / nu (C_visc = 0.1), ON TOP of the wave +
+        // resistive rate. cartesian 3D only (where MHD viscosity is built), so coordinate dx is
+        // physical. the resistive and viscous limits stack: a resistive-viscous run is bounded by
+        // whichever diffusion is stiffer.
+        if self.viscosity > 0.0 {
+            const C_VISC: f64 = 0.1;
+            let min_dx = geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
+            dt.min(C_VISC * min_dx * min_dx / self.viscosity)
+        } else {
+            dt
+        }
     }
 
     // ---- regime-agnostic tails: the gas godunov + the full CT stack (shared AOT kernels) ----

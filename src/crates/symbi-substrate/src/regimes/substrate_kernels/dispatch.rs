@@ -339,11 +339,19 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
     let name: String = match geom.coords {
         symbi_geometry::Geometry::Cartesian => {
             assert!(D == 2 || D == 3, "cartesian viscosity is baked for 2D/3D");
-            if has_energy {
-                assert_eq!(D, 2, "adiabatic (energy-heating) viscosity is baked for cartesian 2D only");
-                "viscous_adiabatic_2d".to_string()
+            let base = if has_energy {
+                format!("viscous_adiabatic_{D}d")
             } else {
                 symbi_ir::KernelId::ViscousIso { ndim: D as u8 }.name().to_string()
+            };
+            // 2.5D MHD (DOF=3 momentum on a 2-axis grid) selects the DOF-aware `_dof3` kernel, which
+            // diffuses ALL three momentum components (the toroidal velocity) + the energy heating;
+            // hydro / full 3D MHD (DOF==D) keep the base name.
+            if DOF != D {
+                assert!(D == 2 && DOF == 3, "the only DOF>ndim viscous case is 2.5D MHD (D=2, DOF=3)");
+                format!("{base}_dof{DOF}")
+            } else {
+                base
             }
         }
         symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {

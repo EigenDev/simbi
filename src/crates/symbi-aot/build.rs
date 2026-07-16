@@ -1752,8 +1752,17 @@ fn main() {
         let (k, writes) = symbi_discretize::viscous_iso_gv();
         emit_gv(&out_dir, KernelId::ViscousIso { ndim: 2 }.name(), 2, &k, &writes);
         // the ADIABATIC twin: same div(tau) momentum + the viscous energy flux div(tau.v) onto nrg.
+        // 2D + 3D (3D serves full-3D MHD viscosity, where D == DOF == 3).
         let (k, writes) = symbi_discretize::viscous_adiabatic_gv();
         emit_gv(&out_dir, "viscous_adiabatic_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::viscous_adiabatic_gv_3d();
+        emit_gv(&out_dir, "viscous_adiabatic_3d", 3, &k, &writes);
+        // the 2.5D DOF-aware twins (D=2 grid, DOF=3 momentum) for 2.5D MHD: the toroidal velocity
+        // diffuses. iso (momentum only) + adiabatic (+ energy heating). named `_2d_dof3`.
+        let (k, writes) = symbi_discretize::viscous_iso_gv_2p5d();
+        emit_gv(&out_dir, "viscous_iso_2d_dof3", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::viscous_adiabatic_gv_2p5d();
+        emit_gv(&out_dir, "viscous_adiabatic_2d_dof3", 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_alpha_gv();
         emit_gv(&out_dir, KernelId::ViscousIsoAlpha { ndim: 2 }.name(), 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_gv_3d();

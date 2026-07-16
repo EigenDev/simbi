@@ -266,6 +266,85 @@ pub fn viscous_iso_gv_3d() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
+/// trace the constant-nu ADIABATIC viscous operator, 3D cartesian: the SAME `dt div(tau)` momentum as
+/// `viscous_iso_gv_3d` PLUS the total-energy increment `dt div(tau . v)` onto `cons.nrg`. serves both
+/// adiabatic hydro AND full-3D MHD (viscosity leaves B untouched, so the flux heats the gas with the
+/// 1/2 B^2 preserved). runs post-c2p.
+pub fn viscous_adiabatic_gv_3d() -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let nu = Gv::scalar("nu");
+    let dx = Gv::scalar("dx_0");
+    let dy = Gv::scalar("dx_1");
+    let dz = Gv::scalar("dx_2");
+
+    let (vst, rst) = prim_stencil_3d();
+    let nust = [[[nu; 3]; 3]; 3];
+    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_3d(&vst, &rst, &nust, [dx, dy, dz], dt);
+    let mom0 = Gv::field("mom0", FieldRef::cons_mom(0));
+    let mom1 = Gv::field("mom1", FieldRef::cons_mom(1));
+    let mom2 = Gv::field("mom2", FieldRef::cons_mom(2));
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    let writes = vec![
+        ("mom_out_0".to_string(), FieldRef::cons_mom(0).into(), (mom0 + dmom[0]).node()),
+        ("mom_out_1".to_string(), FieldRef::cons_mom(1).into(), (mom1 + dmom[1]).node()),
+        ("mom_out_2".to_string(), FieldRef::cons_mom(2).into(), (mom2 + dmom[2]).node()),
+        ("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()),
+    ];
+    (end_trace(), writes)
+}
+
+/// read the primitive `(3-vector velocity, density)` 3x3 IN-PLANE stencil about the current cell — the
+/// DOF=3 velocity a 2.5D MHD flow carries on a 2-axis grid (the out-of-plane v_2 is real, just
+/// gridless in that axis).
+fn prim_stencil_2p5d() -> ([[Tensor<Gv, 3>; 3]; 3], [[Gv; 3]; 3]) {
+    const NDIM: u8 = 2;
+    let mut vst = [[Tensor::<Gv, 3>::zeros(); 3]; 3];
+    let mut rst = [[Gv::ZERO; 3]; 3];
+    for jj in 0..3usize {
+        for ii in 0..3usize {
+            let off = [ii as i32 - 1, jj as i32 - 1];
+            rst[jj][ii] = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
+            let v0 = Gv::field_offset("prim_v0", FieldRef::PrimVel(0), NDIM, &off);
+            let v1 = Gv::field_offset("prim_v1", FieldRef::PrimVel(1), NDIM, &off);
+            let v2 = Gv::field_offset("prim_v2", FieldRef::PrimVel(2), NDIM, &off);
+            vst[jj][ii] = Tensor::new([v0, v1, v2]);
+        }
+    }
+    (vst, rst)
+}
+
+/// the constant-nu 2.5D DOF-aware viscous operator (D=2 grid, DOF=3 momentum). two variants share the
+/// stencil + `viscous_update_2p5d`: the ISOTHERMAL twin writes the 3 momentum components; the
+/// ADIABATIC twin ALSO writes the total-energy heating. serves 2.5D MHD (the toroidal velocity
+/// diffuses; B is untouched so the heat warms the gas).
+pub fn viscous_iso_gv_2p5d() -> (GvKernel, Writes) {
+    viscous_2p5d_impl(false)
+}
+pub fn viscous_adiabatic_gv_2p5d() -> (GvKernel, Writes) {
+    viscous_2p5d_impl(true)
+}
+fn viscous_2p5d_impl(has_energy: bool) -> (GvKernel, Writes) {
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let nu = Gv::scalar("nu");
+    let dx = Gv::scalar("dx_0");
+    let dy = Gv::scalar("dx_1");
+    let (vst, rst) = prim_stencil_2p5d();
+    let nust = [[nu; 3]; 3];
+    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
+    let mut writes: Writes = Vec::new();
+    for c in 0..3 {
+        let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+        writes.push((format!("mom_out_{c}"), FieldRef::cons_mom(c as u8).into(), (mom_c + dmom[c]).node()));
+    }
+    if has_energy {
+        let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+    }
+    (end_trace(), writes)
+}
+
 /// trace the alpha-viscosity isothermal operator, 3D cartesian. the disk lies in
 /// the x-y plane with rotation axis z, so the Keplerian frequency is set by the
 /// CYLINDRICAL radius `R = sqrt((x-x_body)^2 + (y-y_body)^2)` — the vertical

@@ -362,6 +362,95 @@ pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
     Tensor::new([dt * f1, dt * f2])
 }
 
+/// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to IN-PLANE axis `a` (0 or 1) for a
+/// 2.5D flow: a 3x3 in-plane stencil carrying the FULL 3-vector velocity, with the OUT-OF-PLANE axis
+/// frozen (`d_2 = 0`, the 2.5D symmetry). the out-of-plane velocity `v_2` shears in-plane
+/// (`tau_2a = mu d_a v_2`), so a rotating disk's toroidal velocity diffuses -- the DOF > ndim case a
+/// 2D grid cannot express by dimension alone.
+fn face_stress_2p5d<S: Scalar>(
+    v: &[[Tensor<S, 3>; 3]; 3],
+    rho: &[[S; 3]; 3],
+    nu: &[[S; 3]; 3],
+    a: usize,
+    hi: bool,
+    dx: [S; 2],
+) -> [S; 3] {
+    let half = S::from_f64(0.5);
+    let two = S::from_f64(2.0);
+    let two_thirds = S::from_f64(2.0 / 3.0);
+    let (la, ra) = if hi { (1usize, 2usize) } else { (0usize, 1usize) };
+    let b = 1 - a;
+    // 2D stencil index [ii, jj] (v[jj][ii]) with axis a at `along`, the transverse axis b at `trans`.
+    let mk = |along: usize, trans: usize| -> [usize; 2] {
+        let mut o = [1usize; 2];
+        o[a] = along;
+        o[b] = trans;
+        o
+    };
+    let g = |o: [usize; 2], c: usize| v[o[1]][o[0]][c];
+    let rr = |o: [usize; 2]| rho[o[1]][o[0]];
+    let nn = |o: [usize; 2]| nu[o[1]][o[0]];
+    let (lo, ro) = (mk(la, 1), mk(ra, 1));
+    let tiny = S::from_f64(1e-300);
+    let (rl, rh_) = (rr(lo), rr(ro));
+    let mu = (two * rl * rh_ / (rl + rh_ + tiny)) * (half * (nn(lo) + nn(ro)));
+    // grad[j][k] = d v_j / d x_k at the face; k in {a, b} (in-plane), grad[.][2] = 0 (2.5D freeze).
+    let mut grad = [[S::ZERO; 3]; 3];
+    for j in 0..3 {
+        grad[j][a] = (g(ro, j) - g(lo, j)) / dx[a];
+        let (lp, lm, rp, rm) = (mk(la, 2), mk(la, 0), mk(ra, 2), mk(ra, 0));
+        let cl = (g(lp, j) - g(lm, j)) / (two * dx[b]);
+        let cr = (g(rp, j) - g(rm, j)) / (two * dx[b]);
+        grad[j][b] = half * (cl + cr);
+    }
+    let div = grad[0][0] + grad[1][1]; // d_2 v_2 = 0
+    let mut tau = [S::ZERO; 3];
+    for i in 0..3 {
+        // tau_ia = mu (d_a v_i + d_i v_a - 2/3 delta_ia div); d_i v_a = 0 for i = 2 (the frozen axis).
+        let mut t = grad[i][a] + grad[a][i];
+        if i == a {
+            t = t - two_thirds * div;
+        }
+        tau[i] = mu * t;
+    }
+    tau
+}
+
+/// the ADIABATIC viscous increment for a 2.5D flow (D=2 grid, DOF=3 momentum): `dt div(tau)` over the
+/// two in-plane axes onto ALL THREE momentum components (including the out-of-plane one) PLUS
+/// `dt div(tau . v)` onto the total energy. the out-of-plane momentum diffuses by the in-plane
+/// Laplacian; the energy flux carries its work. for MHD, B is untouched, so the heat warms the gas.
+pub fn viscous_update_2p5d<S: Scalar>(
+    v: &[[Tensor<S, 3>; 3]; 3],
+    rho: &[[S; 3]; 3],
+    nu: &[[S; 3]; 3],
+    dx: [S; 2],
+    dt: S,
+) -> (Tensor<S, 3>, S) {
+    let half = S::from_f64(0.5);
+    let center = [1usize, 1usize];
+    let g = |o: [usize; 2], c: usize| v[o[1]][o[0]][c];
+    let mut dmom = [S::ZERO; 3];
+    let mut dnrg = S::ZERO;
+    for a in 0..2 {
+        let sp = face_stress_2p5d(v, rho, nu, a, true, dx);
+        let sm = face_stress_2p5d(v, rho, nu, a, false, dx);
+        for i in 0..3 {
+            dmom[i] = dmom[i] + dt * (sp[i] - sm[i]) / dx[a];
+        }
+        let (mut plus, mut minus) = (center, center);
+        plus[a] = 2;
+        minus[a] = 0;
+        let (mut f_ap, mut f_am) = (S::ZERO, S::ZERO);
+        for c in 0..3 {
+            f_ap = f_ap + sp[c] * (half * (g(center, c) + g(plus, c)));
+            f_am = f_am + sm[c] * (half * (g(minus, c) + g(center, c)));
+        }
+        dnrg = dnrg + dt * (f_ap - f_am) / dx[a];
+    }
+    (Tensor::new(dmom), dnrg)
+}
+
 /// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to axis `a`
 /// of the center cell (`hi` = the +a face i+1/2, else the -a face i-1/2), from
 /// the 3x3x3 velocity/density/viscosity stencil. the normal gradient is compact
@@ -435,15 +524,45 @@ pub fn viscous_mom_update_3d<S: Scalar>(
     dx: [S; 3],
     dt: S,
 ) -> Tensor<S, 3> {
+    viscous_update_3d(v, rho, nu, dx, dt).0
+}
+
+/// the ADIABATIC viscous increment (3D): `dt div(tau)` momentum (bit-identical to
+/// `viscous_mom_update_3d`) PLUS `dt div(tau . v)` onto the total energy — the viscous energy flux
+/// `F_a = tau_ia v_i` on each of the six faces, with v face-interpolated. conserves total energy;
+/// the heating `Phi = tau : grad(v) >= 0` warms the gas. shared by adiabatic hydro AND MHD (viscosity
+/// never touches B, so adding dnrg to the MHD total energy heats the gas with 1/2 B^2 untouched).
+pub fn viscous_update_3d<S: Scalar>(
+    v: &[[[Tensor<S, 3>; 3]; 3]; 3],
+    rho: &[[[S; 3]; 3]; 3],
+    nu: &[[[S; 3]; 3]; 3],
+    dx: [S; 3],
+    dt: S,
+) -> (Tensor<S, 3>, S) {
+    let half = S::from_f64(0.5);
+    let center = [1usize, 1, 1];
+    let g = |o: [usize; 3], c: usize| v[o[2]][o[1]][o[0]][c];
     let mut dmom = [S::ZERO; 3];
+    let mut dnrg = S::ZERO;
     for a in 0..3 {
         let sp = face_stress_3d(v, rho, nu, a, true, dx);
         let sm = face_stress_3d(v, rho, nu, a, false, dx);
         for i in 0..3 {
             dmom[i] = dmom[i] + dt * (sp[i] - sm[i]) / dx[a];
         }
+        // the viscous energy flux F_a = tau_ia v_i at the two a-faces, v face-averaged.
+        let mut plus = center;
+        plus[a] = 2;
+        let mut minus = center;
+        minus[a] = 0;
+        let (mut f_ap, mut f_am) = (S::ZERO, S::ZERO);
+        for c in 0..3 {
+            f_ap = f_ap + sp[c] * (half * (g(center, c) + g(plus, c)));
+            f_am = f_am + sm[c] * (half * (g(minus, c) + g(center, c)));
+        }
+        dnrg = dnrg + dt * (f_ap - f_am) / dx[a];
     }
-    Tensor::new(dmom)
+    (Tensor::new(dmom), dnrg)
 }
 
 #[cfg(test)]
@@ -536,6 +655,31 @@ mod tests {
             "viscous heating off: dnrg = {dnrg}, expected rho nu S^2 dt = {expected}"
         );
         assert!(dnrg > 0.0, "viscous heating must be positive (irreversible dissipation)");
+    }
+
+    // the 2.5D DOF-aware energy: a PURELY out-of-plane shear v_z = S y (v_x = v_y = 0) has a constant
+    // stress tau_2y = mu S -> zero force on all 3 momentum components, but heating Phi = mu S^2 booked
+    // into the energy. verifies the toroidal-velocity path the plain 2D kernel cannot express.
+    #[test]
+    fn out_of_plane_shear_heats_2p5d() {
+        let (s, nu, rho, dt) = (0.9, 0.02, 1.3, 0.01);
+        let (dx, dy) = (0.05, 0.05);
+        let mut v = [[Tensor::<f64, 3>::zeros(); 3]; 3];
+        let mut r = [[0.0; 3]; 3];
+        for jj in 0..3 {
+            for ii in 0..3 {
+                let y = 0.3 + (jj as f64 - 1.0) * dy;
+                v[jj][ii] = Tensor::new([0.0, 0.0, s * y]);
+                r[jj][ii] = rho;
+            }
+        }
+        let (dmom, dnrg) = viscous_update_2p5d(&v, &r, &[[nu; 3]; 3], [dx, dy], dt);
+        for i in 0..3 {
+            assert!(dmom[i].abs() < 1e-14, "constant stress -> zero force, got {dmom:?}");
+        }
+        let expected = dt * rho * nu * s * s;
+        assert!((dnrg - expected).abs() < 1e-14, "2.5D heating off: dnrg {dnrg}, expected {expected}");
+        assert!(dnrg > 0.0);
     }
 
     // positive check: vx = a y^2 gives a varying stress tau_yx = rho nu (2 a y),
