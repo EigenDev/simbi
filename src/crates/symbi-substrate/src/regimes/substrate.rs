@@ -34,8 +34,8 @@ use crate::regimes::substrate_kernels::{
     FusedSourceBinding, GradientBc, RuntimeSource, ScalarBind, Solver, cfl_wave_speed,
     dispatch_body_feedback_iso, dispatch_body_source_iso, dispatch_fields, dispatch_flux,
     dispatch_fused_runtime_cpu, dispatch_godunov_maybe_fused, dispatch_godunov_with_body_source,
-    dispatch_gradient_boundaries, dispatch_runtime_source, dispatch_source_apply,
-    fused_runtime_cpu_kernel, resolve_params,
+    dispatch_driven_boundaries, dispatch_gradient_boundaries, dispatch_runtime_source,
+    dispatch_source_apply, fused_runtime_cpu_kernel, resolve_params,
 };
 use symbi_discretize::gv::GeoSource;
 use symbi_geometry::Geometry;
@@ -97,6 +97,10 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// gradient-boundary (Neumann / Robin) coefficients, indexed by the `BoundaryType::Neumann(id)` /
     /// `Robin(id)` id. the shared fills, fed `cs^2` so the ghost honours `pre = cs^2*rho`.
     pub gradient_bcs: Vec<GradientBc>,
+    /// driven-boundary DAGs, indexed by the `BoundaryType::Driven(id)` id. each prescribes a
+    /// face's ghost `[rho, vel..]` (no pressure slot — the isothermal closure re-derives the
+    /// ghost pressure as `cs2 * rho` after the fill). empty => no driven faces.
+    pub boundary_dags: Vec<Arc<RuntimeSource>>,
     /// consecutive substages the FOFC freeze tier fired (persistent-freeze fail-loud; see fofc.rs).
     pub freeze_streak: std::sync::atomic::AtomicU32,
 }
@@ -132,6 +136,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
             runtime_source: None,
             fuse_runtime: false,
             gradient_bcs: Vec::new(),
+            boundary_dags: Vec::new(),
             freeze_streak: std::sync::atomic::AtomicU32::new(0),
         }
     }
@@ -261,6 +266,41 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     ) {
         for coord in domain.iter() {
             self.cs2.set(coord, *pre.at(coord) / *rho.at(coord));
+        }
+    }
+
+    /// register a DRIVEN boundary DAG; the returned id (registration order) is what the sim's
+    /// `Boundaries` must carry as `BoundaryType::Driven(id)` on the prescribed face. build
+    /// `built` from `expr_bridge::build_boundary_dag(&cfg, &ISO_NEWTONIAN_SPEC)` — the
+    /// prescription is `[rho, vel..]` only (no pressure slot; the isothermal closure re-derives
+    /// the ghost pressure as `cs2 * rho` after the fill).
+    pub fn with_driven_boundary(
+        mut self,
+        built: Vec<(String, BuiltSource)>,
+        params: Vec<f64>,
+    ) -> (Self, u16) {
+        let id = self.boundary_dags.len() as u16;
+        // has_energy = false: no prim.pre assignment rides the dag.
+        self.boundary_dags.push(RuntimeSource::new(built, params, false));
+        (self, id)
+    }
+
+    /// extend the per-cell `cs2` into every ghost cell by clamping each axis into the
+    /// interior — the zero-gradient continuation of the fixed temperature field, covering
+    /// faces, edges, and corners in one pass. without this a LOCALLY isothermal run keeps
+    /// the constructor's uniform `cs^2` in the ghosts (the interior-only derive never
+    /// touches them), and the `p = cs2 * rho` ghost-pressure pass then books that alien
+    /// temperature into every boundary flux — for a cold disk edge (`cs2 ~ 1e-3`) against
+    /// the default `cs = 1`, a ~1000x spurious boundary pressure.
+    pub fn extend_cs2_into_ghosts(&self, allocated: &Domain<D>, interior: &Domain<D>) {
+        for coord in allocated.iter() {
+            if interior.contains(coord) {
+                continue;
+            }
+            let clamped: [isize; D] = std::array::from_fn(|ax| {
+                coord[ax].clamp(interior.spaces[ax].lo, interior.spaces[ax].hi - 1)
+            });
+            self.cs2.set(coord, *self.cs2.at(clamped));
         }
     }
 }
@@ -442,6 +482,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
                 );
             },
         );
+        // the driven faces (skipped by the pullback: Driven -> Skip): prescribe their ghost
+        // [rho, vel..] from the registered boundary DAGs. the pressure is NOT prescribed —
+        // the eos pass below re-derives it as cs2 * rho over every ghost the fill wrote.
+        if !self.boundary_dags.is_empty() {
+            dispatch_driven_boundaries(sim, &self.boundary_dags);
+        }
         // the Neumann/Robin gradient faces (skipped by the pullback), filled from the edge cell over
         // the substrate-owned pressure field; Some(cs^2) makes the shared kernel honour the
         // isothermal closure pre = cs^2*rho at the ghost.

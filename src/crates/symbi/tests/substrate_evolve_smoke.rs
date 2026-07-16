@@ -106,3 +106,85 @@ fn locally_isothermal_cs2_derived_from_ic_and_held() {
     }
     assert!(sim.iteration > 3, "took only {} steps", sim.iteration);
 }
+
+#[test]
+fn locally_isothermal_ghost_temperature_is_the_clamped_interior_value() {
+    // a locally isothermal run derives cs^2(x) = p_IC/rho_IC over the INTERIOR; the ghost
+    // cells must then receive the clamped zero-gradient continuation of that field. left
+    // at the constructor's uniform cs^2 they poison every boundary flux: the ghost-pressure
+    // pass books p = cs2_ghost * rho into the boundary reconstruction, and a cold disk edge
+    // (cs^2 ~ 1e-2) against a cs = 1 default is a ~100x spurious wall pressure.
+    use symbi::sim::evolve::KernelSet;
+    use symbi::symbi_grid::Field;
+    type Sim2 = SimState<IsoNewtonian, 2, Cartesian, Isothermal<f64>, CpuSpace, HostMemory>;
+    let n = 16usize;
+    let dx = 1.0 / n as f64;
+    // a cold, spatially varying temperature, far from the constructor's cs = 1.
+    let cs2_of = |x: f64, y: f64| 0.01 * (1.0 + 0.5 * x + 0.25 * y);
+    let rho_of = |x: f64, y: f64| 1.0 + 0.05 * x - 0.02 * y;
+    let sim = Sim2::build(IsoNewtonian, Isothermal { cs: CS }, Cartesian)
+        .cells([n, n])
+        .spacing([dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .unwrap()
+        .set_initial(|x| PrimG {
+            rho: rho_of(x[0], x[1]),
+            vel: Tensor::new([0.0, 0.0]),
+            pre: Default::default(),
+        })
+        .build();
+
+    let pre_ic = Field::<f64, 2, HostMemory>::zeros(&sim.geom.allocated).unwrap();
+    for c in sim.geom.interior.iter() {
+        let (x, y) = ((c[0] as f64 + 0.5) * dx, (c[1] as f64 + 0.5) * dx);
+        pre_ic.view_mut().set(c, cs2_of(x, y) * rho_of(x, y));
+    }
+    let sub = IsoSubstrateKernelSet::<HostMemory, f64, 2>::new(CS, 0.4, &sim.geom.allocated);
+    sub.compute_isothermal_cs2(&sim.fields.cons.den, &pre_ic, &sim.geom.interior);
+    sub.extend_cs2_into_ghosts(&sim.geom.allocated, &sim.geom.interior);
+
+    // every ghost cell (faces, edges, corners) holds the per-axis-clamped interior value.
+    let (mut ghosts, mut corners) = (0usize, 0usize);
+    for c in sim.geom.allocated.iter() {
+        if sim.geom.interior.contains(c) {
+            continue;
+        }
+        ghosts += 1;
+        let clamped: [isize; 2] = std::array::from_fn(|ax| {
+            c[ax].clamp(sim.geom.interior.spaces[ax].lo, sim.geom.interior.spaces[ax].hi - 1)
+        });
+        if clamped != c {
+            let both_out = (0..2).all(|ax| clamped[ax] != c[ax]);
+            if both_out {
+                corners += 1;
+            }
+        }
+        let got = *sub.cs2.view().at(c);
+        let want = *sub.cs2.view().at(clamped);
+        assert!(
+            (got - want).abs() < 1e-15,
+            "ghost cs2 at {c:?} = {got}, want clamped interior {want} (uniform constructor cs^2 leaked?)"
+        );
+        assert!(got < 0.1, "ghost cs2 at {c:?} = {got} is the constructor's global value, not the IC's");
+    }
+    assert!(ghosts > 0 && corners > 0, "expected face and corner ghosts to be checked");
+
+    // integration: recover the interior prims, then fill ghosts — the ghost pressure
+    // must obey the LOCAL closure p = cs2*rho, not the constructor's uniform cs^2.
+    sub.c2p(&sim);
+    sub.ghost_fill(&sim);
+    for c in sim.geom.allocated.iter() {
+        if sim.geom.interior.contains(c) {
+            continue;
+        }
+        let rho = *sim.fields.prim.rho.view().at(c);
+        let p = *sub.pre.view().at(c);
+        let cs2 = *sub.cs2.view().at(c);
+        assert!(
+            (p - cs2 * rho).abs() < 1e-14 && p < 0.1 * rho,
+            "ghost pressure at {c:?}: p = {p}, cs2*rho = {}, rho = {rho}",
+            cs2 * rho
+        );
+    }
+}

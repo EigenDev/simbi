@@ -3142,6 +3142,11 @@ macro_rules! build_and_run_hydro_decomposed {
                 $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
             );
         }
+        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
+        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
+        if !cfg.driven_exprs.is_empty() {
+            return Err("gpus>1 does not yet support driven boundaries; set gpus=1".to_string());
+        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -3679,6 +3684,15 @@ macro_rules! build_and_run_imhd {
         let prims: &[Vec<f64>] = $prims;
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, $geom_ty, Isothermal<f64>>;
+
+        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
+        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
+        if !cfg.driven_exprs.is_empty() {
+            return Err(
+                "driven (DYNAMIC) boundaries are not yet wired for the isothermal MHD kernel set"
+                    .to_string(),
+            );
+        }
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
@@ -4290,6 +4304,14 @@ macro_rules! build_and_run_iso_decomposed {
         if cfg.locally_isothermal {
             return Err("gpus>1 does not yet support locally-isothermal cs(x); set gpus=1 or use globally isothermal".to_string());
         }
+        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
+        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
+        if !cfg.driven_exprs.is_empty() {
+            return Err(
+                "driven (DYNAMIC) boundaries are not yet wired for the decomposed (gpus>1) iso path; set gpus=1"
+                    .to_string(),
+            );
+        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -4518,6 +4540,26 @@ macro_rules! build_and_run_iso {
             None => sub,
         };
 
+        // register DRIVEN (DYNAMIC) boundaries in Driven-id order, lowered against the iso
+        // spec: the prescription is [rho, vel..] only (no pressure slot; the ghost pressure
+        // re-derives as cs^2 * rho from the held temperature after every fill).
+        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
+            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
+        }
+        let sub = {
+            let mut sub = sub;
+            for json in &cfg.driven_exprs {
+                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                    .map_err(|e| format!("boundary expression parse: {e}"))?;
+                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                    &bcfg,
+                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                )
+                .map_err(|e| format!("boundary expression lower: {e}"))?;
+                sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+            }
+            sub
+        };
         // register the Neumann/Robin gradient boundaries; iso re-derives pre = cs^2*rho at the ghost
         // (the pressure coefficients are ignored — the substrate feeds cs^2 to the shared kernel).
         let sub = {
@@ -4553,6 +4595,11 @@ macro_rules! build_and_run_iso {
                 }
             }
             sub.compute_isothermal_cs2(&sim.fields.cons.den, &pre_ic, &interior);
+            // the temperature field is held fixed, so its ghost values are set ONCE here:
+            // clamped zero-gradient continuation into every ghost cell. without it the
+            // ghosts keep the constructor's uniform cs^2 and the ghost-pressure pass
+            // books an alien temperature into every boundary flux.
+            sub.extend_cs2_into_ghosts(&sim.geom.allocated, &interior);
         }
 
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
@@ -4606,6 +4653,12 @@ macro_rules! build_and_run_iso {
                     order,
                     0.0,
                 );
+                // the prolongation covers the fine interior only; extend the fixed
+                // temperature into the fine ghosts (incl. coarse-fine bands) the same
+                // way the base level does, else they keep the uniform constructor cs^2.
+                hi[0]
+                    .kernels
+                    .extend_cs2_into_ghosts(&hi[0].state.geom.allocated, &region);
             }
         }
 
