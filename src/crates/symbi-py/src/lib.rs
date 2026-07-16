@@ -2658,9 +2658,6 @@ macro_rules! build_and_run_hydro {
         // as coordinate DAGs (docs/design/33). a theta-stratified rotating equilibrium REQUIRES
         // this: no local ghost rule can represent the state beyond a wedge wall.
         let mut sub = sub;
-        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
-            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
-        }
         for json in &cfg.driven_exprs {
             let bcfg = symbi_hydro::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
@@ -2691,6 +2688,25 @@ macro_rules! build_and_run_hydro {
                 .theta(theta)
                 .with_solver(solver)
                 .expect("fine-level kernel set");
+            // register the SAME driven-boundary DAGs on each fine level, in Driven-id order: a
+            // fine level flush against a driven physical face INHERITS `Driven(id)` there (an
+            // interior fine level has only CoarseFine faces and never consults the dags). the
+            // prescription is a pure coordinate DAG, so the fine level evaluates it at its own
+            // finer ghost coordinates; the fill runs at the tail of ghost_fill, AFTER
+            // prolong_cf, so it deterministically owns the driven/coarse-fine corner overlap.
+            // already validated at the base registration.
+            let mut ks = ks;
+            for json in &cfg.driven_exprs {
+                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                    .expect("fine-level boundary parse");
+                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                    &bcfg,
+                    <$regime_ty as Regime<f64, $dof>>::SPEC,
+                )
+                .expect("fine-level boundary lower");
+                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
+            }
+            let ks = ks;
             // attach the SAME user source to each fine level as the base level, so a source
             // overlapping a refined region still acts there (a base-only attach would be restricted
             // away by the fine solution). the source was already validated at the base attach.
@@ -3669,9 +3685,6 @@ macro_rules! build_and_run_mhd {
         // matches `driven_exprs[id]`. a complete prim prescription incl. the cell B (purely
         // toroidal: in-plane B = 0, out-of-plane B_phi injected). single-grid only.
         let mut sub = sub;
-        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
-            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
-        }
         for json in &cfg.driven_exprs {
             let bcfg = symbi_hydro::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
@@ -3683,11 +3696,31 @@ macro_rules! build_and_run_mhd {
             sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
         }
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
-            .substrate()
-            .theta(theta)
-            .with_solver(solver)
-            .expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
+            // the fine kernel set mirrors the base: the SAME ct method (the constructor
+            // default is Contact, which would silently downgrade a UCT run's fine levels)
+            // and the SAME driven-boundary DAGs in Driven-id order — a fine level flush
+            // against a driven physical face inherits Driven(id) and evaluates the
+            // coordinate DAG at its own finer ghost coordinates. already validated at the
+            // base registration.
+            let mut ks = s
+                .substrate()
+                .theta(theta)
+                .with_solver(solver)
+                .expect("fine-level kernel set")
+                .ct_method(cfg.ct_method);
+            for json in &cfg.driven_exprs {
+                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                    .expect("fine-level boundary parse");
+                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                    &bcfg,
+                    <$regime_ty as Regime<f64, $d>>::SPEC,
+                )
+                .expect("fine-level boundary lower");
+                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
+            }
+            ks
+        });
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -3795,9 +3828,6 @@ macro_rules! build_and_run_imhd {
         // pressure slot; the eos closure p = cs^2 rho covers the ghosts). purely toroidal
         // injection: in-plane B = 0, out-of-plane B_phi injected (div-free by axisymmetry).
         let mut sub = sub;
-        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
-            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
-        }
         for json in &cfg.driven_exprs {
             let bcfg = symbi_hydro::SourceConfig::from_json(json)
                 .map_err(|e| format!("boundary expression parse: {e}"))?;
@@ -3809,11 +3839,31 @@ macro_rules! build_and_run_imhd {
             sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
         }
         let solver = cfg.solver;
-        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
-            .substrate()
-            .theta(theta)
-            .with_solver(solver)
-            .expect("fine-level kernel set"));
+        let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
+            // the fine kernel set mirrors the base: the SAME ct method (the constructor
+            // default is Contact, which would silently downgrade a UCT run's fine levels)
+            // and the SAME driven-boundary DAGs in Driven-id order — a fine level flush
+            // against a driven physical face inherits Driven(id) and evaluates the
+            // coordinate DAG at its own finer ghost coordinates. already validated at the
+            // base registration.
+            let mut ks = s
+                .substrate()
+                .theta(theta)
+                .with_solver(solver)
+                .expect("fine-level kernel set")
+                .ct_method(cfg.ct_method);
+            for json in &cfg.driven_exprs {
+                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                    .expect("fine-level boundary parse");
+                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                    &bcfg,
+                    <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                )
+                .expect("fine-level boundary lower");
+                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
+            }
+            ks
+        });
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
     }};
 }
@@ -4617,9 +4667,6 @@ macro_rules! build_and_run_iso {
         // register DRIVEN (DYNAMIC) boundaries in Driven-id order, lowered against the iso
         // spec: the prescription is [rho, vel..] only (no pressure slot; the ghost pressure
         // re-derives as cs^2 * rho from the held temperature after every fill).
-        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
-            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
-        }
         let sub = {
             let mut sub = sub;
             for json in &cfg.driven_exprs {
@@ -4682,6 +4729,23 @@ macro_rules! build_and_run_iso {
                 .theta(theta)
                 .with_viscosity(cfg.viscosity)
                 .with_alpha(cfg.alpha);
+            // register the SAME driven-boundary DAGs on each fine level, in Driven-id order: a
+            // fine level flush against a driven physical face INHERITS `Driven(id)` there; an
+            // interior fine level has only CoarseFine faces and never consults the dags. the
+            // fine ghost pressure re-derives as cs2 * rho after the fill (the fine cs2 is
+            // prolonged + clamp-extended). already validated at the base registration.
+            let mut ks = ks;
+            for json in &cfg.driven_exprs {
+                let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                    .expect("fine-level boundary parse");
+                let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                    &bcfg,
+                    <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                )
+                .expect("fine-level boundary lower");
+                ks = ks.with_driven_boundary(built, bcfg.params.clone()).0;
+            }
+            let ks = ks;
             // attach the SAME user source to each fine level (a base-only attach
             // would be restricted away by the fine solution). already validated
             // at the base attach.
