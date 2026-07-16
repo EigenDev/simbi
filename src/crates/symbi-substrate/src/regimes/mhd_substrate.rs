@@ -990,6 +990,10 @@ pub(crate) fn post_godunov<const D: usize, const DOF: usize, Mem, Sc>(
     // non-2.5D grid, or a curvilinear chart skips it — the 3D + curvilinear resistive EMFs are
     // follow-ons.
     if eta > 0.0 {
+        // OHMIC HEATING IS AUTOMATIC + energy-conserving here: nrg is the TOTAL energy (conserved by
+        // the godunov flux), and `bcell_from_bface` reconciles it with the resistively-decayed B, so
+        // the dissipated magnetic energy 1/2 B^2 becomes gas internal energy exactly (verified to
+        // machine precision by tests/ohmic_heating.rs). NO separate Joule-source term is needed.
         apply_resistive_emf::<D, DOF, Mem, Sc>(sim, eta);
     }
 

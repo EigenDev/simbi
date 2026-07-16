@@ -7,8 +7,8 @@
 // sheared v_x = V sin(k y) + a sheared B_x = B0 sin(k y) must, with both on:
 //   - lose more KINETIC energy than the ideal run (viscosity is acting),
 //   - lose more MAGNETIC energy than the ideal run (resistivity is acting),
-//   - GAIN gas internal energy (viscous heating; resistivity leaves the gas energy alone in the CT
-//     scheme, which does not book Ohmic heat -- so any internal-energy rise is the viscous dissipation),
+//   - GAIN gas internal energy (BOTH viscous heating AND Ohmic heating warm the gas -- each dissipation
+//     is conservatively booked into the internal energy),
 //   - evolve stably.
 // =============================================================================
 
@@ -104,7 +104,7 @@ fn resistive_viscous_mhd_runs_both_diffusivities() {
         me_loss_res > 3.0 * me_loss_ideal,
         "resistivity not acting: magnetic-energy loss resistive {me_loss_res:.3e} vs ideal {me_loss_ideal:.3e}"
     );
-    // the viscous heating raised the gas internal energy (resistivity does not, in the CT scheme).
+    // the dissipations (viscous + Ohmic) raised the gas internal energy.
     assert!(b1.2 > b0.2, "viscous heating did not warm the gas: internal {} -> {}", b0.2, b1.2);
     // and everything stayed finite.
     assert!(b1.0.is_finite() && b1.1.is_finite() && b1.2.is_finite(), "state went non-finite");
