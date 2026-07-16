@@ -326,6 +326,7 @@ def run(
     compute_mode: str = "cpu",
     validate: bool = False,
     live_monitor: bool = False,
+    max_steps: int = 0,
 ) -> None:
     """
     run a simulation with the given problem configuration.
@@ -336,6 +337,9 @@ def run(
         validate: if True, validate generator output before running
         live_monitor: if True, write a read-only snapshot each cadence so
             `simbi attach <data_directory>` can monitor a headless run
+        max_steps: stop after this many steps (0 = run to end_time); the final
+            checkpoint is written either way — a bounded run is a truncated
+            but otherwise ordinary run (smoke tests, profiling probes)
 
     example:
         >>> from simbi.simulation import SimbiProblem, ProblemParam, run
@@ -373,6 +377,9 @@ def run(
     # convert to execution dict
     exec_dict = to_execution_dict(problem)
     exec_dict["live_monitor"] = live_monitor
+    if max_steps < 0:
+        raise ValueError(f"max_steps must be >= 0, got {max_steps}")
+    exec_dict["max_steps"] = max_steps
 
     # configure gpu if needed
     gpu_blocks = None

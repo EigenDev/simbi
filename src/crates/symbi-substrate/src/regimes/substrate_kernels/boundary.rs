@@ -27,9 +27,14 @@ use super::runtime_source::{
 use symbi_sim::state::BoundaryType;
 use std::collections::HashMap;
 
-/// the ghost-cell band of one face: the ghost cells on `(axis, side)` (side 0 = lo, 1 = hi), with
-/// the transverse axes spanning the INTERIOR (the face's own band, corners excluded — a coordinate
-/// prescription needs no neighbor, so no sweep).
+/// the ghost-cell slab of one face: the ghost cells on `(axis, side)` (side 0 = lo, 1 = hi), with
+/// the transverse axes spanning the FULL ALLOCATION so the slab covers the edge/corner ghost
+/// blocks shared with adjacent faces. the standard pullback never writes a ghost region whose
+/// contacting faces are all driven (they are Skip to it), so an interior-clamped band would leave
+/// those corners at their allocation zeros — a rho = 0 ghost that any multi-dimensional stencil
+/// (a viscous 3x3, a CT corner EMF) then reads as gas. the prescription is a pure coordinate DAG,
+/// so a corner-ghost coordinate is as well-defined as a face-ghost one; where two driven slabs
+/// overlap, the last axis written wins, deterministically.
 fn ghost_band_domain<const D: usize>(
     allocated: &Domain<D>,
     interior: &Domain<D>,
@@ -46,7 +51,7 @@ fn ghost_band_domain<const D: usize>(
             };
             Space { name: allocated.spaces[axis].name, lo, hi }
         } else {
-            Space { name: interior.spaces[a].name, lo: interior.spaces[a].lo, hi: interior.spaces[a].hi }
+            Space { name: allocated.spaces[a].name, lo: allocated.spaces[a].lo, hi: allocated.spaces[a].hi }
         }
     }))
 }

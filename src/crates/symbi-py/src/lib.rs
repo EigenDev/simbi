@@ -108,6 +108,10 @@ struct Config {
     checkpoint_log_anchor: f64,
     checkpoint_index: u64,
     t_final: f64,
+    // stop after this many root iterations; 0 = march to t_final. a bounded run
+    // exits through the ordinary success path (final checkpoint written), so a
+    // smoke gate or profiling probe sees a truncated but otherwise normal run.
+    max_steps: u64,
     checkpoint_interval: f64,
     data_dir: String,
     // natural time unit for checkpoint names + display: reported time is
@@ -701,6 +705,12 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<u64>().ok())
             .unwrap_or(0),
         t_final: get_f64(dict, "end_time")?,
+        max_steps: dict
+            .get_item("max_steps")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract::<u64>().ok())
+            .unwrap_or(0),
         checkpoint_interval: get_f64(dict, "checkpoint_interval")?,
         data_dir: dict
             .get_item("data_directory")?
@@ -1242,6 +1252,13 @@ where
         let st = &h.levels[0].state;
         let (iter, time, dt) = (st.iteration, st.time, st.dt);
         let mut dirty = false;
+
+        // bounded march: stop after `max_steps` root iterations (0 = unbounded).
+        // the break exits through the success epilogue, which writes the final
+        // checkpoint — a truncated but otherwise ordinary run.
+        if cfg.max_steps > 0 && iter >= cfg.max_steps {
+            return std::ops::ControlFlow::Break(());
+        }
 
         // live-dashboard input (tier 2a): the render thread owns the keys + sets
         // control flags; the solver only READS them. space parks the integrator
