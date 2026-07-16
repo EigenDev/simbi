@@ -118,33 +118,31 @@ class SedovTaylor(SimbiProblem):
     @model_validator(mode="after")
     def compute_defaults(self) -> "SedovTaylor":
         """compute resolution and bounds based on input parameters."""
-        # the resolution field cannot default to None (its type is a zone tuple),
-        # so the (0, 0) placeholder marks "derive from zones per decade" — a zero
-        # zone count is never a runnable grid.
+        # neither field can default to None (their types are a zone tuple and an
+        # extent list), so the zero placeholders — (0, 0) zones, zero-extent
+        # bounds — mark "derive from rinit/rend/zpd/full_sphere". a zero zone
+        # count or a zero-extent axis is never a runnable grid.
         resolution_unset = self.resolution is None or not all(self.resolution)
-        if resolution_unset or self.bounds is None:
-            # set theta boundaries based on full_sphere flag
-            theta_min = 0
+        bounds_unset = self.bounds is None or all(lo == hi for lo, hi in self.bounds)
+        if bounds_unset:
             theta_max = math.pi if self.full_sphere else 0.5 * math.pi
-            if self.bounds is None:
-                self.bounds = [
-                    (self.rinit, self.rend),
-                    (theta_min, theta_max),
-                ]
-
-            if resolution_unset:
-                # calculate number of radial zones based on zones per decade
-                ndec = math.log10(self.rend / self.rinit)
-                nr = round(self.zpd * ndec)
-                # calculate number of polar zones
-                npolar = compute_num_polar_zones(
-                    rmin=float(self.rinit),
-                    rmax=float(self.rend),
-                    nr=nr,
-                    theta_bounds=(theta_min, theta_max),
-                    zpd=int(self.zpd),
-                )
-                self.resolution = (nr, npolar)
+            self.bounds = [
+                (self.rinit, self.rend),
+                (0.0, theta_max),
+            ]
+        if resolution_unset:
+            # radial zone count from zones per decade; polar zone count matched
+            # to the radial spacing over the (possibly user-set) theta extent.
+            ndec = math.log10(self.rend / self.rinit)
+            nr = round(self.zpd * ndec)
+            npolar = compute_num_polar_zones(
+                rmin=float(self.rinit),
+                rmax=float(self.rend),
+                nr=nr,
+                theta_bounds=tuple(self.bounds[1]),
+                zpd=int(self.zpd),
+            )
+            self.resolution = (nr, npolar)
 
         return self
 

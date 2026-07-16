@@ -55,6 +55,19 @@ def test_every_example_config_passes_the_arity_guard(module_name: str) -> None:
         pytest.skip(f"{module_name} defines no SimbiProblem subclass")
     for cls in classes:
         problem = cls()
+        # a default-constructed config must be a runnable grid: computed-field
+        # placeholders (zero zones, zero-extent bounds) that survive the model
+        # validator surface as backend allocation failures at a user's run.
+        # 1d configs carry a scalar resolution and a flat (lo, hi) bounds pair;
+        # normalize both to per-axis lists.
+        res = problem.resolution
+        zones = [res] if isinstance(res, int) else list(res)
+        for ax, nn in enumerate(zones):
+            assert nn > 0, f"{cls.__name__}: zero zones on axis {ax}: {res}"
+        bounds = problem.bounds
+        pairs = [bounds] if not hasattr(bounds[0], "__len__") else list(bounds)
+        for ax, (lo, hi) in enumerate(pairs):
+            assert hi > lo, f"{cls.__name__}: zero-extent bounds on axis {ax}: {bounds}"
         # the exact-width branch, when the regime fixes it, must be internally
         # consistent: rho + at least one velocity + pressure.
         expected = problem.expected_primitive_arity()
