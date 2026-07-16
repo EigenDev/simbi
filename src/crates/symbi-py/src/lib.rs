@@ -2996,6 +2996,9 @@ macro_rules! build_and_run_hydro_decomposed_refined {
         if cfg.mesh_motion {
             return Err("gpus>1 + refinement does not yet support mesh motion; set gpus=1".to_string());
         }
+        if !cfg.driven_exprs.is_empty() {
+            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
+        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -3142,12 +3145,6 @@ macro_rules! build_and_run_hydro_decomposed {
                 $cfg, $prims, $regime, $regime_ty, $d, $geom, $geom_ty
             );
         }
-        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
-        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
-        if !cfg.driven_exprs.is_empty() {
-            return Err("gpus>1 does not yet support driven boundaries; set gpus=1".to_string());
-        }
-
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
@@ -3236,6 +3233,26 @@ macro_rules! build_and_run_hydro_decomposed {
                         sub.attach_runtime_source(built, scfg.params.clone())?
                     }
                     None => sub,
+                };
+                // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
+                // the ids ride the boundary enum copied from the physical faces, so only edge
+                // tiles carry Driven faces and interior tiles hold the dags inert. each tile
+                // evaluates the coordinate prescription at its own GLOBAL coords, the same
+                // contract as the per-tile user source (decomposed == monolithic to round-off,
+                // proven by decomp_driven_equivalence).
+                let sub = {
+                    let mut sub = sub;
+                    for json in &cfg.driven_exprs {
+                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("boundary expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                            &bcfg,
+                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("boundary expression lower: {e}"))?;
+                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+                    }
+                    sub
                 };
                 Ok((sim, sub))
             })?;
@@ -3685,14 +3702,6 @@ macro_rules! build_and_run_imhd {
         let bufs: &[Vec<f64>] = $bufs;
         type Sim = SimDefaultGeneric<IsothermalMhd, $d, 3, $geom_ty, Isothermal<f64>>;
 
-        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
-        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
-        if !cfg.driven_exprs.is_empty() {
-            return Err(
-                "driven (DYNAMIC) boundaries are not yet wired for the isothermal MHD kernel set"
-                    .to_string(),
-            );
-        }
 
         // gpus>1 -> the decomposed multi-gpu path (validated separately above by
         // validate_gpu_request); gpus<=1 -> the single-device path below, bit-identical.
@@ -3781,6 +3790,24 @@ macro_rules! build_and_run_imhd {
             }
             None => sub,
         };
+        // register DRIVEN (DYNAMIC) boundaries in Driven-id order so `Driven(id)` on a face
+        // matches `driven_exprs[id]`. the iso-MHD prescription is [rho, vel.., B..] (no
+        // pressure slot; the eos closure p = cs^2 rho covers the ghosts). purely toroidal
+        // injection: in-plane B = 0, out-of-plane B_phi injected (div-free by axisymmetry).
+        let mut sub = sub;
+        if !cfg.driven_exprs.is_empty() && cfg.refinement_enabled {
+            return Err("driven boundaries are not yet supported with mesh refinement".to_string());
+        }
+        for json in &cfg.driven_exprs {
+            let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                .map_err(|e| format!("boundary expression parse: {e}"))?;
+            let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                &bcfg,
+                <IsothermalMhd as Regime<f64, $d>>::SPEC,
+            )
+            .map_err(|e| format!("boundary expression lower: {e}"))?;
+            sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+        }
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| s
             .substrate()
@@ -3977,6 +4004,11 @@ macro_rules! build_and_run_imhd_decomposed {
 
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
+        }
+        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
+        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
+        if !cfg.driven_exprs.is_empty() {
+            return Err("gpus>1 does not yet support driven boundaries for isothermal MHD; set gpus=1".to_string());
         }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -4304,15 +4336,6 @@ macro_rules! build_and_run_iso_decomposed {
         if cfg.locally_isothermal {
             return Err("gpus>1 does not yet support locally-isothermal cs(x); set gpus=1 or use globally isothermal".to_string());
         }
-        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
-        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
-        if !cfg.driven_exprs.is_empty() {
-            return Err(
-                "driven (DYNAMIC) boundaries are not yet wired for the decomposed (gpus>1) iso path; set gpus=1"
-                    .to_string(),
-            );
-        }
-
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
         if prims.len() != total {
@@ -4392,6 +4415,25 @@ macro_rules! build_and_run_iso_decomposed {
                         sub.attach_runtime_source(built, scfg.params.clone())?
                     }
                     None => sub,
+                };
+                // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
+                // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
+                // tile evaluates the coordinate prescription at its own GLOBAL coords -- the same
+                // contract as the per-tile user source. iso prescribes [rho, vel..]; the ghost
+                // pressure is the eos closure p = cs^2 rho (globally isothermal on this path).
+                let sub = {
+                    let mut sub = sub;
+                    for json in &cfg.driven_exprs {
+                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("boundary expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                            &bcfg,
+                            <IsoNewtonian as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("boundary expression lower: {e}"))?;
+                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+                    }
+                    sub
                 };
                 Ok((sim, sub))
             })?;
