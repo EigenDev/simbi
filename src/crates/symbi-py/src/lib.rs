@@ -3840,9 +3840,6 @@ macro_rules! build_and_run_mhd_decomposed {
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
         }
-        if !cfg.driven_exprs.is_empty() {
-            return Err("gpus>1 does not yet support driven boundaries; set gpus=1".to_string());
-        }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
         let total: usize = n.iter().product();
@@ -3946,6 +3943,27 @@ macro_rules! build_and_run_mhd_decomposed {
                     }
                     None => sub,
                 };
+                // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
+                // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
+                // tile evaluates the coordinate prescription at its own GLOBAL coords -- the
+                // same contract as the per-tile user source. the prescription covers the hydro
+                // prims + the cell B; the staggered face B rides the CT ghost fill and the
+                // transverse halo exchange, identically to the monolithic run (oracle:
+                // decomp_driven_mhd_equivalence).
+                let sub = {
+                    let mut sub = sub;
+                    for json in &cfg.driven_exprs {
+                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("boundary expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                            &bcfg,
+                            <$regime_ty as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("boundary expression lower: {e}"))?;
+                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+                    }
+                    sub
+                };
                 Ok((sim, sub))
             })?;
             tiles.push(built);
@@ -4004,11 +4022,6 @@ macro_rules! build_and_run_imhd_decomposed {
 
         if cfg.refinement_enabled {
             return Err("gpus>1 does not yet support mesh refinement; set gpus=1 or disable refinement".to_string());
-        }
-        // fail loud rather than silently leave DYNAMIC faces unfilled: the standard pullback
-        // skips a Driven face, so an unregistered prescription is a zeroed ghost band.
-        if !cfg.driven_exprs.is_empty() {
-            return Err("gpus>1 does not yet support driven boundaries for isothermal MHD; set gpus=1".to_string());
         }
 
         let n: [usize; $d] = std::array::from_fn(|ax| cfg.n_cells[ax]);
@@ -4106,6 +4119,25 @@ macro_rules! build_and_run_imhd_decomposed {
                         sub.attach_runtime_source(built, scfg.params.clone())?
                     }
                     None => sub,
+                };
+                // register the DRIVEN (DYNAMIC) boundary DAGs on EVERY tile, in Driven-id order:
+                // only edge tiles carry Driven faces (interior cuts are CoarseFine), and each
+                // tile evaluates the coordinate prescription at its own GLOBAL coords. the iso-mhd
+                // prescription is [rho, vel.., B..] (no pressure slot; the eos closure is
+                // p = cs^2 rho); the staggered face B rides the CT ghost fill + halo exchange.
+                let sub = {
+                    let mut sub = sub;
+                    for json in &cfg.driven_exprs {
+                        let bcfg = symbi_hydro::SourceConfig::from_json(json)
+                            .map_err(|e| format!("boundary expression parse: {e}"))?;
+                        let built = symbi_hydro::expr_bridge::build_boundary_dag(
+                            &bcfg,
+                            <IsothermalMhd as Regime<f64, $d>>::SPEC,
+                        )
+                        .map_err(|e| format!("boundary expression lower: {e}"))?;
+                        sub = sub.with_driven_boundary(built, bcfg.params.clone()).0;
+                    }
+                    sub
                 };
                 Ok((sim, sub))
             })?;
