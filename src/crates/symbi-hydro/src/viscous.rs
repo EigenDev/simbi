@@ -664,10 +664,16 @@ mod tests {
             let radial = frmax / fref.abs();
             let err = ((0.5 * (pmin + pmax) - fref) / fref).abs();
             // the operator is axisymmetric: NO grid-aligned (m=4) angular variation in the
-            // azimuthal force, NO spurious radial force, and the error converges with dx.
+            // azimuthal force, NO spurious radial force, and the error converges at SECOND
+            // order — halving dx must cut the error by ~4x (central differences on the
+            // face stresses); a ratio bound of 3 allows the subleading terms.
             assert!(spread < 0.01, "azimuthal force varies with angle (grid m=4): spread={spread} at dx={dx}");
             assert!(radial < 0.01, "spurious radial viscous force on an axisymmetric field: {radial} at dx={dx}");
-            assert!(err < prev_err, "viscous force does not converge: err={err} at dx={dx}");
+            assert!(
+                prev_err.is_infinite() || prev_err / err > 3.0,
+                "viscous force not second-order: err {prev_err:.3e} -> {err:.3e} (ratio {:.2}) at dx={dx}",
+                prev_err / err
+            );
             prev_err = err;
         }
     }
