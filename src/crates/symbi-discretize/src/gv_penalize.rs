@@ -270,6 +270,54 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     (kernel, vec![("ez_new".to_string(), "ez".into(), ez_new.node())])
 }
 
+/// the 3D cartesian body-masked Ohmic resistive edge EMF along edge `dir`: adds `eta * chi * J_dir`
+/// to that edge's EMF in place, where `chi` is the body indicator sampled at the dir-edge and
+/// `J_dir = dB_p2/dx_p1 - dB_p1/dx_p2` (p1=(dir+1)%3, p2=(dir+2)%3) is the current from the two
+/// transverse faces. it is the bulk 3D resistive EMF (`rmhd_resistive_emf_3d_dir_gv`) gated by the
+/// mask, so the same div-B-clean 3D curl consumes it and the composed operator is the mask-weighted
+/// negative-definite Laplacian: the body can only shed the field threading it.
+pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Writes) {
+    let ndim = 3usize;
+    let p1 = (dir + 1) % 3;
+    let p2 = (dir + 2) % 3;
+    begin_trace();
+    let emf = Gv::field("emf", "emf");
+    let eta = Gv::scalar("eta");
+    let b_p1 = Gv::field("b_p1", "b_p1");
+    let b_p2 = Gv::field("b_p2", "b_p2");
+    let back = |ax: usize| -> [i32; 3] {
+        let mut o = [0, 0, 0];
+        o[ax] = -1;
+        o
+    };
+    let b_p1_m = gv_field_at("b_p1", "b_p1", 3, &back(p2)); // dB_p1/dx_p2, backward
+    let b_p2_m = gv_field_at("b_p2", "b_p2", 3, &back(p1)); // dB_p2/dx_p1, backward
+    let dxp1 = Gv::scalar(&format!("dx_{p1}"));
+    let dxp2 = Gv::scalar(&format!("dx_{p2}"));
+    let j = (Gv::ONE / dxp1) * (b_p2 - b_p2_m) - (Gv::ONE / dxp2) * (b_p1 - b_p1_m);
+
+    // the dir-edge sits at the cell centroid shifted half a cell back on the two TRANSVERSE axes
+    // (p1, p2) and centered along dir. sample the body mask at that edge so the dissipation registers
+    // with the edge EMF.
+    let dx: Vec<Gv> = (0..ndim).map(|a| Gv::scalar(&format!("dx_{a}"))).collect();
+    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; ndim], &(0..ndim).collect::<Vec<_>>(), ndim);
+    let half = Gv::from_f64(0.5);
+    let corner: Vec<Gv> = (0..ndim)
+        .map(|a| if a == dir { geo.centroid[a] } else { geo.centroid[a] - half * dx[a] })
+        .collect();
+    let x_cart = centroid_to_cartesian(coords, ndim, &corner);
+    let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
+    let center: [Gv; 3] =
+        std::array::from_fn(|a| if a < ndim { Gv::scalar(&format!("body_0_pos_{a}")) } else { Gv::ZERO });
+    let min_w = dx.iter().copied().reduce(|a, b| a.min(b)).unwrap();
+    let phi = body_mask_sdf(center).dist(x);
+    let chi = symbi_ib::sdf::chi(phi, min_w);
+
+    let emf_new = emf + eta * chi * j;
+    let kernel = end_trace().with_output_support(body_support(ndim));
+    (kernel, vec![("emf_new".to_string(), "emf".into(), emf_new.node())])
+}
+
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian. `ndim` is the SPATIAL
 /// grid dimension (geometry, mask, force receipt); `dof` is the MOMENTUM count (the conserved
 /// 3-vector's active components). `dof == ndim` for hydro and full 3D MHD; `dof = 3, ndim = 2` for

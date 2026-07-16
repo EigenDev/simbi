@@ -224,6 +224,126 @@ fn resistive_body_localizes_under_full_evolution() {
     );
 }
 
+// =============================================================================
+// 3D cartesian: the same localization + dissipation properties for the full 3D
+// body-mask resistive EMF (all three edge EMFs, not just the 2.5D out-of-plane E_z).
+// =============================================================================
+type Sim3 = SimStateGeneric<NewtonianMhd, 3, 3, Cartesian, IdealGas<f64>, CpuSpace, HostMemory, f64>;
+
+const N3: usize = 16;
+const BODY3: [f64; 3] = [0.5, 0.5, 0.5];
+
+fn rnd3(c: [isize; 3], salt: u64) -> f64 {
+    let mut x = (c[0] as i64 as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (c[1] as i64 as u64).wrapping_mul(0xD1B5_4A32_D192_ED03)
+        ^ (c[2] as i64 as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+        ^ salt.wrapping_mul(0x2545_F491_4F6C_DD1D);
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xFF51_AFD7_ED55_8CCD);
+    x ^= x >> 33;
+    (x as f64 / u64::MAX as f64) - 0.5
+}
+fn in_window3(c: [isize; 3]) -> bool {
+    (0..3).all(|a| c[a] >= PAD && c[a] < N3 as isize - PAD)
+}
+fn bseed3(axis: usize, c: [isize; 3]) -> f64 {
+    if in_window3(c) { rnd3(c, axis as u64 + 1) } else { 0.0 }
+}
+
+fn make_sim3(magnetic: MagneticSpec) -> Sim3 {
+    let dx = 1.0 / N3 as f64;
+    let sim = Sim3::build(NewtonianMhd, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N3, N3, N3])
+        .origin([0.0, 0.0, 0.0])
+        .spacing([dx, dx, dx])
+        .boundaries(Boundaries::uniform(BoundaryType::Periodic))
+        .cfl(0.3)
+        .allocate()
+        .expect("3D resistive body sim construction failed")
+        .set_initial(|_| MhdPrim {
+            hydro: Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 },
+            mag: Tensor::new([0.0, 0.0, 0.0]),
+        })
+        .seed_faces(|_, _| 0.0)
+        .build();
+    sim.with_bodies(BodyCollection::new().add(
+        Body::rigid_sphere(0, Tensor::new(BODY3), Tensor::zeros(), 1.0, R_BODY, 1.0, false)
+            .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 0.0, k_eta_t: 0.0 })
+            .with_magnetic(magnetic),
+    ))
+}
+
+fn seed_field3(s: &Sim3) {
+    let m = s.fields.mhd.as_ref().unwrap();
+    for axis in 0..3 {
+        for c in m.bface[axis].domain().iter() { m.bface[axis].set(c, bseed3(axis, c)); }
+    }
+    for k in 0..3 {
+        for c in m.efield[k].domain().iter() { m.efield[k].set(c, 0.0); }
+    }
+}
+
+// cell-center distance from the body (a coarse locator for the near/far windows).
+fn cell_dist3(s: &Sim3, c: [isize; 3]) -> f64 {
+    let dx = s.geom.dx[0];
+    (0..3).map(|a| (s.geom.x_lo[a] + (c[a] as f64 + 0.5) * dx - BODY3[a]).powi(2)).sum::<f64>().sqrt()
+}
+
+#[test]
+fn resistive_body_3d_localizes_and_dissipates() {
+    // the 3D body resistive EMF fills all three edge EMFs with eta*chi*J_dir. pin the same two
+    // properties as the 2.5D case, now across every edge component.
+    let sim = make_sim3(MagneticSpec::Resistive { eta: ETA });
+    seed_field3(&sim);
+    body_resistive_emf::<3, 3, HostMemory, f64>(&sim);
+
+    // LOCALIZATION: some edge EMF is nonzero near the body and every edge EMF is ~zero far from it.
+    let (mut near_max, mut far_max) = (0.0_f64, 0.0_f64);
+    {
+        let m = sim.fields.mhd.as_ref().unwrap();
+        for k in 0..3 {
+            for c in m.efield[k].domain().iter() {
+                let e = m.efield[k].at(c).abs();
+                let r = cell_dist3(&sim, c);
+                if r < R_BODY { near_max = near_max.max(e); }
+                if r > R_BODY + 6.0 * sim.geom.dx[0] { far_max = far_max.max(e); }
+            }
+        }
+    }
+    assert!(near_max > 1e-6, "the 3D resistive body added no EMF inside its mask (near_max = {near_max})");
+    assert!(
+        far_max < 1e-3 * near_max,
+        "the 3D resistive EMF is not localized: far_max = {far_max}, near_max = {near_max}"
+    );
+
+    // DISSIPATION: the div-B-clean 3D curl consumes the masked EMF and the magnetic-energy change is
+    // negative (cartesian face weights are unity). dW = sum_{k,f} B_f*(bface_after - B_f).
+    ct_curl::<3, 3, HostMemory, f64>(&sim, 1.0);
+    let mut dw = 0.0_f64;
+    {
+        let m = sim.fields.mhd.as_ref().unwrap();
+        for axis in 0..3 {
+            for c in m.bface[axis].domain().iter() {
+                dw += bseed3(axis, c) * (*m.bface[axis].at(c) - bseed3(axis, c));
+            }
+        }
+    }
+    assert!(dw < -1e-9, "the 3D resistive body did not dissipate magnetic energy (dW = {dw} >= 0)");
+
+    // a MagneticSpec::None body adds NOTHING to any edge EMF.
+    let sim_none = make_sim3(MagneticSpec::None);
+    seed_field3(&sim_none);
+    body_resistive_emf::<3, 3, HostMemory, f64>(&sim_none);
+    let none_max = {
+        let m = sim_none.fields.mhd.as_ref().unwrap();
+        (0..3)
+            .flat_map(|k| sim_none.geom.interior.iter().map(move |c| (k, c)))
+            .map(|(k, c)| m.efield[k].at(c).abs())
+            .fold(0.0_f64, f64::max)
+    };
+    assert_eq!(none_max, 0.0, "a non-magnetic 3D body perturbed an edge EMF (max |E| = {none_max})");
+}
+
 #[test]
 fn drain_sink_in_2p5d_mhd_is_local_and_stable() {
     // REGRESSION: the immersed-body penalize under 2.5D MHD (D=2, DOF=3). the dispatch once bound the

@@ -1105,15 +1105,16 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
             continue;
         }
         assert!(
-            D == 2 && sim.geom.coords == symbi_geometry::Geometry::Cartesian,
+            sim.geom.coords == symbi_geometry::Geometry::Cartesian && (D == 2 || D == 3),
             "MagneticSpec::Resistive (a resistive immersed body) has a masked-adjoint resistive EMF for \
-             the cartesian 2.5D chart only; the {:?} chart in {D}D needs its own body-mask + adjoint \
-             pair, not yet built. use a cartesian 2.5D grid or drop the magnetic coupling.",
+             the cartesian 2.5D and 3D charts only; the {:?} chart in {D}D needs its own body-mask + \
+             adjoint pair, not yet built. use a cartesian grid or drop the magnetic coupling.",
             sim.geom.coords
         );
         let mhd = sim.fields.mhd.as_ref().expect("MHD requires mhd fields");
-        let name = "body_resistive_emf_2d";
-        let scalars = scalars_for(name, |bind| {
+        // the shared body/geom scalar resolver: the body's eta, the body-0 position (mask center), and
+        // the geom scalars (dx_a) the mask + current differences read. reused across every edge.
+        let resolve = |bind: &ScalarBind| -> Sc {
             Sc::from_f64(match bind {
                 ScalarBind::Spec(s) if &**s == "eta" => eta,
                 ScalarBind::Ref(ScalarRef::Body { idx: 0, field }) => {
@@ -1123,22 +1124,40 @@ pub fn body_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
                     .unwrap_or_else(|| panic!("body_resistive_emf: unexpected scalar {other:?}")),
                 o => panic!("body_resistive_emf: unexpected scalar {o:?}"),
             })
-        });
-        let slot = |s: &str| -> &Field<Sc, D, Mem> {
-            match s {
-                "ez" => &mhd.efield[0],
-                "bx" => &mhd.bface[0],
-                "by" => &mhd.bface[1],
-                o => panic!("body_resistive_emf: unknown manifest slot '{o}'"),
-            }
         };
-        let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
-        for (bind, is_out) in kernel_field_binds(name).iter() {
-            let fld = slot(&bind.name());
-            if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+        // the (edge slot, transverse faces, kernel name) list to fill: 2.5D has only the out-of-plane
+        // E_z from the two in-plane faces; 3D has all three edges, each from its two transverse faces.
+        let edges: Vec<(usize, usize, usize, String)> = if D == 2 {
+            vec![(0, 0, 1, "body_resistive_emf_2d".to_string())]
+        } else {
+            ct_edges(&sim.geom.axes)
+                .into_iter()
+                .map(|edge| {
+                    let dir = edge.name_k;
+                    (edge.slot, (dir + 1) % 3, (dir + 2) % 3, format!("body_resistive_emf_3d_{dir}"))
+                })
+                .collect()
+        };
+        for (eslot, p1, p2, name) in edges {
+            let scalars = scalars_for(&name, &resolve);
+            // slot names differ by dim: the 2.5D kernel binds (ez, bx, by); the 3D kernels bind
+            // (emf, b_p1, b_p2) for the edge's two transverse faces.
+            let slot = |s: &str| -> &Field<Sc, D, Mem> {
+                match s {
+                    "ez" | "emf" => &mhd.efield[eslot],
+                    "bx" | "b_p1" => &mhd.bface[p1],
+                    "by" | "b_p2" => &mhd.bface[p2],
+                    o => panic!("body_resistive_emf: unknown manifest slot '{o}'"),
+                }
+            };
+            let mut inputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+            let mut outputs: Vec<&Field<Sc, D, Mem>> = Vec::new();
+            for (bind, is_out) in kernel_field_binds(&name).iter() {
+                let fld = slot(&bind.name());
+                if *is_out { outputs.push(fld); } else { inputs.push(fld); }
+            }
+            dispatch_fields_each::<Sc, Mem, D>(&name, mhd.efield[eslot].domain(), &inputs, &outputs, &[], &scalars);
         }
-        dispatch_fields_each::<Sc, Mem, D>(name, mhd.efield[0].domain(), &inputs, &outputs, &[], &scalars);
     }
 }
 

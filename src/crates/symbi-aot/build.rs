@@ -1014,6 +1014,12 @@ fn gen_rmhd_ct_curl(out_dir: &str) {
         let (k, writes) = rmhd_resistive_emf_3d_dir_gv(dir);
         emit_gv(out_dir, &format!("rmhd_resistive_emf_3d_{dir}"), 3, &k, &writes);
     }
+    // the 3D Cartesian immersed-body resistive edge EMF, one per edge direction: the bulk 3D kernel
+    // gated by the body mask chi(x), so a resistive body dissipates the field threading it in 3D.
+    for dir in 0..3 {
+        let (k, writes) = symbi_discretize::body_resistive_emf_3d_dir_gv(dir, Coords::Cartesian);
+        emit_gv(out_dir, &format!("body_resistive_emf_3d_{dir}"), 3, &k, &writes);
+    }
 }
 
 // the RMHD face flux along a given sweep `dir` at 3D (per-dir kernel; the
