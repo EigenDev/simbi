@@ -698,7 +698,33 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     symbi_xpu::with_device(devices[i], || kernels[i].snapshot(sh[i]));
                 }
             }
+        }
+        // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
+        // scalars from the tile's motion state, which must hold a(t) at the stage's
+        // shu-osher ENTRY time — the same per-stage refresh the single-grid step performs,
+        // applied in lockstep on every tile (identical inputs -> identical a). `a` is
+        // restored to the step-entry value after the stages; the canonical step advance
+        // lives at the step tail. static meshes assign a_n back to itself — no change.
+        let frac = crate::driver::stage_time_fractions(stages);
+        let a_n: Vec<f64> = stores.iter().map(|s| s.motion.a).collect();
+        for s in stores.iter_mut() {
+            s.dt = dt;
+        }
+        {
             for (sidx, &(a0, ac)) in stages.iter().enumerate() {
+                let entry = if sidx == 0 { 0.0 } else { frac[sidx - 1] };
+                for (i, s) in stores.iter_mut().enumerate() {
+                    let t_entry = s.time + entry * dt;
+                    let mexpr =
+                        s.motion_law.as_ref().map(|ml| (ml.a_at(t_entry), ml.adot_at(t_entry)));
+                    if let Some((a, ad)) = mexpr {
+                        s.motion.a = a;
+                        s.motion.a_dot = ad;
+                    } else if s.motion.homologous {
+                        s.motion.a = a_n[i] + s.motion.a_dot * (entry * dt);
+                    }
+                }
+                let sh = shared!();
                 let stage = (sidx + 1) as u8; // 1-based: post_godunov saves the emf at stage 1, averages at 2.
                 for i in 0..n {
                     symbi_xpu::with_device(devices[i], || {
@@ -747,6 +773,14 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                     symbi_xpu::with_device(devices[i], || kernels[i].ghost_fill(sh[i]));
                 }
             }
+        }
+        // the stage refresh mutated a; the step-tail advance below starts from the
+        // step-entry value, mirroring the single-grid step's restore.
+        for (i, s) in stores.iter_mut().enumerate() {
+            s.motion.a = a_n[i];
+        }
+        {
+            let sh = shared!();
             // the viscous transport, per tile, once per step after
             // the final halo exchange (the +-1 stencil reads the neighbor's
             // exchanged edge). body-independent; inert when inviscid.
@@ -770,6 +804,25 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
         }
         if has_bodies {
             step_bodies_decomposed(stores, dt);
+        }
+        // per-tile clocks + mesh-motion advance, in lockstep (identical law + identical dt on
+        // every tile -> identical scale factors; the cuts sit at fixed comoving indices, so the
+        // halo exchange is unaffected). the tile time feeds time-dependent driven-boundary
+        // prescriptions and the checkpoint metadata. the homologous linear advance matches the
+        // single-grid step; a traced motion law is then sampled EXACTLY at the new time instead
+        // of the constant-rate extrapolation (which overshoots a decelerating mesh).
+        for s in stores.iter_mut() {
+            if s.motion_law.is_none() && s.motion.homologous {
+                s.motion.a += s.motion.a_dot * dt;
+            }
+            s.time += dt;
+            s.iteration += 1;
+            if let Some((a, ad)) =
+                s.motion_law.as_ref().map(|ml| (ml.a_at(s.time), ml.adot_at(s.time)))
+            {
+                s.motion.a = a;
+                s.motion.a_dot = ad;
+            }
         }
         t += dt;
         iter += 1;

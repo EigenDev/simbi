@@ -2469,6 +2469,34 @@ fn prolong_order_for(reconstruction: &str) -> ProlongOrder {
 /// `a += a_dot*dt`, a_ddot = 0), or uniform cartesian translation. `scale_a0` /
 /// `scale_adot` are the python scale-factor callables already evaluated at
 /// start_time (the rust model integrates a from a constant rate).
+/// seed a sim's clock + mesh-motion state from the config: physical time starts at
+/// start_time (a moving-mesh a(t) samples the physical clock), the motion state from the
+/// scale-factor scalars, and the traced a(t) law when the config carries one — the same
+/// seeding the shared uni-grid prep performs; decomposed tiles call it per tile so every
+/// tile advances the identical law in lockstep.
+fn attach_motion<R, const D: usize, const DOF: usize, M, E, S, Mem>(
+    sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    cfg: &Config,
+) -> Result<(), String>
+where
+    R: Regime<f64, D>,
+    M: Metric<f64, D> + Copy + Send + Sync,
+    E: Eos<f64> + Send + Sync,
+    S: ExecutionSpace,
+    Mem: MemorySpace + Sync,
+{
+    sim.time = cfg.start_time;
+    sim.motion = motion_state(cfg);
+    if let Some(ref mj) = cfg.motion_json {
+        let t0 = sim.time;
+        let law = symbi_hydro::motion_law::MotionLaw::from_json(mj, t0, cfg.t_final)
+            .map_err(|e| format!("mesh motion: {e}"))?;
+        sim.motion = symbi_geometry::MotionState::homologous(law.a_at(t0), law.adot_at(t0));
+        sim.motion_law = Some(law);
+    }
+    Ok(())
+}
+
 fn motion_state(cfg: &Config) -> MotionState<f64> {
     if !cfg.mesh_motion {
         MotionState::static_mesh()
@@ -2749,7 +2777,7 @@ macro_rules! build_and_run_hydro {
 fn run_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<(SimStateGeneric<R, D, DOF, M, E, S, Mem>, K)>,
-    global: SimStateGeneric<R, D, DOF, M, E, S, Mem>,
+    mut global: SimStateGeneric<R, D, DOF, M, E, S, Mem>,
     counts: [usize; D],
 ) -> Result<(), String>
 where
@@ -2795,10 +2823,21 @@ where
     let diag_interval = (cfg.diagnostic_interval * cfg.time_unit).max(f64::MIN_POSITIVE);
     let mut next_diag = diag_interval;
 
+    // pin every tile's physical clock to the start time (nonzero on restart): the decomposed
+    // loop advances these per step, and the checkpoint writer records the GATHER TARGET's
+    // clock — synced from tile 0 before every write below.
+    for (s, _) in tiles.iter_mut() {
+        s.time = cfg.start_time;
+    }
+    global.time = cfg.start_time;
+
     // t=start initial condition. a SHARED reborrow of the tiles for the gather (evolve_decomposed
     // takes them by `&mut` below, so the gather views are scoped reborrows on either side).
     if cfg.checkpoint_index == 0 || cfg.start_time == 0.0 {
         let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+        global.time = sh[0].time;
+        global.iteration = sh[0].iteration;
+        global.motion = sh[0].motion;
         gather_interiors(&global, &sh, counts);
         gather_faces(&global, &sh, counts);
         let tag = checkpoint_tag(cfg, 0, cp_width, cfg.start_time, cfg.checkpoint_index);
@@ -2839,6 +2878,12 @@ where
             &transport,
             |_iter, time, sh| {
                 if time + f64::EPSILON >= next_cp {
+                    // the writer records the GATHER TARGET's clock/scale factor: sync from
+                    // tile 0 (all tiles advance in lockstep) or the checkpoint carries the
+                    // start-time forever.
+                    global.time = sh[0].time;
+                    global.iteration = sh[0].iteration;
+                    global.motion = sh[0].motion;
                     gather_interiors(&global, sh, counts);
                     gather_faces(&global, sh, counts);
                     let tag = checkpoint_tag(cfg, 0, cp_width, time, cp_index);
@@ -2872,6 +2917,9 @@ where
     // canonical final snapshot, mirroring the single-grid run (shared reborrow again).
     {
         let sh: Vec<_> = tiles.iter().map(|(s, _)| &**s).collect();
+        global.time = sh[0].time;
+        global.iteration = sh[0].iteration;
+        global.motion = sh[0].motion;
         gather_interiors(&global, &sh, counts);
         gather_faces(&global, &sh, counts);
     }
@@ -2894,7 +2942,7 @@ where
 fn run_refined_decomposed_loop<R, const D: usize, const DOF: usize, M, E, S, Mem, K>(
     cfg: &Config,
     mut tiles: Vec<Hierarchy<R, D, DOF, M, E, S, Mem, K>>,
-    global: Hierarchy<R, D, DOF, M, E, S, Mem, K>,
+    mut global: Hierarchy<R, D, DOF, M, E, S, Mem, K>,
     counts: [usize; D],
 ) -> Result<(), String>
 where
@@ -2929,7 +2977,16 @@ where
 
     // gather each level of the decomposed tiles into the global hierarchy (root over `counts`, fine
     // over the fine sub-grid), then write all the global levels through the multi-level writer.
-    let write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
+    let mut write_cp = |tiles: &[Hierarchy<R, D, DOF, M, E, S, Mem, K>], path: &str, cp_index: u64| {
+        // the writer records the GATHER TARGET's clock: sync every global level from tile 0
+        // (all tiles advance in lockstep; between root steps the fine clock equals the root's)
+        // or the checkpoint carries the start-time forever.
+        let t_now = tiles[0].levels[0].state.time;
+        let it_now = tiles[0].levels[0].state.iteration;
+        for l in global.levels.iter_mut() {
+            l.state.time = t_now;
+            l.state.iteration = it_now;
+        }
         let roots: Vec<_> = tiles.iter().map(|h| &*h.levels[0].state).collect();
         gather_interiors(&*global.levels[0].state, &roots, counts);
         if let Some(fg) = &fg {
@@ -3257,11 +3314,14 @@ macro_rules! build_and_run_hydro_decomposed {
                 // decomposed loop sums the backward feedback across tiles + advances the prescribed
                 // binary orbit identically (oracle: decomp_body_equivalence).
 
-                let sim = if cfg.bodies.is_empty() {
+                let mut sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
                     sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
                 };
+                // clock + mesh motion per tile: every tile carries the identical a(t) law and
+                // the decomposed loop advances them in lockstep with the shared dt.
+                attach_motion(&mut sim, cfg)?;
                 let sub = sim
                     .substrate()
                     .theta(theta)
@@ -4513,6 +4573,11 @@ macro_rules! build_and_run_iso_decomposed {
                 } else {
                     sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
                 };
+                // clock + mesh motion per tile: every tile carries the identical a(t) law and
+                // the decomposed loop advances them in lockstep with the shared dt.
+                let mut sim = sim;
+                attach_motion(&mut sim, cfg)?;
+                let sim = sim;
                 let sub = sim
                     .substrate()
                     .theta(theta)
@@ -4914,9 +4979,6 @@ fn dispatch_and_run(cfg: &Config, prims: &[Vec<f64>], bfields: &[Vec<f64>]) -> R
                  imhd); regime '{}' runs single-gpu for now (set gpus=1)",
                 cfg.regime
             ));
-        }
-        if cfg.mesh_motion {
-            return Err("gpus>1 does not yet support mesh motion (moving mesh); set gpus=1".to_string());
         }
         // immersed bodies (incl. moving binaries) and their force/accreted-mass diagnostics are
         // wired for gpus>1: the decomposed loop applies the body source per tile, sums the backward
