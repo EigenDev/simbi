@@ -489,6 +489,7 @@ def read_metadata(meta_group: h5py.Group) -> Result[Metadata, str]:
                 cfl=float(attrs["cfl"]),
                 plm_theta=float(attrs["plm_theta"]),
                 viscosity=float(attrs.get("viscosity", 0.0)),
+                resistivity=float(attrs.get("resistivity", 0.0)),
                 # domain
                 dimensions=int(attrs["dimensions"]),
                 coord_system=decode_str(attrs["coord_system"]),

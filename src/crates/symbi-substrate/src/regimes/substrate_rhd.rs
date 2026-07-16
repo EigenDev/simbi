@@ -52,6 +52,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosit
 {
 }
 
+// non-ideal resistivity is a Newtonian-MHD operation; the RHD set ignores it (no-op default).
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    symbi_sim::substrate_seam::WithResistivity for RhdSubstrateKernelSet<Mem, Sc, D>
+{
+}
+
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithExcision
     for RhdSubstrateKernelSet<Mem, Sc, D>
 {

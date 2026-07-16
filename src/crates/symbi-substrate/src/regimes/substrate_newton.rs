@@ -69,6 +69,12 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
 {
 }
 
+// resistivity is an MHD operation; the pure-hydro adiabatic set has no magnetic field, ignores it.
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    symbi_sim::substrate_seam::WithResistivity for AdiabaticSubstrateKernelSet<Mem, Sc, D>
+{
+}
+
 pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
     pub gamma: f64,
     pub cfl_number: f64,

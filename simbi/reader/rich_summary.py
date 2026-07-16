@@ -237,6 +237,7 @@ class RichSimulationSummary:
             "is_relativistic": "Relativistic regime (True/False)",
             "shakura_sunyaev_alpha": "Shakura-Sunyaev alpha parameter",
             "viscosity": "Viscosity coefficient",
+            "resistivity": "Ohmic resistivity coefficient",
             "ambient_sound_speed": "Ambient sound speed",
             "use_quirk_smoothing": "Use Quirk (1994) smoothing (True/False)",
             "use_fleischmann_limiter": "Use Fleischmann et al. (2020) low-Mach HLLC fix (True / False)",

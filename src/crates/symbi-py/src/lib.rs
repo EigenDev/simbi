@@ -46,7 +46,7 @@ use symbi_io::Metadata;
 use symbi_sim::checkpoint::write_hierarchy_checkpoint;
 use symbi_sim::state::SimStateGeneric;
 use symbi_sim::state::CtMethod;
-use symbi_sim::substrate_seam::{WithExcision, WithViscosity};
+use symbi_sim::substrate_seam::{WithExcision, WithResistivity, WithViscosity};
 
 // =============================================================================
 // parsed configuration — a plain-rust mirror of the python exec_dict. the
@@ -96,6 +96,7 @@ struct Config {
     dlogt: f64,
     viscosity: f64,
     alpha: f64,
+    resistivity: f64,
     // horizon-excision sphere radius about the chart origin (cartesian kerr-schild
     // 2d only); 0 disables excision. must sit inside the horizon r_+ = 2M.
     excision_radius: f64,
@@ -117,6 +118,9 @@ struct Config {
     // `immersed_bodies` list; empty for body-free runs. dimension-agnostic raw
     // form — the typed `BodyCollection<f64, D>` is built per-dim at sim build.
     bodies: Vec<BodyParams>,
+    // the prescribed binary orbit (`body_system.binary_config`), if any; attaches the Keplerian
+    // orbit to the body collection so the two components orbit each other. None for non-binary runs.
+    binary: Option<BinaryCfg>,
     // a single user source expression in the rust `SourceConfig` wire format
     // (json string), or None. lowered + attached on the hydro path.
     source_json: Option<String>,
@@ -182,6 +186,9 @@ struct BodyParams {
     /// always feel feedback; this dial adds it to non-accreting gravitating
     /// masses (BodyCollection gates feedback on this flag OR the sink kind).
     two_way_coupling: bool,
+    /// the body's Ohmic resistivity `eta` (`MagneticSpec::Resistive`): a magnetized immersed sink that
+    /// dissipates the field threading it. None = magnetically transparent (`MagneticSpec::None`).
+    magnetic_resistivity: Option<f64>,
 }
 
 // =============================================================================
@@ -680,6 +687,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
         dlogt: get_f64_or(dict, "dlogt", 0.0),
         viscosity: get_f64_or(dict, "viscosity", 0.0),
         alpha: get_f64_or(dict, "alpha", 0.0),
+        resistivity: get_f64_or(dict, "resistivity", 0.0),
         excision_radius: get_f64_or(dict, "excision_radius", 0.0),
         x1_spacing: enum_str_or(dict, "x1_spacing", "linear"),
         start_time: get_f64_or(dict, "start_time", 0.0),
@@ -707,6 +715,7 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
             .and_then(|v| v.extract::<String>().ok())
             .unwrap_or_else(|| "t".to_string()),
         bodies: parse_bodies(dict),
+        binary: parse_binary(dict),
         diagnostic_interval: get_f64_or(dict, "diagnostic_interval", 0.0),
         n_gpus: dict
             .get_item("gpus")
@@ -732,13 +741,19 @@ fn parse_config(dict: &Bound<'_, PyDict>) -> PyResult<Config> {
 /// dict) into dimension-agnostic `BodyParams`. missing / malformed entries are
 /// skipped; a body-free config yields an empty vec.
 fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
+    let mut out: Vec<BodyParams> = Vec::new();
+    // the GRAVITATIONAL BODY-SYSTEM branch (`body_system.binary_config`): the binary components are
+    // GRAVITATING ACCRETORS whose initial positions/velocities come from the Keplerian orbit (the
+    // config leaves the component positions at the origin, delegating the ICs to the backend). the
+    // orbit itself is attached separately via `parse_binary` -> `with_binary_params`.
+    parse_binary_components(dict, &mut out);
     let Ok(Some(obj)) = dict.get_item("immersed_bodies") else {
-        return Vec::new();
+        return out;
     };
     let Ok(list) = obj.extract::<Vec<Bound<'_, PyAny>>>() else {
-        return Vec::new();
+        return out;
     };
-    let mut out = Vec::with_capacity(list.len());
+    out.reserve(list.len());
     for item in &list {
         let Ok(b) = item.downcast::<PyDict>() else {
             continue;
@@ -814,9 +829,86 @@ fn parse_bodies(dict: &Bound<'_, PyDict>) -> Vec<BodyParams> {
             spin_axis,
             inertia_principal,
             two_way_coupling,
+            magnetic_resistivity: sub_f64_opt(b, "magnetic", "resistivity"),
         });
     }
     out
+}
+
+/// the prescribed binary orbit params (`body_system.binary_config`): total mass, semi-major axis,
+/// eccentricity, mass ratio. `None` when there is no gravitational binary. threaded to
+/// `BodyCollection::with_binary_params` so the two components follow the Keplerian orbit each step.
+struct BinaryCfg {
+    total_mass: f64,
+    semi_major: f64,
+    eccentricity: f64,
+    mass_ratio: f64,
+}
+
+/// the `body_system.binary_config` sub-dict, if the config carries a gravitational binary.
+fn binary_config_dict<'py>(dict: &Bound<'py, PyDict>) -> Option<Bound<'py, PyDict>> {
+    let bs = dict.get_item("body_system").ok().flatten()?;
+    let bs = bs.downcast_into::<PyDict>().ok()?;
+    let bc = bs.get_item("binary_config").ok().flatten()?;
+    bc.downcast_into::<PyDict>().ok()
+}
+
+fn parse_binary(dict: &Bound<'_, PyDict>) -> Option<BinaryCfg> {
+    let bc = binary_config_dict(dict)?;
+    Some(BinaryCfg {
+        total_mass: get_f64_or(&bc, "total_mass", 1.0),
+        semi_major: get_f64_or(&bc, "semi_major", 1.0),
+        eccentricity: get_f64_or(&bc, "eccentricity", 0.0),
+        mass_ratio: get_f64_or(&bc, "mass_ratio", 1.0),
+    })
+}
+
+/// append the binary components as GRAVITATING (and, if `is_an_accretor`, ACCRETING) bodies, with
+/// their initial positions/velocities from the circular Keplerian orbit about the COM (the config
+/// leaves the component positions at the origin and delegates the ICs to `keplerian_binary`).
+fn parse_binary_components(dict: &Bound<'_, PyDict>, out: &mut Vec<BodyParams>) {
+    const ACCRETION: u64 = 2;
+    let Some(bc) = binary_config_dict(dict) else { return };
+    let total_mass = get_f64_or(&bc, "total_mass", 1.0);
+    let semi_major = get_f64_or(&bc, "semi_major", 1.0);
+    let mass_ratio = get_f64_or(&bc, "mass_ratio", 1.0);
+    let (p1, v1, _m1, p2, v2, _m2) = symbi_ib::keplerian_binary::<f64>(total_mass, semi_major, mass_ratio);
+    let ics = [(p1, v1), (p2, v2)];
+    let Ok(Some(comps)) = bc.get_item("components") else { return };
+    let Ok(comps) = comps.extract::<Vec<Bound<'_, PyAny>>>() else { return };
+    for (i, comp) in comps.iter().enumerate() {
+        let Ok(c) = comp.downcast::<PyDict>() else { continue };
+        let has_accretion = c.get_item("accretion").ok().flatten().is_some();
+        let (pos, vel) = ics.get(i).copied().unwrap_or((p1, v1));
+        let two_way = c
+            .get_item("two_way_coupling")
+            .ok()
+            .flatten()
+            .and_then(|v| v.extract().ok())
+            .unwrap_or(false);
+        out.push(BodyParams {
+            capability: if has_accretion { ACCRETION } else { 1 },
+            mass: get_f64_or(c, "mass", 0.0),
+            radius: get_f64_or(c, "radius", 0.0),
+            position: vec![pos[0], pos[1]],
+            velocity: vec![vel[0], vel[1]],
+            softening: sub_f64(c, "gravitational", "softening_length", 0.0),
+            accretion_radius: sub_f64(c, "accretion", "accretion_radius", 0.0),
+            sink_rate: sub_f64(c, "accretion", "sink_rate", 0.0),
+            porosity: sub_f64_opt(c, "accretion", "porosity"),
+            k_eta_n: sub_f64(c, "accretion", "k_eta_n", 0.0),
+            k_eta_t: sub_f64(c, "accretion", "k_eta_t", 0.0),
+            torque_free_xi: sub_f64_opt(c, "accretion", "torque_free_xi"),
+            inertia: 0.0,
+            no_slip: true,
+            shape_json: None,
+            omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0, 0.0, 0.0],
+            two_way_coupling: two_way,
+            magnetic_resistivity: None,
+        });
+    }
 }
 
 /// read `body[group][key]` as f64 (the nested ImmersedBodyConfig sub-dicts like
@@ -1928,7 +2020,7 @@ fn build_body_shapes(params: &[BodyParams]) -> Vec<Option<symbi_ib::sdf::SdfExpr
         .collect()
 }
 
-fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D> {
+fn build_bodies<const D: usize>(params: &[BodyParams], binary: Option<&BinaryCfg>) -> BodyCollection<f64, D> {
     const ACCRETION: u64 = 2;
     const RIGID: u64 = 1 << 4;
     let mut coll = BodyCollection::new();
@@ -1994,7 +2086,25 @@ fn build_bodies<const D: usize>(params: &[BodyParams]) -> BodyCollection<f64, D>
         } else {
             Body::gravitational(idx, pos, vel, b.mass, b.radius, b.softening)
         };
+        // a magnetized sink: the body dissipates the field threading it (MHD runs only; a no-op on B
+        // for a hydro/None body). applied on top of the surface stack.
+        let body = match b.magnetic_resistivity {
+            Some(eta) if eta > 0.0 => body.with_magnetic(symbi_ib::MagneticSpec::Resistive { eta }),
+            _ => body,
+        };
         coll = coll.add(body.with_two_way_coupling(b.two_way_coupling));
+    }
+    // attach the PRESCRIBED binary orbit so `apply_body_deltas` advances the two components on their
+    // Keplerian orbit each step (the components were built at the Keplerian ICs in parse_binary_components).
+    if let Some(bin) = binary {
+        // `as_binary` flips the orbital-advance capability `advance_binary` gates on; `with_binary_params`
+        // supplies the orbit. BOTH are required (the flag and the params are separate).
+        coll = coll.as_binary().with_binary_params(symbi_ib::BinaryParams::new(
+            bin.total_mass,
+            bin.semi_major,
+            bin.eccentricity,
+            bin.mass_ratio,
+        ));
     }
     coll
 }
@@ -2167,9 +2277,48 @@ mod diagnostics_tests {
             spin_axis: [0.0, 0.0, 1.0],
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: true,
+            magnetic_resistivity: None,
         }];
-        let coll = build_bodies::<2>(&params);
+        let coll = build_bodies::<2>(&params, None);
         assert!(coll.get(0).two_way_coupling);
+    }
+
+    // REGRESSION: a gravitational binary (`body_system.binary_config`) must build TWO orbiting
+    // accretors with the prescribed Keplerian orbit attached -- the `body_system` payload was being
+    // dropped (parse_bodies read only `immersed_bodies`), yielding zero bodies.
+    #[test]
+    fn binary_cfg_builds_a_prescribed_orbiting_pair() {
+        let accretor = |x: f64| BodyParams {
+            capability: 2, // ACCRETION
+            mass: 0.5,
+            radius: 0.0,
+            position: vec![x, 0.0],
+            velocity: vec![0.0, 0.0],
+            softening: 0.05,
+            accretion_radius: 0.2,
+            sink_rate: 0.0,
+            porosity: None,
+            k_eta_n: 0.0,
+            k_eta_t: 0.0,
+            torque_free_xi: None,
+            inertia: 0.0,
+            no_slip: true,
+            shape_json: None,
+            omega: 0.0,
+            spin_axis: [0.0, 0.0, 1.0],
+            inertia_principal: [0.0, 0.0, 0.0],
+            two_way_coupling: false,
+            magnetic_resistivity: None,
+        };
+        let params = vec![accretor(0.5), accretor(-0.5)];
+        let binary = BinaryCfg { total_mass: 1.0, semi_major: 1.0, eccentricity: 0.0, mass_ratio: 1.0 };
+        let coll = build_bodies::<2>(&params, Some(&binary));
+        assert_eq!(coll.len(), 2, "the binary must build two bodies");
+        assert!(coll.is_binary(), "the collection must carry the prescribed binary orbit");
+        assert!(coll.get(0).has_gravity() && coll.get(1).has_gravity(), "both components gravitate");
+        // guard: without the binary cfg the same bodies are NOT a prescribed binary (the orbit is the
+        // thing the body_system payload adds).
+        assert!(!build_bodies::<2>(&params, None).is_binary());
     }
 
     // a RIGID-capability body builds a non-accreting rigid sphere with the drain-off
@@ -2197,8 +2346,9 @@ mod diagnostics_tests {
             spin_axis: [0.0, 0.0, 1.0],
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
+            magnetic_resistivity: None,
         }];
-        let coll = build_bodies::<2>(&params);
+        let coll = build_bodies::<2>(&params, None);
         let body = coll.get(0);
         // shape stays None here: the rigid body defaults to its analytic sphere.
         assert!(build_body_shapes(&params)[0].is_none());
@@ -2240,6 +2390,7 @@ mod diagnostics_tests {
             spin_axis: [0.0, 0.0, 1.0],
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
+            magnetic_resistivity: None,
         };
         let params = vec![
             rigid(Some(
@@ -2277,8 +2428,9 @@ mod diagnostics_tests {
             spin_axis: [0.0, 0.0, 1.0],
             inertia_principal: [0.0, 0.0, 0.0],
             two_way_coupling: false,
+            magnetic_resistivity: None,
         }];
-        let coll = build_bodies::<2>(&params);
+        let coll = build_bodies::<2>(&params, None);
         // omega = rate * spin_axis = 3.5 * (0,0,1).
         let w = coll.get(0).omega;
         assert!(w[0] == 0.0 && w[1] == 0.0 && (w[2] - 3.5).abs() < 1e-12, "spin omega = {w:?}");
@@ -2449,7 +2601,7 @@ macro_rules! build_and_run_hydro {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
             sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
             sim
         };
@@ -2460,6 +2612,7 @@ macro_rules! build_and_run_hydro {
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
             .with_viscosity(cfg.viscosity)
+            .with_resistivity(cfg.resistivity)
             .with_excision(cfg.excision_radius);
         // attach a user source expression (force/cooling/relax/raw) when present.
         // lowered against THIS regime's spec via the source front door — the bridge rejects
@@ -2545,7 +2698,7 @@ macro_rules! build_and_run_hydro {
         // (accreting) bodies, coarser levels carry a gravity-only proxy (finest-owns-bodies, so the
         // sink applies once). the sink sphere must lie inside the finest level (asserted there).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
-            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
             hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
         }
         run_loop(&mut hier, cfg).map_err(|e| e.to_string())
@@ -3035,7 +3188,7 @@ macro_rules! build_and_run_hydro_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
                 };
                 let sub = sim
                     .substrate()
@@ -3438,7 +3591,7 @@ macro_rules! build_and_run_mhd {
         let sim = if cfg.bodies.is_empty() {
             sim
         } else {
-            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+            sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
         };
         let theta = build_theta(cfg);
         let sub = sim
@@ -3565,7 +3718,7 @@ macro_rules! build_and_run_imhd {
         let sim = if cfg.bodies.is_empty() {
             sim
         } else {
-            sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+            sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
         };
         let theta = build_theta(cfg);
         let sub = sim
@@ -3709,7 +3862,7 @@ macro_rules! build_and_run_mhd_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
                 };
                 let sub = sim
                     .substrate()
@@ -3866,7 +4019,7 @@ macro_rules! build_and_run_imhd_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
                 };
                 let sub = sim
                     .substrate()
@@ -4177,7 +4330,7 @@ macro_rules! build_and_run_iso_decomposed {
                 let sim = if cfg.bodies.is_empty() {
                     sim
                 } else {
-                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies))
+                    sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()))
                 };
                 let sub = sim
                     .substrate()
@@ -4314,7 +4467,7 @@ macro_rules! build_and_run_iso {
         let sim = if cfg.bodies.is_empty() || cfg.refinement_enabled {
             sim
         } else {
-            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            let mut sim = sim.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
             sim.attach_body_shapes(build_body_shapes(&cfg.bodies));
             sim
         };
@@ -4411,7 +4564,7 @@ macro_rules! build_and_run_iso {
         // level owns the full (accreting) bodies, coarser levels a gravity-only
         // proxy (finest-owns-bodies, so the sink applies once).
         if !cfg.bodies.is_empty() && cfg.refinement_enabled {
-            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies));
+            hier = hier.with_bodies(build_bodies::<$d>(&cfg.bodies, cfg.binary.as_ref()));
             hier.attach_body_shapes(build_body_shapes(&cfg.bodies));
         }
 

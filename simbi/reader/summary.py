@@ -323,10 +323,12 @@ class SimulationParameterSummary:
                     "is_mhd",
                     "is_relativistic",
                     "viscosity",
+                    "resistivity",
                 ],
                 "descriptions": {
                     "adiabatic_index": "Ratio of specific heats (gamma)",
                     "viscosity": "Kinematic viscosity coefficient",
+                    "resistivity": "Ohmic resistivity coefficient",
                 },
             },
             "Numerics": {

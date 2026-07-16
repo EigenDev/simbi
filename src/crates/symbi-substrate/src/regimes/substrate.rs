@@ -627,3 +627,9 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
     symbi_sim::substrate_seam::WithExcision for IsoSubstrateKernelSet<Mem, Sc, D>
 {
 }
+
+// resistivity is an MHD operation; the pure-hydro isothermal set has no magnetic field, ignores it.
+impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
+    symbi_sim::substrate_seam::WithResistivity for IsoSubstrateKernelSet<Mem, Sc, D>
+{
+}

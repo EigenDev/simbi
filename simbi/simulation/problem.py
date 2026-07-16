@@ -566,6 +566,40 @@ class SimbiProblem(BaseModel):
             return 9
         return self.dimensionality + 3
 
+    def expected_primitive_arity(self) -> Optional[tuple[int, str]]:
+        """the EXACT per-cell primitive tuple (length, signature) that
+        `initial_primitive_state`'s gas generator must yield — or None when the
+        width is not uniquely fixed by the regime. the reader maps the tuple
+        POSITIONALLY, so a too-long tuple silently shifts a trailing field (e.g.
+        pressure) into an ignored slot rather than erroring; pinning the length
+        turns that into a loud failure.
+
+        the layout is `rho`, then one velocity per DOF, then pressure. it is exact
+        only when BOTH are fixed:
+        - DOF is 3 for mhd (v3 couples to B, so it is carried even in 1.5d/2.5d).
+          for pure hydro it is `dimensionality` ONLY on a cartesian chart; a
+          curvilinear chart (spherical/cylindrical) carries transverse velocities
+          for angular momentum with no matching spatial axis, and relativistic
+          hydro (rhd) likewise carries an azimuthal v3 on a curved/rotating chart
+          — so those DOFs are not fixed by dimensionality (width UNDETERMINED).
+        - pressure is mandatory for an energy regime. an ISOTHERMAL run may or may
+          not pass an explicit p/cs field (p = cs^2 rho is derivable), so its width
+          is UNDETERMINED (None).
+        callers fall back to a lower-bound check for the None cases."""
+        if self.isothermal:
+            return None  # optional trailing p/cs entry
+        if self.is_mhd:
+            dof = 3  # v3 couples to B on every chart
+        elif (
+            self.regime != Regime.RHD
+            and self.coord_system == CoordSystem.CARTESIAN
+        ):
+            dof = self.dimensionality  # cartesian hydro carries no extra velocity
+        else:
+            return None  # curvilinear / relativistic: chart-dependent velocity dof
+        fields = ["rho"] + [f"v{ii + 1}" for ii in range(dof)] + ["p"]
+        return len(fields), "(" + ", ".join(fields) + ")"
+
     @computed_field
     @property
     def is_relativistic(self) -> bool:
@@ -637,6 +671,14 @@ class SimbiProblem(BaseModel):
     @property
     def viscosity(self) -> float:
         """viscosity coefficient."""
+        return 0.0
+
+    @computed_field
+    @property
+    def resistivity(self) -> float:
+        """bulk ohmic resistivity eta for non-ideal mhd. the induction equation
+        gains a diffusive emf eta*J, dissipating magnetic energy into the gas.
+        zero recovers ideal mhd."""
         return 0.0
 
     @computed_field

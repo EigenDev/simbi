@@ -123,6 +123,7 @@ def to_execution_dict(problem: SimbiProblem) -> dict[str, Any]:
         "ambient_sound_speed",
         "shakura_sunyaev_alpha",
         "viscosity",
+        "resistivity",
     ]
     for field in computed_fields:
         if hasattr(problem, field):
@@ -437,15 +438,38 @@ def _check_first_tuple(problem: SimbiProblem, it: GasStateGenerator) -> GasState
             f"tuples; check that the config returns the generator function itself "
             f"(not gen()) or vice versa at the call boundary: {exc}"
         ) from None
-    # an energy regime yields (rho, v.., p); isothermal has no pressure entry,
-    # so its minimum is (rho, v).
-    min_len = 2 if getattr(problem, "isothermal", False) else 3
-    shape = "(rho, v..)" if min_len == 2 else "(rho, v.., p)"
-    if not hasattr(first, "__len__") or len(first) < min_len:
+    # where the regime fixes the width exactly, pin it: the reader maps the tuple
+    # positionally, so a too-long tuple silently shifts a trailing field (e.g.
+    # pressure) into an ignored slot rather than erroring. regimes whose width is
+    # not uniquely determined (isothermal's optional p, relativistic hydro's
+    # chart-dependent velocity dof) return None and get a lower-bound check.
+    if not hasattr(first, "__len__"):
         raise ValueError(
-            f"{name}.initial_primitive_state: each yield must be a {shape} "
-            f"sequence of >= {min_len} numbers, got {first!r}"
+            f"{name}.initial_primitive_state: each yield must be a (rho, v.., p) "
+            f"sequence, got a scalar {first!r}"
         )
+    arity_fn = getattr(problem, "expected_primitive_arity", lambda: None)
+    expected = arity_fn()
+    if expected is not None:
+        arity, signature = expected
+        if len(first) != arity:
+            raise ValueError(
+                f"{name}.initial_primitive_state: each yielded tuple must have "
+                f"EXACTLY {arity} entries {signature} for a "
+                f"{problem.dimensionality}d {problem.regime} run — got "
+                f"{len(first)}: {first!r}. mhd always carries the full 3-velocity "
+                f"even in 2.5d; pure hydro carries one velocity per spatial "
+                f"dimension. a longer tuple silently shifts the trailing field "
+                f"(e.g. pressure) into an ignored slot."
+            )
+    else:
+        min_len = 2 if getattr(problem, "isothermal", False) else 3
+        shape = "(rho, v..)" if min_len == 2 else "(rho, v.., p)"
+        if len(first) < min_len:
+            raise ValueError(
+                f"{name}.initial_primitive_state: each yield must be a {shape} "
+                f"sequence of >= {min_len} numbers, got {first!r}"
+            )
     try:
         vals = [float(v) for v in first]
     except (TypeError, ValueError) as exc:
@@ -475,6 +499,8 @@ def _validate_generator(
     try:
         initial_state = problem.initial_primitive_state()
 
+        expected = problem.expected_primitive_arity()
+
         if _is_mhd_generator(initial_state):
             gas_gen_func, bx_gen, by_gen, bz_gen = initial_state
             gas_iter = gas_gen_func()
@@ -483,8 +509,13 @@ def _validate_generator(
                 values = next(gas_iter)
                 if not hasattr(values, "__len__"):
                     return f"generator must yield sequences, got {type(values)}"
-                if len(values) < 5:
-                    return f"mhd generator must yield at least 5 values, got {len(values)}"
+                if expected is not None and len(values) != expected[0]:
+                    return (
+                        f"mhd generator must yield exactly {expected[0]} values "
+                        f"{expected[1]}, got {len(values)}"
+                    )
+                if expected is None and len(values) < 4:
+                    return f"mhd generator must yield at least 4 values, got {len(values)}"
                 try:
                     [float(v) for v in values]
                 except (ValueError, TypeError) as e:
@@ -506,12 +537,21 @@ def _validate_generator(
             gas_gen_func: GasStateFunction = initial_state
             gas_iter = gas_gen_func()
 
-            expected_min = problem.dimensionality + 2
+            # isothermal carries no mandatory pressure (min rho + dim velocities);
+            # an energy regime adds pressure (min rho + dim velocities + p).
+            expected_min = problem.dimensionality + (
+                1 if getattr(problem, "isothermal", False) else 2
+            )
             for _ in range(num_samples):
                 values = next(gas_iter)
                 if not hasattr(values, "__len__"):
                     return f"generator must yield sequences, got {type(values)}"
-                if len(values) < expected_min:
+                if expected is not None and len(values) != expected[0]:
+                    return (
+                        f"generator must yield exactly {expected[0]} values "
+                        f"{expected[1]}, got {len(values)}"
+                    )
+                if expected is None and len(values) < expected_min:
                     return f"generator must yield at least {expected_min} values, got {len(values)}"
                 try:
                     [float(v) for v in values]

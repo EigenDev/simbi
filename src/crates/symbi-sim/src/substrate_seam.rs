@@ -149,6 +149,15 @@ pub trait WithViscosity: Sized {
     }
 }
 
+/// stash the config's Ohmic resistivity `eta` onto a kernel set. same non-const-generic shape as
+/// [`WithViscosity`]; the default is a no-op (non-MHD regimes have no resistive EMF and ignore it);
+/// the MHD kernel sets override it to store the value (the resistive edge EMF + CFL).
+pub trait WithResistivity: Sized {
+    fn with_resistivity(self, _eta: f64) -> Self {
+        self
+    }
+}
+
 /// stash the config's horizon-excision radius onto a kernel set. same
 /// non-const-generic shape as [`WithViscosity`]; the default is a no-op
 /// (regimes without the baked excision kernels ignore it);

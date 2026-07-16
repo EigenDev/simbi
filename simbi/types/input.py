@@ -289,6 +289,7 @@ class Metadata:
     cfl: float
     plm_theta: float
     viscosity: float
+    resistivity: float
 
     # domain
     dimensions: int

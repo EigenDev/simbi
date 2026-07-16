@@ -272,6 +272,22 @@ class RigidProperties:
 
 
 @dataclass(frozen=True)
+class MagneticProperties:
+    """the body's magnetic coupling (MHD runs): a localized Ohmic resistivity `eta` that dissipates the
+    magnetic field THREADING the body (`MagneticSpec::Resistive`). a no-op on B for a hydro run. the
+    backend reads `magnetic.resistivity`; cartesian 2.5D MHD only for now."""
+
+    resistivity: float
+
+    def __post_init__(self) -> None:
+        if self.resistivity < 0.0:
+            raise _config_error(
+                f"magnetic resistivity must be >= 0: it is a diffusivity, not a source. "
+                f"got {self.resistivity}."
+            )
+
+
+@dataclass(frozen=True)
 class ImmersedBodyConfig:
     capability: BodyCapability
     mass: float
@@ -283,6 +299,8 @@ class ImmersedBodyConfig:
     gravitational: Optional[GravitationalProperties] = None
     accretion: Optional[AccretionProperties] = None
     rigid: Optional[RigidProperties] = None
+    # MHD magnetic coupling (Ohmic resistive sink); None = magnetically transparent.
+    magnetic: Optional[MagneticProperties] = None
 
     def __post_init__(self) -> None:
         unsupported = self.capability & ~_WIRED_CAPABILITIES
@@ -387,4 +405,5 @@ __all__ = [
     "BodySystemConfig",
     "BodyCapability",
     "has_capability",
+    "MagneticProperties",
 ]
