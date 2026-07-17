@@ -48,25 +48,15 @@ fn prim_stencil() -> ([[Tensor<Gv, 2>; 3]; 3], [[Gv; 3]; 3]) {
     (vst, rst)
 }
 
-/// accumulate the viscous increment onto cons.mom (in place, pointwise center).
-/// convert a COORDINATE-contravariant velocity stencil to PHYSICAL orthonormal
-/// components per stencil cell: `u_k = h_k v^k` (simbi stores prim.vel as the
-/// contravariant coordinate components — the CFL map's `V^c = h_c v^c` law).
-/// the orthogonal stress carrier works purely in the physical frame, so feeding
-/// coordinate components leaves every azimuthal term wrong by factors of h2 —
-/// the rigid-rotation null residual then does NOT converge with resolution
-/// (caught by the viscous_adiabatic_ortho convergence gate).
-fn physical_vst(
-    vst: &[[Tensor<Gv, 2>; 3]; 3],
-    h1: &[[Gv; 3]; 3],
-    h2: &[[Gv; 3]; 3],
-) -> [[Tensor<Gv, 2>; 3]; 3] {
-    std::array::from_fn(|j| {
-        std::array::from_fn(|i| {
-            Tensor::new([vst[j][i][0] * h1[j][i], vst[j][i][1] * h2[j][i]])
-        })
-    })
-}
+// on every newtonian chart prim.vel / cons.mom store PHYSICAL (orthonormal)
+// components — the r-phi inertial source (m_phi v_phi / r), the CFL's
+// physical-width crossing rate, and the keplerian-disk balance v_phi =
+// sqrt(GM/r) all carry that convention. the orthogonal stress carrier consumes
+// physical components, so the stored stencil feeds it DIRECTLY: scaling by the
+// metric h (reading the storage as coordinate-contravariant v^i) shifts the
+// shear null from v_phi = Omega r (rigid rotation) to v_phi = const (a sheared
+// profile) — an O(1) spurious torque on every rotating disk. (the contravariant
+// storage law belongs to the GR Valencia path only.)
 
 fn accumulate_mom(dmom: Tensor<Gv, 2>) -> Writes {
     let mom0_c = Gv::field("mom0", FieldRef::cons_mom(0));
@@ -293,12 +283,9 @@ fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKe
         }
     }
 
-    let vphys = physical_vst(&vst, &h1, &h2);
-    let (dmom_p, dnrg) =
-        symbi_hydro::viscous::viscous_update_orthogonal_2d(&vphys, &rst, &nust, &h1, &h2, dx1, dx2, dt);
-    // physical force -> coordinate momentum (mom^k = rho u_k / h_k); the heating
-    // is a frame-scalar work density and books directly.
-    let dmom = Tensor::new([dmom_p[0] / h1[1][1], dmom_p[1] / h2[1][1]]);
+    // physical components in, physical force out — same frame as the storage.
+    let (dmom, dnrg) =
+        symbi_hydro::viscous::viscous_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
     let mut writes = accumulate_mom(dmom);
     let nrg = Gv::field("nrg", FieldRef::cons_nrg());
     writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
@@ -335,12 +322,8 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     }
 
     let nust = [[nu; 3]; 3];
-    // physical in, physical out: the carrier's force updates the PHYSICAL momentum
-    // rho u_k; the stored coordinate momentum is mom^k = rho v^k = rho u_k / h_k,
-    // so the writeback divides by the center scale factor.
-    let vphys = physical_vst(&vst, &h1, &h2);
-    let dmom_p = viscous_mom_update_orthogonal_2d(&vphys, &rst, &nust, &h1, &h2, dx1, dx2, dt);
-    let dmom = Tensor::new([dmom_p[0] / h1[1][1], dmom_p[1] / h2[1][1]]);
+    // physical components in, physical force out — same frame as the storage.
+    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
     let writes = accumulate_mom(dmom);
     (end_trace(), writes)
 }
@@ -388,9 +371,8 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
         }
     }
 
-    let vphys = physical_vst(&vst, &h1, &h2);
-    let dmom_p = viscous_mom_update_orthogonal_2d(&vphys, &rst, &nust, &h1, &h2, dx1, dx2, dt);
-    let dmom = Tensor::new([dmom_p[0] / h1[1][1], dmom_p[1] / h2[1][1]]);
+    // physical components in, physical force out — same frame as the storage.
+    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
     let writes = accumulate_mom(dmom);
     (end_trace(), writes)
 }

@@ -2,13 +2,24 @@
 // viscous_adiabatic_ortho.rs
 //
 // the ADIABATIC orthogonal viscous kernels, end to end on a cylindrical (R, phi)
-// grid through the production dispatch: the same scale-factor operator as the
-// iso ortho kernel plus the div(tau . u) heating onto the total energy. gates:
-// - a differentially rotating disk (u_phi ~ 1/R, nonzero shear) loses angular
-//   momentum locally AND books heating (the total energy field changes beyond
-//   the momentum work alone would);
-// - a RIGIDLY rotating disk (v^phi = Omega, coordinate-contravariant) is an
-//   EXACT discrete stress-free null through the production dispatch;
+// grid through the production dispatch: the scale-factor stress operator plus the
+// div(tau . u) heating onto the total energy. prim.vel stores PHYSICAL
+// (orthonormal) components on every newtonian chart — the r-phi inertial source
+// (m_phi v_phi / r), the CFL's physical-width crossing rate, and the keplerian
+// disk gate (v_phi = sqrt(M/r) holds against central gravity) all pin that
+// convention — so rigid rotation is v_phi = Omega * r, and the stress operator
+// must consume the stored components directly. gates:
+// - a constant-specific-angular-momentum disk (v_phi = ell / r, nonzero shear)
+//   loses angular momentum locally AND books heating;
+// - a RIGIDLY rotating disk (v_phi = Omega r) is stress-free through the
+//   production dispatch to truncation order: prims are point samples at
+//   arithmetic cell centers while the operator's scale factors live at
+//   volumetric centroids, so the discrete residual is O(dx^2) and must
+//   CONVERGE at second order (the consistent-sampling carrier null is exact to
+//   1e-15 and gated in symbi-hydro). scaling the stored components by the
+//   metric h (as if they were coordinate-contravariant) shifts the stress null
+//   to v_phi = const, leaving a resolution-INDEPENDENT O(1) torque on rigid
+//   rotation — caught by both the magnitude and the convergence assert;
 // - the ALPHA ortho variant (local cs^2, Omega_K from the radial coordinate)
 //   genuinely acts and differs from the constant-nu update.
 // =============================================================================
@@ -35,12 +46,15 @@ const DP: f64 = 2.0 * std::f64::consts::PI / NP as f64;
 const DT: f64 = 1.0e-4;
 
 // the rigid-rotation null residual at radial resolution `nr`: one viscous
-// application on v_phi = Omega R, measured as the max interior radial-momentum
-// change. the discrete state samples v at cell centers while the operator's
-// scale factors live at volumetric centroids, so the null holds to TRUNCATION
-// order, not exactly — the invariant is that the residual converges away at
-// second order (the carrier-level null, with consistent sampling, is exact to
-// 1e-15 and is gated in symbi-hydro).
+// application on the physical profile v_phi = Omega r, measured as the max
+// change over BOTH momentum components on the interior with the two rings
+// nearest each radial boundary excluded (the zero-gradient outflow ghosts hold
+// the edge value, not the extended profile, so the boundary-adjacent stencils
+// see genuine shear). the AZIMUTHAL component is the discriminating one: for
+// any axisymmetric v_phi(r) the radial force vanishes identically (t11 = t22 =
+// 0 and t12 only enters the radial force through phi-differences), so a
+// radial-only probe is vacuous — the shear signal lives in the angular-momentum
+// flux (1/h2^2) d1(h2^2 t12).
 fn rigid_null_residual(nr: usize) -> f64 {
     let omega = 0.4;
     let dr = (R_HI - R_LO) / nr as f64;
@@ -58,9 +72,7 @@ fn rigid_null_residual(nr: usize) -> f64 {
     .cfl(CFL)
     .allocate()
     .expect("sim")
-    // prim.vel is COORDINATE-contravariant: the rigid rotation is v^phi = Omega
-    // CONSTANT (physical u_phi = h2 v^phi = Omega R).
-    .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, omega]), pre: 1.0 })
+    .set_initial(|x| Prim { rho: 1.0, vel: Tensor::new([0.0, omega * x[0]]), pre: 1.0 })
     .build();
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(0.05);
     // the production stage-entry invariant: prims current AND ghosts filled —
@@ -68,23 +80,32 @@ fn rigid_null_residual(nr: usize) -> f64 {
     // production loop never exposes it to.
     k.c2p(&sim);
     k.ghost_fill(&sim);
-    let before: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[0].view().at(c)).collect();
+    let grab = |c_ax: usize| -> Vec<f64> {
+        sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[c_ax].view().at(c)).collect()
+    };
+    let (b0, b1) = (grab(0), grab(1));
     k.viscous(&sim, DT);
-    let after: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[0].view().at(c)).collect();
-    let _ = nr;
-    before
-        .iter()
-        .zip(after.iter())
-        .map(|(b, a)| (b - a).abs())
-        .fold(0.0_f64, f64::max)
+    let (a0, a1) = (grab(0), grab(1));
+    // ring-major layout (phi fastest): ring i occupies [i*NP, (i+1)*NP). trim the
+    // outflow-contaminated radial edge rings from the max.
+    let trimmed_max = |b: &[f64], a: &[f64]| -> f64 {
+        b.iter()
+            .zip(a)
+            .enumerate()
+            .filter(|(idx, _)| {
+                let ring = idx / NP;
+                (2..nr - 2).contains(&ring)
+            })
+            .map(|(_, (x, y))| (x - y).abs())
+            .fold(0.0_f64, f64::max)
+    };
+    trimmed_max(&b0, &a0).max(trimmed_max(&b1, &a1))
 }
 
 type Sim = SimState<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>;
 type Kern = AdiabaticSubstrateKernelSet<HostMemory, f64, 2>;
 
-// vphi returns the COORDINATE v^phi (physical u_phi = R v^phi).
+// vphi returns the PHYSICAL azimuthal speed v_phi(r).
 fn build(vphi: impl Fn(f64) -> f64, with_body: bool) -> Sim {
     let sim = Sim::build(Newtonian, IdealGas { gamma: GAMMA }, CylindricalRPhi)
         .cells([NR, NP])
@@ -129,9 +150,12 @@ fn max_abs_diff(a: &[f64], b: &[f64]) -> f64 {
 
 #[test]
 fn differential_shear_diffuses_and_heats_on_the_cylindrical_chart() {
-    let sim = build(|r| 0.5 / (r * r), false);
+    // constant specific angular momentum: v_phi = ell / r has shear rate
+    // e_Rphi = (r/2) d(v_phi/r)/dr = -ell/r^2 != 0 everywhere.
+    let sim = build(|r| 0.5 / r, false);
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(0.05);
     k.c2p(&sim);
+    k.ghost_fill(&sim);
     let (m0b, m1b, enb) = snapshot(&sim);
     k.viscous(&sim, DT);
     let (m0a, m1a, ena) = snapshot(&sim);
@@ -142,34 +166,40 @@ fn differential_shear_diffuses_and_heats_on_the_cylindrical_chart() {
 }
 
 #[test]
-fn rigid_rotation_is_an_exact_discrete_null() {
-    // v^phi = Omega constant (the coordinate-contravariant rigid rotation) gives
-    // physical u_phi = Omega h2 at EVERY stencil point, which the orthogonal
-    // stress nulls identically — through the full production dispatch, over the
-    // whole domain (periodic phi and outflow-R ghosts both represent the profile
-    // exactly). the PRE-conversion kernels fed coordinate components as physical
-    // and produced e_Rphi = -Omega/(2R) here — an O(1) spurious torque on rigid
-    // rotation that this gate holds extinct.
-    let residual = rigid_null_residual(32);
+fn rigid_rotation_null_converges_at_second_order() {
+    // v_phi = Omega r (the physical rigid rotation) is stress-free. the discrete
+    // residual is the arithmetic-center vs volumetric-centroid sampling gap —
+    // O(dx^2), tiny, and it must CONVERGE at second order. a kernel that
+    // h-scales the stored components (reading them as coordinate-contravariant)
+    // shifts the stress null to v_phi = const, so rigid rotation carries a
+    // genuine resolution-independent torque: magnitude and ratio both fail.
+    let r32 = rigid_null_residual(32);
+    let r64 = rigid_null_residual(64);
     assert!(
-        residual < 1e-14,
-        "rigid rotation produced a viscous force through the dispatch: {residual:e}"
+        r32 < 1e-8,
+        "rigid rotation produced a viscous torque through the dispatch: {r32:e}"
+    );
+    assert!(
+        r64 < 0.35 * r32,
+        "the rigid-null residual does not converge at second order: {r32:e} -> {r64:e}"
     );
 }
 
 #[test]
 fn alpha_ortho_acts_and_differs_from_constant_nu() {
-    let sim_a = build(|r| 0.5 / (r * r), true);
+    let sim_a = build(|r| 0.5 / r, true);
     let ka = Kern::new(GAMMA, CFL, &sim_a.geom.allocated).with_alpha(0.1);
     ka.c2p(&sim_a);
+    ka.ghost_fill(&sim_a);
     let (_, m1b, _) = snapshot(&sim_a);
     ka.viscous(&sim_a, DT);
     let (_, m1a, _) = snapshot(&sim_a);
     assert!(max_abs_diff(&m1b, &m1a) > 1e-12, "the alpha ortho pass never acted");
 
-    let sim_c = build(|r| 0.5 / (r * r), true);
+    let sim_c = build(|r| 0.5 / r, true);
     let kc = Kern::new(GAMMA, CFL, &sim_c.geom.allocated).with_viscosity(0.05);
     kc.c2p(&sim_c);
+    kc.ghost_fill(&sim_c);
     kc.viscous(&sim_c, DT);
     let (_, m1c, _) = snapshot(&sim_c);
     assert!(
@@ -181,8 +211,9 @@ fn alpha_ortho_acts_and_differs_from_constant_nu() {
 #[test]
 fn isolation_probe_rigid_null_with_hand_set_prims() {
     // bypass the builder/c2p entirely: prims set directly over the ALLOCATED
-    // domain (ghosts included), one dispatch, per-ring dmom printout. exact
-    // coordinate-rigid input v^phi = Omega everywhere.
+    // domain (ghosts included), one dispatch, per-ring dmom printout. the
+    // physical rigid profile v_phi = Omega r evaluated at every allocated cell
+    // center (the formula extends smoothly through the ghost bands).
     let omega = 0.4;
     let sim = SimState::<Newtonian, 2, CylindricalRPhi, IdealGas<f64>, CpuSpace, HostMemory>::build(
         Newtonian,
@@ -200,27 +231,44 @@ fn isolation_probe_rigid_null_with_hand_set_prims() {
     .expect("sim")
     .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0]), pre: 1.0 })
     .build();
+    let ilo = sim.geom.interior.spaces[0].lo;
     let pre = sim.fields.prim.pre_field().expect("pre");
     for c in sim.geom.allocated.iter() {
+        let r = R_LO + ((c[0] - ilo) as f64 + 0.5) * DR;
         sim.fields.prim.rho.set(c, 1.0);
         sim.fields.prim.vel[0].set(c, 0.0);
-        sim.fields.prim.vel[1].set(c, omega);
+        sim.fields.prim.vel[1].set(c, omega * r);
         pre.set(c, 1.0);
         sim.fields.cons.mom[0].set(c, 0.0);
         sim.fields.cons.mom[1].set(c, 0.0);
     }
     let k = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(0.05);
     k.viscous(&sim, DT);
-    let after: Vec<f64> =
-        sim.geom.interior.iter().map(|c| *sim.fields.cons.mom[0].view().at(c)).collect();
-    let rings: Vec<f64> = after
-        .chunks(NP)
-        .map(|r| r.iter().map(|v| v.abs()).fold(0.0_f64, f64::max))
-        .collect();
-    eprintln!("isolation ring |dmom_r|: {:?}", &rings[..8]);
-    let interior_max = rings[2..NR - 2].iter().cloned().fold(0.0_f64, f64::max);
+    // the azimuthal momentum carries the discriminating signal (the radial force
+    // is identically zero for any axisymmetric v_phi profile).
+    let rings = |c_ax: usize| -> Vec<f64> {
+        sim.geom
+            .interior
+            .iter()
+            .map(|c| (*sim.fields.cons.mom[c_ax].view().at(c)).abs())
+            .collect::<Vec<f64>>()
+            .chunks(NP)
+            .map(|r| r.iter().cloned().fold(0.0_f64, f64::max))
+            .collect()
+    };
+    let (r0, r1) = (rings(0), rings(1));
+    eprintln!("isolation ring |dmom_r|: {:?}", &r0[..8]);
+    eprintln!("isolation ring |dmom_phi|: {:?}", &r1[..8]);
+    let interior_max = r0[2..NR - 2]
+        .iter()
+        .chain(&r1[2..NR - 2])
+        .cloned()
+        .fold(0.0_f64, f64::max);
+    // the residual floor is the arithmetic-center vs volumetric-centroid
+    // sampling gap (~1e-10 at this resolution); the h-scaling failure mode
+    // sits four orders above it.
     assert!(
-        interior_max < 1e-13,
-        "hand-set coordinate-rigid input still produces a radial force: {interior_max:e}"
+        interior_max < 1e-8,
+        "hand-set physical rigid rotation still produces a viscous force: {interior_max:e}"
     );
 }

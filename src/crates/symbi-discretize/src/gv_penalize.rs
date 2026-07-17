@@ -138,18 +138,20 @@ fn vector_to_cartesian(coords: Coords, ndim: usize, x: &[Gv], v_phys: &[Gv]) -> 
     }
 }
 
-/// the lab-frame torque receipt `r_cart x F_cart` for a body at `center` (Cartesian):
-/// rotate the physical-frame `force` to Cartesian, cross with the Cartesian
-/// displacement. returns the 3-moment (2d books only z). `x_cart` is the cell's
-/// Cartesian position, `centroid` its coordinate position (drives the rotation).
-fn lab_torque(
+/// the cell's force receipt in the CARTESIAN world frame plus its lab-frame
+/// moment `r_cart x F_cart` about the body center. penalization acts in the
+/// cell's physical orthonormal basis, which rotates from cell to cell on a
+/// curvilinear chart — only cartesian components sum across cells to a
+/// meaningful net force on the body (identity rotation on a cartesian grid).
+/// returns `(f_cart, torque)`; 2d books only the z moment, 1d none.
+fn cartesian_receipt(
     coords: Coords,
     ndim: usize,
     centroid: &[Gv],
     x_cart: &[Gv; 3],
     center: &[Gv; 3],
     force: &Tensor<Gv, 3>,
-) -> Tensor<Gv, 3> {
+) -> (Tensor<Gv, 3>, Tensor<Gv, 3>) {
     let f_cart = vector_to_cartesian(
         coords,
         ndim,
@@ -160,7 +162,28 @@ fn lab_torque(
         if a < ndim { f_cart[a] } else { Gv::ZERO }
     }));
     let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x_cart[a] - center[a]));
-    symbi_ib::moment(&x_rel, &f)
+    let torque = symbi_ib::moment(&x_rel, &f);
+    (f, torque)
+}
+
+/// a cartesian world-frame velocity expressed in the cell's physical
+/// orthonormal basis. gas momentum is stored in physical components, so a
+/// wall's velocity target (the body's translational velocity, or the local
+/// rigid surface velocity u + omega x r) must be rotated into the cell frame
+/// before the normal/tangential decomposition (identity on a cartesian grid).
+fn solid_velocity_phys(
+    coords: Coords,
+    ndim: usize,
+    centroid: &[Gv],
+    u_cart: &Tensor<Gv, 3>,
+) -> Tensor<Gv, 3> {
+    let u_phys = vector_from_cartesian(
+        coords,
+        ndim,
+        centroid,
+        &(0..ndim).map(|a| u_cart[a]).collect::<Vec<_>>(),
+    );
+    Tensor::new(std::array::from_fn(|a| if a < ndim { u_phys[a] } else { Gv::ZERO }))
 }
 
 /// the immersed body's mask geometry as a traced SDF, centered at `center` (the body
@@ -388,7 +411,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, 
     // the angular-momentum receipt: the lab-frame moment r_cart x F_cart of the
     // cell's force receipt about the body center. exactly zero beyond the support
     // ball (F vanishes there). 3d books all three components; 2d only z; 1d none.
-    let torque = lab_torque(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -405,7 +428,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, 
         writes.push((
             format!("pen_force_{a}"),
             format!("pen_0_force_{a}").into(),
-            delta.force_delta[a].node(),
+            f_cart[a].node(),
         ));
     }
     writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
@@ -562,11 +585,18 @@ fn penalize_porous_inner(
     // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
     // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
     // static path keeps the bare translational u_solid, bit-identical to before.
-    let kin = if spin {
+    let kin_cart = if spin {
         let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
         base_kin.at(&x_rel)
     } else {
         base_kin
+    };
+    // the surface velocity is assembled in the cartesian world frame; the gas
+    // momentum is stored in physical components, so the target rotates into the
+    // cell's orthonormal basis before the normal/tangential decomposition.
+    let kin = BodyKin::<Gv, 3> {
+        u_solid: solid_velocity_phys(coords, ndim, &geo.centroid, &kin_cart.u_solid),
+        ..kin_cart
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::PorousAccretor {
@@ -582,7 +612,7 @@ fn penalize_porous_inner(
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let torque = lab_torque(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -599,7 +629,7 @@ fn penalize_porous_inner(
         writes.push((
             format!("pen_force_{a}"),
             format!("pen_0_force_{a}").into(),
-            delta.force_delta[a].node(),
+            f_cart[a].node(),
         ));
     }
     writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
@@ -678,7 +708,13 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
         if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
     }));
-    let kin = BodyKin::<Gv, 3> { u_solid, omega: Tensor::zeros(), e_wall: Gv::ZERO };
+    // the body's translational velocity is a cartesian world vector; rotate it
+    // into the cell's physical basis to match the stored momentum components.
+    let kin = BodyKin::<Gv, 3> {
+        u_solid: solid_velocity_phys(coords, ndim, &geo.centroid, &u_solid),
+        omega: Tensor::zeros(),
+        e_wall: Gv::ZERO,
+    };
     let mut acc = Relax::<Gv, 3>::none();
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, IsoModel> {
@@ -687,7 +723,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let torque = lab_torque(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -703,7 +739,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (
         writes.push((
             format!("pen_force_{a}"),
             format!("pen_0_force_{a}").into(),
-            delta.force_delta[a].node(),
+            f_cart[a].node(),
         ));
     }
     for a in torque_axes(ndim) {
@@ -827,11 +863,18 @@ fn penalize_porous_iso_inner(
     // a spinning wall's velocity target is the LOCAL rigid-motion velocity u_solid + omega x r_cell;
     // `at` bakes omega x r into u_solid per cell (the contribute path reads u_solid directly). the
     // static path keeps the bare translational u_solid, bit-identical to before.
-    let kin = if spin {
+    let kin_cart = if spin {
         let x_rel = Tensor::<Gv, 3>::new(std::array::from_fn(|a| x[a] - center[a]));
         base_kin.at(&x_rel)
     } else {
         base_kin
+    };
+    // the surface velocity is assembled in the cartesian world frame; the gas
+    // momentum is stored in physical components, so the target rotates into the
+    // cell's orthonormal basis before the normal/tangential decomposition.
+    let kin = BodyKin::<Gv, 3> {
+        u_solid: solid_velocity_phys(coords, ndim, &geo.centroid, &kin_cart.u_solid),
+        ..kin_cart
     };
     let mut acc = Relax::<Gv, 3>::none();
     Property::PorousAccretor {
@@ -847,7 +890,7 @@ fn penalize_porous_iso_inner(
         nrg: Default::default(),
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let torque = lab_torque(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -856,7 +899,7 @@ fn penalize_porous_iso_inner(
     }
     writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
     for a in 0..ndim {
-        writes.push((format!("pen_force_{a}"), format!("pen_0_force_{a}").into(), delta.force_delta[a].node()));
+        writes.push((format!("pen_force_{a}"), format!("pen_0_force_{a}").into(), f_cart[a].node()));
     }
     for a in torque_axes(ndim) {
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
@@ -918,7 +961,13 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKe
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
         if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
     }));
-    let kin = BodyKin::<Gv, 3> { u_solid, omega: Tensor::zeros(), e_wall: Gv::ZERO };
+    // the body's translational velocity is a cartesian world vector; rotate it
+    // into the cell's physical basis to match the stored momentum components.
+    let kin = BodyKin::<Gv, 3> {
+        u_solid: solid_velocity_phys(coords, ndim, &geo.centroid, &u_solid),
+        omega: Tensor::zeros(),
+        e_wall: Gv::ZERO,
+    };
     let mut acc = Relax::<Gv, 3>::none();
     Property::TorqueFreeAccretor { inv_tau, xi }.contribute(chi, &kin, &mut acc);
     let cons = ConsG::<Gv, 3, Adiabatic> {
@@ -927,7 +976,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKe
         nrg,
     };
     let (out, delta) = penalize_cell(&cons, &acc, normal, dt, dv, 0);
-    let torque = lab_torque(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -937,7 +986,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKe
     writes.push(("nrg_out".to_string(), symbi_ir::FieldRef::cons_nrg().into(), out.nrg.node()));
     writes.push(("pen_mass".to_string(), "pen_0_mass".into(), delta.mass_delta.node()));
     for a in 0..ndim {
-        writes.push((format!("pen_force_{a}"), format!("pen_0_force_{a}").into(), delta.force_delta[a].node()));
+        writes.push((format!("pen_force_{a}"), format!("pen_0_force_{a}").into(), f_cart[a].node()));
     }
     writes.push(("pen_energy".to_string(), "pen_0_energy".into(), delta.energy_delta.node()));
     for a in torque_axes(ndim) {
@@ -999,7 +1048,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKern
     };
     let (out, delta) = penalize_cell(&cons, &acc, Tensor::zeros(), dt, dv, 0);
     // the angular-momentum receipt, identical booking to the adiabatic twin.
-    let torque = lab_torque(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
+    let (f_cart, torque) = cartesian_receipt(coords, ndim, &geo.centroid, &x, &center, &delta.force_delta);
 
     let mut writes: Writes = Vec::new();
     writes.push(("den_out".to_string(), symbi_ir::FieldRef::cons_den().into(), out.den.node()));
@@ -1015,7 +1064,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKern
         writes.push((
             format!("pen_force_{a}"),
             format!("pen_0_force_{a}").into(),
-            delta.force_delta[a].node(),
+            f_cart[a].node(),
         ));
     }
     for a in torque_axes(ndim) {
