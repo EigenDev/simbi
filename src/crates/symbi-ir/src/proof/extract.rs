@@ -203,6 +203,26 @@ fn eval_rat_elementwise(
             };
             RValue::Scalar(RatFun::from_poly(atom))
         }
+        ElementWiseOp::Max => {
+            // max of two field-independent metric factors (the r >= M/2 singular-core
+            // clamp: max(sqrt(x^2 + ...), M/2)) -> ONE opaque atom keyed by BOTH
+            // operands' canonical forms. the div(curl) telescope is STRUCTURAL — each
+            // face weight must merely be THE SAME expression in the two adjacent cell
+            // divergences — so the proof needs max as a shared atom, not its
+            // semantics. atomization is conservative: it can only fail to prove a
+            // true zero, never prove a false one. max of a field-dependent argument
+            // would be nonlinear in the fields and stays rejected.
+            let a = match eval_rat(graph, ins[0], fields, scalars) {
+                RValue::Scalar(r) => r,
+                RValue::Lin(_) => panic!("proof(rat): max of a field-dependent argument — nonlinear"),
+            };
+            let b = match eval_rat(graph, ins[1], fields, scalars) {
+                RValue::Scalar(r) => r,
+                RValue::Lin(_) => panic!("proof(rat): max of a field-dependent argument — nonlinear"),
+            };
+            let atom = Poly::var(&format!("max[{}|{}]", a.canonical(), b.canonical()));
+            RValue::Scalar(RatFun::from_poly(atom))
+        }
         other => panic!("proof(rat): unsupported element-wise op in curvilinear curl DAG: {other:?}"),
     }
 }
