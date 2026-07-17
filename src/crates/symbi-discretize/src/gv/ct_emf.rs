@@ -2041,6 +2041,183 @@ pub fn rmhd_edge_emf_uct_hlld_gr_gv(
 }
 
 
+/// the CURVED-SPACETIME UCT-HLLD edge EMF for the FULL 3D grid, along edge axis `dir` — the
+/// wave-sum dissipative form (M&DZ Eq. 39) with the three GR generalizations of the 2D builder
+/// (`rmhd_edge_emf_uct_hlld_gr_gv`): per-face ORTHONORMAL-frame MUB09 fans at each Riemann's own
+/// face metric, the transport velocity vtilde = alpha v - beta with the fan speeds relative to the
+/// moving interface vf = beta^n/alpha, and the corner sqrt(gamma) densitization. identity chart
+/// only (physical component == grid axis): the edge is cell-centered along `dir` and cornered on
+/// the transverse pair (g1, g2) = (dir+1, dir+2) mod 3; the out-of-plane prim component is `dir`.
+pub fn rmhd_edge_emf_uct_hlld_gr_3d_gv(
+    dir: usize,
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    assert!(coords == Coords::Cartesian, "the 3d GR UCT-HLLD EMF is baked for the cartesian charts");
+    let ndim = 3usize;
+    let g1 = (dir + 1) % 3;
+    let g2 = (dir + 2) % 3;
+    let (pc1, pc2, out) = (g1, g2, dir);
+    gv_register_field("e_rho", "rho");
+    gv_register_field("e_vp1", "vel_p1");
+    gv_register_field("e_vp2", "vel_p2");
+    gv_register_field("e_vout", "vel_out");
+    gv_register_field("e_pre", "pre");
+    gv_register_field("e_bp1", "bcell_p1");
+    gv_register_field("e_bp2", "bcell_p2");
+    gv_register_field("e_bout", "bcell_out");
+    gv_register_field("e_bface_a", "bface_a");
+    gv_register_field("e_bface_b", "bface_b");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes { o[ax] = -1; }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let eps = Gv::from_f64(1.0e-30);
+    let zero_g = Gv::ZERO;
+    let gamma = Gv::scalar("gamma");
+    let eos = IdealGas { gamma };
+    let avg2 = |a: Gv, b: Gv| (a + b) * half;
+    let ne = zero.clone();
+    let nw = cm(&[g1]);
+    let se = cm(&[g2]);
+    let sw = cm(&[g1, g2]);
+    let a_f = |ax: usize, o: i64| gv_axis_face_at(ax, spacing[ax], o);
+    let a_c = |ax: usize, o: i64| (a_f(ax, o) + a_f(ax, o + 1)) * half;
+    // the edge midpoint: cell-centered along `dir`, faces on the transverse pair —
+    // the advective-EMF densitization point.
+    let corner = {
+        let mut xc = [Gv::ZERO; 3];
+        xc[dir] = a_c(dir, 0);
+        xc[g1] = a_f(g1, 0);
+        xc[g2] = a_f(g2, 0);
+        Tensor::new(xc)
+    };
+    let metric_at = |x: Tensor<Gv, 3>| -> SpatialMetric<Gv, 3> {
+        gr_spatial_metric_at(spacetime, coords, x)
+    };
+    // the 3d position of a face point: grid axis `fa` on a FACE (offset `fo`), the
+    // OTHER transverse axis on a cell centre (offset `co`), the edge axis cell-centered.
+    let face_pos = |fa: usize, fo: i64, co: i64| -> Tensor<Gv, 3> {
+        let ca = if fa == g1 { g2 } else { g1 };
+        let mut c = [Gv::ZERO; 3];
+        c[dir] = a_c(dir, 0);
+        c[fa] = a_f(fa, fo);
+        c[ca] = a_c(ca, co);
+        Tensor::new(c)
+    };
+    let theta = Gv::scalar("theta");
+    let recon_cell = |key: &str, rt: &str, base: &[i32], naxis: usize, sign: f64| -> Gv {
+        let off = |d: i32| -> Vec<i32> { let mut o = base.to_vec(); o[naxis] += d; o };
+        let q0 = gv_field_at(key, rt, ndim, base);
+        let qm = gv_field_at(key, rt, ndim, &off(-1));
+        let qp = gv_field_at(key, rt, ndim, &off(1));
+        let a = q0 - qm;
+        let b = qp - q0;
+        let mm = minmod3(a * theta, half * (a + b), b * theta);
+        let slope = Gv::select(theta.cmp_lt(Gv::ZERO), van_leer(a, b), mm);
+        q0 + Gv::from_f64(0.5 * sign) * slope
+    };
+    // the reconstructed face prim in WORLD component order; the staggered normal
+    // face-B overrides the normal component, the edge-reconstructed transverse B the
+    // transverse one (identity chart: world index == grid axis).
+    let prim_face = |base: &[i32], naxis: usize, sign: f64, n_phys: usize, bn: Gv, t_phys: usize, bt: Gv| -> MhdPrim<Gv, 3> {
+        let r = |key: &str, rt: &str| recon_cell(key, rt, base, naxis, sign);
+        let rho = r("e_rho", "rho");
+        let pre = r("e_pre", "pre");
+        let mut v = [Gv::ZERO; 3];
+        v[pc1] = r("e_vp1", "vel_p1");
+        v[pc2] = r("e_vp2", "vel_p2");
+        v[out] = r("e_vout", "vel_out");
+        let mut b = [Gv::ZERO; 3];
+        b[pc1] = r("e_bp1", "bcell_p1");
+        b[pc2] = r("e_bp2", "bcell_p2");
+        b[out] = r("e_bout", "bcell_out");
+        b[n_phys] = bn;
+        b[t_phys] = bt;
+        MhdPrim::<Gv, 3> { hydro: Prim { rho, vel: Tensor::new(v), pre }, mag: Tensor::new(b) }
+    };
+    let bx_n = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &zero, g2, -1.0);
+    let bx_s = recon_face_to_edge(ndim, theta, "e_bface_a", "bface_a", &se, g2, 1.0);
+    let by_w = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &nw, g1, 1.0);
+    let by_e = recon_face_to_edge(ndim, theta, "e_bface_b", "bface_b", &zero, g1, -1.0);
+    let bx_n_face = gv_field_at("e_bface_a", "bface_a", ndim, &ne);
+    let bx_s_face = gv_field_at("e_bface_a", "bface_a", ndim, &se);
+    let by_w_face = gv_field_at("e_bface_b", "bface_b", ndim, &nw);
+    let by_e_face = gv_field_at("e_bface_b", "bface_b", ndim, &ne);
+    // the wave-sum Phi (coordinate frame, contravariant B jumps), success -> HLL
+    // fallback; every wave speed enters relative to the moving interface vf.
+    let wave_sum = |st: &HlldStates<Gv, 3>, t: usize, bt_l: Gv, bt_r: Gv, vf: Gv| -> Gv {
+        let (l0, l1) = (st.lam[0] - vf, st.lam[1] - vf);
+        let (a0, a1) = (st.alf[0] - vf, st.alf[1] - vf);
+        let phi_hlld = half
+            * hlld_wave_sum_terms(
+                l0.abs(),
+                a0.abs(),
+                a1.abs(),
+                l1.abs(),
+                bt_l,
+                st.bstar[0][t],
+                st.bc[t],
+                st.bstar[1][t],
+                bt_r,
+            );
+        let ap = zero_g.max(l1);
+        let am = zero_g.max(zero_g - l0);
+        let phi_hll = (ap * am / (ap + am + eps)) * (bt_r - bt_l);
+        Gv::select(st.success.cmp_gt(half), phi_hlld, phi_hll)
+    };
+    // the grid-g1-face Riemann (world normal pc1) at its two grid-g2 cell centres.
+    let xn_pos = face_pos(g1, 0, 0);
+    let (a_xn, _, b_xn) = gr_adm_at(spacetime, coords, xn_pos);
+    let vf_xn = b_xn[pc1] / a_xn;
+    let xn_l = prim_face(&nw, g1, 1.0, pc1, bx_n_face, pc2, by_w);
+    let xn_r = prim_face(&ne, g1, -1.0, pc1, bx_n_face, pc2, by_e);
+    let st_xn = hlld_rmhd_states_gr_ortho(&eos, &xn_l, &xn_r, pc1, &metric_at(xn_pos));
+    let xs_pos = face_pos(g1, 0, -1);
+    let (a_xs, _, b_xs) = gr_adm_at(spacetime, coords, xs_pos);
+    let vf_xs = b_xs[pc1] / a_xs;
+    let xs_l = prim_face(&sw, g1, 1.0, pc1, bx_s_face, pc2, by_w);
+    let xs_r = prim_face(&se, g1, -1.0, pc1, bx_s_face, pc2, by_e);
+    let st_xs = hlld_rmhd_states_gr_ortho(&eos, &xs_l, &xs_r, pc1, &metric_at(xs_pos));
+    let phi_x = avg2(wave_sum(&st_xn, pc2, by_w, by_e, vf_xn), wave_sum(&st_xs, pc2, by_w, by_e, vf_xs));
+    // the grid-g2-face Riemann (world normal pc2) at its two grid-g1 cell centres.
+    let yw_pos = face_pos(g2, 0, -1);
+    let (a_yw, _, b_yw) = gr_adm_at(spacetime, coords, yw_pos);
+    let vf_yw = b_yw[pc2] / a_yw;
+    let yw_l = prim_face(&sw, g2, 1.0, pc2, by_w_face, pc1, bx_s);
+    let yw_r = prim_face(&nw, g2, -1.0, pc2, by_w_face, pc1, bx_n);
+    let st_yw = hlld_rmhd_states_gr_ortho(&eos, &yw_l, &yw_r, pc2, &metric_at(yw_pos));
+    let ye_pos = face_pos(g2, 0, 0);
+    let (a_ye, _, b_ye) = gr_adm_at(spacetime, coords, ye_pos);
+    let vf_ye = b_ye[pc2] / a_ye;
+    let ye_l = prim_face(&se, g2, 1.0, pc2, by_e_face, pc1, bx_s);
+    let ye_r = prim_face(&ne, g2, -1.0, pc2, by_e_face, pc1, bx_n);
+    let st_ye = hlld_rmhd_states_gr_ortho(&eos, &ye_l, &ye_r, pc2, &metric_at(ye_pos));
+    let phi_y = avg2(wave_sum(&st_yw, pc1, bx_s, bx_n, vf_yw), wave_sum(&st_ye, pc1, bx_s, bx_n, vf_ye));
+    // advective transport velocity at the corner: vtilde = alpha v - beta on each
+    // transverse axis; the coordinate corner EMF densitized by sqrt(gamma)(corner).
+    let (alpha_c, sqrtg_c, beta_c) = gr_adm_at(spacetime, coords, corner);
+    let (beta_x_c, beta_y_c) = (beta_c[pc1], beta_c[pc2]);
+    let vp1 = |o: &[i32]| gv_field_at("e_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("e_vp2", "vel_p2", ndim, o);
+    let vx_w = alpha_c * avg2(vp1(&nw), vp1(&sw)) - beta_x_c;
+    let vx_e = alpha_c * avg2(vp1(&ne), vp1(&se)) - beta_x_c;
+    let vy_s = alpha_c * avg2(vp2(&sw), vp2(&se)) - beta_y_c;
+    let vy_n = alpha_c * avg2(vp2(&nw), vp2(&ne)) - beta_y_c;
+    let e_dir = zero_g - half * (vx_e * by_e + vx_w * by_w)
+        + half * (vy_n * bx_n + vy_s * bx_s)
+        + phi_x
+        - phi_y;
+    let emf = sqrtg_c * e_dir;
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+
 /// the RK2 edge-EMF save `e_n = e` (pointwise copy; the generic 2-buffer copy the runtime also
 /// reuses for the bcell^n snapshot). write root == the read field node.
 pub fn rmhd_save_efield_gv() -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {

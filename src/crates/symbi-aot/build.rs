@@ -1427,8 +1427,9 @@ fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
     emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{st}_2d_{ok}"), 2, &k, &w);
 }
 
-/// the FULL-3D GR UCT-HLL family: the per-cell materialized wave speeds + the three
-/// edge orientations of the densitized master-form corner EMF. cartesian charts only.
+/// the FULL-3D GR UCT family: the per-cell materialized wave speeds + the three edge
+/// orientations of the densitized master-form corner EMF (HLL) AND the wave-sum HLLD
+/// EMF (the sharp Alfven-resolving one). cartesian charts only.
 fn gen_rmhd_gr_uct_3d(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
     let st = geom.spacetime_suffix();
@@ -1441,6 +1442,10 @@ fn gen_rmhd_gr_uct_3d(out_dir: &str, geom: &Geom) {
             dir, geom.spacetime, geom.coords, &geom.spacing,
         );
         emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{st}_3d_{dir}"), 3, &k, &w);
+        let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_hlld_gr_3d_gv(
+            dir, geom.spacetime, geom.coords, &geom.spacing,
+        );
+        emit_gv(out_dir, &format!("rmhd_edge_emf_uct_hlld{gs}{st}_3d_{dir}"), 3, &k, &w);
     }
 }
 
@@ -2374,11 +2379,23 @@ fn main() {
     for dir in 0..3 {
         gen_rmhd_face_flux_3d(&out_dir, dir);
         gen_rmhd_edge_emf(&out_dir, dir, 3, ((dir + 1) % 3) as usize, ((dir + 2) % 3) as usize);
+        // the flat-space UCT family per edge: the regime-generic HLL corner EMF
+        // plus the three HLLD five-wave EMFs (classical / isothermal /
+        // relativistic). same (edge, in-plane grid axes) convention as the
+        // contact EMF above; the GR UCT chain is baked separately per chart.
+        let (g1, g2) = (((dir + 1) % 3) as usize, ((dir + 2) % 3) as usize);
+        gen_rmhd_edge_emf_uct(&out_dir, dir, 3, g1, g2);
+        gen_nmhd_edge_emf_uct_hlld(&out_dir, dir, 3, g1, g2);
+        gen_imhd_edge_emf_uct_hlld(&out_dir, dir, 3, g1, g2);
+        gen_rmhd_edge_emf_uct_hlld(&out_dir, dir, 3, g1, g2);
     }
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::cart(3));
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::sph(3));
     gen_rmhd_wave_speed_map(&out_dir, 3, Geom::cyl_3d());
     gen_rmhd_wave_speeds_cell(&out_dir, 3); // per-cell exact quartic -> wave_speed_l/r (geom-free)
+    // the classical / isothermal per-cell fan speeds the 3D UCT corner EMFs read.
+    gen_nmhd_wave_speeds_cell(&out_dir, 3);
+    gen_imhd_wave_speeds_cell(&out_dir, 3);
     for dir in 0..3 {
         gen_rmhd_ct_curl_3d_dir(&out_dir, dir, Geom::cart(3));
         gen_rmhd_ct_curl_3d_dir(&out_dir, dir, Geom::sph(3));
