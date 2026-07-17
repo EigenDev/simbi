@@ -22,7 +22,7 @@ use symbi_ir::emit::ReductionOp;
 use symbi_sim::state::FieldStore;
 
 use super::binding::{bind_manifest, kernel_bindings, resolve_path};
-use super::exec::dispatch_fields;
+use super::exec::{dispatch_fields, dispatch_fields_runtime_ir};
 use super::layout::{geom_suffix, gr_chart_dof_tag, penalize_name, spacetime_slug};
 use super::params::{
     ScalarBind, body_scalar, geom_scalar, kernel_geom, motion_scalar, physical_geom, resolve_body_scalars,
@@ -924,15 +924,110 @@ pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     });
 }
 
-/// a runtime-built + cranelift-JIT'd penalization kernel for an arbitrary CSG shape. the shape
-/// geometry is baked into the kernel as constants; the body position + porous dials stay runtime
-/// scalars, so a MOVING body reuses the same compiled kernel. HOST + f64, every orthogonal chart
-/// (the mask distance is physical: the coordinate centroid maps to cartesian inside the kernel),
-/// both the energy-bearing and isothermal regimes (the JIT buffer ABI is raw f64) — device /
-/// non-f64 shaped walls are a follow-on.
+/// a runtime-built + cranelift-JIT'd penalization kernel for an arbitrary CSG shape — the HOST
+/// form of the shaped wall. the shape geometry is baked into the kernel as constants; the body
+/// position + porous dials stay runtime scalars, so a MOVING body reuses the same compiled kernel.
+/// every orthogonal chart (the mask distance is physical: the coordinate centroid maps to cartesian
+/// inside the kernel), both the energy-bearing and isothermal regimes; the JIT buffer ABI is raw
+/// f64. the device form renders the same GvKernel to CUDA (see `ShapedIr`).
 struct ShapedPenalizeKernel {
     kernel: symbi_jit::CompiledKernel,
     scalar_params: Vec<super::params::ScalarBind>,
+}
+
+/// the device (CUDA) form of the shaped porous kernel: the serialized backend-neutral IR blob
+/// (rendered + NVRTC-compiled + cached by the dispatch engine at launch, at the launch precision),
+/// a stable kernel name (the engine's render cache keys on it, so it is unique per distinct shape),
+/// and the scalar manifest resolved through the shared per-body resolver. the device sibling of
+/// `ShapedPenalizeKernel`; the shape geometry is baked into the graph as constants, so a moving
+/// body reuses the one blob.
+struct ShapedIr {
+    name: String,
+    ir: String,
+    scalar_params: Vec<super::params::ScalarBind>,
+}
+
+/// build the shaped porous GvKernel + its write manifest for one (chart, dim, dof, regime, spin)
+/// combination — the SOLE trace front end shared by the host (cranelift) and device (CUDA) paths.
+/// the mask distance is PHYSICAL: the kernel maps the coordinate centroid to Cartesian (baked per
+/// chart), so a spherical / cylindrical grid measures the true distance to the shape.
+fn shaped_penalize_gv(
+    coords: symbi_discretize::Coords,
+    ndim: usize,
+    dof: usize,
+    has_energy: bool,
+    spin: bool,
+    shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
+) -> (symbi_discretize::GvKernel, Vec<(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)>) {
+    match (has_energy, spin) {
+        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape),
+        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape),
+        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape),
+        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape),
+    }
+}
+
+/// build (or fetch from the process cache) the device IR for a shaped porous wall. mirrors
+/// `shaped_penalize_kernel` but emits the backend-neutral blob (`prepare` + `prepared_to_ir`, the
+/// same lowering the AOT registry bakes in build.rs) instead of cranelift-compiling. keyed by the
+/// shape's structural repr + dimension, so a moving body reuses the one blob. the kernel name
+/// embeds a per-shape id so the engine's render cache (keyed by name) never returns another shape's
+/// descriptor; the module cache is content-addressed, so it is safe regardless.
+fn shaped_penalize_ir(
+    coords: symbi_discretize::Coords,
+    ndim: usize,
+    dof: usize,
+    has_energy: bool,
+    spin: bool,
+    shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
+) -> std::sync::Arc<ShapedIr> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, OnceLock, RwLock};
+    static CACHE: OnceLock<RwLock<HashMap<String, Arc<ShapedIr>>>> = OnceLock::new();
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
+    let key = format!("{coords:?}|{ndim}|{dof}|{has_energy}|{spin}|{shape:?}");
+    if let Some(k) = cache.read().unwrap().get(&key) {
+        return k.clone();
+    }
+    let mut w = cache.write().unwrap();
+    if let Some(k) = w.get(&key) {
+        return k.clone();
+    }
+    let (gvk, writes) = shaped_penalize_gv(coords, ndim, dof, has_energy, spin, shape);
+    // a unique name per distinct shape: the render cache aliases on the name.
+    let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    let name = format!("penalize_shaped_{id}");
+    // the same lowering the AOT registry bakes (build.rs emit_gv): penalize buffers do not share
+    // one layout (coalesce_layout = false, matching the AOT penalize path); the smem tile path is
+    // gated off. the neutral blob renders to the launch precision at dispatch time.
+    let inputs = symbi_ir::KernelEmitInputs {
+        kernel_name: &name,
+        ndim: ndim as u8,
+        target: symbi_ir::emit::TargetConfig {
+            target: symbi_ir::emit::Target::Cuda,
+            precision: symbi_ir::emit::Precision::F64,
+        },
+        coalesce_layout: false,
+        field_inputs: &gvk.field_inputs,
+        scalar_params: &gvk.scalar_params,
+        field_writes: &writes,
+        coord_components: &gvk.coord_components,
+        device_preamble: &[],
+        tile_spec: None,
+    };
+    let ir = symbi_ir::prepared_to_ir(&symbi_ir::prepare(&gvk.graph, &inputs));
+    let built = Arc::new(ShapedIr {
+        name,
+        ir,
+        scalar_params: gvk
+            .scalar_params
+            .iter()
+            .map(|s| super::params::ScalarBind::from_name(s))
+            .collect(),
+    });
+    w.insert(key, built.clone());
+    built
 }
 
 /// build (or fetch from the process cache) the shaped porous kernel for a distinct geometry. keyed
@@ -958,14 +1053,7 @@ fn shaped_penalize_kernel(
     if let Some(k) = w.get(&key) {
         return k.clone();
     }
-    // the mask distance is PHYSICAL: the kernel maps the coordinate centroid to Cartesian (baked
-    // per chart), so a spherical / cylindrical grid measures the true distance to the shape.
-    let (gvk, writes) = match (has_energy, spin) {
-        (true, false) => symbi_discretize::penalize_porous_gv_shaped(coords, ndim, dof, shape),
-        (true, true) => symbi_discretize::penalize_porous_gv_spinning(coords, ndim, dof, shape),
-        (false, false) => symbi_discretize::penalize_porous_iso_gv_shaped(coords, ndim, dof, shape),
-        (false, true) => symbi_discretize::penalize_porous_iso_gv_spinning(coords, ndim, dof, shape),
-    };
+    let (gvk, writes) = shaped_penalize_gv(coords, ndim, dof, has_energy, spin, shape);
     let built = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok().map(|kernel| {
         Arc::new(ShapedPenalizeKernel {
             kernel,
@@ -976,11 +1064,12 @@ fn shaped_penalize_kernel(
     built
 }
 
-/// run the runtime-JIT'd shaped porous wall for one body: bind the cons fields (in-place) + the
-/// per-body delta scratch as raw f64 bases, resolve the kernel's scalar manifest through the shared
-/// per-body resolver, JIT-run over the body's bounding-ball bbox, then reduce the deltas into the
-/// feedback accumulator exactly as the AOT path does. self-contained so the bit-identical AOT
-/// sphere loop is left untouched.
+/// run the shaped porous wall for one body on either backend: on host, cranelift-JIT the shape
+/// kernel and run it over raw f64 bases; on a device-accessible Mem, render the SAME GvKernel to
+/// CUDA + NVRTC-dispatch it in place (f64 only). either way, bind the cons fields (in-place) + the
+/// per-body delta scratch, resolve the kernel's scalar manifest through the shared per-body
+/// resolver over the body's bounding-ball bbox, then reduce the deltas into the feedback
+/// accumulator exactly as the AOT path does. self-contained so the AOT sphere loop is untouched.
 #[allow(clippy::too_many_arguments)]
 fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -995,12 +1084,6 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    use super::layout::{alloc_layout, exec_layout};
-    // the JIT buffer ABI is raw f64 on host; Cartesian only (the shape is a physical-frame CSG).
-    assert!(
-        !Mem::IS_DEVICE_ACCESSIBLE && std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
-        "arbitrary-shape immersed body {b}: host + f64 only (device / non-f64 shaped walls are a follow-on)",
-    );
     // the chart the kernel bakes: the mask distance is physical (coordinate centroid mapped to
     // Cartesian), so spherical / cylindrical grids measure the true distance to the body.
     let coords = match sim.geom.coords {
@@ -1016,9 +1099,6 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     let body = im.bodies.get(b);
     let w = body.omega;
     let spin = w[0] != 0.0 || w[1] != 0.0 || w[2] != 0.0 || body.two_way_coupling;
-    let sk = shaped_penalize_kernel(coords, D, DOF, has_energy, spin, shape).unwrap_or_else(|| {
-        panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
-    });
 
     // the bbox. on a CARTESIAN grid the shape's bounding ball floors/ceils to an index box: a
     // STATIC body uses the tight ball at the body position (center pos+lc, radius lr); a SPINNING
@@ -1053,43 +1133,76 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         sim.geom.interior.clone()
     };
 
-    // in-place cons bases (read + write the SAME buffers) + the delta scratch as OUTPUT bases, in
-    // the kernel's declared write order: den, mom_0.., nrg, then the n_delta + n_torque scratch.
-    let cons_ptr = |f: &Field<Sc, D, Mem>| f.as_ptr() as *const f64;
-    let cons_ptr_mut = |f: &Field<Sc, D, Mem>| f.as_ptr() as *mut f64;
     // iso has no energy channel: the kernel neither reads nor writes nrg, so it drops from the
-    // in/out bases (and the writes order the kernel was compiled with).
+    // bound cons fields (and the writes order the kernel was compiled with).
     let nrg = sim.fields.cons.nrg_field();
-    // the shaped kernel is JIT-built with dof = DOF (see shaped_penalize_kernel), so it reads/writes
-    // all DOF momentum components; bind them all. the delta scratch stays D (the in-plane force).
-    let mut in_bases: Vec<*const f64> = Vec::with_capacity(D + 2);
-    in_bases.push(cons_ptr(&sim.fields.cons.den));
-    for c in 0..DOF {
-        in_bases.push(cons_ptr(&sim.fields.cons.mom[c]));
-    }
-    if let Some(n) = nrg {
-        in_bases.push(cons_ptr(n));
-    }
-    let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque);
-    out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
-    for c in 0..DOF {
-        out_bases.push(cons_ptr_mut(&sim.fields.cons.mom[c]));
-    }
-    if let Some(n) = nrg {
-        out_bases.push(cons_ptr_mut(n));
-    }
-    for s in scratch[..n_delta + n_torque].iter() {
-        out_bases.push(cons_ptr_mut(s));
-    }
-    let scalars: Vec<f64> = sk.scalar_params.iter().map(|bind| bind_value(bind, b)).collect();
-
-    let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
-    let (grid, dlo) = exec_layout(&bbox);
-    // SAFETY: shared allocated layout; the cons.* fields are bound as the SAME base in `in_bases`
-    // and `out_bases` (in-place, read-before-write per cell); every scratch output is a distinct
-    // allocation; distinct cells write distinct flat indices on distinct rayon threads.
-    unsafe {
-        sk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases);
+    if Mem::IS_DEVICE_ACCESSIBLE {
+        // the device path renders the SAME shaped GvKernel to CUDA (the neutral IR the AOT
+        // registry bakes for the analytic sphere), NVRTC-compiles + caches it per shape, and
+        // dispatches it in place. f64 only: the delta reductions + the shaped buffer ABI are f64.
+        assert!(
+            std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
+            "arbitrary-shape immersed body {b} on device: f64 only (f32 shaped walls are a follow-on)",
+        );
+        let sk = shaped_penalize_ir(coords, D, DOF, has_energy, spin, shape);
+        // in-place cons: every field input is also a write, folded into the output group by the IR
+        // manifest, so the input list is empty and the outputs run den, mom.., nrg, then the
+        // n_delta + n_torque scratch — the kernel's declared write order.
+        let mut outputs: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+        for c in 0..DOF {
+            outputs.push(&sim.fields.cons.mom[c]);
+        }
+        if let Some(n) = nrg {
+            outputs.push(n);
+        }
+        for s in scratch[..n_delta + n_torque].iter() {
+            outputs.push(s);
+        }
+        let scalars: Vec<Sc> =
+            sk.scalar_params.iter().map(|bind| Sc::from_f64(bind_value(bind, b))).collect();
+        dispatch_fields_runtime_ir::<Sc, Mem, D>(
+            &sk.name, &sk.ir, &sim.geom.allocated, &bbox, &[], &outputs, &[], &scalars,
+        );
+    } else {
+        use super::layout::{alloc_layout, exec_layout};
+        let sk = shaped_penalize_kernel(coords, D, DOF, has_energy, spin, shape).unwrap_or_else(|| {
+            panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
+        });
+        // in-place cons bases (read + write the SAME buffers) + the delta scratch as OUTPUT bases,
+        // in the kernel's declared write order: den, mom_0.., nrg, then the n_delta + n_torque
+        // scratch. the JIT buffer ABI is raw f64 on host.
+        let cons_ptr = |f: &Field<Sc, D, Mem>| f.as_ptr() as *const f64;
+        let cons_ptr_mut = |f: &Field<Sc, D, Mem>| f.as_ptr() as *mut f64;
+        // the shaped kernel is JIT-built with dof = DOF, so it reads/writes all DOF momentum
+        // components; bind them all. the delta scratch stays D (the in-plane force).
+        let mut in_bases: Vec<*const f64> = Vec::with_capacity(D + 2);
+        in_bases.push(cons_ptr(&sim.fields.cons.den));
+        for c in 0..DOF {
+            in_bases.push(cons_ptr(&sim.fields.cons.mom[c]));
+        }
+        if let Some(n) = nrg {
+            in_bases.push(cons_ptr(n));
+        }
+        let mut out_bases: Vec<*mut f64> = Vec::with_capacity(D + 2 + n_delta + n_torque);
+        out_bases.push(cons_ptr_mut(&sim.fields.cons.den));
+        for c in 0..DOF {
+            out_bases.push(cons_ptr_mut(&sim.fields.cons.mom[c]));
+        }
+        if let Some(n) = nrg {
+            out_bases.push(cons_ptr_mut(n));
+        }
+        for s in scratch[..n_delta + n_torque].iter() {
+            out_bases.push(cons_ptr_mut(s));
+        }
+        let scalars: Vec<f64> = sk.scalar_params.iter().map(|bind| bind_value(bind, b)).collect();
+        let (alo, aext, _vol) = alloc_layout(&sim.geom.allocated);
+        let (grid, dlo) = exec_layout(&bbox);
+        // SAFETY: shared allocated layout; the cons.* fields are bound as the SAME base in
+        // `in_bases` and `out_bases` (in-place, read-before-write per cell); every scratch output
+        // is a distinct allocation; distinct cells write distinct flat indices on distinct threads.
+        unsafe {
+            sk.kernel.run_parallel_raw(&grid, &dlo, &alo, &aext, &in_bases, &scalars, &out_bases);
+        }
     }
 
     // reduce the per-body deltas over the bbox and book them, exactly as the AOT path does.

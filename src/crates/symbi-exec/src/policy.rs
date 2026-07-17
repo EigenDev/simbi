@@ -54,6 +54,52 @@ pub fn dispatch_fields<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: u
     dispatch::<Sc, Mem, _>(inv, ir, name, cpu);
 }
 
+/// the host CPU fallback for a RUNTIME-BUILT kernel: unreachable. a runtime kernel
+/// (e.g. the shaped immersed-body wall, whose CSG geometry is known only at setup)
+/// has no AOT-generated CPU fn — the host path runs its own JIT (cranelift), so this
+/// twin is only ever taken on a device-accessible `Mem`, where the CPU arg is dead.
+fn no_host_fallback<Sc: Scalar + OrderedNumeric>(
+    _: &[symbi_aot::CpuField<'_, Sc>],
+    _: &mut [symbi_aot::CpuFieldMut<'_, Sc>],
+    _: &[u32],
+    _: &[i32],
+    _: &[i32],
+    _: &[Sc],
+) {
+    unreachable!("a runtime-built kernel has no AOT cpu fn; the host path uses its own JIT");
+}
+
+/// the runtime-IR twin of `dispatch_fields`: identical buffer binding + launch, but the
+/// neutral IR blob + kernel name are supplied by the CALLER (a runtime-built kernel)
+/// instead of resolved from the generated registry. device-only — the host path of a
+/// runtime kernel has its own JIT, so the CPU fallback is unreachable.
+///
+/// `inputs`/`outputs` follow the same contract as `dispatch_fields`: input-binding order
+/// then output-binding order over the shared allocated layout, and every field a distinct
+/// allocation (in-place read+write fields are passed once, as outputs).
+///
+/// SAFETY: as `dispatch_fields` — every field outlives the dispatch scope and the kernel
+/// reads inputs immutably + writes only its own outputs.
+#[allow(clippy::too_many_arguments)]
+pub fn dispatch_fields_runtime_ir<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
+    name:      &str,
+    ir:        &str,
+    allocated: &Domain<D>,
+    exec:      &Domain<D>,
+    inputs:    &[&Field<Sc, D, Mem>],
+    outputs:   &[&Field<Sc, D, Mem>],
+    ints:      &[i32],
+    scalars:   &[Sc],
+) {
+    let (grid, dlo) = exec_layout(exec);
+    let shared = alloc_layout(allocated);
+    let layouts: smallvec::SmallVec<[([i32; D], [u32; D], usize); 16]> =
+        std::iter::repeat(shared).take(inputs.len() + outputs.len()).collect();
+    let buffers = disjoint_host_buffers(name, inputs, outputs, &layouts);
+    let inv = KernelInvocation { buffers, grid: &grid, dom_lo: &dlo, ints, scalars };
+    dispatch::<Sc, Mem, _>(inv, ir, name, no_host_fallback::<Sc>);
+}
+
 /// build a kernel's WHOLE-buffer host binding set from its input + output fields over a shared
 /// `(lo, extent)` layout — the ONE place the `from_raw_parts` whole-buffer construction lives,
 /// with the disjoint-write contract checked ONCE, RELEASE-ACTIVE. inputs bind `&[T]`, outputs
