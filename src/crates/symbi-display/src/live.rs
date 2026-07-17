@@ -285,6 +285,7 @@ fn render_footer(frame: &mut Frame, area: Rect, active_tab: &str) {
     if active_tab == "overview" {
         keys.push(("f", "field"));
         keys.push(("o", "orient"));
+        keys.push(("+/-", "zoom"));
         keys.push(("c", "cmap"));
         keys.push(("l", "log"));
     }

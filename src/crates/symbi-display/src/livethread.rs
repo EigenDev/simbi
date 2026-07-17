@@ -65,6 +65,10 @@ pub struct Controls {
     /// the 3D slice orientation the `o`-key has selected: 0 = z mid-plane (x, y),
     /// 1 = y mid-plane (x, z), 2 = x mid-plane (y, z). ignored on 1D/2D runs.
     slice_orient: AtomicUsize,
+    /// the heatmap zoom exponent (`+`/`-` keys): the slice samples a centered
+    /// 1/2^k-extent window of the display plane, decimated to the same screen
+    /// resolution — each step doubles the magnification about the domain center.
+    zoom_level: AtomicUsize,
 }
 
 impl Controls {
@@ -75,6 +79,10 @@ impl Controls {
     /// the selected 3D slice orientation (`o`-key cycle): 0 = z, 1 = y, 2 = x mid-plane.
     pub fn slice_orient(&self) -> usize {
         self.slice_orient.load(Ordering::SeqCst)
+    }
+    /// the heatmap zoom exponent (`+`/`-`): magnification is 2^k about the center.
+    pub fn zoom_level(&self) -> usize {
+        self.zoom_level.load(Ordering::SeqCst)
     }
     /// paused: the solver should park (take no step) while keeping publishing.
     pub fn paused(&self) -> bool {
@@ -225,6 +233,16 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
                 Key::Char('o') => {
                     let k = (controls.slice_orient.load(Ordering::SeqCst) + 1) % 3;
                     controls.slice_orient.store(k, Ordering::SeqCst);
+                }
+                // +/-: zoom the heatmap about the domain center (2^k magnification,
+                // clamped to 16x); the solver re-decimates on its next publish.
+                Key::Char('+') | Key::Char('=') => {
+                    let k = (controls.zoom_level.load(Ordering::SeqCst) + 1).min(4);
+                    controls.zoom_level.store(k, Ordering::SeqCst);
+                }
+                Key::Char('-') => {
+                    let k = controls.zoom_level.load(Ordering::SeqCst).saturating_sub(1);
+                    controls.zoom_level.store(k, Ordering::SeqCst);
                 }
                 Key::Char('f') => {
                     let fc = latest

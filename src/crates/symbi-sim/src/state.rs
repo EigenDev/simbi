@@ -2167,17 +2167,21 @@ where
     /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the SCREEN, not
     /// the grid. a 1D grid yields a 1-row line profile. `None` off host memory.
     pub fn field_slice(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
-        self.field_slice_oriented(max_dim, index, 0)
+        self.field_slice_oriented(max_dim, index, 0, 0)
     }
 
-    /// the decimated 2D display slice with a selectable ORIENTATION on a 3D grid:
-    /// orient 0 = the z mid-plane (x, y), 1 = the y mid-plane (x, z), 2 = the x
-    /// mid-plane (y, z). 1D/2D grids ignore the orientation.
+    /// the decimated 2D display slice with a selectable ORIENTATION on a 3D grid
+    /// (orient 0 = the z mid-plane (x, y), 1 = the y mid-plane (x, z), 2 = the x
+    /// mid-plane (y, z); 1D/2D grids ignore it) and a ZOOM exponent: the display
+    /// axes sample a centered 1/2^zoom-extent window, decimated to the same
+    /// screen resolution — each step doubles the magnification about the domain
+    /// center (where the hole / disk / body of interest conventionally sits).
     pub fn field_slice_oriented(
         &self,
         max_dim: usize,
         index: usize,
         orient: usize,
+        zoom: usize,
     ) -> Option<FieldDecimation> {
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
@@ -2209,7 +2213,19 @@ where
         } else {
             (0, 1)
         };
-        let sp0 = &interior.spaces[ah];
+        // the zoomed window on a display axis: a centered span of size/2^zoom,
+        // at least 4 cells so a deep zoom on a tiny grid stays a real picture.
+        let windowed = |sp: &symbi_algebra::Space| -> symbi_algebra::Space {
+            if zoom == 0 {
+                return sp.clone();
+            }
+            let size = sp.size() as isize;
+            let span = (size >> zoom.min(4)).max(4.min(size));
+            let mid = sp.lo + size / 2;
+            symbi_algebra::Space { name: sp.name, lo: mid - span / 2, hi: mid - span / 2 + span }
+        };
+        let sp0 = windowed(&interior.spaces[ah]);
+        let sp0 = &sp0;
         let nx = sp0.size();
         if nx == 0 {
             return None;
@@ -2226,7 +2242,8 @@ where
         let mut vmax = f64::NEG_INFINITY;
 
         // 1D grid: a line profile (height = 1), block-averaged along axis 0.
-        let Some(sp1) = interior.spaces.get(av) else {
+        let sp1_w = interior.spaces.get(av).map(|sp| windowed(sp));
+        let Some(sp1) = sp1_w.as_ref() else {
             let mut data = Vec::with_capacity(out_w);
             for i in 0..out_w {
                 let x0 = sp0.lo + (i * sx) as isize;

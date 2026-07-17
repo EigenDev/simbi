@@ -179,21 +179,41 @@ where
         max_dim: usize,
         index: usize,
         orient: usize,
+        zoom: usize,
     ) -> Option<FieldDecimation> {
         // single grid: no coverage to descend, reuse the plain per-state decimation.
-        // a non-z orientation also takes the plain coarse view: the per-level
-        // coverage descent below walks the (x, y) footprint only, so the composited
-        // fine detail exists for the z mid-plane alone.
-        if self.levels.len() <= 1 || orient != 0 {
-            return self.levels[0].state.field_slice_oriented(max_dim, index, orient);
+        if self.levels.len() <= 1 {
+            return self.levels[0].state.field_slice_oriented(max_dim, index, orient, zoom);
         }
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
         let (kind, name) = self.levels[0].state.nth_field(index);
         let interior = &self.levels[0].state.geom.interior;
-        let sp0 = &interior.spaces[0];
-        let sp1 = interior.spaces.get(1)?; // None on a 1D grid
+        // the display axes per orientation (the same law as field_slice_oriented):
+        // (horizontal, vertical) of the picture; the remaining 3D axis holds its
+        // mid-plane index. 2D shows (0, 1).
+        let (ah, av) = if NDIM >= 3 {
+            match orient % 3 {
+                1 => (0usize, 2usize),
+                2 => (1, 2),
+                _ => (0, 1),
+            }
+        } else {
+            (0, 1)
+        };
+        // the zoomed window: a centered span of size/2^zoom, at least 4 cells.
+        let windowed = |sp: &symbi_algebra::Space| -> symbi_algebra::Space {
+            if zoom == 0 {
+                return sp.clone();
+            }
+            let size = sp.size() as isize;
+            let span = (size >> zoom.min(4)).max(4.min(size));
+            let mid = sp.lo + size / 2;
+            symbi_algebra::Space { name: sp.name, lo: mid - span / 2, hi: mid - span / 2 + span }
+        };
+        let sp0 = windowed(&interior.spaces[ah]);
+        let sp1 = windowed(interior.spaces.get(av)?); // None on a 1D grid
         let (nx, ny) = (sp0.size(), sp1.size());
         if nx == 0 || ny == 0 {
             return None;
@@ -204,6 +224,11 @@ where
         let out_w = (nx + sx - 1) / sx;
         let out_h = (ny + sy - 1) / sy;
         let (lo0, hi0, lo1, hi1) = (sp0.lo, sp0.hi, sp1.lo, sp1.hi);
+        // the base root index: mid-plane on every non-display axis.
+        let base: [isize; NDIM] = std::array::from_fn(|ax| {
+            let s = &interior.spaces[ax];
+            s.lo + (s.size() / 2) as isize
+        });
 
         let mut data = Vec::with_capacity(out_w * out_h);
         let mut vmin = f64::INFINITY;
@@ -222,7 +247,10 @@ where
                 while ry < y1 {
                     let mut rx = x0;
                     while rx < x1 {
-                        sum += self.sample_finest(rx, ry, kind);
+                        let mut idx = base;
+                        idx[ah] = rx;
+                        idx[av] = ry;
+                        sum += self.sample_finest_at(idx, kind);
                         cnt += 1;
                         rx += 1;
                     }
@@ -245,19 +273,10 @@ where
         })
     }
 
-    /// resolve density at a ROOT cell (rx, ry) by descending the nested refinement
-    /// boxes: a parent cell inside `coverage` maps to the finer level at ratio 2.
-    /// axes >= 2 are pinned to the mid-plane (the 3D z-slice) and descend with it.
-    fn sample_finest(&self, rx: isize, ry: isize, kind: FieldKind) -> f64 {
-        let root = &self.levels[0].state.geom.interior;
-        let mut idx: [isize; NDIM] = std::array::from_fn(|ax| {
-            let s = &root.spaces[ax];
-            s.lo + (s.size() / 2) as isize
-        });
-        idx[0] = rx;
-        if let Some(slot) = idx.get_mut(1) {
-            *slot = ry;
-        }
+    /// resolve a ROOT-level index to the finest level covering it and read the
+    /// field there — the axis-general coverage descent (the display slice builds
+    /// the root index per its own orientation/zoom and hands it here).
+    fn sample_finest_at(&self, mut idx: [isize; NDIM], kind: FieldKind) -> f64 {
         let mut lvl = 0usize;
         while lvl + 1 < self.levels.len() {
             let cov = match &self.levels[lvl].coverage {

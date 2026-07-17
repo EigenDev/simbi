@@ -1495,19 +1495,25 @@ where
             let idx = dash.as_ref().map(|d| d.controls().field_kind()).unwrap_or(0);
             // the o-key's 3D slice orientation (z / y / x mid-plane); 1D/2D ignore it.
             let orient = dash.as_ref().map(|d| d.controls().slice_orient()).unwrap_or(0);
+            // the +/- zoom exponent: 2^k magnification about the domain center.
+            let zoom = dash.as_ref().map(|d| d.controls().zoom_level()).unwrap_or(0);
             // decimate field `kk` (composite over refinement levels, single-grid
             // fallback for 1D) into a display FieldSlice; the render thread owns the
             // colormap, so Inferno here is just a default it overrides.
             let make_slice = |kk: usize| {
-                h.field_slice_composite(200, kk, orient)
-                    .or_else(|| h.levels[0].state.field_slice_oriented(200, kk, orient))
+                h.field_slice_composite(200, kk, orient, zoom)
+                    .or_else(|| h.levels[0].state.field_slice_oriented(200, kk, orient, zoom))
                     .map(|fd| {
-                        let label = if cfg.dims >= 3 {
+                        let mut label = if cfg.dims >= 3 {
                             let plane = ["z-slice", "y-slice", "x-slice"][orient % 3];
                             format!("{} · {plane}", fd.name)
                         } else {
                             fd.name
                         };
+                        if zoom > 0 {
+                            label = format!("{label} · {}x", 1usize << zoom.min(4));
+                        }
+                        let label = label;
                         FieldSlice {
                             label,
                             width: fd.width,
