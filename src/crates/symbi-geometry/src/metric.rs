@@ -1365,6 +1365,37 @@ impl<S: Scalar> KerrKSCylindrical<S> {
     }
 }
 
+// the cylindrical kerr chart needs the azimuthal slot (the frame dragging lives in
+// l_phi), so only D = 3 carries the metric; D = 1/2 are fail-loud stubs that let the
+// generic kernel bounds `Metric<S, D>` resolve without ever being reached at bake.
+macro_rules! impl_kerr_ks_cylindrical_stub {
+    ($d:literal) => {
+        impl<S: Scalar> Metric<S, $d> for KerrKSCylindrical<S> {
+            fn geometry(&self) -> Geometry { Geometry::Cylindrical }
+            fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+            fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+                vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
+            }
+            fn spatial_metric(&self, _x: Tensor<S, $d>) -> Matrix<S, $d> {
+                unreachable!("cylindrical kerr is 3d-only (the dragging needs the azimuth)")
+            }
+            fn spatial_metric_inv(&self, _x: Tensor<S, $d>) -> Matrix<S, $d> {
+                unreachable!("cylindrical kerr is 3d-only (the dragging needs the azimuth)")
+            }
+            fn sqrt_det_gamma(&self, _x: Tensor<S, $d>) -> S {
+                unreachable!("cylindrical kerr is 3d-only (the dragging needs the azimuth)")
+            }
+            fn volume_factor(&self, _x: Tensor<S, $d>) -> S {
+                unreachable!("cylindrical kerr is 3d-only (the dragging needs the azimuth)")
+            }
+            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+        }
+    };
+}
+impl_kerr_ks_cylindrical_stub!(1);
+impl_kerr_ks_cylindrical_stub!(2);
+
 impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
     fn geometry(&self) -> Geometry { Geometry::Cylindrical }
     fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
@@ -3399,6 +3430,93 @@ mod tests {
             // agrees with the (R, z) D = 3 poloidal block at z = 0.
             let gm3 = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&bh, Tensor::new([big_r, phi, 0.0]));
             assert!(close(gm[(0, 0)], gm3[(0, 0)]) && close(gm[(1, 1)], gm3[(1, 1)]));
+        }
+    }
+
+    #[test]
+    fn kerr_ks_cylindrical_reduces_to_schwarzschild_at_zero_spin() {
+        let kerr = KerrKSCylindrical { mass: 1.0_f64, spin: 0.0 };
+        let schw = SchwarzschildKSCylindrical { mass: 1.0_f64 };
+        for &(rr, phi, z) in &[(3.0_f64, 0.7, 1.5), (0.9, -1.2, -0.4), (10.0, 2.0, 0.0)] {
+            let p = Tensor::new([rr, phi, z]);
+            let a = <KerrKSCylindrical<f64> as Metric<f64, 3>>::lapse(&kerr, p);
+            let b = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::lapse(&schw, p);
+            assert!((a - b).abs() < 1e-14, "lapse mismatch at ({rr},{phi},{z}): {a} vs {b}");
+            let ga = <KerrKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
+            let gb = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&schw, p);
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    assert!((ga[(ii, jj)] - gb[(ii, jj)]).abs() < 1e-12, "gamma mismatch");
+                }
+            }
+            let sa = <KerrKSCylindrical<f64> as Metric<f64, 3>>::shift(&kerr, p);
+            let sb = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::shift(&schw, p);
+            for ii in 0..3 {
+                assert!((sa[ii] - sb[ii]).abs() < 1e-13, "shift mismatch on axis {ii}");
+            }
+        }
+    }
+
+    #[test]
+    fn kerr_ks_cylindrical_inverse_determinant_and_lapse_identity() {
+        let kerr = KerrKSCylindrical { mass: 1.0_f64, spin: 0.9 };
+        for &(rr, phi, z) in &[(2.5_f64, 0.3, 0.8), (1.1, -2.0, -1.7), (6.0, 1.0, 0.2)] {
+            let p = Tensor::new([rr, phi, z]);
+            let g = <KerrKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
+            let gi = <KerrKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric_inv(&kerr, p);
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    let mut acc = 0.0;
+                    for kk in 0..3 {
+                        acc += g[(ii, kk)] * gi[(kk, jj)];
+                    }
+                    let want = if ii == jj { 1.0 } else { 0.0 };
+                    assert!((acc - want).abs() < 1e-12, "gamma*gamma^-1 != I at ({ii},{jj}): {acc}");
+                }
+            }
+            // the null l preserves det g: alpha sqrt(gamma) = sqrt(det g0) = R exactly.
+            let alpha = <KerrKSCylindrical<f64> as Metric<f64, 3>>::lapse(&kerr, p);
+            let sg = <KerrKSCylindrical<f64> as Metric<f64, 3>>::sqrt_det_gamma(&kerr, p);
+            assert!((alpha * sg - rr).abs() < 1e-12, "alpha sqrt(gamma) != R: {} vs {rr}", alpha * sg);
+        }
+    }
+
+    #[test]
+    fn kerr_ks_cylindrical_matches_the_cartesian_chart_through_the_jacobian() {
+        // the cross-chart oracle: gamma_cyl = J^T gamma_cart J with the coordinate
+        // jacobian of (x, y, z) = (R cos phi, R sin phi, z) — the two charts describe
+        // the SAME spacetime, so any formula drift between them breaks this exactly.
+        let (mm, aa) = (1.0_f64, 0.8_f64);
+        let cyl = KerrKSCylindrical { mass: mm, spin: aa };
+        let cart = KerrKSCartesian { mass: mm, spin: aa };
+        for &(rr, phi, z) in &[(2.0_f64, 0.6, 1.0), (4.5, -1.1, -0.3), (1.3, 3.0, 2.2)] {
+            let (cp, sp) = (phi.cos(), phi.sin());
+            let jac = [[cp, -rr * sp, 0.0], [sp, rr * cp, 0.0], [0.0, 0.0, 1.0]];
+            let pc = Tensor::new([rr * cp, rr * sp, z]);
+            let gc = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&cart, pc);
+            let gy = <KerrKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(
+                &cyl,
+                Tensor::new([rr, phi, z]),
+            );
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    let mut want = 0.0;
+                    for kk in 0..3 {
+                        for ll in 0..3 {
+                            want += jac[kk][ii] * gc[(kk, ll)] * jac[ll][jj];
+                        }
+                    }
+                    assert!(
+                        (gy[(ii, jj)] - want).abs() < 1e-11,
+                        "chart mismatch at ({ii},{jj}) for (R,phi,z)=({rr},{phi},{z}): {} vs {want}",
+                        gy[(ii, jj)]
+                    );
+                }
+            }
+            // the lapse is a scalar: identical across charts at the same physical point.
+            let ac = <KerrKSCartesian<f64> as Metric<f64, 3>>::lapse(&cart, pc);
+            let ay = <KerrKSCylindrical<f64> as Metric<f64, 3>>::lapse(&cyl, Tensor::new([rr, phi, z]));
+            assert!((ac - ay).abs() < 1e-13, "lapse differs across charts: {ac} vs {ay}");
         }
     }
 

@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, KerrKSCartesian, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_algebra::Tensor;
 use symbi_ir::dual::Dual;
@@ -751,6 +751,12 @@ pub fn godunov_stage_gv_with_fused_built(
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pp, b)
                     }
+                    Spacetime::Kerr if coords == Coords::Cylindrical => {
+                        // cylindrical spinning kerr: the rank-1 update on the diag(1, R^2, 1)
+                        // base at the FULL (R, phi, z) position; same autodiff Dual pass.
+                        let spin = Dual::constant(Gv::scalar("kerr_spin"));
+                        grmhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, rho_h, v, pp, b)
+                    }
                     Spacetime::Kerr => {
                         // the generic covariant stress contraction S_j = (1/2) T^{mu nu} d_j g_{mu nu}
                         // with the EM stress; the non-diagonal kerr metric enters only through the
@@ -776,6 +782,10 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::Kerr if coords == Coords::Cartesian => {
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pp)
+                    }
+                    Spacetime::Kerr if coords == Coords::Cylindrical => {
+                        let spin = Dual::constant(Gv::scalar("kerr_spin"));
+                        grhd_covariant_source(&KerrKSCylindrical { mass, spin }, x, e, v, pp)
                     }
                     Spacetime::Kerr => {
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));

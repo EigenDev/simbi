@@ -8,7 +8,7 @@ use super::*;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::RmhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
-use symbi_geometry::{KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
@@ -327,6 +327,7 @@ where
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
     KerrKSCartesian<Gv>: Metric<Gv, D>,
+    KerrKSCylindrical<Gv>: Metric<Gv, D>,
     SchwarzschildKSCylindrical<Gv>: Metric<Gv, D>,
     KerrKS<Gv>: Metric<Gv, D>,
 {
@@ -378,6 +379,10 @@ where
         // gamma + shift on every axis, DOF == D (the frame dragging rides the swirl of l).
         (Spacetime::Kerr, Coords::Cartesian) => {
             let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
+(Spacetime::Kerr, Coords::Cylindrical) => {
+            let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
         (Spacetime::Kerr, _) => {
@@ -477,6 +482,10 @@ where
         // cylindrical: beta^R (coord 0) and beta^z (coord 2) are nonzero, beta^phi (coord 1) = 0
         // (a = 0, no frame dragging), so every sweep EXCEPT the azimuthal carries the shift.
         (Spacetime::KerrSchild, Coords::Cylindrical) => coord_n != 1,
+        // SPINNING kerr on the cylindrical chart: the frame dragging puts beta^phi != 0,
+        // so every sweep carries the shift (dropping the azimuthal one is silent wrong
+        // dragging, the same class as the cartesian-kerr per-axis bug).
+        (Spacetime::Kerr, Coords::Cylindrical) => true,
         (Spacetime::KerrSchild, _) | (Spacetime::Kerr, _) => coord_n == 0,
         _ => false,
     };
@@ -811,6 +820,14 @@ pub fn rmhd_flux_gr_gv(
             let spin = Gv::scalar("kerr_spin");
             let m = KerrKSCartesian { mass, spin };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
+(Spacetime::Kerr, Coords::Cylindrical) => {
+            // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)
+            // and a radial shift (the moving-interface fan handles it). the flux is otherwise
+            // metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
+            let spin = Gv::scalar("kerr_spin");
+            let m = KerrKSCylindrical { mass, spin };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKSCylindrical<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
         (Spacetime::Kerr, _) => {
             // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)

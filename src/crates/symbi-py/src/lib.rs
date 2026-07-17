@@ -34,7 +34,7 @@ use symbi_display::{
 };
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
-use symbi_geometry::{KerrKS, KerrKSCartesian, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -3461,6 +3461,7 @@ macro_rules! hydro_dispatch {
                             | (2, "spherical", "kerr_schild")
                             | (2, "cylindrical", "kerr_schild")
                             | (3, "cylindrical", "kerr_schild")
+                            | (3, "cylindrical", "kerr")
                     ) =>
             {
                 Err(format!(
@@ -3630,6 +3631,15 @@ macro_rules! hydro_dispatch {
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
                 SchwarzschildKSCylindrical { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCylindrical<f64>
+            ),
+            // SPINNING KERR on the full 3D cylindrical chart: the rank-1 metric with the
+            // frame dragging in l_phi, shift on every axis. DOF == NDIM = 3; the 2.5D
+            // (R, z) swirl at spin needs the dragging-consistent azimuthal reconstruction
+            // and stays guard-rejected.
+            (3, "cylindrical") if $cfg.spacetime == "kerr" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 3, 3,
+                KerrKSCylindrical { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
+                KerrKSCylindrical<f64>
             ),
             (3, "cylindrical") => build_and_run_hydro!(
                 $cfg,

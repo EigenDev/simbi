@@ -1955,6 +1955,20 @@ fn main() {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, geom.clone());
         }
     }
+    // SPINNING KERR on the CYLINDRICAL chart (`_cyl` + `_kerr`, full 3D only): the rank-1
+    // kerr-schild update on the diag(1, R^2, 1) base with the frame dragging in the
+    // covariant l_phi — non-diagonal gamma_{R phi} / gamma_{phi z}, shift on EVERY axis
+    // (beta^phi != 0 at spin), alpha sqrt(gamma) = R (the null l preserves the base
+    // determinant). the 2.5D (R, z) swirl at spin needs the dragging-consistent
+    // azimuthal reconstruction and stays unbaked (fail-loud by name).
+    for geom in [Geom::cyl_3d().kerr()] {
+        gen_godunov_stage(&out_dir, 3, "rhd", true, geom.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, 3, geom.clone());
+        gen_rhd_c2p_gr(&out_dir, 3, 20, geom.clone());
+        for dir in 0..3 {
+            gen_rhd_face_flux_gr(&out_dir, 3, dir, geom.clone());
+        }
+    }
     // the cyl_rz SWIRL snapshot (DOF = 3 cons -> u_n copy; geometry- and spacetime-independent) —
     // the flat cylindrical hydro is DOF = 2, so this swirl instance is otherwise unbaked. cyl_3d
     // (DOF == NDIM) reuses the unsuffixed rhd_snapshot_3d.

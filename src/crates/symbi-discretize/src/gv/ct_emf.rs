@@ -15,7 +15,7 @@ use super::*;
 /// vanishes identically and the generic form reduces to the single-shift spherical EMF.
 fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
     use symbi_geometry::{
-        KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
         SchwarzschildKSCylindrical,
     };
     let mass = Gv::scalar("schwarzschild_mass");
@@ -43,6 +43,9 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
         (Spacetime::Kerr, Coords::Cartesian) => {
             adm!(KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") }, KerrKSCartesian<Gv>)
         }
+(Spacetime::Kerr, Coords::Cylindrical) => {
+            adm!(KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") }, KerrKSCylindrical<Gv>)
+        }
         (Spacetime::Kerr, _) => {
             adm!(KerrKS { mass, spin: Gv::scalar("kerr_spin") }, KerrKS<Gv>)
         }
@@ -58,7 +61,7 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
 /// [`gr_adm_at`]; the orthonormal_basis(dir) Gram-Schmidt of this gamma is the tetrad.
 fn gr_spatial_metric_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> SpatialMetric<Gv, 3> {
     use symbi_geometry::{
-        KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+        KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
         SchwarzschildKSCylindrical,
     };
     let mass = Gv::scalar("schwarzschild_mass");
@@ -83,6 +86,7 @@ fn gr_spatial_metric_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) 
         // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::Kerr, Coords::Cartesian) => sm!(KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") }, KerrKSCartesian<Gv>),
+(Spacetime::Kerr, Coords::Cylindrical) => sm!(KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") }, KerrKSCylindrical<Gv>),
         (Spacetime::Kerr, _) => sm!(KerrKS { mass, spin: Gv::scalar("kerr_spin") }, KerrKS<Gv>),
         (Spacetime::Minkowski, _) => {
             unreachable!("the GR CT stack is baked only for a curved spacetime")

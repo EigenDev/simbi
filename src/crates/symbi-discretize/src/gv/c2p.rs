@@ -6,7 +6,7 @@
 
 use super::*;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
-use symbi_geometry::{KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 /// trace the REAL adiabatic (ideal-gas) c2p — symbi-hydro's `Cons::to_primitive` at
 /// `S = Gv` — into a dispatchable kernel. the carrier-generic physics IS the kernel
@@ -157,6 +157,7 @@ where
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
     KerrKSCartesian<Gv>: Metric<Gv, D>,
+    KerrKSCylindrical<Gv>: Metric<Gv, D>,
     SchwarzschildKSCylindrical<Gv>: Metric<Gv, D>,
     KerrKS<Gv>: Metric<Gv, D>,
 {
@@ -202,6 +203,10 @@ where
         // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
         (Spacetime::Kerr, Coords::Cartesian) => {
             let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+(Spacetime::Kerr, Coords::Cylindrical) => {
+            let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
         (Spacetime::Kerr, _) => {
@@ -320,6 +325,13 @@ pub fn rmhd_c2p_gr_gv(
             // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
             // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
             let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric(x), m.spatial_metric_inv(x))
+        }
+(Spacetime::Kerr, Coords::Cylindrical) => {
+            // spinning kerr: theta-dependent non-diagonal gamma (Sigma = r^2 + a^2 cos^2 theta), so
+            // the polar axis must be GRIDDED — the swirl 2D (r, theta) bake grids it (the
+            // equatorial-pi/2 fallback above would drop the a^2 cos^2 theta term). D = 3 swirl only.
+            let m = KerrKSCylindrical { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x))
         }
         (Spacetime::Kerr, _) => {

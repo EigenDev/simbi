@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, KerrKSCylindrical, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_algebra::Tensor;
 
 
@@ -107,6 +107,14 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
             let mass = Gv::scalar("schwarzschild_mass");
             let spin = Gv::scalar("kerr_spin");
             Some(KerrKSCartesian { mass, spin }.lapse(x))
+        }
+(Spacetime::Kerr, Coords::Cylindrical) => {
+            let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
+            }));
+            let mass = Gv::scalar("schwarzschild_mass");
+            let spin = Gv::scalar("kerr_spin");
+            Some(KerrKSCylindrical { mass, spin }.lapse(x))
         }
         // spherical charts: r = the radial centroid (coordinate slot 0). the schwarzschild /
         // kerr-schild lapses are radial-only; the spinning-kerr lapse also reads the polar centroid
