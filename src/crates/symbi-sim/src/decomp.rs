@@ -788,6 +788,28 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                 symbi_xpu::with_device(devices[i], || kernels[i].viscous(sh[i], dt));
             }
             drain_devices::<M>(devices);
+            // horizon excision, once per step after the RK combination, mirroring
+            // the monolithic loop's phase order. the onion fill's donor chains
+            // cross tile cuts one cell per sweep, so a halo exchange BETWEEN
+            // sweeps makes the tiled sweep sequence bit-identical to the
+            // monolithic K sweeps; a final exchange publishes the finalized
+            // (rebuilt) excised state into the neighbors' halos before the next
+            // step's stencils read them. inert (zero passes) when unexcised.
+            let passes = (0..n).map(|i| kernels[i].excise_pass_count(sh[i])).max().unwrap_or(0);
+            if passes > 0 {
+                for _ in 0..passes {
+                    for i in 0..n {
+                        symbi_xpu::with_device(devices[i], || kernels[i].excise_sweep(sh[i]));
+                    }
+                    drain_devices::<M>(devices);
+                    exchange_grid(&sh, counts, devices, transport);
+                }
+                for i in 0..n {
+                    symbi_xpu::with_device(devices[i], || kernels[i].excise_finalize(sh[i]));
+                }
+                drain_devices::<M>(devices);
+                exchange_grid(&sh, counts, devices, transport);
+            }
             // backward immersed-body feedback (per STEP, after all stages): each tile reduces its
             // LOCAL interior force/torque/accreted-mass into its own accumulator. the cross-tile sum
             // + the prescribed-orbit advance happen in `step_bodies_decomposed` below, which needs

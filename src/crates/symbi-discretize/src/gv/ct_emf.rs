@@ -1064,6 +1064,93 @@ pub fn rmhd_edge_emf_uct_gr_gv(
 }
 
 
+/// the FULL-3D densitized UCT-HLL corner EMF for the cartesian GR charts: the same
+/// master-formula combination as the 2d builder, per EDGE direction `dir` — the edge
+/// runs along `dir`, the transverse plane is (g1, g2) = (dir+1, dir+2) mod 3, and the
+/// corner metric sits at (cell center on `dir`, faces on g1/g2). the dispatch binds
+/// the per-edge slots (vel/bface/wave-speed pairs) exactly as it does the 2d family.
+/// cartesian only: the physical components coincide with the grid axes, so the
+/// transport velocity is vtilde = alpha v - beta on g1/g2 directly.
+pub fn rmhd_edge_emf_uct_gr_3d_gv(
+    dir: usize,
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    assert!(coords == Coords::Cartesian, "the 3d GR UCT EMF is baked for the cartesian charts");
+    let ndim = 3usize;
+    let g1 = (dir + 1) % 3;
+    let g2 = (dir + 2) % 3;
+    gv_register_field("edge_vp1", "vel_p1");
+    gv_register_field("edge_vp2", "vel_p2");
+    gv_register_field("edge_bface_a", "bface_a");
+    gv_register_field("edge_bface_b", "bface_b");
+    gv_register_field("edge_wsr1", "wsr_p1");
+    gv_register_field("edge_wsl1", "wsl_p1");
+    gv_register_field("edge_wsr2", "wsr_p2");
+    gv_register_field("edge_wsl2", "wsl_p2");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    let zero_g = Gv::ZERO;
+    let vp1 = |o: &[i32]| gv_field_at("edge_vp1", "vel_p1", ndim, o);
+    let vp2 = |o: &[i32]| gv_field_at("edge_vp2", "vel_p2", ndim, o);
+    let vx_e = (vp1(&zero) + vp1(&cm(&[g2]))) * half;
+    let vx_w = (vp1(&cm(&[g1])) + vp1(&cm(&[g1, g2]))) * half;
+    let vy_n = (vp2(&zero) + vp2(&cm(&[g1]))) * half;
+    let vy_s = (vp2(&cm(&[g2])) + vp2(&cm(&[g1, g2]))) * half;
+    let max4 = |key: &str, path: &str| -> Gv {
+        let v0 = gv_field_at(key, path, ndim, &zero);
+        let v1 = gv_field_at(key, path, ndim, &cm(&[g1]));
+        let v2 = gv_field_at(key, path, ndim, &cm(&[g2]));
+        let v3 = gv_field_at(key, path, ndim, &cm(&[g1, g2]));
+        v0.max(v1).max(v2).max(v3)
+    };
+    let neg_min4 = |key: &str, path: &str| -> Gv {
+        let v0 = zero_g - gv_field_at(key, path, ndim, &zero);
+        let v1 = zero_g - gv_field_at(key, path, ndim, &cm(&[g1]));
+        let v2 = zero_g - gv_field_at(key, path, ndim, &cm(&[g2]));
+        let v3 = zero_g - gv_field_at(key, path, ndim, &cm(&[g1, g2]));
+        v0.max(v1).max(v2).max(v3)
+    };
+    let apx = zero_g.max(max4("edge_wsr1", "wsr_p1"));
+    let amx = zero_g.max(neg_min4("edge_wsl1", "wsl_p1"));
+    let apy = zero_g.max(max4("edge_wsr2", "wsr_p2"));
+    let amy = zero_g.max(neg_min4("edge_wsl2", "wsl_p2"));
+    let cx = uct_hll_coeffs(apx, amx);
+    let cy = uct_hll_coeffs(apy, amy);
+    let eps = Gv::from_f64(1.0e-30);
+    let vbar_x = (apx * vx_w + amx * vx_e) / (apx + amx + eps);
+    let vbar_y = (apy * vy_s + amy * vy_n) / (apy + amy + eps);
+    // the corner metric: the edge midpoint — cell-centered along the edge, faces on
+    // the transverse pair; the transport velocity is vtilde = alpha v - beta on each
+    // transverse axis, and the corner sqrt(gamma) densitizes the whole EMF.
+    let a_f = |ax: usize, o: i64| gv_axis_face_at(ax, spacing[ax], o);
+    let a_c = |ax: usize, o: i64| (a_f(ax, o) + a_f(ax, o + 1)) * half;
+    let mut xc = [Gv::ZERO; 3];
+    xc[dir] = a_c(dir, 0);
+    xc[g1] = a_f(g1, 0);
+    xc[g2] = a_f(g2, 0);
+    let (alpha_c, sqrtg_c, beta_c) = gr_adm_at(spacetime, coords, Tensor::new(xc));
+    let vtilde_r = alpha_c * vbar_x - beta_c[g1];
+    let vtilde_th = alpha_c * vbar_y - beta_c[g2];
+    let theta = Gv::scalar("theta");
+    let by_e = recon_face_to_edge(ndim, theta, "edge_bface_b", "bface_b", &zero, g1, -1.0);
+    let by_w = recon_face_to_edge(ndim, theta, "edge_bface_b", "bface_b", &cm(&[g1]), g1, 1.0);
+    let bx_n = recon_face_to_edge(ndim, theta, "edge_bface_a", "bface_a", &zero, g2, -1.0);
+    let bx_s = recon_face_to_edge(ndim, theta, "edge_bface_a", "bface_a", &cm(&[g2]), g2, 1.0);
+    let emf_phys = uct_master_emf(&cx, &cy, vtilde_r, vtilde_th, by_e, by_w, bx_n, bx_s);
+    let emf = sqrtg_c * emf_phys;
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
 /// PLM-reconstruct a staggered face field a half-cell to the EDGE (M&DZ: the staggered transverse
 /// field reconstructed from the adjacent interface — the 2nd-order piece that preserves smooth fields,
 /// VERIFIED on the field-loop test). `base` the face offset; `axis` the reconstruction direction (the

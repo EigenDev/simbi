@@ -175,6 +175,61 @@ def test_cartesian_ks_mhd_3d_symmetry_and_densitized_divb() -> None:
 
 
 @needs_backend
+def test_cartesian_ks_mhd_3d_uct_preserves_divb_and_mirror() -> None:
+    # the FULL-3D UCT-HLL corner EMF (three edge orientations, materialized wave
+    # speeds): the same two defining invariants as the contact CT — the recomputed
+    # densitized divergence stays at machine zero from the EVOLVED staggered field,
+    # and the early-time field mirror symmetry holds to roundoff (the sharp
+    # coordinate-role gate over the per-edge slot bindings).
+    from simbi.types import CtMethod
+
+    d = tempfile.mkdtemp() + "/"
+    p = _CartesianKsMhd3D(data_directory=Path(d))
+    p.ct_method = CtMethod.UCT
+    runner.run(p, compute_mode="cpu", max_steps=2)
+    finals = glob.glob(os.path.join(d, "*final*.h5"))
+    assert finals, "3d UCT GRMHD run crashed"
+    with h5py.File(finals[0], "r") as h:
+        prims = h["level_0/partition_0/hydro/primitives"]
+        halo = (prims["rho"].shape[0] - RES) // 2
+        sl = slice(halo, halo + RES)
+        b1 = prims["b1"][sl, sl, sl]
+        b2 = prims["b2"][sl, sl, sl]
+        mag = h["level_0/partition_0/hydro/magnetic"]
+        bf = [mag[f"B{k}"]["data"][:] for k in (1, 2, 3)]
+    assert np.abs(b1).max() > 1e-5, "the field never moved under UCT; vacuous"
+    berr = np.abs(b1 - np.transpose(b2, (0, 2, 1))).max()
+    assert berr < 1e-14, f"UCT early B mirror symmetry broken: {berr:e}"
+
+    dd = 2.0 * L / RES
+    xs = (np.arange(RES) + 0.5) * dd - L
+    xs_f = np.arange(RES + 1) * dd - L
+
+    def w(xg, yg, zg):
+        rr = np.sqrt(xg * xg + yg * yg + zg * zg)
+        np.maximum(rr, 0.5 * MASS, out=rr)
+        return np.sqrt(1.0 + 2.0 * MASS / rr)
+
+    zc, yc2, xf = np.meshgrid(xs, xs, xs_f, indexing="ij")
+    w1 = w(xf, yc2, zc)
+    zc, yf, xc2 = np.meshgrid(xs, xs_f, xs, indexing="ij")
+    w2 = w(xc2, yf, zc)
+    zff, yc3, xc3 = np.meshgrid(xs_f, xs, xs, indexing="ij")
+    w3 = w(xc3, yc3, zff)
+    b1f, b2f, b3f = bf[0], bf[1], bf[2]
+    div = (
+        (w1[:, :, 1:] * b1f[:, :, 1:] - w1[:, :, :-1] * b1f[:, :, :-1])
+        + (w2[:, 1:, :] * b2f[:, 1:, :] - w2[:, :-1, :] * b2f[:, :-1, :])
+        + (w3[1:, :, :] * b3f[1:, :, :] - w3[:-1, :, :] * b3f[:-1, :, :])
+    ) / dd
+    dmax = float(np.abs(div).max())
+    bmax = max(float(np.abs(b1f).max()), float(np.abs(b3f).max()), 1e-300)
+    assert dmax < 1e-12 * max(1.0, bmax / 1e-3), (
+        f"UCT densitized div(B) not preserved: {dmax:e}"
+    )
+
+
+@needs_backend
 def test_cartesian_ks_mhd_3d_stencils_are_mirror_exact_early() -> None:
     # before the clamped singular core contaminates the flow (its iterative-c2p chatter
     # is tolerance-level and takes several steps to grow), the discrete CT stencils must

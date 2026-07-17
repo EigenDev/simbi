@@ -132,7 +132,28 @@ where
     /// local conserved rebuild, once per step after the RK combination. magnetized
     /// sets rebuild with the cell's own B; the staggered faces stay CT-owned.
     /// default: no-op (flat backgrounds, and regimes without the baked kernels).
-    fn excise(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
+    /// composed from the sweep/finalize pieces so the DECOMPOSED loop can drive
+    /// the sweeps itself with a halo exchange between them (a donor chain that
+    /// crosses a tile cut advances one cell per sweep through the halo, so
+    /// interleaved exchanges make the tiled sweep sequence bit-identical to the
+    /// monolithic one).
+    fn excise(&self, store: &FieldStore<NDIM, DOF, Mem, Sc>) {
+        for _ in 0..self.excise_pass_count(store) {
+            self.excise_sweep(store);
+        }
+        self.excise_finalize(store);
+    }
+
+    /// the number of onion sweeps a full excision fill needs (0 = excision inert).
+    fn excise_pass_count(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) -> usize {
+        0
+    }
+
+    /// ONE onion sweep (fill + writeback) of the excision region; no-op default.
+    fn excise_sweep(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
+
+    /// the conserved rebuild of the excised cells after the last sweep; no-op default.
+    fn excise_finalize(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 }
 
 /// stash the config's constant-nu viscosity onto a kernel set.

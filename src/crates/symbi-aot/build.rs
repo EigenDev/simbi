@@ -1427,6 +1427,23 @@ fn gen_rmhd_gr_uct(out_dir: &str, geom: &Geom) {
     emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{st}_2d_{ok}"), 2, &k, &w);
 }
 
+/// the FULL-3D GR UCT-HLL family: the per-cell materialized wave speeds + the three
+/// edge orientations of the densitized master-form corner EMF. cartesian charts only.
+fn gen_rmhd_gr_uct_3d(out_dir: &str, geom: &Geom) {
+    let gs = mhd_geom_slug(geom);
+    let st = geom.spacetime_suffix();
+    let (k, w) = symbi_discretize::gv::rmhd_wave_speeds_cell_gr_gv(
+        geom.spacetime, geom.coords, &geom.spacing, &geom.axes,
+    );
+    emit_gv(out_dir, &format!("rmhd_wave_speeds_cell{gs}{st}_3d"), 3, &k, &w);
+    for dir in 0..3usize {
+        let (k, w) = symbi_discretize::gv::rmhd_edge_emf_uct_gr_3d_gv(
+            dir, geom.spacetime, geom.coords, &geom.spacing,
+        );
+        emit_gv(out_dir, &format!("rmhd_edge_emf_uct{gs}{st}_3d_{dir}"), 3, &k, &w);
+    }
+}
+
 fn gen_rmhd_ct_gr(out_dir: &str, geom: &Geom) {
     let gs = mhd_geom_slug(geom);
     let st = geom.spacetime_suffix();
@@ -2064,8 +2081,10 @@ fn main() {
             // direction hold, and the multi-axis moving-interface shift (beta^x, beta^y) rides the fan.
             gen_rmhd_gr_uct_hlld(&out_dir, &geom);
         } else {
-            // full 3D: contact CT only (the UCT families fail loud via the unbaked name).
+            // full 3D: the contact CT + the UCT-HLL family (three edge orientations,
+            // materialized wave speeds). UCT-HLLD at 3D stays unbaked-fail-loud.
             gen_rmhd_ct_gr_3d(&out_dir, &geom);
+            gen_rmhd_gr_uct_3d(&out_dir, &geom);
         }
     }
     // GRMHD on the SPINNING KERR cartesian chart (`_kerr`): the rank-1 kerr-schild metric
@@ -2088,8 +2107,11 @@ fn main() {
         gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), ndim);
         if ndim == 2 {
             gen_rmhd_ct_gr(&out_dir, &geom);
+            // the 2d spinning-kerr UCT-HLL corner EMF (the sharp non-checkerboard CT).
+            gen_rmhd_gr_uct(&out_dir, &geom);
         } else {
             gen_rmhd_ct_gr_3d(&out_dir, &geom);
+            gen_rmhd_gr_uct_3d(&out_dir, &geom);
         }
     }
     // GRMHD in the cylindrical kerr-schild charts (design 45): the equatorial (R, phi) DISK (DIAGONAL

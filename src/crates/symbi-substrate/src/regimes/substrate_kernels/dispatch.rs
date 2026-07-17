@@ -221,13 +221,78 @@ pub fn dispatch_excise<const D: usize, const DOF: usize, Mem, Sc>(
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
 {
-    symbi_sim::driver::prof("excise", || dispatch_excise_inner(sim, gamma, r_exc));
+    symbi_sim::driver::prof("excise", || {
+        for _ in 0..excise_pass_count_for(sim, r_exc) {
+            dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Sweep);
+        }
+        dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Finalize);
+    });
+}
+
+/// ONE onion sweep (fill + writeback) — the decomposed loop drives sweeps itself
+/// with a halo exchange between them, so a donor chain crossing a tile cut
+/// advances one cell per sweep through the exchanged halo and the tiled sweep
+/// sequence stays bit-identical to the monolithic one.
+pub fn dispatch_excise_sweep<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    r_exc: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    symbi_sim::driver::prof("excise", || dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Sweep));
+}
+
+/// the conserved rebuild of the excised cells, once after the last sweep.
+pub fn dispatch_excise_finalize<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    gamma: f64,
+    r_exc: f64,
+) where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    symbi_sim::driver::prof("excise", || dispatch_excise_inner(sim, gamma, r_exc, ExcisePhase::Finalize));
+}
+
+/// the sweep count a full fill needs on this grid: the spin-widened equatorial
+/// extent over the smallest cell width. identical across tiles of one run (the
+/// spacing and radius are global), so the decomposed loop can take any tile's.
+pub fn excise_pass_count_for<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    r_exc: f64,
+) -> usize
+where
+    Mem: MemorySpace + Sync,
+    Sc: Scalar + OrderedNumeric,
+{
+    if r_exc <= 0.0 {
+        return 0;
+    }
+    let spin = sim
+        .geom
+        .spacetime_scalars
+        .iter()
+        .find(|(n, _)| n == "kerr_spin")
+        .map(|(_, v)| *v)
+        .unwrap_or(0.0);
+    let semi_xy = (r_exc * r_exc + spin * spin).sqrt();
+    let min_dx = sim.geom.dx.iter().cloned().fold(f64::INFINITY, f64::min);
+    symbi_ib::excise::onion_pass_count(semi_xy, min_dx)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ExcisePhase {
+    Sweep,
+    Finalize,
 }
 
 fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     gamma: f64,
     r_exc: f64,
+    phase: ExcisePhase,
 ) where
     Mem: MemorySpace + Sync,
     Sc: Scalar + OrderedNumeric,
@@ -330,53 +395,55 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
     let scratch = feedback_scratch(sim, nf);
     let scratch_refs: Vec<&Field<Sc, D, Mem>> = (0..nf).map(|kk| &scratch[kk]).collect();
 
-    // K sweeps of fill (prim -> scratch) + writeback (scratch -> prim): the parallel
-    // stencil never reads a value written by the same sweep. min-width from the
-    // uniform cartesian grid; the sweep count covers the region's LARGEST semi-axis
-    // (the spin-widened equatorial extent).
-    let min_dx = geom.dx.iter().cloned().fold(f64::INFINITY, f64::min);
-    for _ in 0..symbi_ib::excise::onion_pass_count(semi_xy, min_dx) {
-        dispatch_fields::<Sc, Mem, D>(
-            &fill_name,
-            &geom.allocated,
-            &bbox,
-            &prim,
-            &scratch_refs,
-            &[],
-            &fill_scalars,
-        );
-        dispatch_fields::<Sc, Mem, D>(
-            &wb_name,
-            &geom.allocated,
-            &bbox,
-            &scratch_refs,
-            &prim,
-            &[],
-            &wb_scalars,
-        );
-    }
-    // the conserved rebuild: prim (+ cell B when magnetized) reads, cons in-place
-    // (live cells pass through).
-    let mut p2c_in = prim.clone();
-    if let Some(mhd_fields) = sim.fields.mhd.as_ref() {
-        for kk in 0..3 {
-            p2c_in.push(&mhd_fields.bcell[kk]);
+    match phase {
+        // one sweep of fill (prim -> scratch) + writeback (scratch -> prim): the
+        // parallel stencil never reads a value written by the same sweep. the
+        // caller drives the sweep count (excise_pass_count_for).
+        ExcisePhase::Sweep => {
+            dispatch_fields::<Sc, Mem, D>(
+                &fill_name,
+                &geom.allocated,
+                &bbox,
+                &prim,
+                &scratch_refs,
+                &[],
+                &fill_scalars,
+            );
+            dispatch_fields::<Sc, Mem, D>(
+                &wb_name,
+                &geom.allocated,
+                &bbox,
+                &scratch_refs,
+                &prim,
+                &[],
+                &wb_scalars,
+            );
+        }
+        // the conserved rebuild: prim (+ cell B when magnetized) reads, cons
+        // in-place (live cells pass through).
+        ExcisePhase::Finalize => {
+            let mut p2c_in = prim.clone();
+            if let Some(mhd_fields) = sim.fields.mhd.as_ref() {
+                for kk in 0..3 {
+                    p2c_in.push(&mhd_fields.bcell[kk]);
+                }
+            }
+            let mut cons: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
+            for kk in 0..DOF {
+                cons.push(&sim.fields.cons.mom[kk]);
+            }
+            cons.push(sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR)"));
+            dispatch_fields::<Sc, Mem, D>(
+                &p2c_name,
+                &geom.allocated,
+                &bbox,
+                &p2c_in,
+                &cons,
+                &[],
+                &p2c_scalars,
+            );
         }
     }
-    let mut cons: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-    for kk in 0..DOF {
-        cons.push(&sim.fields.cons.mom[kk]);
-    }
-    cons.push(sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR)"));
-    dispatch_fields::<Sc, Mem, D>(
-        &p2c_name,
-        &geom.allocated,
-        &bbox,
-        &p2c_in,
-        &cons,
-        &[],
-        &p2c_scalars,
-    );
 }
 
 pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(

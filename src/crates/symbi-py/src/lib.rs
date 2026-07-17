@@ -2714,11 +2714,16 @@ macro_rules! build_and_run_hydro {
         }
         let solver = cfg.solver;
         let mut hier = into_hierarchy!(sim, sub, cfg, $d, |s| {
+            // the fine set carries the SAME non-ideal knobs as the base: the hierarchy
+            // applies the viscous pass on the FINEST level only, so a fine set without
+            // nu would make the whole refined run silently inviscid.
             let ks = s
                 .substrate()
                 .theta(theta)
                 .with_solver(solver)
-                .expect("fine-level kernel set");
+                .expect("fine-level kernel set")
+                .with_viscosity(cfg.viscosity)
+                .with_resistivity(cfg.resistivity);
             // register the SAME driven-boundary DAGs on each fine level, in Driven-id order: a
             // fine level flush against a driven physical face INHERITS `Driven(id)` there (an
             // interior fine level has only CoarseFine faces and never consults the dags). the
@@ -3118,11 +3123,17 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                         }
                     })
                     .build();
+                // the tile set carries the SAME non-ideal + excision knobs as the
+                // monolithic base — a tile set without them makes the whole decomposed
+                // run silently ideal/unexcised.
                 let sub = sim
                     .substrate()
                     .theta(theta)
                     .with_solver(solver)
-                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?;
+                    .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
+                    .with_viscosity(cfg.viscosity)
+                    .with_resistivity(cfg.resistivity)
+                    .with_excision(cfg.excision_radius);
                 // register the DRIVEN (DYNAMIC) boundary DAGs on the tile root AND every fine
                 // level, in Driven-id order: an edge tile's exterior faces carry Driven(id)
                 // from the physical-boundary copy above, and a fine level flush against one
@@ -3161,7 +3172,16 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 };
                 let sub = register(sub);
                 let make = |s: &Sim| {
-                    register(s.substrate().theta(theta).with_solver(solver).expect("fine kernel set"))
+                    // same non-ideal knobs as the base (the viscous pass runs on the
+                    // finest level only).
+                    register(
+                        s.substrate()
+                            .theta(theta)
+                            .with_solver(solver)
+                            .expect("fine kernel set")
+                            .with_viscosity(cfg.viscosity)
+                            .with_resistivity(cfg.resistivity),
+                    )
                 };
                 let mut h = if tile_regions.is_empty() {
                     Hierarchy::single(sim, sub)
@@ -3222,7 +3242,14 @@ macro_rules! build_and_run_hydro_decomposed_refined {
                 .with_solver(solver)
                 .map_err(|e| format!("global substrate/solver: {e:?}"))?;
             let make = |s: &Sim| {
-                s.substrate().theta(theta).with_solver(solver).expect("fine kernel set")
+                // same non-ideal knobs as the base (the viscous pass runs on the finest
+                // level only).
+                s.substrate()
+                    .theta(theta)
+                    .with_solver(solver)
+                    .expect("fine kernel set")
+                    .with_viscosity(cfg.viscosity)
+                    .with_resistivity(cfg.resistivity)
             };
             let gh = Hierarchy::with_refinement(groot, gsub, &regions, prolong, make)
                 .map_err(|e| format!("global refinement build: {e:?}"))?;
@@ -3834,7 +3861,9 @@ macro_rules! build_and_run_mhd {
                 .theta(theta)
                 .with_solver(solver)
                 .expect("fine-level kernel set")
-                .ct_method(cfg.ct_method);
+                .ct_method(cfg.ct_method)
+                .with_viscosity(cfg.viscosity)
+                .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
                 let bcfg = symbi_hydro::SourceConfig::from_json(json)
                     .expect("fine-level boundary parse");
@@ -3979,7 +4008,9 @@ macro_rules! build_and_run_imhd {
                 .theta(theta)
                 .with_solver(solver)
                 .expect("fine-level kernel set")
-                .ct_method(cfg.ct_method);
+                .ct_method(cfg.ct_method)
+                .with_viscosity(cfg.viscosity)
+                .with_resistivity(cfg.resistivity);
             for json in &cfg.driven_exprs {
                 let bcfg = symbi_hydro::SourceConfig::from_json(json)
                     .expect("fine-level boundary parse");
@@ -4104,7 +4135,10 @@ macro_rules! build_and_run_mhd_decomposed {
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .ct_method(ct);
+                    .ct_method(ct)
+                    .with_viscosity(cfg.viscosity)
+                    .with_resistivity(cfg.resistivity)
+                    .with_excision(cfg.excision_radius);
                 // attach the user source per tile (two-pass). targets the mhd hydro slots
                 // (den/mom/nrg); B is CT-evolved, not a cell source. each tile evaluates S at its
                 // own global coords. rmhd is relativistic -> raw only (enforced in build_user_source).
@@ -4282,7 +4316,10 @@ macro_rules! build_and_run_imhd_decomposed {
                     .theta(theta)
                     .with_solver(solver)
                     .map_err(|e| format!("tile {flat} substrate/solver: {e:?}"))?
-                    .ct_method(ct);
+                    .ct_method(ct)
+                    .with_viscosity(cfg.viscosity)
+                    .with_resistivity(cfg.resistivity)
+                    .with_excision(cfg.excision_radius);
                 // attach the user source per tile (two-pass). iso mhd has no energy -> momentum-only
                 // force/relax, raw den/mom; B is CT-evolved. each tile evaluates S at its own coords.
                 let sub = match &cfg.source_json {
@@ -5273,6 +5310,7 @@ fn check_excision_request(
     mass: f64,
     spin: f64,
     refinement_enabled: bool,
+    refinement_regions: &[Vec<f64>],
     n_gpus: usize,
 ) -> Result<(), String> {
     if excision_radius <= 0.0 {
@@ -5315,11 +5353,44 @@ fn check_excision_request(
             0.7 * r_plus
         ));
     }
-    if refinement_enabled {
-        return Err("excision does not run on refined (FMR) levels; disable refinement".into());
+    if refinement_enabled && n_gpus > 1 {
+        return Err(
+            "excision is wired for the refined path and the decomposed path separately, \
+             not their combination; use refinement with gpus = 1 or excise unrefined \
+             decomposed"
+                .into(),
+        );
     }
-    if n_gpus > 1 {
-        return Err("excision does not run on the multi-gpu decomposed path; use gpus = 1".into());
+    if refinement_enabled {
+        // the excise pass runs on the ROOT level only; a fine patch overlapping the
+        // excised region would evolve its copy of those cells and restrict them back
+        // over the fill. the excised spheroid spans +-sqrt(r^2 + a^2) equatorially
+        // and +-r on the spin axis; reject any refinement region whose box intersects
+        // it (with one root cell of margin for the fill's donor reads).
+        let semi_xy = (excision_radius * excision_radius + spin * spin).sqrt();
+        for region in refinement_regions {
+            if region.len() < 2 * dims {
+                continue;
+            }
+            let mut overlaps = true;
+            for ax in 0..dims {
+                let ext = if dims == 3 && ax == 2 { excision_radius } else { semi_xy };
+                let (lo, hi) = (region[2 * ax], region[2 * ax + 1]);
+                if hi < -ext || lo > ext {
+                    overlaps = false;
+                    break;
+                }
+            }
+            if overlaps {
+                return Err(format!(
+                    "refinement region {region:?} overlaps the excised region \
+                     (equatorial extent {semi_xy:.3}, polar {excision_radius:.3}); the \
+                     excise pass runs on the root level only, so a fine patch there \
+                     would restrict un-excised values back over the fill. move the \
+                     refinement region off the horizon."
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -5330,42 +5401,66 @@ mod excision_gate_tests {
 
     #[test]
     fn zero_radius_is_always_fine() {
-        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, 0.0, true, 4).is_ok());
+        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, 0.0, true, &[], 4).is_ok());
     }
 
     #[test]
     fn excision_needs_a_cartesian_ks_chart() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, 1).is_ok());
-        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_ok());
-        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, 0.0, false, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, 0.0, false, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr", "spherical", 2, 1.0, 0.9, false, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, 0.0, false, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_ok());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, &[], 1).is_ok());
+        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok());
+        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "kerr", "spherical", 2, 1.0, 0.9, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, 0.0, false, &[], 1).is_err());
     }
 
     #[test]
     fn excision_surface_must_sit_between_the_guard_and_the_horizon() {
         // a = 0, M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
-        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_err());
-        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_err());
-        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_ok());
-        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_ok());
+        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_err());
+        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_ok());
+        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 1).is_ok());
     }
 
     #[test]
     fn spinning_horizon_shrinks_the_band() {
-        // a = 0.9, M = 1: r_+ = 1 + sqrt(1 - 0.81) ~ 1.436 — the a = 0 band's 1.9 is
-        // OUTSIDE the spinning horizon and must be rejected.
-        assert!(check_excision_request(1.9, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_ok());
-        assert!(check_excision_request(0.5, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_err());
+        // a = 0.9, M = 1: r_+ = 1 + sqrt(1 - 0.81) ~ 1.436.
+        assert!(check_excision_request(1.9, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err());
+        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_ok());
+        assert!(check_excision_request(0.5, "kerr", "cartesian", 3, 1.0, 0.9, false, &[], 1).is_err());
     }
 
     #[test]
-    fn excision_rejects_refinement_and_multi_gpu() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 2).is_err());
+    fn decomposed_and_refined_are_each_allowed_but_not_combined() {
+        // multi-gpu decomposed: the sweeps interleave halo exchanges (bit-equal to
+        // monolithic); refined: the excise pass runs on the root level with fine
+        // patches off the horizon. the combination stays unwired.
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 2).is_ok());
+        let far = vec![vec![5.0, 8.0, 5.0, 8.0]];
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &far, 1).is_ok());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &far, 2).is_err());
+    }
+
+    #[test]
+    fn refinement_region_on_the_horizon_is_rejected() {
+        // a central fine box overlapping the excised spheroid would restrict
+        // un-excised values back over the root-level fill.
+        let central = vec![vec![-2.0, 2.0, -2.0, 2.0]];
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &central, 1).is_err());
+        // at spin the equatorial extent widens to sqrt(r^2 + a^2): a box clear of
+        // r_exc on x but inside the widened extent still overlaps.
+        let graze = vec![vec![1.5, 3.0, -0.5, 0.5, -0.5, 0.5]];
+        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &graze, 1).is_err());
+        let clear = vec![vec![2.0, 4.0, 2.0, 4.0, -0.5, 0.5]];
+        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, true, &clear, 1).is_ok());
+    }
+
+    #[test]
+    fn excision_rejects_multi_gpu_with_refinement_only() {
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, &[], 2).is_ok());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, &[], 2).is_err());
     }
 }
 
@@ -5495,6 +5590,7 @@ fn run_simulation(
         cfg.schwarzschild_mass,
         cfg.kerr_spin,
         cfg.refinement_enabled,
+        &cfg.refinement_regions,
         cfg.n_gpus,
     )
     .map_err(PyValueError::new_err)?;

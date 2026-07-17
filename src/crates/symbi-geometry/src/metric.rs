@@ -1322,6 +1322,106 @@ impl<S: Scalar> Metric<S, 1> for SchwarzschildKSCartesian<S> {
 //   the full 3D (R, phi, z). reduces to flat cylindrical at M = 0.
 // ============================================================
 
+/// kerr in cylindrical (ingoing) kerr-schild coordinates (R, phi, z), spin about z:
+/// the rank-1 update gamma_ij = g0_ij + 2H l_i l_j on the flat cylindrical base
+/// g0 = diag(1, R^2, 1), with the oblate-spheroidal radius r(R, z) solving
+/// r^2 = (R^2 + z^2 - a^2)/2 + sqrt(((R^2 + z^2 - a^2)/2)^2 + a^2 z^2) and
+///   2H  = 2 M r^3 / (r^4 + a^2 z^2),
+///   l   = (r R/(r^2 + a^2), -a R^2/(r^2 + a^2), z/r)   (COVARIANT coordinate basis;
+/// the azimuthal slot carries the frame dragging). a = 0 reduces exactly to
+/// [`SchwarzschildKSCylindrical`]. NOT diagonal: gamma_{R phi} and gamma_{phi z}
+/// are nonzero at spin.
+#[derive(Debug, Clone, Copy)]
+pub struct KerrKSCylindrical<S> {
+    /// the geometric mass M (G = c = 1); the outer horizon is at r_+ = M + sqrt(M^2 - a^2).
+    pub mass: S,
+    /// the specific angular momentum a = J/M, |a| < M, spin about +z.
+    pub spin: S,
+}
+
+impl<S: Scalar> KerrKSCylindrical<S> {
+    /// (2H, covariant l, |l|^2_{g0}) at (R, phi, z); the kerr-schild radius is clamped
+    /// at r >= M/2 (the same frozen-core treatment as every KS chart). |l|^2 is taken
+    /// with the INVERSE base metric (l contracted g0^{ij} l), the quantity the rank-1
+    /// determinant and sherman-morrison forms need on a non-identity base.
+    #[inline]
+    fn ks_quantities(&self, x: Tensor<S, 3>) -> (S, [S; 3], S) {
+        let half = S::from_f64(0.5);
+        let (rr_cyl, z) = (x[0], x[2]);
+        let a = self.spin;
+        let r2_flat = rr_cyl * rr_cyl + z * z;
+        let d = half * (r2_flat - a * a);
+        let az = a * z;
+        let r2 = d + (d * d + az * az).sqrt();
+        let r = r2.sqrt().max(half * self.mass);
+        let rr = r * r;
+        let two_h = (S::from_f64(2.0) * self.mass * rr * r) / (rr * rr + az * az);
+        let denom = S::ONE / (rr + a * a);
+        let l = [r * rr_cyl * denom, S::ZERO - a * rr_cyl * rr_cyl * denom, z / r];
+        // |l|^2 with g0^{-1} = diag(1, 1/R^2, 1); the azimuthal term is a^2 R^2/(r^2+a^2)^2.
+        let r_safe = rr_cyl.max(S::from_f64(1.0e-30));
+        let ll2 = l[0] * l[0] + (l[1] / r_safe) * (l[1] / r_safe) + l[2] * l[2];
+        (two_h, l, ll2)
+    }
+}
+
+impl<S: Scalar> Metric<S, 3> for KerrKSCylindrical<S> {
+    fn geometry(&self) -> Geometry { Geometry::Cylindrical }
+    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
+    }
+    fn lapse(&self, x: Tensor<S, 3>) -> S { self.lapse_sq(x).sqrt() }
+    // alpha^2 = 1/(1 + 2H |l|^2) — the null l preserves the determinant, so the
+    // det-g-flat identity alpha sqrt(gamma) = sqrt(det g0) = R holds at spin.
+    fn lapse_sq(&self, x: Tensor<S, 3>) -> S {
+        let (two_h, _l, ll2) = self.ks_quantities(x);
+        S::ONE / (S::ONE + two_h * ll2)
+    }
+    // beta^i = (2H/(1 + 2H |l|^2)) g0^{ij} l_j: the contravariant shift on every axis,
+    // including the frame-dragging azimuth beta^phi = coeff * l_phi / R^2.
+    fn shift(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        let (two_h, l, ll2) = self.ks_quantities(x);
+        let s = two_h / (S::ONE + two_h * ll2);
+        let r_safe = x[0].max(S::from_f64(1.0e-30));
+        Tensor::new([s * l[0], s * l[1] / (r_safe * r_safe), s * l[2]])
+    }
+    fn spatial_metric(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
+        let (two_h, l, _ll2) = self.ks_quantities(x);
+        let base = [S::ONE, x[0] * x[0], S::ONE];
+        Matrix::from_fn(|ii, jj| {
+            let g0 = if ii == jj { base[ii] } else { S::ZERO };
+            g0 + two_h * l[ii] * l[jj]
+        })
+    }
+    // sherman-morrison on the diagonal base: gamma^{ij} = g0^{ij} - c (g0 l)^i (g0 l)^j
+    // with c = 2H/(1 + 2H |l|^2) and (g0 l)^i = g0^{ij} l_j.
+    fn spatial_metric_inv(&self, x: Tensor<S, 3>) -> Matrix<S, 3> {
+        let (two_h, l, ll2) = self.ks_quantities(x);
+        let coef = two_h / (S::ONE + two_h * ll2);
+        let r_safe = x[0].max(S::from_f64(1.0e-30));
+        let inv_base = [S::ONE, S::ONE / (r_safe * r_safe), S::ONE];
+        let lu = [l[0], l[1] * inv_base[1], l[2]];
+        Matrix::from_fn(|ii, jj| {
+            let g0i = if ii == jj { inv_base[ii] } else { S::ZERO };
+            g0i - coef * lu[ii] * lu[jj]
+        })
+    }
+    // det(g0 + 2H l l^T) = det(g0) (1 + 2H |l|^2) (rank-1 lemma on the base).
+    fn sqrt_det_gamma(&self, x: Tensor<S, 3>) -> S {
+        let (two_h, _l, ll2) = self.ks_quantities(x);
+        let r_safe = x[0].max(S::from_f64(1.0e-30));
+        (r_safe * r_safe * (S::ONE + two_h * ll2)).sqrt()
+    }
+    fn volume_factor(&self, x: Tensor<S, 3>) -> S { self.sqrt_det_gamma(x) }
+    fn to_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        Tensor::new([x[0] * x[1].cos(), x[0] * x[1].sin(), x[2]])
+    }
+    fn from_cartesian(&self, x: Tensor<S, 3>) -> Tensor<S, 3> {
+        Tensor::new([(x[0] * x[0] + x[1] * x[1]).sqrt(), x[1].atan2(x[0]), x[2]])
+    }
+}
+
 /// schwarzschild in cylindrical kerr-schild coordinates (R, phi, z) — horizon-penetrating, no polar
 /// singularity off the axis. same geometric `mass` M and `schwarzschild_mass` kernel scalar as
 /// [`Schwarzschild`]; the kerr-schild structure is in the poloidal (R, z) block (NON-diagonal), phi

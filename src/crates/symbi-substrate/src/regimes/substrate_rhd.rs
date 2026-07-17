@@ -310,11 +310,32 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         }
     }
 
-    fn excise(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
-        // inert unless a positive excision radius was configured; the dispatch
-        // asserts the baked combination (2d/3d cartesian kerr-schild) fail-loud.
+    // horizon excision as the sweep/finalize pieces: the trait-default excise()
+    // composes them for the monolithic loop; the decomposed loop drives the
+    // sweeps itself with a halo exchange between them. inert at zero radius;
+    // the dispatch asserts the baked combination (2d/3d cartesian kerr-schild
+    // charts) fail-loud.
+    fn excise_pass_count(&self, sim: &FieldStore<D, DOF, Mem, Sc>) -> usize {
+        crate::regimes::substrate_kernels::excise_pass_count_for(sim, self.excision_radius)
+    }
+
+    fn excise_sweep(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         if self.excision_radius > 0.0 {
-            crate::regimes::substrate_kernels::dispatch_excise(sim, self.gamma, self.excision_radius);
+            crate::regimes::substrate_kernels::dispatch_excise_sweep(
+                sim,
+                self.gamma,
+                self.excision_radius,
+            );
+        }
+    }
+
+    fn excise_finalize(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
+        if self.excision_radius > 0.0 {
+            crate::regimes::substrate_kernels::dispatch_excise_finalize(
+                sim,
+                self.gamma,
+                self.excision_radius,
+            );
         }
     }
 
