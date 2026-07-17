@@ -295,7 +295,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // adiabatic shares the iso wave-speed map (cs = sqrt(gamma*p/rho), gamma=1.4 vs 1);
         // the SHARED cfl dispatch binds the field buffers by manifest + owns the reduction.
         let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
-        let dt = cfl_wave_speed(sim, pre, &self.cfl_scratch, "iso", self.gamma, self.cfl_number, None);
+        let dt = cfl_wave_speed(sim, pre, &self.cfl_scratch, "iso", self.gamma, self.cfl_number, None, 0.0);
         // the parabolic viscous cap: an explicit momentum-diffusion step is stable for
         // dt <= C_visc dx^2 / nu (C_visc = 0.1 below the ~0.21 von-Neumann limit of the 4/3 normal
         // stress). cartesian 2D only, so the coordinate dx IS the physical cell width. inert inviscid.

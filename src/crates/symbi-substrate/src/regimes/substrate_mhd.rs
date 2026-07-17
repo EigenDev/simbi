@@ -172,6 +172,10 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// resistive edge EMF before the CT curl). 0 = ideal MHD (bit-identical). the resistive CFL
     /// `dt <= 1/2 dx^2 / eta` folds into the wave-speed reduction.
     pub resistivity: f64,
+    /// the horizon-excision radius on a cartesian kerr-schild background (0 = no
+    /// excision). the gas fill + magnetized conserved rebuild run once per step;
+    /// the staggered faces stay CT-owned, so div(sqrt(gamma) B) is untouched.
+    pub excision_radius: f64,
     /// constant kinematic viscosity `nu` (the Navier-Stokes shear on the velocity, ORTHOGONAL to the
     /// resistive diffusion of B). 0 = inviscid. >0 runs the viscous force + (energy regime) the viscous
     /// heating onto the total energy; B is untouched, so the heat warms the gas with 1/2 B^2 preserved.
@@ -190,7 +194,7 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, viscosity: 0.0, _r: PhantomData }
+        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, viscosity: 0.0, excision_radius: 0.0, _r: PhantomData }
     }
 
     /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
@@ -388,6 +392,32 @@ where
     }
 }
 
+impl<R, Mem, Sc, const D: usize> symbi_sim::substrate_seam::WithResistivity
+    for MhdSubstrateKernelSet<R, Mem, Sc, D>
+where
+    R: Regime<Sc, D>,
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    fn with_resistivity(mut self, eta: f64) -> Self {
+        self.resistivity = eta;
+        self
+    }
+}
+
+impl<R, Mem, Sc, const D: usize> symbi_sim::substrate_seam::WithExcision
+    for MhdSubstrateKernelSet<R, Mem, Sc, D>
+where
+    R: Regime<Sc, D>,
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    fn with_excision(mut self, r_exc: f64) -> Self {
+        self.excision_radius = r_exc;
+        self
+    }
+}
+
 impl<R, Mem, Sc, const D: usize> KernelSet<D, 3, Mem, Sc>
     for MhdSubstrateKernelSet<R, Mem, Sc, D>
 where
@@ -542,6 +572,20 @@ where
         dispatch_named(sim, pre_bind, None, 0, &wsname, &sim.geom.allocated, &[], &scalars);
     }
 
+    fn excise(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
+        // inert unless a positive excision radius was configured; the dispatch asserts
+        // the baked combination (2d/3d cartesian kerr-schild charts) fail-loud. the gas
+        // primitives fill by onion sweep; the magnetized p2c folds the cell B into the
+        // conserved rebuild; the staggered faces are never written.
+        if self.excision_radius > 0.0 {
+            crate::regimes::substrate_kernels::dispatch_excise(
+                sim,
+                self.eos_param,
+                self.excision_radius,
+            );
+        }
+    }
+
     fn cfl(&self, sim: &FieldStore<D, 3, Mem, Sc>) -> f64 {
         let geom = &sim.geom;
         let st = spacetime_slug(geom.spacetime);
@@ -558,8 +602,14 @@ where
         // physical geometry.
         let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, geom.coords, sim.motion.a);
         let resolve_scalar = |bind: &ScalarBind| -> Sc {
-            let ScalarBind::Ref(sref) = bind else {
-                panic!("{} cfl: unexpected spec scalar {bind:?}", Self::kernel_prefix());
+            let sref = match bind {
+                ScalarBind::Ref(sref) => sref,
+                // the source-cfl kernel zeroes its admissibility rate on the excised
+                // r_ks < r_exc level set; 0 on an unexcised run (empty mask).
+                ScalarBind::Spec(sp) if &**sp == "excision_radius" => {
+                    return Sc::from_f64(self.excision_radius);
+                }
+                other => panic!("{} cfl: unexpected spec scalar {other:?}", Self::kernel_prefix()),
             };
             match *sref {
                 ScalarRef::Gamma | ScalarRef::Cs => Sc::from_f64(self.eos_param),

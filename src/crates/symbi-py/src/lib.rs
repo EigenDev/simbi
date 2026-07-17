@@ -3776,7 +3776,10 @@ macro_rules! build_and_run_mhd {
             .theta(theta)
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
-            .ct_method(cfg.ct_method);
+            .ct_method(cfg.ct_method)
+            .with_viscosity(cfg.viscosity)
+            .with_resistivity(cfg.resistivity)
+            .with_excision(cfg.excision_radius);
         // attach a user source expression to the MHD hydro slots (den/mom/nrg).
         // rmhd is relativistic -> only kind="raw"; nmhd takes force/cooling/relax.
         // B is CT-evolved, not a cell source. single-grid only.
@@ -3921,7 +3924,9 @@ macro_rules! build_and_run_imhd {
             .theta(theta)
             .with_solver(cfg.solver)
             .map_err(|e| format!("substrate/solver: {e:?}"))?
-            .ct_method(cfg.ct_method);
+            .ct_method(cfg.ct_method)
+            .with_viscosity(cfg.viscosity)
+            .with_resistivity(cfg.resistivity);
         // attach a user source. iso MHD has no energy -> momentum-only force/relax,
         // raw den/mom (raw->nrg rejected); B is CT-evolved. single-grid only.
         let sub = match &cfg.source_json {
@@ -4370,6 +4375,8 @@ macro_rules! mhd_dispatch {
                             | (2, "spherical", "kerr")
                             | (2, "cartesian", "kerr_schild")
                             | (3, "cartesian", "kerr_schild")
+                            | (2, "cartesian", "kerr")
+                            | (3, "cartesian", "kerr")
                             | (2, "cylindrical", "kerr_schild")
                     ) =>
             {
@@ -4431,6 +4438,20 @@ macro_rules! mhd_dispatch {
                 $cfg, $prims, $bufs, $regime, $regime_ty, 3,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
+            ),
+            // GRMHD on the SPINNING KERR cartesian chart (2d equatorial slice + full 3d box):
+            // the rank-1 non-diagonal metric with the frame dragging in the swirl of l; the
+            // densitized contact CT telescopes for any face weight, so the CT chain is the
+            // same family as the a = 0 chart with the kerr metric arms.
+            (2, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
+                KerrKSCartesian<f64>
+            ),
+            (3, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 3,
+                KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
+                KerrKSCartesian<f64>
             ),
             (1, "cartesian") => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 1, Cartesian, Cartesian
@@ -5247,33 +5268,38 @@ fn check_excision_request(
     coord_system: &str,
     dims: usize,
     mass: f64,
+    spin: f64,
     refinement_enabled: bool,
     n_gpus: usize,
-    regime: &str,
 ) -> Result<(), String> {
     if excision_radius <= 0.0 {
         return Ok(());
     }
-    // the onion fill carries the HYDRO primitive set only; an MHD kernel set's excise
-    // phase is the trait default no-op, so an MHD excision request would silently do
-    // nothing (the field needs a B-carrying fill, not yet built).
-    if regime.contains("mhd") {
+    // every relativistic regime excises: MHD fills the GAS state only (onion fill of
+    // rho/v/p + a magnetized conserved rebuild reading the cell B); the staggered
+    // faces stay CT-owned, so div(sqrt(gamma) B) is untouched. non-relativistic
+    // regimes never reach here (a curved spacetime on a newtonian/iso regime is
+    // rejected upstream).
+    if !matches!(spacetime, "kerr_schild" | "kerr") || coord_system != "cartesian"
+        || !matches!(dims, 2 | 3)
+    {
         return Err(format!(
-            "excision_radius = {excision_radius} is not wired for MHD regimes (the fill \
-             carries no B slots); run unexcised or use the hydro regime."
+            "excision_radius = {excision_radius} requires a 2d or 3d cartesian kerr-schild \
+             chart (spacetime kerr_schild or kerr); got (dims={dims}, coords={coord_system}, \
+             spacetime={spacetime}). spherical charts hide the horizon behind r_min instead."
         ));
     }
-    if spacetime != "kerr_schild" || coord_system != "cartesian" || !matches!(dims, 2 | 3) {
-        return Err(format!(
-            "excision_radius = {excision_radius} requires the 2d or 3d cartesian kerr-schild \
-             chart; got (dims={dims}, coords={coord_system}, spacetime={spacetime}). spherical \
-             charts hide the horizon behind r_min instead."
-        ));
-    }
-    let r_plus = 2.0 * mass;
+    // the excision surface is the kerr-schild-radius level set r_ks = r_exc, which
+    // must sit strictly inside the outer horizon: r_+ = 2M at a = 0,
+    // r_+ = M + sqrt(M^2 - a^2) at spin (|a| <= M is validated by the horizon gate).
+    let r_plus = if spacetime == "kerr" {
+        mass + (mass * mass - spin * spin).max(0.0).sqrt()
+    } else {
+        2.0 * mass
+    };
     if excision_radius >= r_plus {
         return Err(format!(
-            "excision_radius = {excision_radius} >= r_+ = 2M = {r_plus}: the excision sphere \
+            "excision_radius = {excision_radius} >= r_+ = {r_plus}: the excision surface \
              must sit strictly inside the horizon (excised cells are causally disconnected \
              ONLY there)."
         ));
@@ -5283,7 +5309,7 @@ fn check_excision_request(
             "excision_radius = {excision_radius} <= M/2 = {}: the metric is clamped constant \
              below M/2, so the excision surface must sit above it (recommended ~0.7 r_+ = {}).",
             0.5 * mass,
-            1.4 * mass
+            0.7 * r_plus
         ));
     }
     if refinement_enabled {
@@ -5301,39 +5327,42 @@ mod excision_gate_tests {
 
     #[test]
     fn zero_radius_is_always_fine() {
-        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, true, 4, "rhd").is_ok());
+        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, 0.0, true, 4).is_ok());
     }
 
     #[test]
-    fn excision_needs_the_cartesian_ks_chart() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_ok());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, false, 1, "rhd").is_ok());
-        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, false, 1, "rhd").is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, false, 1, "rhd").is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, false, 1, "rhd").is_err());
+    fn excision_needs_a_cartesian_ks_chart() {
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_ok());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, 0.0, false, 1).is_ok());
+        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_ok());
+        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, 0.0, false, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, 0.0, false, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr", "spherical", 2, 1.0, 0.9, false, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, 0.0, false, 1).is_err());
     }
 
     #[test]
-    fn excision_rejects_mhd_regimes() {
-        // the onion fill carries the hydro primitive set only; a b-carrying fill does not exist.
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, false, 1, "srmhd").is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 1, "imhd").is_err());
-        assert!(check_excision_request(0.0, "kerr_schild", "cartesian", 3, 1.0, false, 1, "srmhd").is_ok());
+    fn excision_surface_must_sit_between_the_guard_and_the_horizon() {
+        // a = 0, M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
+        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_err());
+        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_err());
+        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_ok());
+        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 1).is_ok());
     }
 
     #[test]
-    fn excision_sphere_must_sit_between_the_guard_and_the_horizon() {
-        // M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
-        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_err());
-        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_err());
-        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_ok());
-        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_ok());
+    fn spinning_horizon_shrinks_the_band() {
+        // a = 0.9, M = 1: r_+ = 1 + sqrt(1 - 0.81) ~ 1.436 — the a = 0 band's 1.9 is
+        // OUTSIDE the spinning horizon and must be rejected.
+        assert!(check_excision_request(1.9, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_ok());
+        assert!(check_excision_request(0.5, "kerr", "cartesian", 3, 1.0, 0.9, false, 1).is_err());
     }
 
     #[test]
     fn excision_rejects_refinement_and_multi_gpu() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, true, 1, "rhd").is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 2, "rhd").is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, true, 1).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, 0.0, false, 2).is_err());
     }
 }
 
@@ -5461,9 +5490,9 @@ fn run_simulation(
         &cfg.coord_system,
         cfg.dims,
         cfg.schwarzschild_mass,
+        cfg.kerr_spin,
         cfg.refinement_enabled,
         cfg.n_gpus,
-        &cfg.regime,
     )
     .map_err(PyValueError::new_err)?;
     // mesh refinement is cartesian + uniform-spacing ONLY: the coarse-fine prolongation/restriction

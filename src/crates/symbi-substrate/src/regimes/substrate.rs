@@ -404,6 +404,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             ISO_GAMMA,
             self.cfl_number,
             None,
+            0.0,
         );
         // the parabolic viscous cap: an explicit momentum-diffusion step is
         // stable for dt <= C_visc dx^2 / nu_max. the 2D Navier-Stokes normal

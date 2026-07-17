@@ -338,6 +338,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             self.gamma,
             self.cfl_number,
             source_cfl.as_deref(),
+            self.excision_radius,
         )
     }
 

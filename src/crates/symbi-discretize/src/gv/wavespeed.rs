@@ -667,6 +667,23 @@ pub fn rmhd_source_cfl_gr_gv(
     // dt -> 0 through a positive denominator (a c2p-physical cell has q > 0).
     let q_safe = q0.max(Gv::from_f64(1e-12));
     let lam_s = (s_tau.abs() + sm_norm) / q_safe;
+    // excised cells are numerical padding whose onion-filled state can sit near the
+    // admissible-cone boundary indefinitely (the frozen clamped-core metric drives
+    // enormous geodesic sources over donor-copied gas), so their admissibility rate
+    // must not throttle the global dt — inside the horizon nothing they do reaches
+    // the exterior. the mask is the SAME r_ks < r_exc level set the excision fill
+    // uses; `excision_radius` binds 0 on an unexcised run, making the mask empty and
+    // the rate bit-identical. cartesian charts only (spherical charts never excise).
+    let lam_s = if coords == Coords::Cartesian
+        && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
+    {
+        let spin = if spacetime == Spacetime::Kerr { Gv::scalar("kerr_spin") } else { Gv::ZERO };
+        let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
+        let excised = symbi_ib::excise::ks_excised(&xc, spin, Gv::scalar("excision_radius"));
+        Gv::select(excised, Gv::ZERO, lam_s)
+    } else {
+        lam_s
+    };
     let lam_flux = Gv::field("lambda", FieldRef::Scratch);
     let total = lam_flux + lam_s;
     (end_trace(), vec![("lambda".to_string(), FieldRef::Scratch.into(), total.node())])
@@ -782,6 +799,23 @@ pub fn rhd_source_cfl_gr_gv(
     let sm_norm = gamma_norm(&sm_arr).sqrt();
     let q_safe = q0.max(Gv::from_f64(1e-12));
     let lam_s = (s_tau.abs() + sm_norm) / q_safe;
+    // excised cells are numerical padding whose onion-filled state can sit near the
+    // admissible-cone boundary indefinitely (the frozen clamped-core metric drives
+    // enormous geodesic sources over donor-copied gas), so their admissibility rate
+    // must not throttle the global dt — inside the horizon nothing they do reaches
+    // the exterior. the mask is the SAME r_ks < r_exc level set the excision fill
+    // uses; `excision_radius` binds 0 on an unexcised run, making the mask empty and
+    // the rate bit-identical. cartesian charts only (spherical charts never excise).
+    let lam_s = if coords == Coords::Cartesian
+        && matches!(spacetime, Spacetime::KerrSchild | Spacetime::Kerr)
+    {
+        let spin = if spacetime == Spacetime::Kerr { Gv::scalar("kerr_spin") } else { Gv::ZERO };
+        let xc: [Gv; 3] = std::array::from_fn(|c| x[c]);
+        let excised = symbi_ib::excise::ks_excised(&xc, spin, Gv::scalar("excision_radius"));
+        Gv::select(excised, Gv::ZERO, lam_s)
+    } else {
+        lam_s
+    };
     let lam_flux = Gv::field("lambda", FieldRef::Scratch);
     let total = lam_flux + lam_s;
     (end_trace(), vec![("lambda".to_string(), FieldRef::Scratch.into(), total.node())])

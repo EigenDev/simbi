@@ -1,22 +1,26 @@
 # =============================================================================
 # gr_fishbone_moncrief_cartesian.py
 #
-# the fishbone-moncrief torus on the FULL 3D CARTESIAN kerr-schild grid: the
-# same exact equilibrium as the spherical-chart version, but with no polar
-# axis anywhere — the torus resolves its poles like any other direction, and
-# the funnel region above the hole is ordinary grid. the horizon-penetrating
-# chart carries the flow smoothly through r = 2M; the sphere inside the
-# horizon is SDF-excised (every excised cell is overwritten each step with a
-# zero-gradient copy of its outward neighbor — numerical padding the exterior
-# never sees, since every characteristic inside the horizon points inward).
+# the fishbone-moncrief torus on the FULL 3D CARTESIAN kerr-schild grid, at
+# GENERAL SPIN: the same exact equilibrium as the spherical-chart version, but
+# with no polar axis anywhere — the torus resolves its poles like any other
+# direction, and the funnel region above the hole is ordinary grid. the
+# horizon-penetrating chart carries the flow smoothly through r = r_+; the
+# region inside the horizon is level-set-excised (r_ks < r_exc, the sphere at
+# a = 0 and the oblate spheroid at spin — every excised cell is overwritten
+# each step with a zero-gradient copy of its outward neighbor, numerical
+# padding the exterior never sees).
 #
-# the valencia velocity is the KS-chart torus solution mapped by the plain
-# jacobian: with v^r = 2M/r / sqrt(1 + 2M/r) (the orbiter's drift against the
-# infalling eulerian observers) and v^phi from the FM angular momentum,
-#   v^x = v^r x/r - y v^phi,  v^y = v^r y/r + x v^phi,  v^z = v^r z/r.
-# outside the pressure-matched torus surface sits the warm isentropic
-# hydrostatic corona (h alpha = const), the same construction as the
-# spherical chart.
+# the cartesian kerr-schild position map: the KS radius solves the
+# oblate-spheroidal quartic r^2 = (R^2 - a^2)/2 + sqrt(((R^2 - a^2)/2)^2 +
+# a^2 z^2) (R = |x|; r = R at a = 0), theta = arccos(z/r). the valencia
+# velocity is the KS-chart torus solution mapped by the chart jacobian
+#   d x^i/d r   = ((r x + a y)/(r^2 + a^2), (r y - a x)/(r^2 + a^2), z/r)
+#   d x^i/d phi = (-y, x, 0)
+# (the r-column is exactly the kerr-schild null-vector direction l^i; a = 0
+# reduces to x^i/r). outside the pressure-matched torus surface sits the warm
+# isentropic hydrostatic corona (h alpha = const), the same construction as
+# the spherical chart.
 #
 # usage:
 #   simbi run gr_fishbone_moncrief_cartesian --resolution 128,128,128
@@ -43,12 +47,23 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         Spacetime,
         ProblemParam(
             Spacetime.KERR_SCHILD,
-            description="horizon-penetrating cartesian kerr-schild background (a = 0)",
+            description="horizon-penetrating cartesian kerr-schild background; "
+            "setup() promotes it to KERR when kerr_spin != 0",
         ),
     ]
     schwarzschild_mass: Annotated[
         float,
         ProblemParam(1.0, cli=True, description="black-hole mass M (G=c=1)"),
+    ]
+    kerr_spin: Annotated[
+        float,
+        ProblemParam(
+            0.0,
+            cli=True,
+            description="black-hole spin a = J/M, |a| < M, about +z. nonzero spin "
+            "selects the spinning cartesian kerr-schild metric, the FM torus at "
+            "that spin, and the oblate-spheroidal excision surface",
+        ),
     ]
     r_in: Annotated[
         float,
@@ -85,9 +100,14 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
     excision_radius: Annotated[
         float,
         ProblemParam(
-            1.0,
+            -1.0,
             cli=True,
-            description="horizon-excision sphere radius, strictly inside (M/2, 2M)",
+            description="horizon-excision KS radius, strictly inside (M/2, r_+) "
+            "with r_+ = M + sqrt(M^2 - a^2); the excised surface is the r_ks = "
+            "r_exc level set (a sphere at a = 0, an oblate spheroid at spin). "
+            "negative = auto (0.7 r_+, the recommended surface: a wider live "
+            "band of near-vacuum supersonic infall between the surface and the "
+            "horizon is the stiffest gas in the domain); 0 disables excision",
         ),
     ]
     half_width: Annotated[
@@ -146,26 +166,47 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         if self.bounds is None:
             ll = self.half_width
             self.bounds = [(-ll, ll), (-ll, ll), (-ll, ll)]
+        # the spinning chart is a different metric family (non-diagonal gamma with
+        # the frame-dragging swirl of l); the spacetime tag follows the spin knob.
+        if self.kerr_spin != 0.0:
+            self.spacetime = Spacetime.KERR
+        # auto excision surface: 0.7 r_+ keeps the live band between the surface
+        # and the horizon narrow (the gas there is near-vacuum supersonic infall,
+        # the stiffest cells in the domain; a wide band collapses dt).
+        if self.excision_radius < 0.0:
+            mm, aa = self.schwarzschild_mass, self.kerr_spin
+            self.excision_radius = 0.7 * (mm + math.sqrt(max(mm * mm - aa * aa, 0.0)))
 
     def torus(self) -> FishboneMoncrief:
-        # the cartesian chart is kerr-schild at a = 0, so the torus solution is
-        # evaluated in the KS chart (the drift v^r rides every radius).
+        # the torus solution is evaluated in the horizon-penetrating KS chart at
+        # the configured spin (the drift v^r rides every radius).
         return FishboneMoncrief(
             mass=self.schwarzschild_mass,
             r_in=self.r_in,
             gamma=self.adiabatic_index,
             rho_max=self.rho_torus_max,
             kappa=self.kappa,
-            spin=0.0,
+            spin=self.kerr_spin,
             chart="ks",
         )
+
+    def ks_radius(self, x: float, y: float, z: float) -> float:
+        # the kerr-schild radius at a cartesian point: the oblate-spheroidal
+        # quartic root r^2 = (R^2 - a^2)/2 + sqrt(((R^2 - a^2)/2)^2 + a^2 z^2);
+        # |x| at a = 0.
+        a = self.kerr_spin
+        rr2 = x * x + y * y + z * z
+        d = 0.5 * (rr2 - a * a)
+        return math.sqrt(max(d + math.sqrt(d * d + (a * z) ** 2), 1.0e-20))
 
     def atmosphere(self, r: float, r_ref: float) -> tuple[float, float]:
         """(rho, p) of the isentropic hydrostatic corona at radius r: the relativistic
         HSE invariant h(r) alpha(r) = const, normalized to (atm_rho, atm_pre_frac *
         atm_rho) at the torus pressure maximum. the static-observer redshift factor
         is floored inside the ergosphere/horizon — that gas free-falls (and is
-        excised deep inside) regardless."""
+        excised deep inside) regardless. the a = 0 redshift form is kept at spin:
+        the corona is a pressure-matched heuristic and the spin correction to the
+        static redshift is O(a^2 / r^2) at torus radii."""
         gm = self.adiabatic_index
         gm1 = gm - 1.0
         mm = self.schwarzschild_mass
@@ -185,6 +226,8 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         dy = (yhi - ylo) / ny
         dz = (zhi - zlo) / nz
 
+        aa = self.kerr_spin
+
         def gas_state() -> GasStateGenerator:
             for kk in range(nz):
                 z = zlo + (kk + 0.5) * dz
@@ -192,7 +235,7 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
                     y = ylo + (jj + 0.5) * dy
                     for ii in range(nx):
                         x = xlo + (ii + 0.5) * dx
-                        r = max(math.sqrt(x * x + y * y + z * z), 1.0e-10)
+                        r = max(self.ks_radius(x, y, z), 1.0e-10)
                         theta = math.acos(max(-1.0, min(1.0, z / r)))
                         rho_a, pre_a = self.atmosphere(r, torus.r_max)
                         state = torus.primitive(r, theta)
@@ -207,9 +250,12 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
                         else:
                             rho, v_r, vphi, pre = state
                             # jacobian map of the contravariant valencia components:
-                            # dr -> x/r and dphi -> (-y, x, 0).
-                            vx = v_r * x / r - y * vphi
-                            vy = v_r * y / r + x * vphi
+                            # dr -> ((r x + a y)/(r^2 + a^2), (r y - a x)/(r^2 + a^2), z/r)
+                            # (the kerr-schild l direction; x/r at a = 0) and
+                            # dphi -> (-y, x, 0).
+                            den = 1.0 / (r * r + aa * aa)
+                            vx = v_r * (r * x + aa * y) * den - y * vphi
+                            vy = v_r * (r * y - aa * x) * den + x * vphi
                             vz = v_r * z / r
                             yield (rho, vx, vy, vz, pre)
 

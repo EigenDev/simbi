@@ -126,9 +126,11 @@ where
     fn viscous(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
     /// horizon excision: overwrite the causally disconnected cells inside the
-    /// excision sphere (|x| < r_exc about the chart origin, inside the black-hole
-    /// horizon) with a zero-gradient copy of their outward neighbors' primitives
-    /// + a local conserved rebuild, once per step after the RK combination.
+    /// kerr-schild-radius level set r_ks(x; a) < r_exc (the sphere about the chart
+    /// origin at a = 0, the oblate spheroid at spin — strictly inside the horizon)
+    /// with a zero-gradient copy of their outward neighbors' gas primitives + a
+    /// local conserved rebuild, once per step after the RK combination. magnetized
+    /// sets rebuild with the cell's own B; the staggered faces stay CT-owned.
     /// default: no-op (flat backgrounds, and regimes without the baked kernels).
     fn excise(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 }

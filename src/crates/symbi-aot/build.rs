@@ -1809,9 +1809,15 @@ fn main() {
             emit_gv(&out_dir, &viscous_ortho_name("viscous_iso_alpha_ortho", geom, 2), 2, &k, &writes);
         }
     }
-    // horizon excision (cartesian kerr-schild, 2d + 3d): the onion-sweep fill pair
-    // (chart-agnostic prim propagation on the uniform grid) + the valencia
-    // conserved rebuild at the cell's own metric.
+    // horizon excision (cartesian kerr-schild charts, 2d + 3d, spin-generic): the
+    // onion-sweep gas fill pair (chart-agnostic prim propagation on the uniform grid,
+    // masked on the kerr-schild radius r_ks(x; a) < r_exc — the sphere at a = 0, the
+    // oblate spheroid at spin) + the valencia conserved rebuild at the cell's own
+    // metric. the hydro p2c rebuilds (D, S_i, tau) gas-only; the MAGNETIZED p2c folds
+    // the cell B (the CT face average) into the ideal-GRMHD stress — the staggered
+    // faces are never written, so div(sqrt(gamma) B) survives excision identically.
+    // the dof3 2d fill carries the out-of-plane momentum of the magnetized
+    // equatorial slice; the 3d gas fill serves hydro and MHD alike.
     {
         let (k, writes) = symbi_discretize::excise_fill_gv();
         emit_gv(&out_dir, "excise_fill_2d", 2, &k, &writes);
@@ -1825,6 +1831,14 @@ fn main() {
         emit_gv(&out_dir, "excise_writeback_3d", 3, &k, &writes);
         let (k, writes) = symbi_discretize::excise_p2c_3d_gv();
         emit_gv(&out_dir, "excise_p2c_cart_ks_3d", 3, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_fill_dof3_gv();
+        emit_gv(&out_dir, "excise_fill_dof3_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_writeback_dof3_gv();
+        emit_gv(&out_dir, "excise_writeback_dof3_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_p2c_mhd_gv();
+        emit_gv(&out_dir, "excise_p2c_mhd_cart_ks_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::excise_p2c_mhd_3d_gv();
+        emit_gv(&out_dir, "excise_p2c_mhd_cart_ks_3d", 3, &k, &writes);
     }
     gen_scalar_ghost_fill(&out_dir);
     // geometry-algebra probes: cartesian + spherical, uniform + log radial spacing.
@@ -2051,6 +2065,30 @@ fn main() {
             gen_rmhd_gr_uct_hlld(&out_dir, &geom);
         } else {
             // full 3D: contact CT only (the UCT families fail loud via the unbaked name).
+            gen_rmhd_ct_gr_3d(&out_dir, &geom);
+        }
+    }
+    // GRMHD on the SPINNING KERR cartesian chart (`_kerr`): the rank-1 kerr-schild metric
+    // gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius — non-diagonal with
+    // the frame dragging in the swirl of l, alpha sqrt(gamma) = 1 (null l preserves the
+    // determinant). the gas runs the fast-magnetosonic HLLE fan + the tetrad-frame MUB09
+    // HLLD (the Gram-Schmidt triad is metric-generic); the CT runs the densitized contact
+    // corner EMF, whose curl telescopes for ANY face weight. contact CT only (the UCT
+    // families fail loud via the unbaked name).
+    for (geom, ndim) in [(Geom::cart(2).kerr(), 2u8), (Geom::cart(3).kerr(), 3u8)] {
+        gen_rmhd_godunov_gr(&out_dir, ndim, geom.clone());
+        gen_rmhd_wave_speed_map(&out_dir, ndim, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, ndim, 100, geom.clone());
+        for dir in 0..ndim {
+            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), false);
+            gen_rmhd_face_flux_gr_mode(&out_dir, ndim, dir, geom.clone(), false, true);
+            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), true);
+        }
+        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), ndim);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), ndim);
+        if ndim == 2 {
+            gen_rmhd_ct_gr(&out_dir, &geom);
+        } else {
             gen_rmhd_ct_gr_3d(&out_dir, &geom);
         }
     }

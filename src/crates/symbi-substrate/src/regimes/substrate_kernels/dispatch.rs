@@ -49,6 +49,10 @@ pub fn cfl_wave_speed<const D: usize, const DOF: usize, Mem, Sc>(
     // lambda_S; None on a flat background or a regime without a covariant source). it reads the flux
     // rate already in the scratch and adds the source rate in place before the reduction.
     source_cfl: Option<&str>,
+    // the horizon-excision radius (0 = unexcised): the source-cfl kernel zeroes its rate on the
+    // excised r_ks < r_exc level set (padding cells must not throttle dt), so the kernel binds
+    // the radius as a spec scalar.
+    excision_radius: f64,
 ) -> f64
 where
     Mem: MemorySpace + Sync,
@@ -66,8 +70,12 @@ where
     // hubble/translation rates for the in-kernel relative speed `|s - v_g|`.
     let (x_lo_phys, dx_phys) = kernel_geom(&geom.x_lo, &geom.dx, &geom.maps, sim.geom.coords, sim.motion.a);
     let resolve = |bind: &ScalarBind| -> Sc {
-        let ScalarBind::Ref(sref) = bind else {
-            panic!("cfl_wave_speed: unexpected spec scalar {bind:?}");
+        let sref = match bind {
+            ScalarBind::Ref(sref) => sref,
+            ScalarBind::Spec(sp) if &**sp == "excision_radius" => {
+                return Sc::from_f64(excision_radius);
+            }
+            other => panic!("cfl_wave_speed: unexpected spec scalar {other:?}"),
         };
         match *sref {
             ScalarRef::Gamma => Sc::from_f64(gamma),
@@ -226,24 +234,37 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
 {
     let geom = &sim.geom;
     assert!(D == 2 || D == 3, "excision is baked for the 2d and 3d cartesian kerr-schild charts");
-    assert_eq!(DOF, D, "excision needs the full velocity DOF");
     assert_eq!(
         geom.coords,
         symbi_geometry::Geometry::Cartesian,
         "excision is a cartesian-chart operation (spherical charts hide the horizon behind r_min)"
     );
-    assert_eq!(
-        geom.spacetime,
-        symbi_geometry::Spacetime::KerrSchild,
-        "excision requires the horizon-penetrating kerr-schild chart"
+    assert!(
+        matches!(
+            geom.spacetime,
+            symbi_geometry::Spacetime::KerrSchild | symbi_geometry::Spacetime::Kerr
+        ),
+        "excision requires a horizon-penetrating kerr-schild chart"
     );
+    // the spin widens the excised region: r_ks < r_exc is the oblate spheroid with
+    // equatorial semi-major axis sqrt(r_exc^2 + a^2) and polar semi-axis r_exc.
+    let spin = geom
+        .spacetime_scalars
+        .iter()
+        .find(|(n, _)| n == "kerr_spin")
+        .map(|(_, v)| *v)
+        .unwrap_or(0.0);
+    let semi_xy = (r_exc * r_exc + spin * spin).sqrt();
 
-    // the sphere's index bbox about the chart origin, one cell of margin so every
-    // cell whose centroid is inside r_exc is covered, clamped to the interior.
+    // the region's index bbox about the chart origin, one cell of margin so every
+    // cell whose centroid is inside is covered, clamped to the interior. the polar
+    // (z) semi-axis is r_exc; the equatorial axes carry the spin widening (a 2d grid
+    // is the equatorial slice, so both its axes are equatorial).
     let spaces: [symbi_algebra::Space; D] = std::array::from_fn(|a| {
         let s = &geom.interior.spaces[a];
-        let lo_x = (-r_exc - geom.x_lo[a]) / geom.dx[a];
-        let hi_x = (r_exc - geom.x_lo[a]) / geom.dx[a];
+        let ext = if D == 3 && a == 2 { r_exc } else { semi_xy };
+        let lo_x = (-ext - geom.x_lo[a]) / geom.dx[a];
+        let hi_x = (ext - geom.x_lo[a]) / geom.dx[a];
         let lo = (lo_x.floor() as isize - 1).clamp(s.lo, s.hi);
         let hi = (hi_x.ceil() as isize + 2).clamp(s.lo, s.hi);
         symbi_algebra::Space { name: s.name, lo, hi }
@@ -262,35 +283,59 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
                 .find(|(n, _)| n == "schwarzschild_mass")
                 .map(|(_, v)| *v)
                 .expect("excise: the kerr-schild metric supplies schwarzschild_mass"),
+            ScalarBind::Ref(ScalarRef::KerrSpin) => spin,
             ScalarBind::Spec(s) if &**s == "excision_radius" => r_exc,
             ScalarBind::Ref(sref) => geom_scalar(&geom.x_lo, &geom.dx, &geom.maps, *sref)
                 .unwrap_or_else(|| panic!("excise: unexpected scalar {sref:?}")),
             other => panic!("excise: unexpected scalar {other:?}"),
         })
     };
-    let fill_name = format!("excise_fill_{D}d");
-    let wb_name = format!("excise_writeback_{D}d");
-    let p2c_name = format!("excise_p2c_cart_ks_{D}d");
+    // the magnetized state rides the DOF-lifted momentum set (DOF = 3 on the 2d
+    // equatorial slice); the gas fill carries rho + DOF velocities + pre either way.
+    // the field itself is NEVER filled: the staggered faces stay CT-owned, so the
+    // densitized div(B) invariant survives excision identically. the magnetized p2c
+    // additionally reads the cell B (the face average) to fold the ideal-MHD stress
+    // into (D, S_i, tau).
+    let mhd = sim.fields.mhd.is_some();
+    if !mhd {
+        assert_eq!(DOF, D, "hydro excision needs the full velocity DOF");
+    }
+    let fill_name = if mhd && D == 2 {
+        "excise_fill_dof3_2d".to_string()
+    } else {
+        format!("excise_fill_{D}d")
+    };
+    let wb_name = if mhd && D == 2 {
+        "excise_writeback_dof3_2d".to_string()
+    } else {
+        format!("excise_writeback_{D}d")
+    };
+    let p2c_name = if mhd {
+        format!("excise_p2c_mhd_cart_ks_{D}d")
+    } else {
+        format!("excise_p2c_cart_ks_{D}d")
+    };
     let fill_scalars = scalars_for(&fill_name, &resolve);
     let wb_scalars = scalars_for(&wb_name, &resolve);
     let p2c_scalars = scalars_for(&p2c_name, &resolve);
 
-    // the primitive set is rho + D velocities + pre; the conserved set den + D momenta + nrg.
-    let pre = sim.fields.prim.pre_field().expect("excision requires prim.pre (GR hydro)");
+    // the primitive set is rho + DOF velocities + pre; the conserved set den + DOF momenta + nrg.
+    let pre = sim.fields.prim.pre_field().expect("excision requires prim.pre (GR)");
     let mut prim: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.prim.rho];
-    for kk in 0..D {
+    for kk in 0..DOF {
         prim.push(&sim.fields.prim.vel[kk]);
     }
     prim.push(pre);
-    let nf = D + 2;
+    let nf = DOF + 2;
     let scratch = feedback_scratch(sim, nf);
     let scratch_refs: Vec<&Field<Sc, D, Mem>> = (0..nf).map(|kk| &scratch[kk]).collect();
 
     // K sweeps of fill (prim -> scratch) + writeback (scratch -> prim): the parallel
     // stencil never reads a value written by the same sweep. min-width from the
-    // uniform cartesian grid.
+    // uniform cartesian grid; the sweep count covers the region's LARGEST semi-axis
+    // (the spin-widened equatorial extent).
     let min_dx = geom.dx.iter().cloned().fold(f64::INFINITY, f64::min);
-    for _ in 0..symbi_ib::excise::onion_pass_count(r_exc, min_dx) {
+    for _ in 0..symbi_ib::excise::onion_pass_count(semi_xy, min_dx) {
         dispatch_fields::<Sc, Mem, D>(
             &fill_name,
             &geom.allocated,
@@ -310,17 +355,24 @@ fn dispatch_excise_inner<const D: usize, const DOF: usize, Mem, Sc>(
             &wb_scalars,
         );
     }
-    // the conserved rebuild: prim reads, cons in-place (live cells pass through).
+    // the conserved rebuild: prim (+ cell B when magnetized) reads, cons in-place
+    // (live cells pass through).
+    let mut p2c_in = prim.clone();
+    if let Some(mhd_fields) = sim.fields.mhd.as_ref() {
+        for kk in 0..3 {
+            p2c_in.push(&mhd_fields.bcell[kk]);
+        }
+    }
     let mut cons: Vec<&Field<Sc, D, Mem>> = vec![&sim.fields.cons.den];
-    for kk in 0..D {
+    for kk in 0..DOF {
         cons.push(&sim.fields.cons.mom[kk]);
     }
-    cons.push(sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR hydro)"));
+    cons.push(sim.fields.cons.nrg_field().expect("excision requires cons.nrg (GR)"));
     dispatch_fields::<Sc, Mem, D>(
         &p2c_name,
         &geom.allocated,
         &bbox,
-        &prim,
+        &p2c_in,
         &cons,
         &[],
         &p2c_scalars,
