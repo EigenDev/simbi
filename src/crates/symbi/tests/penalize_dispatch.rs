@@ -129,7 +129,13 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
             0,
             Tensor::new([0.1, -0.05]),
             Tensor::zeros(),
-            1.0, 0.08, 0.04, 0.5, 0.0, 0.12,
+            // softening 0.10 (was 0.04): the harder point mass drove the sink
+            // center's c2p unphysical, which pre-FOFC was a SILENT prim floor
+            // (cons untouched, so the mass sum never saw it) and post-FOFC is an
+            // honest first-order redo + freeze parachute — whose cons revert IS
+            // visible in the mass sum. the ledger identity needs a correction-free
+            // run; the fofc-counter assert below is the canary that keeps it one.
+            1.0, 0.08, 0.10, 0.5, 0.0, 0.12,
         )));
     let sub =
         AdiabaticSubstrateKernelSet::<HostMemory, f64, 2>::new(GAMMA, 0.4, &sim.geom.allocated);
@@ -139,11 +145,20 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
         1.0 / (1.0 / (w * w))
     };
     let mass0: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c) * dv).sum();
+    symbi::regimes::fofc::fofc_reset_stats();
     evolve(&mut sim, &sub, 0.05).expect("evolve");
     let mass1: f64 = sim.geom.interior.iter().map(|c| *sim.fields.cons.den.view().at(c) * dv).sum();
 
     let ledger: f64 = sim.immersed.as_ref().unwrap().history.mass_delta().iter().sum();
     let lost = mass0 - mass1;
+    let (fb, fz) = symbi::regimes::fofc::fofc_stats();
+    assert!(
+        fb == 0 && fz == 0,
+        "the ledger oracle's evolution tripped FOFC (fallback {fb}, freeze {fz}): the \
+         freeze parachute is deliberately non-conservative, so the exact ledger == loss \
+         identity only holds on a correction-free run — soften the setup, don't loosen \
+         the tolerance"
+    );
     assert!(ledger > 0.0, "the drain never fired");
     assert!(
         (ledger - lost).abs() <= 1e-11 * lost.abs(),
