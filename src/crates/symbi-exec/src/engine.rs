@@ -235,7 +235,19 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
                 }
                 acc
             })
-            .reduce(|| identity, combine);
+            // DETERMINISTIC combine: collect the per-slab partials INDEXED BY SLAB
+            // (order-stable regardless of work stealing), then fold them sequentially
+            // in slab order. rayon's tree `reduce` combines partials in a
+            // join-order-dependent shape, which reassociates Add/Mul differently run
+            // to run and across thread counts — and the body-feedback SUMS feed the
+            // body equations of motion, so that noise was a run-to-run trajectory
+            // nondeterminism at production sizes. min/max were already exact either
+            // way; the fixed-order fold makes Add/Mul bit-reproducible for a FIXED
+            // domain shape (a different tiling still regroups the partials — the
+            // reproducibility contract is per-decomposition).
+            .collect::<Vec<f64>>()
+            .into_iter()
+            .fold(identity, combine);
     }
     let mut acc = identity;
     for c in domain.iter() {
