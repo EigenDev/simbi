@@ -57,9 +57,11 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosit
         self.viscosity = nu;
         self
     }
-    fn with_alpha(self, _alpha: f64) -> Self {
-        panic!("adiabatic alpha viscosity is not built (nu = alpha cs^2 / Omega needs a reference \
-                sound speed on a varying-cs gas); use constant-nu with_viscosity, or the isothermal regime");
+    fn with_alpha(mut self, alpha: f64) -> Self {
+        // nu = alpha (gamma p/rho) / Omega_K with the LOCAL sound speed — the
+        // shakura-sunyaev prescription on a varying-cs gas.
+        self.alpha = alpha;
+        self
     }
 }
 
@@ -127,6 +129,9 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// viscous heating (div(tau.v) onto the total energy) and caps dt at C_visc dx^2 / nu. cartesian
     /// 2D only for now (the adiabatic energy-flux kernel); alpha + curvilinear + 3D are follow-ons.
     pub viscosity: f64,
+    /// shakura-sunyaev alpha with the LOCAL sound speed: nu = alpha (gamma p/rho) / Omega_K
+    /// about immersed body 0. takes precedence over the constant nu when positive.
+    pub alpha: f64,
 }
 
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSubstrateKernelSet<Mem, Sc, D> {
@@ -134,7 +139,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .expect("failed to allocate adiabatic CFL scratch field");
         // theta defaults to 1.0 (plain minmod) — exact prior behavior; set `theta` to tune.
-        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, c_drain: 1.0, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0), viscosity: 0.0 }
+        Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, c_drain: 1.0, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0), viscosity: 0.0, alpha: 0.0 }
     }
 
     /// **Gap B**: attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
@@ -309,6 +314,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     }
 
     fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
+        // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu.
+        if self.alpha > 0.0 {
+            assert!(
+                sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2,
+                "adiabatic alpha viscosity is baked for cartesian 2D"
+            );
+            crate::regimes::substrate_kernels::dispatch_viscous_alpha(
+                sim, dt, self.alpha, self.gamma,
+            );
+            return;
+        }
         if self.viscosity <= 0.0 {
             return;
         }

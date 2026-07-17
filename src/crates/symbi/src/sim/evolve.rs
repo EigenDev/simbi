@@ -334,16 +334,25 @@ impl FieldSet {
 }
 
 #[derive(Clone, Copy)]
-enum PhaseKind { SnapshotStage, WaveSpeeds, Flux, Efield, Godunov, PostGodunov, SourceApply, BodySource, C2p, GhostFill }
+enum PhaseKind { SnapshotStage, WaveSpeeds, Flux, Efield, Godunov, PostGodunov, SourceApply, BodySource, C2p, Fofc, GhostFill }
 
 /// when a phase runs: unconditional, or gated by an additive source overlay / immersed bodies.
 #[derive(Clone, Copy)]
-enum Gate { Always, AdditiveSource, Bodies }
+enum Gate { Always, AdditiveSource, Bodies, Fofc, AdditiveOrFofc }
 
 impl Gate {
     #[inline]
-    fn active(self, additive: bool, bodies: bool) -> bool {
-        match self { Gate::Always => true, Gate::AdditiveSource => additive, Gate::Bodies => bodies }
+    fn active(self, additive: bool, bodies: bool, fofc: bool) -> bool {
+        match self {
+            Gate::Always => true,
+            Gate::AdditiveSource => additive,
+            Gate::Bodies => bodies,
+            Gate::Fofc => fofc,
+            // the stage-input snapshot serves BOTH consumers: the additive source pass
+            // evaluates S at the stage input, and the FOFC first-order redo restarts
+            // from it.
+            Gate::AdditiveOrFofc => additive || fofc,
+        }
     }
 }
 
@@ -353,7 +362,7 @@ struct Phase { name: &'static str, kind: PhaseKind, reads: FieldSet, writes: Fie
 // regime-independent data flow; stage entry is `cons | prim` (init c2p+ghost, or
 // the prior stage's tail). this list IS the canonical stage order — `step` folds it.
 const STAGE_PIPELINE: &[Phase] = &[
-    Phase { name: "snapshot_stage", kind: PhaseKind::SnapshotStage, reads: FieldSet::CONS,                    writes: FieldSet::USTAGE, gate: Gate::AdditiveSource },
+    Phase { name: "snapshot_stage", kind: PhaseKind::SnapshotStage, reads: FieldSet::CONS,                    writes: FieldSet::USTAGE, gate: Gate::AdditiveOrFofc },
     Phase { name: "wave_speeds",    kind: PhaseKind::WaveSpeeds,    reads: FieldSet::PRIM,                    writes: FieldSet::NONE,   gate: Gate::Always },
     Phase { name: "flux",           kind: PhaseKind::Flux,          reads: FieldSet::PRIM,                    writes: FieldSet::FLUX,   gate: Gate::Always },
     Phase { name: "efield",         kind: PhaseKind::Efield,        reads: FieldSet::FLUX,                    writes: FieldSet::NONE,   gate: Gate::Always },
@@ -362,6 +371,10 @@ const STAGE_PIPELINE: &[Phase] = &[
     Phase { name: "source_apply",   kind: PhaseKind::SourceApply,   reads: FieldSet::USTAGE,                  writes: FieldSet::CONS,   gate: Gate::AdditiveSource },
     Phase { name: "body_source",    kind: PhaseKind::BodySource,    reads: FieldSet::CONS.or(FieldSet::PRIM), writes: FieldSet::CONS,   gate: Gate::Bodies },
     Phase { name: "c2p",            kind: PhaseKind::C2p,           reads: FieldSet::CONS,                    writes: FieldSet::PRIM,   gate: Gate::Always },
+    // first-order flux correction: redo any zone whose high-order c2p went unphysical
+    // with a first-order (PCM + HLLE/light-cone) update from the stage input; host-gated
+    // internally on the failure reduction, so a clean substage is a scan + return.
+    Phase { name: "fofc",           kind: PhaseKind::Fofc,          reads: FieldSet::CONS.or(FieldSet::PRIM).or(FieldSet::USTAGE), writes: FieldSet::PRIM,   gate: Gate::Fofc },
     Phase { name: "ghost_fill",     kind: PhaseKind::GhostFill,     reads: FieldSet::PRIM,                    writes: FieldSet::PRIM,   gate: Gate::Always },
 ];
 
@@ -388,6 +401,7 @@ where
         prof("snapshot", || k.snapshot(sim));
     }
     let additive_source = k.has_additive_source();
+    let fofc_active = k.fofc_active();
     // homologous mesh motion: each stage's dispatches bind geometry / grid-velocity
     // scalars from sim.motion, so a stage must see a(t) at its shu-osher ENTRY time
     // (the time of its input state — the same clock the amr cf ghosts use). a is
@@ -433,7 +447,7 @@ where
             .store(stage_input_is_un, std::sync::atomic::Ordering::Relaxed);
         let mut have = FieldSet::CONS.or(FieldSet::PRIM);
         for ph in STAGE_PIPELINE {
-            if !ph.gate.active(additive_source, bodies) {
+            if !ph.gate.active(additive_source, bodies, fofc_active) {
                 continue;
             }
             if matches!(ph.kind, PhaseKind::SnapshotStage) && stage_input_is_un {
@@ -455,6 +469,7 @@ where
                 PhaseKind::SourceApply   => prof("source_apply", || k.source_apply(sim, ac * sim.dt)),
                 PhaseKind::BodySource    => prof("body_source", || k.body_source(sim, ac * sim.dt)),
                 PhaseKind::C2p           => prof("c2p", || k.c2p(sim)),
+                PhaseKind::Fofc          => prof("fofc", || k.fofc(sim, sim.dt, a0, ac, stage_tag(ii, n))),
                 PhaseKind::GhostFill     => prof("ghost_fill", || k.ghost_fill(sim)),
             }
             have = have.or(ph.writes);

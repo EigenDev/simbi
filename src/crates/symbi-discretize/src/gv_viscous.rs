@@ -108,6 +108,83 @@ pub fn viscous_adiabatic_gv() -> (GvKernel, Writes) {
     (end_trace(), writes)
 }
 
+/// the shakura-sunyaev alpha viscosity with the LOCAL adiabatic sound speed:
+/// nu(x) = alpha cs^2(x) / Omega_K(r), cs^2 = gamma p / rho read per stencil cell
+/// (the isothermal alpha kernel uses the one global cs instead; on a varying-cs
+/// gas the local read IS the shakura-sunyaev prescription). Omega_K from body 0's
+/// mass at the in-plane distance. cartesian 2D; carries the viscous heating.
+pub fn viscous_adiabatic_alpha_gv() -> (GvKernel, Writes) {
+    viscous_adiabatic_alpha_impl(false)
+}
+
+/// the DOF = 3 (2.5D magnetized-gas) variant: diffuses the out-of-plane momentum
+/// too, same local-cs nu law.
+pub fn viscous_adiabatic_alpha_gv_2p5d() -> (GvKernel, Writes) {
+    viscous_adiabatic_alpha_impl(true)
+}
+
+fn viscous_adiabatic_alpha_impl(dof3: bool) -> (GvKernel, Writes) {
+    const NDIM: u8 = 2;
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let alpha = Gv::scalar("alpha");
+    let gamma = Gv::scalar("gamma");
+    let gm = Gv::scalar("body_0_mass");
+    let dx = Gv::scalar("dx_0");
+    let dy = Gv::scalar("dx_1");
+    let bx = Gv::scalar("body_0_pos_0");
+    let by = Gv::scalar("body_0_pos_1");
+
+    let geo = cell_geometry_gv(
+        Coords::Cartesian,
+        &vec![Spacing::Uniform; NDIM as usize],
+        &(0..NDIM as usize).collect::<Vec<_>>(),
+        NDIM as usize,
+    );
+    let (cx, cy) = (geo.centroid[0], geo.centroid[1]);
+    let floor = Gv::from_f64(1e-30);
+
+    // per-stencil-cell nu from the LOCAL cs^2 = gamma p / rho and the keplerian
+    // frequency at that cell's in-plane distance from body 0.
+    let mut nust = [[Gv::ZERO; 3]; 3];
+    for jj in 0..3usize {
+        for ii in 0..3usize {
+            let off = [ii as i32 - 1, jj as i32 - 1];
+            let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+            let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
+            let cs2 = gamma * pre / rho.max(floor);
+            let x = cx + Gv::from_f64(ii as f64 - 1.0) * dx;
+            let y = cy + Gv::from_f64(jj as f64 - 1.0) * dy;
+            let (rx, ry) = (x - bx, y - by);
+            let r = (rx * rx + ry * ry).sqrt().max(floor);
+            let omega_k = (gm / (r * r * r)).sqrt().max(floor);
+            nust[jj][ii] = alpha * cs2 / omega_k;
+        }
+    }
+
+    let mut writes: Writes = Vec::new();
+    if dof3 {
+        let (vst, rst) = prim_stencil_2p5d();
+        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2p5d(&vst, &rst, &nust, [dx, dy], dt);
+        for c in 0..3 {
+            let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+            writes.push((format!("mom_out_{c}"), FieldRef::cons_mom(c as u8).into(), (mom_c + dmom[c]).node()));
+        }
+        let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+    } else {
+        let (vst, rst) = prim_stencil();
+        let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_2d(&vst, &rst, &nust, dx, dy, dt);
+        for c in 0..2 {
+            let mom_c = Gv::field(&format!("mom{c}"), FieldRef::cons_mom(c as u8));
+            writes.push((format!("mom_out_{c}"), FieldRef::cons_mom(c as u8).into(), (mom_c + dmom[c]).node()));
+        }
+        let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+    }
+    (end_trace(), writes)
+}
+
 /// the scale factors `(h1, h2)` at a coordinate point, per chart (Cartesian -> 1;
 /// cylindrical (R, phi) -> (1, R); spherical (r, theta) -> (1, r)). the const-D
 /// metric bridge mirrors the geometric-source dispatch — one metric family. shared with the covariant

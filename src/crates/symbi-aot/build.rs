@@ -1808,6 +1808,12 @@ fn main() {
         emit_gv(&out_dir, "viscous_iso_2d_dof3", 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_adiabatic_gv_2p5d();
         emit_gv(&out_dir, "viscous_adiabatic_2d_dof3", 2, &k, &writes);
+        // the ADIABATIC alpha twins with the LOCAL sound speed nu = alpha (gamma p/rho)/Omega_K:
+        // 2D hydro + the 2.5D DOF-aware magnetized-gas variant.
+        let (k, writes) = symbi_discretize::viscous_adiabatic_alpha_gv();
+        emit_gv(&out_dir, "viscous_adiabatic_alpha_2d", 2, &k, &writes);
+        let (k, writes) = symbi_discretize::viscous_adiabatic_alpha_gv_2p5d();
+        emit_gv(&out_dir, "viscous_adiabatic_alpha_2d_dof3", 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_alpha_gv();
         emit_gv(&out_dir, KernelId::ViscousIsoAlpha { ndim: 2 }.name(), 2, &k, &writes);
         let (k, writes) = symbi_discretize::viscous_iso_gv_3d();

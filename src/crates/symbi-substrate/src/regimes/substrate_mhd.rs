@@ -176,6 +176,9 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// excision). the gas fill + magnetized conserved rebuild run once per step;
     /// the staggered faces stay CT-owned, so div(sqrt(gamma) B) is untouched.
     pub excision_radius: f64,
+    /// shakura-sunyaev alpha with the LOCAL sound speed (energy regimes only);
+    /// takes precedence over the constant nu when positive.
+    pub alpha: f64,
     /// constant kinematic viscosity `nu` (the Navier-Stokes shear on the velocity, ORTHOGONAL to the
     /// resistive diffusion of B). 0 = inviscid. >0 runs the viscous force + (energy regime) the viscous
     /// heating onto the total energy; B is untouched, so the heat warms the gas with 1/2 B^2 preserved.
@@ -194,7 +197,7 @@ where
     pub fn new(eos_param: f64, cfl_number: f64, theta: f64, alloc_domain: &Domain<D>) -> Self {
         let cfl_scratch = Field::<Sc, D, Mem>::zeros(alloc_domain)
             .unwrap_or_else(|_| panic!("failed to allocate {} CFL scratch", Self::kernel_prefix()));
-        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, viscosity: 0.0, excision_radius: 0.0, _r: PhantomData }
+        Self { eos_param, cfl_number, theta, cfl_scratch, solver: Solver::Hlle, ct_method: CtMethod::Contact, runtime_source: None, boundary_dags: Vec::new(), freeze_streak: std::sync::atomic::AtomicU32::new(0), resistivity: 0.0, viscosity: 0.0, excision_radius: 0.0, alpha: 0.0, _r: PhantomData }
     }
 
     /// register a DRIVEN (DYNAMIC) boundary. the returned id (registration order) is what the
@@ -386,9 +389,16 @@ where
         self.viscosity = nu;
         self
     }
-    fn with_alpha(self, _alpha: f64) -> Self {
-        panic!("MHD alpha viscosity is not built (needs a reference sound speed); use constant-nu \
-                with_viscosity");
+    fn with_alpha(mut self, alpha: f64) -> Self {
+        // nu = alpha (gamma p/rho)/Omega_K with the LOCAL sound speed — energy
+        // regimes only (iso MHD has no pressure field to read cs^2 from).
+        assert!(
+            R::SPEC.has_energy,
+            "alpha viscosity on MHD needs the energy regime (local cs^2 = gamma p/rho); \
+             iso MHD has no pressure field — use constant-nu with_viscosity"
+        );
+        self.alpha = alpha;
+        self
     }
 }
 
@@ -426,6 +436,18 @@ where
     Sc: Scalar + OrderedNumeric,
 {
     fn viscous(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
+        // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu;
+        // the 2.5D DOF-aware kernel diffuses the toroidal momentum too.
+        if self.alpha > 0.0 {
+            assert!(
+                sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2,
+                "MHD alpha viscosity is baked for the cartesian 2.5D grid"
+            );
+            crate::regimes::substrate_kernels::dispatch_viscous_alpha(
+                sim, dt, self.alpha, self.eos_param,
+            );
+            return;
+        }
         if self.viscosity <= 0.0 {
             return;
         }

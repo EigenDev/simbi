@@ -739,9 +739,11 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                         // applies it to its own cells -- no cross-tile coupling. all of these are
                         // pointwise/local; the only cross-tile work is the post-stage halo exchange.
                         let additive = kernels[i].has_additive_source();
-                        if additive {
-                            // snapshot the stage-INPUT cons (the state the source evaluates S at), so
-                            // plain-godunov + additive == the single-grid fused stage bit-for-bit.
+                        let fofc = kernels[i].fofc_active();
+                        if additive || fofc {
+                            // snapshot the stage-INPUT cons: the additive source evaluates S at it,
+                            // and the FOFC first-order redo restarts from it. the decomposed loop
+                            // never elides the copy (no stage_input_is_un tracking here).
                             kernels[i].snapshot_stage(sh[i]);
                         }
                         kernels[i].wave_speeds(sh[i]);
@@ -762,6 +764,14 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
                             kernels[i].body_source(sh[i], ac * dt);
                         }
                         kernels[i].c2p(sh[i]);
+                        if fofc {
+                            // first-order flux correction, per tile, BEFORE the post-stage
+                            // exchange (mirroring the hierarchy's c2p -> fofc order): the redo
+                            // reads the stage-input state whose halos are exchange-fresh from
+                            // the previous stage tail, so a flagged cell at a cut redoes its
+                            // faces from the same states the monolithic run sees.
+                            kernels[i].fofc(sh[i], dt, a0, ac, stage);
+                        }
                         kernels[i].ghost_fill(sh[i]);
                     });
                 }

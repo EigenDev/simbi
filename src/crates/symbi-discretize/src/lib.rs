@@ -50,7 +50,7 @@ pub use gv_penalize::{
     penalize_porous_iso_gv_spinning, penalize_torque_free_gv, penalize_torque_free_iso_gv,
 };
 pub use gv_viscous::{
-    viscous_adiabatic_gv, viscous_adiabatic_gv_2p5d, viscous_adiabatic_gv_3d, viscous_iso_gv_2p5d, viscous_iso_alpha_gv, viscous_iso_alpha_gv_3d, viscous_iso_alpha_ortho_gv, viscous_iso_gv,
+    viscous_adiabatic_alpha_gv, viscous_adiabatic_alpha_gv_2p5d, viscous_adiabatic_gv, viscous_adiabatic_gv_2p5d, viscous_adiabatic_gv_3d, viscous_iso_gv_2p5d, viscous_iso_alpha_gv, viscous_iso_alpha_gv_3d, viscous_iso_alpha_ortho_gv, viscous_iso_gv,
     viscous_iso_gv_3d, viscous_iso_ortho_gv,
 };
 pub use gv_immersed::{
