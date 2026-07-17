@@ -545,7 +545,8 @@ fn penalize_porous_inner(
     let u_solid = Tensor::<Gv, 3>::new(std::array::from_fn(|a| {
         if a < ndim { Gv::scalar(&format!("body_0_vel_{a}")) } else { Gv::ZERO }
     }));
-    // a spinning wall's surface moves at u_solid + omega x r; omega is about z (`body_0_omega`).
+    // a spinning wall's surface moves at u_solid + omega x r with the FULL world-frame
+    // angular-velocity vector (an arbitrary rotation axis; z-spin is the [0, 0, w] case).
     let omega = if spin {
         // the full angular-velocity vector (world frame): the surface drags the gas at omega x r
         // about the (evolving) rotation axis.
