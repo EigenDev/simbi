@@ -1830,6 +1830,12 @@ fn main() {
             emit_gv(&out_dir, &viscous_ortho_name("viscous_iso_ortho", geom, 2), 2, &k, &writes);
             let (k, writes) = symbi_discretize::viscous_iso_alpha_ortho_gv(coords);
             emit_gv(&out_dir, &viscous_ortho_name("viscous_iso_alpha_ortho", geom, 2), 2, &k, &writes);
+            // the ADIABATIC orthogonal twins: div(tau) + the div(tau . u) heating
+            // through the shared carrier pair; constant-nu + local-cs alpha.
+            let (k, writes) = symbi_discretize::viscous_adiabatic_ortho_gv(coords);
+            emit_gv(&out_dir, &viscous_ortho_name("viscous_adiabatic_ortho", geom, 2), 2, &k, &writes);
+            let (k, writes) = symbi_discretize::viscous_adiabatic_alpha_ortho_gv(coords);
+            emit_gv(&out_dir, &viscous_ortho_name("viscous_adiabatic_alpha_ortho", geom, 2), 2, &k, &writes);
         }
     }
     // horizon excision (cartesian kerr-schild charts, 2d + 3d, spin-generic): the

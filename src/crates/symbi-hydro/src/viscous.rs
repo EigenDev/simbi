@@ -289,6 +289,28 @@ pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
     dx2: S,
     dt: S,
 ) -> Tensor<S, 2> {
+    viscous_update_orthogonal_2d(v, rho, nu, h1, h2, dx1, dx2, dt).0
+}
+
+/// the FULL orthogonal viscous increment: `dt div(tau)` on the momenta (exactly
+/// [`viscous_mom_update_orthogonal_2d`]) PLUS the viscous HEATING `dt div(tau . u)`
+/// onto the total energy. the energy flux is the plain vector divergence in the
+/// scale-factor form, `(1/(h1 h2)) [d1(h2 F1) + d2(h1 F2)]` with
+/// `F_a = tau_a1 u1 + tau_a2 u2` at the SAME faces (same stresses, same face-mean
+/// velocities) the momentum uses — so the discrete work telescopes in the
+/// h-weighted measure and the pair conserves total energy up to the boundary
+/// flux. `h = (1, 1)` reduces to the cartesian [`viscous_update_2d`] expressions.
+#[allow(clippy::too_many_arguments)]
+pub fn viscous_update_orthogonal_2d<S: Scalar>(
+    v: &[[Tensor<S, 2>; 3]; 3],
+    rho: &[[S; 3]; 3],
+    nu: &[[S; 3]; 3],
+    h1: &[[S; 3]; 3],
+    h2: &[[S; 3]; 3],
+    dx1: S,
+    dx2: S,
+    dt: S,
+) -> (Tensor<S, 2>, S) {
     let half = S::from_f64(0.5);
     let two = S::from_f64(2.0);
     let four = S::from_f64(4.0);
@@ -299,7 +321,7 @@ pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
 
     // stress at the x1-face between columns (ia, ib) of row band: normal d1 compact,
     // transverse d2 four-point. returns (tau_11, tau_12, h2_face).
-    let x1_face = |ia: usize, ib: usize| -> (S, S, S) {
+    let x1_face = |ia: usize, ib: usize| -> (S, S, S, S, S) {
         let g1 = |x: &[[S; 3]; 3]| (x[1][ib] - x[1][ia]) / dx1;
         let g2 = |x: &[[S; 3]; 3]| {
             ((x[2][ia] - x[0][ia]) + (x[2][ib] - x[0][ib])) / (four * dx2)
@@ -310,11 +332,11 @@ pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
             fv(&u1a), fv(&u2a), g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a),
             fv(h1), fv(h2), g2(h1), g1(h2), mu,
         );
-        (t11, t12, fv(h2))
+        (t11, t12, fv(h2), fv(&u1a), fv(&u2a))
     };
     // stress at the x2-face between rows (ja, jb): normal d2 compact, transverse d1
     // four-point. returns (tau_22, tau_12, h1_face).
-    let x2_face = |ja: usize, jb: usize| -> (S, S, S) {
+    let x2_face = |ja: usize, jb: usize| -> (S, S, S, S, S) {
         let g2 = |x: &[[S; 3]; 3]| (x[jb][1] - x[ja][1]) / dx2;
         let g1 = |x: &[[S; 3]; 3]| {
             ((x[ja][2] - x[ja][0]) + (x[jb][2] - x[jb][0])) / (four * dx1)
@@ -325,13 +347,13 @@ pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
             fv(&u1a), fv(&u2a), g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a),
             fv(h1), fv(h2), g2(h1), g1(h2), mu,
         );
-        (t22, t12, fv(h1))
+        (t22, t12, fv(h1), fv(&u1a), fv(&u2a))
     };
 
-    let (t11_1p, t12_1p, h2_1p) = x1_face(1, 2);
-    let (t11_1m, t12_1m, h2_1m) = x1_face(0, 1);
-    let (t22_2p, t12_2p, h1_2p) = x2_face(1, 2);
-    let (t22_2m, t12_2m, h1_2m) = x2_face(0, 1);
+    let (t11_1p, t12_1p, h2_1p, u1_1p, u2_1p) = x1_face(1, 2);
+    let (t11_1m, t12_1m, h2_1m, u1_1m, u2_1m) = x1_face(0, 1);
+    let (t22_2p, t12_2p, h1_2p, u1_2p, u2_2p) = x2_face(1, 2);
+    let (t22_2m, t12_2m, h1_2m, u1_2m, u2_2m) = x2_face(0, 1);
 
     // center: the hoop-stress source for the axis-1 force.
     let (h1_c, h2_c) = (h1[1][1], h2[1][1]);
@@ -359,7 +381,18 @@ pub fn viscous_mom_update_orthogonal_2d<S: Scalar>(
     let f2 = (h2_1p * h2_1p * t12_1p - h2_1m * h2_1m * t12_1m) * (inv_h1h2sq / dx1)
         + (t22_2p - t22_2m) * (S::from_f64(1.0) / h2_c / dx2);
 
-    Tensor::new([dt * f1, dt * f2])
+    // the viscous energy flux at the SAME faces: F1 = tau_11 u1 + tau_12 u2 on
+    // x1-faces, F2 = tau_12 u1 + tau_22 u2 on x2-faces; its scale-factor
+    // divergence (1/(h1 h2)) [d1(h2 F1) + d2(h1 F2)] heats the total energy.
+    let f1_1p = t11_1p * u1_1p + t12_1p * u2_1p;
+    let f1_1m = t11_1m * u1_1m + t12_1m * u2_1m;
+    let f2_2p = t12_2p * u1_2p + t22_2p * u2_2p;
+    let f2_2m = t12_2m * u1_2m + t22_2m * u2_2m;
+    let dnrg = dt
+        * ((h2_1p * f1_1p - h2_1m * f1_1m) / dx1 + (h1_2p * f2_2p - h1_2m * f2_2m) / dx2)
+        * inv_h1h2;
+
+    (Tensor::new([dt * f1, dt * f2]), dnrg)
 }
 
 /// the (tau_0a, tau_1a, tau_2a) stress column at the face normal to IN-PLANE axis `a` (0 or 1) for a
@@ -1395,5 +1428,68 @@ mod tests {
             prev = cur;
         }
         assert!(prev < 1e-2 * e0, "did not decay: {e0} -> {prev}");
+    }
+}
+
+#[cfg(test)]
+mod ortho_heating_tests {
+    use super::*;
+    use symbi_algebra::Tensor;
+
+    #[test]
+    fn h_equals_one_reduces_to_the_cartesian_pair() {
+        // an asymmetric smooth flow: every stress component and both outputs active.
+        let flow = |x: f64, y: f64| (0.3 * x + 0.7 * y * y, -0.2 * x * x + 0.5 * y);
+        let (dx, dy) = (0.01, 0.013);
+        let mut v = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+        let mut r = [[0.0; 3]; 3];
+        for j in 0..3 {
+            for i in 0..3 {
+                let (vx, vy) = flow(0.4 + (i as f64 - 1.0) * dx, -0.2 + (j as f64 - 1.0) * dy);
+                v[j][i] = Tensor::new([vx, vy]);
+                r[j][i] = 1.3;
+            }
+        }
+        let nu = [[0.05; 3]; 3];
+        let ones = [[1.0; 3]; 3];
+        let (mc, ec) = viscous_update_2d(&v, &r, &nu, dx, dy, 1.0e-3);
+        let (mo, eo) = viscous_update_orthogonal_2d(&v, &r, &nu, &ones, &ones, dx, dy, 1.0e-3);
+        for a in 0..2 {
+            let rel = (mc[a] - mo[a]).abs() / mc[a].abs().max(1e-30);
+            assert!(rel < 1e-13, "momentum axis {a}: cartesian {} vs ortho {}", mc[a], mo[a]);
+        }
+        let rel = (ec - eo).abs() / ec.abs().max(1e-30);
+        assert!(rel < 1e-13, "heating: cartesian {ec} vs ortho {eo}");
+        assert!(ec.abs() > 1e-20, "the heating never engaged; the limit check is vacuous");
+    }
+
+    #[test]
+    fn rigid_rotation_is_a_stress_free_null_for_momentum_and_heating() {
+        // cylindrical (R, phi): h = (1, R). the rigid rotation u_phi = Omega R has
+        // ZERO deviatoric stress, so div(tau) AND div(tau . u) must both vanish
+        // identically — any geometry error in the heating operator (a missing
+        // scale factor, a wrong face weight) breaks this exactly.
+        let omega = 0.7;
+        let (dx1, dx2) = (0.02, 0.01);
+        let r0 = 2.0;
+        let mut v = [[Tensor::<f64, 2>::zeros(); 3]; 3];
+        let mut rho = [[0.0; 3]; 3];
+        let mut h1 = [[0.0; 3]; 3];
+        let mut h2 = [[0.0; 3]; 3];
+        for j in 0..3 {
+            for i in 0..3 {
+                let rr = r0 + (i as f64 - 1.0) * dx1;
+                // physical azimuthal velocity of the rigid rotation; zero radial flow.
+                v[j][i] = Tensor::new([0.0, omega * rr]);
+                rho[j][i] = 1.0;
+                h1[j][i] = 1.0;
+                h2[j][i] = rr;
+            }
+        }
+        let nu = [[0.08; 3]; 3];
+        let (dm, de) = viscous_update_orthogonal_2d(&v, &rho, &nu, &h1, &h2, dx1, dx2, 1.0e-3);
+        assert!(dm[0].abs() < 1e-15 && dm[1].abs() < 1e-15,
+            "rigid rotation produced a viscous force: ({}, {})", dm[0], dm[1]);
+        assert!(de.abs() < 1e-15, "rigid rotation produced viscous heating: {de}");
     }
 }

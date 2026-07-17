@@ -481,9 +481,10 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
         }
         symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {
             assert_eq!(D, 2, "curvilinear viscosity is baked for 2D only");
-            assert!(!has_energy, "adiabatic viscosity on a curvilinear chart (the energy flux) is not \
-                                  yet built; use cartesian 2D or the isothermal regime");
-            super::layout::viscous_ortho_name("viscous_iso_ortho", geom.coords, D)
+            // the energy regime carries the div(tau . u) heating through the same
+            // orthogonal scale-factor operator; iso keeps the momentum-only kernel.
+            let base = if has_energy { "viscous_adiabatic_ortho" } else { "viscous_iso_ortho" };
+            super::layout::viscous_ortho_name(base, geom.coords, D)
         }
     };
     let name: &str = &name;
@@ -601,7 +602,12 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
         // kernel; nu(R) uses the radial coordinate, so no body position is needed.
         symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {
             assert_eq!(D, 2, "curvilinear alpha viscosity is baked for 2D only");
-            super::layout::viscous_ortho_name("viscous_iso_alpha_ortho", geom.coords, D)
+            let base = if has_energy {
+                "viscous_adiabatic_alpha_ortho"
+            } else {
+                "viscous_iso_alpha_ortho"
+            };
+            super::layout::viscous_ortho_name(base, geom.coords, D)
         }
     };
     let name: &str = &name;

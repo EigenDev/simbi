@@ -49,6 +49,25 @@ fn prim_stencil() -> ([[Tensor<Gv, 2>; 3]; 3], [[Gv; 3]; 3]) {
 }
 
 /// accumulate the viscous increment onto cons.mom (in place, pointwise center).
+/// convert a COORDINATE-contravariant velocity stencil to PHYSICAL orthonormal
+/// components per stencil cell: `u_k = h_k v^k` (simbi stores prim.vel as the
+/// contravariant coordinate components — the CFL map's `V^c = h_c v^c` law).
+/// the orthogonal stress carrier works purely in the physical frame, so feeding
+/// coordinate components leaves every azimuthal term wrong by factors of h2 —
+/// the rigid-rotation null residual then does NOT converge with resolution
+/// (caught by the viscous_adiabatic_ortho convergence gate).
+fn physical_vst(
+    vst: &[[Tensor<Gv, 2>; 3]; 3],
+    h1: &[[Gv; 3]; 3],
+    h2: &[[Gv; 3]; 3],
+) -> [[Tensor<Gv, 2>; 3]; 3] {
+    std::array::from_fn(|j| {
+        std::array::from_fn(|i| {
+            Tensor::new([vst[j][i][0] * h1[j][i], vst[j][i][1] * h2[j][i]])
+        })
+    })
+}
+
 fn accumulate_mom(dmom: Tensor<Gv, 2>) -> Writes {
     let mom0_c = Gv::field("mom0", FieldRef::cons_mom(0));
     let mom1_c = Gv::field("mom1", FieldRef::cons_mom(1));
@@ -211,6 +230,81 @@ pub(crate) fn scale_factors_at(coords: Coords, ndim: usize, x: &[Gv]) -> Vec<Gv>
 /// the one carrier-generic orthogonal operator. `coords` is the bake-time chart —
 /// cylindrical and spherical both route here (spherical `h = (1, r)` falls out for
 /// free), so this ONE kernel subsumes the chart-specific curvilinear operators.
+/// the ADIABATIC orthogonal viscous operator: the same scale-factor stencil as
+/// the iso one, through the (momentum + HEATING) carrier pair — div(tau) on the
+/// momenta and div(tau . u) onto the total energy. one kernel per chart; the
+/// heating and the momentum share their face stresses, so the discrete work
+/// telescopes and the pair conserves total energy up to the boundary flux.
+pub fn viscous_adiabatic_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+    viscous_adiabatic_ortho_impl(coords, None)
+}
+
+/// the ADIABATIC orthogonal ALPHA operator: nu(x) = alpha (gamma p / rho) / Omega_K
+/// per stencil cell (the LOCAL sound speed), with the keplerian frequency from the
+/// chart's radial coordinate (the central mass sits on the axis/origin, matching
+/// the iso ortho alpha kernel's convention).
+pub fn viscous_adiabatic_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
+    viscous_adiabatic_ortho_impl(coords, Some(()))
+}
+
+fn viscous_adiabatic_ortho_impl(coords: Coords, alpha_mode: Option<()>) -> (GvKernel, Writes) {
+    const NDIM: u8 = 2;
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let dx1 = Gv::scalar("dx_0");
+    let dx2 = Gv::scalar("dx_1");
+
+    let (vst, rst) = prim_stencil();
+    let geo = cell_geometry_gv(
+        coords,
+        &vec![Spacing::Uniform; NDIM as usize],
+        &(0..NDIM as usize).collect::<Vec<_>>(),
+        NDIM as usize,
+    );
+    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+
+    let mut h1 = [[Gv::ZERO; 3]; 3];
+    let mut h2 = [[Gv::ZERO; 3]; 3];
+    let mut nust = [[Gv::ZERO; 3]; 3];
+    let floor = Gv::from_f64(1e-30);
+    for dj in 0..3usize {
+        for di in 0..3usize {
+            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+            let h = scale_factors_at(coords, NDIM as usize, &[x0, x1]);
+            h1[dj][di] = h[0];
+            h2[dj][di] = h[1];
+            nust[dj][di] = if alpha_mode.is_some() {
+                // the LOCAL cs^2 = gamma p / rho and Omega_K at this cell's radial
+                // coordinate (slot 0 on both supported charts).
+                let alpha = Gv::scalar("alpha");
+                let gamma = Gv::scalar("gamma");
+                let gm = Gv::scalar("body_0_mass");
+                let off = [di as i32 - 1, dj as i32 - 1];
+                let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
+                let cs2 = gamma * pre / rho.max(floor);
+                let r = x0.max(floor);
+                let omega_k = (gm / (r * r * r)).sqrt().max(floor);
+                alpha * cs2 / omega_k
+            } else {
+                Gv::scalar("nu")
+            };
+        }
+    }
+
+    let vphys = physical_vst(&vst, &h1, &h2);
+    let (dmom_p, dnrg) =
+        symbi_hydro::viscous::viscous_update_orthogonal_2d(&vphys, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+    // physical force -> coordinate momentum (mom^k = rho u_k / h_k); the heating
+    // is a frame-scalar work density and books directly.
+    let dmom = Tensor::new([dmom_p[0] / h1[1][1], dmom_p[1] / h2[1][1]]);
+    let mut writes = accumulate_mom(dmom);
+    let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+    writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+    (end_trace(), writes)
+}
+
 pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     const NDIM: u8 = 2;
     begin_trace();
@@ -241,7 +335,12 @@ pub fn viscous_iso_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
     }
 
     let nust = [[nu; 3]; 3];
-    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+    // physical in, physical out: the carrier's force updates the PHYSICAL momentum
+    // rho u_k; the stored coordinate momentum is mom^k = rho v^k = rho u_k / h_k,
+    // so the writeback divides by the center scale factor.
+    let vphys = physical_vst(&vst, &h1, &h2);
+    let dmom_p = viscous_mom_update_orthogonal_2d(&vphys, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+    let dmom = Tensor::new([dmom_p[0] / h1[1][1], dmom_p[1] / h2[1][1]]);
     let writes = accumulate_mom(dmom);
     (end_trace(), writes)
 }
@@ -289,7 +388,9 @@ pub fn viscous_iso_alpha_ortho_gv(coords: Coords) -> (GvKernel, Writes) {
         }
     }
 
-    let dmom = viscous_mom_update_orthogonal_2d(&vst, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+    let vphys = physical_vst(&vst, &h1, &h2);
+    let dmom_p = viscous_mom_update_orthogonal_2d(&vphys, &rst, &nust, &h1, &h2, dx1, dx2, dt);
+    let dmom = Tensor::new([dmom_p[0] / h1[1][1], dmom_p[1] / h2[1][1]]);
     let writes = accumulate_mom(dmom);
     (end_trace(), writes)
 }

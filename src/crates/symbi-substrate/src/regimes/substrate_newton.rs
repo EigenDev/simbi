@@ -324,8 +324,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu.
         if self.alpha > 0.0 {
             assert!(
-                sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2,
-                "adiabatic alpha viscosity is baked for cartesian 2D"
+                D == 2,
+                "adiabatic alpha viscosity is baked for 2D (cartesian + the orthogonal charts)"
             );
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(
                 sim, dt, self.alpha, self.gamma,
@@ -335,13 +335,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         if self.viscosity <= 0.0 {
             return;
         }
-        // the adiabatic viscous operator (shear force + viscous heating onto the total energy) is
-        // built for cartesian 2D only; fail loud rather than silently drop the transport or the heat.
+        // the adiabatic viscous operator (shear force + viscous heating onto the
+        // total energy) runs on cartesian 2D and the 2D orthogonal charts through
+        // the shared scale-factor operator; 3D adiabatic heating is a follow-on.
         assert!(
-            sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2,
-            "adiabatic viscosity (with energy heating) is built for cartesian 2D only; the {:?} chart \
-             in {D}D is a follow-on. use a cartesian 2D grid, the isothermal regime, or set nu = 0.",
-            sim.geom.coords
+            D == 2,
+            "adiabatic viscosity (with energy heating) is built for 2D only; {D}D is a follow-on. \
+             use the isothermal regime or set nu = 0."
         );
         crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
     }

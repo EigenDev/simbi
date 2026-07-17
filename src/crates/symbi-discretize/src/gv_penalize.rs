@@ -1042,7 +1042,7 @@ mod shaped_tests {
     fn shaped_porous_kernel_bakes_geometry_and_keeps_position_runtime() {
         let shape = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
             .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
-        let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, &shape);
+        let (kernel, writes) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &shape);
         assert!(!kernel.graph.has_errors(), "shaped porous kernel traced with graph errors");
         assert!(
             kernel.scalar_params.iter().any(|p| p == "body_0_pos_0"),
@@ -1062,7 +1062,7 @@ mod shaped_tests {
     // the unshaped path is the sphere: `body_0_racc` IS a runtime scalar (the AOT kernel).
     #[test]
     fn unshaped_porous_kernel_reads_the_runtime_radius() {
-        let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3);
+        let (kernel, _) = penalize_porous_gv(Coords::Cartesian, 3, 3);
         assert!(kernel.scalar_params.iter().any(|p| p == "body_0_racc"));
     }
 }
