@@ -1100,6 +1100,14 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     let w = body.omega;
     let spin = w[0] != 0.0 || w[1] != 0.0 || w[2] != 0.0 || body.two_way_coupling;
 
+    // shaped walls are f64-only on BOTH backends: the host cranelift buffer ABI is raw f64 (the
+    // cons fields are reinterpreted as *f64) and the device delta reductions + IR render at f64.
+    // reject a non-f64 scalar loudly rather than reinterpret its bytes.
+    assert!(
+        std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
+        "arbitrary-shape immersed body {b}: f64 only (f32 shaped walls are a follow-on)",
+    );
+
     // the bbox. on a CARTESIAN grid the shape's bounding ball floors/ceils to an index box: a
     // STATIC body uses the tight ball at the body position (center pos+lc, radius lr); a SPINNING
     // body sweeps its shape through every orientation, so the mask reaches |lc| + lr from the
@@ -1139,11 +1147,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     if Mem::IS_DEVICE_ACCESSIBLE {
         // the device path renders the SAME shaped GvKernel to CUDA (the neutral IR the AOT
         // registry bakes for the analytic sphere), NVRTC-compiles + caches it per shape, and
-        // dispatches it in place. f64 only: the delta reductions + the shaped buffer ABI are f64.
-        assert!(
-            std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
-            "arbitrary-shape immersed body {b} on device: f64 only (f32 shaped walls are a follow-on)",
-        );
+        // dispatches it in place.
         let sk = shaped_penalize_ir(coords, D, DOF, has_energy, spin, shape);
         // in-place cons: every field input is also a write, folded into the output group by the IR
         // manifest, so the input list is empty and the outputs run den, mom.., nrg, then the
