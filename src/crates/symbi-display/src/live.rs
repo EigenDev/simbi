@@ -210,7 +210,7 @@ pub fn render(frame: &mut Frame, view: &DiagnosticView) {
         "log" => render_log(frame, v[3], view),
         _ => render_config(frame, v[3], view),
     }
-    render_footer(frame, v[4]);
+    render_footer(frame, v[4], tabs[active]);
 }
 
 fn render_header(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
@@ -275,18 +275,21 @@ fn render_tabs(frame: &mut Frame, area: Rect, tabs: &[&str], active: usize) {
     frame.render_widget(widget, area);
 }
 
-fn render_footer(frame: &mut Frame, area: Rect) {
-    let keys = [
-        ("space", "pause"),
-        ("s", "step"),
-        ("tab", "switch"),
-        ("\u{2191}\u{2193}", "scroll"),
-        ("f", "field"),
-        ("c", "cmap"),
-        ("l", "log"),
-        ("w", "checkpoint"),
-        ("q", "quit"),
-    ];
+fn render_footer(frame: &mut Frame, area: Rect, active_tab: &str) {
+    // page-aware hints: the arrow-scroll drives only the config panel, and the
+    // field / orientation / colormap keys act on the overview heatmap.
+    let mut keys: Vec<(&str, &str)> = vec![("space", "pause"), ("s", "step"), ("tab", "switch")];
+    if active_tab == "config" {
+        keys.push(("\u{2191}\u{2193}", "scroll"));
+    }
+    if active_tab == "overview" {
+        keys.push(("f", "field"));
+        keys.push(("o", "orient"));
+        keys.push(("c", "cmap"));
+        keys.push(("l", "log"));
+    }
+    keys.push(("w", "checkpoint"));
+    keys.push(("q", "quit"));
     let mut spans = Vec::new();
     for (ii, (k, label)) in keys.iter().enumerate() {
         if ii > 0 {

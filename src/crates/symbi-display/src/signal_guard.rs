@@ -38,17 +38,21 @@ const SHOW_CURSOR: &[u8] = b"\x1b[?25h";
 //   ?7l     disable auto-wrap (a glyph at the right margin overwrites, never
 //           wraps+scrolls — otherwise a too-wide row smears the redraw)
 //   ?25l    hide the cursor; then clear + home.
-// mouse tracking (?1002h/?1006h) is deliberately NOT enabled. it would "pin"
-// the wheel, but it also makes iTerm2 nag ("mouse reporting was left on…") and
-// turns clicks/scrolls into input bytes. instead: ECHO is disabled in termios
-// (so typed/forwarded bytes never print), and each frame repaints from a cleared
-// home (CLEAR_SCREEN), so a stray wheel scroll self-heals on the next refresh.
+// mouse tracking (?1002h + SGR ?1006h) PINS the wheel to the app (btop-style):
+// without it, macOS Terminal maps wheel scrolls to viewport scrollback and the
+// live dashboard "scrolls away" until the next repaint. the resulting mouse
+// reports arrive as input bytes; the key parser discards any unrecognized
+// escape sequence (and the input read buffer holds a whole SGR report), so
+// clicks/scrolls never alias onto a key binding. ECHO is disabled in termios,
+// so nothing is ever printed. both leave paths (normal + the async-signal-safe
+// handler restore) disable tracking, so the iTerm2 "mouse reporting left on"
+// nag can fire only on an unhandleable SIGKILL.
 // leaving reverses the modes and restores the primary buffer + cursor. the `_STR`
 // forms drive the normal buffered path; the `_BYTES` form is the
 // async-signal-safe restore written from the handler.
-const ENTER_ALT_STR: &str = "\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J\x1b[H";
-const LEAVE_ALT_STR: &str = "\x1b[?7h\x1b[?25h\x1b[?1049l";
-const LEAVE_ALT_BYTES: &[u8] = b"\x1b[?7h\x1b[?25h\x1b[?1049l";
+const ENTER_ALT_STR: &str = "\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[?1002h\x1b[?1006h\x1b[2J\x1b[H";
+const LEAVE_ALT_STR: &str = "\x1b[?1006l\x1b[?1002l\x1b[?7h\x1b[?25h\x1b[?1049l";
+const LEAVE_ALT_BYTES: &[u8] = b"\x1b[?1006l\x1b[?1002l\x1b[?7h\x1b[?25h\x1b[?1049l";
 
 // whether the alternate screen is active, so the signal handler knows
 // to leave it (not merely show the cursor) on an interrupt.

@@ -2167,6 +2167,18 @@ where
     /// 3D z-slice) to <= `max_dim` per axis, so cost is bounded by the SCREEN, not
     /// the grid. a 1D grid yields a 1-row line profile. `None` off host memory.
     pub fn field_slice(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
+        self.field_slice_oriented(max_dim, index, 0)
+    }
+
+    /// the decimated 2D display slice with a selectable ORIENTATION on a 3D grid:
+    /// orient 0 = the z mid-plane (x, y), 1 = the y mid-plane (x, z), 2 = the x
+    /// mid-plane (y, z). 1D/2D grids ignore the orientation.
+    pub fn field_slice_oriented(
+        &self,
+        max_dim: usize,
+        index: usize,
+        orient: usize,
+    ) -> Option<FieldDecimation> {
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
         }
@@ -2185,7 +2197,19 @@ where
             }
         }
         let interior = &self.geom.interior;
-        let sp0 = &interior.spaces[0];
+        // the display axes: (horizontal, vertical) index-space axes of the slice
+        // plane; the remaining axis (3D only) holds its mid-plane index. 2D always
+        // shows (0, 1).
+        let (ah, av) = if D >= 3 {
+            match orient % 3 {
+                1 => (0usize, 2usize),
+                2 => (1, 2),
+                _ => (0, 1),
+            }
+        } else {
+            (0, 1)
+        };
+        let sp0 = &interior.spaces[ah];
         let nx = sp0.size();
         if nx == 0 {
             return None;
@@ -2193,7 +2217,7 @@ where
         let m = max_dim.max(1);
         let sx = ((nx + m - 1) / m).max(1);
         let out_w = (nx + sx - 1) / sx;
-        // base coord: mid-plane on every axis; axes 0/1 are overwritten below.
+        // base coord: mid-plane on every axis; the display axes are overwritten below.
         let mut c: [isize; D] = std::array::from_fn(|ax| {
             let s = &interior.spaces[ax];
             s.lo + (s.size() / 2) as isize
@@ -2202,7 +2226,7 @@ where
         let mut vmax = f64::NEG_INFINITY;
 
         // 1D grid: a line profile (height = 1), block-averaged along axis 0.
-        let Some(sp1) = interior.spaces.get(1) else {
+        let Some(sp1) = interior.spaces.get(av) else {
             let mut data = Vec::with_capacity(out_w);
             for i in 0..out_w {
                 let x0 = sp0.lo + (i * sx) as isize;
@@ -2210,7 +2234,7 @@ where
                 let (mut sum, mut cnt) = (0.0_f64, 0u32);
                 let mut xx = x0;
                 while xx < x1 {
-                    c[0] = xx;
+                    c[ah] = xx;
                     sum += self.field_value(c, kind);
                     cnt += 1;
                     xx += 1;
@@ -2248,12 +2272,12 @@ where
                 let (mut sum, mut cnt) = (0.0_f64, 0u32);
                 let mut yy = y0;
                 while yy < y1 {
-                    if let Some(slot) = c.get_mut(1) {
+                    if let Some(slot) = c.get_mut(av) {
                         *slot = yy;
                     }
                     let mut xx = x0;
                     while xx < x1 {
-                        c[0] = xx;
+                        c[ah] = xx;
                         sum += self.field_value(c, kind);
                         cnt += 1;
                         xx += 1;

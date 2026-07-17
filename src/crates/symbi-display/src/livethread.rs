@@ -62,12 +62,19 @@ pub struct Controls {
     /// index of the field the `f`-key has selected; the solver decimates it and
     /// reports how many fields exist via `DiagnosticView::field_count`.
     field_kind: AtomicUsize,
+    /// the 3D slice orientation the `o`-key has selected: 0 = z mid-plane (x, y),
+    /// 1 = y mid-plane (x, z), 2 = x mid-plane (y, z). ignored on 1D/2D runs.
+    slice_orient: AtomicUsize,
 }
 
 impl Controls {
     /// the selected field index (`f`-key cycle).
     pub fn field_kind(&self) -> usize {
         self.field_kind.load(Ordering::SeqCst)
+    }
+    /// the selected 3D slice orientation (`o`-key cycle): 0 = z, 1 = y, 2 = x mid-plane.
+    pub fn slice_orient(&self) -> usize {
+        self.slice_orient.load(Ordering::SeqCst)
     }
     /// paused: the solver should park (take no step) while keeping publishing.
     pub fn paused(&self) -> bool {
@@ -213,6 +220,12 @@ fn render_loop(rx: Receiver<Frame>, controls: Arc<Controls>, running: Arc<Atomic
                 Key::Char('l') => log_scale = !log_scale,
                 // f: cycle the displayed field. bounded by the bundle length in
                 // attach mode (client-side switch), else the solver's field_count.
+                // o: cycle the 3D slice orientation (z -> y -> x mid-plane); the
+                // solver re-decimates on its next publish. no-op on 1D/2D runs.
+                Key::Char('o') => {
+                    let k = (controls.slice_orient.load(Ordering::SeqCst) + 1) % 3;
+                    controls.slice_orient.store(k, Ordering::SeqCst);
+                }
                 Key::Char('f') => {
                     let fc = latest
                         .as_ref()

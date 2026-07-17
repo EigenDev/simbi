@@ -36,12 +36,19 @@ from simbi_configs.examples.grhd.gr_fishbone_moncrief_cartesian import (
 )
 
 RES = 48
+L_BOX = 20.0
 
 
 def _run(spin: float) -> np.ndarray:
     d = tempfile.mkdtemp() + "/"
+    # the torus geometry is spin-dependent: kappa = 1.01/r_in = 8 is the compact
+    # a = 0 torus; at a = 0.9 that pair degenerates to a sub-cell sliver, so the
+    # spinning run uses the thick-torus pair (r_in = 6, kappa = 1.15).
+    r_in, kappa = (6.0, 1.15) if spin != 0.0 else (8.0, 1.01)
     p = GrFishboneMoncriefCartesian(
         kerr_spin=spin,
+        r_in=r_in,
+        kappa=kappa,
         resolution=(RES, RES, RES),
         end_time=5.0,
         checkpoint_interval=1.0e30,
@@ -72,9 +79,20 @@ def test_spinning_fm_torus_with_spheroidal_excision() -> None:
     rho = _run(0.9)
     assert np.isfinite(rho).all(), "non-finite state in the spinning torus run"
     assert rho.min() > 0.0, "density went non-positive"
-    # the torus survives: the pressure-maximum density stays a large fraction of
-    # its normalization (1.0) after t = 5M on the coarse grid.
-    assert rho.max() > 0.3, f"the torus disintegrated (max rho {rho.max():.3f})"
+    # the torus is PRESENT AND SURVIVES, asserted in ITS OWN equatorial band —
+    # the global density maximum is the floored-redshift corona pileup at the
+    # horizon, which exists whether or not the torus does (a global-max assert
+    # is vacuous for torus presence: the corona once silently swallowed a
+    # near-marginal thin torus whole via the pressure-matched surface).
+    dd = 2.0 * L_BOX / RES
+    xs = (np.arange(RES) + 0.5) * dd - L_BOX
+    z, y, x = np.meshgrid(xs, xs, xs, indexing="ij")
+    r = np.sqrt(x * x + y * y + z * z)
+    band = (np.abs(z) < 2.0) & (r > 5.0) & (r < 14.0)
+    assert rho[band].max() > 0.3, (
+        f"no torus in the equatorial band 5 < r < 14 (max rho {rho[band].max():.4f}; "
+        "the corona swallowed it or it disintegrated)"
+    )
 
     # axisymmetric initial data on the axisymmetric spinning metric: the evolved
     # state holds the quarter turn about the spin axis and the equatorial

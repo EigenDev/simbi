@@ -52,7 +52,11 @@ pub fn poll_key_timeout(timeout_ms: i32) -> Option<Key> {
     if n <= 0 || (pfd.revents & libc::POLLIN) == 0 {
         return None;
     }
-    let mut buf = [0u8; 8];
+    // 64 bytes holds a full SGR mouse report (up to ~17 bytes) plus a keystroke:
+    // with mouse tracking pinning the wheel, reports must land in ONE read so the
+    // escape-sequence discard sees the whole sequence (a split report's tail would
+    // decode as stray printable chars).
+    let mut buf = [0u8; 64];
     // SAFETY: read the pending keystroke bytes into a stack buffer. ICANON is off
     // so this returns immediately with whatever the terminal has queued.
     let r = unsafe { libc::read(0, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };

@@ -18,9 +18,9 @@
 #   d x^i/d r   = ((r x + a y)/(r^2 + a^2), (r y - a x)/(r^2 + a^2), z/r)
 #   d x^i/d phi = (-y, x, 0)
 # (the r-column is exactly the kerr-schild null-vector direction l^i; a = 0
-# reduces to x^i/r). outside the pressure-matched torus surface sits the warm
-# isentropic hydrostatic corona (h alpha = const), the same construction as
-# the spherical chart.
+# reduces to x^i/r). outside the pressure-matched torus surface sits the
+# quiescent power-law atmosphere (rho ~ r^{-3/2}, p ~ r^{-5/2}, the free-fall
+# scalings), cold enough that the pressure match never eats into the torus.
 #
 # usage:
 #   simbi run gr_fishbone_moncrief_cartesian --resolution 128,128,128
@@ -81,7 +81,11 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         ProblemParam(
             1.01,
             cli=True,
-            description="FM angular-momentum parameter l = kappa^{1/2} l(r_in)",
+            description="FM angular-momentum parameter l = kappa^{1/2} l(r_in). the "
+            "torus geometry is a strong function of (kappa, spin): 1.01 gives the "
+            "compact a = 0 torus; at a ~ 0.9 use ~1.15 with r_in = 6 (the same "
+            "kappa collapses to a sliver at spin) — setup() rejects unresolvable "
+            "or box-overflowing tori loudly",
         ),
     ]
     rho_torus_max: Annotated[
@@ -89,12 +93,16 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
     ]
     atm_rho: Annotated[
         float,
-        ProblemParam(1.0e-3, description="corona rest-mass density at r_max"),
+        ProblemParam(1.0e-4, description="corona rest-mass density at r_max"),
     ]
     atm_pre_frac: Annotated[
         float,
         ProblemParam(
-            0.5, description="corona p/rho at r_max (warm, HSE-supported)"
+            0.01,
+            description="corona p/rho at r_max. the corona pressure MUST sit well "
+            "below the torus peak pressure (the pressure-matched surface replaces "
+            "any torus gas colder than the local corona — a warm corona SWALLOWS a "
+            "near-marginal thin torus whole); setup() enforces the margin loudly",
         ),
     ]
     excision_radius: Annotated[
@@ -176,6 +184,46 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         if self.excision_radius < 0.0:
             mm, aa = self.schwarzschild_mass, self.kerr_spin
             self.excision_radius = 0.7 * (mm + math.sqrt(max(mm * mm - aa * aa, 0.0)))
+        # the pressure-matched surface replaces torus gas colder than the corona,
+        # so a corona pressure approaching the torus PEAK pressure erases the torus
+        # entirely (a near-marginal kappa ~ 1 torus is nearly pressureless: p_max =
+        # (h_max - 1) rho_max (gamma-1)/gamma with h_max - 1 ~ 1e-4). fail loud.
+        torus = self.torus()
+        p_torus_max = torus.primitive(torus.r_max, math.pi / 2.0)[3]
+        p_corona = self.atm_pre_frac * self.atm_rho
+        if p_corona >= 0.5 * p_torus_max:
+            raise ValueError(
+                f"the corona pressure {p_corona:.3e} (atm_pre_frac * atm_rho) is not "
+                f"well below the torus peak pressure {p_torus_max:.3e}: the "
+                "pressure-matched surface would replace the torus with corona. "
+                "lower atm_pre_frac/atm_rho or thicken the torus (raise kappa)."
+            )
+        # the torus geometry is a strong function of (r_in, kappa, spin): the same
+        # kappa that gives a healthy zero-spin torus collapses to a sub-cell sliver
+        # at high spin (r_out - r_in < dx), and a slightly larger kappa at a = 0
+        # overflows the box. scan the equatorial outer edge and fail loud on both.
+        r_out = torus.r_max
+        rr = torus.r_max
+        while rr < 3.0 * self.half_width:
+            if torus.primitive(rr, math.pi / 2.0) is None:
+                break
+            r_out = rr
+            rr += 0.05
+        dx_min = 2.0 * self.half_width / max(self.resolution)
+        if r_out - self.r_in < 4.0 * dx_min:
+            raise ValueError(
+                f"the torus annulus [{self.r_in:.2f}, {r_out:.2f}] spans "
+                f"{(r_out - self.r_in) / dx_min:.1f} cells at this resolution — "
+                "unresolvable. thicken it (raise kappa; at high spin the same kappa "
+                "gives a much thinner torus) or refine."
+            )
+        if r_out > 0.9 * self.half_width:
+            raise ValueError(
+                f"the torus outer edge r_out = {r_out:.1f} reaches the box "
+                f"(half_width {self.half_width}); shrink the torus (lower kappa or "
+                "raise r_in) or widen the box — a torus surface on the outflow "
+                "boundary drives spurious inflow."
+            )
 
     def torus(self) -> FishboneMoncrief:
         # the torus solution is evaluated in the horizon-penetrating KS chart at
@@ -200,23 +248,19 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
         return math.sqrt(max(d + math.sqrt(d * d + (a * z) ** 2), 1.0e-20))
 
     def atmosphere(self, r: float, r_ref: float) -> tuple[float, float]:
-        """(rho, p) of the isentropic hydrostatic corona at radius r: the relativistic
-        HSE invariant h(r) alpha(r) = const, normalized to (atm_rho, atm_pre_frac *
-        atm_rho) at the torus pressure maximum. the static-observer redshift factor
-        is floored inside the ergosphere/horizon — that gas free-falls (and is
-        excised deep inside) regardless. the a = 0 redshift form is kept at spin:
-        the corona is a pressure-matched heuristic and the spin correction to the
-        static redshift is O(a^2 / r^2) at torus radii."""
-        gm = self.adiabatic_index
-        gm1 = gm - 1.0
-        mm = self.schwarzschild_mass
-        h_ref = 1.0 + gm / gm1 * self.atm_pre_frac
-        redshift = lambda rr: math.sqrt(max(1.0 - 2.0 * mm / rr, 1.0e-2))
-        hs = h_ref * redshift(r_ref)
-        k_atm = gm1 * (h_ref - 1.0) / (gm * self.atm_rho**gm1)
-        h = hs / redshift(r)
-        rho = (gm1 * (h - 1.0) / (gm * k_atm)) ** (1.0 / gm1)
-        return rho, k_atm * rho**gm
+        """(rho, p) of the quiescent power-law atmosphere at radius r:
+        rho = atm_rho (r/r_ref)^(-3/2), p = atm_pre_frac atm_rho (r/r_ref)^(-5/2),
+        normalized at the torus pressure maximum. NOT an equilibrium — a cold
+        atmosphere has no hydrostatic solution (the relativistic HSE invariant
+        h alpha = const drops below h = 1 at finite radius when the reference
+        enthalpy is small, and anchoring it further out piles up an enormous
+        near-hole contrast); the standard quiescent medium simply free-falls
+        into the excised hole within a dynamical time. the -3/2 / -5/2 slopes
+        are the zero-energy free-fall scalings, so the infalling profile is
+        roughly self-similar."""
+        q = max(r, 2.0 * self.schwarzschild_mass) / r_ref
+        rho = self.atm_rho * q ** (-1.5)
+        return rho, self.atm_pre_frac * self.atm_rho * q ** (-2.5)
 
     def initial_primitive_state(self) -> InitialStateType:
         torus = self.torus()
@@ -243,9 +287,10 @@ class GrFishboneMoncriefCartesian(SimbiProblem):
                         # whose polytropic pressure falls below the local corona
                         # pressure (a pure contact interface, no crush wave).
                         if state is None or state[3] < pre_a:
-                            # the corona free-falls in the KS chart at the eulerian
-                            # drift; leaving it at rest is the standard quiescent
-                            # start (the drift develops within a light-crossing).
+                            # the atmosphere free-falls in the KS chart; leaving it
+                            # at rest is the standard quiescent start (the infall
+                            # develops within a dynamical time and drains into the
+                            # excised hole).
                             yield (rho_a, 0.0, 0.0, 0.0, pre_a)
                         else:
                             rho, v_r, vphi, pre = state

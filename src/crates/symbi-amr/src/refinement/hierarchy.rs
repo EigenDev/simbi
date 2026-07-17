@@ -174,10 +174,18 @@ where
     /// `coverage` box contains it (SMR = single nested box per level, ratio 2), so
     /// the refined region shows its fine detail and the rest shows the coarse grid.
     /// a single-level hierarchy is just the root decimation. cost is screen-bounded.
-    pub fn field_slice_composite(&self, max_dim: usize, index: usize) -> Option<FieldDecimation> {
+    pub fn field_slice_composite(
+        &self,
+        max_dim: usize,
+        index: usize,
+        orient: usize,
+    ) -> Option<FieldDecimation> {
         // single grid: no coverage to descend, reuse the plain per-state decimation.
-        if self.levels.len() <= 1 {
-            return self.levels[0].state.field_slice(max_dim, index);
+        // a non-z orientation also takes the plain coarse view: the per-level
+        // coverage descent below walks the (x, y) footprint only, so the composited
+        // fine detail exists for the z mid-plane alone.
+        if self.levels.len() <= 1 || orient != 0 {
+            return self.levels[0].state.field_slice_oriented(max_dim, index, orient);
         }
         if !Mem::IS_HOST_ACCESSIBLE {
             return None;
