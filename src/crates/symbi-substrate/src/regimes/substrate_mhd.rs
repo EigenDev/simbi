@@ -715,6 +715,18 @@ where
             let inv_w = max_inv_physical_width(geom);
             lambda_max = lambda_max.max(2.0 * (D as f64) * eta_eff * inv_w * inv_w);
         }
+        // VISCOUS CFL: the momentum diffusion obeys the same parabolic limit as the
+        // resistive one; fold the equivalent rate for the constant nu OR the alpha
+        // bound (largest local sound speed at the slowest orbit).
+        let nu_eff = if self.alpha > 0.0 {
+            crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(sim, self.alpha, self.eos_param)
+        } else {
+            self.viscosity
+        };
+        if nu_eff > 0.0 {
+            let inv_w = max_inv_physical_width(geom);
+            lambda_max = lambda_max.max(2.0 * (D as f64) * nu_eff * inv_w * inv_w);
+        }
         // DRIVEN-INFLOW CFL CAP: the per-cell wave-speed map only scans the INTERIOR, so a driven
         // boundary's inflow state (which lives in the ghost band) is invisible to it — a relativistic
         // wind from a cold-ambient inner boundary would size dt off the slow interior and then get

@@ -17,6 +17,7 @@
 use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
 use symbi::sim::state::*;
 use symbi::sim::substrate_seam::{KernelSet, WithViscosity};
+
 use symbi_algebra::Tensor;
 use symbi_geometry::Cartesian;
 use symbi_hydro::eos::IdealGas;
@@ -119,5 +120,45 @@ fn alpha_viscosity_acts_heats_and_carries_the_radial_law() {
         dlaw > 1e-12,
         "the alpha update equals a constant-nu update everywhere: the radial \
          Omega_K law is not being applied"
+    );
+}
+
+#[test]
+fn alpha_and_constant_nu_both_cap_the_timestep() {
+    // the parabolic viscous limit dt <= 0.1 dx^2 / nu_max must bind for BOTH
+    // paths: a large constant nu and a large alpha (whose nu_max is the largest
+    // local sound speed at the slowest orbit) each pull dt well below the
+    // inviscid wave-speed value.
+    let sim = build();
+    let k0 = Kern::new(GAMMA, CFL, &sim.geom.allocated);
+    k0.c2p(&sim);
+    let dt_inviscid = k0.cfl(&sim);
+
+    let kc = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_viscosity(50.0);
+    let dt_const = kc.cfl(&sim);
+    assert!(
+        dt_const < 0.5 * dt_inviscid,
+        "constant-nu cap did not bind: {dt_const:e} vs inviscid {dt_inviscid:e}"
+    );
+    let expect = 0.1 * DX * DX / 50.0;
+    assert!(
+        (dt_const - expect).abs() < 1e-12 * expect.max(1.0),
+        "constant-nu cap is not the parabolic limit: {dt_const:e} vs {expect:e}"
+    );
+
+    let ka = Kern::new(GAMMA, CFL, &sim.geom.allocated).with_alpha(50.0);
+    let dt_alpha = ka.cfl(&sim);
+    assert!(
+        dt_alpha < 0.5 * dt_inviscid,
+        "alpha cap did not bind: {dt_alpha:e} vs inviscid {dt_inviscid:e}"
+    );
+    // the alpha bound uses the LARGEST (p/rho) at the SLOWEST orbit: on this
+    // uniform state, nu_max = alpha gamma (p0/rho0) / Omega_K(r_corner).
+    let r_corner = (2.0_f64).sqrt() * L;
+    let nu_max = 50.0 * GAMMA * 1.0 / (1.0 / (r_corner * r_corner * r_corner)).sqrt();
+    let expect_a = 0.1 * DX * DX / nu_max;
+    assert!(
+        (dt_alpha - expect_a).abs() < 1e-9 * expect_a.max(1.0),
+        "alpha cap does not match the nu_max bound: {dt_alpha:e} vs {expect_a:e}"
     );
 }

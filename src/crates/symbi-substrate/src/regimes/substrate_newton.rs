@@ -304,10 +304,17 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         // the parabolic viscous cap: an explicit momentum-diffusion step is stable for
         // dt <= C_visc dx^2 / nu (C_visc = 0.1 below the ~0.21 von-Neumann limit of the 4/3 normal
         // stress). cartesian 2D only, so the coordinate dx IS the physical cell width. inert inviscid.
-        if self.viscosity > 0.0 {
+        // alpha: nu grows with radius AND with the local cs^2, so the cap bounds it
+        // by the largest sound speed at the slowest orbit (adiabatic_alpha_nu_max).
+        let nu_max = if self.alpha > 0.0 {
+            crate::regimes::substrate_kernels::adiabatic_alpha_nu_max(sim, self.alpha, self.gamma)
+        } else {
+            self.viscosity
+        };
+        if nu_max > 0.0 {
             const C_VISC: f64 = 0.1;
             let min_dx = sim.geom.dx.iter().copied().fold(f64::INFINITY, f64::min);
-            dt.min(C_VISC * min_dx * min_dx / self.viscosity)
+            dt.min(C_VISC * min_dx * min_dx / nu_max)
         } else {
             dt
         }

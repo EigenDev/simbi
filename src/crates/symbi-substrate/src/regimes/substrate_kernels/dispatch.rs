@@ -504,6 +504,60 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
 /// like `dispatch_viscous` but with a spatially varying `nu(x) = alpha cs^2 /
 /// Omega_k(r)` about the central body. resolves the body position/mass (body 0),
 /// the sound speed (the `cs`/`gamma` eos slot), and `alpha`. requires a body.
+/// nu_max for the ADIABATIC alpha viscous CFL cap: nu(x) = alpha (gamma p/rho) / Omega_K(r)
+/// is bounded by alpha gamma (p/rho)_max / Omega_K(r_max) — the largest sound speed anywhere
+/// times the slowest orbit (the farthest domain corner from body 0, matching the kernel's
+/// radial law). the (p/rho) maximum is a host interior scan (the alpha kernels are host-only);
+/// returns 0 (cap inert) with no body or a device-resident state.
+pub fn adiabatic_alpha_nu_max<const D: usize, const DOF: usize, Mem, Sc>(
+    sim: &FieldStore<D, DOF, Mem, Sc>,
+    alpha: f64,
+    gamma: f64,
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    if !Mem::IS_HOST_ACCESSIBLE {
+        return 0.0;
+    }
+    let Some(im) = sim.immersed.as_ref() else { return 0.0 };
+    if im.bodies.is_empty() {
+        return 0.0;
+    }
+    let b = im.bodies.get(0);
+    if b.mass <= 0.0 {
+        return 0.0;
+    }
+    let Some(pre) = sim.fields.prim.pre_field() else { return 0.0 };
+    let geom = &sim.geom;
+    let mut ratio_max = 0.0_f64;
+    for c in geom.interior.iter() {
+        let p = pre.view().at(c).to_f64();
+        let r = sim.fields.prim.rho.view().at(c).to_f64().max(1.0e-300);
+        ratio_max = ratio_max.max(p / r);
+    }
+    // the farthest in-plane corner from the body (the vertical axis does not enter Omega_K).
+    let plane = D.min(2);
+    let mut r_max = 0.0_f64;
+    for corner in 0..(1usize << D) {
+        let mut d2 = 0.0;
+        for a in 0..plane {
+            let sp = &geom.interior.spaces[a];
+            let idx = if corner & (1 << a) != 0 { sp.hi } else { sp.lo };
+            let x = geom.x_lo[a] + geom.dx[a] * (idx as f64);
+            let d = x - b.position[a];
+            d2 += d * d;
+        }
+        r_max = r_max.max(d2.sqrt());
+    }
+    if r_max <= 0.0 {
+        return 0.0;
+    }
+    let omega_min = (b.mass / (r_max * r_max * r_max)).sqrt();
+    alpha * gamma * ratio_max / omega_min
+}
+
 pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
