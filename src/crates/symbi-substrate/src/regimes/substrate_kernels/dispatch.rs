@@ -1133,6 +1133,32 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // physical-frame normal is baked off-chart. no blanket curvilinear early return.
     let nrg = sim.fields.cons.nrg_field();
     let geom = &sim.geom;
+    // the (r, z) axisymmetric section admits ON-AXIS sphere bodies only: the
+    // ring radius (slot 0 of the cartesian position/velocity) must be zero —
+    // an off-axis "point" is a ring, a different object — and a CSG shape in
+    // the section is a surface of revolution, a separate mask story.
+    let rz = D == 2
+        && geom.coords == symbi_geometry::Geometry::Cylindrical
+        && geom.axes[..2] == [0, 2];
+    if rz {
+        let bodies_chk = &im.bodies;
+        for b in 0..bodies_chk.len() {
+            assert!(
+                im.shapes.get(b).and_then(|s| s.as_ref()).is_none(),
+                "immersed body {b}: shaped CSG masks on the cylindrical r-z plane are unsupported \
+                 (a section shape is a surface of revolution)",
+            );
+            let body = bodies_chk.get(b);
+            assert!(
+                body.position[0] == 0.0 && body.velocity[0] == 0.0,
+                "immersed body {b} on the r-z plane must sit ON the symmetry axis with no radial \
+                 motion: position[0] = {}, velocity[0] = {} (note: the cylindrical 2d DEFAULT \
+                 plane is the r-z section — an (r, phi) disk sim must declare cyl_plane(RPhi))",
+                body.position[0],
+                body.velocity[0],
+            );
+        }
+    }
     let n_delta = if nrg.is_some() { D + 2 } else { D + 1 };
     // the torque receipt slots after mass/force/energy: the moment of the
     // force receipt about the body center. rotation needs a plane, so 1d
@@ -1210,21 +1236,21 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
         let cart = symbi_geometry::Geometry::Cartesian;
         let coords_g = geom.coords;
         let name_owned: String = match (bodies.get(b).spec.surface, nrg.is_some()) {
-            (symbi_ib::SurfaceSpec::Drain, true) => penalize_name("penalize_drain", coords_g, D),
+            (symbi_ib::SurfaceSpec::Drain, true) => penalize_name("penalize_drain", coords_g, D, &geom.axes),
             (symbi_ib::SurfaceSpec::Drain, false) => {
-                penalize_name("penalize_drain_iso", coords_g, D)
+                penalize_name("penalize_drain_iso", coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, true) => {
-                penalize_name("penalize_porous", coords_g, D)
+                penalize_name("penalize_porous", coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::Porous { .. }, false) => {
-                penalize_name("penalize_porous_iso", coords_g, D)
+                penalize_name("penalize_porous_iso", coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, false) => {
-                penalize_name("penalize_torque_free_iso", coords_g, D)
+                penalize_name("penalize_torque_free_iso", coords_g, D, &geom.axes)
             }
             (symbi_ib::SurfaceSpec::TorqueFree { .. }, true) => {
-                penalize_name("penalize_torque_free", coords_g, D)
+                penalize_name("penalize_torque_free", coords_g, D, &geom.axes)
             }
         };
         // 2.5D MHD (DOF > D) selects the DOF-aware `_dof{DOF}` kernel that drains all momentum
