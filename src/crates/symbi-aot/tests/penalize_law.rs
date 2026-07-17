@@ -90,6 +90,9 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             "dt" => DT,
             "gamma" => GAMMA,
             "c_drain" => C_DRAIN,
+            // hydro: zero alfven contribution reduces the magnetosonic signal
+            // speed sqrt(cs^2 + c_a2) to the sound-speed form exactly.
+            "c_a2" => 0.0,
             "x_lo_0" | "x_lo_1" => X_LO,
             "dx_0" | "dx_1" => DX,
             "map_kind_0" | "map_kind_1" => 0.0,
@@ -236,6 +239,7 @@ fn compiled_iso_drain_penalize_matches_the_f64_chain_bitwise() {
             "body_0_pos_0" => POS[0],
             "body_0_pos_1" => POS[1],
             "body_0_racc" => RACC,
+            "c_a2" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };
@@ -319,7 +323,10 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
     use symbi_geometry::{CylindricalRPhi, Metric};
     use symbi_hydro::energy::IsoModel;
     let (kernel, ir) = kernel_by_name::<f64>("penalize_drain_iso_cyl_2d").expect("cyl kernel");
-    assert!(kernel_output_support_from_ir(ir).is_some());
+    // a cylindrical kernel carries NO support ball: the cartesian mask region
+    // is not a coordinate ball off the identity chart, so the derivation
+    // refuses and dispatch runs the whole interior.
+    assert!(kernel_output_support_from_ir(ir).is_none());
 
     const CS: f64 = 0.8;
     const R_LO: f64 = 0.0;
@@ -355,6 +362,7 @@ fn compiled_iso_drain_penalize_cylindrical_matches_the_f64_chain_bitwise() {
             "body_0_pos_0" => CENTER[0],
             "body_0_pos_1" => CENTER[1],
             "body_0_racc" => RACC_C,
+            "c_a2" => 0.0,
             other => panic!("unexpected scalar '{other}'"),
         }
     };
@@ -456,7 +464,10 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
     use symbi_hydro::energy::IsoModel;
     let (tf, ir) =
         kernel_by_name::<f64>("penalize_torque_free_iso_cyl_2d").expect("cyl torque-free kernel");
-    assert!(kernel_output_support_from_ir(ir).is_some());
+    // a cylindrical kernel carries NO support ball: the cartesian mask region
+    // is not a coordinate ball off the identity chart, so the derivation
+    // refuses and dispatch runs the whole interior.
+    assert!(kernel_output_support_from_ir(ir).is_none());
     let (drain, drain_ir) =
         kernel_by_name::<f64>("penalize_drain_iso_cyl_2d").expect("cyl drain kernel");
 
@@ -502,6 +513,7 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 "body_0_racc" => RACC_C,
                 "body_0_vel_0" => VEL[0],
                 "body_0_vel_1" => VEL[1],
+                "c_a2" => 0.0,
                 other => panic!("unexpected scalar '{other}'"),
             }
         };
@@ -569,8 +581,15 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
                 symbi_algebra::Embedded::new(Tensor::new([xrel[0] * invr, xrel[1] * invr])),
             );
             let normal = Tensor::new([nphys[0], nphys[1]]);
+            // the body's translational velocity is a cartesian world vector,
+            // rotated into the cell's physical basis before the tangential
+            // split — the same transform the kernel traces.
+            let us = metric.vector_from_cartesian(
+                Tensor::new([cr(ii), cphi(jj)]),
+                symbi_algebra::Embedded::new(Tensor::new(VEL)),
+            );
             let kin = BodyKin::<f64, 2> {
-                u_solid: Tensor::new(VEL),
+                u_solid: Tensor::new([us[0], us[1]]),
                 omega: Tensor::zeros(),
                 e_wall: 0.0,
             };
@@ -582,12 +601,15 @@ fn compiled_torque_free_penalize_cylindrical_matches_and_reduces_at_xi0() {
             assert_eq!(out.1[c].to_bits(), expect.mom[0].to_bits(), "mom0 at ({ii},{jj})");
             assert_eq!(out.2[c].to_bits(), expect.mom[1].to_bits(), "mom1 at ({ii},{jj})");
             assert_eq!(out.3[c].to_bits(), delta.mass_delta.to_bits(), "mass at ({ii},{jj})");
-            assert_eq!(out.4[c].to_bits(), delta.force_delta[0].to_bits(), "fx at ({ii},{jj})");
-            assert_eq!(out.5[c].to_bits(), delta.force_delta[1].to_bits(), "fy at ({ii},{jj})");
+            // the force receipt is booked in the CARTESIAN world frame: local
+            // physical components rotate cell to cell and their raw sum is not
+            // a net force on the body.
             let e = metric.vector_to_cartesian(
                 Tensor::new([cr(ii), cphi(jj)]),
                 symbi_algebra::Physical::new(delta.force_delta),
             );
+            assert_eq!(out.4[c].to_bits(), e[0].to_bits(), "fx at ({ii},{jj})");
+            assert_eq!(out.5[c].to_bits(), e[1].to_bits(), "fy at ({ii},{jj})");
             let tq = symbi_ib::moment(&Tensor::new([xrel[0], xrel[1]]), &Tensor::new([e[0], e[1]]));
             assert_eq!(out.6[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
             if out.3[c] != 0.0 {
@@ -659,6 +681,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
                 "body_0_racc" => RACC,
                 "body_0_vel_0" => VEL[0],
                 "body_0_vel_1" => VEL[1],
+                "c_a2" => 0.0,
                 other => panic!("unexpected scalar '{other}'"),
             }
         };
@@ -801,6 +824,7 @@ fn compiled_porous_penalize_matches_the_f64_chain_and_reduces_at_p1() {
                 "body_0_racc" => RACC,
                 "body_0_vel_0" => VEL[0],
                 "body_0_vel_1" => VEL[1],
+                "c_a2" => 0.0,
                 other => panic!("unexpected scalar '{other}'"),
             }
         };
@@ -964,6 +988,7 @@ fn iso_porous_reduces_to_iso_drain_at_p1() {
             "body_0_racc" => RACC,
             "body_0_vel_0" => 0.05,
             "body_0_vel_1" => -0.03,
+            "c_a2" => 0.0,
             other => panic!("unexpected '{other}'"),
         }
     };
@@ -1005,6 +1030,9 @@ fn adiabatic_torque_free_reduces_to_drain_at_xi0() {
             "dt" => DT,
             "gamma" => GAMMA,
             "c_drain" => C_DRAIN,
+            // hydro: zero alfven contribution reduces the magnetosonic signal
+            // speed sqrt(cs^2 + c_a2) to the sound-speed form exactly.
+            "c_a2" => 0.0,
             "xi" => 0.0,
             "x_lo_0" | "x_lo_1" => X_LO,
             "dx_0" | "dx_1" => DX,
@@ -1073,6 +1101,7 @@ fn off_center_cylindrical_drain_masks_a_ball_around_a_cartesian_point() {
             "body_0_pos_0" => CENTER[0],
             "body_0_pos_1" => CENTER[1],
             "body_0_racc" => RACC_C,
+            "c_a2" => 0.0,
             other => panic!("unexpected '{other}'"),
         }
     };

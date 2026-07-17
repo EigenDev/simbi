@@ -53,6 +53,7 @@ pub mod proof;
 // typed kernel registry names for the amr-transfer / field-op family.
 pub mod kernel_id;
 pub mod support;
+pub mod support_infer;
 
 // Layer 0 universal primitives — categorical structures over the substrate:
 // variance (re-exported), Scope/Scoped (multi-rank discipline), LinearSpace
@@ -70,7 +71,8 @@ pub use kernel_id::{KernelId, ProlongTag};
 
 // carrier-side surface
 pub use gv::{
-    Gv, GvKernel, GvTrace, TileSpec, begin_trace, end_trace, in_isolated_trace, with_trace,
+    Gv, GvKernel, GvTrace, TileSpec, begin_trace, end_trace, in_isolated_trace, tag_support_ball,
+    with_trace,
 };
 
 // IR data surface

@@ -31,7 +31,7 @@ use symbi_hydro::state::ConsG;
 use symbi_ib::penalize::{penalize_cell, BodyKin, Property, Relax};
 use symbi_ib::sdf::SdfExpr;
 use symbi_ir::gv::Writes;
-use symbi_ir::{Gv, GvKernel, ParamExpr, Support};
+use symbi_ir::{Gv, GvKernel, ParamExpr};
 
 /// the wall/drain relaxation signal speed: the FAST MAGNETOSONIC speed `sqrt(c_s^2 + c_a^2)`,
 /// with `c_a^2 = |B|^2 / rho` bound as the runtime `c_a2` scalar (the max over the interior, so the
@@ -219,37 +219,42 @@ fn body_mask_sdf_spinning(center: [Gv; 3], shape: &SdfExpr<f64, 3>) -> SdfExpr<G
     shape.lift(&|c| Gv::from_f64(c)).rotated(rot).translated(center)
 }
 
-/// the dispatch output support for a body penalization kernel: the mask ball padded by
-/// `DRAIN_SUPPORT_WIDTHS` cell widths, beyond which the tanh chi (and hence every delta and
-/// the in-place cons write) is unchanged-valued. derived from the SAME geometry the mask SDF
-/// traces, so support and mask describe one region.
-fn body_support(ndim: usize) -> Support {
-    body_support_shaped(ndim, None)
-}
-
-/// the support for an optionally-shaped body. `None`: the sphere ball at `body_0_pos_*` of
-/// runtime radius `body_0_racc`. `Some(shape)`: the shape's bounding ball — a body-LOCAL
-/// constant center + radius — translated to the runtime body position. a complement is
-/// unbounded and has no ball, so a shaped body must be bounded.
-fn body_support_shaped(ndim: usize, shape: Option<&SdfExpr<f64, 3>>) -> Support {
+/// the saturation lemma at the mask seam: `chi = 0.5(1 - tanh(phi/w))` is
+/// exactly zero in f64 once `phi > DRAIN_SUPPORT_WIDTHS * w`, so the mask is
+/// supported by its geometry's bounding ball padded by that many cell widths.
+/// tagging chi HERE (where the mask is built) lets `with_derived_support`
+/// propagate the ball to every write — support and mask cannot drift apart.
+/// the ball is a COORDINATE-space region: only the identity chart can spell
+/// the cartesian mask ball in grid coordinates, so curvilinear kernels stay
+/// untagged and derive Everywhere (dispatch already falls back to the whole
+/// interior off-cartesian). a SPINNING shape sweeps every orientation about
+/// the body position, so its ball is position-centered with the body-local
+/// offset folded into the radius.
+fn tag_body_mask(chi: &Gv, coords: Coords, ndim: usize, shape: Option<&SdfExpr<f64, 3>>, spin: bool) {
+    if coords != Coords::Cartesian {
+        return;
+    }
     let pad = ParamExpr::constant(crate::ibm::DRAIN_SUPPORT_WIDTHS)
         * ParamExpr::min_of((0..ndim).map(|a| ParamExpr::param(&format!("dx_{a}"))).collect());
-    match shape {
-        None => {
-            let center_p: Vec<ParamExpr> =
-                (0..ndim).map(|a| ParamExpr::param(&format!("body_0_pos_{a}"))).collect();
-            Support::ball(center_p, ParamExpr::param("body_0_racc") + pad)
-        }
+    let pos = |a: usize| ParamExpr::param(&format!("body_0_pos_{a}"));
+    let (center, radius) = match shape {
+        None => ((0..ndim).map(pos).collect(), ParamExpr::param("body_0_racc") + pad),
         Some(s) => {
             let (lc, lr) = s
                 .bounding_ball()
                 .expect("a shaped immersed body must be bounded (a complement has no support ball)");
-            let center_p: Vec<ParamExpr> = (0..ndim)
-                .map(|a| ParamExpr::param(&format!("body_0_pos_{a}")) + ParamExpr::constant(lc[a]))
-                .collect();
-            Support::ball(center_p, ParamExpr::constant(lr) + pad)
+            if spin {
+                let lc_norm = (lc[0] * lc[0] + lc[1] * lc[1] + lc[2] * lc[2]).sqrt();
+                ((0..ndim).map(pos).collect(), ParamExpr::constant(lr + lc_norm) + pad)
+            } else {
+                (
+                    (0..ndim).map(|a| pos(a) + ParamExpr::constant(lc[a])).collect(),
+                    ParamExpr::constant(lr) + pad,
+                )
+            }
         }
-    }
+    };
+    symbi_ir::tag_support_ball(chi, center, radius);
 }
 
 /// the 2.5D immersed-body OHMIC RESISTIVE edge EMF: adds a body-LOCALIZED resistive current
@@ -287,10 +292,12 @@ pub fn body_resistive_emf_2d_gv(coords: Coords) -> (GvKernel, Writes) {
     let min_w = dx0.min(dx1);
     let phi = body_mask_sdf(center).dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
+    tag_body_mask(&chi, coords, ndim, None, false);
 
     let ez_new = ez + eta * chi * jz;
-    let kernel = end_trace().with_output_support(body_support(ndim));
-    (kernel, vec![("ez_new".to_string(), "ez".into(), ez_new.node())])
+    let writes: Writes = vec![("ez_new".to_string(), "ez".into(), ez_new.node())];
+    let kernel = end_trace().with_derived_support(&writes);
+    (kernel, writes)
 }
 
 /// the 3D cartesian body-masked Ohmic resistive edge EMF along edge `dir`: adds `eta * chi * J_dir`
@@ -335,10 +342,12 @@ pub fn body_resistive_emf_3d_dir_gv(dir: usize, coords: Coords) -> (GvKernel, Wr
     let min_w = dx.iter().copied().reduce(|a, b| a.min(b)).unwrap();
     let phi = body_mask_sdf(center).dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
+    tag_body_mask(&chi, coords, ndim, None, false);
 
     let emf_new = emf + eta * chi * j;
-    let kernel = end_trace().with_output_support(body_support(ndim));
-    (kernel, vec![("emf_new".to_string(), "emf".into(), emf_new.node())])
+    let writes: Writes = vec![("emf_new".to_string(), "emf".into(), emf_new.node())];
+    let kernel = end_trace().with_derived_support(&writes);
+    (kernel, writes)
 }
 
 /// trace the [Drain]-stack penalization for the adiabatic regime, cartesian. `ndim` is the SPATIAL
@@ -383,6 +392,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, 
     let sphere = body_mask_sdf(center);
     let phi = sphere.dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
+    tag_body_mask(&chi, coords, ndim, None, false);
 
     // tau = c_drain dx / c_s with c_s from the just-updated conserved state
     // (the drain runs post-godunov, pre-c2p — the stored primitive is stale).
@@ -443,7 +453,7 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKernel, 
     // the delta outputs vanish exactly beyond the tanh saturation radius; the
     // in-place cons writes are unchanged-value there, so the ball bounds
     // everything the reduction needs (dispatch may clip to it).
-    let kernel = end_trace().with_output_support(body_support(ndim));
+    let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
 
@@ -534,6 +544,7 @@ fn penalize_porous_inner(
     };
     let phi = sdf.dist(x);
     let chi = symbi_ib::sdf::chi(phi, min_w);
+    tag_body_mask(&chi, coords, ndim, shape, spin);
 
     let mut mom_sq = Gv::ZERO;
     for m in &mom {
@@ -641,7 +652,7 @@ fn penalize_porous_inner(
         ));
     }
 
-    let kernel = end_trace().with_output_support(body_support_shaped(ndim, shape));
+    let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
 
@@ -689,6 +700,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (
     });
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
+    tag_body_mask(&chi, coords, ndim, None, false);
     let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
     // the outward surface normal in the cell's PHYSICAL frame: the Cartesian
@@ -750,7 +762,7 @@ pub fn penalize_torque_free_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (
         ));
     }
 
-    let kernel = end_trace().with_output_support(body_support(ndim));
+    let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
 
@@ -823,6 +835,7 @@ fn penalize_porous_iso_inner(
         body_mask_sdf_shaped(center, shape)
     };
     let chi = symbi_ib::sdf::chi(sdf.dist(x), min_w);
+    tag_body_mask(&chi, coords, ndim, shape, spin);
     let inv_tau = signal_speed(cs) / (c_drain * min_w);
     let rate_scale = signal_speed(cs) / min_w;
 
@@ -905,7 +918,7 @@ fn penalize_porous_iso_inner(
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
     }
 
-    let kernel = end_trace().with_output_support(body_support_shaped(ndim, shape));
+    let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
 
@@ -941,6 +954,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKe
     let x: [Gv; 3] = std::array::from_fn(|a| if a < ndim { x_cart[a] } else { Gv::ZERO });
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
+    tag_body_mask(&chi, coords, ndim, None, false);
 
     let mut mom_sq = Gv::ZERO;
     for m in &mom {
@@ -993,7 +1007,7 @@ pub fn penalize_torque_free_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKe
         writes.push((format!("pen_torque_{a}"), format!("pen_0_torque_{a}").into(), torque[a].node()));
     }
 
-    let kernel = end_trace().with_output_support(body_support(ndim));
+    let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
 
@@ -1032,6 +1046,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKern
     });
     let sphere = body_mask_sdf(center);
     let chi = symbi_ib::sdf::chi(sphere.dist(x), min_w);
+    tag_body_mask(&chi, coords, ndim, None, false);
     let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
     let kin = BodyKin::<Gv, 3> {
@@ -1075,7 +1090,7 @@ pub fn penalize_drain_iso_gv(coords: Coords, ndim: usize, dof: usize) -> (GvKern
         ));
     }
 
-    let kernel = end_trace().with_output_support(body_support(ndim));
+    let kernel = end_trace().with_derived_support(&writes);
     (kernel, writes)
 }
 

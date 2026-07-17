@@ -14,7 +14,7 @@
 
 use symbi_aot::{kernel_by_name, CpuField, CpuFieldMut};
 use symbi_algebra::Tensor;
-use symbi_geometry::{Metric, SchwarzschildKSCartesian};
+use symbi_geometry::{KerrKSCartesian, Metric};
 use symbi_hydro::eos::IdealGas;
 use symbi_hydro::regime::Regime;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
@@ -39,7 +39,10 @@ fn xc(ii: usize) -> f64 {
 }
 
 fn to_conserved_at(xx: f64, yy: f64, prim: &Prim<f64, 2>) -> symbi_hydro::state::Cons<f64, 2> {
-    let m = SchwarzschildKSCartesian { mass: MASS };
+    // the same metric carrier the baked kernel traces (kerr-schild at a = 0):
+    // algebraically the schwarzschild form, bitwise the kerr evaluation path —
+    // the bit-exactness law requires the identical f64 operation sequence.
+    let m = KerrKSCartesian { mass: MASS, spin: 0.0 };
     let x = Tensor::new([xx, yy]);
     let metric = SpatialMetric::<f64, 2>::new(
         Gamma::new(m.spatial_metric(x)),
@@ -101,6 +104,9 @@ fn run_compiled(g: &mut Grid) {
         match name {
             "gamma" => GAMMA,
             "schwarzschild_mass" => MASS,
+            // a = 0: the kerr-schild radius reduces to the euclidean radius,
+            // matching the f64 oracle's disk criterion.
+            "kerr_spin" => 0.0,
             "excision_radius" => R_EXC,
             "x_lo_0" | "x_lo_1" => X_LO,
             "dx_0" | "dx_1" => DX,
@@ -202,14 +208,18 @@ fn run_reference(g: &mut Grid) {
                         at(&pre, ii + di, jj + dj),
                     ]
                 };
+                // the excision mask at this cell: the a = 0 kerr-schild radius
+                // equals the euclidean radius, so the disk test is exact here.
+                let (x, y) = (xc(ii as usize), xc(jj as usize));
+                let excised = x * x + y * y < R_EXC * R_EXC;
                 let filled = onion_fill_cell(
                     st(0, 0),
                     st(1, 1),
                     st(1, -1),
                     st(-1, 1),
                     st(-1, -1),
-                    [xc(ii as usize), xc(jj as usize)],
-                    R_EXC,
+                    [x, y],
+                    excised,
                 );
                 let c = ii as usize + jj as usize * N;
                 g.rho[c] = filled[0];

@@ -62,6 +62,10 @@ pub struct GvKernel {
     /// into the serialized `Prepared` blob, consumed by dispatch (reduction /
     /// launch regions). `None` = Everywhere (always sound).
     pub output_support: Option<crate::support::Support>,
+    /// builder-tagged support balls by node, carried from the trace for
+    /// `with_derived_support` propagation. build-time metadata only — never
+    /// serialized, dropped by fusion (fused kernels derive before fusing).
+    pub node_supports: std::collections::HashMap<NodeId, crate::support_infer::SupportBall>,
 }
 
 /// shared-memory tile spec for stencil kernels. names the fields to prefetch
@@ -209,6 +213,11 @@ pub struct GvTrace {
     scalar_keys: HashSet<String>,
     coord_components: Vec<u8>,
     coord_nodes: HashMap<u8, NodeId>,
+    /// builder-tagged support balls by node: "this node is exactly zero
+    /// outside the ball" (the saturation lemma, asserted where the mask is
+    /// built, validated by the compiled-kernel sampler). consumed by
+    /// `with_derived_support`.
+    node_supports: HashMap<NodeId, crate::support_infer::SupportBall>,
 }
 
 thread_local! {
@@ -226,6 +235,7 @@ pub fn begin_trace() {
             scalar_keys: HashSet::new(),
             coord_components: Vec::new(),
             coord_nodes: HashMap::new(),
+            node_supports: HashMap::new(),
         });
     });
 }
@@ -259,7 +269,24 @@ pub fn end_trace_with(grade: LaunchGrade) -> GvKernel {
         grade,
         tile_spec: None,
         output_support: None,
+        node_supports: t.node_supports,
     }
+}
+
+/// tag a traced value with a support ball: the builder asserts the value is
+/// exactly zero (f64) outside |x - center| > radius for EVERY field input —
+/// the saturation lemma, stated where the mask that makes it true is built.
+/// consumed by `GvKernel::with_derived_support`, which propagates tags to the
+/// write roots; validated downstream by the compiled-kernel support sampler.
+pub fn tag_support_ball(v: &Gv, center: Vec<crate::support::ParamExpr>, radius: crate::support::ParamExpr) {
+    GV_TRACE.with(|t| {
+        let mut b = t.borrow_mut();
+        let tr = b.as_mut().expect("tag_support_ball outside an active trace");
+        tr.node_supports.insert(
+            v.node(),
+            crate::support_infer::SupportBall { center, radius },
+        );
+    });
 }
 
 /// run `f` in a FRESH, isolated trace and return the finished (untagged) kernel + `f`'s result.
@@ -334,6 +361,7 @@ impl GvKernel {
                 grade,
                 tile_spec: None,
                 output_support: None,
+                node_supports: std::collections::HashMap::new(),
             },
             Vec::new(),
         )
@@ -390,6 +418,24 @@ impl GvKernel {
         }
         self.output_support = Some(support);
         self
+    }
+
+    /// derive the output support from the trace's tagged mask nodes by
+    /// propagation over the graph (`support_infer`), then declare it. a broken
+    /// mask chain or an untagged trace derives Everywhere — fail-safe wide,
+    /// never a stale narrow ball. ball params are manifest-validated exactly
+    /// as a hand declaration would be.
+    pub fn with_derived_support(self, writes: &Writes) -> Self {
+        let support = crate::support_infer::derive_output_support(
+            &self.graph,
+            &self.node_supports,
+            &self.field_inputs,
+            writes,
+        );
+        match support {
+            crate::support::Support::Everywhere => self,
+            s => self.with_output_support(s),
+        }
     }
 }
 
@@ -564,6 +610,9 @@ pub fn try_fuse(
         // a.tile_spec == b.tile_spec, so either side's value serves.
         tile_spec: a.tile_spec,
         output_support,
+        // node tags do not survive fusion: derivation happens at build time,
+        // before fusing, and the fused support is the declared-union above.
+        node_supports: HashMap::new(),
     };
 
     // writes: a's preserved verbatim (target started as a's graph clone),
