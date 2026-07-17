@@ -351,7 +351,11 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim.fields.prim.pre_field().expect("Rhd requires prim.pre");
         let geom_sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
-        let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
+        // the dragging-consistent w-copy is a spherical-azimuth construct (gamma_{r phi} on the
+        // swirl DOF); the cartesian kerr chart has DOF == D and copies the raw prims like any
+        // other background.
+        let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr)
+            && sim.geom.coords == symbi_geometry::Geometry::Spherical;
         let name = if is_kerr {
             format!("rhd_ghost_fill{geom_sfx}_kerr_{D}d")
         } else {

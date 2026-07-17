@@ -20,6 +20,6 @@ pub mod motion;
 pub mod block;
 
 pub use coord_map::{CellInterval, CoordMap, UniformMap, LogMap};
-pub use metric::{DiagonalMetric, Metric, Geometry, Spacetime, Cartesian, Spherical, Cylindrical, CylindricalRPhi, Schwarzschild, KerrKS, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+pub use metric::{DiagonalMetric, Metric, Geometry, Spacetime, Cartesian, Spherical, Cylindrical, CylindricalRPhi, Schwarzschild, KerrKS, KerrKSCartesian, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 pub use motion::MotionState;
 pub use block::{BlockGeometry, AxisMap};

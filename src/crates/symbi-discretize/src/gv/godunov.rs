@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
 use symbi_algebra::Tensor;
 use symbi_ir::dual::Dual;
@@ -745,6 +745,12 @@ pub fn godunov_stage_gv_with_fused_built(
                     Spacetime::KerrSchild => {
                         grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pp, b)
                     }
+                    Spacetime::Kerr if coords == Coords::Cartesian => {
+                        // cartesian spinning kerr: the rank-1 kerr-schild metric at the FULL
+                        // cartesian position; derivatives ride the same autodiff Dual pass.
+                        let spin = Dual::constant(Gv::scalar("kerr_spin"));
+                        grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pp, b)
+                    }
                     Spacetime::Kerr => {
                         // the generic covariant stress contraction S_j = (1/2) T^{mu nu} d_j g_{mu nu}
                         // with the EM stress; the non-diagonal kerr metric enters only through the
@@ -767,6 +773,10 @@ pub fn godunov_stage_gv_with_fused_built(
                         grhd_covariant_source(&SchwarzschildKSCylindrical { mass }, x, e, v, pp)
                     }
                     Spacetime::KerrSchild => grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pp),
+                    Spacetime::Kerr if coords == Coords::Cartesian => {
+                        let spin = Dual::constant(Gv::scalar("kerr_spin"));
+                        grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pp)
+                    }
                     Spacetime::Kerr => {
                         let spin = Dual::constant(Gv::scalar("kerr_spin"));
                         grhd_covariant_source(&KerrKS { mass, spin }, x, e, v, pp)

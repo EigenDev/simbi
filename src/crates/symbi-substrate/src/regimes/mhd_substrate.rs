@@ -337,7 +337,9 @@ pub(crate) fn ghost_fill<const D: usize, const DOF: usize, Mem, Sc>(
 
     // spinning kerr: the frame-dragging ghost (velocity w = v^phi + q v^r AND cell B^phi w_B copy),
     // which reads the metric mass/spin + the radial grid map beyond the generic vel_sign reflect.
-    let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr);
+    // spherical-azimuth only: the cartesian kerr chart has no coordinate azimuth and copies raw prims.
+    let is_kerr = matches!(sim.geom.spacetime, symbi_geometry::Spacetime::Kerr)
+        && sim.geom.coords == symbi_geometry::Geometry::Spherical;
     let gname = if is_kerr {
         format!("rmhd_ghost_fill{}_{D}d", spacetime_slug(sim.geom.spacetime))
     } else if has_energy {

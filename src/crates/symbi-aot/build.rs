@@ -1360,6 +1360,26 @@ fn gen_rmhd_ct_curl_2d_sph(out_dir: &str, dir: u8, geom: &Geom) {
 // metric-contracted energy patch. one gen per (spacing, spacetime) instance.
 // the GR face->cell interpolation alone (every GR MHD row needs it — the corrector runs at
 // ANY dimension; the edge/curl kernels exist only where CT edges do).
+// the FULL-3D curved-spacetime CT set: the densitized contact corner EMF per edge axis
+// (rmhd_edge_emf{st}_3d_{k}, name_k == dir on the identity chart) + the densitized face-B
+// curl per face axis (rmhd_ct_curl_3d_{dir}{st}) + the face->cell interpolation. the UCT
+// edge families are unbaked at 3D GR (an unbaked name fails loud at dispatch).
+fn gen_rmhd_ct_gr_3d(out_dir: &str, geom: &Geom) {
+    let gs = mhd_geom_slug(geom);
+    let st = geom.spacetime_suffix();
+    for dir in 0..3usize {
+        let (k, w) = symbi_discretize::gv::rmhd_edge_emf_gr_3d_gv(
+            dir, geom.spacetime, geom.coords, &geom.spacing,
+        );
+        emit_gv(out_dir, &format!("rmhd_edge_emf{gs}{st}_3d_{dir}"), 3, &k, &w);
+        let (k, w) = symbi_discretize::gv::rmhd_ct_curl_3d_gr_dir_gv(
+            dir, geom.spacetime, geom.coords, &geom.spacing,
+        );
+        emit_gv(out_dir, &format!("rmhd_ct_curl_3d_{dir}{gs}{st}"), 3, &k, &w);
+    }
+    gen_rmhd_bcell_from_bface_gr(out_dir, 3, geom);
+}
+
 fn gen_rmhd_bcell_from_bface_gr(out_dir: &str, ndim: u8, geom: &Geom) {
     let name = format!(
         "rmhd_bcell_from_bface{}{}_{ndim}d",
@@ -1481,7 +1501,9 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     let name = format!("rhd_wave_speed_map{}{}_{ndim}d", geom.suffix(), geom.spacetime_suffix());
     // spinning kerr uses the coordinate light-cone map (state-independent; the theta-dependent
     // lapse + non-diagonal gamma^{rr} break the radial-only backgrounds' factored BF form).
-    let (k, writes) = if geom.spacetime == Spacetime::Kerr {
+    // the spherical swirl keeps its dedicated (r, theta) instance; the cartesian kerr chart
+    // rides the generic light-cone map below (full-position metric, shift on every axis).
+    let (k, writes) = if geom.spacetime == Spacetime::Kerr && geom.coords == Coords::Spherical {
         symbi_discretize::gv::kerr_wave_speed_map_gv(geom.coords, &geom.spacing, &geom.axes, ndim as usize)
     } else if geom.coords != Coords::Spherical && geom.spacetime != Spacetime::Minkowski {
         // non-spherical GR (cartesian, cylindrical): the non-diagonal gamma + multi-axis shift break
@@ -1871,6 +1893,22 @@ fn main() {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks.clone());
         }
     }
+    // SPINNING KERR on the CARTESIAN chart (`_kerr`, cartesian suffix empty): the rank-1
+    // kerr-schild metric gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius,
+    // spin about z. no polar axis, no coordinate ring except the physical one; alpha sqrt(gamma)
+    // = 1 (the null l preserves the determinant), so the flat cartesian volume + the explicit
+    // alpha weight carry the densitization exactly as the a = 0 chart. the frame dragging enters
+    // through the swirl components of l (no extra momentum DOF: DOF == D on this chart). the
+    // 2D instance is the exact equatorial slice (l_z = 0 at z = 0). same kernel family as the
+    // a = 0 cartesian loop; the covariant geodesic source rides the autodiff Dual pass.
+    for (kg, ndim) in [(Geom::cart(2).kerr(), 2u8), (Geom::cart(3).kerr(), 3u8)] {
+        gen_godunov_stage(&out_dir, ndim, "rhd", true, kg.clone(), None);
+        gen_rhd_wave_speed_map(&out_dir, ndim, kg.clone());
+        gen_rhd_c2p_gr(&out_dir, ndim, 20, kg.clone());
+        for dir in 0..ndim {
+            gen_rhd_face_flux_gr(&out_dir, ndim, dir, kg.clone());
+        }
+    }
     // GR CYLINDRICAL kerr-schild (design 45): the natural chart for AXISYMMETRIC relativistic
     // jets / disks around a hole. r = sqrt(R^2 + z^2) (the spherical radius) drives the KS block +
     // lapse; the cylindrical R drives the measure (alpha sqrt(gamma) = R). the kerr-schild structure
@@ -1989,27 +2027,32 @@ fn main() {
     // densitized corner EMF. div(B) is preserved by the coordinate curl of the densitized EMF
     // Etilde = sqrt(gamma) E divided by the per-face sqrt(gamma) weight (Font eq. 101), which
     // telescopes for any weight. the covariant geodesic + EM-stress source carries the gravity.
-    for geom in [Geom::cart(2).kerr_schild()] {
-        gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
-        gen_rmhd_wave_speed_map(&out_dir, 2, geom.clone());
-        gen_rmhd_c2p_gr(&out_dir, 2, 100, geom.clone());
-        for dir in 0..2 {
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), false);
-            gen_rmhd_face_flux_gr_mode(&out_dir, 2, dir, geom.clone(), false, true); // FOFC rusanov fallback
+    for (geom, ndim) in [(Geom::cart(2).kerr_schild(), 2u8), (Geom::cart(3).kerr_schild(), 3u8)] {
+        gen_rmhd_godunov_gr(&out_dir, ndim, geom.clone());
+        gen_rmhd_wave_speed_map(&out_dir, ndim, geom.clone());
+        gen_rmhd_c2p_gr(&out_dir, ndim, 100, geom.clone());
+        for dir in 0..ndim {
+            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), false);
+            gen_rmhd_face_flux_gr_mode(&out_dir, ndim, dir, geom.clone(), false, true); // FOFC rusanov fallback
             // the tetrad-frame MUB09 HLLD gas flux: orthonormal_basis(dir) is the full Gram-Schmidt
             // triad of the NON-DIAGONAL cartesian gamma, so the validated flat solver runs in the
             // frame and the intercell flux maps back with the single normal factor E_dd (+ the
             // kerr-schild shift as the moving-interface speed beta^n/alpha + the induction transpose).
-            gen_rmhd_face_flux_gr(&out_dir, 2, dir, geom.clone(), true);
+            gen_rmhd_face_flux_gr(&out_dir, ndim, dir, geom.clone(), true);
         }
-        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), 2);
-        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), 2);
-        gen_rmhd_ct_gr(&out_dir, &geom);
-        gen_rmhd_gr_uct(&out_dir, &geom);
-        // the sharp Alfven-resolving UCT-HLLD wave-sum edge EMF, via the tetrad states fan: the
-        // cartesian (x, y) grid axes are CONTIGUOUS [0,1], so the world-order prim + world solve
-        // direction hold, and the multi-axis moving-interface shift (beta^x, beta^y) rides the fan.
-        gen_rmhd_gr_uct_hlld(&out_dir, &geom);
+        gen_rmhd_bcell_godunov_euler(&out_dir, geom.clone(), ndim);
+        gen_rmhd_bcell_godunov_rk2(&out_dir, geom.clone(), ndim);
+        if ndim == 2 {
+            gen_rmhd_ct_gr(&out_dir, &geom);
+            gen_rmhd_gr_uct(&out_dir, &geom);
+            // the sharp Alfven-resolving UCT-HLLD wave-sum edge EMF, via the tetrad states fan: the
+            // cartesian (x, y) grid axes are CONTIGUOUS [0,1], so the world-order prim + world solve
+            // direction hold, and the multi-axis moving-interface shift (beta^x, beta^y) rides the fan.
+            gen_rmhd_gr_uct_hlld(&out_dir, &geom);
+        } else {
+            // full 3D: contact CT only (the UCT families fail loud via the unbaked name).
+            gen_rmhd_ct_gr_3d(&out_dir, &geom);
+        }
     }
     // GRMHD in the cylindrical kerr-schild charts (design 45): the equatorial (R, phi) DISK (DIAGONAL
     // on the equator, r = R, gamma = diag(1 + 2M/R, R^2), beta^phi = 0, out-of-plane corner EMF the

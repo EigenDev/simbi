@@ -8,7 +8,7 @@ use super::*;
 use symbi_hydro::rhd::RhdGr;
 use symbi_hydro::RmhdGr;
 use symbi_hydro::spatial_metric::{Gamma, GammaInv, SpatialMetric};
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 
 
 /// trace the newtonian-MHD face flux — PLM-reconstruct the 8-component MHD
@@ -326,6 +326,7 @@ where
     Schwarzschild<Gv>: Metric<Gv, D>,
     SchwarzschildKS<Gv>: Metric<Gv, D>,
     SchwarzschildKSCartesian<Gv>: Metric<Gv, D>,
+    KerrKSCartesian<Gv>: Metric<Gv, D>,
     SchwarzschildKSCylindrical<Gv>: Metric<Gv, D>,
     KerrKS<Gv>: Metric<Gv, D>,
 {
@@ -372,6 +373,13 @@ where
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
         }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update
+        // gamma_ij = delta_ij + 2H l_i l_j with the oblate-spheroidal radius; non-diagonal
+        // gamma + shift on every axis, DOF == D (the frame dragging rides the swirl of l).
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), m.shift(x))
+        }
         (Spacetime::Kerr, _) => {
             // spinning kerr: non-diagonal gamma_{r phi} at the face — swirl (D = 3) only.
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
@@ -389,8 +397,10 @@ where
     // cell's VOLUME-WEIGHTED centroid — the exact position the c2p inverted the metric at, so the
     // cell-wise cancellation transfers to the stencil values at roundoff; the face coefficient
     // comes from the SAME face matrices the riemann states lower with. gamma_{r phi} vanishes for
-    // every other background, so this block is kerr-only.
-    let (left, right) = if spacetime == Spacetime::Kerr {
+    // every other background, so this block is kerr-only — and SPHERICAL-swirl-only: the cartesian
+    // kerr chart has DOF == D and no coordinate azimuth, so it reconstructs the raw v^i (the
+    // dragging profile enters the limited slopes at truncation level, which converges away).
+    let (left, right) = if spacetime == Spacetime::Kerr && coords == Coords::Spherical {
         assert!(D == 3, "the kerr flux carries the swirl DOF");
         let mass = Gv::scalar("schwarzschild_mass");
         let spin = Gv::scalar("kerr_spin");
@@ -461,7 +471,9 @@ where
     // carries beta^i on every axis, so every sweep is shifted. a zero beta^n reduces to the plain
     // HLL bit-identically. mesh motion (vface) never composes with a curved spacetime in the bake.
     let shifted = match (spacetime, coords) {
-        (Spacetime::KerrSchild, Coords::Cartesian) => true,
+        // cartesian kerr-schild charts (a = 0 and spinning): beta^i = (2H/(1 + 2H |l|^2)) l_i
+        // is nonzero on EVERY axis, so every sweep carries the shift.
+        (Spacetime::KerrSchild | Spacetime::Kerr, Coords::Cartesian) => true,
         // cylindrical: beta^R (coord 0) and beta^z (coord 2) are nonzero, beta^phi (coord 1) = 0
         // (a = 0, no frame dragging), so every sweep EXCEPT the azimuthal carries the shift.
         (Spacetime::KerrSchild, Coords::Cylindrical) => coord_n != 1,
@@ -790,6 +802,16 @@ pub fn rmhd_flux_gr_gv(
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)
+            // and a radial shift (the moving-interface fan handles it). the flux is otherwise
+            // metric-generic. the azimuthal momentum (swirl DOF) carries the frame dragging.
+            let spin = Gv::scalar("kerr_spin");
+            let m = KerrKSCartesian { mass, spin };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
         (Spacetime::Kerr, _) => {
             // spinning kerr (ingoing kerr-schild): NON-DIAGONAL gamma_{r phi} (the tetrad handles it)
             // and a radial shift (the moving-interface fan handles it). the flux is otherwise
@@ -807,7 +829,8 @@ pub fn rmhd_flux_gr_gv(
     // limited slopes and generates S_phi at truncation level. mirrors the RHD GR flux. kerr-only
     // (gamma_{r phi} vanishes elsewhere). the per-offset q is at each cell's volume-weighted centroid
     // (the c2p metric point), the face q from the SAME face matrix the riemann states lower with.
-    let (left, right) = if spacetime == Spacetime::Kerr {
+    // spherical-swirl-only: the cartesian kerr chart reconstructs the raw v^i (no coordinate azimuth).
+    let (left, right) = if spacetime == Spacetime::Kerr && coords == Coords::Spherical {
         let spin = Gv::scalar("kerr_spin");
         let geo_c = cell_geometry_gv(coords, spacing, axes, ndim);
         let q_at = |off: i32| -> Gv {

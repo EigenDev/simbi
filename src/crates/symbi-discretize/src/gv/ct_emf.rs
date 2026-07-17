@@ -15,7 +15,7 @@ use super::*;
 /// vanishes identically and the generic form reduces to the single-shift spherical EMF.
 fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv, Tensor<Gv, 3>) {
     use symbi_geometry::{
-        KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+        KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
         SchwarzschildKSCylindrical,
     };
     let mass = Gv::scalar("schwarzschild_mass");
@@ -38,6 +38,11 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
             adm!(SchwarzschildKSCylindrical { mass }, SchwarzschildKSCylindrical<Gv>)
         }
         (Spacetime::KerrSchild, _) => adm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            adm!(KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") }, KerrKSCartesian<Gv>)
+        }
         (Spacetime::Kerr, _) => {
             adm!(KerrKS { mass, spin: Gv::scalar("kerr_spin") }, KerrKS<Gv>)
         }
@@ -53,7 +58,7 @@ fn gr_adm_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> (Gv, Gv,
 /// [`gr_adm_at`]; the orthonormal_basis(dir) Gram-Schmidt of this gamma is the tetrad.
 fn gr_spatial_metric_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) -> SpatialMetric<Gv, 3> {
     use symbi_geometry::{
-        KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
+        KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian,
         SchwarzschildKSCylindrical,
     };
     let mass = Gv::scalar("schwarzschild_mass");
@@ -75,6 +80,9 @@ fn gr_spatial_metric_at(spacetime: Spacetime, coords: Coords, x: Tensor<Gv, 3>) 
             sm!(SchwarzschildKSCylindrical { mass }, SchwarzschildKSCylindrical<Gv>)
         }
         (Spacetime::KerrSchild, _) => sm!(SchwarzschildKS { mass }, SchwarzschildKS<Gv>),
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::Kerr, Coords::Cartesian) => sm!(KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") }, KerrKSCartesian<Gv>),
         (Spacetime::Kerr, _) => sm!(KerrKS { mass, spin: Gv::scalar("kerr_spin") }, KerrKS<Gv>),
         (Spacetime::Minkowski, _) => {
             unreachable!("the GR CT stack is baked only for a curved spacetime")
@@ -1987,4 +1995,138 @@ pub fn fofc_emf_splice_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(
     let e_ho = Gv::field("e_ho", "e_ho");
     let chosen = Gv::select(edge_fo, e_fo, e_ho);
     (end_trace(), vec![("e_fo".to_string(), "e_fo".into(), chosen.node())])
+}
+
+/// the CURVED-SPACETIME CT edge EMF for the FULL 3D grid, along edge axis `dir` — the contact
+/// assembly of [`rmhd_edge_emf_gv`] producing the DENSITIZED corner EMF the GR curl consumes:
+///   cell terms:  sqrt(gamma)|cell x [(alpha v_p2 - beta_p2) b_p1 - (alpha v_p1 - beta_p1) b_p2]
+///   face terms:  alpha sqrt(gamma)|face x (raw mag-row flux)
+/// every gather point carries the metric factors at ITS OWN 3d position: the edge is
+/// cell-centered along `dir` and cornered on the transverse axes (g1, g2) = (dir+1, dir+2) mod 3;
+/// cells sit at arithmetic centers, the bflux_a points on the g1-faces, the bflux_b points on the
+/// g2-faces. the density fluxes stay RAW (the soft-sign blend uses only their signs, and the
+/// alpha sqrt(gamma) measure is positive). identity chart only: physical component == grid axis,
+/// so the shift components are addressed directly by (g1, g2).
+pub fn rmhd_edge_emf_gr_3d_gv(
+    dir: usize,
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let ndim = 3usize;
+    let g1 = (dir + 1) % 3;
+    let g2 = (dir + 2) % 3;
+    gv_register_field("edge_vp1", "vel_p1");
+    gv_register_field("edge_vp2", "vel_p2");
+    gv_register_field("edge_bp1", "bcell_p1");
+    gv_register_field("edge_bp2", "bcell_p2");
+    gv_register_field("edge_bflux_a", "bflux_a");
+    gv_register_field("edge_bflux_b", "bflux_b");
+    gv_register_field("edge_fden_p1", "fden_p1");
+    gv_register_field("edge_fden_p2", "fden_p2");
+    let cm = |axes: &[usize]| -> Vec<i32> {
+        let mut o = vec![0i32; ndim];
+        for &ax in axes {
+            o[ax] = -1;
+        }
+        o
+    };
+    let zero = vec![0i32; ndim];
+    let half = Gv::from_f64(0.5);
+    // per-axis coordinates: faces at integer offsets, arithmetic cell centers between them.
+    let a_f = |ax: usize, o: i64| gv_axis_face_at(ax, spacing[ax], o);
+    let a_c = |ax: usize, o: i64| (a_f(ax, o) + a_f(ax, o + 1)) * half;
+    // a full 3d position: cell-centered along `dir`; the transverse coords supplied per point.
+    let pos = |c_g1: Gv, c_g2: Gv| -> Tensor<Gv, 3> {
+        let mut x = [Gv::ZERO; 3];
+        x[dir] = a_c(dir, 0);
+        x[g1] = c_g1;
+        x[g2] = c_g2;
+        Tensor::new(x)
+    };
+    let adm = |c_g1: Gv, c_g2: Gv| -> (Gv, Gv, Gv, Gv) {
+        let (alpha, sqrtg, beta) = gr_adm_at(spacetime, coords, pos(c_g1, c_g2));
+        (alpha, sqrtg, beta[g1], beta[g2])
+    };
+    // densitized cell EMF at the cell whose LOW corner offset (on g1, g2) is `o`.
+    let cell = |o: &[i32]| -> Gv {
+        let (alpha, sqrtg, beta_p1, beta_p2) =
+            adm(a_c(g1, o[g1] as i64), a_c(g2, o[g2] as i64));
+        let vp1 = gv_field_at("edge_vp1", "vel_p1", ndim, o);
+        let vp2 = gv_field_at("edge_vp2", "vel_p2", ndim, o);
+        let bp1 = gv_field_at("edge_bp1", "bcell_p1", ndim, o);
+        let bp2 = gv_field_at("edge_bp2", "bcell_p2", ndim, o);
+        sqrtg * ((alpha * vp2 - beta_p2) * bp1 - (alpha * vp1 - beta_p1) * bp2)
+    };
+    let ene = cell(&zero);
+    let enw = cell(&cm(&[g1]));
+    let ese = cell(&cm(&[g2]));
+    let esw = cell(&cm(&[g1, g2]));
+    // densitized face EMFs: alpha sqrt(gamma) at the face's own point times the raw flux.
+    let asg = |c_g1: Gv, c_g2: Gv| -> Gv {
+        let (alpha, sqrtg, ..) = adm(c_g1, c_g2);
+        alpha * sqrtg
+    };
+    let en = Gv::ZERO - asg(a_f(g1, 0), a_c(g2, 0)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &zero);
+    let es = Gv::ZERO - asg(a_f(g1, 0), a_c(g2, -1)) * gv_field_at("edge_bflux_a", "bflux_a", ndim, &cm(&[g2]));
+    let ee = asg(a_c(g1, 0), a_f(g2, 0)) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &zero);
+    let ew = asg(a_c(g1, -1), a_f(g2, 0)) * gv_field_at("edge_bflux_b", "bflux_b", ndim, &cm(&[g1]));
+    let fnf = gv_field_at("edge_fden_p1", "fden_p1", ndim, &zero);
+    let fs = gv_field_at("edge_fden_p1", "fden_p1", ndim, &cm(&[g2]));
+    let fe = gv_field_at("edge_fden_p2", "fden_p2", ndim, &zero);
+    let fw = gv_field_at("edge_fden_p2", "fden_p2", ndim, &cm(&[g1]));
+    let emf = ct_contact_emf_gv([en, es, ee, ew], [ene, enw, ese, esw], [fnf, fs, fe, fw]);
+    (end_trace(), vec![("emf".to_string(), "emf".into(), emf.node())])
+}
+
+/// the CURVED-SPACETIME 3D CT face-B update along face axis `dir` from the two incident
+/// DENSITIZED edge EMFs: the coordinate curl of Etilde divided by the face's own
+/// sqrt(gamma) — the densitized induction d(sqrt(gamma) B)/dt = -curl(Etilde) solved for
+/// B at the face point, so div(sqrt(gamma) B) is preserved exactly (the coordinate curl
+/// telescopes for any weight).
+pub fn rmhd_ct_curl_3d_gr_dir_gv(
+    dir: usize,
+    spacetime: Spacetime,
+    coords: Coords,
+    spacing: &[Spacing],
+) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
+    begin_trace();
+    let p1 = (dir + 1) % 3;
+    let p2 = (dir + 2) % 3;
+    let b = Gv::field("b", "b");
+    let dt = Gv::scalar("dt");
+    // positional scalar ABI: pin every axis's face coords up front (the runtime pushes the
+    // full geom set in axis order; liveness pruning must not shift the binding).
+    for ax in 0..3 {
+        let _ = gv_axis_face_at(ax, spacing[ax], 0);
+        let _ = gv_axis_face_at(ax, spacing[ax], 1);
+    }
+    let half = Gv::from_f64(0.5);
+    let a_f = |ax: usize, o: i64| gv_axis_face_at(ax, spacing[ax], o);
+    let a_c = |ax: usize| (a_f(ax, 0) + a_f(ax, 1)) * half;
+    // sqrt(gamma) at THIS face's center: on the low dir-face, centered transversely.
+    let face_pos = {
+        let mut x = [Gv::ZERO; 3];
+        x[dir] = a_f(dir, 0);
+        x[p1] = a_c(p1);
+        x[p2] = a_c(p2);
+        Tensor::new(x)
+    };
+    let sqrtg = gr_adm_at(spacetime, coords, face_pos).1;
+    let off = |ax: usize| -> [i32; 3] {
+        let mut o = [0, 0, 0];
+        o[ax] = 1;
+        o
+    };
+    let inv_dx = |ax: usize| Gv::ONE / (a_f(ax, 1) - a_f(ax, 0));
+    let de = |key: &str, runtime: &str, ax: usize| -> Gv {
+        let e_h = gv_field_at(key, runtime, 3, &[0, 0, 0]);
+        let e_p = gv_field_at(key, runtime, 3, &off(ax));
+        (e_p - e_h) * inv_dx(ax)
+    };
+    let de1 = de("e_p1", "e_p1", p2);
+    let de2 = de("e_p2", "e_p2", p1);
+    let b_new = b + dt * (de1 - de2) / sqrtg;
+    (end_trace(), vec![("b_new".to_string(), "b".into(), b_new.node())])
 }

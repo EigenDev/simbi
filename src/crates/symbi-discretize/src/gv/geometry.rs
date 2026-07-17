@@ -5,7 +5,7 @@
 // =============================================================================
 
 use super::*;
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_algebra::Tensor;
 
 
@@ -96,6 +96,17 @@ pub(crate) fn gv_lapse_weight(coords: Coords, spacetime: Spacetime, coord_centro
                 coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
             }));
             Some(SchwarzschildKSCylindrical { mass: Gv::scalar("schwarzschild_mass") }.lapse(x))
+        }
+        // cartesian spinning kerr: alpha = 1/sqrt(1 + 2H |l|^2) at the FULL cartesian position
+        // (the metric solves the oblate-spheroidal radius internally); the radial-slot shortcut
+        // does not exist on this chart.
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            let x = Tensor::<Gv, 3>::new(std::array::from_fn(|c| {
+                coord_centroid.get(c).copied().unwrap_or(Gv::ZERO)
+            }));
+            let mass = Gv::scalar("schwarzschild_mass");
+            let spin = Gv::scalar("kerr_spin");
+            Some(KerrKSCartesian { mass, spin }.lapse(x))
         }
         // spherical charts: r = the radial centroid (coordinate slot 0). the schwarzschild /
         // kerr-schild lapses are radial-only; the spinning-kerr lapse also reads the polar centroid

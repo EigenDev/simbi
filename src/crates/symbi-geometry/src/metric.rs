@@ -1151,6 +1151,134 @@ macro_rules! impl_schwarzschild_ks_cartesian {
 impl_schwarzschild_ks_cartesian!(2);
 impl_schwarzschild_ks_cartesian!(3);
 
+/// kerr in cartesian (ingoing) kerr-schild coordinates, spin about z — horizon-penetrating,
+/// no polar axis, no coordinate ring except the physical one. the metric is the rank-1
+/// kerr-schild update `gamma_ij = delta_ij + 2H l_i l_j` with
+///   r^2 = (R^2 - a^2)/2 + sqrt(((R^2 - a^2)/2)^2 + a^2 z^2),   R^2 = x^2 + y^2 + z^2,
+///   2H  = 2 M r^3 / (r^4 + a^2 z^2),
+///   l   = ((r x + a y)/(r^2 + a^2), (r y - a x)/(r^2 + a^2), z/r),
+/// where the kerr-schild radius r solves the oblate-spheroidal quartic and |l| = 1 wherever
+/// it does. every closed form below uses the ACTUAL |l|^2 (exact rank-1 determinant and
+/// sherman-morrison inverse), so the clamped region stays a consistent positive-definite
+/// metric and the forms are bit-identical to the unit-l ones where the quartic holds.
+/// a = 0 reduces exactly to [`SchwarzschildKSCartesian`]. NOT a `DiagonalMetric`.
+#[derive(Debug, Clone, Copy)]
+pub struct KerrKSCartesian<S> {
+    /// the geometric mass M (G = c = 1); the outer horizon is at r_+ = M + sqrt(M^2 - a^2).
+    pub mass: S,
+    /// the specific angular momentum a = J/M, |a| < M (units of M), spin about +z.
+    pub spin: S,
+}
+
+impl<S: Scalar> KerrKSCartesian<S> {
+    /// (2H, l padded to 3, |l|^2) at a cartesian position (missing axes read z = 0: the
+    /// D = 2 instance is the equatorial slice, where l_z = 0 exactly). the kerr-schild
+    /// radius is clamped to r >= M/2, the same frozen-core treatment as the a = 0 chart:
+    /// the ring singularity (r -> 0) sits strictly inside the horizon r_+ >= M, so no cell
+    /// whose state matters ever reads a clamped value.
+    #[inline]
+    fn ks_quantities<const D: usize>(&self, x: Tensor<S, D>) -> (S, [S; 3], S) {
+        let half = S::from_f64(0.5);
+        let p: [S; 3] = std::array::from_fn(|ii| if ii < D { x[ii] } else { S::ZERO });
+        let a = self.spin;
+        let r2_flat = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+        let d = half * (r2_flat - a * a);
+        let az = a * p[2];
+        let r2 = d + (d * d + az * az).sqrt();
+        let r = r2.sqrt().max(half * self.mass);
+        let rr = r * r;
+        let two_h = (S::from_f64(2.0) * self.mass * rr * r) / (rr * rr + az * az);
+        let denom = S::ONE / (rr + a * a);
+        let l = [
+            (r * p[0] + a * p[1]) * denom,
+            (r * p[1] - a * p[0]) * denom,
+            p[2] / r,
+        ];
+        let ll2 = l[0] * l[0] + l[1] * l[1] + l[2] * l[2];
+        (two_h, l, ll2)
+    }
+}
+
+macro_rules! impl_kerr_ks_cartesian {
+    ($d:literal) => {
+        impl<S: Scalar> Metric<S, $d> for KerrKSCartesian<S> {
+            fn geometry(&self) -> Geometry { Geometry::Cartesian }
+            fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+            fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+                vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
+            }
+
+            // alpha = 1/sqrt(1 + 2H |l|^2).
+            fn lapse(&self, x: Tensor<S, $d>) -> S {
+                self.lapse_sq(x).sqrt()
+            }
+            fn lapse_sq(&self, x: Tensor<S, $d>) -> S {
+                let (two_h, _l, ll2) = self.ks_quantities(x);
+                S::ONE / (S::ONE + two_h * ll2)
+            }
+            // beta^i = gamma^{ij} (2H l_j) = (2H / (1 + 2H |l|^2)) l_i.
+            fn shift(&self, x: Tensor<S, $d>) -> Tensor<S, $d> {
+                let (two_h, l, ll2) = self.ks_quantities(x);
+                let s = two_h / (S::ONE + two_h * ll2);
+                Tensor::new(std::array::from_fn(|ii| s * l[ii]))
+            }
+
+            fn spatial_metric(&self, x: Tensor<S, $d>) -> Matrix<S, $d> {
+                let (two_h, l, _ll2) = self.ks_quantities(x);
+                Matrix::from_fn(|ii, jj| {
+                    let kron = if ii == jj { S::ONE } else { S::ZERO };
+                    kron + two_h * l[ii] * l[jj]
+                })
+            }
+            // sherman-morrison for the rank-1 update: gamma^{ij} = delta - (2H/(1 + 2H |l|^2)) l^i l^j.
+            fn spatial_metric_inv(&self, x: Tensor<S, $d>) -> Matrix<S, $d> {
+                let (two_h, l, ll2) = self.ks_quantities(x);
+                let coef = two_h / (S::ONE + two_h * ll2);
+                Matrix::from_fn(|ii, jj| {
+                    let kron = if ii == jj { S::ONE } else { S::ZERO };
+                    kron - coef * l[ii] * l[jj]
+                })
+            }
+            // det(delta + 2H l l^T) = 1 + 2H |l|^2 exactly (rank-1 determinant lemma).
+            fn sqrt_det_gamma(&self, x: Tensor<S, $d>) -> S {
+                let (two_h, _l, ll2) = self.ks_quantities(x);
+                (S::ONE + two_h * ll2).sqrt()
+            }
+            fn volume_factor(&self, x: Tensor<S, $d>) -> S { self.sqrt_det_gamma(x) }
+
+            fn to_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+            fn from_cartesian(&self, x: Tensor<S, $d>) -> Tensor<S, $d> { x }
+        }
+    };
+}
+
+impl_kerr_ks_cartesian!(2);
+impl_kerr_ks_cartesian!(3);
+
+// D = 1 is degenerate (cartesian GR has no radial structure on a line); fail-loud so
+// generic kernel bounds `Metric<S, 1>` resolve, never reached at bake time.
+impl<S: Scalar> Metric<S, 1> for KerrKSCartesian<S> {
+    fn geometry(&self) -> Geometry { Geometry::Cartesian }
+    fn spacetime(&self) -> Spacetime { Spacetime::Kerr }
+    fn spacetime_scalars(&self) -> Vec<(&'static str, S)> {
+        vec![("schwarzschild_mass", self.mass), ("kerr_spin", self.spin)]
+    }
+    fn spatial_metric(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("cartesian kerr is 2d/3d only")
+    }
+    fn spatial_metric_inv(&self, _x: Tensor<S, 1>) -> Matrix<S, 1> {
+        unreachable!("cartesian kerr is 2d/3d only")
+    }
+    fn sqrt_det_gamma(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("cartesian kerr is 2d/3d only")
+    }
+    fn volume_factor(&self, _x: Tensor<S, 1>) -> S {
+        unreachable!("cartesian kerr is 2d/3d only")
+    }
+    fn to_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+    fn from_cartesian(&self, x: Tensor<S, 1>) -> Tensor<S, 1> { x }
+}
+
 // D = 1 is degenerate (cartesian GR has no radial structure on a line); provided fail-loud so
 // generic kernel bounds `Metric<S, 1>` resolve, never reached at bake time (the cartesian GR bakes
 // are D = 2, 3). mirrors the KerrKS D = 1 stub.
@@ -3171,6 +3299,92 @@ mod tests {
             // agrees with the (R, z) D = 3 poloidal block at z = 0.
             let gm3 = <SchwarzschildKSCylindrical<f64> as Metric<f64, 3>>::spatial_metric(&bh, Tensor::new([big_r, phi, 0.0]));
             assert!(close(gm[(0, 0)], gm3[(0, 0)]) && close(gm[(1, 1)], gm3[(1, 1)]));
+        }
+    }
+
+    #[test]
+    fn kerr_ks_cartesian_reduces_to_schwarzschild_at_zero_spin() {
+        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.0 };
+        let schw = SchwarzschildKSCartesian { mass: 1.0_f64 };
+        for &(x, y, z) in &[(3.0_f64, -2.0, 1.5), (0.7, 0.2, -0.4), (10.0, 0.0, 0.0)] {
+            let p = Tensor::new([x, y, z]);
+            let a = <KerrKSCartesian<f64> as Metric<f64, 3>>::lapse(&kerr, p);
+            let b = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::lapse(&schw, p);
+            assert!((a - b).abs() < 1e-14, "lapse mismatch at ({x},{y},{z}): {a} vs {b}");
+            let ga = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
+            let gb = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&schw, p);
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    assert!((ga[(ii, jj)] - gb[(ii, jj)]).abs() < 1e-14, "gamma mismatch");
+                }
+            }
+            let sa = <KerrKSCartesian<f64> as Metric<f64, 3>>::shift(&kerr, p);
+            let sb = <SchwarzschildKSCartesian<f64> as Metric<f64, 3>>::shift(&schw, p);
+            for ii in 0..3 {
+                assert!((sa[ii] - sb[ii]).abs() < 1e-14, "shift mismatch");
+            }
+        }
+    }
+
+    #[test]
+    fn kerr_ks_cartesian_inverse_and_determinant_are_exact() {
+        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.9 };
+        for &(x, y, z) in &[(3.0_f64, -2.0, 1.5), (1.2, 0.9, 0.3), (5.0, 5.0, -4.0), (2.0, 0.0, 0.0)] {
+            let p = Tensor::new([x, y, z]);
+            let g = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p);
+            let gi = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric_inv(&kerr, p);
+            // gamma . gamma^{-1} = I (sherman-morrison exactness).
+            for ii in 0..3 {
+                for jj in 0..3 {
+                    let mut s = 0.0;
+                    for kk in 0..3 {
+                        s += g[(ii, kk)] * gi[(kk, jj)];
+                    }
+                    let want = if ii == jj { 1.0 } else { 0.0 };
+                    assert!((s - want).abs() < 1e-13, "g.g^-1 != I at ({x},{y},{z}) [{ii}{jj}]: {s}");
+                }
+            }
+            // det(gamma) equals the closed form (1 + 2H |l|^2) via the numeric 3x3 determinant.
+            let det = g[(0, 0)] * (g[(1, 1)] * g[(2, 2)] - g[(1, 2)] * g[(2, 1)])
+                - g[(0, 1)] * (g[(1, 0)] * g[(2, 2)] - g[(1, 2)] * g[(2, 0)])
+                + g[(0, 2)] * (g[(1, 0)] * g[(2, 1)] - g[(1, 1)] * g[(2, 0)]);
+            let sq = <KerrKSCartesian<f64> as Metric<f64, 3>>::sqrt_det_gamma(&kerr, p);
+            assert!((det - sq * sq).abs() < 1e-12, "det mismatch at ({x},{y},{z}): {det} vs {}", sq * sq);
+        }
+    }
+
+    #[test]
+    fn kerr_ks_cartesian_null_vector_is_unit_off_the_clamp() {
+        // |l| = 1 wherever the kerr-schild quartic holds: sqrt_det_gamma^2 - 1 = 2H exactly there,
+        // so alpha^2 (1 + 2H) = 1. probe well outside the clamp radius.
+        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.7 };
+        for &(x, y, z) in &[(4.0_f64, 1.0, 2.0), (2.5, -3.0, 0.5), (0.9, 0.9, 0.9)] {
+            let p = Tensor::new([x, y, z]);
+            let a2 = <KerrKSCartesian<f64> as Metric<f64, 3>>::lapse_sq(&kerr, p);
+            let sq = <KerrKSCartesian<f64> as Metric<f64, 3>>::sqrt_det_gamma(&kerr, p);
+            assert!((a2 * sq * sq - 1.0).abs() < 1e-13, "alpha^2 det != 1 at ({x},{y},{z})");
+        }
+    }
+
+    #[test]
+    fn kerr_ks_cartesian_equatorial_slice_matches_the_3d_plane() {
+        // the D = 2 instance is the z = 0 slice: gamma's (x, y) block and the in-plane shift
+        // must equal the 3d values at z = 0 (l_z = 0 there exactly).
+        let kerr = KerrKSCartesian { mass: 1.0_f64, spin: 0.6 };
+        for &(x, y) in &[(3.0_f64, -2.0), (1.5, 0.4), (6.0, 6.0)] {
+            let p2 = Tensor::new([x, y]);
+            let p3 = Tensor::new([x, y, 0.0]);
+            let g2 = <KerrKSCartesian<f64> as Metric<f64, 2>>::spatial_metric(&kerr, p2);
+            let g3 = <KerrKSCartesian<f64> as Metric<f64, 3>>::spatial_metric(&kerr, p3);
+            for ii in 0..2 {
+                for jj in 0..2 {
+                    assert!((g2[(ii, jj)] - g3[(ii, jj)]).abs() < 1e-14, "slice mismatch");
+                }
+            }
+            assert!(
+                (g3[(0, 2)]).abs() < 1e-15 && (g3[(1, 2)]).abs() < 1e-15,
+                "equatorial cross terms must vanish (l_z = 0 at z = 0)"
+            );
         }
     }
 }

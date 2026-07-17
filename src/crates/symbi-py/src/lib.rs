@@ -34,7 +34,7 @@ use symbi_display::{
 };
 use symbi_geometry::MotionState;
 use symbi_geometry::Schwarzschild;
-use symbi_geometry::{KerrKS, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_hydro::energy::IsoModel;
 use symbi_hydro::eos::Eos;
 use symbi_hydro::isothermal::IsoNewtonian;
@@ -3422,6 +3422,8 @@ macro_rules! hydro_dispatch {
                         (d, c, $cfg.spacetime.as_str()),
                         (2, "cartesian", "kerr_schild")
                             | (3, "cartesian", "kerr_schild")
+                            | (2, "cartesian", "kerr")
+                            | (3, "cartesian", "kerr")
                             | (1, "spherical", "schwarzschild")
                             | (2, "spherical", "schwarzschild")
                             | (1, "spherical", "kerr_schild")
@@ -3456,6 +3458,21 @@ macro_rules! hydro_dispatch {
                 $cfg, $prims, $regime, $regime_ty, 3, 3,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
+            ),
+            // SPINNING KERR on the cartesian chart (spin about z): the rank-1 kerr-schild
+            // metric with the oblate-spheroidal radius — non-diagonal gamma, shift on every
+            // axis, frame dragging in the swirl of l. DOF == NDIM (no extra momentum slot; the
+            // cartesian components already span the dragging). the 2D instance is the exact
+            // equatorial slice (l_z = 0 at z = 0).
+            (2, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 2, 2,
+                KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
+                KerrKSCartesian<f64>
+            ),
+            (3, "cartesian") if $cfg.spacetime == "kerr" => build_and_run_hydro!(
+                $cfg, $prims, $regime, $regime_ty, 3, 3,
+                KerrKSCartesian { mass: $cfg.schwarzschild_mass, spin: $cfg.kerr_spin },
+                KerrKSCartesian<f64>
             ),
             (2, "cartesian") => {
                 build_and_run_hydro!($cfg, $prims, $regime, $regime_ty, 2, 2, Cartesian, Cartesian)
@@ -4352,6 +4369,7 @@ macro_rules! mhd_dispatch {
                             | (2, "spherical", "schwarzschild")
                             | (2, "spherical", "kerr")
                             | (2, "cartesian", "kerr_schild")
+                            | (3, "cartesian", "kerr_schild")
                             | (2, "cylindrical", "kerr_schild")
                     ) =>
             {
@@ -4404,6 +4422,13 @@ macro_rules! mhd_dispatch {
             // spatial metrics). the covariant geodesic + EM-stress source carries the gravity.
             (2, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
                 $cfg, $prims, $bufs, $regime, $regime_ty, 2,
+                SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
+                SchwarzschildKSCartesian<f64>
+            ),
+            // GRMHD on the FULL 3D cartesian kerr-schild box: no polar axis, the densitized
+            // contact CT (the UCT families are unbaked at 3D GR and fail loud by name).
+            (3, "cartesian") if $cfg.spacetime == "kerr_schild" => build_and_run_mhd!(
+                $cfg, $prims, $bufs, $regime, $regime_ty, 3,
                 SchwarzschildKSCartesian { mass: $cfg.schwarzschild_mass },
                 SchwarzschildKSCartesian<f64>
             ),
@@ -5224,9 +5249,19 @@ fn check_excision_request(
     mass: f64,
     refinement_enabled: bool,
     n_gpus: usize,
+    regime: &str,
 ) -> Result<(), String> {
     if excision_radius <= 0.0 {
         return Ok(());
+    }
+    // the onion fill carries the HYDRO primitive set only; an MHD kernel set's excise
+    // phase is the trait default no-op, so an MHD excision request would silently do
+    // nothing (the field needs a B-carrying fill, not yet built).
+    if regime.contains("mhd") {
+        return Err(format!(
+            "excision_radius = {excision_radius} is not wired for MHD regimes (the fill \
+             carries no B slots); run unexcised or use the hydro regime."
+        ));
     }
     if spacetime != "kerr_schild" || coord_system != "cartesian" || !matches!(dims, 2 | 3) {
         return Err(format!(
@@ -5266,30 +5301,39 @@ mod excision_gate_tests {
 
     #[test]
     fn zero_radius_is_always_fine() {
-        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, true, 4).is_ok());
+        assert!(check_excision_request(0.0, "minkowski", "spherical", 1, 0.0, true, 4, "rhd").is_ok());
     }
 
     #[test]
-    fn excision_needs_the_cartesian_ks_slice() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_ok());
-        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, false, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, false, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, false, 1).is_err());
+    fn excision_needs_the_cartesian_ks_chart() {
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_ok());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, false, 1, "rhd").is_ok());
+        assert!(check_excision_request(1.4, "schwarzschild", "cartesian", 2, 1.0, false, 1, "rhd").is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "spherical", 2, 1.0, false, 1, "rhd").is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 1, 1.0, false, 1, "rhd").is_err());
+    }
+
+    #[test]
+    fn excision_rejects_mhd_regimes() {
+        // the onion fill carries the hydro primitive set only; a b-carrying fill does not exist.
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 3, 1.0, false, 1, "srmhd").is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 1, "imhd").is_err());
+        assert!(check_excision_request(0.0, "kerr_schild", "cartesian", 3, 1.0, false, 1, "srmhd").is_ok());
     }
 
     #[test]
     fn excision_sphere_must_sit_between_the_guard_and_the_horizon() {
         // M = 1: the valid band is (M/2, 2M) = (0.5, 2.0).
-        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_err());
-        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_err());
-        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_ok());
-        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, false, 1).is_ok());
+        assert!(check_excision_request(2.0, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_err());
+        assert!(check_excision_request(0.5, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_err());
+        assert!(check_excision_request(0.6, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_ok());
+        assert!(check_excision_request(1.9, "kerr_schild", "cartesian", 2, 1.0, false, 1, "rhd").is_ok());
     }
 
     #[test]
     fn excision_rejects_refinement_and_multi_gpu() {
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, true, 1).is_err());
-        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 2).is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, true, 1, "rhd").is_err());
+        assert!(check_excision_request(1.4, "kerr_schild", "cartesian", 2, 1.0, false, 2, "rhd").is_err());
     }
 }
 
@@ -5419,6 +5463,7 @@ fn run_simulation(
         cfg.schwarzschild_mass,
         cfg.refinement_enabled,
         cfg.n_gpus,
+        &cfg.regime,
     )
     .map_err(PyValueError::new_err)?;
     // mesh refinement is cartesian + uniform-spacing ONLY: the coarse-fine prolongation/restriction

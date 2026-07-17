@@ -7,7 +7,7 @@
 use super::*;
 use symbi_algebra::Matrix;
 use symbi_geometry::grhd_source::{grhd_covariant_source, grmhd_covariant_source};
-use symbi_geometry::{KerrKS, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
+use symbi_geometry::{KerrKS, KerrKSCartesian, Metric, Schwarzschild, SchwarzschildKS, SchwarzschildKSCartesian, SchwarzschildKSCylindrical};
 use symbi_ir::dual::Dual;
 
 
@@ -301,6 +301,12 @@ pub fn gr_light_cone_wave_speed_map_gv(
             let g = SchwarzschildKS { mass };
             (g.lapse(x), g.spatial_metric_inv(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&g, x))
         }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            let g = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+            (g.lapse(x), g.spatial_metric_inv(x), <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&g, x))
+        }
         (Spacetime::Kerr, _) => {
             let g = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (g.lapse(x), g.spatial_metric_inv(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&g, x))
@@ -513,6 +519,12 @@ pub fn rmhd_wave_speeds_cell_gr_gv(
             let m = SchwarzschildKS { mass };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <SchwarzschildKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
         }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            let m = KerrKSCartesian { mass, spin: Gv::scalar("kerr_spin") };
+            (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKSCartesian<Gv> as Metric<Gv, 3>>::shift(&m, x))
+        }
         (Spacetime::Kerr, _) => {
             let m = KerrKS { mass, spin: Gv::scalar("kerr_spin") };
             (m.spatial_metric(x), m.spatial_metric_inv(x), m.lapse(x), <KerrKS<Gv> as Metric<Gv, 3>>::shift(&m, x))
@@ -609,6 +621,16 @@ pub fn rmhd_source_cfl_gr_gv(
             let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
             let (sm, _) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, Gv::ZERO, b);
             let (_, st) = grmhd_covariant_source(&SchwarzschildKS { mass }, x, rho_h, v, pre, b);
+            (gi, sm, st)
+        }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            let spin_gv = Gv::scalar("kerr_spin");
+            let gi = KerrKSCartesian { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let spin = Dual::constant(spin_gv);
+            let (sm, _) = grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, Gv::ZERO, b);
+            let (_, st) = grmhd_covariant_source(&KerrKSCartesian { mass, spin }, x, rho_h, v, pre, b);
             (gi, sm, st)
         }
         (Spacetime::Kerr, _) => {
@@ -714,6 +736,16 @@ pub fn rhd_source_cfl_gr_gv(
             let gi = SchwarzschildKS { mass: mass_gv }.spatial_metric_inv(x);
             let (sm, _) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, Gv::ZERO);
             let (_, st) = grhd_covariant_source(&SchwarzschildKS { mass }, x, e, v, pre);
+            (gi, sm, st)
+        }
+        // spinning kerr on the CARTESIAN chart: the rank-1 kerr-schild update with the
+        // oblate-spheroidal radius; non-diagonal gamma + shift on every axis.
+        (Spacetime::Kerr, Coords::Cartesian) => {
+            let spin_gv = Gv::scalar("kerr_spin");
+            let gi = KerrKSCartesian { mass: mass_gv, spin: spin_gv }.spatial_metric_inv(x);
+            let spin = Dual::constant(spin_gv);
+            let (sm, _) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, Gv::ZERO);
+            let (_, st) = grhd_covariant_source(&KerrKSCartesian { mass, spin }, x, e, v, pre);
             (gi, sm, st)
         }
         (Spacetime::Kerr, _) => {
