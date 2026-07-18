@@ -23,6 +23,7 @@ from .api import (
 #     plot_separation,
 #     plot_torques,
 # )
+from . import colormaps  # noqa: F401  (import for side effect: registers the simbi_* composites)
 from .cli import setup_parser as setup_viz_parser
 from .config_loader import generate_example_config, load_component_props
 from .pipeline import config_from_args

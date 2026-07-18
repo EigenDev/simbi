@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Sequence
 
 import h5py
 import numpy as np
@@ -183,6 +183,78 @@ def draw_body(
     return [fill, outline]
 
 
+def tint_bodies(
+    ax,
+    field2d: np.ndarray,
+    us: np.ndarray,
+    vs: np.ndarray,
+    checkpoint_path: str,
+    colors: Sequence[str],
+    radius: float,
+    norm=None,
+    plane: tuple[str, str] = ("x", "y"),
+    at: float = 0.0,
+    alpha: float = 1.0,
+    gamma: float = 1.0,
+    region: Optional[Callable[[BodyPose, np.ndarray, np.ndarray, int, int], np.ndarray]] = None,
+) -> list:
+    """re-color the gas NEAR each immersed body with a per-body color, layered over an
+    already-rendered field. `field2d` is the same 2-D array the background shows, on the
+    (`us`, `vs`) cell grid; `colors` gives one color per body (cycled if shorter). each
+    body's gas is mapped through a transparent -> opaque `alpha_ramp` of its color, so only
+    the dense gas lights up while faint gas stays transparent and shows the background
+    palette; sharing the background `norm` keeps color tied to value. the tinted REGION
+    defaults to a disk of `radius` around the body's projected position (the minidisk
+    neighborhood); pass `region(body, ug, vg, ua, va) -> bool array` to tint an arbitrary
+    set instead (e.g. gravitationally-bound gas). returns the created artists so an
+    animation can remove them before the next frame."""
+    from .colormaps import alpha_ramp
+
+    ua, va = _AXIS_INDEX[plane[0]], _AXIS_INDEX[plane[1]]
+    ug, vg = np.meshgrid(us, vs)
+    artists: list = []
+    for ii, body in enumerate(load_bodies(checkpoint_path)):
+        color = colors[ii % len(colors)]
+        if region is not None:
+            near = np.asarray(region(body, ug, vg, ua, va), dtype=bool)
+        else:
+            px = body.position[ua] if ua < len(body.position) else 0.0
+            py = body.position[va] if va < len(body.position) else 0.0
+            near = (ug - px) ** 2 + (vg - py) ** 2 <= radius**2
+        masked = np.ma.masked_where(~near, field2d)
+        cmap = alpha_ramp(color, f"_tint_body_{ii}", gamma=gamma, register=False)
+        artists.append(
+            ax.pcolormesh(us, vs, masked, cmap=cmap, norm=norm, alpha=alpha, shading="auto")
+        )
+    return artists
+
+
+def tint_bodies_on_slice(
+    ax,
+    field2d: np.ndarray,
+    us: np.ndarray,
+    vs: np.ndarray,
+    checkpoint_path: str,
+    slice_spec: Optional[dict[str, float]],
+    coord_system: str,
+    colors: Sequence[str],
+    radius: float,
+    **kwargs,
+) -> list:
+    """tint every body's gas neighborhood on `ax`, matching a field `--slice` (via
+    `slice_to_plane`). cartesian only -- the radial region is cartesian -- and skipped for a
+    1-D (double-sliced) field. the gated entry point mirroring `overlay_bodies_on_slice`."""
+    if ax is None or coord_system != "cartesian":
+        return []
+    plane_at = slice_to_plane(slice_spec)
+    if plane_at is None:
+        return []
+    plane, at = plane_at
+    return tint_bodies(
+        ax, field2d, us, vs, checkpoint_path, colors, radius, plane=plane, at=at, **kwargs
+    )
+
+
 def overlay_bodies(
     ax,
     checkpoint_path: str,
@@ -229,5 +301,7 @@ __all__ = [
     "draw_body",
     "overlay_bodies",
     "overlay_bodies_on_slice",
+    "tint_bodies",
+    "tint_bodies_on_slice",
     "slice_to_plane",
 ]
