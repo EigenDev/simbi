@@ -41,6 +41,15 @@ def _dot_product(a: Sequence[Array], b: Sequence[Array]) -> Array:
     return np.sum([a[ii] * b[ii] for ii in range(len(a))], axis=0)
 
 
+def _vector_dof(regime: str, ndim: int) -> int:
+    """number of stored velocity / magnetic vector components. an mhd field is a 3-vector no
+    matter the spatial dimensionality: a 2.5D (D=2) or 1.75D (D=1) run still evolves and stores the
+    out-of-plane components (the toroidal v_phi and b_phi), so reading only the ndim in-plane ones
+    drops real data — zeroing the magnetic pressure of a purely toroidal field and corrupting the
+    lorentz factor and v.B of any rotating flow. a hydro velocity has one component per axis."""
+    return 3 if "mhd" in regime else ndim
+
+
 def lorentz_factor(
     velocity: Sequence[Array], regime: str, using_gamma_beta: bool = False
 ) -> Array | float:
@@ -363,7 +372,10 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             return np.asarray(result)
 
     def get_velocities(fields: dict[str, Array]) -> list[Array]:
-        return [fields[f"v{ii}"] for ii in range(1, ndim + 1)]
+        # gather the full vector DOF (3 for mhd), not just the ndim in-plane components: the
+        # out-of-plane v_phi is a stored, evolved field in 2.5D / 1.75D runs and enters the lorentz
+        # factor and v.B. callers that need a fixed 3-vector zero-pad the (genuinely absent) tail.
+        return [fields[f"v{ii}"] for ii in range(1, _vector_dof(regime, ndim) + 1)]
 
     def get_b_fields(fields: dict[str, Array]) -> list[Array]:
         """
@@ -378,9 +390,13 @@ def create_computation_pipeline(data: Checkpoint) -> dict[str, Any]:
             b1 shape differs from rho by +1 along the x1-normal axis (fastest varying / last axis)
             b2 differs by +1 along x2-normal (middle axis)
             b3 differs by +1 along x3-normal (slowest / first axis)
+          the field is a 3-vector: in a 2.5D / 1.75D run the out-of-plane component (the toroidal
+          b_phi) is cell-centered (no face in the missing axis) and is accepted as-is below.
         """
-        # gather raw (possibly face-centered) arrays or None placeholders
-        raw = [fields.get(f"b{ii}", None) for ii in range(1, ndim + 1)]
+        # gather the full magnetic vector DOF (3 for mhd), not just the ndim in-plane components:
+        # missing entries resolve to zeros. reading only b1..b_ndim drops the out-of-plane b_phi,
+        # which zeros the magnetic pressure of a purely toroidal field.
+        raw = [fields.get(f"b{ii}", None) for ii in range(1, _vector_dof(regime, ndim) + 1)]
         rho_shape = tuple(np.asarray(fields["rho"]).shape)
 
         def _average_faces_to_cells(face_arr: Array, axis: int) -> Array:
