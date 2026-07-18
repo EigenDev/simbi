@@ -7,8 +7,10 @@
 // frozen-coefficient exponentials on three DISJOINT primitive channels —
 //   rho:   den' = den * exp(-lambda_rho dt)          (the uniform drain)
 //   u:     u'   = u_solid + du_n e^-l_n + du_t e^-l_t (normal/tangential wall)
-//   e_int: e'   = e_wall + (e - e_wall) e^-l_e        (thermal wall)
-// — unconditionally stable for any dt, and commuting exactly under property stack
+//   e_int: e'   = e_wall + (e + Q - e_wall) e^-l_e    (thermal wall; Q = drag heat)
+// — where Q is the frictional dissipation of the velocity channel, so an isothermal
+// wall absorbs the drag heat and an adiabatic wall (l_e = 0) keeps it —
+// unconditionally stable for any dt, and commuting exactly under property stack
 // reordering: the energy reconstruction reads the TOTAL velocity relaxation (for the
 // wall-work / dissipation term below), not any single property's contribution, so
 // the accumulated Relax is order-independent.
@@ -275,21 +277,24 @@ pub fn penalize_cell<S: Scalar, const D: usize, E: EnergyModel>(
     let du_n = normal.scale(du.dot(&normal));
     let du_t = du - du_n;
     let u_delta = -(du_n.scale(g_n) + du_t.scale(g_t));
-    // thermal channel: e' - e = (e_target - e) g_e, exactly +-0 when off.
-    let e_delta = (relax.e_target - e_int) * g_e;
 
     let den_new = cons.den * f_rho;
     let mom_new = cons.mom.scale(f_rho) + u_delta.scale(den_new);
-    // ENERGY CONSERVATION: the gas total energy the wall exchanges with the body is the WORK DONE
-    // ON THE WALL — the transferred momentum times the LOCAL wall velocity `u_solid` (= v_com +
-    // omega x r, baked per cell). writing the gas total energy to change by this work (NOT by the
-    // gas kinetic-energy change `(2u + u_delta).u_delta/2`) closes the gas+body ledger to round-off:
-    // summed, `energy_delta` equals the body's mechanical work `F.v_com + torque.omega`, so
-    // -d(KE_body) == sum(energy_delta). the frictional dissipation (the gas KE change minus the wall
-    // work) is then absorbed as gas INTERNAL energy (nrg = KE + internal), staying in the flow as
-    // heat instead of leaking — a stationary wall (u_solid = 0) transfers zero energy to the body
-    // and turns the whole drag into gas heat.
+    // ENERGY CONSERVATION. the gas total energy the wall exchanges with the body is the WORK DONE ON
+    // THE WALL — the transferred momentum times the LOCAL wall velocity `u_solid` (= v_com + omega x
+    // r, baked per cell) — so summed, `energy_delta` equals the body's mechanical work
+    // `F.v_com + torque.omega` and gas+body mechanical energy conserves. the drag's frictional
+    // dissipation is the gas kinetic-energy change minus that work, `Q = wall_work - ke_delta`
+    // (>= 0): mechanical energy the relaxation turns to heat.
+    let ke_delta = half * (u.scale(S::from_f64(2.0)) + u_delta).dot(&u_delta);
     let wall_work = u_delta.dot(&relax.u_solid);
+    let friction_heat = wall_work - ke_delta;
+    // thermal channel: the wall carries heat toward its temperature target, relaxing the
+    // FRICTION-HEATED internal energy `e_int + Q`. an ISOTHERMAL wall (stiff g_e) absorbs the drag
+    // dissipation — the gas stays at `e_target`, the heat flowing to the wall reservoir (booked in
+    // energy_delta); an ADIABATIC wall (no thermal property, g_e = 0) keeps `Q` in the gas as heat.
+    // exactly +-0 when the thermal channel is off.
+    let e_delta = (relax.e_target - (e_int + friction_heat)) * g_e;
     let nrg_new = cons
         .nrg
         .scale(f_rho)
@@ -385,18 +390,19 @@ mod tests {
         for a in 0..3 {
             assert!((u1[a] - expect_u[a]).abs() < 1e-13, "axis {a}: {} vs {}", u1[a], expect_u[a]);
         }
-        // the internal energy relaxes toward the thermal wall AND absorbs the drag's frictional
-        // heat: energy conservation routes the dissipation into the gas internal energy. the exact
-        // heat per unit mass is |du_n|^2 g_n(1 - g_n/2) + |du_t|^2 g_t(1 - g_t/2) (the relative KE
-        // the normal/tangential relaxations dissipate), so e1 = thermal-relaxation + that heat.
+        // the velocity relaxation dissipates the frictional heat Q = |du_n|^2 g_n(1 - g_n/2) +
+        // |du_t|^2 g_t(1 - g_t/2); the thermal channel then carries off a fraction g_e of it to the
+        // wall reservoir, so the gas retains (1 - g_e) = exp(-lambda_e dt) of Q on top of the pure
+        // thermal relaxation. e1 = thermal-relaxation + Q*(1 - g_e).
         let expect_e_thermal = k.e_wall + (e0 - k.e_wall) * (-acc.lambda_e * dt).exp();
         let g_n = 1.0 - (-acc.lambda_un * dt).exp();
         let g_t = 1.0 - (-acc.lambda_ut * dt).exp();
         let heat =
             du_n.dot(&du_n) * g_n * (1.0 - 0.5 * g_n) + du_t.dot(&du_t) * g_t * (1.0 - 0.5 * g_t);
+        let retained = heat * (-acc.lambda_e * dt).exp();
         assert!(
-            (e1 - (expect_e_thermal + heat)).abs() < 1e-13,
-            "internal energy off: e1 {e1} vs thermal {expect_e_thermal} + heat {heat}"
+            (e1 - (expect_e_thermal + retained)).abs() < 1e-13,
+            "internal energy off: e1 {e1} vs thermal {expect_e_thermal} + retained heat {retained}"
         );
     }
 
@@ -442,19 +448,16 @@ mod tests {
         let mut acc = Relax::none();
         Property::Wall { inv_eta_n: 1e12, inv_eta_t: 1e12 }.contribute(1.0, &k, &mut acc);
         Property::IsothermalWall { inv_eta: 1e12 }.contribute(1.0, &k, &mut acc);
-        let (_, u0, _) = primitives(&cons);
         let (out, _) = penalize_cell(&cons, &acc, n, 10.0, 1.0, 0);
         let (_, u1, e1) = primitives(&out);
         for a in 0..3 {
             assert!(u1[a].is_finite());
             assert!((u1[a] - k.u_solid[a]).abs() < 1e-12);
         }
-        // the thermal channel drives e_int to e_wall AND the stiff velocity relaxation dumps its
-        // FULL relative kinetic energy 0.5|u0 - u_solid|^2 into the gas as frictional heat (energy
-        // conservation: the dissipation stays in the flow), so e1 saturates to e_wall + that heat.
-        let du = u0 - k.u_solid;
-        let friction_heat = 0.5 * du.dot(&du);
-        assert!((e1 - (k.e_wall + friction_heat)).abs() < 1e-12, "e1 {e1} vs {}", k.e_wall + friction_heat);
+        // the stiff velocity relaxation dumps its full relative KE as frictional heat, but the stiff
+        // ISOTHERMAL channel absorbs ALL of it (the heat flows to the wall reservoir), so the gas
+        // saturates back to the wall temperature e_wall.
+        assert!((e1 - k.e_wall).abs() < 1e-12);
         // the drain channel was off: density untouched, bit-exact.
         assert_eq!(out.den.to_bits(), cons.den.to_bits());
     }
