@@ -724,4 +724,4 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 ---
 
 > Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool.
-The speed boosts was just undeniable versus if I had taken the time to do it (during my finite) postdoc.
+The speed boosts was just undeniable versus if I had taken the time to do it myself (during my finite postdoc). Drinking the koolaid sparingly...
