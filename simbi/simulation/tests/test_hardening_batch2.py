@@ -141,6 +141,46 @@ def test_restart_conflict_on_explicit_immutable_flag(monkeypatch, tmp_path):
     assert str(merged.solver.value) == "hlle"
 
 
+def test_restart_continues_checkpoint_index_not_reset_to_zero(monkeypatch, tmp_path):
+    # restarting from chkpt.030 must number the next dump 031, not restart from 0. the checkpoint
+    # index is checkpoint_safe (serializable), so the generic field merge preferred the config
+    # default (0) and every restart silently renumbered from zero, overwriting earlier files —
+    # while start_time (force-restored) looked correct. the merge must force the index too.
+    from simbi.simulation import checkpoint as cp
+
+    class _Meta:
+        time = 5.0
+        gamma = 4.0 / 3.0
+        coord_system = "spherical"
+        regime = "rhd"
+        solver = "hlle"
+        reconstruction = "plm"
+        timestepping = "rk2"
+        plm_theta = 1.5
+        cfl = 0.3
+        checkpoint_index = 30
+        checkpoint_interval = 0.5
+        x1_spacing = "log"
+        x2_spacing = "linear"
+        x3_spacing = "linear"
+        boundary_conditions = ["outflow", "outflow"]
+        level_dts = ()
+        level_substeps = ()
+        subcycling_mode = "none"
+
+    monkeypatch.setattr(
+        cp, "load_checkpoint_metadata", lambda _p: (_Meta(), (512,))
+    )
+
+    # a fresh config carries the default checkpoint_index (0) and start_time (0); the restart must
+    # override both from the checkpoint.
+    fresh = GrBondiKS.from_cli([])
+    assert fresh.checkpoint_index == 0
+    merged = cp.merge_with_checkpoint(fresh, tmp_path / "fake.h5")
+    assert merged.checkpoint_index == 30, "restart reset the checkpoint index to the config default"
+    assert merged.start_time == 5.0
+
+
 def test_viz_config_rejects_typoed_kwargs():
     from simbi.viz.config import FigureConfig
 

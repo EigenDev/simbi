@@ -287,6 +287,14 @@ def merge_with_checkpoint(
     if "start_time" in checkpoint_config:
         merged_data["start_time"] = checkpoint_config["start_time"]
 
+    # the checkpoint INDEX is resume state, not a physics choice: the next dump must continue the
+    # monotonic numbering from where the run stopped (chkpt.030 -> chkpt.031), so force it from the
+    # checkpoint like start_time. it is checkpoint_safe (serializable, user-visible), so the generic
+    # merge above would otherwise reset it to the config default 0 and re-number every restart from
+    # zero — silently overwriting the earlier checkpoints on disk.
+    if "checkpoint_index" in checkpoint_config:
+        merged_data["checkpoint_index"] = checkpoint_config["checkpoint_index"]
+
     # special handling for end_time: allow extending
     if "end_time" in safe_fields:
         user_end = getattr(problem, "end_time")

@@ -1023,6 +1023,96 @@ fn boundaries_nd<const D: usize>(bcs: &[BoundaryType]) -> Boundaries<D> {
 }
 
 /// the time-scheduled checkpoint loop. ONE path for every run: a single grid is a
+/// the number of scheduled checkpoint boundaries already at or before `resume_time`, i.e. the
+/// count a restart must SKIP so the next write lands on the first boundary strictly in the future.
+/// `boundary(fired)` is the (fired+1)-th scheduled checkpoint time and is monotonic increasing
+/// (log: anchor*10^((fired+1)*dlogt); linear: (fired+1)*interval). without this skip a restart
+/// re-dumps the checkpoint it resumed from — duplicating a file and shifting every later index by
+/// one — whenever the schedule is anchored at a fixed reference below the resume clock. a fresh run
+/// (`is_restart` false) skips nothing. the loop terminates: a finite monotonic cadence exceeds any
+/// finite `resume_time`, and a disabled cadence (`boundary` returns a non-finite sentinel) stops at
+/// once.
+fn checkpoints_at_or_before(
+    is_restart: bool,
+    resume_time: f64,
+    boundary: impl Fn(u64) -> f64,
+) -> u64 {
+    if !is_restart {
+        return 0;
+    }
+    let mut fired = 0u64;
+    while boundary(fired).is_finite() && boundary(fired) <= resume_time + 1e-12 {
+        fired += 1;
+    }
+    fired
+}
+
+#[cfg(test)]
+mod checkpoint_schedule_tests {
+    use super::checkpoints_at_or_before;
+
+    // log cadence anchored at a FIXED reference: the k-th checkpoint lands at anchor*10^(k*dlogt).
+    // cp_at(fired) is the (fired+1)-th boundary. a restart at index k resumes with the clock at the
+    // k-th boundary, so the skip must consume exactly k boundaries and leave the next write on the
+    // (k+1)-th — same index it would carry in an uninterrupted run, and NO duplicate at the resume
+    // time. this is the "restart from the correct index" invariant.
+    #[test]
+    fn log_restart_skips_to_the_next_future_boundary() {
+        let anchor = 1.0_f64;
+        let dlogt = 0.1_f64;
+        let cp_at = |fired: u64| anchor * 10f64.powf((fired + 1) as f64 * dlogt);
+
+        for k in 1..=8u64 {
+            let resume_time = anchor * 10f64.powf(k as f64 * dlogt);
+            let skipped = checkpoints_at_or_before(true, resume_time, cp_at);
+            assert_eq!(skipped, k, "restart at index {k} must skip {k} boundaries");
+            // the next scheduled write is strictly in the future and is the (k+1)-th boundary.
+            assert!(
+                cp_at(skipped) > resume_time + 1e-12,
+                "restart at index {k} would re-dump the resumed checkpoint"
+            );
+            assert!((cp_at(skipped) - anchor * 10f64.powf((k + 1) as f64 * dlogt)).abs() < 1e-12);
+        }
+    }
+
+    // when the anchor defaults to the resume clock (no fixed checkpoint_log_anchor) the schedule
+    // re-anchors at start_time, so the first boundary is already in the future and nothing is
+    // skipped — cp_fired stays 0, matching the pre-existing correct behavior for that anchoring.
+    #[test]
+    fn log_restart_reanchored_at_resume_skips_nothing() {
+        let resume_time = 4.2_f64;
+        let dlogt = 0.1_f64;
+        let cp_at = |fired: u64| resume_time * 10f64.powf((fired + 1) as f64 * dlogt);
+        assert_eq!(checkpoints_at_or_before(true, resume_time, cp_at), 0);
+    }
+
+    // linear cadence: boundary (fired+1) at (fired+1)*interval. a restart at index k (clock at
+    // k*interval) skips k boundaries and resumes on the (k+1)-th.
+    #[test]
+    fn linear_restart_skips_to_the_next_future_boundary() {
+        let interval = 0.2_f64;
+        let cp_at = |fired: u64| (fired + 1) as f64 * interval;
+        let resume_time = 5.0 * interval;
+        assert_eq!(checkpoints_at_or_before(true, resume_time, cp_at), 5);
+        assert!((cp_at(5) - 6.0 * interval).abs() < 1e-12);
+    }
+
+    // a fresh run never skips, regardless of the schedule, so the first checkpoint keeps index 0->1.
+    #[test]
+    fn fresh_run_skips_nothing() {
+        let cp_at = |fired: u64| (fired + 1) as f64 * 0.2;
+        assert_eq!(checkpoints_at_or_before(false, 1_000.0, cp_at), 0);
+    }
+
+    // a disabled cadence returns a non-finite sentinel; the skip loop must terminate at once rather
+    // than spin forever.
+    #[test]
+    fn disabled_cadence_terminates() {
+        let cp_at = |_fired: u64| f64::INFINITY;
+        assert_eq!(checkpoints_at_or_before(true, 1_000.0, cp_at), 0);
+    }
+}
+
 /// 1-level `Hierarchy` (`Hierarchy::single`), an AMR run is a multi-level one — the
 /// driver (`evolve_with_callback`) and the writer (`write_hierarchy_checkpoint`,
 /// all levels in one file) are identical either way. no separate single-grid vs
@@ -1075,8 +1165,13 @@ where
             f64::INFINITY
         }
     };
-    let mut cp_fired: u64 = 0;
-    let mut next_cp = cp_at(0);
+    // on a restart the clock resumes mid-schedule at start_time; skip every boundary already at or
+    // before it so the first write lands on the next FUTURE boundary and reuses no index. seeding
+    // cp_fired at 0 would re-dump the resumed checkpoint (a duplicate file, every later index shifted
+    // by one) whenever cp_at is anchored at a fixed checkpoint_log_anchor below the resume clock. a
+    // restart is signalled by a nonzero loaded checkpoint_index; a fresh run skips nothing.
+    let mut cp_fired: u64 = checkpoints_at_or_before(cfg.checkpoint_index > 0, cfg.start_time, &cp_at);
+    let mut next_cp = cp_at(cp_fired);
     let mut cp_index: u64 = cfg.checkpoint_index + 1;
     // LOG-spaced runs are named by the monotonic INDEX, not the time: the fixed-3-decimal
     // time name (`000_790`) collides at small times (0.0001 and 0.0002 both round to
