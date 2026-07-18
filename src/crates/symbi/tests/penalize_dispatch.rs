@@ -574,12 +574,14 @@ fn shaped_box_rigid_wall_cylindrical_penalizes() {
     use symbi_geometry::Cylindrical;
     use symbi_ib::sdf::SdfExpr;
     use symbi_ib::SurfaceSpec;
+    use symbi_sim::state::CylPlane;
     type CylSim = SimState<Newtonian, 2, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
     let (nr, nphi) = (40usize, 32usize);
     let mut sim = CylSim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
         .cells([nr, nphi])
         .origin([1.0, 0.0])
         .spacing([0.1, 2.0 * PI / nphi as f64])
+        .cyl_plane(CylPlane::RPhi)
         .boundaries(Boundaries::per_axis([
             [BoundaryType::Outflow, BoundaryType::Outflow],
             [BoundaryType::Periodic, BoundaryType::Periodic],
@@ -656,4 +658,131 @@ fn spinning_box_wall_imparts_torque_to_still_fluid() {
         tau.abs() > 1e3 * d0[0].torque_delta[2].abs().max(1e-30),
         "the spin torque must dominate the still baseline",
     );
+}
+
+// the (r, z) AXISYMMETRIC section: an on-axis sphere sink is the axisymmetric
+// point body. the mask distance is the plain euclidean |(r, z - z0)| (identity
+// section embedding), the cell volume is the ring measure r dr dz, the net
+// world force is z only (ring-radial cancels identically), and the axis torque
+// is r * f_phi from the drained out-of-plane momentum. gates:
+// - mass ledger: gas loss == the booked receipt to machine precision;
+// - localization: cells beyond the mask ball are bit-untouched;
+// - a swirling gas (v_phi != 0, dof = 3) books a POSITIVE axis torque (the
+//   sink absorbs prograde angular momentum) and zero radial world force.
+#[test]
+fn rz_on_axis_sink_drains_conserves_and_books_axis_torque() {
+    use symbi_geometry::Cylindrical;
+    type RzSim = SimStateGeneric<Newtonian, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+    let (nr, nz) = (48usize, 48usize);
+    let (r_lo, dr) = (0.05f64, 2.0 / nr as f64);
+    let (z_lo, dz) = (-1.0f64, 2.0 / nz as f64);
+    let z0 = 0.0f64;
+    let racc = 0.25f64;
+    let sim = RzSim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
+        .cells([nr, nz])
+        .origin([r_lo, z_lo])
+        .spacing([dr, dz])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("rz sim")
+        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.3, 0.1]), pre: 1.0 })
+        .build()
+        .with_bodies(BodyCollection::new().add(Body::black_hole(
+            0,
+            Tensor::new([0.0, z0]),
+            Tensor::zeros(),
+            1.0,
+            0.08,
+            0.04,
+            0.5,
+            0.0,
+            racc,
+        )));
+
+    // ring-measure cell volume mirror: the FULL ring, dv = pi (r_hi^2 - r_lo^2) dz —
+    // the same finite-volume weight the kernel's geometry scaffold integrates.
+    let ilo: [isize; 2] = std::array::from_fn(|a| sim.geom.interior.spaces[a].lo);
+    let dv = |c: [isize; 2]| -> f64 {
+        let rl = r_lo + (c[0] - ilo[0]) as f64 * dr;
+        let rh = rl + dr;
+        std::f64::consts::PI * (rh * rh - rl * rl) * dz
+    };
+    let dist = |c: [isize; 2]| -> f64 {
+        let r = r_lo + ((c[0] - ilo[0]) as f64 + 0.5) * dr;
+        let z = z_lo + ((c[1] - ilo[1]) as f64 + 0.5) * dz;
+        (r * r + (z - z0) * (z - z0)).sqrt()
+    };
+    let mass = |s: &RzSim| -> f64 {
+        s.geom.interior.iter().map(|c| *s.fields.cons.den.view().at(c) * dv(c)).sum()
+    };
+    let before_mass = mass(&sim);
+    let far_before: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .filter(|c| dist(*c) > racc + 25.0 * dr.min(dz))
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .collect();
+
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
+
+    let after_mass = mass(&sim);
+    let d = sim.immersed.as_ref().unwrap().diagnostics.consolidate();
+    let lost = before_mass - after_mass;
+    assert!(lost > 0.0, "the on-axis rz sink drained nothing");
+    assert!(
+        ((lost - d[0].mass_delta) / lost).abs() < 1e-11,
+        "rz mass ledger broken: gas lost {lost:e} vs receipt {:e}",
+        d[0].mass_delta
+    );
+    let far_after: Vec<f64> = sim
+        .geom
+        .interior
+        .iter()
+        .filter(|c| dist(*c) > racc + 25.0 * dr.min(dz))
+        .map(|c| *sim.fields.cons.den.view().at(c))
+        .collect();
+    assert!(!far_before.is_empty(), "the far-field probe covers no cells");
+    for (b, a) in far_before.iter().zip(&far_after) {
+        assert!(b.to_bits() == a.to_bits(), "far field touched: {b:e} -> {a:e}");
+    }
+    // the swirling gas gives up prograde angular momentum: positive z torque,
+    // zero radial world force (ring cancellation is exact in-kernel).
+    assert!(
+        d[0].torque_delta[2] > 0.0,
+        "prograde swirl must book a positive axis torque: {:?}",
+        d[0].torque_delta
+    );
+    assert_eq!(d[0].force_delta[0], 0.0, "ring-radial receipt must cancel exactly");
+    // uniform +z momentum drains: the receipt on the body points along +z.
+    assert!(d[0].force_delta[1] > 0.0, "the +z momentum drain must book a +z receipt");
+}
+
+// off-axis and shaped bodies remain outside the axisymmetric contract.
+#[test]
+#[should_panic(expected = "must sit ON the symmetry axis")]
+fn rz_off_axis_body_fails_loud() {
+    use symbi_geometry::Cylindrical;
+    type RzSim = SimStateGeneric<Newtonian, 2, 3, Cylindrical, IdealGas<f64>, CpuSpace, HostMemory>;
+    let sim = RzSim::build(Newtonian, IdealGas { gamma: GAMMA }, Cylindrical)
+        .cells([16, 8])
+        .origin([1.0, 0.0])
+        .spacing([1.0 / 16.0, 0.5 / 8.0])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .allocate()
+        .expect("rz sim")
+        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0, 0.0, 0.0]), pre: 1.0 })
+        .build()
+        .with_bodies(BodyCollection::new().add(Body::black_hole(
+            0,
+            Tensor::new([1.5, 0.2]),
+            Tensor::zeros(),
+            1.0,
+            0.08,
+            0.04,
+            0.5,
+            0.0,
+            0.1,
+        )));
+    dispatch_penalize(&sim, 1e-3, GAMMA, 1.0);
 }

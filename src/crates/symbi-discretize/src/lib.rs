@@ -51,7 +51,8 @@ pub use gv_penalize::{
 };
 pub use gv_viscous::{
     viscous_adiabatic_alpha_gv, viscous_adiabatic_alpha_gv_2p5d, viscous_adiabatic_alpha_ortho_gv, viscous_adiabatic_ortho_gv, viscous_adiabatic_gv, viscous_adiabatic_gv_2p5d, viscous_adiabatic_gv_3d, viscous_iso_gv_2p5d, viscous_iso_alpha_gv, viscous_iso_alpha_gv_3d, viscous_iso_alpha_ortho_gv, viscous_iso_gv,
-    viscous_iso_gv_3d, viscous_iso_ortho_gv,
+    viscous_iso_gv_3d, viscous_iso_ortho_gv, viscous_ortho_2p5d_gv, viscous_ortho_3d_gv,
+    OrthoPlane25,
 };
 pub use gv_immersed::{
     body_feedback_drain_gv, body_feedback_grav_gv, body_feedback_gv, body_feedback_iso_gv,

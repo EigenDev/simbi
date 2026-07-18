@@ -1493,3 +1493,482 @@ mod ortho_heating_tests {
         assert!(de.abs() < 1e-15, "rigid rotation produced viscous heating: {de}");
     }
 }
+
+/// the general 2.5D ORTHOGONAL stress `(t11, t22, t33, t12, t13, t23)` at a
+/// point with the THIRD axis frozen (`d_3 = 0`, the 2.5D symmetry) and the
+/// scale factors independent of x_3 (every axisymmetric chart: cylindrical
+/// r-phi with out-of-plane z, spherical r-theta with out-of-plane phi). the
+/// out-of-plane shear is `e_3j = (h3 / 2 h_j) d_j(u3 / h3)` — zero identically
+/// on the rigid profile u3 = Omega h3 — and the trace carries
+/// `e33 = u1 d1h3/(h1 h3) + u2 d2h3/(h2 h3)` (zero when h3 = 1, the
+/// cartesian / cylindrical-z reduction).
+#[allow(clippy::too_many_arguments)]
+fn ortho_stress_2p5d<S: Scalar>(
+    u1: S, u2: S, u3: S,
+    d1u1: S, d2u1: S, d1u2: S, d2u2: S, d1u3: S, d2u3: S,
+    h1: S, h2: S, h3: S,
+    d2h1: S, d1h2: S, d1h3: S, d2h3: S,
+    mu: S,
+) -> (S, S, S, S, S, S) {
+    let two = S::from_f64(2.0);
+    let half = S::from_f64(0.5);
+    let two_thirds = S::from_f64(2.0 / 3.0);
+    let inv_h1 = S::from_f64(1.0) / h1;
+    let inv_h2 = S::from_f64(1.0) / h2;
+    let inv_h3 = S::from_f64(1.0) / h3;
+    let e11 = d1u1 * inv_h1 + u2 * d2h1 * inv_h1 * inv_h2;
+    let e22 = d2u2 * inv_h2 + u1 * d1h2 * inv_h1 * inv_h2;
+    let e33 = u1 * d1h3 * inv_h1 * inv_h3 + u2 * d2h3 * inv_h2 * inv_h3;
+    let e12 = half
+        * (d2u1 * inv_h2 - u1 * d2h1 * inv_h1 * inv_h2 + d1u2 * inv_h1 - u2 * d1h2 * inv_h1 * inv_h2);
+    let e13 = half * (d1u3 * inv_h1 - u3 * d1h3 * inv_h1 * inv_h3);
+    let e23 = half * (d2u3 * inv_h2 - u3 * d2h3 * inv_h2 * inv_h3);
+    let theta = e11 + e22 + e33;
+    (
+        mu * (two * e11 - two_thirds * theta),
+        mu * (two * e22 - two_thirds * theta),
+        mu * (two * e33 - two_thirds * theta),
+        mu * two * e12,
+        mu * two * e13,
+        mu * two * e23,
+    )
+}
+
+/// the FULL 2.5D orthogonal viscous increment: `dt div(tau)` on all THREE
+/// physical momentum components plus the heating `dt div(tau . u)` onto the
+/// total energy, on a general 2D orthogonal chart carrying a frozen third
+/// axis with its own scale factor `h3(x1, x2)`. divergences ride the
+/// J = h1 h2 h3 measure (`(1/J) d_j (J t_ij / h_j)`), geometric sources sit at
+/// the center; the out-of-plane force gains `+ t_3j d_j h3 / (h_j h3)` — the
+/// flux+source split of the angular-momentum-conserving `(1/(J h3)) d_j(J h3
+/// t_3j / h_j)` form, so `h3 u_3` (the axial angular momentum on a spherical
+/// meridian) is transported, never created. `h = (1, 1, 1)` reduces to the
+/// cartesian expressions; `h3 = 1` decouples the out-of-plane channel into
+/// the plain metric Laplacian.
+#[allow(clippy::too_many_arguments)]
+pub fn viscous_update_orthogonal_2p5d<S: Scalar>(
+    v: &[[Tensor<S, 3>; 3]; 3],
+    rho: &[[S; 3]; 3],
+    nu: &[[S; 3]; 3],
+    h1: &[[S; 3]; 3],
+    h2: &[[S; 3]; 3],
+    h3: &[[S; 3]; 3],
+    dx1: S,
+    dx2: S,
+    dt: S,
+) -> (Tensor<S, 3>, S) {
+    let half = S::from_f64(0.5);
+    let two = S::from_f64(2.0);
+    let four = S::from_f64(4.0);
+    let tiny = S::from_f64(1e-300);
+    let one = S::from_f64(1.0);
+    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let comp = |c: usize| -> [[S; 3]; 3] { std::array::from_fn(|j| std::array::from_fn(|i| v[j][i][c])) };
+    let (u1a, u2a, u3a) = (comp(0), comp(1), comp(2));
+
+    // stress at the x1-face between columns (ia, ib): normal d1 compact,
+    // transverse d2 four-point. returns the t_1* column + face h's/u's.
+    let x1_face = |ia: usize, ib: usize| -> ([S; 6], S, S, S, [S; 3]) {
+        let g1 = |x: &[[S; 3]; 3]| (x[1][ib] - x[1][ia]) / dx1;
+        let g2 = |x: &[[S; 3]; 3]| ((x[2][ia] - x[0][ia]) + (x[2][ib] - x[0][ib])) / (four * dx2);
+        let fv = |x: &[[S; 3]; 3]| half * (x[1][ia] + x[1][ib]);
+        let mu = harm(rho[1][ia], rho[1][ib]) * (half * (nu[1][ia] + nu[1][ib]));
+        let t = ortho_stress_2p5d(
+            fv(&u1a), fv(&u2a), fv(&u3a),
+            g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a), g1(&u3a), g2(&u3a),
+            fv(h1), fv(h2), fv(h3),
+            g2(h1), g1(h2), g1(h3), g2(h3),
+            mu,
+        );
+        ([t.0, t.1, t.2, t.3, t.4, t.5], fv(h1), fv(h2), fv(h3), [fv(&u1a), fv(&u2a), fv(&u3a)])
+    };
+    let x2_face = |ja: usize, jb: usize| -> ([S; 6], S, S, S, [S; 3]) {
+        let g2 = |x: &[[S; 3]; 3]| (x[jb][1] - x[ja][1]) / dx2;
+        let g1 = |x: &[[S; 3]; 3]| ((x[ja][2] - x[ja][0]) + (x[jb][2] - x[jb][0])) / (four * dx1);
+        let fv = |x: &[[S; 3]; 3]| half * (x[ja][1] + x[jb][1]);
+        let mu = harm(rho[ja][1], rho[jb][1]) * (half * (nu[ja][1] + nu[jb][1]));
+        let t = ortho_stress_2p5d(
+            fv(&u1a), fv(&u2a), fv(&u3a),
+            g1(&u1a), g2(&u1a), g1(&u2a), g2(&u2a), g1(&u3a), g2(&u3a),
+            fv(h1), fv(h2), fv(h3),
+            g2(h1), g1(h2), g1(h3), g2(h3),
+            mu,
+        );
+        ([t.0, t.1, t.2, t.3, t.4, t.5], fv(h1), fv(h2), fv(h3), [fv(&u1a), fv(&u2a), fv(&u3a)])
+    };
+    // t index order: [t11, t22, t33, t12, t13, t23].
+    let (t_1p, _h1_1p, h2_1p, h3_1p, u_1p) = x1_face(1, 2);
+    let (t_1m, _h1_1m, h2_1m, h3_1m, u_1m) = x1_face(0, 1);
+    let (t_2p, h1_2p, _h2_2p, h3_2p, u_2p) = x2_face(1, 2);
+    let (t_2m, h1_2m, _h2_2m, h3_2m, u_2m) = x2_face(0, 1);
+
+    // center stresses for the geometric sources.
+    let cd1 = |x: &[[S; 3]; 3]| (x[1][2] - x[1][0]) / (two * dx1);
+    let cd2 = |x: &[[S; 3]; 3]| (x[2][1] - x[0][1]) / (two * dx2);
+    let (h1_c, h2_c, h3_c) = (h1[1][1], h2[1][1], h3[1][1]);
+    let mu_c = rho[1][1] * nu[1][1];
+    let tc = ortho_stress_2p5d(
+        u1a[1][1], u2a[1][1], u3a[1][1],
+        cd1(&u1a), cd2(&u1a), cd1(&u2a), cd2(&u2a), cd1(&u3a), cd2(&u3a),
+        h1_c, h2_c, h3_c,
+        cd2(h1), cd1(h2), cd1(h3), cd2(h3),
+        mu_c,
+    );
+    let (d2h1_c, d1h2_c, d1h3_c, d2h3_c) = (cd2(h1), cd1(h2), cd1(h3), cd2(h3));
+
+    let inv_j = one / (h1_c * h2_c * h3_c);
+    // the J t_ij / h_j face fluxes, differenced over the coordinate widths.
+    let flux_div = |row: [usize; 2]| -> S {
+        let f1p = (h2_1p * h3_1p) * t_1p[row[0]];
+        let f1m = (h2_1m * h3_1m) * t_1m[row[0]];
+        let f2p = (h1_2p * h3_2p) * t_2p[row[1]];
+        let f2m = (h1_2m * h3_2m) * t_2m[row[1]];
+        ((f1p - f1m) / dx1 + (f2p - f2m) / dx2) * inv_j
+    };
+    // momentum rows: row i lists the [t_i1, t_i2] indices in the t order.
+    let f1 = flux_div([0, 3])
+        + (tc.3 * d2h1_c - tc.1 * d1h2_c) / (h1_c * h2_c)
+        - tc.2 * d1h3_c / (h1_c * h3_c);
+    let f2 = flux_div([3, 1])
+        + (tc.3 * d1h2_c - tc.0 * d2h1_c) / (h1_c * h2_c)
+        - tc.2 * d2h3_c / (h2_c * h3_c);
+    let f3 = flux_div([4, 5])
+        + tc.4 * d1h3_c / (h1_c * h3_c)
+        + tc.5 * d2h3_c / (h2_c * h3_c);
+
+    // heating: F_j = sum_k t_jk u_k at the same faces, (1/J) d_j (J F_j / h_j).
+    let fdot = |t: &[S; 6], u: &[S; 3], j: usize| -> S {
+        if j == 0 { t[0] * u[0] + t[3] * u[1] + t[4] * u[2] } else { t[3] * u[0] + t[1] * u[1] + t[5] * u[2] }
+    };
+    let dnrg = dt
+        * (((h2_1p * h3_1p) * fdot(&t_1p, &u_1p, 0) - (h2_1m * h3_1m) * fdot(&t_1m, &u_1m, 0)) / dx1
+            + ((h1_2p * h3_2p) * fdot(&t_2p, &u_2p, 1) - (h1_2m * h3_2m) * fdot(&t_2m, &u_2m, 1)) / dx2)
+        * inv_j;
+
+    (Tensor::new([dt * f1, dt * f2, dt * f3]), dnrg)
+}
+
+/// the FULL 3D orthogonal viscous increment: `dt div(tau)` on the three
+/// physical momenta plus the heating `dt div(tau . u)`, on a general 3D
+/// orthogonal chart with scale-factor stencils `h1, h2, h3` (cartesian
+/// (1,1,1), cylindrical (1, r, 1), spherical (1, r, r sin(theta))). the
+/// stress is the general orthogonal deviatoric form; divergences ride the
+/// J = h1 h2 h3 measure with per-face compact normal derivatives and
+/// four-point transverse ones; geometric sources sit at the center. rigid
+/// rotation about the chart's symmetry axis (u = Omega h_axis) nulls every
+/// shear component exactly at the shared face samples.
+#[allow(clippy::too_many_arguments)]
+pub fn viscous_update_orthogonal_3d<S: Scalar>(
+    v: &[[[Tensor<S, 3>; 3]; 3]; 3],
+    rho: &[[[S; 3]; 3]; 3],
+    nu: &[[[S; 3]; 3]; 3],
+    h: [&[[[S; 3]; 3]; 3]; 3],
+    dx: [S; 3],
+    dt: S,
+) -> (Tensor<S, 3>, S) {
+    let half = S::from_f64(0.5);
+    let two = S::from_f64(2.0);
+    let four = S::from_f64(4.0);
+    let tiny = S::from_f64(1e-300);
+    let one = S::from_f64(1.0);
+    let two_thirds = S::from_f64(2.0 / 3.0);
+    let harm = |a: S, b: S| two * a * b / (a + b + tiny);
+    let at = |x: &[[[S; 3]; 3]; 3], o: [usize; 3]| x[o[2]][o[1]][o[0]];
+    let vat = |o: [usize; 3], c: usize| v[o[2]][o[1]][o[0]][c];
+    let ctr = [1usize; 3];
+    let step = |o: [usize; 3], ax: usize, d: i32| -> [usize; 3] {
+        let mut n = o;
+        n[ax] = (n[ax] as i32 + d) as usize;
+        n
+    };
+
+    // the full stress at the `ax`-face between offsets a (low) and b (high):
+    // compact d_ax, four-point transverse derivatives averaged over the two
+    // face-adjacent cells. returns the 3x3 symmetric t plus face h's and u's.
+    let face = |ax: usize| -> [([[S; 3]; 3], [S; 3], [S; 3]); 2] {
+        std::array::from_fn(|side| {
+            let (a, b) = if side == 1 { (ctr, step(ctr, ax, 1)) } else { (step(ctr, ax, -1), ctr) };
+            let d = |f: &dyn Fn([usize; 3]) -> S, j: usize| -> S {
+                if j == ax {
+                    (f(b) - f(a)) / dx[ax]
+                } else {
+                    ((f(step(a, j, 1)) - f(step(a, j, -1))) + (f(step(b, j, 1)) - f(step(b, j, -1))))
+                        / (four * dx[j])
+                }
+            };
+            let fv = |f: &dyn Fn([usize; 3]) -> S| half * (f(a) + f(b));
+            let uf: [S; 3] = std::array::from_fn(|c| fv(&|o| vat(o, c)));
+            let du: [[S; 3]; 3] = std::array::from_fn(|c| std::array::from_fn(|j| d(&|o| vat(o, c), j)));
+            let hf: [S; 3] = std::array::from_fn(|k| fv(&|o| at(h[k], o)));
+            let dh: [[S; 3]; 3] = std::array::from_fn(|k| std::array::from_fn(|j| d(&|o| at(h[k], o), j)));
+            let mu = harm(at(rho, a), at(rho, b)) * (half * (at(nu, a) + at(nu, b)));
+            let mut e = [[S::ZERO; 3]; 3];
+            for i in 0..3 {
+                let mut eii = du[i][i] / hf[i];
+                for j in 0..3 {
+                    if j != i {
+                        eii = eii + uf[j] * dh[i][j] / (hf[i] * hf[j]);
+                    }
+                }
+                e[i][i] = eii;
+                for j in (i + 1)..3 {
+                    let eij = half
+                        * (du[i][j] / hf[j] - uf[i] * dh[i][j] / (hf[i] * hf[j])
+                            + du[j][i] / hf[i]
+                            - uf[j] * dh[j][i] / (hf[i] * hf[j]));
+                    e[i][j] = eij;
+                    e[j][i] = eij;
+                }
+            }
+            let theta = e[0][0] + e[1][1] + e[2][2];
+            let mut t = [[S::ZERO; 3]; 3];
+            for i in 0..3 {
+                for j in 0..3 {
+                    let tr = if i == j { two_thirds * theta } else { S::ZERO };
+                    t[i][j] = mu * (two * e[i][j] - tr);
+                }
+            }
+            (t, hf, uf)
+        })
+    };
+    let faces: [[([[S; 3]; 3], [S; 3], [S; 3]); 2]; 3] = std::array::from_fn(face);
+
+    // center stress + h gradients for the geometric sources.
+    let cd = |f: &dyn Fn([usize; 3]) -> S, j: usize| (f(step(ctr, j, 1)) - f(step(ctr, j, -1))) / (two * dx[j]);
+    let hc: [S; 3] = std::array::from_fn(|k| at(h[k], ctr));
+    let dhc: [[S; 3]; 3] = std::array::from_fn(|k| std::array::from_fn(|j| cd(&|o| at(h[k], o), j)));
+    let uc: [S; 3] = std::array::from_fn(|c| vat(ctr, c));
+    let duc: [[S; 3]; 3] = std::array::from_fn(|c| std::array::from_fn(|j| cd(&|o| vat(o, c), j)));
+    let mu_c = at(rho, ctr) * at(nu, ctr);
+    let mut ec = [[S::ZERO; 3]; 3];
+    for i in 0..3 {
+        let mut eii = duc[i][i] / hc[i];
+        for j in 0..3 {
+            if j != i {
+                eii = eii + uc[j] * dhc[i][j] / (hc[i] * hc[j]);
+            }
+        }
+        ec[i][i] = eii;
+        for j in (i + 1)..3 {
+            let eij = half
+                * (duc[i][j] / hc[j] - uc[i] * dhc[i][j] / (hc[i] * hc[j]) + duc[j][i] / hc[i]
+                    - uc[j] * dhc[j][i] / (hc[i] * hc[j]));
+            ec[i][j] = eij;
+            ec[j][i] = eij;
+        }
+    }
+    let theta_c = ec[0][0] + ec[1][1] + ec[2][2];
+    let mut tc = [[S::ZERO; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            let tr = if i == j { two_thirds * theta_c } else { S::ZERO };
+            tc[i][j] = mu_c * (two * ec[i][j] - tr);
+        }
+    }
+
+    let inv_j = one / (hc[0] * hc[1] * hc[2]);
+    let jh = |hf: &[S; 3], j: usize| -> S {
+        // J / h_j at a face.
+        match j {
+            0 => hf[1] * hf[2],
+            1 => hf[0] * hf[2],
+            _ => hf[0] * hf[1],
+        }
+    };
+    let mut f = [S::ZERO; 3];
+    let mut dnrg = S::ZERO;
+    for j in 0..3 {
+        let (tp, hp, up) = &faces[j][1];
+        let (tm, hm, um) = &faces[j][0];
+        for i in 0..3 {
+            f[i] = f[i] + (jh(hp, j) * tp[i][j] - jh(hm, j) * tm[i][j]) / dx[j] * inv_j;
+        }
+        let fp = tp[j][0] * up[0] + tp[j][1] * up[1] + tp[j][2] * up[2];
+        let fm = tm[j][0] * um[0] + tm[j][1] * um[1] + tm[j][2] * um[2];
+        dnrg = dnrg + (jh(hp, j) * fp - jh(hm, j) * fm) / dx[j] * inv_j;
+    }
+    for i in 0..3 {
+        for j in 0..3 {
+            if j != i {
+                f[i] = f[i] + (tc[i][j] * dhc[i][j] - tc[j][j] * dhc[j][i]) / (hc[i] * hc[j]);
+            }
+        }
+    }
+
+    (Tensor::new([dt * f[0], dt * f[1], dt * f[2]]), dt * dnrg)
+}
+
+#[cfg(test)]
+mod ortho_general_tests {
+    use super::*;
+
+    const DX: f64 = 0.05;
+    const NU: f64 = 0.3;
+
+    fn h_const_2d(v: f64) -> [[f64; 3]; 3] {
+        [[v; 3]; 3]
+    }
+
+    // scale-factor stencils sampled on the coordinate lattice about (r0, t0).
+    fn h_lattice_2d(f: impl Fn(f64, f64) -> f64, x0: f64, y0: f64) -> [[f64; 3]; 3] {
+        std::array::from_fn(|j| std::array::from_fn(|i| {
+            f(x0 + (i as f64 - 1.0) * DX, y0 + (j as f64 - 1.0) * DX)
+        }))
+    }
+
+    fn v_lattice_2p5d(f: impl Fn(f64, f64) -> [f64; 3], x0: f64, y0: f64) -> [[Tensor<f64, 3>; 3]; 3] {
+        std::array::from_fn(|j| std::array::from_fn(|i| {
+            Tensor::new(f(x0 + (i as f64 - 1.0) * DX, y0 + (j as f64 - 1.0) * DX))
+        }))
+    }
+
+    #[test]
+    fn ortho_2p5d_reduces_to_cartesian_at_unit_h() {
+        // a generic smooth 3-velocity field: the general operator at h = 1 must
+        // match the dedicated cartesian 2.5D operator to roundoff (the two
+        // assemble algebraically identical fluxes in different groupings).
+        let vf = |x: f64, y: f64| -> [f64; 3] {
+            [0.3 * (x + 2.0 * y).sin(), -0.2 * (2.0 * x - y).cos(), 0.4 * (x * y).sin()]
+        };
+        let v = v_lattice_2p5d(vf, 0.4, -0.3);
+        let rho = h_lattice_2d(|x, y| 1.0 + 0.2 * (x - y).cos(), 0.4, -0.3);
+        let nu = [[NU; 3]; 3];
+        let one = h_const_2d(1.0);
+        let (dm_g, de_g) =
+            viscous_update_orthogonal_2p5d(&v, &rho, &nu, &one, &one, &one, DX, DX, 1.0);
+        let (dm_c, de_c) = viscous_update_2p5d(&v, &rho, &nu, [DX, DX], 1.0);
+        for c in 0..3 {
+            let rel = (dm_g[c] - dm_c[c]).abs() / dm_c[c].abs().max(1e-12);
+            assert!(rel < 1e-12, "2p5d cartesian reduction, mom {c}: {rel:e}");
+        }
+        let rel = (de_g - de_c).abs() / de_c.abs().max(1e-12);
+        assert!(rel < 1e-12, "2p5d cartesian reduction, heating: {rel:e}");
+    }
+
+    #[test]
+    fn ortho_2p5d_spherical_rigid_rotation_is_exact_null() {
+        // spherical (r, theta) meridian with out-of-plane phi (h3 = r sin(theta)):
+        // rigid rotation about the polar axis is u_phi = Omega r sin(theta),
+        // stress-free — the shared face samples cancel exactly.
+        let omega = 0.7;
+        let (r0, t0) = (1.7, 0.9);
+        let h1 = h_const_2d(1.0);
+        let h2 = h_lattice_2d(|r, _| r, r0, t0);
+        let h3 = h_lattice_2d(|r, t| r * t.sin(), r0, t0);
+        let v = v_lattice_2p5d(|r, t| [0.0, 0.0, omega * r * t.sin()], r0, t0);
+        let rho = h_const_2d(1.0);
+        let nu = [[NU; 3]; 3];
+        let (dm, de) = viscous_update_orthogonal_2p5d(&v, &rho, &nu, &h1, &h2, &h3, DX, DX, 1.0);
+        // the null is algebraically exact; the residual is the non-associative
+        // roundoff of the r sin(theta) products (u3 and h3 group differently),
+        // orders below any physical stress.
+        for c in 0..3 {
+            assert!(dm[c].abs() < 1e-13, "spherical rigid null broken, mom {c}: {:e}", dm[c]);
+        }
+        assert!(de.abs() < 1e-13, "spherical rigid null books heating: {de:e}");
+    }
+
+    #[test]
+    fn ortho_2p5d_out_of_plane_shear_heats_at_the_dissipation_rate() {
+        // h = 1, u3 = S * x2: pure out-of-plane shear — zero force on u1/u2,
+        // heating exactly rho nu S^2 (the flux divergence of t23 u3).
+        let s_rate = 1.3;
+        let one = h_const_2d(1.0);
+        let v = v_lattice_2p5d(|_, y| [0.0, 0.0, s_rate * y], 0.0, 0.0);
+        let rho = h_const_2d(1.0);
+        let nu = [[NU; 3]; 3];
+        let (dm, de) = viscous_update_orthogonal_2p5d(&v, &rho, &nu, &one, &one, &one, DX, DX, 1.0);
+        assert!(dm[0].abs() < 1e-15 && dm[1].abs() < 1e-15 && dm[2].abs() < 1e-14);
+        let rel = (de - NU * s_rate * s_rate).abs() / (NU * s_rate * s_rate);
+        assert!(rel < 1e-12, "out-of-plane heating rate off: {rel:e}");
+    }
+
+    fn h_const_3d(v: f64) -> [[[f64; 3]; 3]; 3] {
+        [[[v; 3]; 3]; 3]
+    }
+
+    fn lattice_3d(f: impl Fn(f64, f64, f64) -> f64, x0: [f64; 3]) -> [[[f64; 3]; 3]; 3] {
+        std::array::from_fn(|k| std::array::from_fn(|j| std::array::from_fn(|i| {
+            f(
+                x0[0] + (i as f64 - 1.0) * DX,
+                x0[1] + (j as f64 - 1.0) * DX,
+                x0[2] + (k as f64 - 1.0) * DX,
+            )
+        })))
+    }
+
+    fn v_lattice_3d(f: impl Fn(f64, f64, f64) -> [f64; 3], x0: [f64; 3]) -> [[[Tensor<f64, 3>; 3]; 3]; 3] {
+        std::array::from_fn(|k| std::array::from_fn(|j| std::array::from_fn(|i| {
+            Tensor::new(f(
+                x0[0] + (i as f64 - 1.0) * DX,
+                x0[1] + (j as f64 - 1.0) * DX,
+                x0[2] + (k as f64 - 1.0) * DX,
+            ))
+        })))
+    }
+
+    #[test]
+    fn ortho_3d_reduces_to_cartesian_at_unit_h() {
+        let x0 = [0.3, -0.2, 0.5];
+        let v = v_lattice_3d(
+            |x, y, z| {
+                [
+                    0.3 * (x + 2.0 * y - z).sin(),
+                    -0.2 * (2.0 * x - y + z).cos(),
+                    0.4 * (x * y + z).sin(),
+                ]
+            },
+            x0,
+        );
+        let rho = lattice_3d(|x, y, z| 1.0 + 0.2 * (x - y + 0.5 * z).cos(), x0);
+        let nu = h_const_3d(NU);
+        let one = h_const_3d(1.0);
+        let (dm_g, de_g) =
+            viscous_update_orthogonal_3d(&v, &rho, &nu, [&one, &one, &one], [DX; 3], 1.0);
+        let (dm_c, de_c) = viscous_update_3d(&v, &rho, &nu, [DX; 3], 1.0);
+        for c in 0..3 {
+            let rel = (dm_g[c] - dm_c[c]).abs() / dm_c[c].abs().max(1e-12);
+            assert!(rel < 1e-12, "3d cartesian reduction, mom {c}: {rel:e}");
+        }
+        let rel = (de_g - de_c).abs() / de_c.abs().max(1e-12);
+        assert!(rel < 1e-12, "3d cartesian reduction, heating: {rel:e}");
+    }
+
+    #[test]
+    fn ortho_3d_cylindrical_rigid_rotation_is_exact_null() {
+        // cylindrical (r, phi, z), h = (1, r, 1): u_phi = Omega r.
+        let omega = 0.6;
+        let x0 = [1.4, 0.7, 0.2];
+        let h1 = h_const_3d(1.0);
+        let h2 = lattice_3d(|r, _, _| r, x0);
+        let h3 = h_const_3d(1.0);
+        let v = v_lattice_3d(|r, _, _| [0.0, omega * r, 0.0], x0);
+        let rho = h_const_3d(1.0);
+        let nu = h_const_3d(NU);
+        let (dm, de) = viscous_update_orthogonal_3d(&v, &rho, &nu, [&h1, &h2, &h3], [DX; 3], 1.0);
+        for c in 0..3 {
+            assert!(dm[c].abs() < 1e-15, "cylindrical 3d rigid null broken, mom {c}: {:e}", dm[c]);
+        }
+        assert!(de.abs() < 1e-15, "cylindrical 3d rigid null books heating: {de:e}");
+    }
+
+    #[test]
+    fn ortho_3d_spherical_rigid_rotation_is_exact_null() {
+        // spherical (r, theta, phi), h = (1, r, r sin(theta)): rigid rotation
+        // about the polar axis is u_phi = Omega r sin(theta).
+        let omega = 0.6;
+        let x0 = [1.6, 1.0, 0.4];
+        let h1 = h_const_3d(1.0);
+        let h2 = lattice_3d(|r, _, _| r, x0);
+        let h3 = lattice_3d(|r, t, _| r * t.sin(), x0);
+        let v = v_lattice_3d(|r, t, _| [0.0, 0.0, omega * r * t.sin()], x0);
+        let rho = h_const_3d(1.0);
+        let nu = h_const_3d(NU);
+        let (dm, de) = viscous_update_orthogonal_3d(&v, &rho, &nu, [&h1, &h2, &h3], [DX; 3], 1.0);
+        // roundoff of the non-associative r sin(theta) products; see the 2.5d twin.
+        for c in 0..3 {
+            assert!(dm[c].abs() < 1e-13, "spherical 3d rigid null broken, mom {c}: {:e}", dm[c]);
+        }
+        assert!(de.abs() < 1e-13, "spherical 3d rigid null books heating: {de:e}");
+    }
+}

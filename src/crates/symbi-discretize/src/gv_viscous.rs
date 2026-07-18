@@ -19,6 +19,7 @@
 // =============================================================================
 
 use symbi_algebra::algebra::Numeric;
+use symbi_ir::algebra::Scalar as _;
 use symbi_algebra::Tensor;
 use symbi_geometry::{CylindricalRPhi, DiagonalMetric, Metric, Spherical};
 use symbi_hydro::viscous::{
@@ -603,5 +604,189 @@ pub fn viscous_iso_alpha_gv() -> (GvKernel, Writes) {
 
     let dmom = viscous_mom_update_2d(&vst, &rst, &nust, dx, dy, dt);
     let writes = accumulate_mom(dmom);
+    (end_trace(), writes)
+}
+
+/// the 2.5D orthogonal viscous plane: the 2-axis grid + the frozen third axis
+/// whose scale factor rides the in-plane coordinates. cylindrical splits into
+/// the (r, phi) disk (out-of-plane z, h = (1, r, 1)) and the (r, z)
+/// axisymmetric section (out-of-plane phi, h = (1, 1, r)); the spherical
+/// (r, theta) meridian carries the azimuth (h = (1, r, r sin(theta))).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum OrthoPlane25 {
+    CylRPhi,
+    CylRz,
+    Sph,
+}
+
+fn ortho_25_h(plane: OrthoPlane25, x0: Gv, x1: Gv) -> [Gv; 3] {
+    match plane {
+        OrthoPlane25::CylRPhi => [Gv::ONE, x0, Gv::ONE],
+        OrthoPlane25::CylRz => [Gv::ONE, Gv::ONE, x0],
+        OrthoPlane25::Sph => [Gv::ONE, x0, x0 * x1.sin()],
+    }
+}
+
+// the keplerian orbital radius for the alpha law: the cylindrical radius of
+// the chart point (the central mass sits on the symmetry axis).
+fn ortho_25_orbital_radius(plane: OrthoPlane25, x0: Gv, x1: Gv) -> Gv {
+    match plane {
+        OrthoPlane25::CylRPhi | OrthoPlane25::CylRz => x0,
+        OrthoPlane25::Sph => x0 * x1.sin(),
+    }
+}
+
+/// trace the 2.5D (DOF = 3 on a 2-axis grid) orthogonal viscous operator for
+/// `plane`: the general scale-factor stress on all three physical momenta,
+/// with the heating div(tau . u) onto the total energy when `adiabatic`.
+/// `alpha` swaps the constant nu for the shakura-sunyaev law nu = alpha cs^2 /
+/// Omega_K(R_cyl) (local cs^2 = gamma p / rho when adiabatic, the global `cs`
+/// scalar otherwise), Omega_K about body 0's mass on the symmetry axis.
+pub fn viscous_ortho_2p5d_gv(plane: OrthoPlane25, adiabatic: bool, alpha: bool) -> (GvKernel, Writes) {
+    const NDIM: u8 = 2;
+    let (coords, axes): (Coords, [usize; 2]) = match plane {
+        OrthoPlane25::CylRPhi => (Coords::Cylindrical, [0, 1]),
+        OrthoPlane25::CylRz => (Coords::Cylindrical, [0, 2]),
+        OrthoPlane25::Sph => (Coords::Spherical, [0, 1]),
+    };
+    // the carrier orders components (in-plane-1, in-plane-2, out-of-plane);
+    // storage is COORDINATE-indexed (r, phi, z) / (r, theta, phi). the (r, z)
+    // section permutes (storage phi = slot 1 is the out-of-plane component);
+    // the disk and the meridian line up with storage already.
+    let perm: [usize; 3] = match plane {
+        OrthoPlane25::CylRz => [0, 2, 1],
+        _ => [0, 1, 2],
+    };
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let dx1 = Gv::scalar("dx_0");
+    let dx2 = Gv::scalar("dx_1");
+    let (vst_raw, rst) = prim_stencil_2p5d();
+    let vst: [[Tensor<Gv, 3>; 3]; 3] = std::array::from_fn(|j| {
+        std::array::from_fn(|i| Tensor::new([vst_raw[j][i][perm[0]], vst_raw[j][i][perm[1]], vst_raw[j][i][perm[2]]]))
+    });
+    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; NDIM as usize], &axes, NDIM as usize);
+    let (c0, c1) = (geo.centroid[0], geo.centroid[1]);
+    let floor = Gv::from_f64(1e-30);
+
+    let mut h1 = [[Gv::ZERO; 3]; 3];
+    let mut h2 = [[Gv::ZERO; 3]; 3];
+    let mut h3 = [[Gv::ZERO; 3]; 3];
+    let mut nust = [[Gv::ZERO; 3]; 3];
+    for dj in 0..3usize {
+        for di in 0..3usize {
+            let x0 = c0 + Gv::from_f64(di as f64 - 1.0) * dx1;
+            let x1 = c1 + Gv::from_f64(dj as f64 - 1.0) * dx2;
+            let h = ortho_25_h(plane, x0, x1);
+            h1[dj][di] = h[0];
+            h2[dj][di] = h[1];
+            h3[dj][di] = h[2];
+            nust[dj][di] = if alpha {
+                let a = Gv::scalar("alpha");
+                let gm = Gv::scalar("body_0_mass");
+                let cs2 = if adiabatic {
+                    let gamma = Gv::scalar("gamma");
+                    let off = [di as i32 - 1, dj as i32 - 1];
+                    let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                    let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
+                    gamma * pre / rho.max(floor)
+                } else {
+                    let cs = Gv::scalar("cs");
+                    cs * cs
+                };
+                let r = ortho_25_orbital_radius(plane, x0, x1).max(floor);
+                let omega_k = (gm / (r * r * r)).sqrt().max(floor);
+                a * cs2 / omega_k
+            } else {
+                Gv::scalar("nu")
+            };
+        }
+    }
+
+    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_2p5d(
+        &vst, &rst, &nust, &h1, &h2, &h3, dx1, dx2, dt,
+    );
+    let mut writes: Writes = Vec::new();
+    for c in 0..3 {
+        // carrier component c lands on its STORAGE slot perm[c].
+        let slot = perm[c] as u8;
+        let mom_c = Gv::field(&format!("mom{}", perm[c]), FieldRef::cons_mom(slot));
+        writes.push((format!("mom_out_{}", perm[c]), FieldRef::cons_mom(slot).into(), (mom_c + dmom[c]).node()));
+    }
+    if adiabatic {
+        let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+    }
+    (end_trace(), writes)
+}
+
+/// trace the FULL-3D orthogonal viscous operator for the cylindrical
+/// (h = (1, r, 1)) or spherical (h = (1, r, r sin(theta))) chart: the general
+/// scale-factor stress + (adiabatic) heating; `alpha` as in the 2.5D twin.
+pub fn viscous_ortho_3d_gv(coords: Coords, adiabatic: bool, alpha: bool) -> (GvKernel, Writes) {
+    const NDIM: u8 = 3;
+    assert!(
+        matches!(coords, Coords::Cylindrical | Coords::Spherical),
+        "viscous_ortho_3d_gv: cylindrical / spherical charts only"
+    );
+    begin_trace();
+    let dt = Gv::scalar("dt");
+    let dx: [Gv; 3] = std::array::from_fn(|a| Gv::scalar(&format!("dx_{a}")));
+    let (vst, rst) = prim_stencil_3d();
+    let geo = cell_geometry_gv(coords, &vec![Spacing::Uniform; 3], &[0, 1, 2], 3);
+    let c: [Gv; 3] = [geo.centroid[0], geo.centroid[1], geo.centroid[2]];
+    let floor = Gv::from_f64(1e-30);
+
+    let mut h1 = [[[Gv::ZERO; 3]; 3]; 3];
+    let mut h2 = [[[Gv::ZERO; 3]; 3]; 3];
+    let mut h3 = [[[Gv::ZERO; 3]; 3]; 3];
+    let mut nust = [[[Gv::ZERO; 3]; 3]; 3];
+    for dk in 0..3usize {
+        for dj in 0..3usize {
+            for di in 0..3usize {
+                let x0 = c[0] + Gv::from_f64(di as f64 - 1.0) * dx[0];
+                let x1 = c[1] + Gv::from_f64(dj as f64 - 1.0) * dx[1];
+                let (hh2, hh3, r_orb) = match coords {
+                    Coords::Cylindrical => (x0, Gv::ONE, x0),
+                    _ => (x0, x0 * x1.sin(), x0 * x1.sin()),
+                };
+                h1[dk][dj][di] = Gv::ONE;
+                h2[dk][dj][di] = hh2;
+                h3[dk][dj][di] = hh3;
+                nust[dk][dj][di] = if alpha {
+                    let a = Gv::scalar("alpha");
+                    let gm = Gv::scalar("body_0_mass");
+                    let cs2 = if adiabatic {
+                        let gamma = Gv::scalar("gamma");
+                        let off = [di as i32 - 1, dj as i32 - 1, dk as i32 - 1];
+                        let pre = Gv::field_offset("prim_pre", FieldRef::PrimPre, NDIM, &off);
+                        let rho = Gv::field_offset("prim_rho", "prim.rho", NDIM, &off);
+                        gamma * pre / rho.max(floor)
+                    } else {
+                        let cs = Gv::scalar("cs");
+                        cs * cs
+                    };
+                    let r = r_orb.max(floor);
+                    let omega_k = (gm / (r * r * r)).sqrt().max(floor);
+                    a * cs2 / omega_k
+                } else {
+                    Gv::scalar("nu")
+                };
+            }
+        }
+    }
+
+    let (dmom, dnrg) = symbi_hydro::viscous::viscous_update_orthogonal_3d(
+        &vst, &rst, &nust, [&h1, &h2, &h3], dx, dt,
+    );
+    let mut writes: Writes = Vec::new();
+    for cc in 0..3 {
+        let mom_c = Gv::field(&format!("mom{cc}"), FieldRef::cons_mom(cc as u8));
+        writes.push((format!("mom_out_{cc}"), FieldRef::cons_mom(cc as u8).into(), (mom_c + dmom[cc]).node()));
+    }
+    if adiabatic {
+        let nrg = Gv::field("nrg", FieldRef::cons_nrg());
+        writes.push(("nrg_out".to_string(), FieldRef::cons_nrg().into(), (nrg + dnrg).node()));
+    }
     (end_trace(), writes)
 }

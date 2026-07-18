@@ -65,6 +65,7 @@ fn build(vel_x: f64, with_body: bool, body_vel: [f64; 2], surface: SurfaceSpec) 
         .cells([NR, NP])
         .origin([R_LO, 0.0])
         .spacing([DR, DP])
+        .cyl_plane(symbi_sim::state::CylPlane::RPhi)
         .boundaries(Boundaries(std::array::from_fn(|a| {
             if a == 1 { [BoundaryType::Periodic; 2] } else { [BoundaryType::Outflow; 2] }
         })))

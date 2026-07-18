@@ -61,7 +61,13 @@ pub fn geom_suffix(coords: Geometry, dof: usize, ndim: usize) -> &'static str {
 /// (dof == ndim, no swirl slot), so the suffix is "" / "_sph" / "_cyl". Cartesian
 /// reproduces the `KernelId` name exactly, so lifting curvilinear support leaves
 /// the Cartesian bake and dispatch untouched.
-pub fn penalize_name(base: &str, coords: Geometry, ndim: usize) -> String {
+pub fn penalize_name(base: &str, coords: Geometry, ndim: usize, axes: &[usize]) -> String {
+    // the two cylindrical 2d planes carry different chart maps: the (r, phi)
+    // disk keeps the plain `_cyl` suffix; the (r, z) axisymmetric section
+    // (axes [0, 2]) is `_cyl_rz` (identity section frame, on-axis bodies).
+    if coords == Geometry::Cylindrical && ndim == 2 && axes[..2] == [0, 2] {
+        return format!("{base}_cyl_rz_{ndim}d");
+    }
     format!("{base}{}_{ndim}d", geom_suffix(coords, ndim, ndim))
 }
 
