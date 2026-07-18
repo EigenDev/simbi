@@ -35,14 +35,17 @@ A quick note on what this is these days: SIMBI started life as a C++ code and wa
 - Spacetime as its own axis: hand the relativistic regimes a Minkowski, Schwarzschild, or horizon-penetrating Kerr-Schild metric the same way you would pick a coordinate system
 - GPU acceleration on NVIDIA cards, with kernels compiled on the fly so there is no separate build step and no architecture flag to remember
 - High-resolution shock capturing with HLLE, HLLC (plus a low-Mach variant), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches
-- Constrained-transport MHD (contact or UCT edge EMFs) that keeps div B at machine zero by construction
-- An immersed boundary method for solid objects, point-mass gravity, and Bondi-Hoyle accretion sinks — with per-body force/torque/accretion diagnostics
+- Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
+- Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
+- A rich immersed-boundary method: point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls of *any* constructive solid geometry (CSG) shape (spheres, boxes, unions/intersections) with no-penetration / no-slip porous surfaces. Bodies can be one-way (prescribed motion) or **two-way coupled** — the gas reaction force and torque then drive the body's full rigid-body dynamics: translation, plus rotation about an arbitrary axis via Euler's equations with a principal-moment inertia tensor, so an asymmetric body tumbles and precesses. Spinning walls drag the gas at omega x r, the gas <-> body energy exchange conserves total energy, and every body reports force / torque / accretion diagnostics
+- Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is excised and refilled by a causal one-way onion sweep, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
 - Block-based static mesh refinement with Berger-Colella subcycling
+- Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
 - Afterglow radiation transport, so you can turn a simulation into synthetic observables
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
 
-On the roadmap: an AMD/HIP backend and multi-GPU (then multi-node) domain decomposition. The architecture is already pointed that way, but those are not shipped yet, so this README only promises what actually runs today.
+An AMD/HIP backend is in the tree as an experimental build feature (the compute layer is backend-agnostic, so the CUDA and HIP paths share one kernel definition). Multi-*node* decomposition is the next step on the roadmap; single-node multi-GPU already runs today.
 
 ---
 
@@ -163,7 +166,7 @@ The GPU path needs the cargo `cuda` feature turned on, so it goes through `dev.p
 ./dev.py install --gpu
 ```
 
-The CPU and GPU extensions live side by side (`cpu_ext` and `gpu_ext`), so installing one does not clobber the other. Pick the backend at run time with `--mode cpu` or `--mode gpu`.
+The CPU and GPU extensions coexist as separate modules (`cpu_ext` and `gpu_ext`), so you can keep both installed and pick the backend at run time with `--mode cpu`, `--mode omp` (OpenMP-threaded CPU, size it with `--nthreads N`), or `--mode gpu`.
 
 ### Cleaning up
 
@@ -263,6 +266,21 @@ simbi afterglow polarization events.h5 --observer-angle 0.1
 
 # spectrum
 simbi afterglow spectrum events.h5 --observer-time 1e5
+
+# sweep the observer time into a sky-map movie
+simbi afterglow movie events.h5 --output skymap.mp4
+```
+
+### Offline analysis
+
+Immersed-body runs write a `body_diagnostics` time series (Mdot, drag, torque) into every
+checkpoint. `simbi.analysis` reads it back and, for an accretor, finds when the flow settled:
+
+```python
+from simbi.analysis import load_body_diagnostics, steady_state_time
+
+diag = load_body_diagnostics("run.chkpt.final.h5")
+t0 = steady_state_time(diag.time, diag.mdot[:, 0])   # steady-state onset for body 0
 ```
 
 ---
@@ -367,7 +385,13 @@ def gravity_source_expressions(self):
 
 ### Immersed bodies
 
-Drop solid objects into the domain:
+Drop objects into the domain. Each body carries one `capability`:
+
+- `GRAVITATIONAL` — a fixed-potential (softened) point mass
+- `ACCRETION` — a Bondi-Hoyle sink: it removes mass, and its `AccretionProperties` can layer on a porous surface (a `porosity` dial), a no-penetration/no-slip wall, or a torque-free (Dittmann) sink that swallows mass without angular momentum
+- `RIGID` — a solid wall. Sphere by default, or *any* CSG `Shape` (boxes, spheres, `union`/`intersect`/`rotated`) authored in the body frame. The surface enforces no-penetration (`k_eta_n`) and, under `apply_no_slip`, no-slip tangential drag (`k_eta_t`)
+
+The simplest case, a gravitating mass:
 
 ```python
 from simbi.types import ImmersedBodyConfig, BodyCapability, GravitationalProperties
@@ -377,31 +401,63 @@ from simbi.types import ImmersedBodyConfig, BodyCapability, GravitationalPropert
 def immersed_bodies(self) -> list[ImmersedBodyConfig]:
     return [
         ImmersedBodyConfig(
-            name="central_mass",
-            capabilities=[BodyCapability.GRAVITATIONAL],
-            gravitational=GravitationalProperties(
-                mass=1.0,
-                softening_length=0.01,
-            ),
+            capability=BodyCapability.GRAVITATIONAL,
+            mass=1.0,
+            radius=0.05,
             position=(0.0, 0.0),
             velocity=(0.0, 0.0),
+            gravitational=GravitationalProperties(softening_length=0.01),
         )
     ]
 ```
 
-### Dynamic mesh motion
-
-For domains that expand or contract:
+Flip `two_way_coupling=True` and the body stops being scenery: the gas reaction force and torque
+drive its full rigid-body motion — it translates, and rotates about an arbitrary axis via Euler's
+equations with an anisotropic inertia tensor, so an off-axis spin precesses and an asymmetric shape
+tumbles. A tumbling card in a wind tunnel:
 
 ```python
-@computed_field
+from simbi.types import ImmersedBodyConfig, BodyCapability, RigidProperties, Shape
+
+card = Shape.box((0.0, 0.0, 0.0), (0.45, 0.22, 0.15))   # half-extents, body frame
+ImmersedBodyConfig(
+    capability=BodyCapability.RIGID,
+    mass=1.0,
+    radius=1.0,                 # the mask-gate scale; the CSG defines the geometry
+    position=(0.0, 0.0, 0.0),
+    velocity=(0.0, 0.0, 0.0),
+    two_way_coupling=True,      # the flow moves AND spins the body; the reaction acts back
+    rigid=RigidProperties(
+        inertia=1.0,
+        apply_no_slip=True,     # tangential drag on (free-slip if False)
+        k_eta_n=50.0,           # no-penetration stiffness
+        k_eta_t=50.0,           # no-slip stiffness
+        shape=card,
+        omega=2.0,              # spin rate
+        spin_axis=(0.3, 1.0, 0.2),          # arbitrary axis
+        inertia_principal=(1.0, 3.0, 3.8),  # unequal moments -> precession / nutation
+    ),
+)
+```
+
+The gas <-> body energy exchange is conserved (drag heats the gas; an isothermal wall carries that
+heat off to its reservoir), and every body reports its force, torque, and accreted mass each step.
+Bodies can also orbit as gravitational binaries, and MHD runs can give a body Ohmic `magnetic`
+coupling.
+
+### Dynamic mesh motion
+
+For domains that expand or contract, expose the scale factor `a(t)` and its derivative as plain
+`@property` hooks returning a callable of time (they return a closure, so they stay plain
+properties):
+
+```python
 @property
-def scale_factor(self):
+def scale_factor(self) -> Optional[Callable[[float], float]]:
     return lambda time: 1.0 + 0.1 * time
 
-@computed_field
 @property
-def scale_factor_derivative(self):
+def scale_factor_derivative(self) -> Optional[Callable[[float], float]]:
     return lambda time: 0.1
 ```
 
@@ -424,8 +480,8 @@ def scale_factor_derivative(self):
 
 ### Spacetimes
 
-Relativity in SIMBI is a property of the *spacetime*, not the fluid regime. The
-relativistic regimes take a `Spacetime` on top:
+Relativity in SIMBI lives in the *spacetime*: you select it by layering a `Spacetime` under a
+relativistic regime, and the geometry supplies the metric the fluid evolves on:
 
 - `MINKOWSKI` — flat, i.e. plain special relativity
 - `SCHWARZSCHILD` — a static central mass
@@ -434,6 +490,17 @@ relativistic regimes take a `Spacetime` on top:
 
 So "GR hydro around a Kerr black hole" is the same `RHD` regime you already know,
 handed a different metric.
+
+### Horizon excision
+
+Point a horizon-penetrating chart (`KERR_SCHILD` or `KERR`) at a black hole and you can actually
+*swallow* it. Set `excision_radius` to a radius inside the horizon (above the metric-guard radius
+M/2, so around 0.7 r_+) and the cells inside are excised every step: their primitives are
+overwritten by a causal, outward one-way "onion" sweep and their conserved state is rebuilt from
+the local metric, so nothing unphysical leaks back out across the horizon and the accretion-rate
+certificate stays well-posed — no coordinate singularity to babysit. It works for hydro and MHD
+(the staggered magnetic faces stay constrained-transport-owned), for spinning (`KERR`) horizons,
+on the GPU, and across the multi-GPU decomposed path.
 
 ### Coordinate systems
 
@@ -480,6 +547,13 @@ proof honest.
 - First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
 - Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
 
+### Non-ideal transport
+
+Two dissipative terms sit on top of the ideal solvers, both off by default (coefficient zero):
+
+- `viscosity` — a Navier-Stokes shear viscosity. Give it a constant, or switch on the alpha-disk law (nu ~ alpha c_s H) for accretion-disk setups
+- `resistivity` — Ohmic resistivity for the MHD regimes; the field diffuses while constrained transport keeps div B at machine zero
+
 ### Static mesh refinement
 
 ```python
@@ -500,7 +574,6 @@ refinement_subcycling_mode: Annotated[
 - `NONE`, every level advances on the same timestep
 - `STANDARD`, subcycle by the refinement ratio
 - `MANUAL`, you specify substeps per level
-- `ADAPTIVE`, not yet implemented
 
 ---
 
@@ -508,7 +581,7 @@ refinement_subcycling_mode: Annotated[
 
 Here is the quick tour of how the Rust side fits together, in case you want to hack on it.
 
-The compute backend is a Cargo workspace of small, focused crates rather than one giant blob. The interesting idea at the center of it: the physics is written ONCE, generically over a "carrier" type, and traced into an intermediate representation. That IR gets lowered to native CPU code (compiled by LLVM at build time), CUDA source (compiled at run time with NVRTC), or — for the source terms you write in Python — machine code JIT-compiled at startup with Cranelift. One definition of the math serves every backend. The same trick powers the test suite: the f64 evaluation of a kernel doubles as its own oracle, so CPU, GPU, and JIT are checked against each other bit-for-bit.
+The compute backend is a Cargo workspace of small, focused crates. The interesting idea at the center of it: the physics is written ONCE, generically over a "carrier" type, and traced into an intermediate representation. That IR gets lowered to native CPU code (compiled by LLVM at build time), CUDA source (compiled at run time with NVRTC), or — for the source terms you write in Python — machine code JIT-compiled at startup with Cranelift. One definition of the math serves every backend. The same trick powers the test suite: the f64 evaluation of a kernel doubles as its own oracle, so CPU, GPU, and JIT are checked against each other bit-for-bit.
 
 The compiler layer earns its keep: common-subexpression elimination, constant-power strength reduction (`r ** -2` in your config compiles down to two multiplies), automatic lazy scheduling of expensive conditional branches (a `where(...)` in your source expressions becomes a real branch when the arms are worth skipping), and a cost-gated select-vectorization pass that turns branch-free kernel bodies into NEON/SIMD-friendly straight-line code. The guiding rule, enforced by the graph itself: only compute what you actually need.
 
@@ -525,7 +598,9 @@ A few load-bearing pieces:
 - **`symbi-afterglow`** does the radiation transport and observables
 - **`symbi-py`** is the thin pyo3 bridge that becomes the `cpu_ext` and `gpu_ext` Python modules
 
-A few design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. The CPU executor fans serial kernels over a cache-blocked cover whose tiles run the full grid row along the contiguous axis, which gives the vectorized kernel bodies the long unit-stride runs they thrive on. And the time step is sequenced entirely through a `KernelSet` trait, so the driver never reaches into the fields directly. That last part is what keeps multi-GPU on the table: a subdomain is just a self-contained simulation state, and the refinement machinery already knows how to exchange halos between neighboring regions.
+A few design choices worth calling out. Fields are stored struct-of-arrays, which is what lets the CPU vectorize and the GPU coalesce its memory reads. The CPU executor fans serial kernels over a cache-blocked cover whose tiles run the full grid row along the contiguous axis, which gives the vectorized kernel bodies the long unit-stride runs they thrive on. And the time step is sequenced entirely through a `KernelSet` trait, so the driver never reaches into the fields directly. That last part is what makes multi-GPU work: a subdomain is just a self-contained simulation state, so `gpus > 1` splits the domain into tiles that halo-exchange between neighbors in lockstep — bit-identical to a monolithic run, and riding the exact halo machinery the refinement hierarchy already uses. Multi-*node* is the natural next step from here.
+
+The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the CUDA and HIP (AMD, experimental) paths share one kernel definition and diverge only in the tiny token-map at the very bottom.
 
 On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave at 256^3 sustains ~38 million zone-cycles per second on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, AthenaK reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
 
@@ -594,7 +669,8 @@ SIMBI has been used in the following papers:
 
 | Version | Changes |
 |---------|---------|
-| **v0.8.0** (current) | Full rewrite of the compute backend from C++ to Rust (traced-IR kernels, LLVM + NVRTC + Cranelift); GR spacetimes; constrained-transport MHD; static mesh refinement; live TUI; the big performance campaign |
+| **v0.9.0** (current) | Full rewrite of the compute backend from C++ to Rust (traced-IR kernels, LLVM + NVRTC + Cranelift); GR spacetimes + horizon excision; constrained-transport MHD; viscosity + resistivity; two-way rigid-body immersed walls (CSG shapes, spin, energy-conserving coupling); single-node multi-GPU domain decomposition; static mesh refinement; live TUI; the big performance campaign |
+| **v0.8.0** | Minimized compiler warnings | 
 | **v0.7.0** | Added mypy type checking and the immersed boundary method |
 | **v0.6.0** | Fixed git tag ordering, general refactoring |
 | **v0.5.0** | Performance optimizations |
@@ -646,4 +722,5 @@ SIMBI is distributed under the [MIT License](https://opensource.org/licenses/MIT
 
 ---
 
-> Porting this to rust benefitted greatly from the use of the Claude Code tool. I will drink the koolaid until my bitter end, I suppose.
+> Porting this to rust from c++ benefitted greatly from the use of the Claude Code tool.
+The speed boosts was just undeniable versus if I had taken the time to do it (during my finite) postdoc.
