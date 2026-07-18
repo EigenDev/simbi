@@ -543,7 +543,7 @@ proof honest.
 
 **A few extras:**
 - `plm_theta`, the PLM reconstruction parameter (0 to 2, default 1.5; 0 gives you piecewise-constant)
-- `use_quirk_smoothing`, Quirk's carbuncle fix
+- `use_quirk_smoothing`, [Quirk 1994](https://onlinelibrary.wiley.com/doi/abs/10.1002/fld.1650180603)'s carbuncle fix
 - First-order flux correction (FOFC): if a high-order update drives a cell unphysical, that cell is redone at first order, and the run reports how often that happened — per window while it runs, and again in the exit summary
 - Prolongation at refinement boundaries runs one order above the interior reconstruction, which preserves the scheme's accuracy across level edges
 
@@ -610,21 +610,24 @@ On speed (one machine, one problem class, double precision): the 3D Newtonian li
 
 There are 60-odd ready-to-run configs in `simbi_configs/examples/`. A sampler:
 
-| Example | What it is |
-|---------|------------|
-| `sod.py` | Newtonian shock tube |
-| `marti_muller.py` | SRHD shock tube (1D and 3D variants) |
-| `kh.py` | Kelvin-Helmholtz instability |
-| `rt.py` | Rayleigh-Taylor instability (with gravity) |
-| `sedov.py` | Sedov-Taylor explosion (spherical) |
-| `thermal_bomb.py` | Thermal bomb (2D and 3D variants) |
-| `magnetic_blast.py` | MHD blast wave |
-| `magnetic_shock_tube.py` | 1D MHD shock |
-| `orszag_tang.py` | SRMHD Orszag-Tang vortex |
-| `kepler.py` | Keplerian disk with a central mass |
-| `bondi.py` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
-| `uniform_sphere.py` | Uniform sphere with homologous mesh expansion |
-| `quad_shocktube.py` | 2D multi-region shock |
+The `Run with` column is the slug you pass to `simbi run` (the file stem with underscores swapped
+for dashes; underscores also work).
+
+| Example | Run with | What it is |
+|---------|----------|------------|
+| `sod.py` | `sod` | Newtonian shock tube |
+| `marti_muller.py` | `marti-muller` | SRHD shock tube (1D and 3D variants) |
+| `kh.py` | `kh` | Kelvin-Helmholtz instability |
+| `rt.py` | `rt` | Rayleigh-Taylor instability (with gravity) |
+| `sedov.py` | `sedov` | Sedov-Taylor explosion (spherical) |
+| `thermal_bomb.py` | `thermal-bomb` | Thermal bomb (2D and 3D variants) |
+| `magnetic_blast.py` | `magnetic-blast` | MHD blast wave |
+| `magnetic_shock_tube.py` | `magnetic-shock-tube` | 1D MHD shock |
+| `rmhd_orszag_tang.py` | `rmhd-orszag-tang` | SRMHD Orszag-Tang vortex (Newtonian, isothermal, and resistive variants also ship) |
+| `kepler.py` | `kepler` | Keplerian disk with a central mass |
+| `bondi.py` | `bondi` | 3D Bondi accretion onto a sink, with a buffer zone and optional refinement |
+| `uniform_sphere.py` | `uniform-sphere` | Uniform sphere with homologous mesh expansion |
+| `quad_shocktube.py` | `quad-shocktube` | 2D multi-region shock |
 
 Run any of them:
 
