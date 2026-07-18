@@ -9,13 +9,63 @@
 import matplotlib
 import numpy as np
 
+import pytest
+from matplotlib.colors import Colormap, LogNorm
+
 from simbi.viz.colormaps import (
     alpha_ramp,
     blend_cmaps,
     join_cmaps,
+    resolve_cmap,
     stack_cmaps,
     truncate_cmap,
 )
+
+
+def test_resolve_cmap_passes_plain_names_and_reverse() -> None:
+    assert isinstance(resolve_cmap("viridis"), Colormap)
+    # an `_r` suffix reverses any base map (covers third-party maps lacking a registered reverse).
+    rev = resolve_cmap("viridis_r")
+    assert np.allclose(rev(0.0)[:3], matplotlib.colormaps["viridis"](1.0)[:3], atol=1e-2)
+
+
+def test_resolve_cmap_builds_a_join_spec() -> None:
+    cmap = resolve_cmap("join:magma,Greys,at=0.5,blend=0.2")
+    lo = np.asarray(cmap(0.25))[:3]
+    hi = np.asarray(cmap(0.95))[:3]
+    assert lo[0] > lo[2]  # magma (warm) on the low end
+    assert abs(hi[0] - hi[1]) < 0.06 and abs(hi[1] - hi[2]) < 0.06  # grayscale on the high end
+    assert _max_adjacent_jump(cmap) < 0.1  # blended, no cliff
+
+
+def test_resolve_cmap_at_data_value_uses_the_norm() -> None:
+    # `at=@DATA` maps a data value through the plot norm, so the split follows the data scale.
+    norm = LogNorm(vmin=1e-6, vmax=1.0)
+    cmap = resolve_cmap("join:Blues,Greys,at=@1e-5", norm=norm)
+    split = float(norm(1e-5))  # log10(1e-5/1e-6)/log10(1/1e-6) = 1/6
+    below = np.asarray(cmap(split * 0.4))[:3]
+    above = np.asarray(cmap(min(1.0, split + 0.5)))[:3]
+    assert below[2] > below[0]  # bluish below the split
+    assert abs(above[0] - above[1]) < 0.08 and abs(above[1] - above[2]) < 0.08  # gray above
+
+
+def test_resolve_cmap_at_data_value_needs_a_norm() -> None:
+    with pytest.raises(ValueError, match="no norm"):
+        resolve_cmap("join:Blues,Greys,at=@1e-5", norm=None)
+
+
+def test_resolve_cmap_builds_a_stack_spec() -> None:
+    cmap = resolve_cmap("stack:Greys_r@0:0.5,inferno@0.5:1,blend=0.12")
+    assert isinstance(cmap, Colormap)
+    # a blended stack has no full black<->white cliff at the seam.
+    assert _max_adjacent_jump(cmap) < 0.5
+
+
+def test_resolve_cmap_rejects_a_malformed_spec() -> None:
+    with pytest.raises(ValueError, match="two colormaps"):
+        resolve_cmap("join:onlyone")
+    with pytest.raises(ValueError, match="cmap@lo:hi"):
+        resolve_cmap("stack:viridis")
 
 
 def _max_adjacent_jump(cmap, n: int = 256) -> float:

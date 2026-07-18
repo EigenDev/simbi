@@ -109,7 +109,7 @@ class QuadPlotComponent(Component):
         """Update component properties and restyle the mesh if it exists."""
         self.props = props
         if self._mesh and self._initialized:
-            self._mesh.set_cmap(props.cmap)
+            self._mesh.set_cmap(self._resolve_cmap())
             self._mesh.set_alpha(props.alpha)
             # Other style updates can go here
 
@@ -157,13 +157,17 @@ class QuadPlotComponent(Component):
             self.props.power,
         )
 
+        # resolve the cmap spec against the norm, so a `join:`/`stack:` composite -- and a
+        # `@DATA` split within it -- can be given inline in props.cmap (see colormaps.resolve_cmap).
+        self._last_norm = norm
+        cmap = self._resolve_cmap(norm)
 
         if self._mesh is None:
             self._mesh = self.ax.pcolormesh(
                 x,
                 y,
                 values,
-                cmap=self.props.cmap,
+                cmap=cmap,
                 shading=self.props.shading,
                 alpha=self.props.alpha,
                 norm=norm,
@@ -190,6 +194,16 @@ class QuadPlotComponent(Component):
             artists={"mesh": self._mesh}, metadata={"mappable": self._mesh}
         )
 
+    def _resolve_cmap(self, norm=None):
+        """resolve props.cmap (a plain name or a `join:`/`stack:` composite spec) to a
+        Colormap, against the given norm or the last one seen. see colormaps.resolve_cmap."""
+        from ..colormaps import resolve_cmap
+
+        return resolve_cmap(
+            self.props.cmap,
+            norm=norm if norm is not None else getattr(self, "_last_norm", None),
+        )
+
     def _update_mesh(self, x: Array, y: Array, values: Array) -> None:
         """Update existing mesh with new data (for animation)."""
         if self._mesh is None:
@@ -207,7 +221,7 @@ class QuadPlotComponent(Component):
                 x,
                 y,
                 values,
-                cmap=self.props.cmap,
+                cmap=self._resolve_cmap(),
                 shading=self.props.shading,
                 alpha=self.props.alpha,
             )
@@ -217,7 +231,7 @@ class QuadPlotComponent(Component):
                     -x[::-1],
                     y,
                     values,  # Example mirror logic
-                    cmap=self.props.cmap,
+                    cmap=self._resolve_cmap(),
                     shading=self.props.shading,
                     alpha=self.props.alpha,
                 )

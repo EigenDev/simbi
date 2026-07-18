@@ -18,7 +18,8 @@
 # =============================================================================
 from __future__ import annotations
 
-from typing import Sequence, Union
+import re
+from typing import Optional, Sequence, Union
 
 import matplotlib
 import numpy as np
@@ -31,10 +32,17 @@ CmapLike = Union[str, Colormap]
 
 
 def _resolve(cmap: CmapLike) -> Colormap:
-    """a colormap name or instance -> a Colormap instance."""
+    """a colormap name or instance -> a Colormap instance. an `_r` suffix reverses any base
+    map (matplotlib built-ins register their own reverse; this covers third-party maps -- e.g.
+    cmasher's `cmr.neutral_r` -- that may not)."""
     if isinstance(cmap, Colormap):
         return cmap
-    return matplotlib.colormaps[cmap]
+    try:
+        return matplotlib.colormaps[cmap]
+    except KeyError:
+        if cmap.endswith("_r"):
+            return matplotlib.colormaps[cmap[:-2]].reversed()
+        raise
 
 
 def _finalize(cmap: Colormap, name: str, register: bool) -> Colormap:
@@ -155,6 +163,79 @@ def blend_cmaps(
     return _finalize(cmap, name, register)
 
 
+# =============================================================================
+# spec strings: build a composite from a single colormap NAME, so the whole thing is
+# expressible inline wherever a cmap name is accepted (e.g. `--props quad.cmap=...`).
+# grammar (everything else falls through to a plain matplotlib lookup, incl `_r` reverse):
+#   join:LO,HI[,at=F|@V][,blend=F]   crossfade LO (low values) into HI (high values); `at`
+#                                    is a [0,1] fraction, or `@DATA` resolved through the
+#                                    plot's norm (so `at=@1e-5` splits at that data value)
+#   stack:C@lo:hi,C@lo:hi[,blend=F]  segmented palette over [0,1] fractions, seams blended
+# =============================================================================
+def _spec_name(spec: str) -> str:
+    """a stable, readable registry name derived from a spec string (so repeated resolves of
+    the same spec reuse one registered colormap)."""
+    return "dyn_" + re.sub(r"[^0-9a-zA-Z]+", "_", spec).strip("_")[:48]
+
+
+def _split_fields(body: str) -> tuple[list[str], dict[str, str]]:
+    """split a comma list into positional items and `k=v` options."""
+    positional: list[str] = []
+    options: dict[str, str] = {}
+    for part in body.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            key, val = part.split("=", 1)
+            options[key.strip()] = val.strip()
+        else:
+            positional.append(part)
+    return positional, options
+
+
+def _resolve_at(raw: str, norm) -> float:
+    """an `at` option -> a [0, 1] split fraction. `@DATA` maps a data value through the plot's
+    norm (LogNorm etc.), so the split follows the data scale; a bare number is already a
+    fraction. `@DATA` needs the render norm; without one, pass a fraction instead."""
+    if raw.startswith("@"):
+        if norm is None:
+            raise ValueError(
+                f"cmap split '{raw}' is a data value but no norm is available; "
+                "use a [0, 1] fraction (e.g. at=0.3) outside the render path"
+            )
+        return float(np.clip(float(norm(float(raw[1:]))), 0.0, 1.0))
+    return float(raw)
+
+
+def resolve_cmap(spec: CmapLike, norm=None) -> Colormap:
+    """resolve a colormap SPEC to a Colormap. a plain name (including `_r` reverse and any
+    registered composite) passes straight through; a `join:`/`stack:` spec builds -- and
+    caches by name -- a composite on the fly. `norm` (the plot's data normalization) lets a
+    `@DATA` split be given in data units. unknown plain names raise the usual lookup error."""
+    if isinstance(spec, Colormap):
+        return spec
+    s = str(spec).strip()
+    if s.startswith("join:"):
+        pos, opts = _split_fields(s[len("join:") :])
+        if len(pos) != 2:
+            raise ValueError(f"join spec needs exactly two colormaps: {spec!r}")
+        at = _resolve_at(opts["at"], norm) if "at" in opts else 0.5
+        blend = float(opts.get("blend", 0.15))
+        return join_cmaps(pos[0], pos[1], _spec_name(s), at=at, blend=blend)
+    if s.startswith("stack:"):
+        pos, opts = _split_fields(s[len("stack:") :])
+        specs: list[tuple[str, float, float]] = []
+        for item in pos:
+            m = re.fullmatch(r"(.+)@([0-9.]+):([0-9.]+)", item)
+            if not m:
+                raise ValueError(f"stack segment must be 'cmap@lo:hi': {item!r}")
+            specs.append((m.group(1), float(m.group(2)), float(m.group(3))))
+        blend = float(opts.get("blend", 0.0))
+        return stack_cmaps(specs, _spec_name(s), blend=blend)
+    return _resolve(s)
+
+
 # a small set of ready-made composites registered at import, so `cmap="simbi_ember"` and
 # friends work out of the box. `simbi_ember`/`simbi_ash` burn the low-to-mid density range
 # (the minidisks) in ember while the dense bulk (the circumbinary disk) fades to neutral
@@ -173,6 +254,7 @@ _register_presets()
 
 
 __all__ = [
+    "resolve_cmap",
     "join_cmaps",
     "stack_cmaps",
     "alpha_ramp",
