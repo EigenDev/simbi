@@ -1865,6 +1865,33 @@ fn main() {
             let (k, writes) = symbi_discretize::viscous_adiabatic_alpha_ortho_gv(coords);
             emit_gv(&out_dir, &viscous_ortho_name("viscous_adiabatic_alpha_ortho", geom, 2), 2, &k, &writes);
         }
+        // the 2.5D (DOF = 3 on a 2-axis grid) orthogonal family: the general
+        // scale-factor stress on all three physical momenta per PLANE — the
+        // cylindrical (r, phi) disk, the (r, z) axisymmetric section, and the
+        // spherical (r, theta) meridian — iso/adiabatic x const-nu/alpha. names
+        // carry the mhd plane suffix + `_dof3` (the dispatch DOF tag).
+        use symbi_discretize::OrthoPlane25;
+        for (plane, sfx) in [
+            (OrthoPlane25::CylRPhi, "_cyl_rphi"),
+            (OrthoPlane25::CylRz, "_cyl_rz"),
+            (OrthoPlane25::Sph, "_sph"),
+        ] {
+            for (adiab, base) in [(false, "iso"), (true, "adiabatic")] {
+                for (alpha, atag) in [(false, ""), (true, "_alpha")] {
+                    let (k, w) = symbi_discretize::viscous_ortho_2p5d_gv(plane, adiab, alpha);
+                    emit_gv(&out_dir, &format!("viscous_{base}{atag}_ortho{sfx}_2d_dof3"), 2, &k, &w);
+                }
+            }
+        }
+        // the FULL-3D orthogonal family per chart.
+        for (coords, sfx) in [(Coords::Cylindrical, "_cyl"), (Coords::Spherical, "_sph")] {
+            for (adiab, base) in [(false, "iso"), (true, "adiabatic")] {
+                for (alpha, atag) in [(false, ""), (true, "_alpha")] {
+                    let (k, w) = symbi_discretize::viscous_ortho_3d_gv(coords, adiab, alpha);
+                    emit_gv(&out_dir, &format!("viscous_{base}{atag}_ortho{sfx}_3d"), 3, &k, &w);
+                }
+            }
+        }
     }
     // horizon excision (cartesian kerr-schild charts, 2d + 3d, spin-generic): the
     // onion-sweep gas fill pair (chart-agnostic prim propagation on the uniform grid,

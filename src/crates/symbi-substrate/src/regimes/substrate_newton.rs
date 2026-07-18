@@ -323,10 +323,6 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
     fn viscous(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
         // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu.
         if self.alpha > 0.0 {
-            assert!(
-                D == 2,
-                "adiabatic alpha viscosity is baked for 2D (cartesian + the orthogonal charts)"
-            );
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(
                 sim, dt, self.alpha, self.gamma,
             );
@@ -336,13 +332,9 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             return;
         }
         // the adiabatic viscous operator (shear force + viscous heating onto the
-        // total energy) runs on cartesian 2D and the 2D orthogonal charts through
-        // the shared scale-factor operator; 3D adiabatic heating is a follow-on.
-        assert!(
-            D == 2,
-            "adiabatic viscosity (with energy heating) is built for 2D only; {D}D is a follow-on. \
-             use the isothermal regime or set nu = 0."
-        );
+        // total energy): cartesian 2D/3D flat kernels, curvilinear 2D / 2.5D / 3D
+        // through the shared scale-factor operator family. dispatch's
+        // (chart, D, DOF) match fails loud on an unbaked combination.
         crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
     }
 

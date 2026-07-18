@@ -439,10 +439,9 @@ where
         // alpha (local-cs shakura-sunyaev) takes precedence over the constant nu;
         // the 2.5D DOF-aware kernel diffuses the toroidal momentum too.
         if self.alpha > 0.0 {
-            assert!(
-                sim.geom.coords == symbi_geometry::Geometry::Cartesian && D == 2,
-                "MHD alpha viscosity is baked for the cartesian 2.5D grid"
-            );
+            // cartesian 2.5D + the curvilinear 2.5D planes + full 3D charts all
+            // route through dispatch_viscous_alpha's (D, DOF, chart) match, which
+            // fails loud on an unbaked combination.
             crate::regimes::substrate_kernels::dispatch_viscous_alpha(
                 sim, dt, self.alpha, self.eos_param,
             );
@@ -453,15 +452,9 @@ where
         }
         // viscosity acts on the velocity (orthogonal to the resistive diffusion of B); the energy
         // regime also books the viscous heating onto the total energy (B untouched -> the gas heats,
-        // 1/2 B^2 preserved). full 3D MHD (D=DOF=3) uses the plain 3D kernel; 2.5D MHD (D=2, DOF=3)
-        // uses the DOF-aware `_dof3` kernel (dispatched by DOF!=D) so the toroidal velocity diffuses.
-        // cartesian only.
-        assert!(
-            sim.geom.coords == symbi_geometry::Geometry::Cartesian && (D == 2 || D == 3),
-            "MHD viscosity is built for cartesian charts only (2.5D or full 3D); the {:?} chart in {D}D \
-             needs the curvilinear viscous energy flux, not yet built. use a cartesian grid or nu = 0.",
-            sim.geom.coords
-        );
+        // 1/2 B^2 preserved). full 3D MHD (D=DOF=3) uses the 3D kernel (cartesian flat / chart
+        // orthogonal); 2.5D MHD (D=2, DOF=3) the DOF-aware plane kernel (cartesian, cyl r-phi,
+        // cyl r-z, spherical meridian) so the toroidal velocity diffuses with its metric.
         crate::regimes::substrate_kernels::dispatch_viscous(sim, dt, self.viscosity);
     }
 

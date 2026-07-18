@@ -480,11 +480,29 @@ pub fn dispatch_viscous<const D: usize, const DOF: usize, Mem, Sc>(
             }
         }
         symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {
-            assert_eq!(D, 2, "curvilinear viscosity is baked for 2D only");
             // the energy regime carries the div(tau . u) heating through the same
             // orthogonal scale-factor operator; iso keeps the momentum-only kernel.
-            let base = if has_energy { "viscous_adiabatic_ortho" } else { "viscous_iso_ortho" };
-            super::layout::viscous_ortho_name(base, geom.coords, D)
+            // DOF == D == 2: the in-plane 2D operator (the r-phi disk / r-theta
+            // meridian). DOF = 3 on a 2-axis grid: the 2.5D plane family keyed on
+            // the grid-axis set (cyl r-phi / cyl r-z / spherical meridian), all
+            // three physical momenta. D == 3: the full 3D chart operator.
+            let base = if has_energy { "adiabatic" } else { "iso" };
+            match (D, DOF) {
+                (2, 2) => super::layout::viscous_ortho_name(
+                    &format!("viscous_{base}_ortho"),
+                    geom.coords,
+                    D,
+                ),
+                (2, 3) => format!(
+                    "viscous_{base}_ortho{}_2d_dof3",
+                    super::layout::mhd_geom_suffix(geom.coords, &geom.axes)
+                ),
+                (3, 3) => format!(
+                    "viscous_{base}_ortho{}_3d",
+                    super::layout::mhd_geom_suffix(geom.coords, &geom.axes)
+                ),
+                _ => panic!("curvilinear viscosity: unsupported (D = {D}, DOF = {DOF})"),
+            }
         }
     };
     let name: &str = &name;
@@ -601,13 +619,23 @@ pub fn dispatch_viscous_alpha<const D: usize, const DOF: usize, Mem, Sc>(
         // every curvilinear chart routes through the ONE general orthogonal alpha
         // kernel; nu(R) uses the radial coordinate, so no body position is needed.
         symbi_geometry::Geometry::Cylindrical | symbi_geometry::Geometry::Spherical => {
-            assert_eq!(D, 2, "curvilinear alpha viscosity is baked for 2D only");
-            let base = if has_energy {
-                "viscous_adiabatic_alpha_ortho"
-            } else {
-                "viscous_iso_alpha_ortho"
-            };
-            super::layout::viscous_ortho_name(base, geom.coords, D)
+            let base = if has_energy { "adiabatic" } else { "iso" };
+            match (D, DOF) {
+                (2, 2) => super::layout::viscous_ortho_name(
+                    &format!("viscous_{base}_alpha_ortho"),
+                    geom.coords,
+                    D,
+                ),
+                (2, 3) => format!(
+                    "viscous_{base}_alpha_ortho{}_2d_dof3",
+                    super::layout::mhd_geom_suffix(geom.coords, &geom.axes)
+                ),
+                (3, 3) => format!(
+                    "viscous_{base}_alpha_ortho{}_3d",
+                    super::layout::mhd_geom_suffix(geom.coords, &geom.axes)
+                ),
+                _ => panic!("curvilinear alpha viscosity: unsupported (D = {D}, DOF = {DOF})"),
+            }
         }
     };
     let name: &str = &name;
