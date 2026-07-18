@@ -45,6 +45,15 @@ warnings = "deny"
 lto = "thin"
 codegen-units = 1
 
+# the cdylib bridge (cpu_ext / gpu_ext) is the terminal crate: it monomorphizes the whole
+# workspace, so under the workspace-wide codegen-units = 1 its codegen serializes onto a single
+# core while the rest of the machine idles — the long pole of the build. it is dispatch glue, not a
+# hot compute path (the flops live in the lower physics crates), so split its codegen across all
+# cores; thin-lto still reunifies cross-crate, leaving runtime unchanged. actual parallelism is
+# bounded by cargo's job count, so this stays correct on any core count.
+[profile.release.package.symbi-py]
+codegen-units = 256
+
 # debug-build size control (docs: the 134 test+example binaries x full DWARF of a heavily
 # monomorphized generic codebase = a ~200GB target/). `line-tables-only` keeps panic file:line +
 # backtraces (the nan-locator / check_dt_or_panic / manifest-slot panics all still resolve) while

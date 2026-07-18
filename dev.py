@@ -40,14 +40,63 @@ def maturin() -> list:
     return [sys.executable, "-m", "maturin"]
 
 
+def _fast_linker_flag():
+    """the fastest link-time-only linker installed, as a rustc `-C link-arg`, or None. mold
+    and lld cut the final cdylib link (a heavily-monomorphized artifact) from minutes to
+    seconds with byte-identical output — the linker never touches codegen, so there is no
+    runtime-quality tradeoff. None when only the system default (bfd/gold) is present keeps
+    the build portable. needs a `cc` that understands `-fuse-ld` (gcc >= 12 or clang)."""
+    for binary, fuse in (("mold", "mold"), ("ld.lld", "lld"), ("lld", "lld")):
+        if shutil.which(binary):
+            return f"-Clink-arg=-fuse-ld={fuse}"
+    return None
+
+
+def _build_jobs() -> int:
+    """parallel rustc jobs, capped so a wide-but-RAM-poor machine is not OOM-killed: the
+    monomorphized crates here peak near 4 GB per rustc, so bound jobs by total_ram / 4 as
+    well as by core count. cargo otherwise defaults its job count to the cores alone."""
+    cores = os.cpu_count() or 1
+    try:
+        total_gb = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 1e9
+        ram_cap = max(1, int(total_gb // 4))
+    except (ValueError, OSError, AttributeError):
+        ram_cap = cores
+    return max(1, min(cores, ram_cap))
+
+
+_TUNING_ANNOUNCED = False
+
+
 def venv_env() -> dict:
-    """ensure child maturin/cargo resolve THIS interpreter's venv (maturin installs
-    the extension into VIRTUAL_ENV). a no-op outside a venv."""
+    """ensure child maturin/cargo resolve THIS interpreter's venv (maturin installs the
+    extension into VIRTUAL_ENV; a no-op outside a venv), plus opportunistic build-speed
+    tuning: a fast linker when one is installed and a RAM-aware job cap. both degrade to the
+    stock behavior when the tool / headroom is absent, and defer to any RUSTFLAGS or
+    CARGO_BUILD_JOBS the caller already set. set SIMBI_NO_BUILD_TUNING=1 to opt out."""
+    global _TUNING_ANNOUNCED
     env = dict(os.environ)
     if sys.prefix != sys.base_prefix:
         bin_dir = str(Path(sys.executable).parent)
         env["VIRTUAL_ENV"] = sys.prefix
         env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+
+    if env.get("SIMBI_NO_BUILD_TUNING") == "1":
+        return env
+
+    notes = []
+    linker = _fast_linker_flag()
+    rustflags = env.get("RUSTFLAGS", "")
+    if linker is not None and "fuse-ld" not in rustflags:
+        env["RUSTFLAGS"] = f"{rustflags} {linker}".strip()
+        notes.append(f"linker={linker.rsplit('=', 1)[1]}")
+    if "CARGO_BUILD_JOBS" not in env:
+        jobs = _build_jobs()
+        env["CARGO_BUILD_JOBS"] = str(jobs)
+        notes.append(f"jobs={jobs}/{os.cpu_count() or 1} cores")
+    if notes and not _TUNING_ANNOUNCED:
+        print(f"build tuning: {', '.join(notes)} (SIMBI_NO_BUILD_TUNING=1 to disable)")
+        _TUNING_ANNOUNCED = True
     return env
 
 
