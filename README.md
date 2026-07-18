@@ -641,7 +641,7 @@ SIMBI has been used in the following papers:
 
 | Year | Publication |
 |------|-------------|
-| **2026** | [Dupont, M. & Quataert E., "Self-Limited Accretion onto Embedded Binaries in a Uniform Medium"](https://iopscience.iop.org/article/10.3847/1538-4357/ae7431) |
+| **2026** | [DuPont, M. & Quataert E., "Self-Limited Accretion onto Embedded Binaries in a Uniform Medium"](https://iopscience.iop.org/article/10.3847/1538-4357/ae7431) |
 | **2024** | [DuPont, M. et al., "Strong Bow Shocks: Turbulence and An Exact Self-Similar Asymptotic"](https://iopscience.iop.org/article/10.3847/1538-4357/ad5adc) |
 | **2023** | [DuPont, M. et al., "Explosions in Roche-lobe Distorted Stars: Relativistic Bullets in Binaries"](https://iopscience.iop.org/article/10.3847/1538-4357/ad284e) |
 | **2023** | [DuPont, M. & MacFadyen A., "Stars Bisected By Relativistic Blades"](https://iopscience.iop.org/article/10.3847/2041-8213/ad132c) |
