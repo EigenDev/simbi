@@ -111,6 +111,68 @@ fn swirl(sim: &DevSim) -> (f64, f64) {
     (lx, lz)
 }
 
+// a free (two-way) shaped spinner started about an off-axis direction: the gas reaction torque
+// decelerates it (drag) while the runtime orientation MATRIX advances each step (the mask rotates),
+// so the device kernel reads a fresh R + omega every step and the body EOM (feedback + step_bodies
+// + advance_rotation) closes the two-way loop. the evolving-mask two-way path, on device.
+fn build_twoway<S: ExecutionSpace, Mem: MemorySpace>() -> Sim<S, Mem> {
+    let sim = Sim::<S, Mem>::build(Newtonian, IdealGas { gamma: GAMMA }, Cartesian)
+        .cells([N; 3])
+        .origin([-L; 3])
+        .spacing([DX; 3])
+        .boundaries(Boundaries::uniform(BoundaryType::Outflow))
+        .cfl(CFL)
+        .timestepping(Timestepping::Rk2)
+        .allocate()
+        .expect("sim")
+        .set_initial(|_| Prim { rho: 1.0, vel: Tensor::new([0.0; 3]), pre: 1.0 })
+        .build();
+    let mut sim = sim.with_bodies(BodyCollection::new().add(
+        Body::rigid_sphere(0, Tensor::new([0.0; 3]), Tensor::new([0.0; 3]), 1.0, 0.3, 5.0, true)
+            .with_surface(SurfaceSpec::Porous { porosity: 0.0, k_eta_n: 1.0e3, k_eta_t: 1.0e3 })
+            // spin about an off-axis direction so the orientation matrix (all 9 entries) evolves.
+            .with_spin_about(OMEGA, Tensor::new([1.0, 0.7, 0.3]))
+            .with_two_way_coupling(true),
+    ));
+    sim.attach_body_shapes(vec![Some(SdfExpr::sphere([0.0; 3], 0.3))]);
+    sim
+}
+
+#[test]
+fn evolving_two_way_spinner_matches_cpu_on_device() {
+    let mut h = build_twoway::<CpuSpace, HostMemory>();
+    let mut d = build_twoway::<CudaSpace, UnifiedMemory>();
+    let hk = AdiabaticSubstrateKernelSet::<HostMemory, f64, 3>::new(GAMMA, CFL, &h.geom.allocated);
+    let dk = AdiabaticSubstrateKernelSet::<UnifiedMemory, f64, 3>::new(GAMMA, CFL, &d.geom.allocated);
+    evolve(&mut h, &hk, 0.3).expect("host two-way spin run");
+    evolve(&mut d, &dk, 0.3).expect("device two-way spin run");
+    symbi::regimes::substrate_gpu::device_sync::<UnifiedMemory>();
+
+    // the full evolving-mask two-way loop composes identically on device.
+    let gap = cons_rel_gap(&h, &d);
+    assert!(gap < 1e-6, "evolving two-way spinner cons host!=device: rel gap {gap:e}");
+    // the body's evolved omega vector + orientation matrix agree host==device.
+    let ho = h.immersed.as_ref().unwrap().bodies.get(0).omega;
+    let dvo = d.immersed.as_ref().unwrap().bodies.get(0).omega;
+    for k in 0..3 {
+        assert!((ho[k] - dvo[k]).abs() < 1e-6 * OMEGA + 1e-9, "omega[{k}] host {} != device {}", ho[k], dvo[k]);
+    }
+    let hr = h.immersed.as_ref().unwrap().bodies.get(0).orientation;
+    let dr = d.immersed.as_ref().unwrap().bodies.get(0).orientation;
+    let mut rgap = 0.0_f64;
+    for i in 0..3 {
+        for j in 0..3 {
+            rgap = rgap.max((hr[i][j] - dr[i][j]).abs());
+        }
+    }
+    assert!(rgap < 1e-6, "orientation matrix host!=device: {rgap:e}");
+    // non-vacuous: the two-way spinner was dragged (omega magnitude decreased from OMEGA) and the
+    // orientation actually advanced off identity.
+    let omag = (ho[0] * ho[0] + ho[1] * ho[1] + ho[2] * ho[2]).sqrt();
+    assert!(omag < OMEGA * 0.9999, "two-way drag did not decelerate the spinner ({omag} vs {OMEGA})");
+    assert!((hr[0][0] - 1.0).abs() > 1e-6 || hr[0][1].abs() > 1e-6, "orientation never advanced (vacuous)");
+}
+
 #[test]
 fn spinning_shaped_wall_matches_cpu_on_device() {
     let mut h = build::<CpuSpace, HostMemory>();

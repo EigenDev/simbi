@@ -68,6 +68,9 @@ fn build<S: ExecutionSpace, Mem: MemorySpace>(
     .cells([NR, NP])
     .origin([R_LO, 0.0])
     .spacing([DR, DP])
+    // the (r, phi) disk plane (the cylindrical 2d default is the r-z section); shaped CSG walls
+    // live on r-phi, and this matches the host twin rigid_curvilinear_wall.rs.
+    .cyl_plane(symbi_sim::state::CylPlane::RPhi)
     .boundaries(Boundaries(std::array::from_fn(|a| {
         if a == 1 { [BoundaryType::Periodic; 2] } else { [BoundaryType::Outflow; 2] }
     })))

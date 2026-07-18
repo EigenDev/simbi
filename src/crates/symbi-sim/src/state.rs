@@ -1394,6 +1394,59 @@ pub struct ImmersedBodies<const NDIM: usize> {
     /// JIT-compiled per distinct geometry (the sphere geometry is baked constants; the body
     /// position stays a runtime scalar, so a moving body rides the same kernel).
     pub shapes: Vec<Option<symbi_ib::sdf::SdfExpr<f64, 3>>>,
+    /// the GLOBAL fast-magnetosonic Alfven stiffness c_a2 = max_interior |B|^2/rho for the wall
+    /// relaxation. the max is a domain-global property, so under domain decomposition the
+    /// decomposed loop reduces the per-tile maxima and publishes the global value here; the
+    /// penalize then relaxes every tile's wall at the monolithic rate (a per-tile local max makes
+    /// the same wall cell relax differently in a tile than in the monolithic run). NaN (the
+    /// default) means "compute the local max", which IS the global max on a monolithic single
+    /// grid. raw f64 bits for Sync interior mutability (set through the shared FieldStore inside
+    /// the tiled loop).
+    c_a2_override: std::sync::atomic::AtomicU64,
+}
+
+impl<const NDIM: usize> ImmersedBodies<NDIM> {
+    /// the published global Alfven stiffness, or `None` if unset (compute the local max).
+    pub fn c_a2_override(&self) -> Option<f64> {
+        let v = f64::from_bits(self.c_a2_override.load(std::sync::atomic::Ordering::Relaxed));
+        (!v.is_nan()).then_some(v)
+    }
+    /// publish the global Alfven stiffness (the decomposed loop's cross-tile max).
+    pub fn set_c_a2_override(&self, v: f64) {
+        self.c_a2_override.store(v.to_bits(), std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// the LOCAL fast-magnetosonic Alfven stiffness c_a2 = max over this store's interior of
+/// |B|^2/rho, the wall-relaxation rate lift for a magnetized immersed body. 0 off MHD (no
+/// magnetic field), where the rate reduces to the sound speed exactly. on a monolithic single
+/// grid this local max IS the global max; the decomposed loop reduces it across tiles and
+/// publishes the global value via `ImmersedBodies::set_c_a2_override`.
+pub fn local_c_a2_max<const NDIM: usize, const DOF: usize, Mem, Sc>(
+    store: &FieldStore<NDIM, DOF, Mem, Sc>,
+) -> f64
+where
+    Mem: MemorySpace,
+    Sc: Scalar + OrderedNumeric,
+{
+    store.fields.mhd.as_ref().map_or(0.0, |mhd| {
+        let den = store.fields.cons.den.view();
+        let bcell: Vec<_> = (0..DOF).map(|k| mhd.bcell[k].view()).collect();
+        let mut m = 0.0_f64;
+        for c in store.geom.interior.iter() {
+            let rho = (*den.at(c)).to_f64();
+            if rho <= 0.0 {
+                continue;
+            }
+            let mut bsq = 0.0;
+            for view in &bcell {
+                let b = (*view.at(c)).to_f64();
+                bsq += b * b;
+            }
+            m = m.max(bsq / rho);
+        }
+        m
+    })
 }
 
 /// the simulation's mutable SUBSTANCE: every buffer + grid + time-state a kernel reads
@@ -1967,6 +2020,8 @@ where
             history: symbi_ib::BodyHistory::new(n),
             // default: every body is its analytic sphere; a config shape is attached separately.
             shapes: vec![None; n],
+            // NaN = "compute the local max"; the decomposed loop publishes a global value.
+            c_a2_override: std::sync::atomic::AtomicU64::new(f64::NAN.to_bits()),
         });
     }
 

@@ -212,8 +212,10 @@ pub(crate) fn body_scalar<const D: usize>(
         BodyScalar::Racc => body.mask_radius().unwrap_or(1.0),
         BodyScalar::Sink => body.sink_rate().unwrap_or(0.0),
         BodyScalar::Delta => body.sink_delta().unwrap_or(1.0),
-        // the prescribed-spin orientation + rate; a shaped wall rotates its mask by `angle` and
-        // drags the gas at `omega x r`. zero for every non-spinning body.
+        // the spin state a shaped wall's mask rotates with: the angular-velocity vector
+        // `omega` (component k) driving `omega x r`, and the row-major orientation matrix
+        // `orientation` (entry k) rotating the mask. an arbitrary evolving axis, not a single
+        // angle. omega is zero for every non-spinning body.
         BodyScalar::Omega(k) => body.omega[k as usize],
         BodyScalar::Rot(k) => {
             let k = k as usize;

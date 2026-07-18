@@ -231,6 +231,20 @@ fn body_mask_sdf(center: [Gv; 3]) -> SdfExpr<Gv, 3> {
 /// MOVING body rides the same kernel: only `body_0_pos_*` changes per step; the shape geometry
 /// is baked, never a runtime knob. (rotation would compose a runtime orientation transform on
 /// `x` before the shape; translation alone is the moving-body core.)
+///
+/// `center` is the body's CENTER OF MASS AND its mask/geometric center at once — they coincide for
+/// every symmetric body (sphere, symmetric CSG), which is all that exists today.
+///
+/// EXTENSION — a body whose mask center is OFFSET from its center of mass (an asymmetric mass
+/// distribution, e.g. a tumbling asteroid): only the MASK PLACEMENT offsets; everything dynamical
+/// stays COM-referenced. keep `body_0_pos_*` as the COM (translation, gravity, the omega x r wall
+/// velocity, and the torque moment arm `x - center` are all already about it — the offset arm falls
+/// out because the force acts on the offset mask). the localized changes are: (1) a body-frame
+/// `mask_offset` field on `Body` (default zero) + a `body_0_com_offset_*` scalar bound like the
+/// other body scalars; (2) HERE, translate the shape to `center + R * mask_offset` (compose the
+/// orientation matrix `body_0_rot_*` with the offset) instead of `center`; (3) widen the mask's
+/// support ball to cover `center + R*mask_offset +- radius`. the receipt (`cartesian_receipt`) and
+/// the spin (`solid_velocity`) need NO change — they stay about the COM `center`.
 fn body_mask_sdf_shaped(center: [Gv; 3], shape: Option<&SdfExpr<f64, 3>>) -> SdfExpr<Gv, 3> {
     match shape {
         None => SdfExpr::<Gv, 3>::Sphere { center, radius: Gv::scalar("body_0_racc") },
@@ -523,8 +537,9 @@ pub fn penalize_porous_gv_shaped(
 }
 
 /// the SPINNING arbitrary-shape porous wall: like `penalize_porous_gv_shaped`, but the mask is
-/// rotated by the runtime orientation `R(body_0_angle)` and the surface velocity carries the spin
-/// `omega x r` (`body_0_omega`), so the wall drags the gas around as it turns.
+/// rotated by the runtime orientation matrix (the 9 scalars `body_0_rot_0..8`) and the surface
+/// velocity carries the spin `omega x r` (the vector `body_0_omega_0..2`), so the wall drags the
+/// gas around as it turns — arbitrary spin axis, not a single angle.
 pub fn penalize_porous_gv_spinning(
     coords: Coords,
     ndim: usize,

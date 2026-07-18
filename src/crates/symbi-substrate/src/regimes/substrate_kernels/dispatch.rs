@@ -1069,11 +1069,14 @@ fn shaped_penalize_kernel(
     has_energy: bool,
     spin: bool,
     shape: &symbi_ib::sdf::SdfExpr<f64, 3>,
+    precision: symbi_ir::emit::Precision,
 ) -> Option<std::sync::Arc<ShapedPenalizeKernel>> {
     use std::sync::{Arc, OnceLock, RwLock};
     static CACHE: OnceLock<RwLock<HashMap<String, Option<Arc<ShapedPenalizeKernel>>>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| RwLock::new(HashMap::new()));
-    let key = format!("{coords:?}|{ndim}|{dof}|{has_energy}|{spin}|{shape:?}");
+    // the compiled cranelift artifact is precision-specific (f32 vs f64 codegen), so the scalar
+    // width joins the shape/dim/regime in the cache key.
+    let key = format!("{coords:?}|{ndim}|{dof}|{has_energy}|{spin}|{precision:?}|{shape:?}");
     if let Some(k) = cache.read().unwrap().get(&key) {
         return k.clone();
     }
@@ -1082,7 +1085,7 @@ fn shaped_penalize_kernel(
         return k.clone();
     }
     let (gvk, writes) = shaped_penalize_gv(coords, ndim, dof, has_energy, spin, shape);
-    let built = symbi_jit::compile_gv_kernel(&gvk, &writes, ndim).ok().map(|kernel| {
+    let built = symbi_jit::compile_gv_kernel_prec(&gvk, &writes, ndim, precision).ok().map(|kernel| {
         Arc::new(ShapedPenalizeKernel {
             kernel,
             scalar_params: gvk.scalar_params.iter().map(|s| super::params::ScalarBind::from_name(s)).collect(),
@@ -1128,13 +1131,18 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
     let w = body.omega;
     let spin = w[0] != 0.0 || w[1] != 0.0 || w[2] != 0.0 || body.two_way_coupling;
 
-    // shaped walls are f64-only on BOTH backends: the host cranelift buffer ABI is raw f64 (the
-    // cons fields are reinterpreted as *f64) and the device delta reductions + IR render at f64.
-    // reject a non-f64 scalar loudly rather than reinterpret its bytes.
-    assert!(
-        std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
-        "arbitrary-shape immersed body {b}: f64 only (f32 shaped walls are a follow-on)",
-    );
+    // the runtime precision the kernel is built/rendered at, from the sim's scalar: the host
+    // cranelift codegen picks its float width from this and the device render honors it. f64 or
+    // f32 (reduced-precision runs); anything else is unsupported.
+    let precision = if std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f32>() {
+        symbi_ir::emit::Precision::F32
+    } else {
+        assert!(
+            std::any::TypeId::of::<Sc>() == std::any::TypeId::of::<f64>(),
+            "arbitrary-shape immersed body {b}: only f32 / f64 scalars are supported",
+        );
+        symbi_ir::emit::Precision::F64
+    };
 
     // the bbox. on a CARTESIAN grid the shape's bounding ball floors/ceils to an index box: a
     // STATIC body uses the tight ball at the body position (center pos+lc, radius lr); a SPINNING
@@ -1197,7 +1205,7 @@ fn dispatch_penalize_shaped_body<const D: usize, const DOF: usize, Mem, Sc>(
         );
     } else {
         use super::layout::{alloc_layout, exec_layout};
-        let sk = shaped_penalize_kernel(coords, D, DOF, has_energy, spin, shape).unwrap_or_else(|| {
+        let sk = shaped_penalize_kernel(coords, D, DOF, has_energy, spin, shape, precision).unwrap_or_else(|| {
             panic!("arbitrary-shape immersed body {b}: shape unbounded or outside the JIT subset")
         });
         // in-place cons bases (read + write the SAME buffers) + the delta scratch as OUTPUT bases,
@@ -1318,24 +1326,13 @@ fn dispatch_penalize_inner<const D: usize, const DOF: usize, Mem, Sc>(
     // relaxation from the sound speed to the FAST MAGNETOSONIC speed (bound to the kernel's `c_a2`
     // scalar), so the wall stays a signal-crossing stiff in the low-beta regions a magnetized sink
     // accumulates. 0 off MHD, where the rate reduces to c_s exactly and a hydro run is unchanged.
-    let c_a2_max: f64 = sim.fields.mhd.as_ref().map_or(0.0, |mhd| {
-        let den = sim.fields.cons.den.view();
-        let bcell: Vec<_> = (0..DOF).map(|k| mhd.bcell[k].view()).collect();
-        let mut m = 0.0_f64;
-        for c in geom.interior.iter() {
-            let rho = (*den.at(c)).to_f64();
-            if rho <= 0.0 {
-                continue;
-            }
-            let mut bsq = 0.0;
-            for view in &bcell {
-                let b = (*view.at(c)).to_f64();
-                bsq += b * b;
-            }
-            m = m.max(bsq / rho);
-        }
-        m
-    });
+    // under domain decomposition the max is a GLOBAL property: the decomposed loop reduces the
+    // per-tile maxima and publishes the global value (a per-tile local max would relax the same
+    // wall cell at a different rate than the monolithic run). unset (the monolithic / single-gpu
+    // path) => this grid's local max, which IS the global max on a single grid.
+    let c_a2_max: f64 = im
+        .c_a2_override()
+        .unwrap_or_else(|| symbi_sim::state::local_c_a2_max(sim));
     let bind_value = |bind: &ScalarBind, b: usize| -> f64 {
         let surface = bodies.get(b).spec.surface;
         match bind {

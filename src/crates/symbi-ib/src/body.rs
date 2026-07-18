@@ -257,6 +257,26 @@ impl<S: Scalar, const D: usize> Body<S, D> {
         self.orientation = matmul3(dr, r);
     }
 
+    /// the body's mechanical kinetic energy: translational `0.5 m |v|^2` plus rotational
+    /// `0.5 omega . I . omega`, with the world-frame inertia `I = R diag(inertia_body) R^T` (so
+    /// `omega . I . omega = sum_k inertia_body[k] (R^T omega)_k^2`). this is the energy the gas
+    /// force/torque deposit in a two-way body; the gas total-energy loss (`BodyDelta::energy_delta`)
+    /// equals this KE gain plus the (non-negative) dissipated heat that stays in the gas — the
+    /// gas+body conservation ledger for a sealed rigid wall.
+    pub fn mechanical_ke(&self) -> S {
+        let half = S::from_f64(0.5);
+        let mut ke = S::ZERO;
+        for a in 0..D {
+            ke = ke + half * self.mass * self.velocity[a] * self.velocity[a];
+        }
+        // omega in the body frame, weighted by the principal moments.
+        let wb = matvec3(transpose3(self.orientation), [self.omega[0], self.omega[1], self.omega[2]]);
+        for k in 0..3 {
+            ke = ke + half * self.inertia_body[k] * wb[k] * wb[k];
+        }
+        ke
+    }
+
     pub fn passive(idx: usize, position: Tensor<S, D>, velocity: Tensor<S, D>,
                    mass: S, radius: S) -> Self {
         Self::base(idx, position, velocity, mass, radius, BodyKind::Passive)

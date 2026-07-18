@@ -825,6 +825,17 @@ pub fn evolve_decomposed<const D: usize, const DOF: usize, M, K, T, F>(
             // + the prescribed-orbit advance happen in `step_bodies_decomposed` below, which needs
             // `&mut` -- so `sh` (a shared reborrow of `stores`) MUST be dropped first.
             if has_bodies {
+                // the wall relaxation's Alfven stiffness c_a2 = max|B|^2/rho is a GLOBAL max over
+                // the domain; reduce the per-tile maxima and publish the global value to every tile
+                // so a magnetized wall straddling a cut relaxes at the monolithic rate (a per-tile
+                // local max would diverge from the monolithic single-grid run). inert (0) off MHD.
+                let global_c_a2 =
+                    (0..n).map(|i| crate::state::local_c_a2_max(sh[i])).fold(0.0_f64, f64::max);
+                for i in 0..n {
+                    if let Some(im) = sh[i].immersed.as_ref() {
+                        im.set_c_a2_override(global_c_a2);
+                    }
+                }
                 for i in 0..n {
                     // IBM surface physics ONCE per step, after all stages
                     // (receipt == removal; see evolve.rs), then the feedback.

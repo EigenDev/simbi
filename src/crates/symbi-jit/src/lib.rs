@@ -119,6 +119,82 @@ extern "C" fn sh_div_euclid(a: f64, b: f64) -> f64 {
     (a / b).floor()
 }
 
+// f32 twins of the shims: an f32 kernel calls these directly (native f32 libm), so the CLIF
+// call passes f32 operands to an f32 signature — no promote/demote, bit-matching the AOT f32
+// path's `<S as Scalar>` transcendentals. selected by precision in `compile_kernel_prec`.
+macro_rules! shim1_f32 {
+    ($name:ident, $m:ident) => {
+        extern "C" fn $name(x: f32) -> f32 {
+            x.$m()
+        }
+    };
+}
+macro_rules! shim2_f32 {
+    ($name:ident, $m:ident) => {
+        extern "C" fn $name(a: f32, b: f32) -> f32 {
+            a.$m(b)
+        }
+    };
+}
+shim1_f32!(sh_sin32, sin);
+shim1_f32!(sh_cos32, cos);
+shim1_f32!(sh_tan32, tan);
+shim1_f32!(sh_asin32, asin);
+shim1_f32!(sh_acos32, acos);
+shim1_f32!(sh_atan32, atan);
+shim1_f32!(sh_sinh32, sinh);
+shim1_f32!(sh_cosh32, cosh);
+shim1_f32!(sh_tanh32, tanh);
+shim1_f32!(sh_asinh32, asinh);
+shim1_f32!(sh_acosh32, acosh);
+shim1_f32!(sh_atanh32, atanh);
+shim1_f32!(sh_exp32, exp);
+shim1_f32!(sh_exp232, exp2);
+shim1_f32!(sh_ln32, ln);
+shim1_f32!(sh_log232, log2);
+shim1_f32!(sh_log1032, log10);
+shim1_f32!(sh_round32, round);
+shim2_f32!(sh_atan232, atan2);
+shim2_f32!(sh_powf32, powf);
+shim2_f32!(sh_hypot32, hypot);
+extern "C" fn sh_powi32(a: f32, b: f32) -> f32 {
+    a.powi(b as i32)
+}
+extern "C" fn sh_div_euclid32(a: f32, b: f32) -> f32 {
+    (a / b).floor()
+}
+
+/// `(symbol, arity-incl-receiver, fn-ptr)` for every shimmed method. `arity` is the total
+/// float args the CLIF call passes (receiver + method args). the f32 twin has the same names
+/// (one JITModule per kernel, so the per-module symbol registration never collides).
+fn shim_table_f32() -> &'static [(&'static str, usize, *const u8)] {
+    &[
+        ("sin", 1, sh_sin32 as *const u8),
+        ("cos", 1, sh_cos32 as *const u8),
+        ("tan", 1, sh_tan32 as *const u8),
+        ("asin", 1, sh_asin32 as *const u8),
+        ("acos", 1, sh_acos32 as *const u8),
+        ("atan", 1, sh_atan32 as *const u8),
+        ("sinh", 1, sh_sinh32 as *const u8),
+        ("cosh", 1, sh_cosh32 as *const u8),
+        ("tanh", 1, sh_tanh32 as *const u8),
+        ("asinh", 1, sh_asinh32 as *const u8),
+        ("acosh", 1, sh_acosh32 as *const u8),
+        ("atanh", 1, sh_atanh32 as *const u8),
+        ("exp", 1, sh_exp32 as *const u8),
+        ("exp2", 1, sh_exp232 as *const u8),
+        ("ln", 1, sh_ln32 as *const u8),
+        ("log2", 1, sh_log232 as *const u8),
+        ("log10", 1, sh_log1032 as *const u8),
+        ("round", 1, sh_round32 as *const u8),
+        ("atan2", 2, sh_atan232 as *const u8),
+        ("powf", 2, sh_powf32 as *const u8),
+        ("hypot", 2, sh_hypot32 as *const u8),
+        ("powi", 2, sh_powi32 as *const u8),
+        ("div_euclid", 2, sh_div_euclid32 as *const u8),
+    ]
+}
+
 /// `(symbol, arity-incl-receiver, fn-ptr)` for every shimmed method. `arity` is the total
 /// f64 args the CLIF call passes (receiver + method args).
 fn shim_table() -> &'static [(&'static str, usize, *const u8)] {
@@ -338,6 +414,10 @@ struct StencilCtx<'a> {
     let_defs: &'a HashMap<String, &'a ScalarExpr>,
     ndim: usize,
     ptr_ty: cranelift_codegen::ir::Type,
+    /// the runtime FLOAT type every field element / const / cast lowers to — `F64` (default) or
+    /// `F32` (a reduced-precision run). the arithmetic tree is operand-polymorphic, so only the
+    /// buffer/const boundary consults this. its `.bytes()` is the field element stride.
+    fty: cranelift_codegen::ir::Type,
 }
 
 /// collect every `Let`/`LetMut` binding (name -> defining expr) reachable in a kernel body, for the
@@ -428,10 +508,13 @@ fn translate_expr(
     shims: &HashMap<&'static str, (cranelift_codegen::ir::FuncRef, usize)>,
     stencil: Option<&StencilCtx>,
 ) -> Result<Value, JitError> {
+    // the runtime float type: F64 default; F32 for a reduced-precision kernel run. the scalar-fn
+    // path (no stencil) is always f64.
+    let fty = stencil.map_or(types::F64, |s| s.fty);
     Ok(match expr {
         ScalarExpr::Const(c) => match c {
-            ConstValue::F64(v) => b.ins().f64const(*v),
-            ConstValue::F32(v) => b.ins().f64const(*v as f64),
+            ConstValue::F64(v) => fconst(b, fty, *v),
+            ConstValue::F32(v) => fconst(b, fty, *v as f64),
             ConstValue::I32(v) => b.ins().iconst(types::I32, *v as i64),
             ConstValue::U32(v) => b.ins().iconst(types::I32, *v as i64),
             ConstValue::Bool(v) => b.ins().iconst(types::I8, *v as i64),
@@ -498,7 +581,7 @@ fn translate_expr(
                 // debuginfo blow-up (the reason the CPU emit keeps these as method
                 // calls rather than lowering to scoped `if`-selects in scalarize).
                 "abs" => {
-                    let zero = b.ins().f64const(0.0);
+                    let zero = fconst(b, fty, 0.0);
                     let neg = b.ins().fneg(recv);
                     let c = b.ins().fcmp(FloatCC::LessThan, recv, zero);
                     return Ok(b.ins().select(c, neg, recv));
@@ -517,7 +600,7 @@ fn translate_expr(
                 "is_nan" => return Ok(b.ins().fcmp(FloatCC::NotEqual, recv, recv)),
                 "is_finite" => {
                     let a = b.ins().fabs(recv);
-                    let inf = b.ins().f64const(f64::INFINITY);
+                    let inf = fconst(b, fty, f64::INFINITY);
                     return Ok(b.ins().fcmp(FloatCC::LessThan, a, inf));
                 }
                 _ => {}
@@ -547,7 +630,7 @@ fn translate_expr(
                 // no-op when the source already carries the target type: `_coord_N` is pre-converted
                 // to f64 in the kernel var seed, so an int->f64 cast of it would re-convert an f64.
                 ElementTy::F64 | ElementTy::F32 => {
-                    if vty == types::F64 { v } else { b.ins().fcvt_from_sint(types::F64, v) }
+                    if vty == fty { v } else { b.ins().fcvt_from_sint(fty, v) }
                 }
                 ElementTy::I32 | ElementTy::U32 => {
                     if vty.is_int() { v } else { b.ins().fcvt_to_sint(types::I32, v) }
@@ -587,9 +670,9 @@ fn translate_expr(
                 ctx.in_bufs,
                 fi as i32 * psz,
             );
-            let byte_off = b.ins().imul_imm(idx, 8);
+            let byte_off = b.ins().imul_imm(idx, fty.bytes() as i64);
             let addr = b.ins().iadd(base, byte_off);
-            b.ins().load(types::F64, MemFlags::trusted(), addr, 0)
+            b.ins().load(fty, MemFlags::trusted(), addr, 0)
         }
         ScalarExpr::FreeCall { name, .. } => {
             return Err(JitError::Unsupported(format!("free call '{name}'")));
@@ -597,12 +680,23 @@ fn translate_expr(
     })
 }
 
-/// the CLIF type for a lowered element type.
-fn clif_ty(e: ElementTy) -> cranelift_codegen::ir::Type {
+/// the CLIF type for a lowered element type. `fty` is the runtime float type (F64 default, F32 for
+/// a reduced-precision run): every graph float element lowers to it (the graph is traced at f64,
+/// the runtime precision overrides the width, exactly as the neutral-IR renderer does).
+fn clif_ty(e: ElementTy, fty: cranelift_codegen::ir::Type) -> cranelift_codegen::ir::Type {
     match e {
-        ElementTy::F64 | ElementTy::F32 => types::F64,
+        ElementTy::F64 | ElementTy::F32 => fty,
         ElementTy::I32 | ElementTy::U32 => types::I64,
         ElementTy::Bool => types::I8,
+    }
+}
+
+/// emit a float constant at the runtime float type (F32 -> `f32const`, else `f64const`).
+fn fconst(b: &mut FunctionBuilder, fty: cranelift_codegen::ir::Type, v: f64) -> Value {
+    if fty == types::F32 {
+        b.ins().f32const(v as f32)
+    } else {
+        b.ins().f64const(v)
     }
 }
 
@@ -657,7 +751,7 @@ fn translate_stmts(
             } => {
                 let var = Variable::from_u32(*next_var);
                 *next_var += 1;
-                b.declare_var(var, clif_ty(*element));
+                b.declare_var(var, clif_ty(*element, stencil.fty));
                 let v = translate_expr(b, init, vars, shims, Some(stencil))?;
                 b.def_var(var, v);
                 vars.insert(name.clone(), LocalSlot::Var(var));
@@ -706,9 +800,10 @@ fn translate_stmts(
                 b.seal_block(body_blk);
                 b.switch_to_block(body_blk);
 
-                // expose the loop index as an f64 local (for the rare body that reads `iter`).
+                // expose the loop index as a float local at the runtime precision (for the rare
+                // body that reads `iter`).
                 let iv = b.use_var(iter_var);
-                let i_f = b.ins().fcvt_from_sint(types::F64, iv);
+                let i_f = b.ins().fcvt_from_sint(stencil.fty, iv);
                 let shadowed = vars.insert(iter.clone(), LocalSlot::Val(i_f));
                 let flow = translate_stmts(b, body, vars, shims, stencil, next_var, Some(exit))?;
                 if flow == Flow::Fallthrough {
@@ -771,7 +866,7 @@ fn translate_stmts(
                 for (name, element) in outs {
                     let var = Variable::from_u32(*next_var);
                     *next_var += 1;
-                    b.declare_var(var, clif_ty(*element));
+                    b.declare_var(var, clif_ty(*element, stencil.fty));
                     vars.insert(name.clone(), LocalSlot::Var(var));
                 }
                 let c = translate_expr(b, cond, vars, shims, Some(stencil))?;
@@ -1091,6 +1186,7 @@ impl CompiledKernel {
 /// (input buffer order); `scalar_params` = kernel scalars; `field_writes` = `(key, RHS node)`.
 /// the body may carry control flow (`For`/`If`/`Break`, e.g., an `IterateInline` root-find);
 /// only generic-dim `For` bounds reject -> caller falls back to the interpreter.
+/// compile a kernel at f64 (the default precision). thin wrapper over `compile_kernel_prec`.
 pub fn compile_kernel(
     graph: &symbi_ir::graph::Graph,
     field_inputs: &[String],
@@ -1098,6 +1194,28 @@ pub fn compile_kernel(
     field_writes: &[(String, symbi_ir::graph::NodeId)],
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
+    compile_kernel_prec(graph, field_inputs, scalar_params, field_writes, ndim, symbi_ir::emit::Precision::F64)
+}
+
+/// compile a kernel at the given precision. the runtime float type (F64/F32) overrides the graph's
+/// f64 element width at every buffer/const/cast boundary; the arithmetic tree is
+/// operand-polymorphic, so f32 falls out once the loads/consts/strides carry the f32 width and the
+/// transcendentals bind the f32 shims. the driver-ABI pointers stay cosmetically `*const f64`
+/// (never dereferenced) — the codegen owns the element stride.
+pub fn compile_kernel_prec(
+    graph: &symbi_ir::graph::Graph,
+    field_inputs: &[String],
+    scalar_params: &[String],
+    field_writes: &[(String, symbi_ir::graph::NodeId)],
+    ndim: usize,
+    precision: symbi_ir::emit::Precision,
+) -> Result<CompiledKernel, JitError> {
+    let fty = if matches!(precision, symbi_ir::emit::Precision::F32) {
+        types::F32
+    } else {
+        types::F64
+    };
+    let fbytes = fty.bytes() as i64;
     let write_nodes: Vec<symbi_ir::graph::NodeId> = field_writes.iter().map(|(_, n)| *n).collect();
     let sc = symbi_ir::passes::scalarize::scalarize_kernel(graph, &write_nodes);
     let (n_in, n_out, n_scalar) = (field_inputs.len(), field_writes.len(), scalar_params.len());
@@ -1121,8 +1239,12 @@ pub fn compile_kernel(
         .map_err(|e| JitError::Codegen(format!("native isa: {e}")))?
         .finish(settings::Flags::new(flags))
         .map_err(|e| JitError::Codegen(format!("isa finish: {e}")))?;
+    // the transcendental shims at the runtime precision (f32 kernel -> native f32 libm shims, so
+    // no promote/demote around the call). one JITModule per compile, so same-named f32/f64 symbols
+    // never collide.
+    let shims = if fty == types::F32 { shim_table_f32() } else { shim_table() };
     let mut jb = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-    for (name, _, ptr) in shim_table() {
+    for (name, _, ptr) in shims {
         jb.symbol(*name, *ptr);
     }
     let mut module = JITModule::new(jb);
@@ -1130,12 +1252,12 @@ pub fn compile_kernel(
     let psz = ptr_ty.bytes() as i32;
 
     let mut shim_ids: HashMap<&'static str, (FuncId, usize)> = HashMap::new();
-    for (name, arity, _) in shim_table() {
+    for (name, arity, _) in shims {
         let mut sig = module.make_signature();
         for _ in 0..*arity {
-            sig.params.push(AbiParam::new(types::F64));
+            sig.params.push(AbiParam::new(fty));
         }
-        sig.returns.push(AbiParam::new(types::F64));
+        sig.returns.push(AbiParam::new(fty));
         let id = module
             .declare_function(name, Linkage::Import, &sig)
             .map_err(|e| JitError::Codegen(format!("declare shim '{name}': {e}")))?;
@@ -1192,11 +1314,13 @@ pub fn compile_kernel(
         let_defs: &let_defs,
         ndim,
         ptr_ty,
+        fty,
     };
 
-    // current-cell flat index, reused for cell loads + output stores.
+    // current-cell flat index, reused for cell loads + output stores. the element stride is the
+    // runtime float width (8 bytes f64 / 4 bytes f32).
     let idx0 = emit_flat_index(&mut b, &coord_i, &sctx);
-    let idx0_off = b.ins().imul_imm(idx0, 8);
+    let idx0_off = b.ins().imul_imm(idx0, fbytes);
 
     // seed the var map: cell loads, scalars, and `_coord_N` as f64 (for float coord use). these
     // dominate everything (defined in the entry block) so they stay immutable `Val` slots.
@@ -1206,17 +1330,20 @@ pub fn compile_kernel(
             .ins()
             .load(ptr_ty, MemFlags::trusted(), in_bufs, i as i32 * psz);
         let addr = b.ins().iadd(base, idx0_off);
-        let v = b.ins().load(types::F64, MemFlags::trusted(), addr, 0);
+        let v = b.ins().load(fty, MemFlags::trusted(), addr, 0);
         vars.insert(key.clone(), LocalSlot::Val(v));
     }
     for (i, name) in scalar_params.iter().enumerate() {
-        let v = b
+        // scalars stay f64 in the ABI (bind_value yields exact f64); narrow to the kernel
+        // precision so they match the f32 arithmetic tree.
+        let raw = b
             .ins()
             .load(types::F64, MemFlags::trusted(), scalars_ptr, (i * 8) as i32);
+        let v = if fty == types::F32 { b.ins().fdemote(types::F32, raw) } else { raw };
         vars.insert(name.clone(), LocalSlot::Val(v));
     }
     for ax in 0..ndim {
-        let cf = b.ins().fcvt_from_sint(types::F64, coord_i[ax]);
+        let cf = b.ins().fcvt_from_sint(fty, coord_i[ax]);
         vars.insert(format!("_coord_{ax}"), LocalSlot::Val(cf));
     }
 
@@ -1288,15 +1415,28 @@ pub fn compile_gv_kernel(
     writes: &[(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)],
     ndim: usize,
 ) -> Result<CompiledKernel, JitError> {
+    compile_gv_kernel_prec(kernel, writes, ndim, symbi_ir::emit::Precision::F64)
+}
+
+/// compile a runtime `GvKernel` at the given precision (the reduced-precision runtime-JIT path,
+/// e.g. an f32 shaped immersed-body wall). the graph is traced at f64; `precision` overrides the
+/// codegen element width.
+pub fn compile_gv_kernel_prec(
+    kernel: &symbi_ir::GvKernel,
+    writes: &[(String, symbi_ir::FieldBind, symbi_ir::graph::NodeId)],
+    ndim: usize,
+    precision: symbi_ir::emit::Precision,
+) -> Result<CompiledKernel, JitError> {
     let field_inputs: Vec<String> = kernel.field_inputs.iter().map(|(k, _)| k.clone()).collect();
     let field_writes: Vec<(String, symbi_ir::graph::NodeId)> =
         writes.iter().map(|(k, _, n)| (k.clone(), *n)).collect();
-    compile_kernel(
+    compile_kernel_prec(
         &kernel.graph,
         &field_inputs,
         &kernel.scalar_params,
         &field_writes,
         ndim,
+        precision,
     )
 }
 

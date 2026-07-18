@@ -96,3 +96,20 @@ fn shaped_iso_porous_penalize_jit_compiles() {
         "the iso shaped penalize kernel is outside the JIT subset",
     );
 }
+
+#[test]
+fn shaped_penalize_jit_compiles_f32() {
+    // the reduced-precision (f32) runtime-JIT path: the SAME CSG graph must cranelift-compile at
+    // f32 (the f32 transcendental shims for tanh/sin/cos, f32 loads/consts/strides). covers the
+    // CSG union (min/max kinks + Dual normal), the spinning kernel (f32 sin/cos shims), and the
+    // iso curvilinear path (centroid_to_cartesian at f32).
+    use symbi_ir::emit::Precision::F32;
+    let csg = SdfExpr::<f64, 3>::cuboid([0.0, 0.0, 0.0], [0.5, 0.3, 0.2])
+        .union(SdfExpr::sphere([0.6, 0.0, 0.0], 0.25));
+    let (k, w) = penalize_porous_gv_shaped(Coords::Cartesian, 3, 3, &csg);
+    assert!(symbi_jit::compile_gv_kernel_prec(&k, &w, 3, F32).is_ok(), "f32 shaped kernel outside the JIT subset");
+    let (k, w) = penalize_porous_gv_spinning(Coords::Cartesian, 2, 2, &csg);
+    assert!(symbi_jit::compile_gv_kernel_prec(&k, &w, 2, F32).is_ok(), "f32 spinning shaped kernel not JIT-able");
+    let (k, w) = penalize_porous_iso_gv_shaped(Coords::Cylindrical, 2, 2, &csg);
+    assert!(symbi_jit::compile_gv_kernel_prec(&k, &w, 2, F32).is_ok(), "f32 iso cylindrical shaped kernel not JIT-able");
+}
