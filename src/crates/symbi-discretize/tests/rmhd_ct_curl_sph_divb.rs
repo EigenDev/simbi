@@ -4,7 +4,7 @@
 // proves the CURVILINEAR (spherical) constrained-transport curl
 // (rmhd_ct_curl_3d_dir under Coords::Spherical) preserves the AREA-WEIGHTED
 // div(B) = 0 to machine precision — the curvilinear generalization of the
-// Cartesian rmhd_ct_curl3d_divb gate (docs/design/16). this is the
+// Cartesian rmhd_ct_curl3d_divb gate. this is the
 // non-negotiable correctness check for curvilinear CT.
 //
 // the curl is the ONE coord-generic orthogonal-curl in the scale factors h_p

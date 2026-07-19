@@ -1,7 +1,7 @@
 // =============================================================================
 // symbi-aot
 //
-// build-time AOT kernel library (docs/design/10 §4, docs/design/15 §3). build.rs
+// build-time AOT kernel library. build.rs
 // runs the substrate to lower every kernel to IR and emit it as BOTH compilable
 // Rust source (via emit_kernel_cpu) and a serialized backend-NEUTRAL lowered IR
 // blob (the Prepared artifact, via prepare + prepared_to_ir), then writes ONE
@@ -9,7 +9,7 @@
 // blob as a `<KERNEL>_IR` const. the blob renders to ANY backend at runtime via
 // `symbi_ir::render_from_ir`. this crate `include!`s that single registry —
 // so adding a kernel touches only build.rs's kernel list, never this file
-// (docs/design/15 §3: no hand-maintained registration).
+// (no hand-maintained registration).
 //
 // each generated `pub fn` is a normal compiled function exported from this crate;
 // downstream consumers (the tests here, `symbi`'s SubstrateKernelSet) call them
@@ -208,7 +208,7 @@ impl<'a, T> CpuFieldMut<'a, T> {
     }
 }
 
-// ---- the structured binding ABI (docs/design/15 §5) ----
+// ---- the structured binding ABI ----
 //
 // the backend-NEUTRAL kernel invocation. instead of the call site building the
 // CPU-specific `&[CpuField]` / `&mut [CpuFieldMut]` host slices directly (a host-
@@ -277,7 +277,7 @@ impl<'a, T> KernelInvocation<'a, T> {
     }
 }
 
-// the kernel scalar type — the precision genericity of docs/design/15. the
+// the kernel scalar type — the precision-generic parameter. the
 // generated CPU kernels are `fn k<S: Scalar + OrderedNumeric>(..)`, so `Sim<f64>`
 // and `Sim<f32>` pick the precision by the buffer type they pass (S inferred).
 // the OrderedNumeric bound is the Tier-1.7 closure: the CPU emitter writes native
@@ -292,7 +292,7 @@ pub use symbi_ir::algebra::Scalar;
 /// this shape, so the generic fn item `k::<S>` coerces to `KernelFn<S>`. `kernel_by_name`
 /// (generated in the registry below) returns one of these, so the D-generic
 /// SubstrateKernelSet picks a kernel instance by name rather than a hand-maintained
-/// per-regime match (docs/design/15 §5). CpuField / CpuFieldMut / Scalar / OrderedNumeric
+/// per-regime match. CpuField / CpuFieldMut / Scalar / OrderedNumeric
 /// are in scope above.
 pub type KernelFn<S> =
     fn(&[CpuField<'_, S>], &mut [CpuFieldMut<'_, S>], &[u32], &[i32], &[i32], &[S]);

@@ -33,7 +33,7 @@ use symbi_xpu::{
 };
 
 // =============================================================================
-// energy/pressure FIELD slot (docs/design/34) — the field-layer analog of
+// energy/pressure FIELD slot — the field-layer analog of
 // `symbi_hydro::energy::EnergySlot`. encodes energy presence at the TYPE level so
 // `cons.nrg` / `prim.pre` are a real `Field` for energy regimes and a zero-sized
 // `FieldZero` for isothermal — retiring the runtime `Option<Field>`. lives HERE (not on
@@ -87,17 +87,17 @@ impl FieldEnergy for symbi_hydro::energy::IsoModel {
     type Slot<Sc: Scalar + OrderedNumeric, const D: usize, Mem: MemorySpace> = FieldZero;
 }
 
-// NOTE (docs/design/34): `alloc_slot` + the `ConsFields`/`PrimFields` `E::Slot`
-// flip were reverted — the field-layer flip is a far wider sweep than estimated (~180 access sites
-// across ~55 files, + the foreign-`Field` trait-scope friction). the additive foundation above
-// (`FieldEnergy`/`EnergyFieldSlot`/`FieldZero` + `Regime::Energy`) is retained, ready for the flip
-// to be re-attempted as a dedicated, fully-validated pass.
+// the energy/pressure field storage stays `Option<Field>`, not a type-level `E::Slot`. the
+// additive foundation above (`FieldEnergy`/`EnergyFieldSlot`/`FieldZero` + `Regime::Energy`) is
+// the type-level slot resolver; the field containers do not route their `nrg`/`pre` storage
+// through it (routing them would touch ~180 access sites across ~55 files plus the foreign-`Field`
+// trait scope).
 
 // =============================================================================
 // SoA field containers
 // =============================================================================
 
-/// conserved state in SoA layout: separate field per component (docs/design/18).
+/// conserved state in SoA layout: separate field per component.
 /// GPU-optimal: each kernel reads one contiguous array at a time. nrg is None for
 /// isothermal regimes (no energy equation).
 ///
@@ -168,7 +168,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     /// whether this field set includes energy.
     pub fn has_energy(&self) -> bool { self.nrg_field().is_some() }
 
-    /// **the energy-slot SEAM** (docs/design/34, [[feedback_representation_behind_a_seam]]): the ONE
+    /// **the energy-slot accessor**: the ONE
     /// accessor for the `nrg` field. ALL readers route through this, so swapping the representation
     /// (`Option<Field>` -> a type-level `E::Slot`) is a one-place change behind this method, not a
     /// 180-site sweep. returns the backing field, or `None` when energy is absent (isothermal).
@@ -226,7 +226,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
     }
 }
 
-/// primitive state in SoA layout (docs/design/18). pre is None for isothermal regimes
+/// primitive state in SoA layout. pre is None for isothermal regimes
 /// (pressure derived from eos, not stored). `NDIM` = grid dim, `DOF` = velocity-component
 /// dim (decoupled — the `PrimFields<D>` alias fills `DOF = NDIM = D`).
 pub struct PrimFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
@@ -274,7 +274,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
         })
     }
 
-    /// **the pressure-slot SEAM** (docs/design/34, [[feedback_representation_behind_a_seam]]): the ONE
+    /// **the pressure-slot accessor**: the ONE
     /// accessor for the `pre` field. ALL readers route through this so the representation is swappable
     /// in one place. `None` when pressure is not stored (isothermal — derived from the EOS).
     #[inline]
@@ -332,7 +332,7 @@ impl<const NDIM: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNu
 // =============================================================================
 
 /// all field storage for one partition. `NDIM` = grid dim, `DOF` = vector (momentum)
-/// component dim (docs/design/18); the `PartitionFields<D>` alias fills `DOF = NDIM = D`.
+/// component dim; the `PartitionFields<D>` alias fills `DOF = NDIM = D`.
 /// the MHD staggered fields stay keyed on `NDIM` (RMHD is full-3D, so its B is NDIM-component).
 pub struct PartitionFieldsGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
     pub cons: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
@@ -355,22 +355,21 @@ pub type PartitionFields<const D: usize, M = DefaultMemory, Sc = f64> = Partitio
 // =============================================================================
 // MHD staggered FieldGroups
 //
-// M.3.a: each of the per-axis Field arrays inside MhdStaggeredFields is
+// each of the per-axis Field arrays inside MhdStaggeredFields is
 // wrapped in a `#[derive(FieldGroup)]` struct that carries its centering at
-// the type level (Cell / Face / Edge — axis-erased, see M.1.c). this lets
+// the type level (Cell / Face / Edge — axis-erased). this lets
 // chalkboard kernels accept `&BfaceFields<D, M>` etc. and the macro emits
 // per-D per-member access automatically.
 //
 // `Index<usize>` / `IndexMut<usize>` impls preserve the bare-array indexing
-// syntax (`bcell[d]`) so the ~140 user/init call sites that read or write
-// `mhd.bcell[d]` keep compiling unchanged when MhdStaggeredFields refactors
-// to use these groups (M.3.b).
+// syntax (`bcell[d]`) so call sites that read or write `mhd.bcell[d]` use the
+// same syntax whether the field is a bare array or one of these groups.
 // =============================================================================
 
 /// cell-centered magnetic field group: one Field per B-component.
-/// internal Field array uses default `Cell` centering; M.4+ per-kernel
-/// migrations may promote to typed Cell/Face/Edge as call sites are
-/// updated. the FieldGroup struct distinction (BcellFields ≠ BfaceFields)
+/// internal Field array uses default `Cell` centering; per-kernel call sites
+/// may use typed Cell/Face/Edge centering. the FieldGroup struct distinction
+/// (BcellFields != BfaceFields)
 /// already separates the storage at the type level.
 // N = vector-component count (DOF for MHD), decoupled from the grid dimension D:
 // the cell-centered B is a DOF-vector on a D-axis grid, so the array length (N=DOF)
@@ -442,7 +441,7 @@ pub struct MhdStaggeredFields<const D: usize, const DOF: usize, M: MemorySpace =
     /// per DOF vector component. the D in-plane components [0..D) are interpolated
     /// from bface after CT; the (DOF-D) out-of-plane components [D..DOF) have no
     /// face to stagger on and are carried/evolved cell-centered directly (1.5D /
-    /// 2.5D MHD — docs/design/30). at D=DOF this is the fully interpolated B.
+    /// 2.5D MHD). at D=DOF this is the fully interpolated B.
     pub bcell: BcellFields<D, DOF, M, Sc>,
 
     /// RK2 snapshot of bcell at the start of a step (bcell^n). the godunov
@@ -638,7 +637,7 @@ impl<const D: usize, const DOF: usize, M: MemorySpace, Sc: Scalar + OrderedNumer
 }
 
 /// RK workspace for one partition. `NDIM` = grid dim, `DOF` = vector component dim
-/// (docs/design/18); the `RkWorkspace<D>` alias fills `DOF = NDIM = D`.
+/// the `RkWorkspace<D>` alias fills `DOF = NDIM = D`.
 pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpace = DefaultMemory, Sc: Scalar + OrderedNumeric = f64> {
     pub u_n: ConsFieldsGeneric<NDIM, DOF, M, Sc>,
     pub prim_n: PrimFieldsGeneric<NDIM, DOF, M, Sc>,
@@ -656,8 +655,8 @@ pub struct RkWorkspaceGeneric<const NDIM: usize, const DOF: usize, M: MemorySpac
     /// `snapshot_stage` writes it), so the alias can never be written through. the driver sets it per
     /// stage; `binding.rs` is the single site that honours it.
     pub stage_input_is_un: std::sync::atomic::AtomicBool,
-    /// disables the stage-0 alias above, forcing the `cons -> u_stage` copy at every stage. the
-    /// REFERENCE path: an oracle evolves the same state both ways and asserts a bit-identical
+    /// disables the stage-0 alias, forcing the `cons -> u_stage` copy at every stage. the
+    /// REFERENCE path: a reference run evolves the same state both ways and asserts a bit-identical
     /// trajectory, so the elision cannot silently change physics. `true` (elide) in production.
     pub elide_stage_snapshot: std::sync::atomic::AtomicBool,
     /// first-order flux-correction scratch: the HIGH-ORDER per-direction conserved fluxes, saved
@@ -709,7 +708,7 @@ pub struct PartitionGeometry<const D: usize> {
 
     /// the spacetime background (from the metric `M::spacetime()`) — ORTHOGONAL to `coords`:
     /// `Minkowski` for every flat run, a curved variant (Schwarzschild, ...) for GR. drives the
-    /// lapse / sqrt(gamma) densitization selector in the kernel (B3); flat -> no-op.
+    /// lapse / sqrt(gamma) densitization selector in the kernel; flat -> no-op.
     pub spacetime: symbi_geometry::Spacetime,
 
     /// the curved-spacetime runtime scalar params (from `M::spacetime_scalars()`), `(wire-name,
@@ -786,7 +785,7 @@ where
     _marker: std::marker::PhantomData<(S, Mem, Sc, St)>,
 }
 
-/// typestate markers for [`SimBuilder`] (docs/design — safe-path-only frontend). the builder moves
+/// typestate markers for [`SimBuilder`] (safe-path-only frontend). the builder moves
 /// `NeedsGrid -> NeedsCells -> Ready`; `build()` is callable ONLY at `Ready`, so a sim with
 /// un-seeded fields (or un-seeded MHD faces) is unrepresentable at the type level.
 pub struct NeedsGrid;
@@ -1221,7 +1220,7 @@ pub enum BoundaryType {
     /// filled by prolongation from a coarser AMR level.
     /// standard ghost fill skips these faces.
     CoarseFine,
-    /// **docs/design/33** — a DRIVEN boundary: the ghost state is PRESCRIBED by a user DAG
+    /// a DRIVEN boundary: the ghost state is PRESCRIBED by a user DAG
     /// (`build_boundary_dag`), not pulled from the interior. the `u16` indexes the kernel-set's
     /// boundary-DAG side table. standard ghost fill SKIPS these faces (like `CoarseFine`); the
     /// driven-boundary pass fills them by evaluating the DAG over the face's ghost band. enum stays
@@ -1450,11 +1449,11 @@ where
 }
 
 /// the simulation's mutable SUBSTANCE: every buffer + grid + time-state a kernel reads
-/// or writes (docs/design/35 R3). parametrized ONLY by storage shape — grid dim `NDIM`,
+/// or writes. parametrized ONLY by storage shape — grid dim `NDIM`,
 /// vector dim `DOF`, memory space `Mem`, scalar `Sc` — NOT by the physics tags (`R`/`M`/`E`)
-/// or the executor (`S`). this is the decoupling that makes `R3` the keystone: a `KernelSet`
+/// or the executor (`S`). this is the keystone decoupling: a `KernelSet`
 /// takes `&FieldStore` and so carries 4 params instead of 8, and the energy/schema bounds
-/// that ripple off `R` (R4) become LOCAL to this one struct instead of an 80-site sweep.
+/// that ripple off `R` become LOCAL to this one struct instead of an 80-site sweep.
 pub struct FieldStore<
     const NDIM: usize,
     const DOF: usize,
@@ -1507,8 +1506,8 @@ pub struct Context<S: ExecutionSpace> {
 }
 
 /// complete simulation state = `FieldStore` (substance) + `Physics` (tags) + `Context`
-/// (executor), decomposed per docs/design/35 R3. generic over regime, GRID dim (`NDIM`),
-/// VECTOR dim (`DOF`, docs/design/18), metric, eos. the `SimState<R, D, M, ..>` alias fills
+/// (executor). generic over regime, GRID dim (`NDIM`),
+/// VECTOR dim (`DOF`), metric, eos. the `SimState<R, D, M, ..>` alias fills
 /// `DOF = NDIM = D` (the natural case); axisymmetric hydro uses `SimStateGeneric<R, 2, 3,
 /// Cylindrical, ..>` directly (2D grid, 3-vector momentum with the v_phi swirl).
 ///
@@ -1546,7 +1545,7 @@ impl<const NDIM: usize, const DOF: usize, Mem: MemorySpace, Sc: Scalar + Ordered
     }
 }
 
-/// **the storage seam (R3):** `SimStateGeneric` `Deref`s to its `FieldStore`. this is a
+/// **the storage seam:** `SimStateGeneric` `Deref`s to its `FieldStore`. this is a
 /// DELIBERATE seam, not accidental `Deref`-as-inheritance: the `FieldStore` IS the sim's
 /// substance (1300+ `sim.fields` / `sim.geom` / `sim.time` accesses), while `physics` /
 /// `ctx` are rare type-level side-cars reached explicitly (`sim.physics.regime`,
@@ -1619,7 +1618,7 @@ pub type SimState<
 /// keep working unchanged; pass an explicit C turbofish for face / edge
 /// arrays.
 // `N` component fields on a `D`-dimensional grid. `N` is the VECTOR (component) dimension,
-// decoupled from the grid `D` (docs/design/18) — `N == D` for the natural case, `N > D` for an
+// decoupled from the grid `D` — `N == D` for the natural case, `N > D` for an
 // axisymmetric vector (the v_phi swirl on an (r,z) grid). `N` is inferred from the target array.
 pub fn array_field_zeros<const D: usize, const N: usize, M: MemorySpace, C: symbi_grid::centering::Centering, Sc: Scalar + OrderedNumeric>(
     domain: &Domain<D>,
@@ -1786,7 +1785,7 @@ where
     }
 }
 
-// the inherent impl, generic over the vector dimension `DOF` (docs/design/18): `new` builds
+// the inherent impl, generic over the vector dimension `DOF`: `new` builds
 // a `DOF`-component state, so the `SimState<R,D,M,..>` alias gives the natural `DOF = D` and
 // `SimStateGeneric<R, 2, 3, ..>::new` gives axisymmetric (3-vector momentum on a 2D grid).
 impl<R, const D: usize, const DOF: usize, M, E, S, Mem, Sc> SimStateGeneric<R, D, DOF, M, E, S, Mem, Sc>
@@ -1866,7 +1865,7 @@ where
             None
         };
 
-        // prim.pre allocation is REGIME-uniform across CPU and GPU (docs/design/34): adiabatic
+        // prim.pre allocation is REGIME-uniform across CPU and GPU: adiabatic
         // allocates it (the pressure primitive); isothermal does NOT — iso's pressure lives in the
         // kernel-set's substrate-owned `self.pre` (= cs^2*rho), bound by every iso kernel via the
         // `pre` override on CPU AND GPU. an `|| S::IS_DEVICE` term would allocate a DEAD placeholder on

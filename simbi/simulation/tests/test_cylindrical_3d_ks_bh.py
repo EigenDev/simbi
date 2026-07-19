@@ -1,7 +1,7 @@
 # =============================================================================
 # test_cylindrical_3d_ks_bh.py
 #
-# design 45 phase 2: GRHD in the FULL 3D cylindrical kerr-schild chart — (R, phi, z) all
+# GRHD in the FULL 3D cylindrical kerr-schild chart — (R, phi, z) all
 # gridded. the metric is AXISYMMETRIC (phi-independent), so a phi-uniform initial state
 # must stay phi-uniform to roundoff even with the azimuth FULLY RESOLVED — the correctness
 # gate that the 3D path handles the gridded phi axis right (the radial + vertical infall

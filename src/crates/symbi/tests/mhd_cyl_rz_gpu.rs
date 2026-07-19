@@ -1,8 +1,8 @@
 // =============================================================================
 // mhd_cyl_rz_gpu.rs
 //
-// GPU<->CPU parity for the CURVILINEAR 2.5D cyl r-z MHD path (docs/design/30) — the
-// AGENT.md §4.3 carrier gate for the cyl-rz substrate kernels (the cartesian 2.5D
+// GPU<->CPU parity for the CURVILINEAR 2.5D cyl r-z MHD path — the carrier gate for the
+// cyl-rz substrate kernels (the cartesian 2.5D
 // parity lives in mhd_2p5d_gpu.rs; cyl HYDRO in cylindrical_swirl/disk_gpu). builds
 // the SAME poloidal-rotor-in-B_z sim on host (CpuSpace/HostMemory) and device
 // (CudaSpace/UnifiedMemory), evolves a handful of RK2 steps through the production

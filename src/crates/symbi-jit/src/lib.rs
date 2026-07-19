@@ -6,12 +6,12 @@
 // code via Cranelift, returning a `CompiledFn` callable as
 // `fn(inputs: &[f64], out: &mut [f64])`.
 //
-// the v1 subset is exactly what a SOURCE dag emits (docs/design/36): `ScalarStmt::Let`
+// the v1 subset is exactly what a SOURCE dag emits: `ScalarStmt::Let`
 // + `Const`/`Var`/`BinOp`/`UnaryOp`/`MethodCall`/`Select`/`Cast`. anything else
 // (stencils, generic-dim loops, reductions) is REJECTED (`JitError::Unsupported`) so the
 // caller falls back to the interpreter — never a miscompile.
 //
-// bit-identity with the interpreter (the oracle gate `f64-interp == cranelift`):
+// bit-identity with the interpreter (`f64-interp == cranelift`):
 //   - arithmetic is plain IEEE `fadd/fmul/...`; Cranelift does NOT auto-contract to FMA,
 //     so `a*b + c` matches the interpreter's separate mul+add;
 //   - every `MethodCall` is routed through a Rust shim (`extern "C" fn` wrapping `x.sin()`
@@ -289,7 +289,7 @@ pub fn compile(lowered: &LoweredFn) -> Result<CompiledFn, JitError> {
     // codegen quality matters — Cranelift defaults to `opt_level=none`, which leaves it well behind
     // the AOT rustc `-O` kernels. "speed" enables GVN / LICM / redundant-load elimination / better
     // regalloc WITHOUT FP reassociation or auto-FMA (Cranelift never contracts FMA), so the
-    // bit-identity oracle still holds (interp == cranelift).
+    // bit-identity still holds (interp == cranelift).
     flags.set("opt_level", "speed").unwrap();
     let isa = cranelift_native::builder()
         .map_err(|e| JitError::Codegen(format!("native isa: {e}")))?
@@ -576,8 +576,8 @@ fn translate_expr(
                 "trunc" => return Ok(b.ins().trunc(recv)),
                 // abs/min/max as a TERNARY (fcmp + select), NOT
                 // libdevice fabs/fmin/fmax — bit-matches the cuda emit, the interp,
-                // and the f64/f32 `Numeric` carrier at NaN / signed-zero (tier-1
-                // #2b). CLIF select is a value, not a lexical scope, so there is no
+                // and the f64/f32 `Numeric` carrier at NaN / signed-zero.
+                // CLIF select is a value, not a lexical scope, so there is no
                 // debuginfo blow-up (the reason the CPU emit keeps these as method
                 // calls rather than lowering to scoped `if`-selects in scalarize).
                 "abs" => {
@@ -1233,7 +1233,7 @@ pub fn compile_kernel_prec(
     // codegen quality matters — Cranelift defaults to `opt_level=none`, which leaves it well behind
     // the AOT rustc `-O` kernels. "speed" enables GVN / LICM / redundant-load elimination / better
     // regalloc WITHOUT FP reassociation or auto-FMA (Cranelift never contracts FMA), so the
-    // bit-identity oracle still holds (interp == cranelift).
+    // bit-identity still holds (interp == cranelift).
     flags.set("opt_level", "speed").unwrap();
     let isa = cranelift_native::builder()
         .map_err(|e| JitError::Codegen(format!("native isa: {e}")))?
@@ -1449,7 +1449,7 @@ mod tests {
 
     /// build a graph (the closure adds its own params + returns the output node), scalarize,
     /// and assert the Cranelift-compiled fn is BIT-IDENTICAL to the interpreter over many
-    /// random input vectors — the oracle gate. inputs are passed in `LoweredFn::params` order
+    /// random input vectors. inputs are passed in `LoweredFn::params` order
     /// to BOTH paths, so the exact param order is irrelevant.
     fn assert_jit_matches_interp(build: impl Fn(&mut Graph) -> NodeId) {
         let mut g = Graph::new();
@@ -1464,7 +1464,7 @@ mod tests {
         // the zero-crossing, signed zeros, and magnitude extremes — to stress the native CLIF ops
         // (fcmp/select/div/sqrt/neg) at the edges a narrow positive range never reaches. interp ==
         // cranelift must hold on NaN/Inf too: every native op is IEEE-754 on both sides, every
-        // MethodCall routes through the SAME std shim. (the carrier oracle's whole job is to catch a
+        // MethodCall routes through the SAME std shim. (this reference check catches a
         // codegen divergence; a narrow fuzz domain is exactly how a min/max-style NaN bug hides.)
         let mut state = 0x2545F4914F6CDD1Du64;
         let mut next = || {
@@ -1555,7 +1555,7 @@ mod tests {
 
     #[test]
     fn min_max_match() {
-        // max(a, 0) * min(b, a) — fcmp+select ternary; the widened oracle
+        // max(a, 0) * min(b, a) — fcmp+select ternary; the widened fuzz range
         // exercises NaN / signed-zero, so jit == interp under the my_min/my_max form.
         assert_jit_matches_interp(|g| {
             let (a, b) = (p(g, "a"), p(g, "b"));

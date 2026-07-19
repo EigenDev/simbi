@@ -423,7 +423,7 @@ fn splice_fused_sources_to_contribs(
     ncomp: usize,
     has_energy: bool,
     geo: &Option<CellGeometryGv>,
-    // the STATE vocabulary the DAG reads `rho`/`vel_k` from (docs/design/33 `StateEnv`). `Some((rho,
+    // the STATE vocabulary the DAG reads `rho`/`vel_k` from (`StateEnv`). `Some((rho,
     // mom))` binds them (sources read the stage/conserved state); `None` binds NOTHING from state — a
     // pure coordinate prescription (a driven boundary, whose DAG outputs the state rather than reading
     // it). `x_k` (centroid) + scalar params are bound regardless.
@@ -720,8 +720,8 @@ pub fn godunov_stage_gv_with_fused_built(
                 // the same key convention as the discrete magnetic geo source. the momentum call
                 // takes p = 0 (the gas-pressure block rides the discrete well-balanced form) but
                 // keeps the FULL magnetic stress — the b^2/2 isotropic block is analytic; the
-                // one-step-residual instrument adjudicates its balance. spinning kerr is design-44
-                // phase C (the dragging-consistent reconstruction does not yet extend to B).
+                // one-step-residual instrument adjudicates its balance. spinning kerr is not
+                // covered here (the dragging-consistent reconstruction does not yet extend to B).
                 let gamma_eos = Gv::scalar("gamma");
                 let prim_rho = Gv::field("prim_rho", FieldRef::PrimRho);
                 let rho_h = prim_rho + gamma_eos / (gamma_eos - Gv::ONE) * p;
@@ -906,10 +906,10 @@ pub fn godunov_stage_gv_with_fused_built(
 /// `S` lands with the same `ac*dt` weight the fused stage applies inside its `ac*fe` combine.
 ///
 // =============================================================================
-// THE UNIFIED DAG-APPLICATION OPERATOR (docs/design/33 section 7).
+// THE UNIFIED DAG-APPLICATION OPERATOR.
 //
 // `apply_dag_core_gv` is the ONE kernel builder behind BOTH the interior source pass and
-// (docs/design/33) the driven-boundary pass. it factors out the decisions a source/boundary
+// the driven-boundary pass. it factors out the decisions a source/boundary
 // makes: WHERE the DAG reads state (`StateEnv`), and HOW its result lands in
 // the target field (`WriteMode`). the iteration domain + target-field binding are the dispatch's job
 // (the same `dispatch_runtime_ir` + `resolve_path` serve cons.* and prim.*), so this builder is the
@@ -1084,10 +1084,10 @@ pub fn source_apply_from_built_gv(
 }
 
 
-/// DRIVEN-BOUNDARY entry (docs/design/33): prescribe the primitive state from coordinate DAGs — the
+/// DRIVEN-BOUNDARY entry: prescribe the primitive state from coordinate DAGs — the
 /// `(Coord, Assign)` instance of [`apply_dag_core_gv`]. `sources` are `(slot, BuiltSource)` with slot
 /// `"den"`/`"mom"`/`"nrg"` mapping to `prim.rho`/`prim.vel_k`/`prim.pre`; each DAG reads only
-/// `x_k`/`t`/`p_i` and OUTPUTS the prescribed value. dispatched over a face's ghost band (task 2).
+/// `x_k`/`t`/`p_i` and OUTPUTS the prescribed value. dispatched over a face's ghost band.
 pub fn boundary_fill_from_built_gv(
     coords: Coords,
     spacing: &[Spacing],
@@ -1255,7 +1255,7 @@ fn bcell_flux_divs_gv(
 /// is NOT one of the grid axes. those live on staggered faces and are re-derived cell-centered by
 /// `bcell_from_bface = interp(bface)`, so the predictor must leave them alone; the complement — the
 /// out-of-plane components — have no face to curl and ARE evolved here as cell-centered conserved
-/// variables (docs/design/30). cartesian `[0..ndim)` grid -> `[ndim..ncomp)`; cyl r-z (axes [0,2])
+/// variables. cartesian `[0..ndim)` grid -> `[ndim..ncomp)`; cyl r-z (axes [0,2])
 /// -> {phi=1}; sph r-theta (axes [0,1]) -> {phi=2}; a fully-gridded 3D chart -> empty.
 fn oop_components(ncomp: usize, axes: &[usize]) -> Vec<usize> {
     (0..ncomp).filter(|c| !axes.contains(c)).collect()
@@ -1264,10 +1264,10 @@ fn oop_components(ncomp: usize, axes: &[usize]) -> Vec<usize> {
 
 /// the RMHD cell-B FLUX PREDICTOR (Euler): `bcell[c] -= dt*div(bflux_c)`, in-place, for the
 /// OUT-OF-PLANE components ONLY (`oop_components`). those are the genuinely cell-centered magnetic
-/// slots — no staggered face, so not CT-evolved (reduced-dimension MHD; docs/design/30). the
+/// slots — no staggered face, so not CT-evolved (reduced-dimension MHD). the
 /// in-plane components are re-derived by `bcell_from_bface = interp(bface)` and must NOT be
 /// flux-evolved here: their transient predictor value poisons the FOFC/c2p recoverability probe once
-/// the magnetic-energy patch is gone (spec §6 / oop_predictor_spec.md). a fully-gridded chart (3D)
+/// the magnetic-energy patch is gone. a fully-gridded chart (3D)
 /// has no out-of-plane component and yields an EMPTY kernel — its dispatch is elided at `ndim==ncomp`.
 pub fn rmhd_bcell_godunov_euler_gv(
     coords: Coords,

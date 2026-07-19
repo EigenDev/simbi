@@ -1,9 +1,9 @@
 // =============================================================================
 // body_gravity_evolve.rs
 //
-// the immersed-boundary forward gravity, END TO END on the substrate (docs/design/19
-// P1c): a fixed central point mass pulls a fluid inward through the real evolve() loop
-// (the body_source KernelSet method, dispatched per RK stage when has_bodies()).
+// the immersed-boundary forward gravity, END TO END on the substrate: a fixed central
+// point mass pulls a fluid inward through the real evolve() loop (the body_source
+// KernelSet method, dispatched per RK stage when has_bodies()).
 //
 //   - cpu: uniform fluid at rest around a central mass develops INWARD radial momentum,
 //     stays finite, conserves mass (gravity touches mom/nrg, not den).
@@ -42,7 +42,7 @@ fn central_mass() -> BodyCollection<f64, 2> {
 }
 
 // -----------------------------------------------------------------------------
-// M2 regression: the FOFC redo must re-apply the immersed-body source. a FOFC-firing
+// regression: the FOFC redo must re-apply the immersed-body source. a FOFC-firing
 // substage RESTORES the stage-input state and re-runs the godunov + additive source; without
 // re-applying the body source there too, a FO/freeze-selected cell near a body loses its gravity
 // kick for that substage. discriminating A/B on ONE forward-Euler substage (so a flagged cell
@@ -533,7 +533,7 @@ fn black_hole_records_accretion_without_changing_mass() {
     // a black hole (gravity + accretion) embedded in dense fluid: the fluid is removed by the
     // sink + the accretion RECORDED into the diagnostic (total_accreted_mass), but the BH's
     // GRAVITATING mass is held FIXED (fixed-potential sink — the central potential must not
-    // drift). docs/design/19.
+    // drift).
     type Sim = SimState<Newtonian, 2, Cartesian, IdealGas<f64>, CpuSpace, HostMemory>;
     let dx = 2.0 * L / N as f64;
     let m_init = 1.0;
@@ -720,8 +720,8 @@ fn body_feedback_gpu_matches_cpu() {
 }
 
 // -----------------------------------------------------------------------------
-// curvilinear (polar r-phi) body gravity (docs/design/19): a central mass must
-// produce PURELY RADIAL gravity in the physical (r, phi) momentum components.
+// curvilinear (polar r-phi) body gravity: a central mass must produce PURELY RADIAL
+// gravity in the physical (r, phi) momentum components.
 // -----------------------------------------------------------------------------
 #[test]
 fn curvilinear_central_gravity_is_radial() {
@@ -881,8 +881,8 @@ fn curvilinear_body_source_gpu_matches_cpu() {
 }
 
 // -----------------------------------------------------------------------------
-// 3D spherical body gravity (docs/design/19): a central mass must produce
-// PURELY RADIAL gravity in the physical (r, theta, phi) components.
+// 3D spherical body gravity: a central mass must produce PURELY RADIAL gravity in the
+// physical (r, theta, phi) components.
 // -----------------------------------------------------------------------------
 #[test]
 fn spherical_central_gravity_is_radial() {

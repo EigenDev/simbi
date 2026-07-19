@@ -82,8 +82,8 @@ pub enum BodyKind<S: Scalar> {
     },
 }
 
-/// the hydrodynamic penalization stack a body's surface runs (docs/design/50
-/// property algebra). config-static — parameters, never state, never checkpointed.
+/// the hydrodynamic penalization stack a body's surface runs (the property
+/// algebra). config-static — parameters, never state, never checkpointed.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum SurfaceSpec {
     /// the uniform-scaling drain: the validated accretor (p = 1).
@@ -125,7 +125,7 @@ pub enum MagneticSpec {
 /// declared target. config-static.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct BodySpec {
-    /// the hydrodynamic surface: drain / porous wall / torque-free (design 50 channels).
+    /// the hydrodynamic surface: drain / porous wall / torque-free channels.
     pub surface: SurfaceSpec,
     /// the magnetic surface coupling (MHD); default `None` is transparent to B.
     pub magnetic: MagneticSpec,

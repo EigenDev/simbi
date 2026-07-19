@@ -1,8 +1,8 @@
 // =============================================================================
 // cylindrical_disk_evolve.rs
 //
-// the cylindrical r-phi DISK plane on the substrate (docs/design/20): a 2-axis
-// (r, phi) grid carrying a 2-component velocity (v_r, v_phi) — DOF == NDIM == 2,
+// the cylindrical r-phi DISK plane on the substrate: a 2-axis (r, phi) grid carrying
+// a 2-component velocity (v_r, v_phi) — DOF == NDIM == 2,
 // the NATURAL cylindrical plane. distinct from the r-z axisymmetric family
 // (cylindrical_swirl_evolve.rs, DOF=3 > NDIM=2): r-phi -> "_cyl" kernels, r-z ->
 // "_cyl_rz", discriminated by DOF-vs-ndim at dispatch (geom_suffix).

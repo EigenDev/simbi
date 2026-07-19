@@ -388,7 +388,7 @@ def print_progress(
             # prefer the central factory if available
             from simbi.reader.progress import create_progress_bar
 
-            # ensure we have a console to pass in
+            # ensure a console is available to pass in
             try:
                 from rich.console import Console
 

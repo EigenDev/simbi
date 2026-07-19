@@ -4,7 +4,7 @@
 // numerical validation of the BUILD-TIME-GENERATED RHD cons->prim kernel — the
 // first ITERATIVE substrate kernel (a fixed-bound masked Newton-Raphson for the
 // relativistic pressure, `operators::iterate`, lowered + emitted to compiled Rust
-// via the DAG-preserving lowering of docs/design/13). this is the proof the deep
+// via the DAG-preserving lowering). this is the proof the deep
 // iterate produces CORRECT numbers, not just compilable code.
 //
 // two independent checks on the same compiled kernel `rhd_c2p_1d`:

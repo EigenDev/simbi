@@ -5,7 +5,7 @@
 // the substrate verification gate (CPU numerics + nvcc PTX + on-device run). the
 // SAME substrate IR graph is emitted to two backends: the CPU Rust fn
 // `symbi_aot::rhd_c2p_1d` and the neutral IR blob `symbi_aot::RHD_C2P_1D_IR`,
-// rendered to CUDA source at test time via `render_from_ir` (docs/design/15 §3).
+// rendered to CUDA source at test time via `render_from_ir`.
 // the CUDA is nvcc-compiled to PTX, launched on the GPU; the test asserts the
 // device output matches BOTH the CPU kernel AND the analytic primitives the
 // conserved states were built from. proves the iterative kernel (20-step masked
@@ -47,7 +47,7 @@ fn view_1d(ptr: *const f64, n: usize) -> DeviceView {
     }
 }
 
-// render a kernel's neutral IR blob to CUDA source at f64 (docs/design/15 §3).
+// render a kernel's neutral IR blob to CUDA source at f64.
 fn cuda_src(ir: &str) -> String {
     render_from_ir(ir, Target::Cuda, Precision::F64).source
 }

@@ -17,8 +17,8 @@
 //   - rank-0: the scalar element type (e.g., `double`)
 //   - rank-N: a struct with named fields _0, _1, ..., _{N-1}
 //
-// the macro layer (R.5) is the eventual consumer; CUDA syntax here is
-// pure device-function code, no kernel-launch (__global__) shape yet.
+// the macro layer consumes these device functions; CUDA syntax here is
+// pure device-function code, no kernel-launch (__global__) shape.
 // =============================================================================
 
 use crate::graph::{ConstValue, Graph, NodeId};
@@ -255,7 +255,7 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt) {
             // CUDA has no block-expression form, so declare `name` in the
             // outer scope, write inside the inner `{ }`, and rely on the
             // brace to kill all inner locals. nvcc gets clean lifetime
-            // information for the body's temps. see docs/design/23.
+            // information for the body's temps.
             out.push_str(cuda_type_name(*element));
             out.push(' ');
             out.push_str(name);
@@ -351,7 +351,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
             // divergent semantics produced different fluxes CPU vs GPU -> macroscopic
             // Bx drift in MUB09. the f64/f32 `Numeric` carrier, the
             // interpreter, and the cranelift jit all use this SAME ternary, so the
-            // CPU<->GPU bit-oracle (cpu_gpu_minmax_oracle.rs) holds.
+            // CPU and GPU paths stay bit-identical at min/max.
             //   min(a, b) = a < b ? a : b
             //   max(a, b) = a > b ? a : b
             //   abs(x)    = x < 0 ? -x : x
@@ -467,7 +467,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr) {
             );
         }
         ScalarExpr::FreeCall { name, args } => {
-            // F1.B.8: direct function call by name. the function
+            // direct function call by name. the function
             // definition is supplied externally (by the scalar
             // elemental's _cuda accessor, embedded into the kernel
             // preamble by the kernel macro). emitter just produces the
@@ -488,7 +488,7 @@ fn emit_const(out: &mut String, v: &ConstValue) {
         // non-finite consts spell the IEEE bit pattern via device intrinsics, NOT the
         // <math.h> macros (INFINITY) / functions (nan): nvcc includes math.h
         // implicitly but NVRTC does NOT, so `INFINITY` is undefined under runtime
-        // compilation (docs/design/15 §1). __longlong_as_double / __int_as_float are
+        // compilation. __longlong_as_double / __int_as_float are
         // CUDA+HIP device builtins needing no header, and reinterpret the exact bits
         // — bit-identical to the macros, no numerical change.
         ConstValue::F64(x) => {
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn min_emits_ternary_matching_my_min() {
-        // tier-1 #2b: emit `(a < b ? a : b)` not `fmin(a, b)`.
+        // emit `(a < b ? a : b)` not `fmin(a, b)`.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let b = g.add_scalar_param("b", ElementTy::F64);
@@ -739,7 +739,7 @@ mod tests {
 
     #[test]
     fn max_emits_ternary_matching_my_max() {
-        // tier-1 #2b: emit `(a > b ? a : b)` not `fmax(a, b)`.
+        // emit `(a > b ? a : b)` not `fmax(a, b)`.
         let mut g = Graph::new();
         let a = g.add_scalar_param("a", ElementTy::F64);
         let b = g.add_scalar_param("b", ElementTy::F64);
@@ -788,7 +788,7 @@ mod tests {
 
     #[test]
     fn powi_emits_unrolled_product_not_libdevice() {
-        // tier-1 #4: a `powi` MethodCall must NOT hit the `other => other`
+        // a `powi` MethodCall must NOT hit the `other => other`
         // fallthrough (which emits a bare `powi(...)` that NVRTC cannot compile).
         // it lowers to the exponentiation-by-squaring multiply chain, grouped
         // bit-identically to f64::powi / gv.rs::powi.
@@ -944,7 +944,7 @@ mod tests {
         assert_eq!(src.matches('{').count(), src.matches('}').count(), "{src}");
     }
 
-    // ----- docs/design/23: ScalarStmt::Scope CUDA tests -----
+    // ----- ScalarStmt::Scope CUDA tests -----
 
     /// CUDA has no block-expression syntax, so a `Scope` lowers to:
     ///   `<ty> <name>; { <body>; <name> = <result>; }`

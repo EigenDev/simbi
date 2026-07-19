@@ -30,7 +30,7 @@ use std::ops::{Add, Sub, Neg, Mul};
 pub struct ConsG<S: Scalar, const D: usize, E: EnergyModel = Adiabatic> {
     pub den: S,
     /// momentum density. INVARIANT: PHYSICAL (orthonormal-frame) components, `rho*V_a` with
-    /// `V_a = h_a v^a` — the frame the conservation form is written in (docs/design/31). it is left
+    /// `V_a = h_a v^a` — the frame the conservation form is written in. it is left
     /// a bare `Tensor` (not `symbi_algebra::Physical`) on purpose: the interior physics is
     /// frame-CONSISTENT by construction (the Riemann solver / flux / wave-speeds are locally flat
     /// and never mix frames), so typing it would be a ~500-site tax that catches zero bugs. frames

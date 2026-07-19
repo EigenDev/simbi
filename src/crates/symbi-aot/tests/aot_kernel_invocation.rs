@@ -1,7 +1,7 @@
 // =============================================================================
 // aot_kernel_invocation.rs
 //
-// the structured binding ABI (docs/design/15 §5) — proof that routing a
+// the structured binding ABI — proof that routing a
 // generated kernel through `KernelInvocation::run_cpu` produces BYTE-IDENTICAL
 // output to calling the descriptor wrapper directly with `&[CpuField]` /
 // `&mut [CpuFieldMut]`. the invocation is the backend-NEUTRAL boundary (handle +

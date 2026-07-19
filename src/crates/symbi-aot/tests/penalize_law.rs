@@ -1,7 +1,7 @@
 // =============================================================================
 // penalize_law.rs
 //
-// the [Drain] penalization kernel's gates (docs/design/50 step 2): the
+// the [Drain] penalization kernel's gates: the
 // compiled kernel is BIT-IDENTICAL to the f64 host chain built from the same
 // carrier-generic functions (sphere SDF chi -> Relax -> penalize_cell), the
 // per-cell deltas equal the gas's conserved loss exactly, and the blob
@@ -192,7 +192,7 @@ fn compiled_drain_penalize_matches_the_f64_chain_bitwise() {
             let x_rel = Tensor::new([x[0] - POS[0], x[1] - POS[1]]);
             let tq = symbi_ib::moment(&x_rel, &delta.force_delta);
             assert_eq!(pt[c].to_bits(), tq[2].to_bits(), "torque at ({ii},{jj})");
-            // gate 5, per cell: the delta IS the gas's loss.
+            // per cell: the delta IS the gas's loss.
             assert_eq!(
                 pm[c].to_bits(),
                 ((host_in.0[c] - den[c]) * dv).to_bits(),
@@ -772,7 +772,7 @@ fn compiled_iso_torque_free_penalize_matches_the_f64_chain_and_reduces_at_xi0() 
     }
 }
 
-// the [PorousAccretor] kernel (docs/design/50 zoo): the compiled kernel is
+// the [PorousAccretor] kernel: the compiled kernel is
 // bit-identical to the f64 chain (guarded sphere normal -> PorousAccretor
 // contribute -> penalize_cell), free-slip (k_eta_t = 0) leaves the tangential
 // velocity bit-untouched THROUGH the compiled path, and porosity = 1 reduces

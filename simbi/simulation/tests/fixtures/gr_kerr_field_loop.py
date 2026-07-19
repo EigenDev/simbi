@@ -2,8 +2,8 @@
 # gr_kerr_field_loop.py
 #
 # a poloidal field loop advected radially through a SPINNING kerr (r, theta)
-# wedge (ingoing kerr-schild coords) — the GRMHD phase-C smoke/dispatch gate
-# (design 44 phase C). it is the gr_field_loop probe lifted to the kerr metric:
+# wedge (ingoing kerr-schild coords) — the GRMHD smoke/dispatch gate.
+# it is the gr_field_loop probe lifted to the kerr metric:
 # a weak passive loop, seeded div-free via the METRIC-WEIGHTED discrete curl of a
 # localized A_phi with the KERR sqrt(gamma) = Sigma sin(theta) sqrt(1 + 2Mr/Sigma)
 # (so the w-weighted divergence is machine zero by construction on the kerr grid),

@@ -1,7 +1,7 @@
 # =============================================================================
 # test_grmhd_hlld.py
 #
-# the GR-HLLD gates (design 44 GR-HLLD): the ORTHONORMAL-frame MUB09 five-wave
+# the GR-HLLD gates: the ORTHONORMAL-frame MUB09 five-wave
 # relativistic-MHD Riemann solver on a curved background.
 #
 # the GR solve maps the diagonal spatial metric to the local orthonormal frame

@@ -1,7 +1,7 @@
 // =============================================================================
 // support_law.rs
 //
-// the support-validation law (docs/design/48 part 3): a kernel's DECLARED
+// the support-validation law: a kernel's DECLARED
 // output support must hold on the COMPILED kernel — every output exactly zero
 // (in f64, not approximately) at every cell outside the declared region, for
 // nontrivial field inputs. the declaration drives dispatch decisions (the

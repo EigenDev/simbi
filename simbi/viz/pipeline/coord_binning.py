@@ -22,7 +22,7 @@ def _get_stitched_leaf_data(
     level_fields_map: dict[str, list[FieldData]] = {}
     all_levels = set()
 
-    # Group the fields by their base name (e.g., 'rho_L0', 'rho_L1')
+    # group the fields by their base name (e.g., 'rho_L0', 'rho_L1')
     for name in field_names:
         level_fields_map[name] = [
             f for f in data.fields if f.name.startswith(name)
@@ -37,7 +37,7 @@ def _get_stitched_leaf_data(
     if num_levels == 0:
         raise ValueError("No fields found for any requested name")
 
-    # Find all refined regions from L1+
+    # find all refined regions from L1+
     is_3d = data.fields[0].values.ndim == 3
     refined_regions = []
     for i in range(1, num_levels):
@@ -57,13 +57,13 @@ def _get_stitched_leaf_data(
 
         refined_regions.append(region)
 
-    # Prepare output lists
+    # prepare output lists
     stitched_data: dict[str, list] = {
         f"{name}_flat": [] for name in field_names
     }
     stitched_data["x_flat"] = []
     stitched_data["y_flat"] = []
-    stitched_data["volume_flat"] = []  # NEW: cell volumes
+    stitched_data["volume_flat"] = []  # cell volumes
     if is_3d:
         stitched_data["z_flat"] = []
 
@@ -85,12 +85,12 @@ def _get_stitched_leaf_data(
             0.5 * (z_verts[1:] + z_verts[:-1]) if is_3d else np.array([0.0])
         )
 
-        # Calculate cell sizes for this level
+        # calculate cell sizes for this level
         dx = x_verts[1] - x_verts[0]
         dy = y_verts[1] - y_verts[0]
         dz = (z_verts[1] - z_verts[0]) if is_3d else 1.0
 
-        # Cell volume for this level
+        # cell volume for this level
         cell_volume = dx * dy * dz
 
         nx, ny, nz = len(x_centers), len(y_centers), len(z_centers)
@@ -102,7 +102,7 @@ def _get_stitched_leaf_data(
                 for i in range(nx):
                     xc = x_centers[i]
 
-                    # Check if this cell is covered by a *finer* level
+                    # check if this cell is covered by a *finer* level
                     is_covered = False
                     for region in refined_regions[level_idx:]:
                         covered_2d = (
@@ -125,10 +125,10 @@ def _get_stitched_leaf_data(
                     if is_covered:
                         continue
 
-                    # This is a leaf cell. Add its data.
+                    # this is a leaf cell. add its data.
                     stitched_data["x_flat"].append(xc)
                     stitched_data["y_flat"].append(yc)
-                    stitched_data["volume_flat"].append(cell_volume)  # NEW
+                    stitched_data["volume_flat"].append(cell_volume)  # cell volume
                     if is_3d:
                         stitched_data["z_flat"].append(zc)
 
@@ -170,7 +170,7 @@ def _calculate_momentum_terms(
     vy = stitched_data["v2_flat"]
     vz = stitched_data.get("v3_flat", np.zeros_like(x_flat))
 
-    # calculate Spherical Quantities
+    # calculate spherical quantities
     r_flat = np.sqrt(x_flat**2 + y_flat**2 + z_flat**2)
     vr_flat = (vx * x_flat + vy * y_flat + vz * z_flat) / (r_flat + 1e-10)
 
@@ -182,37 +182,37 @@ def _calculate_momentum_terms(
     # calc centers from the bins array
     bin_centers = 0.5 * (bins[1:] + bins[:-1])
 
-    # profile: Radial Velocity <vr>
+    # profile: radial velocity <vr>
     mean_vr, _, _ = binned_statistic(
         r_flat, vr_flat, statistic="mean", bins=bins
     )
 
-    # profile: Density <rho>
+    # profile: density <rho>
     mean_rho, _, _ = binned_statistic(
         r_flat, rho_flat, statistic="mean", bins=bins
     )
 
-    # profile: Pressure <P>
+    # profile: pressure <P>
     mean_p, _, _ = binned_statistic(r_flat, p_flat, statistic="mean", bins=bins)
 
-    # compute Terms (Finite Differences)
+    # compute terms (finite differences)
 
-    # term 1: Advection (v_r * dv_r/dr)
+    # term 1: advection (v_r * dv_r/dr)
     dvr_dr = np.gradient(mean_vr, bin_centers)
     term_advection = mean_rho * mean_vr * dvr_dr
 
-    # term 2: Pressure Gradient (-1/rho * dP/dr)
+    # term 2: pressure gradient (-1/rho * dP/dr)
     dp_dr = np.gradient(mean_p, bin_centers)
-    # Safety for vacuum regions
+    # safety for vacuum regions
     term_pressure = -dp_dr
 
-    # term 3: Gravity (-GM / r^2)
+    # term 3: gravity (-GM / r^2)
     term_gravity = -mean_rho * GM / (bin_centers**2 + 1e-10)
 
-    # term 4: Residual
+    # term 4: residual
     term_residual = term_advection - (term_pressure + term_gravity)
 
-    # 5. Package Results
+    # package results
     return [
         FieldData(
             name="term_advection",
@@ -291,7 +291,7 @@ def _calculate_mass_flux_profile(
     max_radius = np.max(r_flat)
     bins = np.linspace(0, max_radius, n_bins + 1)
 
-    # Volume-weighted mean flux density in each shell
+    # volume-weighted mean flux density in each shell
     # \sum(\rho v_r * volume) / \sum(volume)
     weighted_flux, bin_edges, _ = binned_statistic(
         r_flat,
@@ -328,8 +328,7 @@ def create_coordinate_profile_data(
     Stitches 3D refined data and computes spherically averaged profiles.
     """
 
-    # This is our "contract":
-    # What raw fields do we need for the requested analyses?
+    # the raw fields each requested analysis depends on
     prerequisite_fields = set()
     for name in field_names:
         if name == "mdot":
@@ -339,18 +338,18 @@ def create_coordinate_profile_data(
         else:
             prerequisite_fields.add(name)
 
-    # Load all full-dim refinement levels for the prerequisites
+    # load all full-dim refinement levels for the prerequisites
     refined_plot_data = PlotData(
         fields=prepare_fields(data, list(prerequisite_fields), config),
         # ... (other PlotData fields) ...
     )
 
-    # Stitch all prerequisite fields into flat arrays
+    # stitch all prerequisite fields into flat arrays
     stitched_data = _get_stitched_leaf_data(
         refined_plot_data, list(prerequisite_fields)
     )
 
-    # Run the requested analyses
+    # run the requested analyses
     final_fields: list[FieldData] = []
     n_bins = getattr(config.coordinate, "n_bins", 100)
 
@@ -377,7 +376,7 @@ def create_coordinate_profile_data(
     return PlotData(
         fields=final_fields,
         time=data.metadata.time,
-        dimensions=1,  # The result is always 1D
+        dimensions=1,  # the result is always 1D
         coord_system=CoordSystem(data.metadata.coord_system),
         hierarchy=data.hierarchy() if data.has_refinement() else None,
     )

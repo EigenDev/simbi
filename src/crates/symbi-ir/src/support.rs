@@ -2,7 +2,7 @@
 // support.rs
 //
 // the SUPPORT of a kernel output: a region outside which its value is exactly
-// zero in f64 — not just mathematically (docs/design/48 part 3). the minimal
+// zero in f64 — not just mathematically. the minimal
 // lattice:
 //   Everywhere — no bound is known (always sound)
 //   Ball       — zero outside a coordinate ball; center/radius are expressions
@@ -82,7 +82,7 @@ impl std::ops::Mul for ParamExpr {
 
 /// the support of a kernel output. `Everywhere` is the sound default for
 /// anything undeclared; `Ball` is the only bounded shape until a consumer
-/// demands another (docs/design/48 YAGNI guard).
+/// demands another.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Support {
     Everywhere,

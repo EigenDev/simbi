@@ -1,7 +1,7 @@
 // =============================================================================
 // refine_transfer_oracle.rs
 //
-// gate (docs/design/22): the gv-traced amr transfer kernels
+// gate: the gv-traced amr transfer kernels
 // (refine_restrict_gv / refine_prolong_gv) BIT-MATCH the recovered gen-1 f64
 // reference (symbi-amr prolong_nd / restrict_nd at git 3bfc5b9, vendored
 // below) on pseudo-random data, across 1d/2d/3d, all prolongation orders,
@@ -31,7 +31,7 @@ fn noise(seed: u64, c: &[i64]) -> f64 {
 }
 
 // =============================================================================
-// the vendored gen-1 f64 reference (git 3bfc5b9) — the oracle
+// the vendored gen-1 f64 reference (git 3bfc5b9)
 // =============================================================================
 
 mod reference {
@@ -380,7 +380,7 @@ fn run_restrict<const D: usize>() {
         })
         .run();
 
-    // the oracle: gen-1 restrict_nd over the aligned fine region [-4, 6)^D.
+    // the reference: gen-1 restrict_nd over the aligned fine region [-4, 6)^D.
     let fine_region = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {
         name: ["i", "j", "k"][ax],
         lo: 2 * R_WIN_LO as isize,
@@ -456,7 +456,7 @@ fn run_prolong<const D: usize>(order: reference::ProlongOrder, alpha: f64) {
         .scalars(&[("alpha", alpha)])
         .run();
 
-    // the oracle: gen-1 prolong_nd over the coarse active window, reading the
+    // the reference: gen-1 prolong_nd over the coarse active window, reading the
     // SAME time-interpolated coarse state.
     let coarse_active = symbi_algebra::Domain::new(std::array::from_fn(|ax| symbi_algebra::Space {
         name: ["i", "j", "k"][ax],
@@ -517,7 +517,7 @@ fn prolong_ppm_bit_matches_reference() {
 // =============================================================================
 // face restriction bit-match (staggered fields): the coarse face is
 // the transverse sweep-average of its ratio^(D-1) fine faces; the normal index
-// scales exactly. the oracle mirrors the sweep inline (axis 0 innermost among
+// scales exactly. the reference mirrors the sweep inline (axis 0 innermost among
 // transverse axes, (a + b) * 0.5 per pass).
 // =============================================================================
 

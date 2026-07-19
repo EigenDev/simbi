@@ -5,7 +5,7 @@
 //
 // these are the type-level disciplines that physics (Layer 1, in symbi-hydro)
 // depends on, but the IR substrate is paradigm-agnostic about. they discharge
-// three axioms from docs/design/00_axioms.md:
+// three axioms:
 //
 //   A3 (algebra)            — LinearSpace: opt-in, nominal algebraic structure.
 //   A4 (indices + geometry) — Variance markers (re-exported), Geometry trait.
@@ -32,7 +32,6 @@
 // references:
 //   - crate::algebra        — the new `Scalar` / `Mask` these traits build on
 //   - symbi-algebra::variance — `Indexed`/`Upper`/`Lower` (used unchanged)
-//   - docs/design/00_axioms.md — A3, A4, A5
 // =============================================================================
 
 #![deny(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
@@ -178,7 +177,7 @@ impl<S: Scalar> LinearSpace for S {
 // identity metric — the optimizer eliminates every method call through
 // monomorphization. Cylindrical/Spherical/KerrSchild add non-trivial metric.
 //
-// NOT wired into the Regime trait in symbi-hydro — physics handles
+// NOT connected to the Regime trait in symbi-hydro — physics handles
 // curvilinear cases ad-hoc. lifting Geometry into Regime (so flux/wave_speed
 // take `&G`) is the contract this trait defines.
 // =============================================================================

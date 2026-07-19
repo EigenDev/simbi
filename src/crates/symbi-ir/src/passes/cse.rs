@@ -72,7 +72,7 @@ pub fn cse_kernel(k: &mut KernelScalarized) {
 // ----- internals -----
 
 fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefix: &str) {
-    // docs/design/23 scope-aware CSE. before the flat-pass below
+    // scope-aware CSE. before the flat-pass below
     // runs, recursively CSE each `Scope`'s body so duplicates LOCAL to a
     // scope land inside that scope's braces (the scope acts as a hoisting
     // barrier per the design). this is the structural fix for the
@@ -94,7 +94,7 @@ fn cse_in_place(body: &mut Vec<ScalarStmt>, outputs: &mut Vec<ScalarExpr>, prefi
         let _ = count_and_hash(out, &mut counts);
     }
 
-    // docs/design/23: candidacy is COST-AWARE. the count map
+    // candidacy is COST-AWARE. the count map
     // is threaded as-is into the rewrite state; the threshold check happens
     // at each rewrite site, gated on `cost_class(expr)`. cheap ops (add /
     // sub / mul / neg / select / casts / comparisons) need >= 4 uses;
@@ -231,7 +231,7 @@ fn dce_in_place(body: &mut Vec<ScalarStmt>, outputs: &[ScalarExpr]) {
     }
 }
 
-/// docs/design/23: recurse into every `Scope` in `body` and run
+/// recurse into every `Scope` in `body` and run
 /// `cse_in_place` on its `(body, result)` pair, then ALSO walk through
 /// `For` / `If` bodies to find Scopes nested deeper. each Scope is
 /// CSE'd INDEPENDENTLY with its own candidate set + `__cse_N` numbering —
@@ -476,7 +476,7 @@ fn hash_expr_step(e: &ScalarExpr, child_hashes: &[u64]) -> u64 {
 
 // ---- candidate eligibility: cost model ----
 
-/// docs/design/23: register-pressure cost model.
+/// register-pressure cost model.
 ///
 /// classify each ScalarExpr by the cost of RECOMPUTING it vs the cost of
 /// HOLDING it in a register across its live range. hoisting a value costs
@@ -711,7 +711,7 @@ fn count_and_hash(e: &ScalarExpr, counts: &mut HashMap<u64, usize>) -> u64 {
 // ---- pass 2: rewrite, single bottom-up walk ----
 
 struct RewriteState {
-    /// docs/design/23: hash -> raw share count (computed in
+    /// hash -> raw share count (computed in
     /// pass 1). the cost-model threshold check at the rewrite site uses
     /// `cost_class(expr)` to pick the per-class minimum (cheap=4,
     /// medium/expensive/memory=2, trivial=never). storing counts (not a
@@ -868,7 +868,7 @@ fn rewrite_expr(
         return (ScalarExpr::Var(name.clone()), self_hash);
     }
 
-    // docs/design/23: candidate iff share-count meets the
+    // candidate iff share-count meets the
     // cost-class threshold AND the expression is non-trivial AND F64.
     // each gate is a load-bearing structural check:
     //   - count: pass-1 hash buckets (could exceed the threshold);
@@ -1257,7 +1257,7 @@ mod tests {
         }
     }
 
-    // ----- docs/design/23 scope-aware CSE tests -----
+    // ----- scope-aware CSE tests -----
 
     /// helper: a Scope statement that wraps `inner_body` and binds the result
     /// of evaluating `inner_result` to a freshly-named outer local.
@@ -1428,7 +1428,7 @@ mod tests {
         }
     }
 
-    // ----- docs/design/23 cost-model CSE tests -----
+    // ----- cost-model CSE tests -----
     //
     // each test exercises ONE class of the cost table at the threshold
     // boundary: just-below stays inline (good — would have spent a register

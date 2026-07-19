@@ -1,7 +1,7 @@
 // =============================================================================
 // penalize.rs
 //
-// the composable immersed-boundary property algebra (docs/design/50 layer 2):
+// the composable immersed-boundary property algebra:
 // properties contribute relaxation RATES and TARGETS into a `Relax`
 // accumulator; the engine integrates the accumulated system once, as exact
 // frozen-coefficient exponentials on three DISJOINT primitive channels —
@@ -31,9 +31,9 @@
 // EXACTLY, every correction is an exact zero, and the update reduces bit-for-
 // bit to `drain_cell`'s uniform scaling (up to the sign of exactly-zero
 // momentum components: x + 0.0 flips -0 to +0). that reduction is the p = 1
-// anchor the whole algebra gates on.
+// anchor the whole algebra rests on.
 //
-// carrier-generic: f64 for the oracle and unit laws, Gv for the traced
+// carrier-generic: f64 for the reference and unit laws, Gv for the traced
 // penalization kernel, Dual for sensitivities. the isothermal regime's energy
 // slot discards the e-channel corrections by construction (EnergySlot).
 //
@@ -340,7 +340,7 @@ mod tests {
         (c.den, u, e)
     }
 
-    // gate 4a (the p = 1 anchor): the [Drain]-only stack reduces BIT-FOR-BIT
+    // the single-property (p = 1) case: the [Drain]-only stack reduces BIT-FOR-BIT
     // to drain_cell's uniform scaling — every correction term is an exact zero.
     #[test]
     fn drain_only_stack_is_bit_identical_to_drain_cell() {
@@ -364,7 +364,7 @@ mod tests {
         }
     }
 
-    // gate 2: each channel's exact exponential against the analytic frozen-
+    // each channel's exact exponential against the analytic frozen-
     // coefficient solution, all three active at once.
     #[test]
     fn channels_match_the_analytic_exponentials() {
@@ -406,7 +406,7 @@ mod tests {
         );
     }
 
-    // gate 3: the properties act on disjoint channels, so every stack
+    // the properties act on disjoint channels, so every stack
     // ordering accumulates the same Relax and produces the same bits.
     #[test]
     fn stack_order_does_not_change_a_single_bit() {
@@ -462,7 +462,7 @@ mod tests {
         assert_eq!(out.den.to_bits(), cons.den.to_bits());
     }
 
-    // gate 5: the returned body delta IS the gas's loss — conservation is a
+    // the returned body delta IS the gas's loss — conservation is a
     // subtraction, exact by construction, pinned here against regressions.
     #[test]
     fn gas_loss_equals_body_gain_exactly() {
@@ -715,7 +715,7 @@ mod tests {
         assert_eq!(moment(&r1, &r1), Tensor::zeros());
     }
 
-    // gate 1 (design 51): the rotating target through the SAME exponentials —
+    // the rotating target through the SAME exponentials —
     // u relaxes toward u_translation + omega x x_rel, analytic per channel.
     #[test]
     fn rotating_target_matches_the_analytic_exponential() {
@@ -750,7 +750,7 @@ mod tests {
         }
     }
 
-    // gate 2 (design 51): zero spin through `at()` is bit-identical to the
+    // zero spin through `at()` is bit-identical to the
     // constant-target path — the omega terms are exactly +-0.
     #[test]
     fn zero_omega_at_reduces_bit_exactly() {
@@ -774,7 +774,7 @@ mod tests {
         }
     }
 
-    // gate 3 (design 51): gas already in rigid co-rotation with the target
+    // gas already in rigid co-rotation with the target
     // gets exactly +-0 corrections — a stiff spinning wall is a no-op on it.
     #[test]
     fn co_rotation_is_an_exact_no_op() {
@@ -807,14 +807,14 @@ mod tests {
         }
     }
 
-    // free-slip porous surface (design 50 zoo / the porosity-slip dial):
+    // free-slip porous surface (the porosity-slip dial):
     // inv_eta_t = 0 is an EXACT off switch — the tangential velocity is
     // bit-untouched while the normal channel relaxes.
     #[test]
     fn free_slip_leaves_the_tangential_velocity_bit_untouched() {
         // den a power of two: u = mom * (1/den) round-trips exactly, so the
         // tangential projection compares bit-for-bit (the same precondition
-        // as the co-rotation gate).
+        // as the co-rotation test).
         let den = 4.0;
         let u = Tensor::new([0.3, -0.2, 0.1]);
         let e_int = 1.7;

@@ -2,7 +2,7 @@
 // iterate_break_bit_equivalence.rs
 //
 // closes the direct-evidence gap for the IterateInline `break_when` claim
-// (docs/design/14 + the freeze-law invariant): running an iterate WITH a
+// (the freeze-law invariant): running an iterate WITH a
 // break-predicate produces BIT-EXACT the same f64 result as running the SAME
 // iterate WITHOUT a break-predicate, provided convergence fires before the
 // iteration cap. the break is a perf shortcut; the freeze pattern

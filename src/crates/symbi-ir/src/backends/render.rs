@@ -1,7 +1,7 @@
 // =============================================================================
 // emit_render.rs
 //
-// the Renderer trait + the SHARED kernel-emission driver (docs/design/12). a
+// the Renderer trait + the SHARED kernel-emission driver. a
 // scalarized stencil kernel is lowered ONCE — scalarize, buffer assignment, the
 // FieldLoadAt -> buffer-index rewrite, the base-cell-read gate, the skeleton
 // sequencing — and a per-backend `KernelRenderer` supplies only the language
@@ -77,7 +77,7 @@ pub trait KernelRenderer {
     /// on the render-time copy). default = `false`; the Rust CPU renderer
     /// exposes it behind the SYMBI_MASK_FORM a/b knob — `select` computes both
     /// arms, which measured SLOWER than the branch-predicted bool/if form on
-    /// the flux body (docs/design/47 resolution).
+    /// the flux body.
     fn mask_form(&self) -> bool {
         false
     }
@@ -121,7 +121,7 @@ pub trait KernelRenderer {
     /// just the fn.
     fn close(&self, ndim: usize) -> String;
 
-    // ----- Gate 3 shared-memory tiling (docs/design/22) -----
+    // ----- shared-memory tiling -----
     // the smem hooks. defaults make tiling a NO-OP: `smem_prelude` emits nothing,
     // and the load/base hooks return `None` so the driver falls back to the gmem
     // path. only the C-family (CUDA) renderer overrides them. the CPU renderer
@@ -169,7 +169,7 @@ struct TileCtx {
 /// bindings, and the dispatch side-tables — everything `render` needs EXCEPT the
 /// renderer-dependent FieldLoadAt rewrite (which bakes a backend's flat-index
 /// spelling, so it must run per-backend, AFTER serialization). this is the durable
-/// artifact of docs/design/15 §3: `build.rs` serializes it into the binary; the
+/// artifact: `build.rs` serializes it into the binary; the
 /// runtime deserializes and `render`s it for any accelerator.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Prepared {
@@ -202,7 +202,7 @@ pub struct Prepared {
     /// generated IR non-reproducible build-to-build (spurious diffs / cache churn).
     /// only ever read via `.get(name)`, so the ordering is otherwise irrelevant.
     pub param_elem: BTreeMap<String, ElementTy>,
-    /// the shared-memory tile spec (Gate 3, docs/design/22), threaded from the
+    /// the shared-memory tile spec, threaded from the
     /// `GvKernel`. when `Some`, the C-family renderer emits a cooperative smem
     /// prefetch prelude + redirects the tiled fields' stencil reads to `__shared__`;
     /// other renderers (CPU) ignore it. serialized into the build-time artifact so
@@ -220,7 +220,7 @@ pub struct Prepared {
     /// identity lands. the carrier oracle is the correctness gate.
     #[serde(default)]
     pub coalesce_layout: bool,
-    /// the declared SUPPORT of this kernel's outputs (docs/design/48 part 3):
+    /// the declared SUPPORT of this kernel's outputs:
     /// exactly zero outside the region, for every field input value. stamped by
     /// the artifact producer (build.rs) from the `GvKernel` declaration AFTER
     /// `prepare` — no renderer reads it, so it does not ride `KernelEmitInputs`.
@@ -268,7 +268,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
     //          no longer shuffles cons.mom ahead of cons.den in the signature; the
     //          KernelSet always provides outputs in the natural [den, mom.., nrg] order.
     //          (Cartesian is a no-op: there touch order already equals writes order.)
-    // reads AND writes are born-typed FieldBind now (docs/design/38 L2 Stage 2). the buffer map
+    // reads AND writes are born-typed FieldBind. the buffer map
     // keys on FieldBind, so the in-place detection (a read whose buffer is also written) is
     // spelling-invariant by construction.
     let write_fields: std::collections::HashSet<FieldBind> = inputs
@@ -340,7 +340,7 @@ pub fn prepare(graph: &Graph, inputs: &KernelEmitInputs) -> Prepared {
     }
 }
 
-/// the runtime buffer manifest for a serialized kernel (docs/design/18 D3): each
+/// the runtime buffer manifest for a serialized kernel: each
 /// `(runtime_path, is_output)` in CANONICAL buffer order (pure inputs first, then
 /// outputs; in-place fields fold into the output group). a metadata-driven dispatch
 /// resolves each `runtime_path` against the sim's fields and binds in this order, so
@@ -359,7 +359,7 @@ pub fn kernel_bindings_from_ir(ir: &str) -> Vec<(FieldBind, bool)> {
 /// reads the sort to route each lane by name to the right tail (so a mixed kernel like
 /// ghost-fill, with int `map_type`/`arg` + float `vel_sign`, resolves fully by name, never
 /// positionally). the sort comes from the graph's param element types (`param_elem`).
-/// the declared output support of a serialized kernel (docs/design/48 part 3),
+/// the declared output support of a serialized kernel,
 /// or `None` when the artifact declares nothing (= Everywhere). the dispatch
 /// layer evaluates a Ball's center/radius against its own scalar table to
 /// derive reduction / launch regions.
@@ -703,7 +703,7 @@ fn rewrite_field_load_at<R: KernelRenderer>(
                 }
             };
         }
-        // every non-FieldLoadAt node just recurses its SSOT children (docs/design/38 P3b).
+        // every non-FieldLoadAt node just recurses its SSOT children.
         _ => {
             for c in e.children_mut() {
                 rewrite_field_load_at(c, ndim, key_to_buf, tile, r);

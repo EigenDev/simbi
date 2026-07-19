@@ -1,7 +1,7 @@
 // =============================================================================
 // nmhd_2p5d_divb_under_evolve.rs
 //
-// increment-2 validation of the 2.5D Newtonian-MHD substrate (docs/design/30): run
+// validation of the 2.5D Newtonian-MHD substrate: run
 // the ENTIRE production NMHD KernelSet on a GENUINE D=2 grid (DOF=3) — c2p ->
 // ghost_fill -> flux per dir -> cfl -> snapshot -> godunov_euler -> post_godunov[CT]
 // -> rk2 — for ~10 steps with periodic BCs and assert

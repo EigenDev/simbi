@@ -6,7 +6,7 @@
 # and meets a rounded bluff body (a box fused with a spherical nose), forming a
 # detached bow shock and a low-pressure wake. the obstacle is a no-slip wall
 # whose mask + surface normal come from the signed-distance CSG, penalized by
-# the design-50 porous stack with the drain channel sealed (porosity 0).
+# the porous stack with the drain channel sealed (porosity 0).
 #
 # showcases: arbitrary-shape rigid boundaries (Shape CSG), the no-slip wall, and
 # a driven-boundary freestream. the body's drag is written to diagnostics.dat.

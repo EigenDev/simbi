@@ -11,7 +11,7 @@
 // the GR flux kernel uses this via `riemann::hlle_with_speeds` + the shift-in-the-fan,
 // so GRMHD is a DIVERGENT KERNEL, not a change to the shared flat `Rmhd`. `prim.vel` is
 // the CONTRAVARIANT valencia velocity `v^i`; `prim.mag`/`cons.mag` the CONTRAVARIANT
-// eulerian field `B^i`. see docs/design/44.
+// eulerian field `B^i`.
 //
 // wave speeds: the flat Mignone & Del Zanna magnetosonic quartic is a flat-frame
 // construct; the GR fan uses the fast-speed BOUND c_ms^2 = c_s^2 + v_A^2 - c_s^2 v_A^2

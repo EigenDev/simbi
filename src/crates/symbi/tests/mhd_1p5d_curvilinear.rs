@@ -1,10 +1,10 @@
 // =============================================================================
 // mhd_1p5d_curvilinear.rs
 //
-// end-to-end validation of the newly-baked 1.5D CURVILINEAR Newtonian-MHD kernels (the spherical
+// end-to-end validation of the 1.5D CURVILINEAR Newtonian-MHD kernels (the spherical
 // and cylindrical radial charts — `{n,r,i}mhd_godunov_stage_{sph,cyl}_1d`, the matching wave-speed
-// maps, and the `rmhd_bcell_godunov_euler_{sph,cyl}_1d` out-of-plane predictor). the 1.5D MHD bake
-// was cartesian-only; a (1, spherical) / (1, cylindrical) run previously had no baked kernel. no
+// maps, and the `rmhd_bcell_godunov_euler_{sph,cyl}_1d` out-of-plane predictor). the cartesian 1.5D
+// MHD kernels do not cover the (1, spherical) / (1, cylindrical) charts. no
 // constrained transport at D=1 (C(1,2)=0 edges), so:
 //   - the normal radial field B_r is carried on the r-faces and never curled (seeded div-free,
 //     B_r = B0/r^2 on spherical / B0/r on cylindrical, so the area-weighted radial divergence is

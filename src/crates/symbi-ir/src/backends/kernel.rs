@@ -74,7 +74,7 @@ pub struct KernelEmitInputs<'a> {
     /// (callees before callers) and de-duplication. each entry is a
     /// complete `__device__ inline RET name(...) { ... }` string.
     pub device_preamble: &'a [String],
-    /// docs/design/26: the kernel's shared-memory tile intent for STENCIL
+    /// the kernel's shared-memory tile intent for STENCIL
     /// kernels (halo + stencil-read field keys). `None` = no smem tiling.
     /// the CUDA emitter (Gate 3) cooperatively prefetches the (block + halo)
     /// region for these fields into `__shared__`; the CPU emitter ignores it
@@ -84,7 +84,7 @@ pub struct KernelEmitInputs<'a> {
 }
 
 /// the C-FAMILY backend spelling for the shared kernel driver (`emit_render`):
-/// CUDA AND HIP (doc 15 §7). produces an `extern "C" __global__` kernel over raw
+/// CUDA AND HIP. produces an `extern "C" __global__` kernel over raw
 /// `<precision>*` buffers (the per-cell view ABI shape); the header + global qualifier
 /// vary by `target.target` (`emit::header` / `global_qualifier`), so HIP is a
 /// pure token-map with zero physics edits. Metal (MSL: buffer-index ABI, no
@@ -247,7 +247,7 @@ pub fn emit_kernel_from_lowering(graph: &Graph, inputs: &KernelEmitInputs) -> Ke
     emit_kernel_render(graph, inputs, &CRenderer { target: inputs.target.clone() })
 }
 
-// ----- Gate 3 smem tiling: CUDA spelling (docs/design/22) -----
+// ----- smem tiling: CUDA spelling -----
 
 /// the CUDA thread/block builtin axis suffixes, indexed by spatial axis.
 const CUDA_TDIM: [&str; 3] = ["x", "y", "z"];
@@ -351,18 +351,18 @@ pub fn prepared_to_ir(prepared: &Prepared) -> String {
 }
 
 /// deserialize a `Prepared` IR blob — the backend-NEUTRAL artifact `build.rs`
-/// embeds per kernel (docs/design/15 §3). hides serde_json from consumers so they
+/// embeds per kernel. hides serde_json from consumers so they
 /// don't take the dep; pair with `render(_, &SomeRenderer)` (the choice of backend
 /// is the renderer, never this function).
 pub fn prepared_from_ir(ir: &str) -> Prepared {
     serde_json::from_str(ir).expect("prepared_from_ir: malformed Prepared IR blob")
 }
 
-/// the RUNTIME render path (docs/design/15 §3): deserialize a `Prepared` IR blob and
+/// the RUNTIME render path: deserialize a `Prepared` IR blob and
 /// render it to `target` source at `precision`. `target` is a PARAMETER, not baked
 /// into the name — adding HIP/Metal is a new match arm here, never a new `*_cuda`
-/// function (doc 15 §8 invariant 3). one blob renders every backend AND both
-/// precisions (precision is a render-algebra parameter, doc 15 §4); the source then
+/// function. one blob renders every backend AND both
+/// precisions (precision is a render-algebra parameter); the source then
 /// feeds the backend's runtime compiler (NVRTC/hiprtc/Metal). the
 /// accelerator renders source at runtime rather than shipping pre-rendered text.
 pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelDescriptor {
@@ -371,10 +371,10 @@ pub fn render_from_ir(ir: &str, target: Target, precision: Precision) -> KernelD
     match target {
         // CUDA and HIP share the C-family renderer: it already varies header +
         // global-qualifier by `Target` (emit::header / global_qualifier), so HIP
-        // drops in as a token-map with zero physics edits (doc 15 §7 proof test).
+        // drops in as a token-map with zero physics edits.
         Target::Cuda | Target::Hip => render(prepared, &CRenderer { target: tcfg }),
         // Metal (MSL) is f32-only and needs its own renderer (the binding-index ABI
-        // + no-`double` capability gate, doc 15 §4–5); it lands with that backend.
+        // + no-`double` capability gate); it lands with that backend.
         Target::Metal => unimplemented!(
             "Metal renderer not yet implemented (docs/design/15 §4); render from IR \
              once MetalRenderer exists"
@@ -412,13 +412,13 @@ fn reduction_identity_combine(op: ReductionOp, precision: Precision) -> (&'stati
 /// the block size for grid reductions — threads per block, also the `sdata` length.
 pub const REDUCTION_BLOCK_SIZE: u32 = 256;
 
-/// render a GRID reduction (docs/design/15 §2's Reduce morphism): reduce ONE input
+/// render a GRID reduction (the Reduce morphism): reduce ONE input
 /// field by `op` over the dispatch window, emitting one partial per block (the host
 /// folds the partials — only the partials cross, never per-cell). C-family
 /// (CUDA/HIP) + precision-generic + NVRTC-renderable; the per-thread value is the
 /// field load at the cell (the trivial morphism — a fused per-cell value expression
 /// is a later extension). the CPU algebra of the same reduce is the host fold in
-/// `substrate_gpu::field_max_reduce` (doc 15 §2: "a host loop").
+/// `substrate_gpu::field_max_reduce` (a host loop).
 ///
 /// ABI (extends the per-cell view ABI with a linear thread map + partials):
 ///   buf0, total_cells, grid_size_{0..}, dom_lo_{0..}, [ndim>=2] buf_extent_0_{0..},

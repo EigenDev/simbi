@@ -161,8 +161,8 @@ fn uniform_state_picks_up_only_the_user_source_contribution() {
             ("mom_1", mom_v[1] + dt * rho_v * g_ext[1]),
             ("mom_2", mom_v[2] + dt * rho_v * g_ext[2]),
             // energy unchanged: the energy-side of uniform_acceleration is a
-            // separate SourceSpec (`[1]` in the returned Vec) not wired into
-            // this momentum-targeting fusion. a per-field overlay list
+            // separate SourceSpec (`[1]` in the returned Vec), outside this
+            // momentum-targeting fusion. a per-field overlay list
             // extends to it.
             ("nrg", nrg_v),
         ],

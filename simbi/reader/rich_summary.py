@@ -412,7 +412,7 @@ class RichSimulationSummary:
             left = tables[::2]
             right = tables[1::2]
             # when printing side-by-side, tables may need to be narrower than full width
-            # note: if you want strict side-by-side fitting, consider passing a smaller width to each table
+            # strict side-by-side fitting requires a smaller width passed to each table
             for l, r in zip(left, right):
                 # print paired tables side-by-side
                 self.console.print(l, r)

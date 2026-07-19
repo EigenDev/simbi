@@ -7,7 +7,7 @@
 //
 // these helpers exist because ~60% of a KernelSet impl is identical across
 // regimes: face-domain construction, ghost region analysis with per-axis
-// BC parameterization, cfl scaling. see design/kernel_set_decomposition.md.
+// BC parameterization, cfl scaling.
 //
 // usage:
 //   // face-parallel dispatch domain for axis `dir`
@@ -61,7 +61,7 @@ pub fn to_bc_array<const D: usize>(boundaries: &Boundaries<D>) -> [[BcType; 2]; 
             BoundaryType::Outflow => BcType::Outflow,
             BoundaryType::Reflect => BcType::Reflect,
             BoundaryType::CoarseFine => BcType::Skip,
-            // driven faces are SKIPPED by the standard pullback (docs/design/33); the
+            // driven faces are SKIPPED by the standard pullback; the
             // driven-boundary pass prescribes their ghost state from the DAG afterward.
             BoundaryType::Driven(_) => BcType::Skip,
             // neumann / robin faces are likewise SKIPPED here; the gradient-boundary pass fills
@@ -95,7 +95,7 @@ pub struct GhostMapParams<const D: usize> {
     pub pivot: [f64; D],
     pub clamp_val: [f64; D],
     pub vel_sign: [f64; D],
-    /// the lattice-map source-coord arg (docs/design/11), one integer per axis,
+    /// the lattice-map source-coord arg, one integer per axis,
     /// for the substrate `iso_ghost_fill` kernel: a SIGNED periodic shift
     /// (`+len` on a low-side ghost, `-len` on a high side), a reflect `pivot2`, or
     /// an outflow edge cell. `src[ax] = c+arg | arg-c | arg` by `map_type`. derived

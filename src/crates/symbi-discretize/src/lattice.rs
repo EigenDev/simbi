@@ -1,7 +1,7 @@
 // =============================================================================
 // lattice.rs
 //
-// the lattice-map / pullback algebra (docs/design/11). a `LatticeMap` is an
+// the lattice-map / pullback algebra. a `LatticeMap` is an
 // INTEGER rule "destination cell -> source cell": boundary conditions, AMR
 // restrict/prolong, staggered-grid shifts, and MPI halos all reduce to one. it
 // pairs with a field PULLBACK — read the source cell, then transform the value by

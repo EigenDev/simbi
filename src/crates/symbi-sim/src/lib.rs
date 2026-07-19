@@ -1,7 +1,7 @@
 // =============================================================================
 // symbi-sim/src/lib.rs
 //
-// the simulation-state core crate (docs/design/41): the `FieldStore` /
+// the simulation-state core crate: the `FieldStore` /
 // `SimState` SoA containers, the sim<->substrate seam (KernelSet / RegimeSubstrate
 // traits + the Solver/RegimeKind classification enums), config, the free field
 // helpers, checkpoint I/O, and example CLI parsing.

@@ -1,11 +1,11 @@
 // =============================================================================
 // fused_fine_level_equals_two_pass.rs
 //
-// AMR follow-on: source/body fusion must hold at REFINED levels, not just the uni-grid. a 2-level
+// source/body fusion must hold at REFINED levels, not just the uni-grid. a 2-level
 // hierarchy carrying a central accreting body is evolved two ways — every level's kernel-set FUSED
 // (`with_source_fusion`, body folded into godunov) vs every level TWO-PASS (the standalone
 // `body_source`) — and must produce a bit-for-bit identical trajectory on every level. this gates the
-// py `$make` closure now fusing fine levels (it re-attaches the source / enables fusion per level);
+// py `$make` closure fusing fine levels (it re-attaches the source / enables fusion per level);
 // without it a refined run silently drops to the two-pass on its finest, most-cell-dense levels.
 //
 // run: cargo test -p symbi --test fused_fine_level_equals_two_pass
@@ -74,8 +74,8 @@ fn two_level(fused: bool) -> Hier {
 
 #[test]
 fn fused_fine_level_equals_two_pass() {
-    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
-    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     let t_final = 0.02;
     let mut h_two = two_level(false);

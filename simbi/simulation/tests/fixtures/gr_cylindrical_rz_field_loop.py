@@ -2,7 +2,7 @@
 # gr_cylindrical_rz_field_loop.py
 #
 # a poloidal magnetic field loop on the 2.5D cylindrical kerr-schild (R, z) plane
-# (design 45 GRMHD) — the constrained-transport probe for the axisymmetric poloidal
+# the constrained-transport probe for the axisymmetric poloidal
 # chart. the (R, z) spatial metric is NON-DIAGONAL (gamma_Rz = 2H R z / r^2, r =
 # sqrt(R^2 + z^2)), sqrt(det gamma) = R sqrt(1 + 2M/r), and the shift is nonzero on
 # BOTH poloidal axes (beta^R, beta^z). a compact poloidal loop (B_R, B_z) is seeded

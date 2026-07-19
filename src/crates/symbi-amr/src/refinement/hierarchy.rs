@@ -1,7 +1,7 @@
 // =============================================================================
 // hierarchy.rs
 //
-// the static-mesh-refinement (SMR) hierarchy (docs/design/22). each
+// the static-mesh-refinement (SMR) hierarchy. each
 // level is a complete SimStateGeneric + its KernelSet; the hierarchy adds only
 // inter-level coordination: recursive berger-oliger subcycling with
 // time-interpolated coarse-fine ghost prolongation, conservative restriction,
@@ -12,7 +12,7 @@
 // level-pair. the refined region is fixed at setup, not re-flagged from the
 // solution; there is no patch graph and no berger-rigoutsos clustering.
 // multi-patch adaptive refinement (a level as a disjoint cover of Domains) is
-// not implemented — see docs/design/21_amr.md and findings/ADVERSARIAL_REVIEW_2026-06-16.md §5.
+// not implemented.
 //
 // advance_level re-sequences the SSP stage loop (sim/evolve.rs::step) so the
 // register accumulation slots between flux() and the stage update.
@@ -106,10 +106,10 @@ where
     /// finer level's bface transverse-halo prolongation (per-component
     /// staggered domains, cloned from this level's bface).
     pub bface_old: Option<[Field<f64, NDIM, Mem>; NDIM]>,
-    /// per-slab intermediates of the axis-split prolongation INTO this level
-    /// (docs/design/49), in `cf_ghost_slabs` order. SMR slabs are static, so
+    /// per-slab intermediates of the axis-split prolongation INTO this level,
+    /// in `cf_ghost_slabs` order. SMR slabs are static, so
     /// the shapes are too: lazily allocated on the first prolongation, reused
-    /// every call (the step loop allocates nothing — law E2). None-equivalent
+    /// every call (the step loop allocates nothing). None-equivalent
     /// (uninitialized) on the root.
     pub prolong_sweep: std::sync::OnceLock<Vec<ProlongSweepScratch<NDIM, DOF, Mem>>>,
     /// the region of THIS level covered by the next finer level, in absolute
@@ -747,7 +747,7 @@ where
                 }
             }
         }
-        // the caller reads fields next: drain the device queue (the B12
+        // the caller reads fields next: drain the device queue (the
         // host-read barrier; no-op on a host backend).
         symbi_substrate::regimes::substrate_gpu::device_sync::<Mem>();
         let _ = callback(self);
@@ -1143,7 +1143,7 @@ where
             l.kernels.penalize(&l.state, dt);
             // the viscous transport on the finest level — where
             // the resolved disk dynamics live. coarse-level viscosity (the outer
-            // low-dynamics buffer) is a follow-up; inert when inviscid.
+            // low-dynamics buffer) is not applied; inert when inviscid.
             l.kernels.viscous(&l.state, dt);
         }
         if has_finer {
@@ -1521,7 +1521,7 @@ fn validate_coverage<R, const D: usize, const DOF: usize, M, E, S, Mem>(
 }
 
 // =============================================================================
-// decomposed hierarchy driver (refinement x decomposition, phases 1-3)
+// decomposed hierarchy driver (refinement x decomposition)
 // =============================================================================
 
 /// the sub-grid of tiles that carry the first fine level. for SMR (one refined box per level) the

@@ -1,15 +1,15 @@
 // =============================================================================
 // nmhd_rotor_cyl_rphi.rs
 //
-// the magnetized ROTOR in the CYLINDRICAL r-phi DISK plane (docs/design/30) — the
+// the magnetized ROTOR in the CYLINDRICAL r-phi DISK plane — the
 // curvilinear sibling of nmhd_rotor_cyl_rz, validating the r-phi constrained-transport
 // stack: the SINGLE out-of-plane corner EMF E_z (reused from cartesian, identity axes),
 // the metric in-plane curl
 //   dB_r/dt   = -(1/r) d_phi E_z   (the 1/r metric on the phi-derivative),
 //   dB_phi/dt = +d_r E_z           (flat, NO metric — mirror of r-z),
 // the gas + geometric source on the (r, phi) disk, and the `with_cyl_plane(RPhi)` selector
-// (grid axes [0,1], out-of-plane vertical B_z). a dense disk spins in the MERIDIONAL... no:
-// in the DISK (r, phi) plane inside a uniform toroidal B_phi, winding B_r out of the advected
+// (grid axes [0,1], out-of-plane vertical B_z). a dense disk spins in the (r, phi) disk
+// plane inside a uniform toroidal B_phi, winding B_r out of the advected
 // azimuthal field. asserts:
 //   (a) the staggered CYLINDRICAL div(B) = (1/r) d_r(r B_r) + (1/r) d_phi B_phi stays at
 //       machine zero (the discrete d-of-d the metric curl must preserve),

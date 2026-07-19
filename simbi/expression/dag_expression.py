@@ -755,7 +755,7 @@ class CompiledExpr:
             elif op == "divide":
                 denominator = values[input_ids[1]]
                 if denominator == 0.0:
-                    values[node_id] = 0.0  # we handle division by zero
+                    values[node_id] = 0.0  # division by zero yields 0.0
                 else:
                     values[node_id] = values[input_ids[0]] / denominator
             elif op == "le":
@@ -784,7 +784,7 @@ class CompiledExpr:
             elif op == "sqrt":
                 val = values[input_ids[0]]
                 if val < 0.0:
-                    values[node_id] = 0.0  # we handle negative sqrt
+                    values[node_id] = 0.0  # negative argument yields 0.0
                 else:
                     values[node_id] = math.sqrt(val)
             elif op == "sin":
@@ -875,7 +875,7 @@ class CompiledExpr:
         """Serialize the compiled expression for C++ evaluation."""
         expressions: list[dict[str, Any]] = []
 
-        # map from our internal node ids to serialized indices
+        # map from internal node ids to serialized indices
         node_map: dict[NodeId, int] = {}
 
         for node_id in self._eval_order:

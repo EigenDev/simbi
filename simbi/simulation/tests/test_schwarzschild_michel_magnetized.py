@@ -1,7 +1,7 @@
 # =============================================================================
 # test_schwarzschild_michel_magnetized.py
 #
-# the GRMHD wiring gates (design 44 phase A) on the magnetized michel monopole:
+# the GRMHD gates on the magnetized michel monopole:
 # the exact michel transonic hydro profile threaded by the divergence-free radial
 # field sqrt(gamma) B^r = const on the schwarzschild grid. a radial field aligned
 # with a radial flow exerts zero lorentz force, so the stationary solution is the
@@ -12,7 +12,7 @@
 #   identically zero by the shared-face antisymmetry), and the azimuthal/polar
 #   momentum rows generate nothing (measured 0.0 and 1.6e-23).
 #
-#   consistency-class: the hydro hold against the michel oracle converges under
+#   consistency-class: the hydro hold against the michel solution converges under
 #   refinement (measured L1 rho 1.19e-4 at 128 -> 4.4e-5 at 256, ratio 2.7 — the
 #   bound fan is mildly more diffusive than the RHD banyuls-font gate's 5.0e-5);
 #   the hydro profile is FIELD-INDEPENDENT (b_ref 0 vs 2.0 differ by ~4e-8
@@ -38,7 +38,7 @@ needs_backend = pytest.mark.skipif(
 )
 
 _HOLD_TIME = 10.0
-# measured hold: L1 rho vs oracle 1.19e-4 (128) -> 4.41e-5 (256), ratio 2.7;
+# measured hold: L1 rho vs michel solution 1.19e-4 (128) -> 4.41e-5 (256), ratio 2.7;
 # tolerances carry ~3x margin, 1.8 separates convergence from a wrong-term floor.
 _HOLD_TOL_128 = 3.6e-4
 _HOLD_CONV = 1.8
@@ -98,7 +98,7 @@ def test_magnetized_michel_holds_and_field_is_bitwise_static() -> None:
     # SHARED staggered face value on both riemann sides), so B^r must not move AT ALL.
     assert db_lo == 0.0, f"staggered B^r moved: {db_lo:.3e}"
     assert db_hi == 0.0, f"staggered B^r moved at 256: {db_hi:.3e}"
-    # consistency: the hydro hold converges toward the michel oracle.
+    # consistency: the hydro hold converges toward the michel solution.
     assert l1_lo < _HOLD_TOL_128, f"128 hold L1 {l1_lo:.3e}"
     assert l1_lo / l1_hi > _HOLD_CONV, (
         f"hold does not converge: {l1_lo:.3e} -> {l1_hi:.3e} "

@@ -2,8 +2,8 @@
 // prolong_timing.rs
 //
 // single-core wall-time of the amr prolongation on a coarse-fine ghost slab:
-// the fused TIME-PAIR kernel (refine_prolong_{order}_5c_3d — the design-47
-// act-8 gather census: 2 snapshots x 5^3 x 5 comps loads per fine cell)
+// the fused TIME-PAIR kernel (refine_prolong_{order}_5c_3d — the gather
+// census: 2 snapshots x 5^3 x 5 comps loads per fine cell)
 // against the LERP-THEN-PROLONG split (field_lerp_5c_3d over the coarse
 // parent region + refine_prolong_1t_{order}_5c_3d — one snapshot). serial
 // twins, so the number is per-core compute without rayon scheduling noise.
@@ -71,7 +71,7 @@ fn main() {
         single(&inputs, &mut outs, &f_ext, &LO, &[], &[]);
     };
 
-    // the axis-split sweep chain (design 49): lerp -> sw0 (A: fine-x,
+    // the axis-split sweep chain: lerp -> sw0 (A: fine-x,
     // coarse-yz) -> sw1 (B: fine-xy, coarse-z) -> sw2 (dst). w = the order's
     // stencil halfwidth; the intermediate lattices mirror transfer.rs.
     let w: isize = match order.as_str() {

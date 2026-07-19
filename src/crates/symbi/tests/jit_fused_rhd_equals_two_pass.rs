@@ -1,7 +1,7 @@
 // =============================================================================
 // jit_fused_rhd_equals_two_pass.rs
 //
-// extends the fused-source seam to the RELATIVISTIC-hydro regime: a flat (SRHD) run with a raw user
+// fused-source path in the RELATIVISTIC-hydro regime: a flat (SRHD) run with a raw user
 // source (the only kind the RHD bridge accepts) must produce a bit-for-bit identical trajectory whether
 // the source is FUSED into the godunov stage (one Cranelift-JIT'd host kernel) or run as the TWO-PASS
 // (plain AOT godunov + `apply_runtime_source`). RHD carries no Newtonian immersed body, so this is the
@@ -38,8 +38,8 @@ fn assert_cons_bit_identical<const D: usize>(
 
 #[test]
 fn rhd_raw_source_fused_equals_two_pass_rk2() {
-    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
-    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    // the two-pass source application is the default policy; opt the FUSED kernel
+    // in before the policy OnceLock latches so this test exercises the fused path.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     type Sim = SimCpu<Rhd, 2, Cartesian, IdealGas<f64>>;
     const GAMMA: f64 = 4.0 / 3.0;

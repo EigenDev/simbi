@@ -90,7 +90,7 @@ unsafe extern "C" {
     fn cuDeviceGetName(name: *mut c_char, len: c_int, dev: CUdevice) -> CUresult;
     fn cuDeviceTotalMem_v2(bytes: *mut usize, dev: CUdevice) -> CUresult;
     fn cuDeviceGetCount(count: *mut c_int) -> CUresult;
-    // peer access + cross-device copy (docs/design/37 M3). cuMemcpyPeer takes the source and
+    // peer access + cross-device copy. cuMemcpyPeer takes the source and
     // destination CONTEXTS, so the logical->physical context mapping composes automatically.
     fn cuMemcpyPeer(
         dst: CUdeviceptr,
@@ -208,7 +208,7 @@ fn check(res: CUresult, op: &'static str) -> error::Result<()> {
 }
 
 // =============================================================================
-// CUDA initialization: a per-device context registry (docs/design/37)
+// CUDA initialization: a per-device context registry
 // =============================================================================
 
 unsafe extern "C" {
@@ -270,7 +270,7 @@ fn device_ctx(ord: i32) -> CUcontext {
                     // there are at least as many gpus as logical ids (the production case),
                     // and wrapping otherwise -- so N logical devices run as N distinct contexts
                     // on a single card, which is how the multi-device path is validated without
-                    // a second gpu (docs/design/37).
+                    // a second gpu.
                     let mut count: c_int = 0;
                     check(cuDeviceGetCount(&mut count), "cuDeviceGetCount")
                         .expect("cuDeviceGetCount failed");
@@ -300,7 +300,7 @@ fn ensure_init() -> error::Result<()> {
 }
 
 /// run `f` with device `ord`'s context current on this thread, restoring the previous
-/// device afterward. this binds a tile's kernels to its gpu (docs/design/37): the launch /
+/// device afterward. this binds a tile's kernels to its gpu: the launch /
 /// alloc / sync code targets "the current context", so the right one is made current rather
 /// than threading a device id through every signature.
 pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
@@ -314,7 +314,7 @@ pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
 }
 
 // =============================================================================
-// peer access (docs/design/37 M3): direct device-to-device halo copy. the peer
+// peer access: direct device-to-device halo copy. the peer
 // `HaloTransport` gathers a strip on the source device, moves the contiguous buffer to the
 // destination device with `memcpy_peer`, then scatters there. on a single gpu these are not
 // exercised (one device cannot peer with itself); they run on a real multi-gpu node.

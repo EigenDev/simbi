@@ -59,7 +59,7 @@ class StreamPlotComponent(Component):
     def update(self, props: StreamPlotProps) -> None:
         """Update component properties."""
         self.props = props
-        # Stream plots must be fully redrawn on render
+        # stream plots must be fully redrawn on render
 
     def _validate_and_prep_data(
         self, data: List[FieldData]
@@ -76,18 +76,18 @@ class StreamPlotComponent(Component):
             raise ValueError("StreamPlotComponent fields must be 2D.")
 
         # streamplot needs 1D coordinate arrays, not 2D meshgrids.
-        # we assume the pipeline gives us pcolormesh-style "edge" coordinates
+        # the pipeline provides pcolormesh-style "edge" coordinates
         x, y = u_field.domain
         u_values, v_values = u_field.values, v_field.values
 
-        # We plot on cell *centers*.
+        # plotted on cell *centers*.
         # x_centers = (x_edges[:-1] + x_edges[1:]) / 2
         # y_centers = (y_edges[:-1] + y_edges[1:]) / 2
 
         # streamplot expects U, V to be (N, M)
         # and x, y to be (M,) and (N,)
-        # Our data is (N, M) and our centers are (M,) and (N,)
-        # This matches the matplotlib convention.
+        # the data is (N, M) and the centers are (M,) and (N,)
+        # this matches the matplotlib convention.
 
         return x, y, u_values, v_values
 
@@ -106,7 +106,7 @@ class StreamPlotComponent(Component):
 
         x, y, u, v = self._validate_and_prep_data(data)
 
-        # Stream plots are static and must be cleared and redrawn
+        # stream plots are static and must be cleared and redrawn
         self.cleanup()
         x = 0.5 * (x[1:] + x[:-1])
         y = 0.5 * (y[1:] + y[:-1])
@@ -132,11 +132,11 @@ class StreamPlotComponent(Component):
     def cleanup(self) -> None:
         if self._streamplot:
             # streamplot returns a composite object
-            # We must remove its lines
+            # remove its lines
             if hasattr(self._streamplot, "lines") and self._streamplot.lines:
                 self.ax.collections.remove(self._streamplot.lines)
 
-            # And its arrows (if they exist)
+            # and its arrows (if they exist)
             if hasattr(self._streamplot, "arrows") and self._streamplot.arrows:
                 self._streamplot.arrows.remove()
 

@@ -1,7 +1,7 @@
 // =============================================================================
 // regimes/substrate_kernels/boundary.rs
 //
-// DRIVEN BOUNDARIES (docs/design/33). the `(Coord, Assign)` instance of the unified DAG
+// DRIVEN BOUNDARIES. the `(Coord, Assign)` instance of the unified DAG
 // operator: the kernel-set holds boundary DAGs (`Arc<RuntimeSource>`), the sim's
 // `Boundaries` marks WHICH faces are `Driven(id)`, and after the standard ghost-fill SKIPS
 // those faces, this pass PRESCRIBES their ghost prim state by evaluating the DAG over the

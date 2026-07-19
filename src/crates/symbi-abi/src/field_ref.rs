@@ -16,9 +16,8 @@
 // (`name()`), and `parse()` recovers the typed ref from a runtime path. the
 // consumer (`resolve_path`) parses once at the decode boundary and matches
 // EXHAUSTIVELY — adding a field is then a compile error until every match covers
-// it, and the name can no longer be wrong. this is the reversible first slice of
-// pillar 1: the `GvKernel` manifest stays string-typed; only the decode chokepoint
-// goes typed.
+// it, and the name can no longer be wrong. the `GvKernel` manifest stays
+// string-typed; only the decode chokepoint goes typed.
 //
 // usage:
 //  // consumer (dispatch): match FieldRef::parse(path)? {
@@ -133,7 +132,7 @@ pub enum FieldRef {
 
 impl FieldRef {
     // concise constructors for the conserved/flux slot family — the producers mint these
-    // (docs/design/38 L2 Stage 2) instead of dotted strings, so a mistyped binding is a compile
+    // instead of dotted strings, so a mistyped binding is a compile
     // error, not a silent `Raw`. they wrap `State { slot, comp }` so the call sites stay readable
     // and need no `StateSlot`/`StateComp` in scope.
     pub const fn cons_den() -> Self { Self::State { slot: StateSlot::Cons, comp: StateComp::Den } }

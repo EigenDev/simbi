@@ -1,7 +1,7 @@
 // =============================================================================
 // penalize_dispatch.rs
 //
-// the [Drain] penalization dispatch (docs/design/50 step 2b), end to end on a
+// the [Drain] penalization dispatch, end to end on a
 // real sim: the kernel runs over the body's declared support box only, drains
 // the masked cells in place, leaves the far field BIT-untouched, and the
 // reduced deltas land in the diagnostics accumulator — gas loss == body gain
@@ -102,10 +102,10 @@ fn penalize_drains_the_mask_and_conserves_gas_plus_body() {
 
 // the LEDGER LAW through the full RK evolve loop: with periodic boundaries the
 // drain is the only mass sink, so the accumulated per-step receipts must equal
-// the gas's total conserved loss. this is the gate the legacy feedback failed
-// (RK2 stage-weight over-count, measured 1.5x on bondi) and the gate a
-// stage-blended penalize placement fails the same way — the penalize runs ONCE
-// per step after the RK combination precisely so this holds.
+// the gas's total conserved loss. an RK2 stage-weight over-count double-counts
+// the receipts (measured 1.5x on bondi), and a stage-blended penalize placement
+// fails the same way — the penalize runs ONCE per step after the RK combination
+// precisely so this holds.
 #[test]
 fn ledger_equals_gas_loss_through_the_rk_loop() {
     use symbi::regimes::substrate_newton::AdiabaticSubstrateKernelSet;
@@ -129,12 +129,12 @@ fn ledger_equals_gas_loss_through_the_rk_loop() {
             0,
             Tensor::new([0.1, -0.05]),
             Tensor::zeros(),
-            // softening 0.10 (was 0.04): the harder point mass drove the sink
-            // center's c2p unphysical, which pre-FOFC was a SILENT prim floor
-            // (cons untouched, so the mass sum never saw it) and post-FOFC is an
-            // honest first-order redo + freeze parachute — whose cons revert IS
-            // visible in the mass sum. the ledger identity needs a correction-free
-            // run; the fofc-counter assert below is the canary that keeps it one.
+            // softening 0.10 keeps the run correction-free: a harder point mass
+            // drives the sink-center c2p unphysical, and FOFC's response (a
+            // first-order redo plus a freeze parachute) reverts conserved
+            // variables in a way the mass sum sees, breaking the exact ledger
+            // identity. the fofc-counter assert below guards that no correction
+            // fired.
             1.0, 0.08, 0.10, 0.5, 0.0, 0.12,
         )));
     let sub =
@@ -199,7 +199,7 @@ fn iso_dispatch_drains_directly() {
     assert!(deltas[0].mass_delta > 0.0, "iso dispatch removed no mass: {:e}", deltas[0].mass_delta);
 }
 
-// the ANGULAR-MOMENTUM receipt (docs/design/51): the reduced torque_delta is
+// the ANGULAR-MOMENTUM receipt: the reduced torque_delta is
 // the moment of the gas's momentum loss about the body center, machine-exact.
 // gas in rigid rotation about the body makes the receipt decisively nonzero
 // (a drain removes the local angular momentum along with the mass).
@@ -271,7 +271,7 @@ fn torque_receipt_equals_the_moment_of_the_momentum_loss() {
     assert_eq!(deltas[0].torque_delta[1], 0.0);
 }
 
-// the porous surface through the dispatch (docs/design/50 zoo): the body's
+// the porous surface through the dispatch: the body's
 // declared SurfaceSpec picks the kernel, and the porosity endpoints hold
 // end to end — p = 0 books EXACTLY zero mass receipts (a sealed wall absorbs
 // momentum but never mass), p > 0 drains.

@@ -3,12 +3,10 @@
 //
 // THE SYMBI CODEGEN SUBSTRATE — mathematical contract.
 //
-// status: TIER 0 CLOSED (2026-05-30). the trait surface is feature-complete
-// against the known kernel set (iterate/iterate_vec with freeze law, hyperbolics
-// for RMHD quartic, infinity/nan/is_nan, branch default for state-typed
-// conditionals, FieldLoad/IterateInline payload pinned in doc). still NOT
-// wired into the workspace as the active `Scalar` trait — the Tier 1 atomic
-// cutover from `symbi_algebra::Scalar` remains pending.
+// the trait surface is feature-complete against the known kernel set:
+// iterate/iterate_vec with freeze law, hyperbolics for the RMHD quartic,
+// infinity/nan/is_nan, branch default for state-typed conditionals, and the
+// FieldLoad/IterateInline payload.
 //
 // constitution voice: this file preserves UPPERCASE EMPHASIS on load-bearing
 // invariants (A1, FREEZE LAW, NEVER USE) and lowercase for narration. that's
@@ -25,11 +23,6 @@
 // errors (carrier dialect, variance, scope, algebra, theory composition,
 // naming) MUST be compile errors. admitted panics live only at I/O / driver
 // boundaries (config parse, NVRTC compile, HDF5 write) — outside this file.
-//
-// references:
-//   - docs/design/00_axioms.md             — the axioms this code discharges
-//   - docs/FOUNDATION_gv_reconciliation.md — the Gv carrier story (Gen-3)
-//   - reviews/v2-synthesis.md §5           — the runtime-panic hole this closes
 // =============================================================================
 
 #![deny(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
@@ -136,7 +129,7 @@ impl Mask for bool {}
 //
 // invariants:
 //   1. every Op in §1 has a corresponding method on this trait. partial impls
-//      are an A1 violation (see reviews/v2-synthesis.md §5).
+//      are an A1 violation.
 //   2. NO `PartialOrd`. native `<`, `>`, `<=`, `>=` on `S: Scalar` must NOT
 //      compile in generic code. comparisons return `S::Mask`.
 //   3. NO `to_f64` on the trait. extracting a concrete value from a Carrier
@@ -224,7 +217,7 @@ pub trait Scalar:
     // `sqrt` / `abs` / `min` / `max` are inherited from `Numeric`.
     fn recip(self) -> Self;
 
-    // ── carrier-safe clamp idioms (CLAUDE.md §4.3) ────────────────────────
+    // ── carrier-safe clamp idioms ────────────────────────
     // these make the prescribed `safe_sqrt` / `g_clamp` idioms CALLABLE rather than
     // hand-rolled per site. the Gv carrier evaluates BOTH arms of a `select`, so a
     // maybe-NaN op (sqrt of a negative, an out-of-domain transcendental) must be clamped
@@ -368,7 +361,7 @@ pub trait Scalar:
         std::array::from_fn(|j| Self::select(m, tv[j], fv[j]))
     }
 
-    // ── HIGHER-ORDER: bounded-pressure scope (docs/design/23) ─────────────
+    // ── HIGHER-ORDER: bounded-pressure scope ─────────────
     /// declare a **bounded-pressure phase**: run `body`, return its result;
     /// on tracing Carriers, intermediates that were created inside the
     /// closure die at the closure's closing brace. lets nvcc / rustc see
@@ -388,8 +381,7 @@ pub trait Scalar:
     ///   automatically — no call-site changes.
     /// - any future carrier (smid/avx) can override per its own discipline.
     ///
-    /// see `docs/design/23_bounded_pressure_ir.md` for the formal framing
-    /// (interval-graph coloring, Sethi-Ullman pathwidth).
+    /// the formal framing is interval-graph coloring and Sethi-Ullman pathwidth.
     ///
     /// **return type:** `Self` — the scope returns a single scalar of the
     /// same carrier. for multi-output phases (`(lo, hi)` tuples, etc.),
@@ -628,8 +620,8 @@ impl Scalar for f64 {
     }
 
     // the lazy branch: a REAL `if` on the host — only the taken arm runs. this
-    // is the f64 reference for the early-out branch cost (and the
-    // oracle the traced `Op::IfElse` kernel is checked against).
+    // is the f64 reference for the early-out branch cost (and the reference
+    // the traced `Op::IfElse` kernel is checked against).
     #[inline(always)]
     fn cond(m: bool, t: impl FnOnce() -> f64, f: impl FnOnce() -> f64) -> f64 {
         if m { t() } else { f() }
@@ -1043,7 +1035,7 @@ mod tests {
         assert!(loc.line > 0);
     }
 
-    // ── hyperbolic identities (the laws drive the carrier oracle) ─────────
+    // ── hyperbolic identities (the laws validate the carrier) ─────────
     #[test]
     fn f64_cosh_sq_minus_sinh_sq_is_one() {
         for &x in &[-1.5_f64, 0.0, 0.7, 2.5] {
@@ -1188,7 +1180,7 @@ mod tests {
         assert_eq!(r, 7.0);
     }
 
-    // ----- docs/design/23: Scalar::scope at S = f64 -----
+    // ----- Scalar::scope at S = f64 -----
 
     /// at `S = f64`, `scope` is identity — the closure runs immediately and
     /// returns its value. this is the FOUNDATION for the Gv override: physics
@@ -1213,8 +1205,8 @@ mod tests {
 
     /// scope CAN be nested arbitrarily. each nested call to `scope` produces
     /// an independent identity transform at f64. this proves the trait
-    /// shape works for the nested-phase patterns the design doc describes
-    /// (load → reconstruct → compute → store).
+    /// shape works for nested-phase patterns
+    /// (load -> reconstruct -> compute -> store).
     #[test]
     fn f64_scope_nests_arbitrarily() {
         let inner = <f64 as Scalar>::scope(|| {

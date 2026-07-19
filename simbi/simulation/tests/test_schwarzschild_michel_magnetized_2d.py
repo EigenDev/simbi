@@ -1,7 +1,7 @@
 # =============================================================================
 # test_schwarzschild_michel_magnetized_2d.py
 #
-# the curved-CT instrument (design 44 phase B): the michel transonic profile on
+# the curved-CT instrument: the michel transonic profile on
 # the (r, theta) wedge threaded by the theta-uniform radial monopole, run through
 # the FULL 2D GRMHD machinery — the densitized corner EMF (contact assembly), the
 # densitized-space curl, the metric-contracted face->cell interpolation, and the
@@ -13,7 +13,7 @@
 #   evolution (measured 6.3e-15 against a 0.29 flux scale over ~5000 steps); the
 #   one-step b1/m3 rows are exactly 0.0 and m2/b2 sit at cancellation roundoff.
 #
-#   consistency-class: the hold L1 rho vs the michel oracle EQUALS the 1D gate's
+#   consistency-class: the hold L1 rho vs the michel solution EQUALS the 1D gate's
 #   value (1.192e-4 at nr = 128 — the wedge adds nothing), the one-step
 #   den/m1/nrg residuals equal the 1D values and converge (ratios 2.1-2.6), and
 #   the staggered field drift is roundoff-accumulation only (measured 4.3e-10

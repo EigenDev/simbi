@@ -1,7 +1,7 @@
 // =============================================================================
 // gv_refinement.rs
 //
-// the amr field-transfer kernels (docs/design/21, 22): restriction
+// the amr field-transfer kernels: restriction
 // (fine -> coarse conservative child average) and prolongation (coarse -> fine
 // limited interpolation, time-interpolated between two coarse snapshots) as
 // gv-traced pullbacks over the refinement lattice maps (lattice.rs
@@ -458,8 +458,8 @@ pub fn refine_prolong_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKer
 /// `refine_prolong_gv`, but the leaf reads ONE coarse buffer "src" — no time
 /// pair, no alpha. paired with a `field_lerp` pass that time-interpolates the
 /// coarse snapshots once per coarse cell, this halves the prolong kernel's
-/// gather traffic (the design-47 act-8 census put the time pair at 2x the
-/// loads of a 5^3 ppm neighbourhood, recomputed per fine cell).
+/// gather traffic (the time pair reads 2x the loads of a 5^3 ppm
+/// neighbourhood, recomputed per fine cell).
 pub fn refine_prolong_1t_gv(ndim: usize, ratio: i64, order: ProlongOrder) -> (GvKernel, Writes) {
     assert!((1..=3).contains(&ndim), "refine_prolong_1t_gv: ndim must be 1..=3");
     assert!(ratio >= 2, "refine_prolong_1t_gv: ratio must be >= 2");
@@ -531,7 +531,7 @@ pub fn refine_prolong_multi_1t_gv(
     (end_trace(), writes)
 }
 
-/// trace ONE PASS of the axis-split prolongation (docs/design/49): the 1d
+/// trace ONE PASS of the axis-split prolongation: the 1d
 /// interpolation operator applied along `sweep_axis` only, every other axis
 /// passing the thread coordinate through to the input load. the swept axis of
 /// the OUTPUT lattice is fine-indexed (parent = floor_div(c, r), parity = the

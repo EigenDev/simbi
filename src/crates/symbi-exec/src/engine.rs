@@ -1,7 +1,7 @@
 // =============================================================================
 // engine.rs
 //
-// the GPU mapping of the structured kernel ABI (docs/design/15 §5). the
+// the GPU mapping of the structured kernel ABI. the
 // substrate KernelSet builds ONE backend-neutral `KernelInvocation` per kernel
 // (ordered buffer handles + packed params); `symbi-aot::run_cpu` maps it to the
 // generated CPU fn, and `run_gpu` here maps the SAME invocation to a GPU launch:
@@ -12,8 +12,8 @@
 // `dispatch` picks the path on `Mem::IS_DEVICE_ACCESSIBLE` — the SAME invocation,
 // one branch. unified memory (the default device memory) is host- AND
 // device-addressable, so the buffer's pointer is usable on-device as-is; the host
-// never dereferences it (doc 15 §6). an explicit-memory `BufHandle::Device` variant
-// (host cannot deref) is a later addition — not needed for the unified milestone.
+// never dereferences it. an explicit-memory `BufHandle::Device` variant
+// (host cannot deref) is not present: unified memory covers every current path.
 // =============================================================================
 
 use symbi_aot::{CpuField, CpuFieldMut, KernelInvocation, OrderedNumeric, Scalar};
@@ -70,7 +70,7 @@ const _: () = {
 };
 
 // =============================================================================
-// GpuBackend — the device-backend seam (docs/design/35 R2).
+// GpuBackend — the device-backend abstraction.
 //
 // every GPU leak that names CUDA explicitly — the render-target token, the kernel
 // dispatcher, the launch-arg ABI for a field buffer — is funneled through this ONE
@@ -120,7 +120,7 @@ impl GpuBackend for CudaBackend {
     }
 }
 
-// the hip backend (docs/design/38): same `Target::Hip` (renders the identical cuda-c++ source),
+// the hip backend: same `Target::Hip` (renders the identical cuda-c++ source),
 // the hip per-device dispatcher, and the SAME `DeviceView` launch ABI as cuda.
 #[cfg(feature = "hip")]
 pub struct HipBackend;
@@ -166,9 +166,9 @@ pub fn field_max_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: 
 }
 
 /// reduce `field` over `domain` by `op` (Add/Mul/Min/Max) — the substrate Reduce
-/// morphism (docs/design/15 §2). on HOST memory it's a plain fold; on DEVICE memory
+/// morphism. on HOST memory it's a plain fold; on DEVICE memory
 /// it runs a GPU block-reduction so only the per-block partials cross device->host,
-/// NOT a per-cell host scan over unified memory ([[feedback_no_compute_roundtrips]]).
+/// NOT a per-cell host scan over unified memory.
 /// the two algebras agree (max/min are exact; add/mul differ from the host's
 /// sequential fold only by reassociated rounding).
 pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usize>(
@@ -187,7 +187,7 @@ pub fn field_reduce<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const D: usiz
             unreachable!("device-accessible memory requires a gpu feature (cuda or hip)");
         }
     }
-    // host fold (the CPU algebra of the Reduce morphism, doc 15 §2). LARGE
+    // host fold (the CPU algebra of the Reduce morphism). LARGE
     // domains fold in parallel over outer-axis slabs — a serial fold here was
     // a measured per-root-step stall at production sizes (the cfl reduce runs
     // per level, the body-feedback sums per component). min/max are exact in
@@ -276,7 +276,7 @@ fn host_identity_combine(op: ReductionOp) -> (f64, fn(f64, f64) -> f64) {
     }
 }
 
-/// **B12 — cached reduction partials buffer.** the CFL host-fold needs one
+/// cached reduction partials buffer. the CFL host-fold needs one
 /// `Sc` per block (typically ~1K-4K bytes for a 512² grid). a fresh
 /// `cuMemAllocManaged` for it on every step was the only per-step driver
 /// alloc cost left in the pipeline. one slot per precision (`f64` / `f32`),
@@ -374,7 +374,7 @@ fn field_reduce_device<
     let buf_lo: Vec<i32> = (0..D).map(|a| alloc.spaces[a].lo as i32).collect();
 
     let num_blocks = total_cells.div_ceil(REDUCTION_BLOCK_SIZE).max(1);
-    // **B12 — partials buffer is CACHED ACROSS STEPS, not allocated per call.**
+    // the partials buffer is CACHED ACROSS STEPS, not allocated per call.
     // a fresh `cuMemAllocManaged` on every reduction (every CFL step) was
     // pure smell: ~30 µs of driver-allocator time per step × 25K steps =
     // ~750 ms wasted in the alloc path of a typical Kepler run. the partials
@@ -488,7 +488,7 @@ const TILED_SMEM_LIMIT: usize = 48 * 1024;
 /// grid, total <= 256 threads, and — critically — whose `(block + 2*halo)` slab
 /// times `cell_bytes` fits `TILED_SMEM_LIMIT`. tries decreasing cube edges and
 /// shrinks the largest dim to meet the thread cap. `SYMBI_TILE_BLOCK="8,8,4"`
-/// overrides for the tile-size sweep (docs/design/22 §G). this is used in place of the
+/// overrides for the tile-size sweep. this is used in place of the
 /// warp-first `block_for` for tiled kernels, whose [32,8,1] shape blows the slab
 /// when the halo sits on a thin (block=1) axis.
 #[cfg(feature = "gpu")]
@@ -531,7 +531,7 @@ fn env_tile_block(ndim: usize) -> Option<[u32; 3]> {
     Some(b)
 }
 
-/// the HOST-READ BARRIER of the B12 contract: kernel launches are
+/// the HOST-READ BARRIER for asynchronous device launches: kernel launches are
 /// asynchronous (same-stream semantics order kernel-to-kernel; the per-launch
 /// sync was removed for pipelining), so host code that reads — or writes —
 /// device-accessible memory the queued kernels touch MUST drain the device
@@ -564,9 +564,9 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     use symbi_aot::BufHandle;
     use symbi_ir::emit::Precision;
     use symbi_ir::render_from_ir;
-    // **B12** — ctx_sync no longer called per-launch; same-stream CUDA semantics
-    // serialize kernel-to-kernel ordering. ctx_sync stays in field_reduce_device
-    // (line 151) where it actually crosses host↔device for the cfl host-fold.
+    // ctx_sync is NOT called per-launch: same-stream CUDA semantics serialize
+    // kernel-to-kernel ordering. ctx_sync stays in field_reduce_device, where it
+    // crosses host-device for the cfl host-fold.
     use symbi_xpu::LaunchConfig;
     use symbi_xpu::runtime::GpuRuntime;
 
@@ -666,7 +666,7 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
     // + transverse dims clamped to the actual `grid` extents, so a quasi-1D/2D run (a 3D
     // kernel over a thin transverse axis) doesn't idle most of each block. an explicit
     // `SYMBI_BLOCK_{1D,2D,3D}` env var overrides it.
-    // Gate 3: a tiled kernel needs a block shape that BOUNDS the per-block smem
+    // a tiled kernel needs a block shape that BOUNDS the per-block smem
     // slab `prod_a (block_a + 2*halo_a) * sizeof(S) * n_fields` under the device
     // limit. the warp-first `block_for` shape ([32,8,1]) makes a pathological slab
     // when the halo is on a thin (block=1) axis — e.g., dir-2 flux: 32*8*(1+4) cells
@@ -732,11 +732,9 @@ fn run_gpu<B: GpuBackend, Sc: Scalar + OrderedNumeric>(
                 .unwrap_or_else(|e| panic!("GPU launch '{}' failed: {:?}", kernel_name, e));
         }
     });
-    // **B12 — removed per-launch `ctx_sync()`** (was here, sub-agent diagnosis
-    // 2026-05-31). every dispatch syncing host→device serialized launches and
-    // killed pipelining (~20 launches × ~10 µs × N steps in pure stall on the
-    // 2070; measured: dropped Kepler 512² from missing-half-of-target to
-    // expected). CUDA's same-stream semantics already serialize kernel-to-
+    // no per-launch `ctx_sync()`: a host-device sync on every dispatch would
+    // serialize launches and kill pipelining (~20 launches per step spent in
+    // pure stall). CUDA's same-stream semantics already serialize kernel-to-
     // kernel ordering, so the next kernel reading these buffers cannot start
     // before this one finishes — correctness preserved.
     //

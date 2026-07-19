@@ -31,7 +31,7 @@ class MeshAdapter:
         global_cells = self._mesh.global_cells[axis]
         spacing_type = self._mesh.spacing_types[axis]
 
-        # if we have owned_domain, compute actual patch bounds
+        # when owned_domain is provided, compute actual patch bounds
         if self._owned_domain is not None:
             # owned_domain indices in global coordinate system
             start_idx = self._owned_domain[0][axis]  # owned_start

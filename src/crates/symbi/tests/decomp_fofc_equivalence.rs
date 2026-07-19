@@ -6,10 +6,10 @@
 // atmosphere trips the correction at the excision rim (the fill's donor copies
 // meet the steepening infall there) while staying recoverable — an unexcised
 // clamped core is a PERSISTENT poison that (correctly) fires the freeze-streak
-// fail-loud instead. the oracle proves the per-tile redo — driven from
-// exchange-fresh stage-input halos with the failure reduction evaluated per
-// tile — reproduces the monolithic correction bit-for-bit, THROUGH genuine
-// correction events (the fallback counters assert non-vacuity).
+// fail-loud instead. the per-tile redo — driven from exchange-fresh stage-input
+// halos with the failure reduction evaluated per tile — reproduces the monolithic
+// correction bit-for-bit, THROUGH genuine correction events (the fallback counters
+// assert non-vacuity).
 // =============================================================================
 
 use symbi::regimes::fofc::{fofc_reset_stats, fofc_stats};

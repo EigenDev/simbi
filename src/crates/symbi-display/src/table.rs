@@ -75,7 +75,7 @@ pub struct Table {
     /// benchmark-row update. a ring buffer capped at the chart width; built from a
     /// scalar already in hand, so it costs no device sync or field copy.
     throughput: VecDeque<f64>,
-    /// live tabbed-dashboard state (design 40). the string/headless path ignores
+    /// live tabbed-dashboard state. the string/headless path ignores
     /// these; the ratatui path projects them into a `DiagnosticView`.
     start: Instant,
     regime: String,
@@ -318,7 +318,7 @@ impl Table {
         }
     }
 
-    /// **B10** — set the static System Information sub-table (rendered above
+    /// set the static System Information sub-table (rendered above
     /// the benchmark section). each row is `[category, property, value]`.
     /// the renderer collapses repeated `category` entries to blanks (e.g.
     /// "CPU" + 4 properties = one "CPU" label + 3 blanks).
@@ -328,7 +328,7 @@ impl Table {
             .collect();
     }
 
-    /// **B10** — set the static Problem Setup sub-table (rendered between
+    /// set the static Problem Setup sub-table (rendered between
     /// System Info and Benchmarks). each row is `[category, property, value]`.
     pub fn set_problem_setup(&mut self, rows: &[[&str; 3]]) {
         self.problem_setup = rows.iter()
@@ -411,7 +411,7 @@ impl Table {
     }
 
     /// build an owned snapshot for the live tabbed render. owning the data lets it
-    /// cross the channel to the render thread (tier 2a). throughput is converted
+    /// cross the channel to the render thread. throughput is converted
     /// from zone-cyc/s to Mzcups for display.
     pub fn diagnostic_view(&self) -> DiagnosticView {
         DiagnosticView {
@@ -520,7 +520,7 @@ impl Table {
         let _ = io::stdout().flush();
     }
 
-    /// **B10** — render a 3-col (Category | Property | Value) sub-table at
+    /// render a 3-col (Category | Property | Value) sub-table at
     /// the current renderer's total width. coalesces repeated `category`
     /// entries to blanks so the visual grouping is clear ("CPU" → 4 fields
     /// shows as one "CPU" label + 3 indented blanks).

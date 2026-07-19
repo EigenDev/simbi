@@ -1,7 +1,7 @@
 // =============================================================================
 // executor_laws.rs
 //
-// executor law E2 (docs/design/48 part 2): the steady-state step loop performs
+// executor law E2: the steady-state step loop performs
 // no per-call bulk allocation. kernels, scratch fields, and dispatch tables are
 // allocated once at attach / first dispatch; after warmup, a step's allocator
 // traffic is bounded by a small named budget (per-dispatch kernel-name strings,

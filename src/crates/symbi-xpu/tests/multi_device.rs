@@ -1,7 +1,7 @@
 // =============================================================================
 // multi_device.rs
 //
-// validates the device-binding infrastructure (docs/design/37 M1/M2) WITHOUT a second
+// validates the device-binding infrastructure WITHOUT a second
 // gpu: logical device 1 round-robins onto the one physical card as a SECOND cuda context.
 // each context has its own module table, so the per-device dispatcher must jit + launch in
 // the right context -- a single shared dispatcher would launch device 0's module in device

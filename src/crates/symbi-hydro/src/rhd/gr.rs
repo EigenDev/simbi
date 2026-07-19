@@ -10,7 +10,7 @@
 // the GR flux kernel (the `_schw`/`_ks` bake) uses this via `riemann::hlle_with_speeds`, so GR is a
 // DIVERGENT KERNEL, not a change to the shared flat `Rhd` — the same principle the densitization +
 // shift-flux kernels already follow. `prim.vel` is the CONTRAVARIANT velocity `v^i` (the valencia
-// velocity; = the physical V under identity gamma). see docs/design/42.
+// velocity; = the physical V under identity gamma).
 // =============================================================================
 
 use symbi_algebra::{OrderedNumeric, Tensor};
@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn rhd_gr_reduces_to_flat_at_identity() {
         // RhdGr on the flat metric (gamma = identity, alpha = 1) MUST equal the flat Rhd regime,
-        // component-for-component: conserved, flux, AND wave speeds. this is the "flat untouched" gate.
+        // component-for-component: conserved, flux, AND wave speeds. the flat path stays untouched.
         let eos = IdealGas { gamma: 4.0 / 3.0 };
         let flat = Rhd;
         let gr = RhdGr::<f64, 1> { metric: SpatialMetric::flat(), alpha: 1.0 };

@@ -1,7 +1,7 @@
 // =============================================================================
 // cylindrical_axis_roles.rs
 //
-// validates the AXIS-ROLE physics (docs/design/18) for the cylindrical (r, z)
+// validates the AXIS-ROLE physics for the cylindrical (r, z)
 // axisymmetric swirl plane: grid axes [r, z] = coordinate map [0, 2], with phi
 // (coord 1) a SYMMETRY axis but a CARRIED swirl component (ncomp=3 > ndim=2). two
 // gv probes pin the (r, z) case the fixed-order convention could not express:
@@ -32,7 +32,7 @@ fn close(got: f64, want: f64, what: &str, i: usize, j: usize) {
 
 #[test]
 fn cylindrical_rz_swirl_source_matches_analytic() {
-    // the axisymmetric swirl source (docs/design/18 stage 2): cylindrical (r,z) grid [0,2]
+    // the axisymmetric swirl source: cylindrical (r,z) grid [0,2]
     // with ncomp=3 (carry v_phi though phi isn't gridded). per coordinate the source is:
     //   S_r   = p*(A_r,hi - A_r,lo)/V  +  mom_phi*v_phi/r   (pressure-curvature + centrifugal)
     //   S_phi = -mom_r*v_phi/r                              (angular-momentum, the swirl law)
@@ -71,7 +71,7 @@ fn cylindrical_rz_swirl_source_matches_analytic() {
 
 #[test]
 fn cylindrical_rz_swirl_flux_is_advective() {
-    // ncomp>ndim hydro flux (docs/design/18 stage 3): cylindrical (r,z) [0,2], ncomp=3.
+    // ncomp>ndim hydro flux: cylindrical (r,z) [0,2], ncomp=3.
     // the gv cyl r-z flux (riemann::hlle at the Newtonian regime, coord_n = axes[0] = r)
     // builds a momentum flux for ALL THREE coordinates; for a uniform state HLLE returns the
     // physical flux, so along the r-sweep (coord_n=r):

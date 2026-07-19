@@ -2,7 +2,7 @@
 // substrate_seam.rs
 //
 // the sim <-> substrate seam: the abstractions the sim core needs to TALK ABOUT
-// substrates without depending on any concrete regime KernelSet (docs/design/41).
+// substrates without depending on any concrete regime KernelSet.
 // homing `KernelSet` and the `Solver`/`RegimeKind` enums here keeps
 // `FieldStore`/`state.rs` from depending UP into `regimes` (which would be a cycle).
 //
@@ -41,13 +41,13 @@ use crate::state::FieldStore;
 /// source terms (gravity, geometric) are fused into godunov_euler and
 /// godunov_rk2. unused sources produce zero via scalar parameters
 /// (e.g., body_mass = 0.0). no separate source passes.
-/// `NDIM` = grid dimension, `DOF` = vector (momentum-component) dimension (docs/design/18);
+/// `NDIM` = grid dimension, `DOF` = vector (momentum-component) dimension;
 /// they coincide for the natural case and diverge for axisymmetric (DOF>NDIM).
-// the kernel-set sees ONLY the `FieldStore` (docs/design/35 R3): its 4 storage params, never
+// the kernel-set sees ONLY the `FieldStore`: its 4 storage params, never
 // the physics tags `R`/`M`/`E` or the executor `S` (the concrete set bakes `R::SPEC` /
 // `eos_param` at construction — it does not read them off the sim). this is the keystone
-// decoupling: 4 params instead of 8, and the energy/schema bounds off `R` (R4) stay LOCAL to
-// `FieldStore`. impls keep their `sim` param name (now `&FieldStore`) so bodies are unchanged.
+// decoupling: 4 params instead of 8, and the energy/schema bounds off `R` stay LOCAL to
+// `FieldStore`. impls name the `&FieldStore` argument `sim`.
 pub trait KernelSet<const NDIM: usize, const DOF: usize, Mem, Sc>
 where
     Mem: MemorySpace,
@@ -90,7 +90,7 @@ where
     /// no-op — regimes with cheap algebraic wave speeds keep computing them inline in the flux.
     fn wave_speeds(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>) {}
 
-    /// forward immersed-body source (gravity, docs/design/19): `cons += dt * S_body`, applied
+    /// forward immersed-body source (gravity): `cons += dt * S_body`, applied
     /// per RK stage after godunov when the sim has bodies. default: no-op (body-free regimes).
     fn body_source(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
@@ -110,13 +110,13 @@ where
     /// execution; default: no-op.
     fn source_apply(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _weight: f64) {}
 
-    /// backward immersed-body feedback (docs/design/19): reduce the per-body force/torque/
+    /// backward immersed-body feedback: reduce the per-body force/torque/
     /// accreted-mass from the fluid into the side-car diagnostics, once per step. default: no-op.
     fn body_feedback(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 
-    /// the immersed-boundary penalization (docs/design/50): the property-
-    /// algebra surface physics (drain today; walls, porosity, thermal surfaces
-    /// as they land), applied post-source each substage — the ONE body
+    /// the immersed-boundary penalization: the property-
+    /// algebra surface physics (drain, walls, porosity, thermal surfaces),
+    /// applied post-source each substage — the ONE body
     /// mechanism. default: no-op (regimes without a baked penalize envelope).
     fn penalize(&self, _store: &FieldStore<NDIM, DOF, Mem, Sc>, _dt: f64) {}
 

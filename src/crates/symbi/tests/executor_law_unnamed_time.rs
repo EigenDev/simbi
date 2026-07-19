@@ -1,12 +1,11 @@
 // =============================================================================
 // executor_law_unnamed_time.rs
 //
-// executor law E1 (docs/design/48 part 2): no unnamed time. the sum of the
-// per-phase profiler accumulators (`symbi_sim::driver::prof`) must account for
-// nearly all of the step loop's wall time. a dispatch or reduction added to
-// the loop without a `prof` wrapper is invisible to every profile — the
-// design-47 campaign lost 33.5% of a run's wall time to an unwrapped
-// `body_feedback` for an evening — and fails this law instead.
+// executor law E1: no unnamed time. the sum of the per-phase profiler
+// accumulators (`symbi_sim::driver::prof`) must account for nearly all of the
+// step loop's wall time. a dispatch or reduction added to the loop without a
+// `prof` wrapper is invisible to every profile — an unwrapped `body_feedback`
+// can silently swallow a third of a run's wall time — and fails this law instead.
 //
 // the profiler is env-gated through a process-global OnceLock, so this binary
 // holds ONLY this law (the flag must be set before the first `prof` call).

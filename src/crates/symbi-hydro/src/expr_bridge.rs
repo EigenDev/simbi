@@ -14,7 +14,7 @@
 // other source: VariableX{1,2,3} -> `x_0/x_1/x_2` (the cell position, bound to the
 // centroid at splice), VariableT -> `t` (time), Parameter(i) -> `p{i}` (runtime scalar).
 //
-// the typed IR is the win and the gate: a user `IF_THEN_ELSE` lowers to `Select` (no
+// the typed IR enforces carrier-traceability: a user `IF_THEN_ELSE` lowers to `Select` (no
 // native branch — the carrier dialect), comparisons produce a Bool consumed only by a
 // conditional, and ops with no carrier-traceable equivalent (`Sgn`, `Mod`) are REJECTED
 // rather than silently miscompiled.
@@ -229,7 +229,7 @@ pub fn lower_dag_to_builtsource(
 ///   mom_{dim-1}, nrg]` (`2 + dim` on energy regimes, `1 + dim` on iso). (the `dim == sim DOF`
 ///   cross-check is the const-generic apply path's, where DOF is known.)
 ///
-/// the **`region`** axis (docs/design/32): if `cfg.region` names a mask node `chi(x)`, the
+/// the **`region`** axis: if `cfg.region` names a mask node `chi(x)`, the
 /// contribution is multiplied by it. the conservation lifts are LINEAR in the field, so masking the
 /// field (for `relax`: only the rate `kappa`) equals masking the conserved contribution — no splice
 /// change, CPU + GPU fall out of the existing path.
@@ -438,7 +438,7 @@ fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Rang
     }
 }
 
-/// THE BOUNDARY FRONT DOOR (docs/design/33): compile a `SourceConfig` into a DRIVEN-BOUNDARY
+/// THE BOUNDARY FRONT DOOR: compile a `SourceConfig` into a DRIVEN-BOUNDARY
 /// prescription — a complete primitive state `[rho, vel_0..vel_{D-1}, pre]` the ghost cells are SET
 /// to (Dirichlet), `combine = overwrite`. returns `(slot, BuiltSource)` in the structural-slot
 /// convention `den`/`mom`/`nrg` that [`symbi_discretize::boundary_fill_from_built_gv`] writes to
@@ -450,7 +450,7 @@ fn mask_field(field: &mut BuiltSource, chi: Option<NodeId>, idxs: std::ops::Rang
 ///   law), valid for RHD too (`is_relativistic` ALLOWED). MHD additionally prescribes the CELL-B
 ///   vector (`bcell` slot -> `prim.mag`): the OUT-OF-PLANE component (B_phi in a 2.5D axisymmetric
 ///   grid) is cell-centered + flux-evolved, so prescribing it is a plain Dirichlet, NOT the CT
-///   tangential-EMF sub-problem (doc 33 §5) that a prescribed POLOIDAL/in-plane FACE field needs.
+///   tangential-EMF sub-problem that a prescribed POLOIDAL/in-plane FACE field needs.
 ///   the in-plane cell-B components are the user's responsibility to keep div-compatible (=0 for a
 ///   purely toroidal field) — `raw`-style: garbage in, garbage out.
 /// - **complete prim state.** the DAG must output exactly the regime's primitive components:
@@ -468,7 +468,7 @@ pub fn build_boundary_dag(
     // axisymmetric grid: cell-centered, flux-evolved) is the safe toroidal case — div-free
     // by axisymmetry. the IN-PLANE components are the user's responsibility to keep
     // div-compatible (=0 for a purely toroidal field); they are NOT a CT face prescription
-    // here, so no tangential-EMF sub-problem (doc 33 section 5) — that gate only applies to
+    // here, so no tangential-EMF sub-problem — that constraint only applies to
     // a prescribed POLOIDAL (in-plane face) field, which this does not provide.
     let n_mag = if spec.is_mhd { d } else { 0 };
     let n_prim = 1 + d + usize::from(spec.has_energy) + n_mag;
@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn cooling_on_iso_is_rejected() {
-        // the live bug pre-gate: cooling targets nrg, which iso lacks -> reject up front.
+        // cooling targets nrg, which iso lacks -> reject up front.
         let cfg = cfg_from(
             r#"{ "kind":"cooling", "dim":1, "outputs":[0], "params":[1.0],
                  "nodes":[ {"op":"PARAMETER","param_idx":0} ] }"#,
@@ -770,7 +770,7 @@ mod tests {
         assert!(err.contains("energy"), "expected nrg-needs-energy rejection, got: {err}");
     }
 
-    // ---- region axis (docs/design/32) ----------------------------------------------
+    // ---- region axis ----------------------------------------------
 
     #[test]
     fn region_masks_the_contribution() {
@@ -791,7 +791,7 @@ mod tests {
         assert!((s_at(0.5) - 0.5).abs() < 1e-12, "linear in chi: got {}", s_at(0.5));
     }
 
-    // ---- relax combine (docs/design/32) --------------------------------------------
+    // ---- relax combine --------------------------------------------
 
     #[test]
     fn relax_damps_toward_reference_velocity() {
@@ -971,7 +971,7 @@ mod tests {
         assert!(err.contains("v_ref"), "expected relax arity rejection, got: {err}");
     }
 
-    // ---- driven boundaries (docs/design/33) -----------------------------------------------
+    // ---- driven boundaries -----------------------------------------------
 
     fn expect_boundary_err(cfg: &symbi_expr::SourceConfig, spec: &crate::regime_spec::RegimeSpec) -> String {
         match build_boundary_dag(cfg, spec) {

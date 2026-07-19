@@ -37,7 +37,7 @@ pub mod cuda;
 #[cfg(feature = "cuda")]
 pub mod nvrtc;
 
-// the amd backend (docs/design/38). sibling to cuda behind the same traits.
+// the amd backend. sibling to cuda behind the same traits.
 #[cfg(feature = "hip")]
 pub mod hip;
 
@@ -69,7 +69,7 @@ use cuda as gpu_backend;
 use hip as gpu_backend;
 
 // neutral device api (gpu = cuda || hip): downstream calls `symbi_xpu::ctx_sync`,
-// `symbi_xpu::memcpy_peer`, etc. instead of naming a backend module (docs/design/38).
+// `symbi_xpu::memcpy_peer`, etc. instead of naming a backend module.
 #[cfg(feature = "gpu")]
 pub use gpu_backend::{
     can_access_peer, ctx_sync, current_device, device_count, device_info, enable_peer_access,
@@ -90,7 +90,7 @@ pub use hip::{HipManaged as DeviceMemory, HipSpace as DeviceSpace};
 
 /// run `f` with gpu device `ord` bound on this thread, restoring the previous device after. on
 /// a host (no-gpu) build this is just `f()` -- device binding is a no-op there, so callers can
-/// wrap a tile's work uniformly regardless of backend (docs/design/37).
+/// wrap a tile's work uniformly regardless of backend.
 #[cfg(feature = "gpu")]
 pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
     gpu_backend::with_device(ord, f)

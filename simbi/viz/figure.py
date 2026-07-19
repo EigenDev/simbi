@@ -22,10 +22,6 @@
 #   into (artists_dict, metadata) tuples using `_normalize_render_output`.
 #   formatting decisions (title, axis labels, colorbar, legend, spines, limits)
 #   are delegated to `FigureFormatter.apply_figure_formatting`.
-#
-# why this file changed:
-#   - factor normalization logic into a single helper for clarity and testability
-#   - document the Figure <-> RenderResult contract in the module header
 # =============================================================================
 
 from typing import Any, Optional, Sequence, Tuple
@@ -49,8 +45,8 @@ from .config import VisualizationConfig
 from .types import CoordSystem, FieldData
 
 
-# formatting/frame failures were historically swallowed silently (unlabeled
-# plots, frozen movies exiting 0); each distinct failure now warns ONCE with
+# formatting/frame failures are otherwise swallowed silently (unlabeled
+# plots, frozen movies exiting 0); each distinct failure warns once with
 # the real exception so the defect is visible without spamming per frame.
 _WARNED: set[str] = set()
 
@@ -176,17 +172,17 @@ class Figure:
 
         main_ax = self.axes["main"]
 
-        # --- PRE-RENDER FORMATTING ---
+        # --- pre-render formatting ---
         formatting.apply_scaling(main_ax, self.config.figure)
 
-        # --- RENDER DATA ---
+        # --- render data ---
         rendered_artists = []
         has_mesh_collection = False
         for component, data in self._components:
             if not component.initialized:
                 raise RuntimeError("Component not initialized before render.")
 
-            # The component renders its artist (components should return RenderResult,
+            # the component renders its artist (components should return RenderResult,
             # but legacy dict/list returns are tolerated)
             result = component.render(data, self.config.figure)
             artist_dict, metadata = _normalize_render_output(result)
@@ -263,14 +259,14 @@ class Figure:
             if style.ylims.min is not None or style.ylims.max is not None:
                 main_ax.set_ylim(style.ylims.min, style.ylims.max)
 
-        # Get context from the *first* component
+        # get context from the *first* component
         first_component, first_data = (
             self._components[0] if self._components else (None, None)
         )
         if first_data is None:
-            return  # Nothing to format
+            return  # nothing to format
 
-        # Delegate all figure-level formatting to the FigureFormatter instance.
+        # delegate all figure-level formatting to the FigureFormatter instance.
         try:
             assert self.fig is not None
             self.formatter.apply_figure_formatting(
@@ -421,7 +417,7 @@ class Figure:
         # the next frame's overlay so a tumbling body does not smear across the movie.
         self._body_artists: list = []
 
-        # build a map of the original component payload \"signatures\" so we can
+        # build a map of the original component payload signatures used to
         # request the same plotted fields for each frame.
         component_signatures: List[object] = []
         for _, payload in self._components:
@@ -520,7 +516,7 @@ class Figure:
                         )
 
                     if artist is not None:
-                        # Normalize different possible return types into (artists_dict, metadata)
+                        # normalize different possible return types into (artists_dict, metadata)
                         artists_dict, metadata = _normalize_render_output(
                             artist
                         )

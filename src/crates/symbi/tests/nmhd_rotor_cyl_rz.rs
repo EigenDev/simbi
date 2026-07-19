@@ -1,7 +1,7 @@
 // =============================================================================
 // nmhd_rotor_cyl_rz.rs
 //
-// the magnetized ROTOR in CYLINDRICAL r-z AXISYMMETRIC newtonian MHD (docs/design/30) —
+// the magnetized ROTOR in CYLINDRICAL r-z AXISYMMETRIC newtonian MHD —
 // the curvilinear sibling of nmhd_rotor_2p5d, validating the cyl r-z constrained-transport
 // stack: the SINGLE out-of-plane corner EMF E_phi, the metric in-plane curl
 //   dB_r/dt = +d_z E_phi          (flat, h_z = 1),

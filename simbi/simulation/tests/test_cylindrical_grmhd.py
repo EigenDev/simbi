@@ -1,15 +1,15 @@
 # =============================================================================
 # test_cylindrical_grmhd.py
 #
-# the cylindrical kerr-schild GRMHD constrained-transport gates (design 45 GRMHD):
+# the cylindrical kerr-schild GRMHD constrained-transport gates:
 # a poloidal field loop on the 2.5D (R, z) plane and an in-plane loop on the (R, phi)
 # equatorial DISK, each seeded div-free through the metric-weighted curl of a vector
 # potential. the chart-generic densitized curl + the two-component-shift corner EMF
 # must PRESERVE the w-weighted div(B) = sum sqrt(gamma)(face) x coordinate-length x
 # B_face to machine precision as the gas free-falls, and run stably (p > 0, |B|
 # bounded, finite — no floors). sqrt(det gamma) = R sqrt(1 + 2M/r), r = sqrt(R^2 + z^2)
-# (the disk is the r = R equatorial slice). the gas flux is the HLLE fan (the diagonal-
-# metric HLLD wrapper is a follow-on). both charts run at contact and UCT-HLL CT.
+# (the disk is the r = R equatorial slice). the gas flux is the HLLE fan. both charts
+# run at contact and UCT-HLL CT.
 # requires the built cpu_ext backend; skipped otherwise.
 # =============================================================================
 import glob

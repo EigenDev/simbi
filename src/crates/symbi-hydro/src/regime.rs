@@ -40,7 +40,7 @@ use symbi_ir::algebra::{Scalar, Selectable};
 /// this enables one solver implementation for all directions.
 pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// the declarative metadata bundle for this regime — name, field layout,
-    /// flag consts, c2p flavor (docs/design/09 §2.3): the physics
+    /// flag consts, c2p flavor: the physics
     /// regime as a FIRST-CLASS DATA VALUE. callers prefer
     /// `<Self as Regime<S, D>>::SPEC.is_relativistic` over the
     /// `self.is_relativistic()` accessor; the bool methods below default to
@@ -50,7 +50,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// primitive state type (e.g., rho, vel, pre for newtonian).
     type Prim: Copy;
 
-    /// the energy model (docs/design/34): `Adiabatic` (energy equation evolved) or `IsoModel`
+    /// the energy model: `Adiabatic` (energy equation evolved) or `IsoModel`
     /// (none). this is the regime's `Prim`/`Cons` energy `Slot` parameter, surfaced as an associated
     /// type so the SIM-FIELD layer can pick the field storage (`Field` vs a ZST) at the TYPE level —
     /// retiring the runtime `Option<Field>` on `cons.nrg` / `prim.pre`.
@@ -87,7 +87,7 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
     /// convert conservative to primitive. returns C2pResult with a usable
     /// (possibly floored) value and an error code describing any failures.
     ///
-    /// **host-only by API** (Tier 1.7, 2026-05-30): the `where S: OrderedNumeric`
+    /// **host-only by API**: the `where S: OrderedNumeric`
     /// bound declares that diagnostic c2p is a host computation — `C2pResult`'s
     /// `ErrorCode` is bool-based and cannot be traced at `S = Gv`. the kernel
     /// emit path uses `Cons::to_primitive` (algebraic, no diagnostics) or the
@@ -185,11 +185,10 @@ pub trait Regime<S: Scalar, const D: usize>: Copy {
         Self::SPEC.has_energy
     }
 
-    // `Regime::hllc` was dropped. the default fell
-    // back silently to HLLE — a lie in code that masked "this regime does
-    // not implement a three-wave star solver." HLLC is now an explicit free
-    // function per regime: `crate::riemann::hllc` (newtonian),
-    // `crate::riemann::hllc_rhd`, `crate::riemann::hllc_rmhd`.
-    // callers that genuinely want HLLE invoke `crate::riemann::hlle`
-    // directly (regime-generic; resolves shock + rarefaction, not contact).
+    // HLLC is not a trait method: it is an explicit free function per regime —
+    // `crate::riemann::hllc` (newtonian), `crate::riemann::hllc_rhd`,
+    // `crate::riemann::hllc_rmhd`. a trait default would silently fall back to
+    // HLLE, masking that a regime lacks a three-wave star solver. callers that
+    // want HLLE invoke `crate::riemann::hlle` directly (regime-generic; resolves
+    // shock + rarefaction, not contact).
 }

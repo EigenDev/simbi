@@ -1,13 +1,13 @@
 // =============================================================================
 // dashboard_skeleton.rs
 //
-// throwaway driver for the design-40 tabbed dashboard. it owns a dummy xorshift
+// throwaway driver for the tabbed dashboard. it owns a dummy xorshift
 // integrator that random-walks a snapshot, projects it into a `live::DiagnosticView`,
 // and renders through the SHARED production render (`symbi_display::live`) — so
 // look-and-feel iterates here (compile ~0.4s, no maturin) and production inherits
 // exactly the same output.
 //
-// it drives the terminal via the REAL production seam: SignalGuard owns the
+// it drives the terminal via the REAL production path: SignalGuard owns the
 // graceful-interrupt flag (Ctrl-C -> SIGINT, never a keystroke), ScreenGuard owns
 // the alt screen + termios (ICANON/ECHO off, ISIG on), and poll_key reads the
 // remaining keys over that mode. no crossterm raw mode is enabled anywhere.
@@ -101,7 +101,7 @@ impl App {
         app
     }
 
-    /// advance one diagnostic cadence — the design's ~10-step reduction interval.
+    /// advance one diagnostic cadence — the ~10-step reduction interval.
     fn tick(&mut self) {
         self.frame = self.frame.wrapping_add(1);
         self.step += 10;

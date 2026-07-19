@@ -355,7 +355,7 @@ pub fn rmhd_resistive_emf_cyl_rz_gv(spacing: &[Spacing]) -> (GvKernel, Vec<(Stri
 /// (`Metric::scale_factors`). this is the DEC codifferential — the mimetic ADJOINT of the induction
 /// curl — written through the scale factors, so ONE kernel covers every 2.5D orthogonal chart:
 /// cyl r-z (`h = (1, 1)`) recovers the metric-free `d_z B_r - d_r B_z`; cyl r-phi and spherical r-theta
-/// (`h_2 = r`) grow the `(1/r) d_r(r .)` factor. the geometry-agnostic adjoint oracle validates each
+/// (`h_2 = r`) grow the `(1/r) d_r(r .)` factor. the geometry-agnostic adjoint reference validates each
 /// chart; `-curl(eta J)` is negative-definite (magnetic energy decays). `eta = 0` is an exact no-op.
 /// `B_i` = bface[i]; scale factors are sampled at the staggered face/corner positions of each term.
 pub fn rmhd_resistive_emf_ortho_gv(coords: Coords, spacing: &[Spacing]) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
@@ -395,7 +395,7 @@ pub fn rmhd_resistive_emf_ortho_gv(coords: Coords, spacing: &[Spacing]) -> (GvKe
     let jout = inv_h * (d0 - d1);
     // E += eta*jout: the adjoint sign for a RIGHT-HANDED (axis0, axis1, out-of-plane) triple — cyl
     // r-phi `(r, phi, z)` and spherical r-theta `(r, theta, phi)`. (cyl r-z's `(r, z, phi)` triple is
-    // left-handed and uses its own oppositely-signed kernel.) oracle-pinned to make -curl(eta J)
+    // left-handed and uses its own oppositely-signed kernel.) sign-pinned to make -curl(eta J)
     // negative-definite so the magnetic energy decays.
     let e_new = e + eta * jout;
     (end_trace(), vec![("e_new".to_string(), "e".into(), e_new.node())])
@@ -599,7 +599,7 @@ pub fn imhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
         o
     };
     // interpolate the ndim in-plane (face-staggered) components; out-of-plane components
-    // (if any) are carried cell-centered and untouched here (2.5D / 1.5D — docs/design/30).
+    // (if any) are carried cell-centered and untouched here (2.5D / 1.5D).
     let bf: Vec<Gv> = (0..ndim).map(|c| Gv::field(&format!("bf_{c}"), &format!("bf_{c}"))).collect();
     let writes = (0..ndim)
         .map(|c| {
@@ -616,7 +616,7 @@ pub fn imhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBin
 /// its two bounding faces — used for reconstruction + the c2p magnetic-energy subtraction. NO energy
 /// correction: `cons.nrg` (tau) already carries the magnetic energy and is conserved by the Godunov
 /// flux (the Poynting term); the old `nrg += 0.5 d|bcell|^2` patch DOUBLE-ACCOUNTED it and did not
-/// telescope (spec §6 / energy_conservation_spec.md).
+/// telescope.
 pub fn rmhd_bcell_from_bface_gv(ndim: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     let half = Gv::from_f64(0.5);
@@ -807,7 +807,7 @@ pub fn rmhd_bcell_from_bface_gr_gv(
     let bf: Vec<Gv> = (0..ndim).map(|c| Gv::field(&format!("bf_{c}"), &format!("bf_{c}"))).collect();
     // interpolate each in-plane cell component from its two bounding faces (arithmetic average;
     // metric-free — the cell field is a derived reconstruction / c2p quantity, not conserved). NO
-    // energy patch (spec §6): tau carries the magnetic energy and is conserved by the Godunov flux;
+    // energy patch: tau carries the magnetic energy and is conserved by the Godunov flux;
     // the old metric-weighted `nrg += 1/2 d(gamma_ij B^i B^j)` double-accounted it non-conservatively.
     let writes: Vec<(String, FieldBind, NodeId)> = axes
         .iter()
@@ -975,7 +975,7 @@ pub fn rmhd_edge_emf_uct_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec
 
 /// the CURVED-SPACETIME UCT-HLL edge EMF for the 2.5D (r, theta) poloidal plane — the master
 /// form [`rmhd_edge_emf_uct_gv`] producing the DENSITIZED corner EMF `Etilde_phi` the GR curl
-/// consumes. GENERALIZATION (design 44 GR-UCT): (1) the edge signal speeds are the SHIFTED
+/// consumes. GENERALIZATION (GR-UCT): (1) the edge signal speeds are the SHIFTED
 /// coordinate speeds materialized by `rmhd_wave_speeds_cell_gr_gv` (the BF fast bound minus the
 /// shift — quartic-free; the flux still computes its own inline); (2) the advective velocity is
 /// the transport velocity `vtilde = alpha v - beta` at the corner (the upwound physical v
@@ -1424,7 +1424,7 @@ pub fn nmhd_edge_emf_uct_hllc_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 /// on the advective `a` (eq:dEW). upwind transverse velocity `vbar` (eq:vt), shared with UCT-HLL.
 /// NO floor on rho^{*s}: physical states give rho^{*s} > 0; the degenerate guard (nu* = 0 when the
 /// rotational waves collapse, eps = 1e-9) is the ONLY safeguard. zeroth order = R+/- reconstruction
-/// is identity (theta = 0). spec: literature/uct_algorithm.md §3.4 + mignone_delzanna/method2.tex.
+/// is identity (theta = 0). Mignone & Del Zanna method 2.
 pub fn nmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel, Vec<(String, FieldBind, NodeId)>) {
     begin_trace();
     gv_register_field("h_rho", "rho");
@@ -1700,8 +1700,8 @@ pub fn imhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 
 /// the RELATIVISTIC UCT-HLLD edge EMF (RMHD). built from the WAVE-SUM dissipative flux (Mignone &
 /// Del Zanna 2020 Eq. 39 + MUB09 star states), NOT the classical coefficient form (Eq. 44) — that
-/// bakes in a CLASSICAL velocity-chi that is invalid relativistically and was VERIFIED wrong
-/// (telescoping test, 2026-06-24). derivation + paper proof in `literature/uct_algorithm.md` 3.5.
+/// bakes in a CLASSICAL velocity-chi that is invalid relativistically and fails the
+/// energy-telescoping property.
 ///
 /// the EMF is the centered advection minus the per-direction dissipative flux Phi:
 /// ```text
@@ -1748,8 +1748,8 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
     let nw = cm(&[g1]);
     let se = cm(&[g2]);
     let sw = cm(&[g1, g2]);
-    // PLM-reconstruct a CELL field to a face (same theta + limiter as the gas flux). THE FIX (M&DZ
-    // §3.6 EXACT recipe): the wave-sum's per-face Riemann must use the SAME reconstructed L/R states
+    // PLM-reconstruct a CELL field to a face (same theta + limiter as the gas flux). the Mignone &
+    // Del Zanna exact recipe: the wave-sum's per-face Riemann must use the SAME reconstructed L/R states
     // the gas flux solves, NOT a 2-cell-averaged single edge Riemann — cell states make the EMF fan
     // inconsistent with the flux at sharp reconstruction (the plm=2 checkerboard, the relativistic D1).
     let theta = Gv::scalar("theta");
@@ -1849,7 +1849,7 @@ pub fn rmhd_edge_emf_uct_hlld_gv(ndim: usize, g1: usize, g2: usize) -> (GvKernel
 
 /// the CURVED-SPACETIME UCT-HLLD edge EMF (the wave-sum dissipative form, M&DZ Eq. 39) for the
 /// 2.5D (r, theta) poloidal plane — the sharp, Alfven-resolving GR-UCT EMF. mirrors the flat
-/// `rmhd_edge_emf_uct_hlld_gv` with three GR generalizations (design 44 GR-HLLD): (1) the per-face
+/// `rmhd_edge_emf_uct_hlld_gv` with three GR generalizations (GR-HLLD): (1) the per-face
 /// HLLD Riemann uses the ORTHONORMAL-frame MUB09 solver `hlld_rmhd_states_gr_ortho(.., &face_metric)`
 /// — the flat star fields + speeds map back to the coordinate frame (fields /sqrt(g_i), speeds
 /// /sqrt(g_n)) so the wave-sum telescopes EXACTLY to the coordinate HLLD B_t flux (proven,

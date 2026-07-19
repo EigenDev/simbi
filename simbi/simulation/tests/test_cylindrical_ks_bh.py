@@ -1,7 +1,7 @@
 # =============================================================================
 # test_cylindrical_ks_bh.py
 #
-# design 45 phase 2: GRHD in the CYLINDRICAL kerr-schild chart — a schwarzschild BH on
+# GRHD in the CYLINDRICAL kerr-schild chart — a schwarzschild BH on
 # a 2.5D axisymmetric (R, z) grid with the azimuthal v_phi DOF. the metric is EXACTLY
 # symmetric under z -> -z (r = sqrt(R^2 + z^2) is even in z; gamma_Rz and beta^z flip
 # sign with the z-momentum), so a z-symmetric initial state on a grid symmetric about

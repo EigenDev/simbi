@@ -3,7 +3,7 @@
 //
 // the CPU-native (Rust) sibling of emit_kernel.rs's `emit_kernel_from_lowering`
 // (which emits a CUDA `__global__`). this is the build-time AOT path for the CPU
-// backend (docs/design/10 §4): a scalarized stencil kernel -> a compilable Rust
+// backend: a scalarized stencil kernel -> a compilable Rust
 // `pub fn` that iterates the dispatch window over `&[f64]` / `&mut [f64]`
 // buffers, with the SAME flat-index ABI as the CUDA emitter (coord is absolute;
 // access is `buf[(coord - buf_lo) . strides]`).
@@ -47,7 +47,7 @@
 /// blocks with serial nested loops inside each block, keeping a block's stencil
 /// neighborhood + multi-field working set resident. measured ~1.4-2.1x full-step
 /// over the flat emit, GROWING with grid size, and grid-size-independent
-/// throughput (docs/design/26). 8 and 16 both measured ~optimal; 8 is the
+/// throughput. 8 and 16 both measured ~optimal; 8 is the
 /// conservative default (fits closer to L1/L2).
 const CPU_TILE: usize = 8;
 
@@ -120,7 +120,7 @@ use crate::{ElementTy, Graph};
 /// the Rust (CPU) backend: the per-language spelling for the shared kernel driver
 /// (`emit_render`). produces a compilable generic `pub fn k<S: Scalar>` over `&[S]`
 /// slices with pure-integer indices (one `as usize` at the slice boundary). the
-/// float scalar is the type parameter `S` (docs/design/15 §4: `Sim<f64>`/`Sim<f32>`
+/// float scalar is the type parameter `S` (`Sim<f64>`/`Sim<f32>`
 /// pick it by the buffer type they pass); constants render `S::lit(..)`, math
 /// resolves to the `Scalar` trait. one kernel, every precision — no monomorphized
 /// duplication, no dispatch.
@@ -402,12 +402,12 @@ impl KernelRenderer for RustRenderer {
             // TILED (SYMBI_TILE_CPU=N): parallelize over cache blocks; serial
             // nested loops over each block's cells keep its stencil
             // neighborhood in cache. recovers the per-cell cache-miss penalty
-            // once the grid working set exceeds cache (docs/design/26). per-tile
+            // once the grid working set exceeds cache. per-tile
             // rebind (amortized over the block's cells).
             //
             // the CONTIGUOUS axis is NOT tiled (ndim >= 2): the vectorized
             // (mask-form/SLP) bodies need long unit-stride inner trips —
-            // edge-length trips invert their win (docs/design/47 act 6, the
+            // edge-length trips invert their win (the
             // same law as the cover executor's row-elongated blocks). 1d tiles
             // its only axis: an untiled 1d loop would serialize the kernel.
             let tile = cpu_tile_size();
@@ -1025,7 +1025,7 @@ mod tests {
 
     #[test]
     fn cpu_kernels_are_generic_over_the_scalar() {
-        // the CPU kernel is ONE generic `fn k<S: Scalar>` (docs/design/15 §4) — not
+        // the CPU kernel is ONE generic `fn k<S: Scalar>` — not
         // a monomorphized f64/f32 pair. Sim<f64>/Sim<f32> pick the precision by the
         // buffer type they pass (S inferred); no dispatch. every float spelling is S:
         // buffers &[S], reads `let x: S`, the f64-built ConstValue(2.0) -> S::lit(2.0),

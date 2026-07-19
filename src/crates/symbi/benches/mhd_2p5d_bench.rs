@@ -1,7 +1,7 @@
 // =============================================================================
 // mhd_2p5d_bench.rs
 //
-// increment-4 perf gate (docs/design/30): the GENUINE 2.5D MHD path (spatial D=2,
+// throughput comparison of the GENUINE 2.5D MHD path (spatial D=2,
 // vector DOF=3) vs the legacy 3D-with-nz=1 HACK, on the same Orszag-Tang vortex.
 // the 2.5D run removes the wasted z-sweep, the z-ghosts, and the 3D loop overhead;
 // the cache-tiling executor (policy_for, D-generic) then tiles the genuine 2D grid.

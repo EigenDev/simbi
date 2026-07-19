@@ -73,7 +73,7 @@ fn build_root(cells: [usize; 2], origin: [f64; 2], bnd: Boundaries<2>, ts: Times
 }
 
 // the MONOLITHIC reference: one full-grid root + the refined patch, run via the CANONICAL
-// `hier.evolve()` (so the oracle validates BOTH the decomposition AND that the staged driver
+// `hier.evolve()` (so the test validates BOTH the decomposition AND that the staged driver
 // reproduces the canonical recursive advance).
 fn build_mono(ts: Timestepping) -> Hier {
     let root = build_root([N, N], [0.0, 0.0], Boundaries::uniform(BoundaryType::Outflow), ts);
@@ -122,9 +122,9 @@ fn build_tiles(counts: [usize; 2], ts: Timestepping) -> Vec<Hier> {
     tiles
 }
 
-// drive the tiles through the PRODUCTION decomposed-hierarchy loop (symbi-amr): the oracle now
-// tests the same `evolve_hierarchy_decomposed` a multi-gpu refinement run would call, so a
-// divergence between the proof and production is impossible. host: all tiles on "device 0".
+// drive the tiles through the PRODUCTION decomposed-hierarchy loop (symbi-amr): exercises the
+// same `evolve_hierarchy_decomposed` a multi-gpu refinement run would call, so a divergence
+// between test and production is impossible. host: all tiles on "device 0".
 fn run_decomposed(tiles: &mut [Hier], counts: [usize; 2], t_final: f64, ts: Timestepping) {
     let devices: Vec<i32> = vec![0; tiles.len()];
     evolve_hierarchy_decomposed(

@@ -1,7 +1,7 @@
 // =============================================================================
 // regimes/substrate_kernels/runtime_source.rs
 //
-// Gap B (Path B) — RUNTIME user sources, REGIME-AGNOSTIC. one mechanism for every
+// RUNTIME user sources, REGIME-AGNOSTIC. one mechanism for every
 // regime: a spec-validated `RuntimeSource` (DAGs + params + has_energy) drives the CPU
 // per-cell interpreter, the lazily-JIT'd fused host kernel, and the device NVRTC kernel,
 // all from the SAME `BuiltSource`s. also the `dispatch_runtime_ir` device path for any
@@ -93,7 +93,7 @@ pub fn dispatch_runtime_ir<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 // =============================================================================
-// Gap B (Path B) — RUNTIME user sources, REGIME-AGNOSTIC.
+// RUNTIME user sources, REGIME-AGNOSTIC.
 //
 // ONE mechanism for every regime. the regime supplies only `has_energy` (from its static
 // `RegimeSpec`, stamped at attach by the kernel-set — the authority, not the caller); the
@@ -115,7 +115,7 @@ pub struct RuntimeSource {
     pub params: Vec<f64>,
     pub(crate) has_energy: bool,
     pub(crate) gpu_ir: OnceLock<(String, String)>,
-    /// the FUSED host path (v2 inc 3+4): the godunov+source `GvKernel` Cranelift-JIT'd into ONE
+    /// the FUSED host path: the godunov+source `GvKernel` Cranelift-JIT'd into ONE
     /// native kernel, lazily built on first host dispatch (geometry known only then), cached for the
     /// run. `Some(None)` = built but out-of-JIT-subset -> dispatch falls back to the two-pass. a
     /// `CompiledKernel` is a bare code ptr (`Send + Sync`), so this field does NOT make `RuntimeSource`
@@ -126,7 +126,7 @@ pub struct RuntimeSource {
     /// into one native kernel dispatched over the interior like any other — replacing the per-cell
     /// evaluation harness, whose per-cell coord/param/lookup orchestration measured 93 ns/zone-cycle
     /// on the bondi sponge (vs ~4 for a compiled kernel over the same math). `Some(None)` = out of
-    /// jit subset -> the per-cell path remains the fallback oracle.
+    /// jit subset -> the per-cell path remains the fallback.
     source_cpu: OnceLock<Option<FusedCpuKernel>>,
 }
 
@@ -161,8 +161,9 @@ impl RuntimeSource {
     /// the fused host-kernel build state, for tests/introspection: `None` = never attempted (the
     /// fused path was not taken — wrong carrier, device memory, or `fuse_runtime` off); `Some(true)`
     /// = the godunov+source kernel JIT-compiled and the fused path is live; `Some(false)` = it fell
-    /// outside the JIT subset and the dispatch fell back to the two-pass. the oracle asserts
-    /// `Some(true)` so a silent fallback can't make `fused == two-pass` pass vacuously.
+    /// outside the JIT subset and the dispatch fell back to the two-pass. the fused-vs-two-pass
+    /// equivalence check asserts `Some(true)` so a silent fallback can't make `fused == two-pass`
+    /// pass vacuously.
     pub fn fused_cpu_state(&self) -> Option<bool> {
         self.fused_cpu.get().map(|o| o.is_some())
     }
@@ -189,7 +190,7 @@ pub fn dispatch_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
 }
 
 /// the CPU per-cell pass: read the STAGE-INPUT state from `u_stage` (S taken at the stage input —
-/// the S2 invariant the fused/AOT pass also obeys), evaluate the user source per cell, and add
+/// the invariant the fused/AOT pass also obeys), evaluate the user source per cell, and add
 /// `weight * S` to the target conserved field in place. host-memory ONLY.
 fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
@@ -245,7 +246,7 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
             let inputs = &inbuf[..params.len()];
 
             // compute the source contribution `out[0..n_out]`: the NATIVE JIT path when the field
-            // compiled (allocation-free), else the interpreter ORACLE fallback (allocates; only when
+            // compiled (allocation-free), else the interpreter fallback (allocates; only when
             // a node fell outside the JIT subset).
             let mut out = [0.0f64; MAX_OUT];
             let n_out = if let Some(jit) = eval.jit_components(field) {
@@ -299,7 +300,8 @@ fn apply_runtime_source<const D: usize, const DOF: usize, Mem, Sc>(
 /// build the FUSED godunov+source host kernel from a runtime user source: trace the combined
 /// `GvKernel` (the step-2 `godunov_stage_gv_with_fused_built` core, fed the loaded `BuiltSource`s)
 /// and Cranelift-JIT it. `None` when a node falls outside the JIT subset -> the caller runs the
-/// two-pass. `geo` MUST match the AOT godunov the two-pass uses (the bit-equivalence the oracle gates).
+/// two-pass. `geo` MUST match the AOT godunov the two-pass uses, so the fused and two-pass results
+/// stay bit-equivalent.
 fn build_fused_cpu_kernel<const D: usize>(
     coords: symbi_discretize::Coords,
     spacing: &[symbi_discretize::Spacing],
@@ -362,7 +364,7 @@ fn build_source_only_cpu_kernel<const D: usize>(
 }
 
 /// the GATE for the compiled standalone source pass: host memory AND `Sc == f64` AND the
-/// source-only kernel compiled. `None` -> the per-cell evaluation path (the oracle fallback).
+/// source-only kernel compiled. `None` -> the per-cell evaluation path (the fallback).
 pub(crate) fn source_only_cpu_kernel<'a, const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     rs: &'a RuntimeSource,
@@ -445,7 +447,7 @@ fn dispatch_source_only_cpu<const D: usize, const DOF: usize, Mem, Sc>(
 
 /// the GATE for the fused host path: returns the cached `FusedCpuKernel` only when it applies —
 /// host memory AND `Sc == f64` (the JIT reads/writes raw f64 buffers) AND `SYMBI_FUSE=1` or the
-/// source-only kernel missed the jit subset (E3: the two-pass with a compiled source pass is the
+/// source-only kernel missed the jit subset (the two-pass with a compiled source pass is the
 /// default) AND the kernel compiled. any failure returns `None` -> the caller runs the two-pass
 /// (plain AOT godunov + the source pass). builds + caches on first call (geometry known only here). both
 /// `godunov_stage` and `source_apply` call this with the SAME `geo` so they agree on whether the
@@ -471,7 +473,7 @@ where
     if std::any::TypeId::of::<Sc>() != std::any::TypeId::of::<f64>() {
         return None;
     }
-    // the two-pass default (E3) needs the compiled source-only pass to be viable —
+    // the two-pass default needs the compiled source-only pass to be viable —
     // the per-cell interpreter harness (~93 ns/zone-cycle) must never be the
     // default. a source outside the jit subset keeps the fused kernel.
     if !fuse_override() && source_only_cpu_kernel(sim, rs).is_some() {
@@ -514,7 +516,7 @@ where
 /// two-pass the body. cached on the KERNEL-SET (not a RuntimeSource, since there is none). host+f64 +
 /// energy regime + bodies present; `None` otherwise (nothing to fold, or the two-pass fallback). the
 /// body is baked at MAX_BODIES to match the standalone `body_source` (unused slots zero via mass = 0).
-/// the fused-vs-two-pass policy (executor law E3, docs/design/48): the two-pass —
+/// the fused-vs-two-pass policy: the two-pass —
 /// llvm-compiled aot godunov + the standalone aot body pass + the compiled
 /// cranelift source-only pass — is the DEFAULT. fusing puts ALL the stage compute
 /// under cranelift (no slp, simpler scheduling); the two-pass pays one extra
@@ -548,7 +550,7 @@ where
     if !has_energy || sim.immersed.is_none() {
         return None;
     }
-    // E3: the body-only two-pass (aot godunov + the standalone aot body pass) is
+    // the body-only two-pass (aot godunov + the standalone aot body pass) is
     // always compiled, so the default is unconditionally two-pass.
     if !fuse_override() {
         return None;
@@ -803,7 +805,7 @@ pub(crate) fn gv_kernel_to_ir(
             kernel_name:      nm,
             ndim,
             // inert token: `prepare` does NOT bake the target into the neutral `Prepared` IR
-            // (it carries no target field — docs/design/15: "one blob renders every backend").
+            // (it carries no target field — one blob renders every backend).
             // the LIVE render target is `GpuBackend::TARGET` in `run_gpu`; this stays a fixed
             // value only so the content-hash below is stable.
             target:           TargetConfig { target: Target::Cuda, precision: Precision::F64 },

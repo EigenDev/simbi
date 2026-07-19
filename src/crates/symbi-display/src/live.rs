@@ -1,7 +1,7 @@
 // =============================================================================
 // live.rs
 //
-// the live tabbed diagnostic dashboard (design 40). a pure render over a
+// the live tabbed diagnostic dashboard. a pure render over a
 // `DiagnosticView` snapshot — the same code drives the throwaway skeleton
 // (dummy data) and the production `Table` (a live per-cadence reduction), so
 // look-and-feel iterates in the fast example while production inherits it.
@@ -322,7 +322,7 @@ fn render_hero(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     }
 }
 
-/// the hero panel — reserved for the live field view (tier 2); holds
+/// the hero panel — reserved for the live field view; holds
 /// the throughput trace.
 fn render_throughput_hero(frame: &mut Frame, area: Rect, view: &DiagnosticView) {
     let block = Block::new()

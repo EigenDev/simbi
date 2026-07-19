@@ -65,7 +65,7 @@ fn aot_mass_godunov_step_matches_hand_written() {
 fn aot_mass_godunov_runs_at_f32() {
     // the SAME generic kernel `godunov_mass_1d<S: Scalar>` instantiated at f32 — S
     // inferred from the &[f32] buffers + f32 scalars. proves the precision-generic
-    // codegen (docs/design/15 §4): one kernel, run at f32, Scalar-for-f32 forwarding
+    // codegen: one kernel, run at f32, Scalar-for-f32 forwarding
     // to f32::* correctly. no separate f32 kernel, no dispatch — just inference.
     let n = 8usize;
     let (dt, dx) = (0.01_f32, 0.5_f32);

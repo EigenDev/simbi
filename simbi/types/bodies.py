@@ -112,11 +112,11 @@ class BodySystemConfig:
 class GravitationalSystemConfig(BodySystemConfig):
     """Configuration for gravitational system."""
 
-    # General gravitational config
+    # general gravitational config
     prescribed_motion: bool
     reference_frame: str
     system_type: str
-    # Only used if system_type="binary"
+    # only used if system_type="binary"
     binary_config: BinaryConfig
 
     def to_backend(self) -> dict[str, Any]:
@@ -154,7 +154,7 @@ class AccretionProperties:
     sink_rate: float = 0.0
     total_accreted_mass: float = 0.0
     accretion_rate: float = 0.0
-    # the porous surface dial (docs/design/50): None keeps the pure drain.
+    # the porous surface dial: None keeps the pure drain.
     # porosity p scales the drain channel, (1 - p) the wall channels; the
     # wall rates are k_eta_* c_s / dx (multiplicative dials, zero = channel
     # off exactly, so k_eta_t = 0 is a free-slip surface). p = 0 is a sealed
@@ -214,7 +214,7 @@ class RigidProperties:
     # k_eta_* c_s / dx: k_eta_n (normal, no-penetration) always acts; k_eta_t
     # (tangential) acts only under no-slip (apply_no_slip False = free slip, so
     # the tangential channel is switched off exactly). inertia carries the body's
-    # moment of inertia for the (future) two-way rotational coupling. `shape` is an
+    # moment of inertia for the two-way rotational coupling. `shape` is an
     # optional signed-distance CSG (body-local frame): None is the analytic sphere of
     # radius `body.radius`; a Shape gives an arbitrary rigid wall whose penalization
     # kernel is runtime-built + JIT-compiled per distinct geometry.

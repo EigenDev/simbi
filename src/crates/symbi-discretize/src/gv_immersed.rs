@@ -1,13 +1,13 @@
 // =============================================================================
 // gv_immersed.rs
 //
-// the immersed-boundary body source terms traced at S = Gv (docs/design/19):
+// the immersed-boundary body source terms traced at S = Gv:
 //   - body_source_gv  (FORWARD, bodies -> fluid): softened gravity + Bondi-Hoyle accretion,
 //     cons -> cons in-place (`cons += dt * S`).
 //   - body_feedback_gv (BACKWARD, fluid -> bodies): per-cell per-body force / torque / accreted
 //     mass -> scratch fields a device reduction sums into each body's BodyDelta.
 //
-// GENERIC over coordinate system (docs/design/19): the physics is done in CARTESIAN
+// GENERIC over coordinate system: the physics is done in CARTESIAN
 // (coord-free) — `cell_scaffold` supplies the cell's cartesian position + gas velocity via the
 // gv to_cartesian / vector_to_cartesian transforms; the forward source PROJECTS gravity + sink
 // velocity onto the physical momentum frame (vector_from_cartesian), the feedback keeps the
@@ -41,7 +41,7 @@ fn sq(a: Gv) -> Gv {
 
 /// per-cell, per-body physics in CARTESIAN (coord-free): softened gravity `g`, the well-posed
 /// DRAIN RATE `drain_rate` (1/time; the fluid in the mask relaxes by `exp(-drain_rate*dt)`), and
-/// `rvec = cell - body`. the drain (docs/ideas/accretor.md) replaces the KMK04 mass-only sink: a
+/// `rvec = cell - body`. the drain replaces the KMK04 mass-only sink: a
 /// UNIFORM exponential scaling of every conserved component leaves the intensive primitive state
 /// invariant (no acoustic injection, positivity-preserving for any dt) and the accretion rate is
 /// EMERGENT (the reduced `U(1 - exp(-rate*dt))`).
@@ -52,7 +52,7 @@ struct BodyContributionGv {
 }
 
 /// the CARTESIAN axes (0=x,1=y,2=z) a body's ndim-D position/velocity components map to — the
-/// grid-plane convention (docs/design/19). identical to `immersed::body_cart_axes`.
+/// grid-plane convention. identical to `immersed::body_cart_axes`.
 fn body_cart_axes(coords: Coords, ndim: usize, axes: &[usize]) -> Vec<usize> {
     match coords {
         Coords::Cartesian => (0..ndim).collect(),
@@ -212,7 +212,7 @@ fn body_contribution(
     // (g = -grad phi) + bounded in the well-posedness suite (`ibm.rs`).
     let g = crate::ibm::softened_gravity(rvec, mass, soft);
 
-    // the well-posed DRAIN rate (accretor.md §2): chi * min(sink, cs/dx), the mollified mask chi =
+    // the well-posed DRAIN rate: chi * min(sink, cs/dx), the mollified mask chi =
     // 0.5(1 - tanh((r - r_mask)/w)) (w = one cell) times the sound-crossing-capped sink. `sink_rate`
     // (per body) is the user dial: 0 for a non-accreting body (drain_rate = 0, exact no-op), large ->
     // the full sound-crossing drain. carrier-generic form proven nonnegative -> f in (0,1] (`ibm.rs`).
@@ -259,7 +259,7 @@ pub(crate) fn body_evolved_gv(
         cell_scaffold(coords, ndim, ncomp, axes, gamma, den, mom, nrg);
 
     // gravity is an ADDITIVE momentum + energy source; the drain is the TOTAL rate over all bodies,
-    // applied as ONE uniform multiplicative factor (per accretor.md §2, the exact-exponential
+    // applied as ONE uniform multiplicative factor (the exact-exponential
     // relaxation). the two operators split cleanly: gravity accelerates, then the mask drains.
     let mut d_mom: Vec<Gv> = vec![Gv::ZERO; ncomp];
     let mut d_nrg = Gv::ZERO;
@@ -495,7 +495,7 @@ pub fn body_feedback_gv(
 }
 
 // =============================================================================
-// isothermal variants (docs/design/19; no energy equation)
+// isothermal variants (no energy equation)
 //
 // the immersed-body PHYSICS is EOS-independent — softened gravity + Bondi-Hoyle
 // accretion are functions of (den, mom, cs) only via the SHARED `body_contribution`.

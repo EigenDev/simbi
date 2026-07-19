@@ -170,7 +170,7 @@ pub fn dispatch_named<const D: usize, const DOF: usize, Mem, Sc>(
     // inside `dispatch_fields_each` — bit-identical to a shared layout for cell-centered fields
     // (where `f.domain() == sim.geom.allocated`), and the ONLY thing that lets a STAGGERED field
     // (the CT `bface[dir]`, whose domain differs) bind by the same manifest path as every cell
-    // field. this is the structural cure (docs/design/38): no kernel hand-orders a buffer list,
+    // field. this is the structural cure: no kernel hand-orders a buffer list,
     // no dispatch assumes a uniform layout. `dispatch_fields_each` carries the target-aware
     // cover/whole policy internally (host block-split when a serial twin exists; one whole launch
     // on device), so the scheduling seam is unchanged.
@@ -857,7 +857,7 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
         }
 
         // drain-weighted quantities: support-box dispatch + reduce. the box derives
-        // from the drain kernel's DECLARED output support (docs/design/48 part 3):
+        // from the drain kernel's DECLARED output support:
         // evaluate the ball with this body's own scalar table (the same values the
         // kernel receives), convert to index space, clamp to the interior. a
         // non-accreting body has no sink (every drain output is identically zero)
@@ -928,16 +928,15 @@ fn dispatch_body_feedback_split<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// dispatch the [Drain]-stack immersed-boundary penalization (docs/design/50
-/// step 2b): per accreting body, run `penalize_drain_{D}d` over the kernel's
+/// dispatch the [Drain]-stack immersed-boundary penalization: per accreting
+/// body, run `penalize_drain_{D}d` over the kernel's
 /// DECLARED support ball (evaluated with this body's scalar table, clamped to
 /// the interior), in place on cons, with the per-cell exchange deltas reduced
 /// into the diagnostics accumulator — the same feedback stream the sink path
 /// feeds, so Mdot(t)/F_acc(t) land in the body history unchanged. cartesian +
 /// adiabatic only (the baked envelope); `c_drain` is the convergence dial
-/// (tau = c_drain dx / c_s), never tuned to a target rate. runs beside the
-/// production sink until the bondi equivalence gate (design 50 gate 4b)
-/// retires one of them.
+/// (tau = c_drain dx / c_s), never tuned to a target rate. a parallel accretion
+/// mechanism to the drain sink.
 pub fn dispatch_penalize<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     dt: f64,
@@ -1847,7 +1846,7 @@ pub fn dispatch_source_apply<const D: usize, const DOF: usize, Mem, Sc>(
     );
 }
 
-/// **B6-iv (Phase 4b) — declarative fused-source binding** for a substrate kernel-set.
+/// **declarative fused-source binding** for a substrate kernel-set.
 /// the kernel-set holds an `Option<FusedSourceBinding>`; when `Some`, `godunov_euler` /
 /// `godunov_rk2` route through `dispatch_godunov_with_sources` (the AOT-baked fused
 /// kernel); when `None`, the unfused `dispatch_godunov` (backwards-compat default).
@@ -1872,7 +1871,7 @@ impl FusedSourceBinding {
         }
     }
 
-    /// **B6-iv Phase 4c**: construct from the `(source_id, scalar_pairs)` tuple
+    /// construct from the `(source_id, scalar_pairs)` tuple
     /// `symbi_hydro::SimulationLaws::derive_fused_binding()` returns. closes the
     /// data-driven loop: a `SimulationLaws` declaration becomes a substrate-ready
     /// binding without the caller hand-spelling param names.
@@ -1910,7 +1909,7 @@ pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
     }
 }
 
-/// **B6-iv (Phase 4) — fused-source godunov dispatch.** the same metadata-driven path as
+/// **fused-source godunov dispatch.** the same metadata-driven path as
 /// `dispatch_godunov`, but selects the AOT-baked FUSED kernel
 /// `{prefix}_godunov_{kind}_with_{source_id}{sfx}_{D}d` and feeds it the spec source's
 /// scalar parameters (e.g., `g_ext_0 = -9.81` for `uniform_acceleration_sources`)
@@ -1930,7 +1929,7 @@ pub fn dispatch_godunov_maybe_fused<const D: usize, const DOF: usize, Mem, Sc>(
 /// only new SCALARS.
 ///
 /// callers that want the unfused kernel keep using `dispatch_godunov`. one launch
-/// replaces two (godunov + body_source) on the AOT-baked fused configs (B6-iii).
+/// replaces two (godunov + body_source) on the AOT-baked fused configs.
 #[allow(clippy::too_many_arguments)]
 pub fn dispatch_godunov_with_sources<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,

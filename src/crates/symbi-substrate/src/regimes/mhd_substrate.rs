@@ -13,7 +13,7 @@
 //
 // the 1/2|B|^2 magnetic-energy correction in `rmhd_bcell_from_bface` is the
 // NEWTONIAN form exactly (it is only an approximation for RMHD), so sharing it is
-// correct for both. see docs/design/29.
+// correct for both.
 //
 // usage:
 //  mhd_substrate::godunov_stage(sim, has_energy, gas_prefix, gamma, dt, a0, ac);
@@ -73,7 +73,7 @@ pub(crate) fn field_layout<const D: usize, Mem: MemorySpace, Sc: Scalar + Ordere
 }
 
 // route one structured invocation to the GPU (Mem device-accessible) or the
-// generated CPU kernel — the dispatch seam of docs/design/15 §5.
+// generated CPU kernel — the dispatch seam.
 #[inline]
 fn invoke<Sc, Mem, F>(inv: KernelInvocation<Sc>, ir: &str, name: &str, cpu: F)
 where
@@ -290,7 +290,7 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
     // BY MANIFEST through `dispatch_named`. the IN-PLANE cell B is a DERIVED quantity — after the CT
     // curl, `bcell_from_bface` overwrites it with `interp(bface)` — but the gas energy flux F_tau
     // carries the magnetic energy (the Poynting term), so tau is conserved by the flux WITHOUT any
-    // magnetic-energy patch (spec §6). the curvilinear geo-source prim reads are regime-specific (RMHD
+    // magnetic-energy patch. the curvilinear geo-source prim reads are regime-specific (RMHD
     // rho/vel/pre/mag, NMHD/IMHD vel/mag/pre), so the buffer layout tracks the kernel artifact (a
     // hand-built list would scramble NMHD/IMHD when DOF != D).
     let gname = format!("{gas_prefix}_godunov_stage{sfx}_{D}d");
@@ -304,10 +304,10 @@ pub(crate) fn godunov_stage<const D: usize, const DOF: usize, Mem, Sc>(
 
     // the cell-B induction-flux predictor for the OUT-OF-PLANE (non-CT) magnetic components: By,Bz in
     // 1.5D and Bz in 2.5D (curvilinear: Bphi) have no staggered face to curl and are cell-centered
-    // conserved variables evolved here by the induction-flux divergence (docs/design/30). the in-plane
+    // conserved variables evolved here by the induction-flux divergence. the in-plane
     // components are re-derived by `bcell_from_bface` and are NOT touched by the predictor — flux-
     // evolving them would poison the FOFC/c2p recoverability probe now that the magnetic-energy patch
-    // is gone (spec §6 / oop_predictor_spec.md). a fully-gridded chart (D == DOF, i.e. 3D) has NO
+    // is gone. a fully-gridded chart (D == DOF, i.e. 3D) has NO
     // out-of-plane component, so the predictor is a no-op and is not dispatched. forward-Euler (0,1)
     // steps bcell; SSP-RK2 (1/2,1/2) combines with bcell_n (both guaranteed by the assert above). the
     // predictor is always the rmhd_* kernel (Faraday induction is regime-agnostic); its name carries
@@ -722,10 +722,10 @@ pub(crate) fn fofc_emf_splice<const D: usize, const DOF: usize, Mem, Sc>(
 //     never in the complex, so "Bz rides the induction-flux divergence" is not special).
 //
 // efield[slot] stores edge `slot` (enumeration position, < C(D,2) <= D for D<=3).
-// 1.5D / 2.5D / 3D are the SAME dispatch evaluated at different D. see docs/design/30.
+// 1.5D / 2.5D / 3D are the SAME dispatch evaluated at different D.
 // =============================================================================
 
-// the grid-axis -> vector-component map (docs/design/30, the axis-set seam) lives on the sim:
+// the grid-axis -> vector-component map (the axis-set seam) lives on the sim:
 // `sim.geom.axes`. grid axis d carries physical component `axes[d]`; the complement of {axes}
 // in 0..DOF is out-of-plane. identity for cartesian/spherical/3D; the cylindrical 2D plane is
 // r-z [0,2] (default, phi out-of-plane) or r-phi [0,1] (disk, z out-of-plane) per
@@ -1032,7 +1032,7 @@ pub fn apply_resistive_emf<const D: usize, const DOF: usize, Mem, Sc>(
         // the resistive J is METRIC-FREE for every orthogonal chart (the metric lives in the induction
         // curl + the physical energy weights), so the plain difference curl is the adjoint in 3D
         // cartesian AND 3D curvilinear (identity axes -> the cyclic curl is right-handed for all of
-        // cartesian / spherical / cylindrical); the geometry-agnostic oracle verifies each.
+        // cartesian / spherical / cylindrical); a geometry-agnostic reference verifies each.
         (Cartesian, 3) | (Spherical, 3) | (Cylindrical, 3) => resistive_emf_3d::<D, DOF, Mem, Sc>(sim, eta),
         // 2.5D: cyl r-z is metric-free in-plane and left-handed (its own kernel); the ortho kernel
         // serves the right-handed cyl r-phi and spherical r-theta.
@@ -1382,7 +1382,7 @@ pub fn ct_curl<const D: usize, const DOF: usize, Mem, Sc>(
 /// -> cons.nrg. IDEMPOTENT: once `bcell == interp(bface)` a second call adds a zero energy patch, so
 /// the gas-only FOFC redo re-runs it to re-attach the consistent cell B + patch onto the FOFC'd gas
 /// (the redo feeds the cell-B predictor the HIGH-ORDER induction flux, so `bcell_old` is the HO
-/// predictor and the patch is the small HO reconciliation, not a shock — see the C2 fix / §3').
+/// predictor and the patch is the small HO reconciliation, not a shock).
 pub(crate) fn bcell_from_bface<const D: usize, const DOF: usize, Mem, Sc>(
     sim: &FieldStore<D, DOF, Mem, Sc>,
     has_energy: bool,

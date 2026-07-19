@@ -1,7 +1,7 @@
 // =============================================================================
 // symbi-substrate/src/lib.rs
 //
-// the substrate crate (docs/design/41): the live per-regime substrate
+// the substrate crate: the live per-regime substrate
 // `KernelSet`s (iso / adiabatic / rhd / rmhd / mhd), the regime -> KernelSet map
 // (`RegimeSubstrate` + the `SimSubstrate` front door), the shared substrate-kernel
 // dispatch (binding / params / dispatch / runtime_source / boundary), and the
@@ -22,5 +22,5 @@
 pub mod regimes;
 
 // shared kernel-set support (cfl_from_lambda, GhostFillDriver, ...) — the
-// hand-written per-regime kernel sets were retired (docs/design/18).
+// hand-written per-regime kernel sets were retired.
 pub mod kernels;

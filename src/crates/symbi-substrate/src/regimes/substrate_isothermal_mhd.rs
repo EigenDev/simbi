@@ -2,7 +2,7 @@
 // regimes/substrate_isothermal_mhd.rs
 //
 // the isothermal-MHD KernelSet is now the `R = IsothermalMhd` instance of the unified
-// `MhdSubstrateKernelSet` (docs/design/35 R1). thin back-compat alias; the
+// `MhdSubstrateKernelSet`. thin back-compat alias; the
 // implementation (trivial c2p, HLLE/HLLD flux with `p = cs^2 rho`, the shared CT stack)
 // lives once in `substrate_mhd` + `mhd_substrate`, driven by `IsothermalMhd::SPEC`
 // (`has_energy = false` -> the pre/nrg field rows are dropped; `cs` is the EOS scalar).

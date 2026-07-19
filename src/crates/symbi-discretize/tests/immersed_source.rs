@@ -1,7 +1,7 @@
 // =============================================================================
 // immersed_source.rs
 //
-// validates the substrate body_source builder (docs/design/19) against an
+// validates the substrate body_source builder against an
 // independent inline implementation of the same spec: an interpreter run on a known
 // state with one ACTIVE body + one INACTIVE body (mass=0, sink=0) to prove the
 // branch-free MAX_BODIES loop contributes exactly zero for inactive slots.
@@ -108,7 +108,7 @@ fn body_source_accretion_matches_spec() {
             let r_mag = r_dist2.sqrt();
 
             // gravity is an additive momentum + energy source; the DRAIN then scales EVERY
-            // conserved component by f = exp(-drain_rate*dt) (docs/ideas/accretor.md).
+            // conserved component by f = exp(-drain_rate*dt).
             let g = [-M0 * rvec[0] / r_eff3, -M0 * rvec[1] / r_eff3];
             let mom_grav = [m0_in + DT * den_in * g[0], m1_in + DT * den_in * g[1]];
             let nrg_grav = nrg_in + DT * (m0_in * g[0] + m1_in * g[1]);

@@ -50,7 +50,7 @@ const ISO_GAMMA: f64 = 1.0;
 /// a D-generic isothermal `KernelSet`, every method substrate-generated.
 pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> {
     pub cs: f64,
-    /// the drain timescale dial tau = c_drain dx / c_s (accretor.md §2.3).
+    /// the drain timescale dial tau = c_drain dx / c_s.
     pub c_drain: f64,
     /// constant kinematic viscosity nu. 0 = inviscid (the
     /// viscous pass and its CFL cap are inert). >0 selects the Navier-Stokes
@@ -89,10 +89,10 @@ pub struct IsoSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, 
     /// agnostic mechanism (shared with the energy regimes); iso stamps `has_energy = false`, so a
     /// `cooling` or `nrg`-targeted source was already rejected at `build_user_source`.
     pub runtime_source: Option<Arc<RuntimeSource>>,
-    /// **v2 inc 3+4**: when true AND a `runtime_source` is attached, the runtime user source is
+    /// when true AND a `runtime_source` is attached, the runtime user source is
     /// FUSED into the godunov stage as ONE Cranelift-JIT'd host kernel instead of the two-pass.
-    /// opt-in + gated (host + f64); falls back to the two-pass otherwise. proven bit-for-bit by
-    /// `jit_fused_equals_two_pass`.
+    /// opt-in + gated (host + f64); falls back to the two-pass otherwise. bit-for-bit identical
+    /// to the two-pass path.
     pub fuse_runtime: bool,
     /// gradient-boundary (Neumann / Robin) coefficients, indexed by the `BoundaryType::Neumann(id)` /
     /// `Robin(id)` id. the shared fills, fed `cs^2` so the ghost honours `pre = cs^2*rho`.
@@ -214,9 +214,9 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         self
     }
 
-    /// **v2 inc 3+4**: attach a runtime user source AND route it through the FUSED host path (the
+    /// attach a runtime user source AND route it through the FUSED host path (the
     /// source rides inside the Cranelift-JIT'd godunov stage, one launch). same physics as
-    /// `with_runtime_source`, bit-for-bit, proven by `jit_fused_equals_two_pass`; host + f64 only,
+    /// `with_runtime_source`, bit-for-bit identical; host + f64 only,
     /// else it falls back to the two-pass.
     pub fn with_fused_runtime_source(
         mut self,
@@ -364,7 +364,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
             return;
         }
         // the geometric-source pressure is the substrate-owned self.pre (= cs^2*rho).
-        // fused_source: None => unfused kernel (the prior default), Some => AOT-baked
+        // fused_source: None => unfused kernel (the default), Some => AOT-baked
         // fused variant in one launch (`iso_godunov_stage_with_{source_id}_{D}d`).
         // the FUSED runtime-source path (one JIT'd godunov+source launch); gated host+f64, the
         // source's separate pass skipped in `source_apply` under the same predicate. iso reads the
@@ -620,7 +620,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize> Kerne
     }
 
     fn penalize(&self, sim: &FieldStore<D, D, Mem, Sc>, dt: f64) {
-        // the [Drain] stack (docs/design/50): the sole accretion mechanism on
+        // the [Drain] stack: the sole accretion mechanism on
         // cartesian grids; the iso kernel reads `cs` through the eos-param slot.
         crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.cs, self.c_drain);
     }

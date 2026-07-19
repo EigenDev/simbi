@@ -1,7 +1,7 @@
 // =============================================================================
 // aot_ghost_fill.rs
 //
-// run the BUILD-TIME-GENERATED lattice-map pullback ghost fill (docs/design/11),
+// run the BUILD-TIME-GENERATED lattice-map pullback ghost fill,
 // compiled into this crate from the substrate, and check it against the lattice-
 // map definition: read prim at the integer source coord (periodic / reflect /
 // outflow), write at the cell, velocity picks up the per-axis Jacobian sign.

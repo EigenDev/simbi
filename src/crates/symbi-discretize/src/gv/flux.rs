@@ -708,7 +708,7 @@ pub fn rmhd_flux_gv(ndim: u8, dir: u8, coord_n: usize) -> (GvKernel, Vec<(String
         writes.push((format!("flux_mag_{k}"), format!("flux.mag_{k}").into(), flux.mag[k].node()));
     }
 
-    // Gate 3 smem tile (docs/design/22): reconstruction is 1D ALONG `dir`, so the
+    // the smem tile: reconstruction is 1D ALONG `dir`, so the
     // tile is a thin SLAB — halo on axis `dir` only, transverse axes unextended.
     // the tiled set is derived from the graph (the shifted `LoadAt` fields: the 8
     // reconstructed prim + the 2 per-cell wave speeds), NOT a hand-kept list.

@@ -1,7 +1,7 @@
 // =============================================================================
 // livethread.rs
 //
-// render-thread decouple (design 40, tier 2a). the solver thread PUBLISHES a
+// render-thread decouple. the solver thread PUBLISHES a
 // DiagnosticView snapshot at its cadence; a dedicated render thread owns the
 // ratatui terminal, draws at ~30 fps, and handles keyboard input — so tab / pause
 // respond instantly regardless of step rate, the ui never freezes on a heavy step,

@@ -2,7 +2,7 @@
 // regimes/substrate_newtonian_mhd.rs
 //
 // the Newtonian-MHD KernelSet is now the `R = NewtonianMhd` instance of the unified
-// `MhdSubstrateKernelSet` (docs/design/35 R1). thin back-compat alias; the
+// `MhdSubstrateKernelSet`. thin back-compat alias; the
 // implementation (algebraic c2p, inline-magnetosonic HLLE/HLLC/HLLD flux, the shared
 // CT stack) lives once in `substrate_mhd` + `mhd_substrate`, driven by `NewtonianMhd::SPEC`
 // (`has_energy = true`, `materializes_wave_speeds = false`).

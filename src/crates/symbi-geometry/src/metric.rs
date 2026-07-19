@@ -172,7 +172,7 @@ pub trait Metric<S: Scalar, const D: usize> {
     ///   cylindrical 1D: r  (not 1)
     ///   cylindrical 2D: r  (not 1)
     ///
-    /// REQUIRED, no default (M6 / D4): the natural default `= sqrt_det_gamma` is WRONG for every
+    /// REQUIRED, no default: the natural default `= sqrt_det_gamma` is WRONG for every
     /// REDUCED-dimension metric — it drops the jacobian of the suppressed angular directions (a
     /// spherical-1D cell volume is r^2 dr, not the 1x1 `sqrt_det_gamma = 1`). a silent default there
     /// bakes the wrong face area / cell volume with no error. forcing it means a full-rank metric
@@ -190,7 +190,7 @@ pub trait Metric<S: Scalar, const D: usize> {
     /// global Cartesian frame. default: identity (cartesian: Ortho == Cart); override for
     /// non-cartesian (the rotation by the orthonormal basis directions). typed so the review's
     /// `vector_to_cartesian(lower(v))` is now a COMPILE ERROR — `lower` yields `Covariant`
-    /// (coordinate basis), this wants `Physical` (orthonormal). docs/design/31.
+    /// (coordinate basis), this wants `Physical` (orthonormal).
     fn vector_to_cartesian(&self, x: Tensor<S, D>, v: Physical<S, D>) -> Embedded<S, D>
     where
         Self: DiagonalMetric<S, D>,
@@ -209,10 +209,10 @@ pub trait Metric<S: Scalar, const D: usize> {
         Physical::new(v.into_raw())
     }
 
-    /// the SCALE-FACTOR BRIDGE `CoordUp -> Ortho`: `V_a = h_a v^a`. the one seam where the metric
+    /// the SCALE-FACTOR BRIDGE `CoordUp -> Ortho`: `V_a = h_a v^a`. the one place where the metric
     /// enters the (otherwise flat) orthonormal frame the substrate computes in. requires
     /// [`DiagonalMetric`] (the orthonormal frame exists only for a diagonal metric; a non-diagonal
-    /// metric replaces this with a tetrad). docs/design/31 §2.
+    /// metric replaces this with a tetrad).
     fn to_physical(&self, x: Tensor<S, D>, v: &Contravariant<S, D>) -> Physical<S, D>
     where
         Self: DiagonalMetric<S, D>,
@@ -295,7 +295,7 @@ pub trait Metric<S: Scalar, const D: usize> {
 /// quadrature on it until the non-diagonal forms are written. a pure marker: the gated methods
 /// already live on `Metric`; this trait only carries the diagonality proof obligation.
 ///
-/// the gate, executable. a `DiagonalMetric`-bounded generic MAY take scale factors:
+/// the diagonality bound is compile-enforced. a `DiagonalMetric`-bounded generic MAY take scale factors:
 /// ```
 /// use symbi_geometry::{DiagonalMetric, Spherical};
 /// use symbi_algebra::Tensor;
@@ -3188,7 +3188,7 @@ mod tests {
     #[test]
     fn cartesian_ks_det_g_flat_identity_is_one() {
         // alpha sqrt(gamma) = 1 = the flat cartesian volume element (sqrt(-g) is chart-independent);
-        // the densitization seam relies on this (design 43). checked in D = 2 and D = 3.
+        // the densitization path relies on this. checked in D = 2 and D = 3.
         let bh = SchwarzschildKSCartesian { mass: 0.8_f64 };
         let x3 = Tensor::new([3.0_f64, -2.0, 1.5]);
         assert!(approx(bh.lapse(x3) * bh.volume_factor(x3), 1.0));
@@ -3319,7 +3319,7 @@ mod tests {
     #[test]
     fn cylindrical_ks_det_g_flat_is_the_cylindrical_measure() {
         // alpha sqrt(gamma) = R = the flat cylindrical volume element (sqrt(-g) chart-independent);
-        // the densitization seam relies on this. also checks the TWO-radii structure: the lapse
+        // the densitization path relies on this. also checks the TWO-radii structure: the lapse
         // depends on the SPHERICAL radius sqrt(R^2 + z^2), not R alone.
         let bh = SchwarzschildKSCylindrical { mass: 0.8_f64 };
         let x = Tensor::new([3.0_f64, 1.1, 4.0]); // r_sph = 5
@@ -3483,7 +3483,7 @@ mod tests {
 
     #[test]
     fn kerr_ks_cylindrical_matches_the_cartesian_chart_through_the_jacobian() {
-        // the cross-chart oracle: gamma_cyl = J^T gamma_cart J with the coordinate
+        // the cross-chart reference: gamma_cyl = J^T gamma_cart J with the coordinate
         // jacobian of (x, y, z) = (R cos phi, R sin phi, z) — the two charts describe
         // the SAME spacetime, so any formula drift between them breaks this exactly.
         let (mm, aa) = (1.0_f64, 0.8_f64);

@@ -1,8 +1,8 @@
 // =============================================================================
 // decomp_equivalence.rs
 //
-// the correctness contract for multi-gpu domain decomposition (docs/design/36),
-// validated IN-PROCESS on the cpu -- no second device, no peer copy, no mpi.
+// the correctness contract for multi-gpu domain decomposition, validated IN-PROCESS
+// on the cpu -- no second device, no peer copy, no mpi.
 //
 // the one thing that must be right before any transport work: a domain split into a
 // grid of tiles, with same-level halo exchange each step, must reproduce the
@@ -30,7 +30,7 @@
 // the `decomp_harness!` macro emits a concrete harness per dimension: a generic-over-D
 // harness drowns in `Cartesian: Metric<f64,D>` / `Regime` / KernelSet bounds.
 //
-// device binding (docs/design/37): each tile is bound to a LOGICAL device, round-robin
+// device binding: each tile is bound to a LOGICAL device, round-robin
 // over `NDEV`. on the one physical card those logical ordinals fold onto distinct cuda
 // contexts (the modulo map in cuda.rs), so a tile's allocation + every physics kernel run
 // in their own context while the host-orchestrated exchange runs on device 0 over the
@@ -152,10 +152,10 @@ macro_rules! decomp_harness {
             }
 
             // drive the PRODUCTION decomposed evolve loop (symbi-sim::decomp) over this
-            // harness's tiles. the oracle now TESTS the same function the multi-gpu python entry
-            // runs (docs/design/37) -- the hand-rolled loop is gone, so a divergence between
-            // proof and production is impossible. interval = u64::MAX: no mid-run callback, the
-            // equivalence check reads the final state via `global_den`.
+            // harness's tiles. exercises the same function the multi-gpu python entry runs --
+            // the hand-rolled loop is gone, so a divergence between test and production is
+            // impossible. interval = u64::MAX: no mid-run callback, the equivalence check
+            // reads the final state via `global_den`.
             fn run(tiles: &mut [(Sim, Kern)], counts: [usize; $d], ts: Timestepping) {
                 let devices: Vec<i32> = (0..tiles.len()).map(tile_device).collect();
                 // evolve_decomposed takes the tiles by &mut (the per-step body bookkeeping mutates
@@ -226,7 +226,7 @@ macro_rules! decomp_harness {
                 );
 
                 // ALSO exercise `gather_interiors` -- the production checkpoint gather the python
-                // multi-gpu path runs (docs/design/37). reassemble the decomposed tiles into a
+                // multi-gpu path runs. reassemble the decomposed tiles into a
                 // full-size global sim and confirm its density equals the direct read. this covers
                 // the gather index arithmetic (mirror of the IC scatter) across every topology
                 // here -- the one piece the python path uses that `evolve_decomposed` does not.
@@ -267,7 +267,7 @@ decomp_harness!(gpu_d1, 1, DeviceSpace, DeviceMemory, DeviceCopy);
 decomp_harness!(gpu_d2, 2, DeviceSpace, DeviceMemory, StagedCopy);
 // the peer-copy transport: tiles round-robin onto NDEV LOGICAL devices, so on a 2+ gpu node
 // the 2x2 grid drives real cross-device `cuMemcpyPeer` halos. self-skips on a single card (a
-// device cannot peer with itself); the math oracle still applies, now across real devices.
+// device cannot peer with itself); the equivalence check still applies, now across real devices.
 #[cfg(feature = "gpu")]
 decomp_harness!(gpu_peer_d2, 2, DeviceSpace, DeviceMemory, PeerCopy);
 
