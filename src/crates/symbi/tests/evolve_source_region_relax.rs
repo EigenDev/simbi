@@ -1,9 +1,9 @@
 // =============================================================================
 // evolve_source_region_relax.rs
 //
-// docs/design/32 region + relax axes, END-TO-END through the live evolve loop (the runtime
-// user-source path: json -> build_user_source -> SourceEvaluator -> source_apply). proves the two
-// new axes are real physics, not just graph construction:
+// region + relax axes, END-TO-END through the live evolve loop (the runtime user-source path:
+// json -> build_user_source -> SourceEvaluator -> source_apply). proves the region and relax
+// axes are real physics, not just graph construction:
 //
 //   region: a force masked to chi(x) = [x_0 < 0.5] accelerates ONLY the left half of the box; the
 //           right half stays at rest. the mask is a property of the source, applied per cell.

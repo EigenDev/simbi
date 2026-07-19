@@ -1,7 +1,7 @@
 # =============================================================================
 # test_cartesian_grmhd.py
 #
-# the cartesian kerr-schild GRMHD constrained-transport gate (design 45 GRMHD): a
+# the cartesian kerr-schild GRMHD constrained-transport gate: a
 # poloidal field loop on the non-spherical (x, y) chart, seeded div-free through the
 # metric-weighted curl of A_z. the chart-generic densitized curl + the two-component-
 # shift corner EMF must PRESERVE the w-weighted div(B) = sum sqrt(gamma)(face) x

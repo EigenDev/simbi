@@ -125,7 +125,7 @@ def run(cmd, **kwargs) -> None:
 
 def _features(args) -> str:
     feats = [f.strip() for f in (args.features or "").split(",") if f.strip()]
-    # `--gpu`/`--cuda` -> the nvidia backend; `--hip` -> the amd backend (docs/design/38).
+    # `--gpu`/`--cuda` -> the nvidia backend; `--hip` -> the amd backend.
     # mutually exclusive: the rust crate compile_error!s if both are set.
     if getattr(args, "gpu", False) and "cuda" not in feats:
         feats.append("cuda")

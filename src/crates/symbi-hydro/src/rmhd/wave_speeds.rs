@@ -356,13 +356,13 @@ mod tests {
         pressure::peak_pressure_kernel(&k)
     }
 
-    /// **docs/design/23 regression bound**. pins the
+    /// regression bound. pins the
     /// `peak_pressure` metric on rmhd_wave_speeds at its measured
     /// value (87, post cost-model CSE, no `S::scope` in the kernel).
     ///
     /// the bound exists to catch FUTURE REGRESSIONS — if a future edit
     /// pushes the metric above 87, the reviewer must either lower it back
-    /// or justify the new ceiling in the design.
+    /// or justify the new ceiling.
     ///
     /// the metric is a conservative UPPER bound (it counts every ancestor-
     /// scope Let as live, ignoring true liveness), so 87 is not the SASS

@@ -99,7 +99,7 @@ def setup_parser(subparsers) -> None:
         help="run a simulation from a config file",
         formatter_class=HelpFormatter,
         usage="simbi run <config> [options]",
-        # we handle -h/--help ourselves (below) so that `simbi run <config> --help`
+        # -h/--help is handled here rather than by argparse so that `simbi run <config> --help`
         # can load the config and show ITS flags, not just the generic run options.
         add_help=False,
     )

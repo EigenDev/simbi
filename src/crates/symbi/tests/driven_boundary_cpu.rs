@@ -1,7 +1,7 @@
 // =============================================================================
 // driven_boundary_cpu.rs
 //
-// docs/design/33 task 24 (CPU): a DRIVEN boundary prescribes its ghost prim state from a user DAG.
+// a DRIVEN boundary prescribes its ghost prim state from a user DAG (CPU).
 // the standard ghost-fill SKIPS the driven face (Driven -> BcType::Skip); the driven pass then
 // evaluates the boundary DAG over that face's ghost band and ASSIGNS prim.{rho,vel,pre}.
 //

@@ -29,7 +29,7 @@ pub trait GpuRuntime: 'static + Send + Sync {
 
     /// compile kernel source to a loadable binary (PTX, HSACO) with the backend's
     /// OWN runtime compiler — NVRTC for CUDA, hiprtc for HIP — not a shelled-out
-    /// toolchain binary (docs/design/15 §1). default: the backend has no in-process
+    /// toolchain binary. default: the backend has no in-process
     /// compiler, so source dispatch is unsupported (override to enable JIT).
     fn compile(&self, source: &str, name: &str) -> crate::Result<Vec<u8>> {
         let _ = (source, name);
@@ -196,7 +196,7 @@ pub mod cuda_runtime {
     }
 
     // one dispatcher per device ordinal: cuda modules are bound to the context they were
-    // loaded into, so device N's kernels must live in device N's dispatcher (docs/design/37).
+    // loaded into, so device N's kernels must live in device N's dispatcher.
     // each is initialized on first use, in whatever context is current at that point.
     static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<CudaRuntime>>; crate::cuda::MAX_GPUS] =
         [const {
@@ -212,7 +212,7 @@ pub mod cuda_runtime {
 }
 
 // =============================================================================
-// HIP runtime (docs/design/38). the amd sibling of cuda_runtime: hiprtc -> code object ->
+// HIP runtime. the amd sibling of cuda_runtime: hiprtc -> code object ->
 // hipModuleLoadData. same per-device dispatcher registry (modules are per-device), keyed on
 // the hip current-device ordinal.
 // =============================================================================
@@ -257,7 +257,7 @@ pub mod hip_runtime {
     }
 
     // one dispatcher per device ordinal: hip modules are bound to the device they were loaded
-    // for, so device N's kernels must live in device N's dispatcher (docs/design/37).
+    // for, so device N's kernels must live in device N's dispatcher.
     static DISPATCHERS: [std::sync::LazyLock<KernelDispatcher<HipRuntime>>; crate::hip::MAX_GPUS] =
         [const {
             std::sync::LazyLock::new(make_dispatcher as fn() -> KernelDispatcher<HipRuntime>)
@@ -271,7 +271,7 @@ pub mod hip_runtime {
 }
 
 // =============================================================================
-// neutral backend selection (docs/design/38): downstream names `runtime::DeviceRuntime` and
+// neutral backend selection: downstream names `runtime::DeviceRuntime` and
 // `runtime::current_dispatcher()`; the active backend feature binds them. cuda wins if both
 // are somehow set (the hip arms are `not(cuda)`), so the tree never double-binds.
 // =============================================================================

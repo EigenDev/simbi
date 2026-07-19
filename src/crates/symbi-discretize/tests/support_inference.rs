@@ -1,8 +1,8 @@
 // =============================================================================
 // support_inference.rs
 //
-// the derived-support parity law (docs/design/48 part 3, propagation
-// increment): every body kernel's output support is now DERIVED — the mask
+// the derived-support parity law: every body kernel's output support is
+// DERIVED — the mask
 // seam tags chi's saturation ball and propagation carries it through the
 // property algebra to the write roots — and must reproduce the geometry the
 // hand declarations stated: ball(body_0_pos, racc + DRAIN_SUPPORT_WIDTHS *

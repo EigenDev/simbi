@@ -16,8 +16,8 @@ from ..config import VisualizationConfig
 from ..figure import Figure
 from ..types import Array, CoordSystem, FieldData
 
-# Maps logical axis names (user-facing) to the data's array index.
-# This example assumes data is stored (nz, ny, nx) or (x3, x2, x1).
+# maps logical axis names (user-facing) to the data's array index.
+# this example assumes data is stored (nz, ny, nx) or (x3, x2, x1).
 AXIS_MAP = {"x1": 2, "x2": 1, "x3": 0}
 INV_AXIS_MAP = {v: k for k, v in AXIS_MAP.items()}
 
@@ -84,7 +84,7 @@ def plan_slice(
     ndim = len(domain)
 
     if not slice_spec:
-        # Pass-through Plan (e.g., Full 3D)
+        # pass-through plan (e.g., full 3D)
         logical_names = [INV_AXIS_MAP.get(i, f"dim_{i}") for i in range(ndim)]
         return SlicePlan(
             index_tuple=tuple(slice(None) for _ in range(ndim)),
@@ -93,11 +93,11 @@ def plan_slice(
             final_axis_names=logical_names,
         )
 
-    # Slicing Plan
+    # slicing plan
     index_tuple_list: list[Any] = [slice(None)] * ndim
     sliced_axes_indices = set()
 
-    # Build the index tuple
+    # build the index tuple
     for axis_name, position in slice_spec.items():
         if axis_name not in AXIS_MAP:
             raise KeyError(f"Invalid axis name '{axis_name}' in slice config.")
@@ -147,12 +147,12 @@ def execute_slice(
 
     sliced_values = values[plan.index_tuple]
 
-    # Reorder (transpose) the data to match logical order
-    # For a 1D slice, sliced_values is (e.g.,) 100-long,
-    # transpose_order is (0,), so this does nothing, which is correct. (I think)
+    # reorder (transpose) the data to match logical order
+    # for a 1D slice, sliced_values is (e.g.,) 100-long,
+    # transpose_order is (0,), so this does nothing, which is correct.
     transposed_values = sliced_values.transpose(plan.transpose_order)
 
-    # Reorder the domain to match
+    # reorder the domain to match
     new_domain = [domain[i] for i in plan.final_domain_indices]
 
     return transposed_values, new_domain
@@ -221,9 +221,8 @@ def prepare_field_level(
     name = f"{field_name}_L{level}" if level > 0 else field_name
 
     # if effective dim is less than current dim, further squeeze
-    # the axis map needs to be considered here. We might have a 3D
-    # problem, but symmetry results in a quasi-2D or quasi-1D dataset.
-    # We must carefully select the axis names accordingly.
+    # the axis map matters here: a 3D problem with symmetry reduces to a
+    # quasi-2D or quasi-1D dataset, so the axis names are selected accordingly.
     axis_names = [INV_AXIS_MAP[i] for i in non_singleton_axes]
     if effective_dim == 1:
         axis_names = ["x1"]
@@ -344,38 +343,38 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
     If refined, this "squashes" fine levels onto the base grid.
     If Unigrid, this is a no-op.
     """
-    # Unigrid case: Just return the single 2D field.
+    # unigrid case: just return the single 2D field.
     if len(fields_2d) == 1:
         return fields_2d[0]
 
-    # refined case: Start with the base level (L0)
+    # refined case: start with the base level (L0)
     base_field = fields_2d[0]
     base_x, base_y = base_field.domain
     composited_values = base_field.values.copy()
 
-    # Loop over finer levels and "squash" them onto the base
+    # loop over finer levels and "squash" them onto the base
     for fine_field in fields_2d[1:]:
         fine_x, fine_y = fine_field.domain
         fine_values = fine_field.values
 
-        # Find overlapping indices in the base grid
+        # find overlapping indices in the base grid
         i_start = np.searchsorted(base_x, fine_x[0], side="left")
         i_end = np.searchsorted(base_x, fine_x[-1], side="right")
         j_start = np.searchsorted(base_y, fine_y[0], side="left")
         j_end = np.searchsorted(base_y, fine_y[-1], side="right")
 
-        # Get the sub-region of the base grid that is covered
+        # get the sub-region of the base grid that is covered
         coarse_nx = i_end - i_start
         coarse_ny = j_end - j_start
 
-        # Check if the fine grid dimensions are a multiple
+        # check if the fine grid dimensions are a multiple
         # of the coarse grid region it's covering
         fine_ny, fine_nx = fine_values.shape
         if fine_nx % coarse_nx != 0 or fine_ny % coarse_ny != 0:
-            # Grid mismatch, cannot perform clean block averaging
+            # grid mismatch, cannot perform clean block averaging
             continue
 
-        # Downsample the fine data to the coarse grid's resolution
+        # downsample the fine data to the coarse grid's resolution
         ref_ratio_x = fine_nx // coarse_nx
         ref_ratio_y = fine_ny // coarse_ny
 
@@ -383,10 +382,10 @@ def _compose_pcolormesh(fields_2d: list[FieldData]) -> FieldData:
             fine_values, (ref_ratio_y, ref_ratio_x)
         )
 
-        # Overwrite the base grid data with the averaged fine data
+        # overwrite the base grid data with the averaged fine data
         composited_values[j_start:j_end, i_start:i_end] = averaged_fine_data
 
-    # Return a new 2D FieldData object
+    # return a new 2D FieldData object
     return FieldData(
         name=base_field.name,
         time=base_field.time,
@@ -408,10 +407,10 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
     all_patches = []
     all_values = []
 
-    # We must track regions covered by finer levels to avoid overplotting
+    # track regions covered by finer levels to avoid overplotting
     refined_regions = []
 
-    # Iterate from finest level (end of list) to coarsest (start)
+    # iterate from finest level (end of list) to coarsest (start)
     for field in reversed(fields_2d):
         # field.domain is in DATA-STORAGE order (slow..fast = [y, x] for 2D), matching the
         # values array shape (ny, nx) -- see prepare_field_level. unpack it the same way, NOT as
@@ -420,10 +419,10 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
         y_edges, x_edges = field.domain
         values = field.values
 
-        # Create cell patches for this level
+        # create cell patches for this level
         for j in range(len(y_edges) - 1):
             for i in range(len(x_edges) - 1):
-                # Check if this cell is covered by an already-processed
+                # check if this cell is covered by an already-processed
                 # finer level
                 cell_x_center = (x_edges[i] + x_edges[i + 1]) / 2
                 cell_y_center = (y_edges[j] + y_edges[j + 1]) / 2
@@ -440,7 +439,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
                 if is_covered:
                     continue
 
-                # Not covered, so add this "leaf cell"
+                # not covered, so add this "leaf cell"
                 patch = [
                     (x_edges[i], y_edges[j]),
                     (x_edges[i + 1], y_edges[j]),
@@ -450,7 +449,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
                 all_patches.append(patch)
                 all_values.append(values[j, i])
 
-        # Add this level's domain to the list of refined regions
+        # add this level's domain to the list of refined regions
         refined_regions.append(
             {
                 "xmin": x_edges[0],
@@ -468,7 +467,7 @@ def _compose_polygons(fields_2d: Sequence[FieldData]) -> FieldData:
     ]
 
     axis_names = fields_2d[0].axis_names
-    # Return a new 1D FieldData object (the "Polygon Contract")
+    # return a new 1D FieldData object (the "Polygon Contract")
     return FieldData(
         name=f"{fields_2d[0].name}_polygons",
         values=np.array(all_values),
@@ -493,10 +492,10 @@ def compose_2d_render(
         raise ValueError("Cannot compose an empty list of fields.")
 
     if render_mode == "pcolormesh":
-        # Returns a single 2D FieldData object
+        # returns a single 2D FieldData object
         return _compose_pcolormesh(fields_2d)
     elif render_mode == "polygons":
-        # Returns a single 1D FieldData object (of polygons)
+        # returns a single 1D FieldData object (of polygons)
         return _compose_polygons(fields_2d)
     else:
         raise ValueError(f"Unknown render_mode: {render_mode}")

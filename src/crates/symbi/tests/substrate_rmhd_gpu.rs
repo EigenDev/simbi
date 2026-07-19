@@ -1,7 +1,7 @@
 // =============================================================================
 // substrate_rmhd_gpu.rs
 //
-// the step-3c milestone (docs/design/15): the RMHD substrate KernelSet runs on the
+// the RMHD substrate KernelSet runs on the
 // GPU through the production dispatch path. build TWO identical RMHD sims — one on
 // host memory (CpuSpace), one on unified memory (CudaSpace) — and run the SAME
 // `RmhdSubstrateKernelSet3D` method on each. the unified-memory `Mem` makes
@@ -68,7 +68,7 @@ fn build_sim<S: ExecutionSpace, Mem: MemorySpace>(
     .build()
 }
 
-// GPU vs CPU agree modulo nvcc FMA fusion (project_fma_discipline): ULP-bounded drift.
+// GPU vs CPU agree modulo nvcc FMA fusion: ULP-bounded drift.
 fn assert_close(gpu: f64, cpu: f64, what: &str, coord: [isize; 3]) {
     let rel = (gpu - cpu).abs() / cpu.abs().max(1.0);
     assert!(rel < 1e-9, "{what} at {coord:?}: gpu {gpu} != cpu {cpu} (rel {rel:e})");
@@ -82,7 +82,7 @@ fn substrate_rmhd_c2p_gpu_matches_cpu() {
     // host memory -> AOT CPU kernel; unified memory -> run_gpu (render IR + NVRTC).
     RmhdSubstrateKernelSet3D::<HostMemory>::new(GAMMA, CFL, 1.0, &host.geom.allocated).c2p(&host);
     RmhdSubstrateKernelSet3D::<UnifiedMemory>::new(GAMMA, CFL, 1.0, &dev.geom.allocated).c2p(&dev);
-    symbi_xpu::cuda::ctx_sync(); // host-read barrier: run_gpu doesn't sync per-launch (B12)
+    symbi_xpu::cuda::ctx_sync(); // host-read barrier: run_gpu doesn't sync per-launch
 
     let hp = host.fields.prim.pre_field().unwrap();
     let dp = dev.fields.prim.pre_field().unwrap();
@@ -165,7 +165,7 @@ fn substrate_rmhd_flux_gpu_matches_cpu() {
     }
 }
 
-// the step-3c capstone: the FULL evolve loop on the GPU. drive the real RK2 step
+// the FULL evolve loop on the GPU. drive the real RK2 step
 // driver (cfl -> flux -> efield -> godunov -> CT -> c2p -> ghost, multiple steps)
 // on host + unified sims with identical init; the substrate KernelSet routes every
 // kernel to the GPU for unified memory. assert the run completes NaN-free and the
@@ -218,7 +218,7 @@ fn substrate_rmhd_evolve_gpu_matches_cpu() {
     }
 }
 
-// the (2b) Reduce-morphism proof in isolation: the GPU block-reduction max over a
+// the Reduce-morphism proof in isolation: the GPU block-reduction max over a
 // field's INTERIOR window must equal the host max — bit-exact (max has no FMA) — AND
 // must ignore values outside the window (a huge ghost value is not reduced). this
 // pins the device reduction + its view_t windowing independently of the full step.

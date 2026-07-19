@@ -174,7 +174,7 @@ class SystemManifest:
 
 
 # =============================================================================
-# observer params (how you OBSERVE the system — not a property of it)
+# observer params (the OBSERVATION choices — not a property of the system)
 # =============================================================================
 
 

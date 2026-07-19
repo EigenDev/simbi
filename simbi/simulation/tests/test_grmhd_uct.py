@@ -1,12 +1,12 @@
 # =============================================================================
 # test_grmhd_uct.py
 #
-# the GR-UCT constrained-transport gates (design 44 GR-UCT): the upwind
+# the GR-UCT constrained-transport gates: the upwind
 # constrained-transport edge EMF (Del Zanna 2007 / M&DZ 2020 master form) on a
 # curved background — the densitized corner EMF `Etilde_phi` built from the
 # transport velocity `vtilde = alpha v - beta` and the SHIFTED Banyuls-Font bound
 # speeds (materialized per cell, quartic-free), consumed by the same GR curl the
-# contact EMF uses. UCT-HLL coefficients (the UCT-HLLD wave-sum is a further step).
+# contact EMF uses. UCT-HLL coefficients (not the sharper UCT-HLLD wave-sum).
 #
 # the gates are CORRECTNESS, not a quantitative checkerboard win (that needs the
 # sharp UCT-HLLD solver — the HLLE gas flux here is already diffusive):

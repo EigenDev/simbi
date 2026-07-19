@@ -1,7 +1,7 @@
 // =============================================================================
 // flux_register.rs
 //
-// flux correction (refluxing, docs/design/22) for static mesh refinement
+// flux correction (refluxing) for static mesh refinement
 // (SMR). single-coverage cap: ONE register per coarse-fine level-pair, sized to
 // the level's single refined box (`coverage`) — there is no per-patch register
 // fan-out, because a level refines exactly one box (this is SMR, not multi-patch
@@ -23,7 +23,7 @@
 //
 // two execution paths: UNIFORM-cartesian geometry runs substrate kernels
 // (field_fill / field_axpy_shift / refine_acc_face — cpu AND gpu through the
-// dispatch seam; the face area and cell volume are constant scales), while
+// kernel dispatch; the face area and cell volume are constant scales), while
 // curvilinear geometry keeps the per-coordinate host loops (cpu-only until
 // the register kernels learn in-kernel geometry). the budget diagnostics
 // (debug_*_den) are maintained by the host path only; the uniform path

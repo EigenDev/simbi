@@ -1,8 +1,8 @@
 // =============================================================================
 // ir_blobs_render.rs
 //
-// the CPU-side regression for the serialized backend-neutral IR (docs/design/15
-// §3): every kernel build.rs emits is stored as a `<KERNEL>_IR` blob — the
+// the CPU-side regression for the serialized backend-neutral IR: every
+// kernel build.rs emits is stored as a `<KERNEL>_IR` blob — the
 // serialized `Prepared`. this test deserializes the REAL generated blobs and
 // renders them to CUDA source on the CPU (no GPU, no cuda feature, no nvcc).
 //

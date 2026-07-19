@@ -10,8 +10,8 @@
 //   2. typed `target_field` — a source can only contribute to a field the
 //      parent regime declares in `RegimeSpec.fields`. the runtime cross-checks.
 //   3. branchless conditionals — region-localized sources use `S::select` /
-//      `S::branch` on a carrier-generic mask. Tier 1.7 compile-enforces this
-//      because `Numeric` ≠ `OrderedNumeric`.
+//      `S::branch` on a carrier-generic mask. the type system compile-enforces
+//      this because `Numeric` and `OrderedNumeric` are distinct bounds.
 //   4. provenance preserved through composition — each `SourceSpec` carries a
 //      `NodeAnnotation`; the homomorphism (A7) requires every target preserve
 //      it under `RenderPolicy::Audit`.
@@ -67,7 +67,7 @@ pub struct BuiltSource {
 /// declarative description of one additive RHS contribution. analogous to
 /// `LawSpec` but for the source half of the evolution equation.
 ///
-/// **identity by physics, not syntax** (docs/design/09 §2.3): two sources
+/// **identity by physics, not syntax**: two sources
 /// are equal iff they declare the same `(kind, target_field)` pair —
 /// matching `LawSpec`'s identity discipline. the build_source fn pointer
 /// is implementation detail and excluded from the equality check.
@@ -536,7 +536,7 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 //   S = select(inside, full_source, 0)  — `Op::Select` (the algebra primitive)
 //
 // at the carrier-generic Rust level this lowers to `S::cmp_lt(.)` returning
-// `Self::Mask`, then `S::select(mask, t, f)` — the Tier 1.7 closure makes
+// `Self::Mask`, then `S::select(mask, t, f)` — the `S: Scalar` bound makes
 // the native-`<` alternative a compile error in `S: Scalar`-bound code, so
 // the discipline is structurally enforced before this layer ever runs.
 //
@@ -548,7 +548,7 @@ fn point_mass_energy_source(d: usize) -> BuiltSource {
 //
 // (energy entrainment, torque-controlled sink velocity, mach-aware boundary
 // layers are surface physics: they belong to the property algebra
-// (`symbi_ib::penalize`, docs/design/50), not to this spec layer. the spec
+// (`symbi_ib::penalize`), not to this spec layer. the spec
 // layer encodes the canonical analytical source forms only.)
 // =============================================================================
 
@@ -679,8 +679,8 @@ pub fn rigid_body_penalty_sources(_d: usize) -> Vec<SourceSpec> {
 //             builder API exposes.
 //   clause 2 (typed target_field) — `SimulationLaws::validate` enforces
 //             this against the regime's fields array.
-//   clause 3 (branchless conditionals) — compile-enforced (Tier 1.7's
-//             Numeric ≠ OrderedNumeric closure).
+//   clause 3 (branchless conditionals) — compile-enforced (the distinct
+//             Numeric / OrderedNumeric bounds).
 //   clause 4 (provenance) — preserved via `NodeAnnotation`.
 //   clause 5 (geometric derived, not declared) — not applicable to user
 //             sources (they're external physics by definition).
@@ -746,7 +746,7 @@ pub fn user_defined_source(
 // `S: Scalar` and shared by the built-in sources (`UniformAccel`, `PointMassGravity`, which
 // supply `a` in Rust) AND these user sources (which supply `a` as the spliced DAG). so the
 // law is f64==Gv by construction — a hand-built `Op` graph that traced a DIFFERENT computation
-// than the f64 reference (the bug class this gate exists to catch) cannot exist, because there
+// than the f64 reference (the bug class this check exists to catch) cannot exist, because there
 // is no hand-built graph. a force contributes to TWO fields, built as two `BuiltSource`s
 // (momentum + energy) tracing the SAME lift over the SAME field `a` — the structural reason the
 // energy source can never desync from the momentum source.
@@ -1879,7 +1879,7 @@ mod tests {
     fn source_spec_equality_ignores_fn_pointer() {
         // two SourceSpecs with the same (kind, target_field) compare equal
         // regardless of which fn pointer they carry. mirrors LawSpec's
-        // identity discipline (docs/design/09 §2.3).
+        // identity discipline.
         let a = SourceSpec {
             kind: SourceKind::Geometric,
             target_field: "mom",

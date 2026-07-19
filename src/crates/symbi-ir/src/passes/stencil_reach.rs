@@ -2,7 +2,7 @@
 // stencil_reach.rs
 //
 // pure analysis: the per-field, per-axis stencil reach of a scalarized kernel,
-// read off its FieldLoadAt index expressions (docs/design/48 part 1).
+// read off its FieldLoadAt index expressions.
 // each load component is classified as an affine function of the coord vars:
 // - `_coord_a + c` (unit coefficient on the component's own axis) is a stencil
 //   offset — the reach contribution is |c|

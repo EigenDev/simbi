@@ -1,10 +1,10 @@
 // =============================================================================
 // gv_penalize.rs
 //
-// the traced immersed-boundary penalization kernel (docs/design/50 layer 3):
+// the traced immersed-boundary penalization kernel:
 // per cell, the sphere SDF's signed distance -> the mollified chi -> the
 // property stack's Relax accumulation -> the SAME carrier-generic
-// `penalize_cell` the f64 oracle runs, evaluated at Gv. the [Drain] stack is
+// `penalize_cell` that runs at f64, evaluated at Gv. the [Drain] stack is
 // the p = 1 anchor: chi/tau on the rho channel only, every other channel's
 // correction an exact arithmetic zero, so the kernel reduces bit-for-bit to
 // `drain_cell`'s uniform scaling.
@@ -454,8 +454,8 @@ pub fn penalize_drain_gv(coords: Coords, ndim: usize, dof: usize, axes: &[usize]
     let cs = symbi_ib::drain::sound_speed_from_cons(den, mom_sq, nrg, gamma);
     let inv_tau = signal_speed(cs) / (c_drain * min_w);
 
-    // the property stack (docs/design/50): [Drain]. contribute at Gv, then
-    // the SAME integrator the f64 oracle runs.
+    // the property stack: [Drain]. contribute at Gv, then
+    // the SAME integrator that runs at f64.
     let kin = BodyKin::<Gv, 3> {
         u_solid: Tensor::zeros(),
         omega: Tensor::zeros(),

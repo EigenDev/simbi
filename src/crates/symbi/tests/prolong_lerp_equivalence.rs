@@ -1,7 +1,7 @@
 // =============================================================================
 // prolong_lerp_equivalence.rs
 //
-// the gates for the lerp-then-prolong split (design 47 act 8, step 1):
+// the gates for the lerp-then-prolong split:
 //
 //   - BIT EQUALITY: the two-pass path (field_lerp over the coarse parent
 //     region + the single-snapshot prolong) reproduces the fused time-pair
@@ -20,8 +20,8 @@
 //   - PPM CONSERVATION: the ratio^D children of a parent average back to the
 //     parent value (the sub-cell averages partition the parent integral).
 //
-// these laws also gate the NEXT restructures (axis-split sweeps, per-parent
-// evaluation): any replacement pipeline must pass the same three.
+// these laws also gate any replacement pipeline (axis-split sweeps, per-parent
+// evaluation): it must pass the same three.
 // =============================================================================
 
 use symbi::sim::refinement::transfer::{
@@ -109,7 +109,7 @@ fn lerp_then_prolong_is_bit_identical_to_the_time_pair_kernel() {
     }
 }
 
-// the axis-split sweep chain (design 49) against the fused tensor-product
+// the axis-split sweep chain against the fused tensor-product
 // kernel: bit identity at every order and a nontrivial alpha. the sweeps
 // materialize the SAME per-axis composition through f64 intermediates, so any
 // bit difference is a wiring bug (pass order, operand order, a frac spelled

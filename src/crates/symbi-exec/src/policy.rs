@@ -1,7 +1,7 @@
 // =============================================================================
 // policy.rs
 //
-// the CPU/GPU EXECUTOR seam for cell-centered structured invocations: `dispatch_fields`
+// the CPU/GPU EXECUTOR entry point for cell-centered structured invocations: `dispatch_fields`
 // (shared-layout), `dispatch_fields_cover` (disjoint-cover fork-join), `dispatch_fields_each`
 // (per-buffer layouts), the `ExecPolicy` strategy + its `policy_for` / `run_policy` /
 // `auto_block_size` selection, and the env-gated dispatch micro-profiler. all parallelism
@@ -24,7 +24,7 @@ use crate::layout::{alloc_layout, exec_layout, expect_kernel};
 /// (read-only, `Host`) then `outputs` (`HostMut`, including in-place read+write), all
 /// on the allocated layout, executed over `exec`. the kernel `name` is resolved to
 /// its structured CPU fn + neutral IR blob via the generated registry; the CPU path
-/// runs the AOT fn, a device-accessible `Mem` renders + JITs the IR (the GPU seam).
+/// runs the AOT fn, a device-accessible `Mem` renders + JITs the IR (the GPU path).
 ///
 /// `inputs` MUST be in the generated kernel's input-binding order and `outputs` in
 /// its output-binding order (`run_cpu` re-splits by handle, preserving order within
@@ -126,7 +126,7 @@ where
     // `layouts` carries one `(lo, extent, vol)` per field, in `inputs ++ outputs` order — a SHARED
     // cell layout (replicated) for `dispatch_fields`, or each field's own `Field::domain()` layout
     // for `dispatch_fields_each` (staggered / mixed-domain binds). ONE constructor, ONE distinctness
-    // check (release-active) — the "DisjointBufferSet" SSOT (docs/design/38).
+    // check (release-active) — the "DisjointBufferSet" SSOT.
     debug_assert_eq!(
         layouts.len(), inputs.len() + outputs.len(),
         "disjoint_host_buffers('{name}'): one layout per field required",
@@ -368,7 +368,7 @@ pub fn dispatch_fields_each<Sc: Scalar + OrderedNumeric, Mem: MemorySpace, const
 }
 
 /// the ONE CPU-parallelism strategy for an interior dispatch, decided at the ONE
-/// scheduling seam (`policy_for`) and consumed at the ONE site (`run_policy`).
+/// scheduling point (`policy_for`) and consumed at the ONE site (`run_policy`).
 /// `Whole` runs the kernel's own internal rayon over the whole exec window (the
 /// small-domain / device / no-serial-twin fallback); `Cover` fans a SERIAL kernel
 /// out over a disjoint `BlockGrid` cover in ONE fork-join (the big-domain win — the
@@ -448,7 +448,7 @@ pub fn run_policy<const D: usize>(
 /// TRANSVERSE axes at a small fixed edge (stencil reuse stays in cache) while the
 /// CONTIGUOUS axis runs the full row — the vectorized (mask-form/SLP) kernel
 /// bodies need long unit-stride inner trips to amortize; 8-cell trips invert
-/// their win into a loss (docs/design/47 act 6).
+/// their win into a loss.
 ///
 /// measured on M4 Pro (linear_wave 256^3, hlle, f64), whole step:
 ///   block 8^3 = 28.9 MZCS (flux 16 ns/zc) — the pre-vectorization sweet spot

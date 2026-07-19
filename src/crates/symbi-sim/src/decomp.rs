@@ -12,7 +12,7 @@
 // the exchange is a two-pass scheme: the caller processes axes in order, and a cut
 // face's transverse extent is the interior for cut axes not yet exchanged, the full
 // allocated extent otherwise. that carries corner ghosts to the diagonal neighbor
-// without any explicit diagonal traffic (docs/design/36).
+// without any explicit diagonal traffic.
 //
 // everything is built on `Domain` (slab / boundary / iter): the strips are domains and
 // the copy is a cell-for-cell walk of two equal-shape domains, so the index arithmetic
@@ -36,7 +36,7 @@ use symbi_xpu::{with_device, KernelArgs, LaunchConfig, MemoryBlock};
 /// regions have identical shape (same per-axis extents); the transport pairs them by
 /// iteration order. `src_dev`/`dst_dev` are the LOGICAL devices the two fields live on --
 /// the one piece of device identity a cross-device exchange genuinely needs (the rest of the
-/// code uses the ambient current-device model, docs/design/37). single-device transports
+/// code uses the ambient current-device model). single-device transports
 /// (`LocalCopy`, `DeviceCopy`, `StagedCopy`) ignore them; `PeerCopy` uses them to drive
 /// `cuMemcpyPeer` between the two devices.
 pub trait HaloTransport {
@@ -219,8 +219,8 @@ fn ghost_strip<const D: usize>(
 /// plus the primitives (rho, velocity, pressure), and -- for MHD -- the cell-centered B `bcell`
 /// (the checkpoint writer reads it for both the `mag` conserved slot and the `bcell` primitive).
 /// used by `gather_interiors` to reassemble a decomposed run into one global store for output --
-/// the gathered global then writes through the existing single-grid checkpoint path unchanged
-/// (docs/design/37). the STAGGERED `bface` lives on a face domain, so it is gathered separately
+/// the gathered global then writes through the existing single-grid checkpoint path unchanged.
+/// the STAGGERED `bface` lives on a face domain, so it is gathered separately
 /// by `gather_faces`. hydro/iso stores have no `mhd`, so the bcell tail is empty there; global and
 /// tiles share a regime, so both data_fields lists align component-for-component.
 fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
@@ -242,7 +242,7 @@ fn data_fields<const D: usize, const DOF: usize, M: MemorySpace>(
 }
 
 /// reassemble a decomposed run into one full-size `global` store: copy each tile's INTERIOR
-/// (cons + prim) into the matching sub-box of `global` (docs/design/37). the inverse of the
+/// (cons + prim) into the matching sub-box of `global`. the inverse of the
 /// tile build's IC scatter; the gathered `global` is then written by the existing single-grid
 /// checkpoint writer, so decomposed output is byte-identical in format to a single-device run.
 ///
@@ -552,7 +552,7 @@ pub fn exchange_grid<const D: usize, const DOF: usize, M: MemorySpace, T: HaloTr
 
 // drain every UNIQUE tile device's context so async writes are visible to a consumer running
 // in another context (the cross-device read barrier). no-op on a host backend. mirrors the
-// oracle's `sync_devices` (docs/design/37).
+// equivalence test's `sync_devices`.
 #[cfg(feature = "gpu")]
 pub fn drain_devices<M: MemorySpace>(devices: &[i32]) {
     if !M::IS_DEVICE_ACCESSIBLE {
@@ -571,9 +571,9 @@ pub fn drain_devices<M: MemorySpace>(devices: &[i32]) {
 pub fn drain_devices<M: MemorySpace>(_devices: &[i32]) {}
 
 /// drive a decomposed simulation: `stores.len()` tiles evolved in LOCKSTEP at a shared dt,
-/// with a same-level halo exchange after each ssp stage. this IS the proven oracle loop
-/// (`symbi/tests/decomp_equivalence.rs::run`), lifted into production so the multi-gpu python
-/// entry and the oracle share ONE tested path (docs/design/37).
+/// with a same-level halo exchange after each ssp stage. this IS the loop the
+/// decomposition-equivalence test drives (`symbi/tests/decomp_equivalence.rs::run`),
+/// lifted into production so the multi-gpu python entry and that test share ONE tested path.
 ///
 /// - `stores[i]` / `kernels[i]`: tile i's field store + kernel set, in flat tile order
 ///   (matching `flatten(tile_coord, counts)`).
@@ -1106,13 +1106,13 @@ pub fn enable_peer_mesh(devices: &[i32]) {
 #[cfg(not(feature = "gpu"))]
 pub fn enable_peer_mesh(_devices: &[i32]) {}
 
-/// the cross-device halo transport (docs/design/37): gather the strip into the source
+/// the cross-device halo transport: gather the strip into the source
 /// device's contiguous buffer, `cuMemcpyPeer` it to the destination device's buffer over the
 /// link (nvlink intra-node), then scatter it into the destination strip. the gather and
 /// scatter ARE `StagedCopy`'s proven halves; only the peer move in the middle is new. when
 /// `src_dev == dst_dev` there is nothing to move across, so it defers to the proven
 /// single-device `StagedCopy`. host fallback for a cpu backend. NOT exercisable on one gpu (a
-/// device cannot peer with itself); the equivalence oracle runs it on a real multi-gpu node.
+/// device cannot peer with itself); the equivalence test runs it on a real multi-gpu node.
 #[cfg(feature = "gpu")]
 pub struct PeerCopy;
 

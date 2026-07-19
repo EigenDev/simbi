@@ -1,11 +1,10 @@
 // =============================================================================
 // regime_spec.rs
 //
-// `RegimeSpec` — physics regime metadata as a first-class DATA VALUE.
-// docs/design/09 §2.3 "the regime-spec as a first-class value", implemented
+// `RegimeSpec` — physics regime metadata as a first-class DATA VALUE, built
 // against the `symbi-hydro::Regime` spine.
 //
-// the design claim ratified by this module:
+// the invariant this module encodes:
 //
 //   **`Rhd` and `Rmhd` collapse to consts-plus-c2p-hook.**
 //
@@ -180,7 +179,7 @@ pub enum LawKind {
 /// struct is pure metadata, consumed by `simulation_laws::validate` (clause 2 —
 /// every overlay/law targets a field the regime declares).
 ///
-/// **identity by physics, not syntax** (docs/design/09 §2.3): `(field, kind)`
+/// **identity by physics, not syntax**: `(field, kind)`
 /// IS the physical declaration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LawSpec {
@@ -464,7 +463,7 @@ pub const ISO_MHD_SPEC: RegimeSpec = RegimeSpec {
 
 // =============================================================================
 // section 3 — collapse proof tests. these are the load-bearing assertions
-// against the design claim that `RegimeSpec` is consts + c2p hook. when
+// against the invariant that `RegimeSpec` is consts + c2p hook. when
 // future regimes land (e.g., iso-rhd, dust, two-fluid), they need to extend
 // these tests with their own delta against the prototype.
 // =============================================================================
@@ -475,7 +474,7 @@ mod tests {
 
     /// the RHD vs newtonian collapse: every spec field MUST match EXCEPT
     /// `name`, `is_relativistic`, and `c2p_kind`. this is the load-bearing
-    /// assertion of the "consts-plus-c2p-hook" claim from docs/design/09.
+    /// assertion of the "consts-plus-c2p-hook" claim.
     #[test]
     fn rhd_collapses_to_newtonian_plus_relativistic_plus_c2p() {
         let n = &NEWTONIAN_SPEC;
@@ -616,7 +615,7 @@ mod tests {
     fn rmhd_adds_three_components_for_the_magnetic_field() {
         // RMHD field count is D-INDEPENDENT: den(1) + mom(3) + nrg(1) + mag(3) = 8 at every
         // D, because the MHD momentum AND magnetic field are fixed 3-vectors (DOF=3), unlike
-        // RHD's D-vector momentum. (this is the spatial-D ⊥ vector-DOF axiom, docs/design/30.)
+        // RHD's D-vector momentum. (the spatial dimension is independent of the vector DOF count.)
         for d in [1usize, 2, 3] {
             assert_eq!(RMHD_SPEC.total_components_at(d), 8, "rmhd is always 8 components (D={d})");
         }

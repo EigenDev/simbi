@@ -12,7 +12,7 @@ fn main() {
         // on systems with NVIDIA GPU drivers (default linker search path).
         println!("cargo:rustc-link-lib=cuda");
 
-        // libnvrtc.so (the runtime CUDA compiler, docs/design/15 §1) lives in the
+        // libnvrtc.so (the runtime CUDA compiler) lives in the
         // toolkit libdir, not the default search path — add it from CUDA_PATH /
         // CUDA_HOME (fallback /opt/cuda), and bake an rpath so the loader finds it at
         // runtime without requiring LD_LIBRARY_PATH.
@@ -28,7 +28,7 @@ fn main() {
     if cfg!(feature = "hip") {
         // link the amd hip runtime (libamdhip64.so) and the runtime compiler (libhiprtc.so).
         // both live under ROCM_PATH/lib (default /opt/rocm/lib); bake an rpath so the loader
-        // finds them without LD_LIBRARY_PATH. docs/design/38.
+        // finds them without LD_LIBRARY_PATH.
         let rocm_root = std::env::var("ROCM_PATH")
             .or_else(|_| std::env::var("ROCM_HOME"))
             .unwrap_or_else(|_| "/opt/rocm".to_string());

@@ -1,7 +1,7 @@
 // =============================================================================
 // nmhd_1p5d_brio_wu.rs
 //
-// increment-3 validation of the 1.5D Newtonian-MHD substrate (docs/design/30): the
+// validation of the 1.5D Newtonian-MHD substrate: the
 // canonical Brio & Wu (1988) MHD shock tube on a GENUINE D=1 grid (DOF=3). 1.5D has
 // NO constrained transport — C(1,2)=0 edges (the StaggerComplex empty case) — so:
 //   - the normal field Bx is carried but NEVER curled: it MUST stay at its constant IC

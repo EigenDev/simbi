@@ -4,7 +4,7 @@
 // AMD HIP/ROCm execution space and managed memory space. raw driver API bindings,
 // no external crate dependencies -- just extern "C" to libamdhip64.so.
 //
-// the sibling of cuda.rs (docs/design/38). the key difference: HIP has no context
+// the sibling of cuda.rs. the key difference: HIP has no context
 // api -- a device is bound per-thread with `hipSetDevice(ord)` and the primary
 // context is implicit. so there is NO context registry here; `with_device` is just
 // save / set / restore, and the per-device dispatcher registry keys on the ordinal
@@ -88,7 +88,7 @@ unsafe extern "C" {
     fn hipMemsetD8(dst: hipDeviceptr_t, value: u8, count: usize) -> hipError_t;
     fn hipDeviceGetName(name: *mut c_char, len: c_int, dev: hipDevice_t) -> hipError_t;
     fn hipDeviceTotalMem(bytes: *mut usize, dev: hipDevice_t) -> hipError_t;
-    // peer access + cross-device copy (docs/design/37 M3). hipMemcpyPeer takes device
+    // peer access + cross-device copy. hipMemcpyPeer takes device
     // ORDINALS (not contexts), which is simpler than the cuda context-based form.
     fn hipMemcpyPeer(
         dst: *mut c_void,
@@ -110,7 +110,7 @@ fn check(res: hipError_t, op: &'static str) -> error::Result<()> {
 }
 
 // =============================================================================
-// device binding: hipSetDevice (no context api, docs/design/38)
+// device binding: hipSetDevice (no context api)
 // =============================================================================
 
 /// max gpus per node bound. mirrors the cuda path; a fixed array avoids hot-path locking.
@@ -183,7 +183,7 @@ fn ensure_init() -> error::Result<()> {
 }
 
 /// run `f` with device `ord` bound on this thread, restoring the previous device after. binds a
-/// tile's kernels to its gpu (docs/design/37): launch / alloc / sync target "the current
+/// tile's kernels to its gpu: launch / alloc / sync target "the current
 /// device", so the right one is made current rather than threading a device id through.
 pub fn with_device<R>(ord: i32, f: impl FnOnce() -> R) -> R {
     let prev = current_device();
@@ -205,7 +205,7 @@ pub fn ctx_sync() {
 }
 
 // =============================================================================
-// peer access (docs/design/37 M3): direct device-to-device halo copy. mirrors the cuda
+// peer access: direct device-to-device halo copy. mirrors the cuda
 // surface so `decomp::PeerCopy` is backend-agnostic; hip takes ordinals, not contexts.
 // =============================================================================
 
@@ -483,7 +483,7 @@ impl ExecutionSpace for HipSpace {
 // =============================================================================
 
 /// HIP managed (unified) memory. accessible from both host and device. the amd analog of
-/// `UnifiedMemory`; the same managed-thrash caveat applies (docs/design/37) -- a device-local
+/// `UnifiedMemory`; the same managed-thrash caveat applies -- a device-local
 /// space is not yet implemented.
 pub struct HipManaged;
 

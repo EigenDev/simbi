@@ -1,7 +1,7 @@
 # =============================================================================
 # test_cartesian_ks_bh.py
 #
-# design 45: the first GRHD run in a NON-spherical chart — a schwarzschild black
+# the first GRHD run in a NON-spherical chart — a schwarzschild black
 # hole in CARTESIAN kerr-schild coordinates (SchwarzschildKSCartesian). the metric
 # gamma_ij = delta_ij + 2M x_i x_j / r^3 and the shift beta^i = 2M x_i/(r^2(r+2M))
 # are EXACTLY symmetric under the x <-> y coordinate swap, so a symmetric initial
@@ -57,7 +57,7 @@ def _run(res: int, data_dir: str):
 
 @needs_backend
 def test_cartesian_ks_bh_runs_stably() -> None:
-    # the milestone: GRHD in a NON-spherical chart runs end-to-end, horizon-penetrating, holding a
+    # GRHD in a NON-spherical chart runs end-to-end, horizon-penetrating, holding a
     # positive finite state with no floors — the metric-aware Valencia flux with the shift on every
     # axis, the covariant geodesic source, the metric-aware c2p, and the light-cone CFL all compose.
     with tempfile.TemporaryDirectory() as d:

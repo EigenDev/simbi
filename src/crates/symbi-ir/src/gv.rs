@@ -33,7 +33,7 @@ use crate::graph::{ConstValue, ElementWiseOp, Graph, NodeId, TranscendentalOp};
 pub struct GvKernel {
     pub graph: Graph,
     /// field-buffer reads as `(ir_key, FieldBind)`: the IR-side load name paired with the
-    /// born-typed runtime binding the producer minted (docs/design/38 L2). the binding is a
+    /// born-typed runtime binding the producer minted. the binding is a
     /// `FieldBind` (typed `Ref` for the closed cell vocabulary, `Raw` for hand-built paths) —
     /// no consumer re-parses a runtime string.
     pub field_inputs: Vec<(String, FieldBind)>,
@@ -52,11 +52,11 @@ pub struct GvKernel {
     /// emit produces the prior gmem-per-thread pattern.
     ///
     /// the type carries the spec; the CUDA emit and LoadAt rewriting paths are
-    /// **not implemented** — see `docs/design/22_smem_tiling.md`. the field
+    /// **not implemented**. the field
     /// exists so builders, fusion, and the runtime can be extended without
     /// further enum-shape changes.
     pub tile_spec: Option<TileSpec>,
-    /// the declared SUPPORT of this kernel's outputs (docs/design/48 part 3):
+    /// the declared SUPPORT of this kernel's outputs:
     /// a region outside which every output is exactly zero for any field input.
     /// declared by the builder (where the saturation constants live), carried
     /// into the serialized `Prepared` blob, consumed by dispatch (reduction /
@@ -157,7 +157,7 @@ impl LaunchGrade {
 
 /// the writes manifest each builder pairs with its `GvKernel`: per output, a
 /// `(write_key, born-typed runtime binding, root_node)` triple. fusion concatenates
-/// these after the splice remaps `root_node` into the fused graph (docs/design/38 L2).
+/// these after the splice remaps `root_node` into the fused graph.
 pub type Writes = Vec<(String, FieldBind, NodeId)>;
 
 #[derive(Clone, Debug)]
@@ -304,7 +304,7 @@ pub fn in_isolated_trace<R>(f: impl FnOnce() -> R) -> (GvKernel, R) {
 }
 
 impl GvKernel {
-    /// docs/design/26: infer this kernel's shared-memory tile intent. an explicit
+    /// infer this kernel's shared-memory tile intent. an explicit
     /// `tile_spec` overrides; otherwise a STENCIL kernel (non-empty
     /// `coord_components` — it does shifted `load_at` reads, so it has a halo and
     /// reusable neighbor data) gets a `TileSpec`, and a POINTWISE kernel (empty)
@@ -321,7 +321,7 @@ impl GvKernel {
     /// CUBE for every stencil kernel; that over-loads smem ~7.5x for a 1D-along-dir
     /// reconstruction and reads transverse ghost cells the physics never touches,
     /// so it is NOT a safe default. auto-inference of a correct per-axis slab from
-    /// the graph's `LoadAt` offsets is deferred to the promotion step (docs/design/22 §F).
+    /// the graph's `LoadAt` offsets is deferred to the promotion step.
     pub fn infer_tile_spec(&self) -> Option<TileSpec> {
         self.tile_spec.clone()
     }
@@ -331,7 +331,7 @@ impl GvKernel {
     /// are actual `field_inputs` (a LoadAt always names a registered field, so
     /// the restriction is a safety net, not a filter). this is the smem-tile
     /// candidate set: only stencil-read fields have reusable neighbor data worth
-    /// prefetching; a field read pointwise stays on gmem. (docs/design/22.)
+    /// prefetching; a field read pointwise stays on gmem.
     pub fn stencil_read_field_keys(&self) -> Vec<String> {
         let manifest: std::collections::HashSet<&str> =
             self.field_inputs.iter().map(|(k, _)| k.as_str()).collect();
@@ -980,7 +980,7 @@ impl crate::algebra::Scalar for Gv {
         Gv::of(with_trace(|t| t.graph.select(c, y, n, None)))
     }
 
-    // docs/design/23: scope frame at S = Gv.
+    // scope frame at S = Gv.
     //
     // semantics: snapshot the graph's node count BEFORE running `body`; all
     // NodeIds pushed during the closure (the lexical region of this scope)
@@ -1135,7 +1135,7 @@ impl crate::algebra::Scalar for Gv {
     fn floor(self) -> Gv { self.unop(ElementWiseOp::Floor) }
     fn ceil(self) -> Gv  { self.unop(ElementWiseOp::Ceil) }
 
-    // ── hyperbolics — Tier 0 additions, wired to graph ops ────────────────
+    // ── hyperbolics — graph-op lowerings ────────────────
     fn sinh(self) -> Gv  { self.unop(ElementWiseOp::Sinh) }
     fn cosh(self) -> Gv  { self.unop(ElementWiseOp::Cosh) }
     fn tanh(self) -> Gv  { self.transcendental_unop(TranscendentalOp::Tanh) }
@@ -1575,7 +1575,7 @@ mod fusion_laws {
 }
 
 // =============================================================================
-// docs/design/23: Scalar::scope at S = Gv — emits a real frame.
+// Scalar::scope at S = Gv — emits a real frame.
 //
 // at f64 the default `Scalar::scope` impl is identity (the closure runs
 // inline). at Gv the override above snapshots the trace, runs the closure,

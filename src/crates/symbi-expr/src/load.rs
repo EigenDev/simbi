@@ -244,7 +244,7 @@ pub fn nodes_from_descs(node_descs: &[NodeDesc]) -> Result<Vec<Node>, LoadError>
 /// ```
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceConfig {
-    /// the conservation LAW the framework wraps the field in (docs/design/32 `kind <-> invariant`):
+    /// the conservation LAW the framework wraps the field in (`kind <-> invariant`):
     /// `"force"` (acceleration -> S_mom=rho*a, S_nrg=rho*a.v), `"cooling"` (rate -> S_nrg=-Lambda),
     /// `"relax"` (velocity relaxation S_mom=kappa*rho*(v_ref-v), kappa>=0 -> stable damping; the
     /// `outputs` are `[kappa, v_ref_0..v_ref_{D-1}]`), or `"raw"` (outputs written directly to
@@ -261,7 +261,7 @@ pub struct SourceConfig {
     /// runtime parameter values, indexed by each `PARAMETER` node's `param_idx`.
     #[serde(default)]
     pub params: Vec<f64>,
-    /// **docs/design/32 `region` axis** — an OPTIONAL node index (into `nodes`) of a mask
+    /// **`region` axis** — an OPTIONAL node index (into `nodes`) of a mask
     /// `chi(x) in [0,1]` restricting WHERE the source acts (sponge layers, jet nozzles). the
     /// contribution is multiplied by `chi` at build time (the lift is linear in the field, so
     /// masking the field == masking the conserved contribution). `None` => everywhere (`chi == 1`),

@@ -1,8 +1,8 @@
 // =============================================================================
 // mhd_cyl_rphi_gpu.rs
 //
-// GPU<->CPU parity for the CYLINDRICAL r-phi DISK MHD path (docs/design/30) — the
-// AGENT.md §4.3 carrier gate for the r-phi substrate kernels (r-z parity lives in
+// GPU<->CPU parity for the CYLINDRICAL r-phi DISK MHD path — the carrier gate for the
+// r-phi substrate kernels (r-z parity lives in
 // mhd_cyl_rz_gpu.rs). builds the SAME in-plane-rotor-in-B_phi disk sim on host and
 // device via `with_cyl_plane(RPhi)`, evolves a handful of RK2 steps through the
 // production loop, and asserts conserved state + cell B + the staggered FACE B agree

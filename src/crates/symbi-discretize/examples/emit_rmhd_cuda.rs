@@ -26,7 +26,7 @@ type Writes = Vec<(String, symbi_ir::FieldBind, NodeId)>;
 // emit a Gv-traced kernel (graph + ABI manifest already carried) -> CUDA source.
 fn emit_gv(out_dir: &str, name: &str, ndim: u8, k: GvKernel, writes: Writes) {
     assert!(!k.graph.has_errors(), "{name} graph errors: {:?}", k.graph.errors());
-    // thread the kernel's declared smem tile intent (Gate 3) so the emitted CUDA
+    // thread the kernel's declared smem tile intent so the emitted CUDA
     // exercises the smem prelude + redirected stencil reads through the PTX gate.
     let tile_spec = k.infer_tile_spec();
     let desc = emit_kernel_from_lowering(&k.graph, &KernelEmitInputs {
@@ -57,7 +57,7 @@ fn main() {
     let (rmhd_f, rmhd_fw) = rmhd_flux_gv(1, 0, 0);
     emit_gv(&out_dir, "rmhd_hlle_flux", 1, rmhd_f, rmhd_fw);
 
-    // the 3D direction-0 flux — the hottest GPU kernel + the Gate 3 smem slab target.
+    // the 3D direction-0 flux — the hottest GPU kernel + the smem slab target.
     let (rmhd_f3, rmhd_f3w) = rmhd_flux_gv(3, 0, 0);
     emit_gv(&out_dir, "rmhd_face_flux_3d_0", 3, rmhd_f3, rmhd_f3w);
 

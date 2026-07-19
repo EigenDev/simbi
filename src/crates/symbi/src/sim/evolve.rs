@@ -17,13 +17,13 @@ use symbi_hydro::eos::Eos;
 use symbi_geometry::Metric;
 use symbi_xpu::{ExecutionSpace, MemorySpace};
 use crate::sim::state::*;
-// the KernelSet trait lives at the sim<->substrate seam (docs/design/41); the driver
-// is a consumer of the contract, not its home. re-exported so the
-// `sim::evolve::KernelSet` path resolves for downstream callers.
+// the KernelSet trait lives at the sim<->substrate seam; the driver is a consumer
+// of the contract, not its home. re-exported so the `sim::evolve::KernelSet` path
+// resolves for downstream callers.
 pub use crate::sim::substrate_seam::KernelSet;
 // shared driver primitives (dt guard, stage bookkeeping, profiler, body coupling) live in the
-// sim-state core (docs/design/41) so the AMR driver shares them DRY. the public profiler
-// API is re-exported at the `sim::evolve::` path for the bench examples.
+// sim-state core so the AMR driver shares them DRY. the public profiler API is
+// re-exported at the `sim::evolve::` path for the bench examples.
 use crate::sim::driver::{evolve_bodies, prof, stage_tag, stage_time_fractions};
 pub use crate::sim::driver::{check_dt, report_profile, reset_profile};
 
@@ -49,7 +49,7 @@ where
 // advance the sim by ONE step at a caller-supplied dt. `evolve` hides the per-step
 // sequence inside its run-to-completion loop; the decomposition / spmd drivers need
 // per-step control so a shared dt + inter-subdomain halo exchange can be interleaved
-// between steps (docs/design/36). prim + cons must be current at entry (prime with
+// between steps. prim + cons must be current at entry (prime with
 // c2p + ghost_fill once before the first call), same contract as the internal stage loop.
 pub fn step_once<R, const D: usize, const DOF: usize, M, E, S, Mem>(
     sim: &mut SimStateGeneric<R, D, DOF, M, E, S, Mem>,
@@ -222,14 +222,14 @@ where
         kernels.excise(sim);
 
         if sim.has_bodies() {
-            // the IBM surface physics (docs/design/50), ONCE per step AFTER the
+            // the IBM surface physics, ONCE per step AFTER the
             // full RK combination: applied inside the stage blend, a stage's
             // exponential removal is partially undone by the SSP convex
             // combination while its receipt is not — the ledger then over-
             // counts (RK2: 3/2x). post-step, receipt == removal exactly.
             kernels.penalize(sim, sim.dt);
             // backward feedback: reduce per-body force/torque/accreted-mass from the fluid into
-            // the side-car diagnostics (docs/design/19), then evolve_bodies consolidates + applies it
+            // the side-car diagnostics, then evolve_bodies consolidates + applies it
             // + advances the (prescribed) binary, and resets the accumulator for the next step.
             prof("body_feedback", || kernels.body_feedback(sim, sim.dt));
             prof("body_motion", || evolve_bodies(sim));
@@ -302,7 +302,7 @@ where
 // =============================================================================
 
 // =============================================================================
-// stage pipeline (docs/design/35 R5): the per-stage kernel sequence as DATA.
+// stage pipeline: the per-stage kernel sequence as DATA.
 //
 // each `Phase` declares the field groups it READS + WRITES; `step` FOLDS over the
 // list, and a debug-only assert verifies every phase's reads were produced by an
@@ -311,7 +311,7 @@ where
 // that reads a stale field trips the assert instead of silently running on last
 // step's data. zero hot-path cost: the pipeline is `const`, dispatch is a `match`,
 // the assert is debug-only, and the calls / order / gates are byte-identical to
-// the prior imperative sequence.
+// a hand-written imperative sequence.
 //
 // `FieldSet` tracks only the REGIME-INDEPENDENT data flow (cons / prim / flux /
 // u_stage) — every regime carries these, so the assert never false-positives.
@@ -425,10 +425,9 @@ where
         }
         let sim = &*sim;
         let bodies = sim.has_bodies();
-        // FOLD the stage pipeline (R5). semantics preserved from the prior imperative
-        // sequence, phase-by-phase:
+        // FOLD the stage pipeline. each phase's semantics, in execution order:
         //  - snapshot_stage: cons BEFORE godunov overwrites it, so the additive source pass
-        //    evaluates S at the stage input (the state the fused stage uses, S2 invariant).
+        //    evaluates S at the stage input (the state the fused stage uses).
         //  - wave_speeds: materialize per-cell speeds on the CURRENT prim (RMHD quartic ->
         //    wave_speed_l/r) so flux reads them; no-op for inline-speed regimes.
         //  - godunov/source_apply/body_source share the SSP stage weight `ac*dt` (Euler ac=1

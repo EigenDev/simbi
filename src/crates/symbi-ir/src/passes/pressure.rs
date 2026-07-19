@@ -1,7 +1,7 @@
 // =============================================================================
 // pressure.rs
 //
-// docs/design/23: peak-register-pressure analysis over the lowered
+// peak-register-pressure analysis over the lowered
 // scope tree. counts the maximum number of simultaneously-live let bindings
 // along any program point. Scope's `{ body; result }` is a hoisting barrier
 // — bindings declared inside die at the closing brace; only `name` (the
@@ -10,7 +10,7 @@
 // the metric is an UPPER BOUND on true register pressure: a let bound on
 // line 1 and last-used on line 2 still occupies a slot here for the rest of
 // its enclosing block. but it's the metric the *scope structure* directly
-// bounds — and the one the design's algebra (`seq`/`par`/`scope`/`share`)
+// bounds — and the one the algebra (`seq`/`par`/`scope`/`share`)
 // composes over without any liveness inference.
 //
 // usage:

@@ -124,7 +124,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize>
         }
     }
 
-    /// register a DRIVEN boundary (docs/design/33). the returned id (registration order,
+    /// register a DRIVEN boundary. the returned id (registration order,
     /// 0-based) is what the sim's `Boundaries` must carry as `BoundaryType::Driven(id)` on the
     /// prescribed face. build `built` from `expr_bridge::build_boundary_dag(&cfg, RHD_SPEC)` —
     /// a complete prim prescription `[rho, vel.., pre]`.
@@ -439,12 +439,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             },
         );
 
-        // docs/design/33: the standard pullback above SKIPPED any Driven faces (Driven ->
+        // the standard pullback skips any Driven faces (Driven ->
         // BcType::Skip); prescribe their ghost prim state from the registered boundary DAGs.
         if !self.boundary_dags.is_empty() {
             dispatch_driven_boundaries(sim, &self.boundary_dags);
         }
-        // the Neumann/Robin gradient faces (also skipped above), filled from the edge cell.
+        // the Neumann/Robin gradient faces (also skipped by the pullback), filled from the edge cell.
         if !self.gradient_bcs.is_empty() {
             dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
         }

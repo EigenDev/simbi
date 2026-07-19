@@ -11,8 +11,8 @@
 // transcendental / multi-division arms (the hllc star fan measured 2.6x
 // SLOWER mask-formed) and tolerates a single guarded division (the van-leer
 // limiter idiom measured FASTER eager than branched). the win depends on
-// long unit-stride trips — the row-elongated cover blocks (docs/design/47
-// act 6) are this spelling's other half.
+// long unit-stride trips — the row-elongated cover blocks are this
+// spelling's other half.
 //
 // bit-identity: `select` evaluates both arms and returns the taken arm's
 // value unchanged, so per-cell results are bit-for-bit identical to the

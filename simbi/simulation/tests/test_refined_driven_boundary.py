@@ -4,9 +4,9 @@
 # driven (DYNAMIC) boundaries on a REFINED run, end to end through the wheel:
 # the config's boundary prescriptions must register on the base AND every fine
 # kernel set (a fine level flush against a driven face inherits Driven(id) and
-# resolves it against its own registration). the oracle is exact: uniform gas
+# resolves it against its own registration). the invariant is exact: uniform gas
 # with every face driven at the same uniform state must stay uniform on both
-# levels — any seam/ordering/registration defect breaks uniformity or panics.
+# levels — any ordering or registration defect breaks uniformity or panics.
 # gated for the energy (newtonian) and isothermal build macros separately;
 # they register the dags in different code paths.
 # =============================================================================

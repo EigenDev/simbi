@@ -1,14 +1,14 @@
 # =============================================================================
 # gr_rotating_equilibrium_mhd.py
 #
-# the RMHD (B = 0) rotating-equilibrium accuracy gate (design 44 phase C): the
+# the RMHD (B = 0) rotating-equilibrium accuracy gate: the
 # GrRotatingEquilibrium constant-l orbit (Fishbone-Moncrief 1976, at general
 # spin, dynamic boundaries pinned to the analytic state) run on the RELATIVISTIC-
 # MHD kernel path with a vanishing magnetic field. at B = 0 the RMHD equations
 # reduce to GRHD, so the SAME analytic equilibrium is stationary — but the state
 # now flows through the full spinning-kerr RMHD flux (the tetrad HLLD, the shift,
 # and the v^phi FRAME-DRAGGING w-reconstruction), c2p, and covariant EM-stress
-# source. it is the accuracy oracle for those pieces: the one-step S_phi residual
+# source. it is the accuracy check for those pieces: the one-step S_phi residual
 # must sit at truncation and CONVERGE under refinement (a raw v^phi
 # reconstruction generates S_phi off the dragging manifold and fails to converge).
 #

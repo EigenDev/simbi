@@ -1,7 +1,7 @@
 // =============================================================================
 // emf_register.rs
 //
-// the edge-EMF reflux register (docs/design/22) — the constrained-
+// the edge-EMF reflux register — the constrained-
 // transport analogue of the flux register. the CT curl applies, per coarse
 // face bface_a(c) with (p1, p2) cyclic of a:
 //   bface_a(c) += dt * ( (E_p1(c+e_p2) - E_p1(c)) / dx_p2
@@ -16,7 +16,7 @@
 // div(curl) = 0 cell-by-cell, so the staggered divB stays at machine zero
 // across the level jump.
 //
-// SLAB-FIELD storage, all kernels (cpu + gpu through the dispatch seam): for
+// SLAB-FIELD storage, all kernels (cpu + gpu through the dispatch boundary): for
 // each edge direction t and each coarse-fine SIDE PLANE (axis b != t, side s,
 // skipped where the coverage touches the coarse interior), one thin Field
 // over the in-plane t-edge slab (t cells x a nodes at the plane's b node,

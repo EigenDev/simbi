@@ -1,7 +1,7 @@
 // =============================================================================
 // jit_fused_body_equals_two_pass.rs
 //
-// piece-2 oracle: with the fused runtime-source path ON by default, a Newtonian run carrying BOTH a
+// with the fused runtime-source path ON by default, a Newtonian run carrying BOTH a
 // user source AND an immersed body must produce a bit-for-bit identical trajectory whether the update
 // is FUSED (one Cranelift-JIT'd godunov that folds the user source AND the body wrap) or run as the
 // TWO-PASS (plain AOT godunov -> `apply_runtime_source` -> `body_source`, three separate CONS sweeps).
@@ -55,8 +55,8 @@ fn central_black_hole() -> BodyCollection<f64, 2> {
 
 #[test]
 fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
-    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
-    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     type Sim = SimCpu<Newtonian, 2, Cartesian, IdealGas<f64>>;
     const GAMMA: f64 = 1.4;
@@ -126,8 +126,8 @@ fn adiabatic_source_and_body_fused_equals_two_pass_rk2() {
 
 #[test]
 fn adiabatic_body_only_fused_equals_two_pass_rk2() {
-    // E3 (docs/design/48) made the two-pass the default; this oracle pins the
-    // FUSED kernel as live, so opt in before the policy OnceLock latches.
+    // the two-pass is the default; this test pins the FUSED kernel as live, so
+    // opt in before the policy OnceLock latches.
     unsafe { std::env::set_var("SYMBI_FUSE", "1") };
     // the body-WITHOUT-a-user-source path: a pure gravity/accretion run. `with_source_fusion()` folds
     // the immersed body into godunov (one launch, no user source to carry it) and must match the

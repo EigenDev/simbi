@@ -1,7 +1,7 @@
 // =============================================================================
 // decomp_mhd_equivalence.rs
 //
-// the MHD correctness contract for multi-gpu domain decomposition (docs/design/37): a 2d
+// the MHD correctness contract for multi-gpu domain decomposition: a 2d
 // RMHD grid split into a 2x2 tile grid, evolved in lockstep with the same-level halo exchange,
 // must reproduce the monolithic run to round-off AND keep div(B) at machine zero across the
 // tile cuts. the second check is the MHD-specific one: a wrong staggered `bface` exchange
@@ -435,11 +435,11 @@ fn mhd_euler_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Euler);
 }
 
-// the 2x2 corner under RK2 -- the hard case. FIXED: the bug was a ghost_fill/exchange ORDERING
-// defect in evolve_decomposed (ghost_fill ran before the cut exchange, so a domain-boundary ghost
-// at a boundary-meets-cut corner read a stale unexchanged cut cell -> spurious edge-EMF, only
-// exposed by the RK2 corrector averaging the saved stage-1 emf). moving ghost_fill AFTER the
-// exchange fixed it; div(B) exact and decomposed == monolithic to round-off here too.
+// the 2x2 corner under RK2 -- the hard case. ghost_fill must run AFTER the cut exchange: if it
+// ran before, a domain-boundary ghost at a boundary-meets-cut corner would read a stale
+// unexchanged cut cell -> spurious edge-EMF, exposed by the RK2 corrector averaging the saved
+// stage-1 emf. with ghost_fill after the exchange, div(B) is exact and decomposed == monolithic
+// to round-off here too.
 #[test]
 fn mhd_rk2_quad_tile_2d_grid() {
     assert_matches([2, 2], Timestepping::Rk2);

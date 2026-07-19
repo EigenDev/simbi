@@ -7,7 +7,7 @@
 // `Gv` carrier + the trace itself live in `symbi-core`; this module is the
 // discretization layer that drives it: it picks coords/spacing/reconstruction
 // (the numerical choices) and builds c2p / flux / godunov / wave-speed / CT /
-// ghost-fill / geometry kernels (design/gv_algebra_unification.md §3). `S = f64`
+// ghost-fill / geometry kernels. `S = f64`
 // gives the host body; `S = Gv` gives the kernel graph — one physics source.
 //
 // raw index/stencil IR (integer coord arithmetic, lattice-map boundary source,
@@ -135,7 +135,7 @@ pub(crate) fn plm_theta_from_stencil(qm2: Gv, qm1: Gv, q0: Gv, qp1: Gv, theta: G
 }
 
 // =============================================================================
-// the lattice-map GHOST FILL in Gv (docs/design/11) — the boundary pullback: read the
+// the lattice-map GHOST FILL in Gv — the boundary pullback: read the
 // primitives at the per-axis integer SOURCE coord (periodic shift / reflect pivot / outflow
 // clamp on a runtime `map_type`), write at the cell (in place), with the grade-1 Jacobian
 // `vel_sign` flip on the velocity (and B for RMHD). the source coord is PURE INTEGER (the
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn infer_tile_spec_stencil_vs_pointwise() {
-        // Gate 3: the rmhd flux builder DECLARES an explicit per-axis SLAB tile
+        // the rmhd flux builder DECLARES an explicit per-axis SLAB tile
         // (halo on the reconstruction axis `dir`, 0 transverse). a POINTWISE
         // kernel (same-cell reads only) declares no spec -> infers None.
         let (flux, _) = rmhd_flux_gv(1, 0, 0);
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn boundary_fill_is_the_coord_assign_instance() {
-        // docs/design/33 section 7: the SAME operator (apply_dag_core_gv) as the source pass, at the
+        // the SAME operator (apply_dag_core_gv) as the source pass, at the
         // (Coord, Assign) coordinate. proves the abstraction is general — TWO instances, one builder.
         // a prim prescription: rho=2, vel=0.5, pre=1 (consts; a real boundary reads x/t, same path).
         use symbi_ir::graph::ConstValue;

@@ -28,10 +28,10 @@ class CoordinateProfileProps(ComponentProps):
     linestyle: str = "-"
     linewidth: float = 2.0
     normalization: float = 1
-    rbeg: float = 0.2  # Reference line start radius
-    rend: float = 0.5  # Reference line end radius
+    rbeg: float = 0.2  # reference line start radius
+    rend: float = 0.5  # reference line end radius
 
-    # Analysis-specific formatting
+    # analysis-specific formatting
     show_reference_lines: bool = True
     x_scale: str = "linear"
     y_scale: str = "linear"
@@ -63,7 +63,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
 
     def update(self, props: CoordinateProfileProps) -> None:
         self.props = props
-        # We would re-render if props change
+        # prop changes are applied on the next render
         pass
 
     def render(self, data: FieldData, style: FigureConfig) -> RenderResult:
@@ -78,7 +78,7 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         values = data.values
         _, field_str = stripped_field_name(data.name)
         norm = self.props.normalization
-        # --- Render Main Line ---
+        # --- render main line ---
         good_bins = ~np.isnan(values)
         if self._main_line is None:
             self._main_line = self.ax.plot(
@@ -92,14 +92,14 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
             )
 
         if norm != 1:
-            # if plotting a negative normalized quantity, we need to
-            # account for whether the horizontal line is -1 or 1
+            # for a negatively normalized quantity the reference horizontal
+            # line sits at -1 rather than +1
             norm_loc = 1.0 if np.all(values / norm > 0) else -1.0
             self.ax.axhline(
                 norm_loc, color="gray", linestyle="--", linewidth=0.5
             )
 
-        # --- Apply Special Formatting ---
+        # --- apply special formatting ---
         self._format_axes(r_bins, values, data.name)
         # return a RenderResult so the Figure/Formatter can inspect artists and metadata
         return RenderResult(
@@ -116,16 +116,16 @@ class CoordinateProfileComponent(Component[CoordinateProfileProps, FieldData]):
         self.ax.set_xlabel("$r$")
         # self.ax.set_ylabel(field_str)
 
-        # Add reference lines
+        # add reference lines
         if self.props.show_reference_lines:
             # self.ax.axvline(50.0, color="gray", linestyle="--", linewidth=0.5)
-            # Add power-law reference for density
+            # add power-law reference for density
             if field_base_name == "rho":
                 good_bins = ~np.isnan(values)
                 r_ref = r_bins[good_bins]
                 val_ref = values[good_bins]
 
-                # Find a good anchor point for the reference line
+                # find a good anchor point for the reference line
                 ref_beg_idx = np.argmax(r_ref > 2)
                 ref_end_idx = np.argmax(r_ref > 30)
                 if ref_beg_idx > 0:

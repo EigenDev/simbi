@@ -15,9 +15,9 @@
 //   - rank-N:  a tuple of length = product of literal dims
 //              (e.g., `(f64, f64, f64)` for shape [3])
 //
-// the R.5 kernel macro will eventually use a different emission shape
-// (writing per-component to Field<T> via SoA indices); this V1 shape
-// targets elemental-style usage and the IR conformance tests.
+// the kernel macro emits a different shape (writing per-component to
+// Field<T> via SoA indices); this elemental shape targets elemental-style
+// usage and the IR conformance tests.
 //
 // scalar expressions render with explicit parentheses to keep operator
 // precedence unambiguous. type suffixes (`1.0_f64`) on every Const
@@ -167,7 +167,6 @@ pub(crate) fn emit_stmt(out: &mut String, stmt: &ScalarStmt, generic: bool) {
         } => {
             // Rust has first-class block expressions: `let name: ty = { body; result };`
             // — the inner lets die at the closing brace, only `result` survives.
-            // see docs/design/23_bounded_pressure_ir.md.
             out.push_str("let ");
             out.push_str(name);
             out.push_str(": ");
@@ -313,7 +312,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr, generic: bool) {
             );
         }
         ScalarExpr::FreeCall { name, args } => {
-            // F1.B.8: direct function call by name. Rust emission —
+            // direct function call by name. Rust emission —
             // the function is resolved by name at the surrounding
             // module scope (the scalar elemental's Rust impl).
             out.push_str(name);
@@ -330,7 +329,7 @@ pub(crate) fn emit_expr(out: &mut String, e: &ScalarExpr, generic: bool) {
 }
 
 // float constants: `generic` (kernel) renders the scalar-parametric form
-// `S::lit(x)` / `S::nan()` (docs/design/15: kernels are `fn k<S: Scalar>`);
+// `S::lit(x)` / `S::nan()` (kernels are `fn k<S: Scalar>`);
 // `!generic` (the f64 elemental path) renders the concrete `{x}_f64` / `f64::NAN`.
 // integer/bool constants are scalar-independent.
 fn emit_const(out: &mut String, v: &ConstValue, generic: bool) {
@@ -480,7 +479,7 @@ mod tests {
     #[test]
     fn method_call_emits_dot_notation() {
         // abs is emitted as a method call `(x).abs()`; for generic-S kernels this
-        // resolves to the `Numeric` carrier's ternary `my_abs` (tier-1 #2b), no
+        // resolves to the `Numeric` carrier's ternary `my_abs`, no
         // scoped if-select (which would blow up rustc debuginfo on nested chains).
         let mut g = Graph::new();
         let x = g.add_scalar_param("x", ElementTy::F64);
@@ -548,7 +547,7 @@ mod tests {
         assert!(src.contains("-> i32"));
     }
 
-    // ----- docs/design/23: ScalarStmt::Scope tests -----
+    // ----- ScalarStmt::Scope tests -----
 
     /// build a `LoweredFn` by hand whose body contains a `Scope` statement,
     /// emit it, and verify the Rust output is the canonical block-expression

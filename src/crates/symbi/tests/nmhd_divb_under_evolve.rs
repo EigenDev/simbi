@@ -1,7 +1,7 @@
 // =============================================================================
 // nmhd_divb_under_evolve.rs
 //
-// validation of the Newtonian-MHD substrate (docs/design/29): run the ENTIRE
+// validation of the Newtonian-MHD substrate: run the ENTIRE
 // production NMHD KernelSet (c2p -> ghost_fill -> flux per dir -> cfl -> snapshot ->
 // godunov_euler -> post_godunov[CT] -> rk2) for ~10 steps with periodic BCs and assert
 //   (a) the discrete staggered div(B) stays at machine zero (the CT stack — reused

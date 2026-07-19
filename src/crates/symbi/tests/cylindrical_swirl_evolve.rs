@@ -3,7 +3,7 @@
 //
 // the FIRST end-to-end run of a vector-dimension-lifted sim: an axisymmetric
 // cylindrical (r, z) grid carrying a 3-component velocity (v_r, v_phi, v_z) —
-// DOF = 3 on an NDIM = 2 grid (docs/design/18). it exercises the whole _cyl
+// DOF = 3 on an NDIM = 2 grid. it exercises the whole _cyl
 // adiabatic kernel family (c2p / flux / godunov / wave_speed / snapshot / ghost,
 // all ncomp = 3) through the DOF-generic AdiabaticSubstrateKernelSet + the
 // metadata-driven dispatch (each kernel's buffer manifest read off the artifact).

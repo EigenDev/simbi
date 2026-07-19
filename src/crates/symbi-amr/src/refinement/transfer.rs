@@ -1,7 +1,7 @@
 // =============================================================================
 // transfer.rs
 //
-// the inter-level field-transfer driver (docs/design/22): selects the
+// the inter-level field-transfer driver: selects the
 // regions and dispatches the aot amr kernels (refine_restrict_{D}d /
 // refine_prolong_{order}_{D}d, built in symbi-discretize gv_refinement.rs) per field
 // component through `dispatch_fields_each` — each buffer resolves the ABSOLUTE
@@ -217,7 +217,7 @@ fn coarse_parents<const D: usize>(region: &Domain<D>, w: isize) -> Domain<D> {
 }
 
 /// the two mixed-resolution intermediate lattices of the axis-split
-/// prolongation of `region` (docs/design/49): pass 0's output A is fine along
+/// prolongation of `region`: pass 0's output A is fine along
 /// axis 0 and coarse (parents + stencil halo) elsewhere; pass 1's output B is
 /// fine along axes 0..=1 and coarse along axis 2.
 fn sweep_domains<const D: usize>(region: &Domain<D>, w: isize) -> (Domain<D>, Domain<D>) {
@@ -233,7 +233,7 @@ fn sweep_domains<const D: usize>(region: &Domain<D>, w: isize) -> (Domain<D>, Do
 /// the per-slab intermediates of the axis-split prolongation: one prim batch
 /// per pass, shaped exactly to the slab's mixed lattices. SMR slabs are
 /// static, so these allocate once (the fine level's lazy init) and are reused
-/// every call — the step loop allocates nothing (law E2).
+/// every call — the step loop allocates nothing.
 pub struct ProlongSweepScratch<const D: usize, const DOF: usize, Mem: MemorySpace> {
     pub a: PrimFieldsGeneric<D, DOF, Mem>,
     pub b: PrimFieldsGeneric<D, DOF, Mem>,
@@ -252,7 +252,7 @@ impl<const D: usize, const DOF: usize, Mem: MemorySpace> ProlongSweepScratch<D, 
 }
 
 /// prolong the prim batch as THREE axis-split sweep passes over the lerped
-/// coarse scratch (docs/design/49): interp along axis 0 into A (fine-x,
+/// coarse scratch: interp along axis 0 into A (fine-x,
 /// coarse-yz), along axis 1 into B (fine-xy, coarse-z), along axis 2 into
 /// `dst` — bit-identical to the fused tensor-product kernel at ~1/17 the
 /// interp evaluations and ~1/14 the loads. `scratch` must have been built

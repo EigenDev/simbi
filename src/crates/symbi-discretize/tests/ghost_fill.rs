@@ -1,7 +1,7 @@
 // =============================================================================
 // ghost_fill.rs
 //
-// the lattice-map PULLBACK scheme (docs/design/11) emits correct integer code.
+// the lattice-map PULLBACK scheme emits correct integer code.
 // `iso_ghost_fill` reads the primitives at a per-axis lattice-map source coord
 // (periodic / reflect / outflow, branched on a runtime integer `map_type`) and
 // writes them at the cell, with the per-component `vel_sign` (the map's Jacobian).

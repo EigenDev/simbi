@@ -1,10 +1,10 @@
 // =============================================================================
 // sdf.rs
 //
-// signed-distance geometry as carrier-generic CSG (docs/design/50 layer 1):
+// signed-distance geometry as carrier-generic CSG:
 // negative inside the body, positive outside. every operation is min/max/
 // affine arithmetic plus one sqrt, so the SAME expression evaluates at f64
-// (host oracle + tests), at Gv (the traced penalization kernel), and at
+// (host reference + tests), at Gv (the traced penalization kernel), and at
 // Dual<S> — which is how normals are computed: the exact gradient of the
 // exact expression, one seeded evaluation per axis, no finite-difference
 // step size. after CSG the gradient magnitude drifts from 1 (min/max kinks,
@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn the_sdf_traces_at_gv() {
-        // the trace-native claim (docs/design/50): the SAME expression that
+        // the trace-native claim: the SAME expression that
         // ran at f64 above evaluates at the Gv carrier inside a trace — shape
         // parameters as scalar params, the distance as a graph node. the
         // penalization kernel builder consumes exactly this path.

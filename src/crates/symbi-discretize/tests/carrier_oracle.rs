@@ -567,7 +567,7 @@ fn rhd_wave_speed_map_matches_native_physics() {
 fn rmhd_wave_speed_map_matches_native_physics() {
     // the CFL map traces `rmhd_magnetosonic_cfl_speeds` (the cheap c_f^2 = c_s^2 + c_A^2 upper
     // bound), NOT the full Mignone & Del Zanna quartic — the quartic stays on the Riemann/flux
-    // path only. so the oracle MUST be the same magnetosonic bound at native f64, not
+    // path only. so the reference MUST be the same magnetosonic bound at native f64, not
     // `wave_speeds_axis` (which over-tightens to the exact characteristic and disagrees by ~2%).
     // dx=1 -> the map IS `max(|sl|,|sr|)`; the bound reads the full 3-velocity + 3-B-field.
     let prim = MhdPrim::<f64, 3> {
@@ -603,7 +603,7 @@ fn rmhd_wave_speed_map_matches_native_physics() {
 //     algebraic, NOT iterative -> ULP-tight, unlike RMHD's 1e-9).
 //   - flux: uniform state -> HLLE returns the physical `NewtonianMhd::to_flux`.
 //   - wave-speed map: dx=1 -> lambda == max(|sl|,|sr|) from the exact magnetosonic.
-// proves the regime traces, lowers, CPU-interprets, and bit-matches f64 (CLAUDE.md 4.3).
+// proves the regime traces, lowers, CPU-interprets, and bit-matches f64.
 // =============================================================================
 
 const NMHD_GAMMA: f64 = 5.0 / 3.0;
@@ -734,7 +734,7 @@ fn nmhd_wave_speed_map_matches_native_physics() {
 
 #[test]
 fn nmhd_builders_render_to_cpu_and_cuda() {
-    // the LOWERABILITY half of the carrier gate (CLAUDE.md 4.3): all three NMHD
+    // the LOWERABILITY half of the carrier gate: all three NMHD
     // builders must emit non-empty CPU (rust) AND CUDA source — write-once-run-
     // everywhere at the source level. the GPU emit is the whole point of NMHD.
     KernelRun::new(nmhd_c2p_gv()).grid([N]).assert_lowers();
@@ -896,7 +896,7 @@ fn imhd_builders_render_to_cpu_and_cuda() {
 // =============================================================================
 // HLLC / HLLD carrier oracle — the highest-risk kernels (most select-heavy /
 // NaN-prone): the contact-resolving HLLC family (adiabatic / rhd / rmhd) and the
-// 5-wave rmhd HLLD. the review flagged these as having NO f64 == Gv oracle. the
+// 5-wave rmhd HLLD, the kernels with no algebraic f64 == Gv equivalence elsewhere. the
 // reference is the SAME riemann function run NATIVELY at S = f64 (never re-derived
 // algebra) on the SAME reconstructed L/R the kernel sees. uniform state -> the
 // PLM slope is zero so L == R == the cell value, which isolates the Riemann
@@ -1004,7 +1004,7 @@ fn rmhd_hlld_flux_matches_native_physics_on_uniform_state() {
 
 #[test]
 fn hllc_hlld_builders_render_to_cpu_and_cuda() {
-    // the lowerability half of the carrier gate (CLAUDE.md 4.3): every HLLC/HLLD builder
+    // the lowerability half of the carrier gate: every HLLC/HLLD builder
     // must emit non-empty CPU (rust) AND CUDA source. an unlowerable op panics here.
     KernelRun::new(adiabatic_hllc_flux_gv::<2>(0)).grid([1, NSWEEP]).assert_lowers();
     KernelRun::new(rhd_hllc_flux_gv::<2>(0)).grid([1, NSWEEP]).assert_lowers();
@@ -1105,7 +1105,7 @@ fn euler_flux_nonuniform_reconstruction_drives_limiter() {
 }
 
 // =============================================================================
-// cartesian kerr-schild flux x<->y symmetry (design 45): the metric is exactly
+// cartesian kerr-schild flux x<->y symmetry: the metric is exactly
 // symmetric under the x<->y coordinate + index swap, so on a transpose-symmetric
 // state the x-face flux at (i,j) must map to the y-face flux at (j,i) with the
 // momentum components swapped. isolates the flux kernel from the full sim (boundary,
@@ -1157,7 +1157,7 @@ fn cartesian_ks_flux_is_x_y_symmetric() {
         "nrg: {} vs {}", fx.get(fxc, "flux_nrg"), fy.get(fyc, "flux_nrg"));
 }
 
-// the cartesian kerr-schild c2p x<->y symmetry (design 45): a transpose-symmetric conserved state
+// the cartesian kerr-schild c2p x<->y symmetry: a transpose-symmetric conserved state
 // (den/nrg symmetric, S_x[i][j] = S_y[j][i]) must recover transpose-symmetric primitives. per-cell,
 // so it isolates the metric-aware Valencia recovery from the flux/godunov.
 #[test]
@@ -1194,7 +1194,7 @@ fn cartesian_ks_c2p_is_x_y_symmetric() {
     }
 }
 
-// the cartesian kerr-schild GODUNOV STAGE x<->y symmetry (design 45): the assembled integrator —
+// the cartesian kerr-schild GODUNOV STAGE x<->y symmetry: the assembled integrator —
 // flux-divergence + the covariant geodesic source + the lapse densitization — on a transpose-
 // symmetric state (cons/u_n/prims symmetric, per-direction fluxes swap: F^i_{S_k}(c) <->
 // F^{swap i}_{S_swap k}(swap c)) must produce a transpose-symmetric update. isolates the stage

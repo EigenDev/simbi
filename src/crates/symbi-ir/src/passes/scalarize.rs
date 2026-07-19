@@ -96,8 +96,8 @@ pub enum ScalarExpr {
     /// method call: `receiver.method(args...)`. used for `.abs()`,
     /// `.sqrt()`, `.min(b)`, `.sin()`, `.atan2(x)`, `.is_finite()`, etc.
     /// `method` is an owned `String` (not `&'static str`) so the lowered form
-    /// is serde-deserializable — the serialized IR is the durable artifact
-    /// (docs/design/15 §3); construction sites pass a literal `.to_string()`.
+    /// is serde-deserializable — the serialized IR is the durable artifact;
+    /// construction sites pass a literal `.to_string()`.
     MethodCall {
         receiver: Box<ScalarExpr>,
         method: String,
@@ -151,7 +151,7 @@ pub enum ScalarExpr {
 
 impl ScalarExpr {
     /// the immediate sub-expressions this node owns, in evaluation order. THE single source for
-    /// "which children do I have" (docs/design/38) — every WALK / TRANSFORM pass (cse var
+    /// "which children do I have" — every WALK / TRANSFORM pass (cse var
     /// collect, free-call scan, var-use test, FieldLoadAt rewrite) recurses through this instead
     /// of re-matching all 10 variants inline. the EMIT backends (cpu/cuda/interp/jit) still match
     /// per-variant — producing target source/IR is the irreducible part — exactly the split the
@@ -251,7 +251,7 @@ pub enum ScalarStmt {
     /// dead at the closing brace; only `result` survives, bound to `name` in
     /// the enclosing scope.
     ///
-    /// docs/design/23: this is the IR primitive that lets the renderer
+    /// this is the IR primitive that lets the renderer
     /// communicate phase boundaries to nvcc / rustc. without it, the CSE
     /// pass hoists every shared subexpression to function scope, producing
     /// the 239-`__cse_N` flat blocks that blow `wave_speed_map`'s
@@ -267,8 +267,8 @@ pub enum ScalarStmt {
     ///     scope, the write inside the inner, and the inner-scope locals die
     ///     at the closing brace.)
     ///
-    /// the CSE pass treats the scope as a **hoisting barrier**
-    /// (docs/design/23): CSE candidates whose uses are all inside the
+    /// the CSE pass treats the scope as a **hoisting barrier**:
+    /// CSE candidates whose uses are all inside the
     /// scope stay inside; candidates whose uses cross the boundary get
     /// hoisted to the LCA scope of all use sites.
     ///
@@ -542,7 +542,7 @@ struct Scalarizer {
     next_temp: usize,
     /// the current `IterateInline` accumulator local names (one per vector
     /// component), set while lowering a loop's `steps` cone so `Op::IterAcc(j)`
-    /// resolves to `iter_acc[j]` (docs/design/14).
+    /// resolves to `iter_acc[j]`.
     iter_acc: Option<Vec<String>>,
 }
 
@@ -672,7 +672,7 @@ impl Scalarizer {
                 init,
                 count,
             } => Binding::Concrete(self.lower_fold(*lambda, *init, *count, ty, graph)),
-            // docs/design/14: the loop accumulator placeholder resolves to the
+            // the loop accumulator placeholder resolves to the
             // mutable local set up by `lower_iterate_inline` (only while lowering
             // a loop's `step` cone).
             Op::IterAcc(idx) => Binding::Concrete(vec![ScalarExpr::Var(
@@ -694,7 +694,7 @@ impl Scalarizer {
             Op::IterateInline { .. } => {
                 unreachable!("IterateInline is lowered in scalarize_kernel, not lower_node",)
             }
-            // docs/design/23: Op::Scope is body-partitioned like
+            // Op::Scope is body-partitioned like
             // IterateInline. scalarize_kernel collects scope-owned NodeIds,
             // skips them in the main pass, then lowers each Scope via
             // `lower_scope` which emits a ScalarStmt::Scope wrapping the
@@ -773,13 +773,13 @@ impl Scalarizer {
         vec![acc_var]
     }
 
-    /// docs/design/14: lower an `Op::IterateInline` over an N-component accumulator
+    /// lower an `Op::IterateInline` over an N-component accumulator
     /// vector to `LetMut acc_j = inits[j]; For i { <union cone> acc_j = steps[j] }`.
     /// the `cone` is the acc-dependent slice of all `steps` (id/topo order); its
     /// loop-INVARIANT inputs are already lowered before the loop. the N assigns
     /// come AFTER the whole cone, so the update is SIMULTANEOUS (Jacobi): every
     /// `steps[j]` reads the OLD `acc_*`. binds the node to `Var(acc_result)`.
-    /// docs/design/23: lower an `Op::Scope` node into a
+    /// lower an `Op::Scope` node into a
     /// `ScalarStmt::Scope` brace-block. body NodeIds are lowered IN ORDER into
     /// a fresh sub-body that becomes the scope's inner statements; `result`'s
     /// expression becomes the scope's trailing tail value.
@@ -1401,11 +1401,11 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     // are reached via the IterateInline node's `steps` field through `Op::inputs`
     // — so a reachable IterateInline pulls its cone in automatically.
     let reachable = reachable_from_outputs(graph, outputs);
-    // docs/design/14: an IterateInline emits its body ONCE as a `for`. its `step`
+    // an IterateInline emits its body ONCE as a `for`. its `step`
     // sub-DAG's acc-dependent cone must be lowered INSIDE the loop, not in the
     // main pass — collect those nodes to skip, and the cone per iterate node.
     //
-    // docs/design/23: Op::Scope body NodeIds are similarly partitioned —
+    // Op::Scope body NodeIds are similarly partitioned —
     // they belong to the Scope's lexical region and are lowered INSIDE a
     // `ScalarStmt::Scope` brace block, not at function root.
     //
@@ -1417,7 +1417,7 @@ pub fn scalarize_kernel(graph: &Graph, outputs: &[NodeId]) -> KernelScalarized {
     let mut skip: HashSet<NodeId> = HashSet::new();
     let mut iter_cones: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     let mut scope_owner: HashMap<NodeId, NodeId> = HashMap::new();
-    // docs/design/23: a NodeId can appear in a scope's
+    // a NodeId can appear in a scope's
     // body list yet ALSO be referenced from outside the scope, because the
     // graph is hash-consed — a closure may compute `bn * bn` (pushed inside
     // the scope) and later outer code may produce a structurally-identical
@@ -1717,7 +1717,7 @@ fn reachable_from_outputs(graph: &Graph, outputs: &[NodeId]) -> HashSet<NodeId> 
     reachable
 }
 
-/// docs/design/14: the acc-dependent CONE of an `IterateInline` — the nodes that
+/// the acc-dependent CONE of an `IterateInline` — the nodes that
 /// must be recomputed each iteration. = the union backward-reachable set of all
 /// `steps` whose `dep` flag is true, where `dep[n] = accs.contains(n) ||
 /// any(dep[input])`. returned in increasing-id (topological) order. loop-INVARIANT
@@ -1850,7 +1850,7 @@ fn scalar_element_wise(op: ElementWiseOp, mut inputs: Vec<ScalarExpr>) -> Scalar
         // method-based binary. min/max stay as method calls — every backend
         // renders them as the `a<b?a:b` / `a>b?a:b` ternary:
         // the cuda special-case arm, the interp/jit ternary, and the f64/f32
-        // `Numeric` carrier. so CPU and GPU agree at NaN/signed-zero (tier-1 #2b)
+        // `Numeric` carrier. so CPU and GPU agree at NaN/signed-zero
         // WITHOUT lowering to a scoped `if`-select — that inlines nested min/max
         // chains into deeply-nested lexical scopes and overflows rustc's debuginfo.
         ElementWiseOp::Min => method_binary("min", &mut inputs),
@@ -2124,7 +2124,7 @@ mod tests {
         }
     }
 
-    // ---- docs/design/14: Op::IterateInline lowering ----
+    // ---- Op::IterateInline lowering ----
 
     #[test]
     fn iterate_inline_lowers_to_one_loop_body_emitted_once() {

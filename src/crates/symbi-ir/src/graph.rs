@@ -543,8 +543,8 @@ pub enum Op {
     /// (`IterAcc(0)`). only meaningful within the `steps` sub-DAGs of the
     /// `IterateInline` that owns it.
     IterAcc(u32),
-    /// an INLINE bounded iteration — the loop counterpart of `iterate`'s unroll
-    /// (docs/design/14). emits the body ONCE as a real `for` over an `N`-component
+    /// an INLINE bounded iteration — the loop counterpart of `iterate`'s unroll.
+    /// emits the body ONCE as a real `for` over an `N`-component
     /// accumulator VECTOR (N = `accs.len()`; scalar Newton is N=1, a bracketed
     /// false-position root-find — KKC RMHD c2p — is N>1):
     ///
@@ -577,7 +577,7 @@ pub enum Op {
         /// this turns ~92 dead bodies/cell into a real break — measurable.
         break_when: Option<NodeId>,
     },
-    /// docs/design/23: a bounded-pressure phase scope. `body`
+    /// a bounded-pressure phase scope. `body`
     /// lists the NodeIds CREATED inside a `Gv::scope` closure (in insertion
     /// order); they are temporaries that the lowered emit will surround
     /// with `{ ... }` braces so the codegen sees their lifetimes end at
@@ -720,7 +720,7 @@ impl Op {
                 Ok(())
             }
 
-            // docs/design/23: `body` is a Vec<NodeId> of scope-local
+            // `body` is a Vec<NodeId> of scope-local
             // temps, `result` is the value the scope returns. both get remapped.
             Op::Scope { body, result } => {
                 for n in body.iter_mut() {
@@ -821,7 +821,7 @@ impl Op {
                 result,
                 break_when,
             } => target.iterate_inline(accs, inits, steps, count, result, break_when, span),
-            // docs/design/23: Op::Scope rebuilt by direct push
+            // Op::Scope rebuilt by direct push
             // through the `scope_op` builder (which derives ty from result
             // and bypasses hash-cons).
             Op::Scope { body, result } => target.scope_op(body, result, span),
@@ -1904,14 +1904,14 @@ impl Graph {
         )
     }
 
-    /// docs/design/14: a fresh `IterAcc(idx)` placeholder (rank-0 F64) for inline
+    /// a fresh `IterAcc(idx)` placeholder (rank-0 F64) for inline
     /// loop accumulator component `idx`. each call is distinct (bypasses hash-cons)
     /// so two loops (or two components) never share a placeholder.
     pub fn iter_acc(&mut self, idx: u32, span: Option<Span>) -> NodeId {
         self.push(Op::IterAcc(idx), TensorTy::scalar(ElementTy::F64), span)
     }
 
-    /// docs/design/23: build an `Op::Scope` node. `body` lists
+    /// build an `Op::Scope` node. `body` lists
     /// the NodeIds created inside the scope's closure (in insertion order —
     /// `Gv::scope` populates this via the `(snapshot..)` range of newly-
     /// pushed NodeIds). `result` is the value the scope returns; the
@@ -1988,7 +1988,7 @@ impl Graph {
         self.push(Op::Proj { source, index }, ty, span)
     }
 
-    /// docs/design/14: an inline bounded iteration over an N-component accumulator
+    /// an inline bounded iteration over an N-component accumulator
     /// vector. `accs[j]` must be `IterAcc(j)` (referenced by the `steps`);
     /// `inits[j]`/`steps[j]` are rank-0 F64; `count` is the literal bound; the
     /// node's value is `accs[result]` post-loop. the N=1 case is a scalar Newton —
@@ -2109,7 +2109,7 @@ impl Graph {
         let op = src.node(src_id).op.clone();
         // SPECIAL cases — cross-graph semantics that `dispatch_builder` can't
         // express. everything else goes through the generic recurse-+-remap-+-
-        // dispatch path below (same Phase-3 contract as splice).
+        // dispatch path below (same contract as splice).
         let dst = match op {
             // Param: bind via the caller-supplied leaf resolver; fall back to
             // cloning the param into `self` with its source type. resolve_leaf
@@ -2175,7 +2175,7 @@ impl Graph {
         // the Apply call sites. Op::Apply still hash-conses.
         // IterAcc: each placeholder is a distinct loop accumulator — sharing two
         // would alias unrelated loops. bypass hash-cons like Param/Lambda.
-        // docs/design/23: `Op::Scope` bypasses hash-cons too. each
+        // `Op::Scope` bypasses hash-cons too. each
         // `Gv::scope` call site is a distinct lexical region; deduping two
         // scopes with identical body+result vectors would collapse them into
         // one, but they could be CALLED from different outer contexts where

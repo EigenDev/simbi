@@ -1,7 +1,7 @@
 // =============================================================================
 // ibm.rs
 //
-// the carrier-generic core of the immersed-boundary source (docs/design/19), split from the
+// the carrier-generic core of the immersed-boundary source, split from the
 // Gv-traced kernel builders so the SAME expressions serve two roles:
 //   - traced at S = Gv (the `body_source` / fused-godunov kernels), and
 //   - evaluated at S = f64 or S = Dual<f64> (the well-posedness suite: the conservative-gravity
@@ -10,7 +10,7 @@
 // every function is a PURE map over one Scalar carrier — no field reads, no trace state — so the
 // property a proof establishes on the f64/Dual carrier is a property of the traced kernel too.
 //
-// the physics (accretor.md §2):
+// the physics:
 //   - softened Newtonian gravity  g = -M r / (r^2 + eps^2)^{3/2}, the negative gradient of the
 //     softened potential  phi = -M / sqrt(r^2 + eps^2). the softening eps regularizes the bare
 //     1/r^2 singularity, making g bounded and Lipschitz.

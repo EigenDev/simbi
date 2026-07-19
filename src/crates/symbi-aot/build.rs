@@ -1,19 +1,19 @@
 // =============================================================================
 // build.rs
 //
-// the build-time codegen step (docs/design/10 §4, P2.2/P2.3). runs the substrate
+// the build-time codegen step. runs the substrate
 // to lower conservation laws to stencil IR graphs, then for each one: emits a
 // compilable Rust `pub fn` via `emit_kernel_cpu` AND serializes the backend-neutral
-// lowered IR (Prepared) per kernel (docs/design/15 §3) to a `{kernel_name}.ir.json`
+// lowered IR (Prepared) per kernel to a `{kernel_name}.ir.json`
 // blob, all written to OUT_DIR. the crate's lib.rs `include!`s the CPU fns and
 // exposes the IR blobs as consts; downstream crates (tests here; `symbi`'s
 // SubstrateKernelSet) call them — the IR blob renders to any backend at runtime
 // via `render_from_ir`.
 //
 // generates two kernels:
-//   - godunov_mass_1d        — single mass law, separate output buffer (P2.2).
+//   - godunov_mass_1d        — single mass law, separate output buffer.
 //   - iso_godunov_euler_1d   — isothermal Euler (mass + x-momentum), IN-PLACE
-//                              conserved update (P2.3), matching the production
+//                              conserved update, matching the production
 //                              iso godunov for the no-gravity case.
 //
 // in production (a later refactor) this codegen runs from a RegimeSpec registry;
@@ -25,7 +25,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 // collects (cpu_include_file, kernel_name) for every kernel emitted this run, so
-// main() writes ONE registry module (docs/design/15 §3) instead of this crate
+// main() writes ONE registry module instead of this crate
 // hand-maintaining include!/const lines. populated by write_both — the single
 // emission chokepoint (write_kernel is only ever called through it). build.rs is
 // single-threaded; the Mutex is just to satisfy `static` mutability.
@@ -76,7 +76,7 @@ fn write_kernel(out_dir: &str, file: &str, desc: &symbi_ir::emit::KernelDescript
 // emit from one IR graph: the CPU Rust (compiled into the crate) AND the
 // backend-neutral lowered IR — `prepare` (scalarize + buffer-bind, no renderer)
 // serialized to `{kernel_name}.ir.json` and exposed as a const, rendered to any
-// backend at runtime via `render_from_ir` (docs/design/15 §3). one physics graph,
+// backend at runtime via `render_from_ir`. one physics graph,
 // one neutral artifact. `prepare` runs twice (once inside emit_kernel_cpu, once
 // here) — deterministic, build-time only.
 //
@@ -97,8 +97,8 @@ fn serial_twins_enabled() -> bool {
 }
 
 // the artifact-producing emit: CPU source + the serialized neutral IR blob.
-// `output_support` is the GvKernel's declared output support (docs/design/48
-// part 3), stamped onto the Prepared AFTER prepare — no renderer reads it, so
+// `output_support` is the GvKernel's declared output support,
+// stamped onto the Prepared AFTER prepare — no renderer reads it, so
 // it does not ride KernelEmitInputs. the serial twin reuses the same blob, so
 // the declaration travels with both registrations.
 fn write_both_with_support(
@@ -151,7 +151,7 @@ fn write_both_with_support(
 
 // write the single registry module from everything write_both emitted this run:
 // one `include!` per CPU kernel + one `<KERNEL>_IR` blob const per kernel (the
-// serialized backend-neutral lowered IR / Prepared, docs/design/15 §3). the const
+// serialized backend-neutral lowered IR / Prepared). the const
 // name + .ir.json filename derive uniformly from kernel_name (iso_c2p_1d ->
 // ISO_C2P_1D_IR + iso_c2p_1d.ir.json), so no per-kernel hand-registration survives.
 fn write_registry(out_dir: &str) {
@@ -168,7 +168,7 @@ fn write_registry(out_dir: &str) {
             kernel_name.to_uppercase(),
         ));
     }
-    // the name -> (structured CPU fn, neutral IR blob) lookup (docs/design/15 §5):
+    // the name -> (structured CPU fn, neutral IR blob) lookup:
     // the D-generic SubstrateKernelSet<.., const D> builds a kernel name from
     // (regime, ndim, dir) and resolves the instance HERE — no hand-maintained
     // `match (D, dir)` per regime. `KernelFn<S>` (lib.rs) is the structured ABI fn
@@ -185,8 +185,8 @@ fn write_registry(out_dir: &str) {
     }
     src.push_str("        _ => return None,\n    })\n}\n");
     // the ENUMERABLE registry: every generated kernel's (name, neutral IR blob).
-    // registry-wide audits (the ghost-width law over FieldLoadAt stencil reach,
-    // docs/design/48 part 1) iterate this instead of naming kernels by hand, so
+    // registry-wide audits (the ghost-width law over FieldLoadAt stencil reach)
+    // iterate this instead of naming kernels by hand, so
     // a newly generated kernel is audited the build it appears.
     src.push_str("\n/// every generated kernel's (name, neutral IR blob), in registration order.\n");
     src.push_str("pub static IR_BLOBS: &[(&str, &str)] = &[\n");
@@ -270,7 +270,7 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
                     KernelId::RefineProlongMulti1t { order: tag, ncomp, ndim }.name(),
                     ndim, &k, &writes,
                 );
-                // the axis-split sweep passes (docs/design/49): one per axis.
+                // the axis-split sweep passes: one per axis.
                 for axis in 0..3u8 {
                     let (k, writes) = symbi_discretize::refine_prolong_sweep_multi_gv(
                         nd, 2, order, axis as usize, ncomp as usize,
@@ -292,14 +292,14 @@ fn gen_refine_transfer(out_dir: &str, ndim: u8) {
     }
 }
 
-// P2.2: single mass law, writing to a SEPARATE output buffer — the gv divergence + update.
+// single mass law, writing to a SEPARATE output buffer — the gv divergence + update.
 fn gen_godunov_mass_1d(out_dir: &str) {
     let g = Geom::cart(1);
     let (k, writes) = godunov_mass_gv(g.coords, &g.spacing, &g.axes, 1);
     emit_gv(out_dir, "godunov_mass_1d", 1, &k, &writes);
 }
 
-// P2.3 (corrected): isothermal Euler godunov, IN-PLACE conserved update,
+// isothermal Euler godunov, IN-PLACE conserved update,
 // DIMENSION-GENERIC. mass + one scalar law PER momentum component, looped over
 // `ndim` — each momentum component's flux is a vector whose divergence sums over
 // the sweep axes (`finite_volume_scheme` lowers that D-generically). there is NO
@@ -314,7 +314,7 @@ fn coords_suffix(coords: Coords) -> &'static str {
 }
 
 // =============================================================================
-// **B6-iv (4c-restructure) — DATA-DRIVEN AOT BAKE MATRIX**.
+// DATA-DRIVEN AOT BAKE MATRIX.
 //
 // `RegimeBuild` + `FamilyKind` declare every point in the fused-kernel bake
 // matrix as DATA, not as copy-paste calls. the codegen loop in main() walks
@@ -379,7 +379,7 @@ const FUSED_FAMILIES: &[FamilyKind] = &[
 ];
 
 // a kernel instance's discretization config — the three facts that travel together per
-// instance (docs/design/18): the coordinate system, the vector-component count `ncomp`
+// instance: the coordinate system, the vector-component count `ncomp`
 // (the momentum/velocity DOF), and the grid-axis -> coordinate-role map `axes`. cartesian
 // and spherical use the identity axes + ncomp = ndim (the grid axes ARE the coordinates);
 // cylindrical r-z AXISYMMETRIC decouples them — a 2-axis (r,z) grid carrying a 3-component
@@ -513,7 +513,7 @@ fn mhd_geom_slug(geom: &Geom) -> &'static str {
 // manifest.
 fn emit_gv(out_dir: &str, kernel_name: &str, ndim: u8, k: &GvKernel, writes: &[(String, FieldBind, NodeId)]) {
     assert!(!k.graph.has_errors(), "{kernel_name} (gv) graph errors: {:?}", k.graph.errors());
-    // docs/design/22 Gate 3: the smem tile intent (per-axis SLAB declared by the
+    // the smem tile intent (per-axis SLAB declared by the
     // builder via with_tile_spec) is OPT-IN behind SYMBI_GPU_SMEM, so the default
     // build stays byte-identical (flat) until the GPU smem path is hardware-validated.
     // the `rerun-if-env-changed` in `main` keeps the A/B honest — without it cargo
@@ -625,7 +625,7 @@ fn gen_source_apply(
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// P3.3: the isothermal face FLUX — reconstruction composed with the one
+// the isothermal face FLUX — reconstruction composed with the one
 // canonical HLLE (symbi_discretize::iso_hlle_flux). dimension-generic: it loops
 // the momentum components internally; codegen instantiates one kernel per (ndim,
 // sweep dir) — the reconstruction axis `dir` is baked into the kernel instance.
@@ -670,7 +670,7 @@ fn gen_adiabatic_face_flux(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// P4: isothermal cons->prim (prim.rho = cons.den; prim.vel = cons.mom/cons.den).
+// isothermal cons->prim (prim.rho = cons.den; prim.vel = cons.mom/cons.den).
 // pointwise, dimension-generic.
 fn gen_iso_c2p(out_dir: &str, ndim: u8) {
     let name = format!("iso_c2p_{ndim}d");
@@ -696,7 +696,7 @@ fn gen_iso_pre(out_dir: &str, ndim: u8) {
     emit_gv(out_dir, &name, ndim, &k, &writes);
 }
 
-// P4: isothermal CFL wave-speed map (per-cell lambda); the host reduces by max. for
+// isothermal CFL wave-speed map (per-cell lambda); the host reduces by max. for
 // curvilinear coords it folds per-cell PHYSICAL widths (cell_inv_phys_widths) instead of
 // a uniform inv_dx; the iso map is shared by the adiabatic/Newton CFL too.
 fn gen_iso_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
@@ -793,7 +793,7 @@ fn gen_adiabatic_c2p(out_dir: &str, ndim: u8, geom: Geom) {
 // Newton (`operators::iterate`, `max_iters` baked at codegen); rho/vel/Lorentz
 // follow algebraically. proves the substrate emits a compilable iterative kernel
 // — the deep iterate lowers in linear time via the DAG-preserving lowering
-// (docs/design/13), where `as_op` would have exploded. pointwise, D-generic.
+// where `as_op` would have exploded. pointwise, D-generic.
 fn gen_rhd_c2p(out_dir: &str, ndim: u8, max_iters: usize) {
     let name = format!("rhd_c2p_{ndim}d");
     // built from symbi-hydro's branch-free `rhd_recover` at S=Gv — the SINGLE-SOURCE
@@ -832,7 +832,7 @@ fn gen_rhd_face_flux(out_dir: &str, ndim: u8, dir: u8) {
 
 // the RHD cons->prim on a curved SPATIAL metric — the Valencia covariant recovery (`|S|^2 =
 // gamma^{ij} S_i S_j`, contravariant `v^i = gamma^{ij} S_j/(...)`) with gamma(r) evaluated at the
-// cell centroid. baked per (spacetime, spacing) on the GR path; 1D radial (angular GR is task 9).
+// cell centroid. baked per (spacetime, spacing) on the GR path; 1D radial (angular GR not baked).
 // name carries the spacetime slug (`rhd_c2p{_schw|_ks}_1d`) so the runtime select matches; the
 // radial spacing is a runtime `map_kind` scalar, not a name axis. depends on the radial grid
 // (centroid), so it carries the same schwarzschild_mass + x_lo_0/dx_0 scalars the GR wavespeed/
@@ -871,7 +871,7 @@ fn gen_rhd_c2p_gr(out_dir: &str, ndim: u8, max_iters: usize, geom: Geom) {
 // coordinate wave speeds (`rhd_flux_gr_gv` at the `RhdGr` regime). REPLACES the flat flux on the GR
 // path (the flat kernel stayed cartesian-agnostic and bolted GR on as post-processing; the covariant
 // storage needs the metric-aware flux). name carries the spacetime slug + sweep dir. 1D radial
-// (angular GR is task 9); reads schwarzschild_mass for the in-kernel metric at the face.
+// (angular GR not baked); reads schwarzschild_mass for the in-kernel metric at the face.
 fn gen_rhd_face_flux_gr(out_dir: &str, ndim: u8, dir: u8, geom: Geom) {
     gen_rhd_face_flux_gr_mode(out_dir, ndim, dir, geom.clone(), false);
     // the light-cone rusanov FOFC fallback rides every GR-hydro flux bake (DOF == D + the swirl
@@ -1267,11 +1267,11 @@ fn gen_imhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
 // the RMHD cell-B flux predictor (Euler + RK2): flux-evolve the OUT-OF-PLANE (non-CT) cell B
 // components by the induction-flux divergence, in-place on their bc_{c} slots. the in-plane
 // components live on faces and are re-derived by bcell_from_bface, so the predictor leaves them
-// alone (oop_predictor_spec.md).
+// alone.
 fn gen_rmhd_bcell_godunov_euler(out_dir: &str, geom: Geom, ndim: u8) {
     // a fully-gridded chart (3D) carries all three B components on staggered faces, so there is no
     // out-of-plane cell-centered component and the predictor is empty — skip it (godunov_stage elides
-    // the dispatch at D == DOF; oop_predictor_spec.md).
+    // the dispatch at D == DOF).
     if (0..3).all(|c| geom.axes.contains(&c)) {
         return;
     }
@@ -1543,7 +1543,7 @@ fn gen_rhd_wave_speed_map(out_dir: &str, ndim: u8, geom: Geom) {
     }
 }
 
-// the lattice-map pullback ghost fill (docs/design/11): read prim at the per-axis
+// the lattice-map pullback ghost fill: read prim at the per-axis
 // integer source coord (periodic/reflect/outflow on a runtime map_type), write at
 // the cell, with vel_sign per momentum component. IN-PLACE (write path == input
 // path). dimension-generic; codegen instantiates the 1D kernel here.
@@ -1596,7 +1596,7 @@ fn gen_rmhd_kerr_ghost_fill(out_dir: &str, geom: &Geom) {
     emit_gv(out_dir, &name, 2, &k, &writes);
 }
 
-// P2 (curvilinear): the SPHERICAL mass-law godunov — `rho_new = rho - dt*div(F)` with the
+// curvilinear: the SPHERICAL mass-law godunov — `rho_new = rho - dt*div(F)` with the
 // analytic AREA-WEIGHTED divergence `(1/V)(F_hi*A_hi - F_lo*A_lo)` from the gv `cell_geometry_gv`.
 // a host test extracts div = -rho_new (rho=0, dt=1) and bit-diffs it against the analytic
 // spherical-shell formula.
@@ -1606,7 +1606,7 @@ fn gen_godunov_mass_sph_1d(out_dir: &str) {
     emit_gv(out_dir, "godunov_mass_sph_1d", 1, &k, &writes);
 }
 
-// P3b (curvilinear): the centrifugal/coriolis INERTIAL momentum source on a 2D spherical
+// curvilinear: the centrifugal/coriolis INERTIAL momentum source on a 2D spherical
 // grid (single theta cell -> isolates the radial centrifugal). regime-agnostic via the
 // conserved momentum: a host test sets cons.mom (= rho v Newtonian, or rho h W^2 v for
 // RHD) + v_r, v_theta and checks s_0 = mom_theta*v_theta/r_c (centrifugal), s_1 =
@@ -1616,7 +1616,7 @@ fn gen_inertial_momentum_probe_sph_2d(out_dir: &str) {
     emit_gv(out_dir, "inertial_momentum_sph_2d", 2, &k, &writes);
 }
 
-// P4 (curvilinear): the iso CFL wave-speed map on a LOG-spaced spherical radial grid.
+// curvilinear: the iso CFL wave-speed map on a LOG-spaced spherical radial grid.
 // the per-cell physical inverse width 1/(h_r*dr_i) tracks the GROWING log zones
 // (h_r=1, dr_i grows), so a host test (v=0) checks lambda[i] = cs/dr_i per cell — not
 // the single uniform inv_dx. proves the metric-correct per-cell CFL length.
@@ -1647,7 +1647,7 @@ fn gen_rmhd_geometric_source(out_dir: &str, geom: Geom) {
     emit_gv(out_dir, &name, 3, &k, &writes);
 }
 
-// the geometry-algebra probe (P1, docs/design — curvilinear): write the per-cell inverse
+// the geometry-algebra probe (curvilinear): write the per-cell inverse
 // volume + dir-0 face areas + dir-0 volume-weighted centroid, computed FROM THE INDEX via the
 // gv metric (`cell_geometry_gv`). a host test bit-diffs these against the analytic formulas
 // (incl. log spacing) — so the gv geometry foundation is validated against analytic before the
@@ -1657,7 +1657,7 @@ fn gen_geometry_probe(out_dir: &str, ndim: u8, coords: Coords, spacing: &[Spacin
     emit_gv(out_dir, name, ndim, &k, &writes);
 }
 
-// immersed-body forward source (docs/design/19 P1/P2): the cons->cons kernel — softened
+// immersed-body forward source: the cons->cons kernel — softened
 // Newtonian GRAVITY + Bondi-Hoyle mass ACCRETION from MAX_BODIES point masses. in-place
 // writes cons.den (accretion removes mass) / cons.mom_* / cons.nrg; body params arrive as
 // scalar params packed by the runtime (MAX_BODIES imported from symbi-ib).
@@ -1681,7 +1681,7 @@ fn gen_fofc_body_select(out_dir: &str, ndim: u8, coords: Coords, prefix: &str, h
     emit_gv(out_dir, &format!("{prefix}_fofc_select_with_body{}_{ndim}d", coords_suffix(coords)), ndim, &k, &w);
 }
 
-// immersed-body BACKWARD feedback (docs/design/19 P3): per cell, per body, the force /
+// immersed-body BACKWARD feedback: per cell, per body, the force /
 // torque / accreted-mass contributions -> scratch fields a device reduction sums into
 // each body's BodyDelta. reads cons (pure); writes MAX_BODIES*(ndim+4) scratch outputs.
 fn gen_penalize(out_dir: &str, ndim: u8) {
@@ -1781,7 +1781,7 @@ fn gen_body_feedback(out_dir: &str, ndim: u8, coords: Coords) {
     let g = Geom::identity(coords, ndim);
     let (k, writes) = body_feedback_gv(MAX_BODIES, coords, ndim as usize, g.ncomp as usize, &g.axes);
     emit_gv(out_dir, &name, ndim, &k, &writes);
-    // the SPLIT single-body halves (design 47 act 9): the gravity reaction reduces
+    // the SPLIT single-body halves: the gravity reaction reduces
     // globally over one streamed field; the drain-weighted quantities reduce over the
     // sink support box only. the combined kernel above stays registered (iso + the
     // full-domain fallback for curvilinear grids where the box is not index-aligned).
@@ -1813,7 +1813,7 @@ fn gen_body_feedback_iso(out_dir: &str, ndim: u8, coords: Coords) {
 fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     gen_godunov_mass_1d(&out_dir);
-    // amr field transfer (docs/design/22): the refinement-lattice
+    // amr field transfer: the refinement-lattice
     // pullbacks at ratio 2, every dimension.
     for ndim in 1u8..=3 {
         gen_refine_transfer(&out_dir, ndim);
@@ -1932,9 +1932,9 @@ fn main() {
     gen_geometry_probe(
         &out_dir, 2, Coords::Spherical, &[Spacing::Log, Spacing::Uniform], "geom_sph_log_2d",
     );
-    // P2: the spherical area-weighted mass-law divergence probe.
+    // the spherical area-weighted mass-law divergence probe.
     gen_godunov_mass_sph_1d(&out_dir);
-    // P3/P3b: the SPHERICAL adiabatic hydro kernels (the curvilinear instances the
+    // the SPHERICAL adiabatic hydro kernels (the curvilinear instances the
     // M-generic AdiabaticSubstrateKernelSet selects on a spherical SimState) — the SAME
     // builders as Cartesian with set_geometry(Spherical): area-weighted divergence +
     // geometric pressure source (+ inertial for ndim>=2) + per-cell CFL widths. the
@@ -1948,7 +1948,7 @@ fn main() {
     // GR (Schwarzschild) RHD godunov stage — the lapse-densitized relativistic gas update on a
     // spherically-symmetric BH background (`rhd_godunov_stage_sph_schw_{1,2}d`). only the
     // RELATIVISTIC regime composes physically (no adiabatic/iso on a horizon). 1D radial (the
-    // Michel accretion oracle) + 2D axisymmetric.
+    // Michel accretion solution) + 2D axisymmetric.
     for ndim in 1u8..=2 {
         let bh = Geom::sph(ndim).schwarzschild();
         gen_godunov_stage(&out_dir, ndim, "rhd", true, bh.clone(), None);
@@ -1976,7 +1976,7 @@ fn main() {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, ks.clone());
         }
     }
-    // GR CARTESIAN kerr-schild (design 45): the (x, y) equatorial slice of the horizon-penetrating
+    // GR CARTESIAN kerr-schild: the (x, y) equatorial slice of the horizon-penetrating
     // chart — NON-diagonal gamma_ij = delta_ij + 2M x_i x_j / r^3, a shift beta^i on EVERY axis, and
     // alpha sqrt(gamma) = 1 (the det-g-flat cartesian volume). NO polar axis. the covariant godunov
     // (flat cartesian face measure + the covariant geodesic source), the state-independent light-cone
@@ -2007,7 +2007,7 @@ fn main() {
             gen_rhd_face_flux_gr(&out_dir, ndim, dir, kg.clone());
         }
     }
-    // GR CYLINDRICAL kerr-schild (design 45): the natural chart for AXISYMMETRIC relativistic
+    // GR CYLINDRICAL kerr-schild: the natural chart for AXISYMMETRIC relativistic
     // jets / disks around a hole. r = sqrt(R^2 + z^2) (the spherical radius) drives the KS block +
     // lapse; the cylindrical R drives the measure (alpha sqrt(gamma) = R). the kerr-schild structure
     // is the NON-diagonal POLOIDAL (R, z) block; phi decouples (gamma_phi-phi = R^2, beta^phi = 0), so
@@ -2040,7 +2040,7 @@ fn main() {
     // the flat cylindrical hydro is DOF = 2, so this swirl instance is otherwise unbaked. cyl_3d
     // (DOF == NDIM) reuses the unsuffixed rhd_snapshot_3d.
     gen_snapshot(&out_dir, 2, "rhd", true, Geom::cyl_rz());
-    // GR CYLINDRICAL (R, phi) EQUATORIAL DISK (design 45): the razor-thin accretion-disk chart, the
+    // GR CYLINDRICAL (R, phi) EQUATORIAL DISK: the razor-thin accretion-disk chart, the
     // z = 0 slice where r = R so the metric is DIAGONAL gamma = diag(1 + 2M/R, R^2). DOF == NDIM = 2
     // (v_R, v_phi), axes [0, 1]; the shift rides the R sweep (beta^phi = 0); light-cone CFL. reuses
     // the unsuffixed rhd_snapshot_2d (DOF == NDIM copy).
@@ -2090,8 +2090,8 @@ fn main() {
     // angular dist is per-coordinate (not physical arc-length r*dtheta).
     gen_neumann_ghost_fill(&out_dir, 2, Geom::sph_swirl());
     gen_robin_ghost_fill(&out_dir, 2, Geom::sph_swirl());
-    // GRMHD (design 44): the schwarzschild 1D radial row — the magnetized-michel
-    // monopole gate's kernel family. gas godunov (the ideal-MHD stress in the covariant
+    // GRMHD: the schwarzschild 1D radial row — the magnetized-michel
+    // monopole kernel family. gas godunov (the ideal-MHD stress in the covariant
     // contraction), the light-cone CFL map, the metric-aware KKC c2p, the RmhdGr face flux,
     // and the 1D bcell flux-divergence predictor (the radial B row's flux is identically
     // zero — the transverse-B curved measures land with the phase-B densitized CT).
@@ -2114,7 +2114,7 @@ fn main() {
     }
     // GRMHD phase B: the 2D (r, theta) schwarzschild row — the gas/flux/c2p/map gens are
     // ndim-generic; the CT trio (densitized EMF + curl + interpolation) is the curved-CT
-    // machinery (docs/design/44). ghost fill reuses the flat rmhd_ghost_fill_2d
+    // machinery. ghost fill reuses the flat rmhd_ghost_fill_2d
     // (a spacetime-free lattice pullback).
     for geom in [Geom::sph(2).schwarzschild()] {
         gen_rmhd_godunov_gr(&out_dir, 2, geom.clone());
@@ -2195,7 +2195,7 @@ fn main() {
             gen_rmhd_gr_uct_3d(&out_dir, &geom);
         }
     }
-    // GRMHD in the cylindrical kerr-schild charts (design 45): the equatorial (R, phi) DISK (DIAGONAL
+    // GRMHD in the cylindrical kerr-schild charts: the equatorial (R, phi) DISK (DIAGONAL
     // on the equator, r = R, gamma = diag(1 + 2M/R, R^2), beta^phi = 0, out-of-plane corner EMF the
     // vertical E_z) and the 2.5D poloidal (R, z) plane (NON-DIAGONAL gamma_Rz = 2H R z / r^2, r =
     // sqrt(R^2 + z^2); the CT carries the TWO-component in-plane shift beta^R, beta^z; out-of-plane
@@ -2251,7 +2251,7 @@ fn main() {
     // gas inertial + magnetic tension, via the RMHD adapter onto the generic builder.
     gen_rmhd_geometric_source(&out_dir, Geom::sph(3));
     gen_rmhd_geometric_source(&out_dir, Geom::cyl_3d());
-    // P4: the iso CFL wave-speed map with per-cell physical widths (log-spherical).
+    // the iso CFL wave-speed map with per-cell physical widths (log-spherical).
     gen_iso_wave_speed_map_sph_log_1d(&out_dir);
     // P3b: the Newtonian inertial (centrifugal/coriolis) momentum source probe.
     gen_inertial_momentum_probe_sph_2d(&out_dir);
@@ -2277,7 +2277,7 @@ fn main() {
         gen_godunov_stage(&out_dir, ndim, "adiabatic", true, Geom::cart(ndim), None);
         gen_snapshot(&out_dir, ndim, "adiabatic", true, Geom::cart(ndim));
         // RHD (special-relativistic Euler): the ITERATIVE c2p (20-step masked
-        // Newton, docs/design/14) + the relativistic flux/wave-speed map; the
+        // Newton) + the relativistic flux/wave-speed map; the
         // godunov/snapshot are the SAME EOS-generic builders (D/S_k/tau).
         gen_rhd_c2p(&out_dir, ndim, 20);
         gen_rhd_wave_speed_map(&out_dir, ndim, Geom::cart(ndim));
@@ -2304,7 +2304,7 @@ fn main() {
         gen_rmhd_hllc_face_flux(&out_dir, 3, dir);
         gen_rmhd_hlld_face_flux(&out_dir, 3, dir);
     }
-    // **B6-iv (Phase 3 + 3b + 4c-restructure + vi) — the DRY AOT-bake matrix**.
+    // the DRY AOT-bake matrix.
     //
     // every fused godunov kernel symbi-aot emits is one point in the cube:
     //
@@ -2342,7 +2342,7 @@ fn main() {
             );
         }
     }
-    // the CYLINDRICAL r-z AXISYMMETRIC adiabatic family (docs/design/18): a 2-axis
+    // the CYLINDRICAL r-z AXISYMMETRIC adiabatic family: a 2-axis
     // (r, z) grid carrying a 3-component velocity — v_phi is the swirl on the folded
     // phi symmetry coordinate. ncomp=3, axes=[0,2], Cylindrical. the SAME EOS-generic
     // builders as the cartesian set, only the Geom differs (the inertial centrifugal
@@ -2366,14 +2366,14 @@ fn main() {
     // geometry-dependent godunov + wave-speed are "_cyl" (area-weighted divergence +
     // centrifugal/coriolis/hoop source); the c2p/flux/snapshot/ghost reuse the cartesian
     // ncomp == NDIM instances (DOF==D -> "" suffix). r-phi (2D) is the disk-evolve hydro
-    // the immersed bodies ride (docs/design/19/20). the r-z AXISYMMETRIC swirl (DOF=3,
+    // the immersed bodies ride. the r-z AXISYMMETRIC swirl (DOF=3,
     // above) is the separate DOF-lifted family (newton only).
     gen_curvilinear_hydro(&out_dir, 1, Geom::cyl_1d());
     gen_curvilinear_hydro(&out_dir, 2, Geom::cyl_rphi());
     gen_curvilinear_hydro(&out_dir, 3, Geom::cyl_3d());
-    // immersed-body forward source (gravity + accretion, docs/design/19 P1/P2/P4): the cons->cons
+    // immersed-body forward source (gravity + accretion): the cons->cons
     // kernel, emitted per grid dimension (regime-agnostic) + the curvilinear variants (generic
-    // physical-basis gravity, docs/design/19 P4). cylindrical 2D = the r-phi disk plane (natural
+    // physical-basis gravity). cylindrical 2D = the r-phi disk plane (natural
     // axes). 3D / spherical body emission follow once the generic transforms are wired (the
     // builder already handles them).
     for ndim in 1u8..=3 {
@@ -2453,7 +2453,7 @@ fn main() {
     }
     gen_rmhd_bcell_from_bface(&out_dir, 3);
     // no cell-B predictor at 3D: all three B components are staggered on faces (full CT), so there is
-    // no out-of-plane cell-centered component to flux-evolve (oop_predictor_spec.md).
+    // no out-of-plane cell-centered component to flux-evolve.
     gen_rmhd_save_efield(&out_dir, 3);
     gen_rmhd_average_efield(&out_dir, 3);
     gen_rmhd_ghost_fill(&out_dir);
@@ -2535,7 +2535,7 @@ fn main() {
         gen_godunov_stage(&out_dir, 3, "nmhd", true, geom, None);
     }
     // =========================================================================
-    // 2.5D MHD (spatial D=2, vector DOF=3) constrained transport — docs/design/30.
+    // 2.5D MHD (spatial D=2, vector DOF=3) constrained transport.
     // cartesian. the out-of-plane Bz rides the ordinary induction-flux divergence
     // (no CT: with d/dz=0 only the in-plane field is div-B-constrained); only the
     // in-plane Bx,By use CT via the SINGLE corner E_z (edge dir=2 -> p1=x, p2=y).
@@ -2622,7 +2622,7 @@ fn main() {
     }
 
     // =========================================================================
-    // 2.5D CYLINDRICAL r-z AXISYMMETRIC MHD (docs/design/30): a 2-axis (r,z) grid carrying
+    // 2.5D CYLINDRICAL r-z AXISYMMETRIC MHD: a 2-axis (r,z) grid carrying
     // a 3-component B/velocity — the swirl B_phi/v_phi is the out-of-plane DOF on the folded
     // phi symmetry. axes=[0,2]: grid axis 0=r (coord 0), grid axis 1=z (coord 2); phi (coord 1)
     // is out of plane. the SINGLE CT edge is E_phi (name_k=1); the in-plane curl carries the
@@ -2682,7 +2682,7 @@ fn main() {
     }
 
     // =========================================================================
-    // 2.5D SPHERICAL r-theta MHD (docs/design/30): a 2-axis (r,theta) grid carrying a
+    // 2.5D SPHERICAL r-theta MHD: a 2-axis (r,theta) grid carrying a
     // 3-component B/velocity — the TOROIDAL B_phi/v_phi is the out-of-plane DOF on the folded
     // phi symmetry. axes=[0,1] identity (grid axis 0=r coord 0, grid axis 1=theta coord 1); phi
     // (coord 2) is out of plane. the SINGLE CT edge is the corner E_phi (name_k=2, REUSED from the
@@ -2716,7 +2716,7 @@ fn main() {
     }
 
     // =========================================================================
-    // 2.5D CYLINDRICAL r-phi DISK MHD (docs/design/30): a 2-axis (r,phi) grid carrying a
+    // 2.5D CYLINDRICAL r-phi DISK MHD: a 2-axis (r,phi) grid carrying a
     // 3-component B/velocity — the VERTICAL B_z/v_z is the out-of-plane DOF. axes=[0,1]: grid
     // axis 0=r (coord 0), grid axis 1=phi (coord 1); z (coord 2) is out of plane. the SINGLE CT
     // edge is E_z (name_k=2); the in-plane curl carries the cylindrical metric -(1/r) d_phi E_z
@@ -2753,7 +2753,7 @@ fn main() {
     }
 
     // =========================================================================
-    // 1.5D MHD (spatial D=1, vector DOF=3) — docs/design/30. NO constrained transport:
+    // 1.5D MHD (spatial D=1, vector DOF=3). NO constrained transport:
     // C(1,2)=0 edges (the StaggerComplex empty case), so no edge_emf / ct_curl. the
     // in-plane Bx (c=0) is carried on its (thin) face but never curled -> it stays at its
     // constant IC (the "Bx is a parameter" rule, realized as the no-edge case). By,Bz
@@ -2839,7 +2839,7 @@ fn main() {
     // scalar, so a log-radial grid selects the log face map in the SAME kernel.
 
     // emit the single registry from everything generated above — replaces the
-    // hand-maintained include!/const lines in lib.rs (docs/design/15 §3).
+    // hand-maintained include!/const lines in lib.rs.
     write_registry(&out_dir);
     // STALENESS FIX: the emitted kernels are a pure function of the SUBSTRATE physics
     // (symbi-hydro carrier fns + symbi-discretize gv builders + symbi-ir emitter), none
@@ -2851,7 +2851,7 @@ fn main() {
     // physics change regenerates the kernels. NOTE: emitting any rerun-if-changed disables
     // the default whole-package watch, so build.rs is listed too.
     println!("cargo:rerun-if-changed=build.rs");
-    // Gate 3 GPU smem tiling opt-in (docs/design/22). same A/B-honesty reason.
+    // GPU smem tiling opt-in. same A/B-honesty reason.
     println!("cargo:rerun-if-env-changed=SYMBI_GPU_SMEM");
     // part-1 loop-lowering: bounds-check-free field access (the ~8x spike win).
     println!("cargo:rerun-if-env-changed=SYMBI_UNCHECKED_LOADS");

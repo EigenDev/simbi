@@ -2,7 +2,7 @@
 // regimes/substrate_rmhd.rs
 //
 // the RMHD KernelSet is now the `R = Rmhd` instance of the unified
-// `MhdSubstrateKernelSet` (docs/design/35 R1). this module is a thin back-compat
+// `MhdSubstrateKernelSet`. this module is a thin back-compat
 // alias; the implementation (KKC c2p, quartic-wave-speed HLLE/HLLC flux, the CT
 // stack) lives once in `substrate_mhd` + `mhd_substrate`, driven by `Rmhd::SPEC`.
 //

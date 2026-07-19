@@ -362,7 +362,7 @@ impl<const R: usize> Domain<R> {
     pub fn strides(&self) -> &[usize; R] { &self.strides }
 
     /// convert domain-coordinate point to flat index, via the one [`crate::layout::flat_offset`]
-    /// value-path formula (docs/design/38 P3a).
+    /// value-path formula.
     pub fn flat_index(&self, point: [isize; R]) -> usize {
         crate::layout::flat_offset(point, std::array::from_fn(|a| self.spaces[a].lo), self.strides)
     }
@@ -1187,7 +1187,7 @@ mod laws {
     // law above proves that), but it means `dom.iter()` does NOT yield cells in
     // ascending `flat_index` order. any code that COLLECTS `iter()` into a
     // sequential buffer and then reads it back BY POSITION is transposed (the
-    // checkpoint-restart bug, Tier-1 #1, was exactly this). this test makes the
+    // checkpoint-restart bug was exactly this). this test makes the
     // divergence explicit and load-bearing: a future "fix" that silently aligns
     // the iterator to storage order must update this pin and audit collectors.
     #[test]

@@ -1,7 +1,7 @@
 // =============================================================================
 // refine_divb_under_evolve.rs
 //
-// div(B)-preservation gate (docs/design/22): a 2-level static nesting of the NEWTONIAN-MHD
+// div(B)-preservation gate: a 2-level static nesting of the NEWTONIAN-MHD
 // substrate (orszag-tang, periodic, the fine level covering the vortex core)
 // keeps the discrete staggered div(B) at machine zero on BOTH levels under
 // evolve — the area-weighted bface restriction + the edge-EMF reflux preserve

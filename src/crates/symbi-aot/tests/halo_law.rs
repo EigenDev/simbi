@@ -1,7 +1,7 @@
 // =============================================================================
 // halo_law.rs
 //
-// the ghost-width law (docs/design/48 part 1): every registered kernel's
+// the ghost-width law: every registered kernel's
 // stencil reach — read off its FieldLoadAt index expressions in the serialized
 // neutral IR — must fit inside the allocated ghost halo. a stencil widened
 // without widening the halo fails here at test time, naming the kernel, the

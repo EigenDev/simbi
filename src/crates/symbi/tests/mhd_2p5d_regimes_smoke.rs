@@ -1,7 +1,7 @@
 // =============================================================================
 // mhd_2p5d_regimes_smoke.rs
 //
-// increment-2 (docs/design/30) cross-regime smoke: the ISOTHERMAL and RELATIVISTIC
+// cross-regime smoke: the ISOTHERMAL and RELATIVISTIC
 // MHD substrates each run a few steps on a GENUINE 2.5D grid (D=2, DOF=3) with an
 // Orszag-Tang-with-Bz IC; assert the in-plane staggered div(B) stays at machine zero,
 // the state stays finite, and the out-of-plane Bz evolves. companion to

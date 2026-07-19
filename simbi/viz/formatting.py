@@ -48,7 +48,7 @@ def apply_scaling(ax: Axes, config: FigureConfig) -> None:
     """Applies log or semilog scaling."""
     ax.set_xscale(config.xscale)
     ax.set_yscale(config.yscale)
-    # Note: 'log' is handled by the component's norm
+    # note: 'log' is handled by the component's norm
 
 
 def apply_axis_labels(
@@ -86,7 +86,7 @@ def apply_legend(ax: Axes) -> None:
 def add_colorbar(
     fig: Figure,
     artist: Any,
-    cax: Axes,  # The colorbar axes MUST be provided
+    cax: Axes,  # the colorbar axes must be provided
     label: Optional[str] = None,
     orientation: str = "vertical",
 ) -> Colorbar:
@@ -156,14 +156,14 @@ class FigureFormatter:
             show_legend: whether to allow showing a legend (subject to presence
                          of line-like artists)
         """
-        # Title and time
+        # title and time
         time = getattr(first_data, "time", None)
         set_title(main_ax, fig, self.style, time)
         ndim = 0
         if first_data:
             ndim = first_data.values.ndim
 
-        # Normalize rendered_artists entries first (needed for label extraction)
+        # normalize rendered_artists entries first (needed for label extraction)
         normalized: list[tuple[dict, dict | None]] = []
         for entry in rendered_artists:
             if entry is None:
@@ -194,8 +194,8 @@ class FigureFormatter:
                     normalized.append(({}, None))
 
         # extract labels from component metadata for smart ylabel/legend handling
-        # "label" (str) → single ylabel
-        # "labels" (list) → if 1 item: ylabel, no legend; if >1: legend, no ylabel
+        # "label" (str) -> single ylabel
+        # "labels" (list) -> if 1 item: ylabel, no legend; if >1: legend, no ylabel
         metadata_label: Optional[str] = None
         metadata_labels: list = []
         use_legend_from_metadata = False
@@ -214,22 +214,22 @@ class FigureFormatter:
         derived_ylabel = None
         label_set = list(set(metadata_labels))
         if len(label_set) == 1:
-            # single label in list → use as ylabel, suppress legend
+            # single label in list -> use as ylabel, suppress legend
             derived_ylabel = get_field_str(label_set[0])
             show_legend = False
         elif len(label_set) > 1:
-            # multiple labels → show legend, no ylabel from metadata
+            # multiple labels -> show legend, no ylabel from metadata
             use_legend_from_metadata = True
             derived_ylabel = None
         elif metadata_label:
-            # single "label" key → use as ylabel
+            # single "label" key -> use as ylabel
             derived_ylabel = get_field_str(metadata_label)
 
         # determine axis labels
         if xlabel is None or ylabel is None:
             try:
-                # no derived lable in 1D plot means we should plot
-                # a legend instead of a y-label
+                # no derived label in a 1D plot means a legend is shown
+                # instead of a y-label
                 # prefer explicit axis names from data when present
                 axis_names = getattr(first_data, "axis_names", None)
                 if axis_names and isinstance(axis_names, (list, tuple)):
@@ -264,8 +264,8 @@ class FigureFormatter:
         except Exception:
             pass
 
-        # continue processing normalized list (already built above)
-        # Colorbar: find the first mappable among normalized artists
+        # scan the normalized list for a colorbar mappable
+        # colorbar: find the first mappable among normalized artists
         mappable = None
         for artists, metadata in normalized:
             if not isinstance(artists, dict):
@@ -295,7 +295,7 @@ class FigureFormatter:
                 # ensure formatting step never halts the render pipeline
                 pass
 
-        # Legend: only show if there are line-like artists (or metadata indicates labels)
+        # legend: only show if there are line-like artists (or metadata indicates labels)
         has_line_like = False
         for artists, metadata in normalized:
             # check explicit metadata hint first
@@ -337,7 +337,7 @@ class FigureFormatter:
                 show_legend and has_line_like
             )
 
-            # but not if we used the single label as ylabel
+            # but not when the single label was used as the ylabel
             if should_show_legend and len(label_set) > 1:
                 apply_legend(main_ax)
         except Exception:
@@ -355,7 +355,7 @@ class FigureFormatter:
             main_ax.set_theta_zero_location("N")
             main_ax.set_theta_direction(-1)
 
-            # Hide tick labels if specified
+            # hide tick labels if specified
             main_ax.set_xticklabels([])
             main_ax.set_yticklabels([])
 
@@ -387,7 +387,7 @@ class FigureFormatter:
         except Exception:
             color_range = None
 
-        # Helper: attempt to update an existing colorbar in-place
+        # helper: attempt to update an existing colorbar in-place
         existing_cbar = getattr(ax, "_simbi_colorbar", None)
         if existing_cbar is not None and isinstance(existing_cbar, MplColorbar):
             try:
@@ -429,12 +429,12 @@ class FigureFormatter:
                 except Exception:
                     pass
 
-        # if we reach here, create a new colorbar and attach it to the axes
+        # otherwise create a new colorbar and attach it to the axes
         cax = None
         orientation = "vertical"
 
         if hasattr(ax, "name") and "polar" in getattr(ax, "name"):
-            # Polar-specific placements (horizontal for half-sphere, vertical otherwise)
+            # polar-specific placements (horizontal for half-sphere, vertical otherwise)
             try:
                 theta = field_data.domain[1]
                 max_angle = theta[-1]
@@ -458,7 +458,7 @@ class FigureFormatter:
                 cax = fig.add_axes((x, y, 0.03, height))
                 orientation = "vertical"
         else:
-            # Cartesian default: use an axes divider for a vertical colorbar
+            # cartesian default: use an axes divider for a vertical colorbar
             try:
                 divider = make_axes_locatable(ax)
                 cax = divider.append_axes("right", size="5%", pad=0.05)

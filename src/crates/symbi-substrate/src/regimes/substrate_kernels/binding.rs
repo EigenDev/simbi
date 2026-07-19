@@ -1,7 +1,7 @@
 // =============================================================================
 // regimes/substrate_kernels/binding.rs
 //
-// the BUFFER half of the metadata-driven ABI (docs/design/18 D3): parse a kernel's
+// the BUFFER half of the metadata-driven ABI: parse a kernel's
 // serialized manifest into typed `FieldRef` / `ScalarBind` bindings (cached per name),
 // split them into (inputs, outputs) via `bind_manifest`, and resolve each `FieldRef`
 // to the backing sim `Field` via `resolve_path`. one resolver serves every regime +
@@ -22,7 +22,7 @@ use symbi_sim::state::FieldStore;
 use super::layout::expect_kernel;
 use super::params::ScalarBind;
 
-// ---- metadata-driven dispatch (docs/design/18 D3) -------------------------------------
+// ---- metadata-driven dispatch -------------------------------------
 //
 // instead of each method hand-reconstructing a kernel's buffer order (which depends on
 // ncomp / axis-roles / curvilinearity — the source/wave-speed/ghost ordering quirks), the
@@ -140,7 +140,7 @@ pub(crate) fn kernel_scalar_kinds(name: &str) -> Arc<[(ScalarBind, bool)]> {
     parsed
 }
 
-/// the declared OUTPUT SUPPORT of a kernel (docs/design/48 part 3), cached: the
+/// the declared OUTPUT SUPPORT of a kernel, cached: the
 /// region outside which every output is exactly zero, as serialized in the
 /// neutral IR blob. `None` = the artifact declares nothing (= Everywhere).
 /// dispatch evaluates a Ball's center/radius against its own scalar table to

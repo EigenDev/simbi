@@ -1,8 +1,8 @@
 // =============================================================================
 // substrate_gpu_dispatch.rs
 //
-// proof of the structured-ABI GPU mapping (docs/design/15 §5) AND its
-// precision-genericity (§4): build the SAME `KernelInvocation` the substrate
+// proof of the structured-ABI GPU mapping AND its
+// precision-genericity: build the SAME `KernelInvocation` the substrate
 // KernelSet hands `run_cpu`, back it with unified memory, and route it through
 // `substrate_gpu::dispatch`. with a device-accessible `Mem`, dispatch renders the
 // neutral IR at the scalar's precision, NVRTC-compiles it, reorders the buffers
@@ -111,7 +111,7 @@ fn dispatch_routes_iso_c2p_to_gpu_matching_cpu() {
     iso_c2p_gpu_matches_cpu::<f64>(1e-12);
 }
 
-// the precision-generic GPU path (docs/design/15 §4): the SAME IR blob renders at
+// the precision-generic GPU path: the SAME IR blob renders at
 // f32, the f32 buffers/scalars launch, and match the f32 CPU kernel (looser tol —
 // single precision + FMA). running in the same process as the f64 test above proves
 // the precision-keyed render/module caches keep the two builds distinct.

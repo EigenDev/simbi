@@ -4,8 +4,7 @@
 // AdiabaticSubstrateKernelSet<Mem, Sc, const D> — the D-GENERIC adiabatic (ideal-gas
 // Newtonian Euler) KernelSet, every method dispatched to a build-time AOT substrate
 // kernel through the structured binding ABI, the instance resolved by name (regime,
-// ndim, dir) via the generated `kernel_by_name` registry. one struct serves 1D/2D/3D
-// (the kepler/blast gap).
+// ndim, dir) via the generated `kernel_by_name` registry. one struct serves 1D/2D/3D.
 //
 // it shares the EOS-generic substrate kernels with the RHD set — the godunov /
 // snapshot / rk2 are the SAME `{prefix}_*` builders — and adds the genuinely
@@ -48,8 +47,7 @@ use symbi_sim::state::FieldStore;
 
 /// a D-generic adiabatic (ideal-gas Euler) `KernelSet`, every method substrate-generated.
 // the ADIABATIC viscous operator books BOTH the Navier-Stokes shear force AND the viscous heating
-// (div(tau.v) onto the total energy); constant-nu, cartesian 2D. alpha (needs a reference sound speed
-// on a varying-cs gas) is a follow-on.
+// (div(tau.v) onto the total energy); constant-nu, cartesian 2D.
 impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> WithViscosity
     for AdiabaticSubstrateKernelSet<Mem, Sc, D>
 {
@@ -92,18 +90,18 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// per-stage `adiabatic_source_with_{slug}_{D}d` pass. proven bit-for-bit
     /// equal to `fused_source` with the same binding. see the iso analogue.
     pub additive_source: Option<FusedSourceBinding>,
-    /// **Gap B**: a RUNTIME-loaded user source (python -> json -> `build_user_source` ->
+    /// a RUNTIME-loaded user source (python -> json -> `build_user_source` ->
     /// `SourceEvaluator::from_built`). `Some` => `source_apply` runs a per-cell CPU pass that
     /// interprets the user `BuiltSource`(s) and adds `weight*S` to cons — NO recompile, NO
     /// AOT-baked kernel. CPU-only (host memory); the gpu path is runtime NVRTC (future).
     pub runtime_source: Option<Arc<RuntimeSource>>,
-    /// **v2 inc 3+4**: when true AND a `runtime_source` is attached, the runtime user source is
+    /// when true AND a `runtime_source` is attached, the runtime user source is
     /// FUSED into the godunov stage as ONE Cranelift-JIT'd host kernel (cooling -> RT MZCS) instead
     /// of the two-pass (plain godunov + per-cell `apply_runtime_source`). opt-in + gated: falls back
     /// to the two-pass on non-f64 carriers, device memory, or an out-of-JIT-subset source. the
-    /// two-pass remains the default. proven bit-for-bit by `jit_fused_equals_two_pass`.
+    /// two-pass remains the default; the fused path is bit-for-bit identical to it.
     pub fuse_runtime: bool,
-    /// the drain timescale dial tau = c_drain dx / c_s (accretor.md §2.3): a
+    /// the drain timescale dial tau = c_drain dx / c_s: a
     /// convergence-study parameter, never tuned to a target rate.
     pub c_drain: f64,
     /// the BODY-ONLY fused godunov kernel (godunov + geo + immersed-body wrap, no user source),
@@ -111,7 +109,7 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     /// to carry the body. built lazily on first `godunov_stage` (geometry + bodies known then), gated
     /// host+f64 + `fuse_runtime`. `Some(None)` = out-of-JIT-subset -> the two-pass body pass runs.
     pub(crate) fused_rhs: OnceLock<Option<FusedCpuKernel>>,
-    /// **docs/design/33** — driven-boundary DAGs, indexed by the `BoundaryType::Driven(id)` id the
+    /// driven-boundary DAGs, indexed by the `BoundaryType::Driven(id)` id the
     /// sim's `Boundaries` carries. each prescribes a face's ghost prim state. empty => no driven
     /// faces (the standard ghost-fill is the whole story). reuses `RuntimeSource` as the holder (same
     /// data); the `(Coord, Assign)` dispatch is what makes it a boundary.
@@ -127,7 +125,7 @@ pub struct AdiabaticSubstrateKernelSet<Mem: MemorySpace, Sc: Scalar + OrderedNum
     pub freeze_streak: std::sync::atomic::AtomicU32,
     /// constant kinematic viscosity nu. 0 = inviscid. >0 runs the Navier-Stokes shear PLUS the
     /// viscous heating (div(tau.v) onto the total energy) and caps dt at C_visc dx^2 / nu. cartesian
-    /// 2D only for now (the adiabatic energy-flux kernel); alpha + curvilinear + 3D are follow-ons.
+    /// 2D (the adiabatic energy-flux kernel).
     pub viscosity: f64,
     /// shakura-sunyaev alpha with the LOCAL sound speed: nu = alpha (gamma p/rho) / Omega_K
     /// about immersed body 0. takes precedence over the constant nu when positive.
@@ -142,7 +140,7 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         Self { gamma, cfl_number, theta: 1.0, cfl_scratch, fused_source: None, additive_source: None, runtime_source: None, fuse_runtime: false, c_drain: 1.0, fused_rhs: OnceLock::new(), boundary_dags: Vec::new(), gradient_bcs: Vec::new(), solver: Solver::Hlle, freeze_streak: std::sync::atomic::AtomicU32::new(0), viscosity: 0.0, alpha: 0.0 }
     }
 
-    /// **Gap B**: attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
+    /// attach a RUNTIME-loaded user source from already-lowered `(target, BuiltSource)`
     /// pairs (the `build_user_source` output of a python -> json `SourceConfig`). ONE source of
     /// truth: the substrate derives BOTH the CPU per-cell interpreter (`SourceEvaluator::from_built`)
     /// AND — lazily, on first device dispatch — the GPU IR (the SAME `source_apply_from_built_gv`
@@ -158,10 +156,10 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         self
     }
 
-    /// **v2 inc 3+4**: attach a runtime user source AND route it through the FUSED host path — the
+    /// attach a runtime user source AND route it through the FUSED host path — the
     /// source rides INSIDE the Cranelift-JIT'd godunov stage (one launch), not as a separate pass.
-    /// same source, faster execution; bit-for-bit identical to `with_runtime_source` (the two-pass),
-    /// proven by `jit_fused_equals_two_pass`. host + f64 only; otherwise it transparently falls back
+    /// same source, faster execution; bit-for-bit identical to `with_runtime_source` (the two-pass).
+    /// host + f64 only; otherwise it transparently falls back
     /// to the two-pass.
     pub fn with_fused_runtime_source(mut self, built: Vec<(String, BuiltSource)>, params: Vec<f64>) -> Self {
         self.runtime_source = Some(RuntimeSource::new(built, params, true));
@@ -179,15 +177,16 @@ impl<Mem: MemorySpace, Sc: Scalar + OrderedNumeric, const D: usize> AdiabaticSub
         self
     }
 
-    /// the body-only fused-kernel build state, for the oracle: `None` = never attempted (no bodies /
-    /// fusion off / a user source carried the body instead); `Some(true)` = the body-only godunov+body
-    /// kernel JIT-compiled and is live; `Some(false)` = out-of-JIT-subset -> the two-pass body ran. the
-    /// oracle asserts `Some(true)` so a silent fallback can't make `fused == two-pass` pass vacuously.
+    /// the body-only fused-kernel build state, for tests/introspection: `None` = never attempted (no
+    /// bodies / fusion off / a user source carried the body instead); `Some(true)` = the body-only
+    /// godunov+body kernel JIT-compiled and is live; `Some(false)` = out-of-JIT-subset -> the two-pass
+    /// body ran. the fused-vs-two-pass equivalence check asserts `Some(true)` so a silent fallback
+    /// can't make `fused == two-pass` pass vacuously.
     pub fn body_only_fused_state(&self) -> Option<bool> {
         self.fused_rhs.get().map(|o| o.is_some())
     }
 
-    /// **docs/design/33**: register a DRIVEN boundary. the returned id (registration order, 0-based)
+    /// register a DRIVEN boundary. the returned id (registration order, 0-based)
     /// is what the sim's `Boundaries` must carry as `BoundaryType::Driven(id)` on the prescribed
     /// face. build `built` from `expr_bridge::build_boundary_dag(&cfg, &NEWTONIAN_SPEC)` (a complete
     /// prim prescription `[rho, vel.., pre]`). after the standard ghost-fill skips the driven faces,
@@ -340,8 +339,8 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn ghost_fill(&self, sim: &FieldStore<D, DOF, Mem, Sc>) {
         // the SHARED lattice-map pullback (iso_ghost_fill{sfx}_{D}d): rho/vel/pre, in-place,
-        // bound by manifest. (DOF>NDIM: the cyl ghost manifest is the pending axis-BC work —
-        // docs/design/18 D3 — but the dispatch path is regime-uniform.)
+        // bound by manifest. (DOF>NDIM: the cyl ghost manifest is pending axis-BC work,
+        // but the dispatch path is regime-uniform.)
         let bc = to_bc_array::<D>(&sim.boundaries);
         let pre = sim.fields.prim.pre_field().expect("Newtonian requires prim.pre");
         let sfx = if DOF != D { geom_suffix(sim.geom.coords, DOF, D) } else { "" };
@@ -366,12 +365,12 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
             dispatch_named(sim, pre, None, 0, &name, &region.domain, &ints, &scalars);
         });
 
-        // docs/design/33: the standard pullback above SKIPPED any Driven faces (Driven -> BcType::Skip);
-        // now prescribe their ghost prim state from the registered boundary DAGs.
+        // the standard pullback skips any Driven faces (Driven -> BcType::Skip);
+        // prescribe their ghost prim state from the registered boundary DAGs.
         if !self.boundary_dags.is_empty() {
             dispatch_driven_boundaries(sim, &self.boundary_dags);
         }
-        // and the Neumann/Robin gradient faces (also skipped above), filled from the edge cell.
+        // and the Neumann/Robin gradient faces (also skipped by the pullback), filled from the edge cell.
         if !self.gradient_bcs.is_empty() {
             dispatch_gradient_boundaries(sim, pre, &self.gradient_bcs, None);
         }
@@ -391,13 +390,13 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
 
     fn fofc_active(&self) -> bool {
         // the first-order flux correction covers the DOF == D charts (the fofc select's momentum
-        // count is baked to ncomp = D); the spherical-swirl DOF-lift is a follow-on.
+        // count is baked to ncomp = D).
         DOF == D
     }
 
     fn fofc(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64, a0: f64, ac: f64, _stage: u8) {
-        // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D); the
-        // spherical-swirl DOF-lift is a follow-on. `fofc` is called unconditionally by the driver, so
+        // FOFC covers the DOF == D charts only (the fofc kernels are baked at ncomp = D). `fofc` is
+        // called unconditionally by the driver, so
         // the gate lives here (fofc_active only guards the stage-input snapshot).
         if DOF != D {
             return;
@@ -408,7 +407,7 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
         crate::regimes::fofc::fofc_orchestrate(
             sim,
             "adiabatic",
-            "", // the DOF != D early-return above means this path is always DOF == D
+            "", // the DOF != D early-return means this path is always DOF == D
             <Self as KernelSet<D, DOF, Mem, Sc>>::has_additive_source(self),
             &self.cfl_scratch,
             pre,
@@ -480,19 +479,19 @@ impl<Mem: MemorySpace + Sync, Sc: Scalar + OrderedNumeric, const D: usize, const
                 return;
             }
         }
-        // forward immersed-body source (gravity + accretion, docs/design/19): cons += dt*S, in-place.
+        // forward immersed-body source (gravity + accretion): cons += dt*S, in-place.
         dispatch_body_source(sim, dt, self.gamma);
     }
 
     fn penalize(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
-        // the [Drain] stack (docs/design/50): the sole accretion mechanism on
-        // cartesian grids — the legacy in-godunov sink resolves its rate to
+        // the penalization drain is the sole accretion mechanism on
+        // cartesian grids — the in-godunov sink resolves its rate to
         // zero under the same predicate (params::penalize_owns_accretion).
         dispatch_penalize(sim, dt, self.gamma, self.c_drain);
     }
 
     fn body_feedback(&self, sim: &FieldStore<D, DOF, Mem, Sc>, dt: f64) {
-        // backward feedback (docs/design/19): reduce per-body force/torque/mass -> diagnostics.
+        // backward feedback: reduce per-body force/torque/mass -> diagnostics.
         dispatch_body_feedback(sim, dt, self.gamma);
     }
 }

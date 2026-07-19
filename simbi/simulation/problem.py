@@ -499,7 +499,7 @@ class SimbiProblem(BaseModel):
     ]
 
     # =========================================================================
-    # refinement / fmr settings (fixed mesh refinement only for now)
+    # refinement / fmr settings (fixed mesh refinement only)
     # =========================================================================
     refinement_enabled: Annotated[
         bool, ProblemParam(False, description="enable mesh refinement")

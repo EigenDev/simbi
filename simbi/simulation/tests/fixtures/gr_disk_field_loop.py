@@ -2,7 +2,7 @@
 # gr_disk_field_loop.py
 #
 # an in-plane magnetic field loop on the equatorial (R, phi) cylindrical kerr-schild
-# DISK (design 45 GRMHD) — the constrained-transport probe for the razor-thin disk
+# DISK — the constrained-transport probe for the razor-thin disk
 # chart. on the equator (z = 0, r = R) the kerr-schild off-diagonal vanishes so the
 # metric is DIAGONAL (gamma = diag(1 + 2M/R, R^2), alpha = 1/sqrt(1 + 2M/R), beta^R =
 # 2M/(R + 2M), beta^phi = 0), sqrt(det gamma) = R sqrt(1 + 2M/R). a compact in-plane

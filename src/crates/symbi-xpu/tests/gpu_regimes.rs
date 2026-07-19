@@ -4,8 +4,8 @@
 // GPU<->CPU runtime validation for the iso / adiabatic / RHD c2p + flux + snapshot
 // + wave-speed + mass + ghost-fill kernels: the SAME substrate IR graph emitted to
 // two backends — the CPU Rust fn (`symbi_aot::*_1d__raw`) and the neutral IR blob
-// (`symbi_aot::*_IR`), rendered to CUDA source at test time via `render_from_ir`
-// (docs/design/15 §3). each test nvcc-compiles the CUDA to PTX, launches it on the
+// (`symbi_aot::*_IR`), rendered to CUDA source at test time via `render_from_ir`.
+// each test nvcc-compiles the CUDA to PTX, launches it on the
 // GPU, and asserts the device output matches the CPU kernel (modulo nvcc FMA fusion).
 //
 // ABI (re-synced to the current AOT kernels): the CPU `__raw` fns take view-wrapped
@@ -43,7 +43,7 @@ use symbi_ir::render_from_ir;
 use symbi_xpu::cuda::{CudaSpace, UnifiedMemory};
 use symbi_xpu::*;
 
-// render a kernel's neutral IR blob to CUDA source at f64 (docs/design/15 §3).
+// render a kernel's neutral IR blob to CUDA source at f64.
 fn cuda_src(ir: &str) -> String {
     render_from_ir(ir, Target::Cuda, Precision::F64).source
 }

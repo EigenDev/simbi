@@ -26,7 +26,7 @@ class QuiverPlotProps(ComponentProps):
     scale: Optional[float] = None
     width: Optional[float] = 0.002
     alpha: float = 1.0
-    skip: int = 5  # Plot every 'skip' vector
+    skip: int = 5  # plot every 'skip' vector
 
     @field_validator("skip")
     @classmethod
@@ -66,8 +66,8 @@ class QuiverPlotComponent(Component):
     def update(self, props: QuiverPlotProps) -> None:
         """Update component properties and restyle the quiver."""
         self.props = props
-        # Quiver styling is complex to update live.
-        # For simplicity, we'll let render() handle the redraw.
+        # quiver styling is complex to update live.
+        # render() rebuilds the quiver on redraw.
 
     def _validate_and_prep_data(
         self, data: List[FieldData]
@@ -83,17 +83,17 @@ class QuiverPlotComponent(Component):
         if u_field.ndim != 2 or v_field.ndim != 2:
             raise ValueError("QuiverPlotComponent fields must be 2D.")
 
-        # We assume the pipeline gives us pcolormesh-style "edge" coordinates
+        # the pipeline provides pcolormesh-style "edge" coordinates
         x_edges, y_edges = u_field.domain
         u_values, v_values = u_field.values, v_field.values
 
-        # Quiver plots on cell *centers*.
+        # quiver plots on cell *centers*.
         x_centers = (x_edges[:-1] + x_edges[1:]) / 2
         y_centers = (y_edges[:-1] + y_edges[1:]) / 2
 
         X, Y = np.meshgrid(x_centers, y_centers)
 
-        # Apply the 'skip' prop for downsampling
+        # apply the 'skip' prop for downsampling
         sl = slice(None, None, self.props.skip)
 
         X_sparse, Y_sparse = X[sl, sl], Y[sl, sl]
@@ -115,7 +115,7 @@ class QuiverPlotComponent(Component):
 
         X, Y, U, V = self._validate_and_prep_data(data)
 
-        # Quiver is slow to update. It's cleaner to remove and redraw.
+        # quiver is slow to update. it's cleaner to remove and redraw.
         if self._quiver:
             self._quiver.remove()
 

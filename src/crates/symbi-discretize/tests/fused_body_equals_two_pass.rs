@@ -17,7 +17,7 @@
 // the flux divergence is zero (uniform flux), so the godunov combine reduces to a0*u_n + ac*cons;
 // the body wrap still varies per cell through the cell centroid (gravity + drain depend on the
 // distance to the body), so the per-cell centroid indexing is exercised. a `body_changed` guard
-// keeps the oracle from passing vacuously on a no-op body.
+// keeps the equality check from passing vacuously on a no-op body.
 //
 // run: cargo test -p symbi-discretize --test fused_body_equals_two_pass
 // =============================================================================

@@ -3,7 +3,7 @@
 //
 // NVRTC: NVIDIA's runtime CUDA compiler (libnvrtc.so). compiles a CUDA C++
 // source string straight to PTX IN-PROCESS — no `nvcc` binary, no host C++
-// compiler, no temp files (docs/design/15 §1: every accelerator compiles at
+// compiler, no temp files (every accelerator compiles at
 // runtime via its own runtime compiler). this is what lets `Sim<UnifiedMemory>`
 // JIT + run a substrate kernel on the GPU without the nvcc toolchain (the host
 // gcc-16 breaks nvcc; NVRTC ships its own front-end, so it does not care).

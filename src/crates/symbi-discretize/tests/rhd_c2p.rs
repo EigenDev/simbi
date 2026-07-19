@@ -60,7 +60,7 @@ fn rhd_c2p_1d_lowers_and_emits() {
         "gamma must be a scalar param (precision-generic S):\n{src}"
     );
 
-    // docs/design/14: the Newton emits as ONE loop (body emitted once), not an 8x
+    // the Newton emits as ONE loop (body emitted once), not an 8x
     // unroll — identified by its literal `0..8` bound. the cache-tiled default CPU
     // emit ALSO emits per-axis cell loops (`for _d in 0.._ts`) for the outer
     // iteration, so count the Newton specifically rather than all `in 0..` loops.

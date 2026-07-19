@@ -181,7 +181,7 @@ pub(crate) fn motion_scalar(
     }
 }
 
-// ---- immersed-body forward source: gravity + accretion (docs/design/19 P1/P2) ----------
+// ---- immersed-body forward source: gravity + accretion ----------
 
 /// resolve a body scalar ref `body_{idx}_{field}` to its value: `{mass,soft,racc,sink,delta}` and
 /// the per-axis `{pos,vel}_{ax}`. the branch-free-loop conventions: an INACTIVE slot
@@ -232,7 +232,7 @@ pub(crate) fn body_scalar<const D: usize>(
 /// the MAX_BODIES body params from the immersed side-car. shared by the forward source + the backward
 /// feedback (both kernels take the same scalar set).
 
-/// whether the IBM penalization (docs/design/50) owns accretion on this sim:
+/// whether the IBM penalization owns accretion on this sim:
 /// cartesian (adiabatic AND isothermal kernels are baked). where true,
 /// every legacy sink-rate scalar resolves to zero (an exact no-op in the
 /// traced drain) and `dispatch_penalize` performs the drain instead.
@@ -274,12 +274,11 @@ where
             // `gamma` carries the regime EOS parameter: the adiabatic index for `Gamma`, the
             // isothermal sound speed for `Cs` (the iso freeze-select-with-body kernel).
             ScalarRef::Gamma | ScalarRef::Cs => gamma,
-            // MIGRATION (docs/design/50): the IBM penalize path owns accretion on
-            // cartesian adiabatic grids — the legacy in-godunov sink retires by
-            // resolving its rate to zero (drain_rate = chi min(sink, cs/dx) is an
-            // exact arithmetic no-op at sink = 0, same baked kernel, gravity
-            // untouched). curvilinear grids keep the legacy sink until the SDF
-            // layer speaks curvilinear coordinates.
+            // the IBM penalize path owns accretion on cartesian adiabatic grids:
+            // the in-godunov sink resolves its rate to zero there (drain_rate =
+            // chi min(sink, cs/dx) is an exact arithmetic no-op at sink = 0, same
+            // baked kernel, gravity untouched). curvilinear grids keep the
+            // in-godunov sink until the SDF layer speaks curvilinear coordinates.
             ScalarRef::Body { idx, field } => {
                 if matches!(field, BodyScalar::Sink)
                     && penalize_owns_accretion::<D, DOF, Mem, Sc>(sim)

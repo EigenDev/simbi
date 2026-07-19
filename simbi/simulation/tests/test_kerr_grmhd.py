@@ -1,15 +1,15 @@
 # =============================================================================
 # test_kerr_grmhd.py
 #
-# the spinning-KERR GRMHD gate (design 44 phase C): the full kerr RMHD kernel
+# the spinning-KERR GRMHD gate: the full kerr RMHD kernel
 # path — the tetrad HLLD on the NON-DIAGONAL gamma_{r phi}, the moving-interface
 # radial shift, the EM-stress covariant source with the azimuthal (swirl)
 # momentum, the metric-aware c2p, and the kerr-wired constrained transport.
 #
 # the gate is the w-weighted div(B) machine-zero + stability on an advected
 # poloidal loop at spin 0.9. this ALSO guards the python->rust dispatch: a Kerr
-# MHD config that silently falls through to the flat path (the bug this test was
-# written to catch) runs Minkowski kernels, and the KERR sqrt(gamma)-weighted
+# MHD config that silently falls through to the flat path runs Minkowski
+# kernels, and the KERR sqrt(gamma)-weighted
 # div then drifts to O(1) — so a passing machine-zero here certifies the real
 # kerr kernels actually ran. requires the built cpu_ext backend.
 # =============================================================================
@@ -150,7 +150,7 @@ def test_kerr_rotating_equilibrium_holds_and_converges() -> None:
 
 @needs_backend
 def test_magnetized_fm_torus_seeds_divergence_free_and_stable() -> None:
-    # the MRI initial condition (design 44 phase C step 4): the fat FM torus threaded with a weak
+    # the MRI initial condition: the fat FM torus threaded with a weak
     # beta-normalized poloidal seed field on the spinning-kerr RMHD path (tetrad HLLD + UCT-HLLD).
     # the seed must be div-free to machine zero, the torus core resolved, and the state stable.
     from simbi_configs.examples.grmhd.gr_fishbone_moncrief_mhd import GrFishboneMoncriefMhd

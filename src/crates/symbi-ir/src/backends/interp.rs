@@ -2,22 +2,20 @@
 // interp.rs
 //
 // the CPU backend: an in-process interpreter for the scalarized IR
-// (`09_core_abstractions` abstraction #4 — the device-agnostic execution boundary).
+// (the device-agnostic execution boundary).
 //
 // emit_cpu / emit_cuda / emit_kernel render a `LoweredFn` to SOURCE that is
-// compiled later; this RUNS it directly. that closes the device-agnosticism
-// hole — until now the substrate could emit CUDA but had no way to EXECUTE a
-// generated computation on the host. `Cpu` is the first `Backend` instance;
-// the source-emitting GPU path (emit_cuda / emit_kernel + the `symbi` runtime's
-// JIT + dispatch) is the other. the cross-device kernel-over-field-buffers
-// method extends this boundary — it needs the buffer / domain
-// model that lives in `symbi-grid` / `symbi`.
+// compiled later; this RUNS it directly on the host. `Cpu` is the first
+// `Backend` instance; the source-emitting GPU path (emit_cuda / emit_kernel +
+// the `symbi` runtime's JIT + dispatch) is the other. the cross-device
+// kernel-over-field-buffers method extends this boundary — it needs the buffer
+// / domain model that lives in `symbi-grid` / `symbi`.
 //
-// scope (slice 1): elemental `LoweredFn` over SCALAR params — the `scalarize`
+// scope: elemental `LoweredFn` over SCALAR params — the `scalarize`
 // output for pointwise / elemental graphs (arithmetic, transcendentals,
 // select). kernel-stencil evaluation (`FieldLoadAt` over field buffers + a
-// coordinate loop), rank-1 array params, and generic-dim `for` loops are
-// follow-ons; they panic with a clear message here.
+// coordinate loop), rank-1 array params, and generic-dim `for` loops
+// panic with a clear message here.
 // =============================================================================
 
 use std::collections::HashMap;
@@ -251,7 +249,7 @@ fn eval_method(recv: f64, method: &str, args: &[f64]) -> Value {
     match method {
         "sqrt" => Value::F(recv.sqrt()),
         // abs/min/max use the plain `a<b?a:b` TERNARY, NOT the
-        // NaN-symmetric f64::abs/min/max — so the interpreter (the carrier oracle)
+        // NaN-symmetric f64::abs/min/max — so the interpreter
         // matches the cuda emit, the cranelift jit, and the f64/f32 `Numeric`
         // carrier bit-for-bit at NaN / signed-zero.
         "abs" => Value::F(if recv < 0.0 { -recv } else { recv }),
@@ -378,7 +376,7 @@ impl Cpu {
         for flat in 0..total {
             // the canonical flat -> coord map, owned by the layout (`CONTIGUOUS_AXIS` fastest), so
             // this reference sweep visits cells in the same order the emitted kernels and the JIT
-            // drivers do. hand-rolling the inverse here is how the two halves drifted apart.
+            // drivers do. the inverse map comes from the layout, never hand-rolled here.
             symbi_algebra::unflatten(flat, &ext, &mut idx);
             let coord: Vec<i64> =
                 (0..ndim).map(|ax| dom_los[ax] as i64 + idx[ax] as i64).collect();
@@ -413,10 +411,10 @@ mod tests {
         g.add_param(Symbol::intern(name), TensorTy::scalar(ElementTy::F64), None)
     }
 
-    // the LAYOUT chokepoint gate: the interpreter's view offset must agree
+    // the layout chokepoint: the interpreter's view offset must agree
     // bit-for-bit with the canonical `symbi_algebra::Layout` over a sweep of
-    // non-square / >=2D extents and asymmetric coords. if anyone re-spells the
-    // stride formula in `flat_index` and drifts from the canonical definition
+    // non-square / >=2D extents and asymmetric coords. if the
+    // stride formula in `flat_index` is re-spelled and drifts from the canonical definition
     // (the latent axis-order class of bug — last-axis-fastest vs axis-0-fastest),
     // this fails. `Layout` itself is already pinned == `Domain::flat_index` in
     // symbi-algebra, so transitively interp == Domain == kernels.
@@ -535,7 +533,7 @@ mod tests {
         assert_eq!(Cpu.eval_elemental(&f, &[ 2.0]), vec![2.0]);
     }
 
-    // ----- docs/design/23: Scope interpreter semantics test -----
+    // ----- Scope interpreter semantics test -----
 
     /// the interpreter must execute a `ScalarStmt::Scope` correctly: run the
     /// inner body, evaluate `result`, bind `result`'s value to the outer name.

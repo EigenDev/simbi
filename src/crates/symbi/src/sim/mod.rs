@@ -3,8 +3,8 @@
 //
 // simulation framework:
 //   state / substrate_seam / config / hydro_ops / run_args / checkpoint
-//                 — re-exported from the `symbi-sim` crate (docs/design/41): the
-//                   FieldStore hub + the sim<->substrate seam, lifted below the substrate.
+//                 — re-exported from the `symbi-sim` crate: the FieldStore hub +
+//                   the sim<->substrate seam, lifted below the substrate.
 //   evolve        — the evolve driver (drives the KernelSet trait); stays here, it depends
 //                   UP on the substrate (regimes) + the executor.
 //   refinement    — static mesh refinement (SMR) hierarchy; stays here for the same reason.
@@ -16,8 +16,8 @@ pub use symbi_sim::{
     checkpoint, config, decomp, driver, hydro_ops, run_args, state, substrate_seam,
 };
 
-// SMR lives in the `symbi-amr` crate (docs/design/41); re-exported at the
-// `crate::sim::refinement` path so downstream callers (tests, examples) are untouched.
+// SMR lives in the `symbi-amr` crate; re-exported at the `crate::sim::refinement`
+// path so downstream callers (tests, examples) are untouched.
 pub use symbi_amr::refinement;
 
 pub mod evolve;

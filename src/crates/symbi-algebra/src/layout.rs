@@ -50,8 +50,8 @@ pub const CONTIGUOUS_AXIS: usize = 0;
 
 /// the INVERSE of the flat index: recover a coordinate from a canonical iteration index, with
 /// [`CONTIGUOUS_AXIS`] varying FASTEST. this is the map every flat driver (`0..total` parallel
-/// sweeps, block covers, the IR interpreter) needs, and the one the layout historically did not own —
-/// so each rolled its own and half of them walked the SLOWEST axis fastest, striding the hot loop by
+/// sweeps, block covers, the IR interpreter) needs; centralizing it here keeps every driver off
+/// the trap of walking the SLOWEST axis fastest, which strides the hot loop by
 /// `extent[0]*extent[1]` on every cell.
 ///
 /// the defining law, pinned by `unflatten_inverts_the_flat_offset`: for a buffer whose extent equals
@@ -75,7 +75,7 @@ pub fn nest_order(ndim: usize) -> impl DoubleEndedIterator<Item = usize> + Clone
 }
 
 /// the affine flat offset under physical-x-fastest strides: `sum_a (coord[a] - lo[a]) * strides[a]`.
-/// THE single value-path index formula (docs/design/38 P3a) — `Layout::at`, `Domain::flat_index`,
+/// THE single value-path index formula — `Layout::at`, `Domain::flat_index`,
 /// and the grid `View`/`ViewMut` accessors all route here, so the storage convention lives in
 /// exactly one place. a coordinate left of its origin (`coord < lo`) is a caller bug (out of the
 /// buffer); the subtraction wraps in release like any index past the end.
@@ -117,7 +117,7 @@ impl<const D: usize> Layout<D> {
     }
 
     /// the affine flat offset of `coord`: `sum_a (coord[a] - lo[a]) * strides[a]`.
-    /// routes through the one [`flat_offset`] formula (docs/design/38 P3a).
+    /// routes through the one [`flat_offset`] formula.
     #[inline]
     pub fn at(&self, coord: [i32; D]) -> usize {
         let coord: [isize; D] = std::array::from_fn(|a| coord[a] as isize);

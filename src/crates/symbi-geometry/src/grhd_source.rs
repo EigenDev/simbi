@@ -9,7 +9,7 @@
 //                     the angular 2p/r geometric term rides the flat curvilinear momentum source)
 //   S_tau          = alpha ( T^{mu 0} d_mu ln alpha - T^{mu nu} Gamma^0_{mu nu} )
 //
-// this is the numerically-validated `test_kerr_schild_sources.py` oracle ported to rust. the caller
+// validated against the closed-form schwarzschild and kerr-schild geodesic sources. the caller
 // supplies the ADM radial block (alpha, beta^r, gamma_rr) + its radial derivatives (the metric's
 // analytic d_r), plus the fluid state (E = rho eta W^2 = D + tau + p, the orthonormal radial
 // velocity V, and p). SPHERICAL background (the GR metrics are spherical); the suppressed angular
@@ -48,7 +48,7 @@ impl<S: Scalar> AdmRadialDerivs<S> {
 /// the generic GRHD geodesic gravity source on a SPHERICAL curved background, radial component.
 /// returns `(S_{S_r}^gravity, S_tau)` — the momentum GRAVITY source (the t-r block; excludes the flat
 /// 2p/r), and the full energy source. carrier-generic: at `S = Gv` this traces the kernel expression,
-/// at `S = f64` it evaluates directly (the `test_grhd_source` validation + the python oracle).
+/// at `S = f64` it evaluates directly.
 #[allow(clippy::too_many_arguments)]
 pub fn grhd_radial_geodesic_source<S: Scalar>(
     r: S,
@@ -163,7 +163,7 @@ where
 
 /// the full GRMHD covariant valencia source — [`grhd_covariant_source`] with the ideal-MHD
 /// stress `T^{mu nu} = (rho h + b^2) u^mu u^nu + (p + b^2/2) g^{mu nu} - b^mu b^nu` in the SAME
-/// per-axis contraction (the design-43/44 promise: the EM stress only changes `T`). the caller
+/// per-axis contraction — the electromagnetic stress enters only through `T`. the caller
 /// supplies the METRIC-FREE rest enthalpy density `rho_h = rho + Gamma/(Gamma-1) p`, the
 /// contravariant valencia `v^i`, the isotropic-block pressure `p`, and the contravariant
 /// eulerian field `B^i`; the lorentz factor and the magnetic four-vector assemble in here from
@@ -436,7 +436,7 @@ mod tests {
             let (s_mom, s_tau) =
                 grhd_radial_geodesic_source(r, a, br, grr, d.d_lapse, d.d_shift_r, d.d_gamma_rr, e, big_v, p);
             let f = 1.0 - 2.0 * m / r;
-            // closed forms (gv/godunov.rs Schwarzschild arms): gravity part only for momentum.
+            // schwarzschild closed forms: gravity part only for momentum.
             let s_mom_cf = -m * e * (1.0 + big_v * big_v) / (r * r * f);
             let s_tau_cf = -a * e * big_v * m / (r * r * f);
             assert!(approx(s_mom, s_mom_cf), "S_Sr r={r}: {s_mom} != {s_mom_cf}");
@@ -445,10 +445,10 @@ mod tests {
     }
 
     // the covariant contraction at the metric's full D = 3, radial flow: the radial momentum
-    // source must equal the (t, r)-block oracle PLUS the angular pressure blocks
+    // source must equal the (t, r)-block source PLUS the angular pressure blocks
     // (1/2)(T^{theta theta} d_r g_{theta theta} + T^{phi phi} d_r g_{phi phi}) = 2p/r; the
     // polar source is the pressure term p cot(theta); the azimuthal source vanishes
-    // (axisymmetry); the energy source equals the oracle (which carries the angular
+    // (axisymmetry); the energy source equals the (t, r)-block source (which carries the angular
     // Gamma^t blocks already).
     #[test]
     fn covariant_source_radial_flow_matches_oracle_plus_angular_blocks() {
@@ -486,7 +486,7 @@ mod tests {
     // rotating (swirl) flow on schwarzschild, off the equator: the closed forms follow from
     // the diagonal metric — S_theta = (E (v^phi)^2 + p g^{phi phi}) r^2 sin(theta) cos(theta),
     // S_r gains the azimuthal centrifugal block E (v^phi)^2 r sin^2(theta), and the energy
-    // source is unchanged from the radial oracle (zero shift: only T^{tr} couples to Gamma^t).
+    // source is unchanged from the radial-block source (zero shift: only T^{tr} couples to Gamma^t).
     #[test]
     fn covariant_source_swirl_closed_form_schwarzschild() {
         use crate::metric::Schwarzschild;

@@ -1,7 +1,7 @@
 // =============================================================================
 // symbi-exec/src/lib.rs
 //
-// the EXECUTION LAYER crate (docs/design/40): the backend-neutral dispatch engine
+// the EXECUTION LAYER crate: the backend-neutral dispatch engine
 // + the CPU parallelism policy, lifted out of the `symbi` orchestration crate so the
 // layering is compiler-enforced, not convention. it consumes ONLY neutral artifacts
 // (a kernel NAME resolved through the symbi-aot registry, `&[&Field]` buffers over a

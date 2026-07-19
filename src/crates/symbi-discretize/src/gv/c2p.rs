@@ -275,7 +275,7 @@ pub fn rmhd_c2p_gv(max_iters: usize) -> (GvKernel, Vec<(String, FieldBind, NodeI
 /// stored at, so the round-trip is exact (well-balanced). the metric evaluates at its FULL
 /// three coordinates regardless of the grid dimension (RMHD vectors are always 3-component):
 /// gridded slots take the centroid, the ungridded polar slot the exact equatorial pi/2, the
-/// azimuthal slot zero. spinning kerr requires the gridded polar axis (design 44).
+/// azimuthal slot zero. spinning kerr requires the gridded polar axis.
 pub fn rmhd_c2p_gr_gv(
     coords: Coords,
     spacetime: Spacetime,

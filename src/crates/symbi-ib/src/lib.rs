@@ -4,7 +4,7 @@
 // immersed boundary body system: discrete physical objects (black holes,
 // planets, rigid spheres) embedded in a fluid grid. body kinematics live on
 // `Body`/`BodyKind`; surface physics is the volume-penalized property algebra
-// (`penalize`, docs/design/50) over exact signed-distance geometry (`sdf`).
+// (`penalize`) over exact signed-distance geometry (`sdf`).
 //
 // usage:
 //   use symbi_ib::{Body, BodyCollection, Property, Relax, penalize_cell};

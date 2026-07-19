@@ -2,7 +2,7 @@
 # gr_field_loop.py
 #
 # a poloidal field loop advected radially through a schwarzschild (r, theta)
-# wedge — the GR constrained-transport probe (design 44 GR-UCT). a weak passive
+# wedge — the GR constrained-transport probe. a weak passive
 # loop, seeded div-free via the METRIC-WEIGHTED discrete curl of a localized
 # A_phi (so the w-weighted divergence w = sqrt(gamma)(face) x coordinate length is
 # machine zero by construction), carried inward through a uniform inflow. it

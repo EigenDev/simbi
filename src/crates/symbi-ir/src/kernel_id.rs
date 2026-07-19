@@ -58,13 +58,13 @@ pub enum KernelId {
     /// MULTI-FIELD pointwise time interpolation `dst_k = (1-alpha)*old_k +
     /// alpha*new_k` — the coarse-side pass feeding `RefineProlongMulti1t`.
     FieldLerpMulti { ncomp: u8, ndim: u8 },
-    /// the immersed-boundary [Drain] penalization (docs/design/50): the
+    /// the immersed-boundary [Drain] penalization: the
     /// property-algebra kernel whose p = 1 stack reduces bit-exactly to the
     /// uniform-scaling drain. adiabatic, cartesian.
     PenalizeDrain { ndim: u8 },
     /// the isothermal twin: constant sound speed, no energy channel.
     PenalizeDrainIso { ndim: u8 },
-    /// the [PorousAccretor] penalization (docs/design/50 zoo): the porosity
+    /// the [PorousAccretor] penalization: the porosity
     /// dial p scales the drain, (1 - p) the wall channels; independent
     /// normal/tangential wall rates (free-slip = tangential rate zero,
     /// exactly). p = 1 reduces bit-exactly to `PenalizeDrain`. adiabatic,
@@ -85,7 +85,7 @@ pub enum KernelId {
     /// conservative shear-stress flux divergence, but with a spatially varying
     /// nu(x) = alpha c_s^2 / Omega_k(r) about the central body. isothermal, 2D.
     ViscousIsoAlpha { ndim: u8 },
-    /// ONE PASS of the axis-split prolongation (docs/design/49): the 1d
+    /// ONE PASS of the axis-split prolongation: the 1d
     /// operator along `axis`, other axes passing through. chained axis
     /// 0 -> 1 -> 2 it reproduces `RefineProlongMulti1t` bit for bit at ~1/17
     /// the interp evaluations.

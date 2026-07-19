@@ -2,7 +2,7 @@
 // regimes/substrate_mhd.rs
 //
 // MhdSubstrateKernelSet<R, Mem, Sc, D> — the ONE ideal-MHD KernelSet, generic over the
-// regime `R` (RMHD / NewtonianMhd / IsothermalMhd; DOF = 3 fixed). docs/design/35 R1.
+// regime `R` (RMHD / NewtonianMhd / IsothermalMhd; DOF = 3 fixed).
 //
 // the three MHD families differ ONLY by data read off `R::SPEC`:
 //   - `Self::kernel_prefix()`                     -> the AOT kernel-name prefix (rmhd / nmhd / imhd)
@@ -13,7 +13,7 @@
 //                                           NMHD/iMHD compute the magnetosonic speed inline
 // the gas godunov + the ENTIRE constrained-transport stack are regime-agnostic and delegate
 // to `mhd_substrate` (the SAME AOT kernels). the per-regime structs (`RmhdSubstrateKernelSet`
-// etc.) are now back-compat type aliases of this one. see docs/design/29, /30.
+// etc.) are now back-compat type aliases of this one.
 //
 // usage:
 //  let sub = MhdSubstrateKernelSet::<Rmhd, HostMemory, f64, 3>::new(gamma, cfl, theta, &alloc);
@@ -182,7 +182,7 @@ pub struct MhdSubstrateKernelSet<R, Mem: MemorySpace, Sc: Scalar + OrderedNumeri
     /// constant kinematic viscosity `nu` (the Navier-Stokes shear on the velocity, ORTHOGONAL to the
     /// resistive diffusion of B). 0 = inviscid. >0 runs the viscous force + (energy regime) the viscous
     /// heating onto the total energy; B is untouched, so the heat warms the gas with 1/2 B^2 preserved.
-    /// finite magnetic Prandtl number Pm = nu / eta. cartesian; full 3D (D==DOF) now, 2.5D pending the
+    /// finite magnetic Prandtl number Pm = nu / eta. cartesian; full 3D (D==DOF), 2.5D via the
     /// DOF-aware kernel. caps dt at C_visc dx^2 / nu.
     pub viscosity: f64,
     _r: PhantomData<R>,
@@ -318,8 +318,8 @@ where
     }
 
     /// FIRST-ORDER FLUX CORRECTION for the MHD regimes: the shared face-based gas redo (first-order
-    /// flux = the light-cone Lax-Friedrichs / Rusanov fan) PLUS the C2 constrained-transport re-sync
-    /// (§3'). the induction/CT subsystem is INVARIANT under a gas FOFC — B evolves by curl-of-EMF,
+    /// flux = the light-cone Lax-Friedrichs / Rusanov fan) PLUS the C2 constrained-transport re-sync.
+    /// the induction/CT subsystem is INVARIANT under a gas FOFC — B evolves by curl-of-EMF,
     /// independent of the gas c2p — so the face field, EMF, and curl stay HIGH-ORDER; the redo only
     /// (a) restores the HO induction flux for the cell-B predictor so its magnetic-energy patch is
     /// the small HO reconciliation (not the FO-vs-HO shock), and (b) re-runs `bcell_from_bface` on the
@@ -473,7 +473,7 @@ where
     }
 
     fn penalize(&self, sim: &FieldStore<D, 3, Mem, Sc>, dt: f64) {
-        // the design-50 immersed-body penalization under MHD, via the 1/2|B|^2 sandwich: strip
+        // the immersed-body penalization under MHD, via the 1/2|B|^2 sandwich: strip
         // the magnetic energy so the (unchanged) hydro drain acts on the GAS energy alone, run
         // it, then restore the field energy. the drain never touches bcell, so B and 1/2|B|^2
         // are exactly invariant and the flux is left to constrained transport. host-only (the
@@ -482,8 +482,7 @@ where
             return;
         }
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, -1.0);
-        // eos_param is gamma (has_energy MHD); c_drain uses the adiabatic default 1.0 (plumbing
-        // it from config is a follow-on).
+        // eos_param is gamma (has_energy MHD); c_drain uses the adiabatic default 1.0.
         crate::regimes::substrate_kernels::dispatch_penalize(sim, dt, self.eos_param, 1.0);
         crate::regimes::mhd_substrate::shift_magnetic_energy(sim, 1.0);
     }
@@ -726,7 +725,7 @@ where
         // pulled across the first inner face at a dt ~1e4x too large -> NaN. a relativistic signal
         // can travel at most c = 1, so bound dt by the light-crossing of the interior cell adjacent
         // to each driven face: lambda >= max_d (1 / (h_d * width_d)). only relativistic regimes get
-        // the c = 1 bound; non-relativistic driven inflow is a future refinement.
+        // the c = 1 bound.
         if R::SPEC.is_relativistic {
             lambda_max = lambda_max.max(driven_inflow_lambda(sim));
         }
@@ -755,7 +754,7 @@ where
     }
     fn ghost_fill(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         crate::regimes::mhd_substrate::ghost_fill(sim, R::SPEC.has_energy);
-        // docs/design/33: the standard fill skipped Driven faces (Driven -> Skip); prescribe
+        // the standard fill skips Driven faces (Driven -> Skip); prescribe
         // their ghost prim state (incl. the cell B_phi) from the registered boundary DAGs.
         if !self.boundary_dags.is_empty() {
             dispatch_driven_boundaries(sim, &self.boundary_dags);
@@ -786,7 +785,7 @@ where
 
     fn snapshot_stage(&self, sim: &FieldStore<D, 3, Mem, Sc>) {
         // capture the stage-input gas cons into u_stage so source_apply reads the
-        // pre-godunov state (S2 invariant). without this, u_stage is zero and the
+        // pre-godunov state. without this, u_stage is zero and the
         // force lift S_mom = rho*a reads rho=0 -> NaN.
         crate::regimes::mhd_substrate::snapshot_stage(sim, R::SPEC.has_energy);
     }

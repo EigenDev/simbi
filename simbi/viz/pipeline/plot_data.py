@@ -47,7 +47,7 @@ def prepare_fields(
             config.refinement, "composite_view", False
         )
 
-    # determine if we should crop to owned region
+    # determine whether to crop to the owned region
     # crop when visualizing a single refined level only
     single_level = len(active_levels) == 1
     crop_to_owned = single_level and not use_composite
@@ -145,15 +145,15 @@ def create_plot_data(
     > Prepares full-dim refinement levels (respecting composite_view).
     > Applies optional slicing.
     """
-    # Handles refinement logic (gets full-dim fields)
+    # handles refinement logic (gets full-dim fields)
     full_dim_fields = prepare_fields(data, field_names, config)
 
-    # Get slice spec from config
+    # get slice spec from config
     slice_spec: Optional[dict[str, float]] = None
     if hasattr(config, "plot") and hasattr(config.plot, "slice"):
         slice_spec = config.plot.slice
 
-    # Apply Slicing
+    # apply slicing
     sliced_fields = apply_slicing(full_dim_fields, slice_spec)
 
     # field-value normalization: divide each field by a constant, or its own "max"/"min"
@@ -189,7 +189,7 @@ def create_plot_data(
             + (f" with slice {slice_spec}" if slice_spec else "")
         )
 
-    # Package and return the (potentially un-stitched) fields
+    # package and return the (potentially un-stitched) fields
     return PlotData(
         fields=sliced_fields,
         time=data.metadata.time,

@@ -5,7 +5,7 @@
 // (iso / adiabatic / rhd). each method gathers its cell-centered field refs
 // (inputs-then-outputs, in the generated kernel's binding order), names the kernel
 // instance by (regime, ndim, dir), and routes ONE KernelInvocation through the
-// CPU/GPU dispatch seam (docs/design/15 §5). the kernel instance is resolved by name
+// CPU/GPU dispatch seam. the kernel instance is resolved by name
 // via the generated `symbi_aot::kernel_by_name` registry — no hand-maintained
 // `match (D, dir)` per regime.
 //
@@ -38,7 +38,7 @@ pub use types::*;
 pub use layout::*;
 pub use exec::*;
 // the raw field manifest accessor — for the component-agnostic CT kernels (edge EMF / curl) that
-// bind generic slots positionally, ordered by the recorded manifest (docs/design/38).
+// bind generic slots positionally, ordered by the recorded manifest.
 pub(crate) use binding::kernel_field_binds;
 pub use params::*;
 pub use dispatch::*;

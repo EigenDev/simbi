@@ -106,9 +106,8 @@ def test_ks_chart_primitives_are_physical() -> None:
 
 def test_general_oracle_reduces_to_zero_spin() -> None:
     # the general (Sigma, Delta, A) formulas at a = 0 must reproduce the
-    # schwarzschild closed forms that the michel-era gates certified: the
-    # stationary euler balance dp/dr = E[-M/(r^2 f) ... ] holds to the
-    # finite-difference floor.
+    # schwarzschild closed forms: the stationary euler balance
+    # dp/dr = E[-M/(r^2 f) ... ] holds to the finite-difference floor.
     t = FishboneMoncrief(mass=1.0, r_in=6.0, gamma=4.0 / 3.0, rho_max=1.0, kappa=1.01)
     th = 1.45
     for r in (10.0, 16.0, 30.0):

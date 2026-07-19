@@ -5,7 +5,7 @@
 // per-axis geometry-scalar push, and the `kernel_exists` coverage probe. pure
 // index/string arithmetic — no dispatch. the executor-facing layouts
 // (`alloc_layout`/`exec_layout`/`expect_kernel`) live in the `symbi-exec` crate
-// (docs/design/40) and are re-exported below so the paths resolve.
+// and are re-exported below so the paths resolve.
 // =============================================================================
 
 use symbi_algebra::OrderedNumeric;
@@ -14,7 +14,7 @@ use symbi_ir::algebra::Scalar;
 use symbi_aot::kernel_by_name;
 
 // the allocation/execution layouts + the AOT-registry lookup wrapper live in the
-// `symbi-exec` crate (docs/design/40); re-exported here so the substrate's
+// `symbi-exec` crate; re-exported here so the substrate's
 // `super::layout::{alloc_layout, exec_layout, expect_kernel}` paths resolve.
 pub use symbi_exec::layout::{alloc_layout, exec_layout, expect_kernel};
 
