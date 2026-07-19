@@ -28,25 +28,27 @@
 
 SIMBI is a finite volume code for astrophysical fluid simulations. If you want to throw relativistic jets, shock tubes, stellar explosions, or magnetized turbulence at a grid and see what happens, this is the tool. Results from SIMBI have shown up in *The Astrophysical Journal* and *The Astrophysical Journal Letters*, covering relativistic jets, shock morphology, and stellar explosions.
 
-A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. The physics is the same, the speed got better, and the codebase is a lot easier to live in. You drive the whole thing from Python, so you never have to touch the Rust unless you want to.
+A quick note on what this is these days: SIMBI started life as a C++ code and was rewritten from the ground up in Rust. The physics is the same, the speed got better (because I became a better progrtammer over the years from the wee ol' monolithic-to-the-max days), and the codebase is a lot easier to live in. You drive the whole thing from Python, so you never have to touch the Rust unless you want to.
 
 **What you get:**
 - Six fluid regimes in one code: Newtonian hydro, relativistic hydro (RHD), Newtonian and relativistic MHD, plus isothermal variants of both
 - Spacetime as its own axis: hand the relativistic regimes a Minkowski, Schwarzschild, or horizon-penetrating Kerr-Schild metric the same way you would pick a coordinate system
 - GPU acceleration on NVIDIA cards, with kernels compiled on the fly so there is no separate build step and no architecture flag to remember
-- High-resolution shock capturing with HLLE, HLLC (plus a low-Mach variant), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches
+- High-resolution shock capturing with HLLE, HLLC (plus a low-Mach variant, see [Fleischmann et al. 2020](https://www.sciencedirect.com/science/article/pii/S0021999120305362)), and HLLD Riemann solvers, backed by a first-order flux-correction safety net that logs every cell it touches (still working on strengthening this. Maybe I'll switch to [Zalesak and friends](https://apps.dtic.mil/sti/tr/pdf/ADA360122.pdf) at some point).
 - Constrained-transport MHD (contact [Gardiner & Stone](https://arxiv.org/abs/0712.2634) or UCT ([Mignone & DelZanna (2021)](https://arxiv.org/abs/2004.10542)) edge EMFs) that keeps div B at machine zero by construction
 - Physical transport when you want it: Navier-Stokes viscosity (constant or alpha-disk) and Ohmic resistivity, layered on top of the ideal solvers
-- A rich immersed-boundary method: point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls of *any* constructive solid geometry (CSG) shape (spheres, boxes, unions/intersections) with no-penetration / no-slip porous surfaces. Bodies can be one-way (prescribed motion) or **two-way coupled** — the gas reaction force and torque then drive the body's full rigid-body dynamics: translation, plus rotation about an arbitrary axis via Euler's equations with a principal-moment inertia tensor, so an asymmetric body tumbles and precesses. Spinning walls drag the gas at omega x r, the gas <-> body energy exchange conserves total energy, and every body reports force / torque / accretion diagnostics
+- A rich immersed-boundary method: point-mass gravity, Bondi-Hoyle accretion sinks, and rigid walls of *any* constructive solid geometry (CSG) shape (spheres, boxes, unions/intersections) with no-penetration / no-slip porous surfaces. Bodies can be one-way (prescribed motion) or **two-way coupled** — the gas reaction force and torque then drive the body's full rigid-body dynamics: translation, plus rotation about an arbitrary axis via Euler's equations with a principal-moment inertia tensor, so an asymmetric body tumbles and precesses. Spinning walls drag the gas at omega x r, the gas <-> body energy exchange conserves total energy, and every body reports force / torque / accretion diagnostics. I took [Chuck Peskin](https://en.wikipedia.org/wiki/Charles_S._Peskin)'s class during my time as a graduate student at NYU,
+and I loved it so much that I thought it'd be cool to introduce it into my code! 
 - Horizon excision for GR accretion: on a horizon-penetrating Kerr-Schild chart the region inside the black hole is excised and refilled by a causal one-way onion sweep, so you can swallow the singularity and still keep a well-posed accretion-rate certificate
-- Block-based static mesh refinement with Berger-Colella subcycling
+- Block-based static mesh refinement with [Berger-Colella](https://www.sciencedirect.com/science/article/pii/0021999189900351) subcycling
 - Single-node **multi-GPU domain decomposition** — set `gpus > 1` and the domain splits across the cards, halo-exchanged in lockstep and bit-identical to a monolithic run
 - Afterglow radiation transport, so you can turn a simulation into synthetic observables
 - A live terminal dashboard while you run (pause, single-step, checkpoint on demand, field heatmaps), and `simbi attach` to peek at a headless run from another shell
 - A type-safe Python config system that generates its own CLI, so you stop hand-writing argument parsers
 
 An AMD/HIP backend is in the tree as an experimental build feature (the compute layer is backend-agnostic, so the CUDA and HIP paths share one kernel definition). Multi-*node* decomposition is the next step on the roadmap; single-node multi-GPU already runs today.
-
+I don't have a science problem that needs it at this time, so it prob won't be added for 
+quite a while.
 ---
 
 ## Simulation Gallery
@@ -67,7 +69,7 @@ An AMD/HIP backend is in the tree as an experimental build feature (the compute 
 
 ## Quick Start
 
-If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too. It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary, and it makes the whole setup a two-line affair.
+If you only read one section, read this one. We lean hard on [uv](https://docs.astral.sh/uv/) here, and you should too (Not really. Just my strong recommendation is all). It is an absurdly fast Python package manager and environment tool, it replaces pip and venv and conda in one binary (though conda is objectively broader and more powerful. It's just too ""powerful" for my use cases these days), and it makes the whole setup a two-line affair.
 
 Do not have uv yet? Grab it:
 
@@ -215,7 +217,7 @@ it lists both and asks.
 
 **Options you will reach for:**
 - `--mode cpu|gpu` sets the execution backend
-- `--resolution N`, `--resolution N M`, or `--resolution N M K` sets the grid
+- `--resolution N`, `--resolution N,M`, or `--resolution N,M,K` sets the grid. Comma is required for 2D and 3D.
 - `--adiabatic-index` is the ratio of specific heats
 - `--end-time` is when to stop
 - `--data-directory` is where the output goes
@@ -602,7 +604,7 @@ A few design choices worth calling out. Fields are stored struct-of-arrays, whic
 
 The neutral IR is precision-agnostic too: the same traced graph renders to f64 or f32 at the target's launch precision (an f32 device run just halves the bandwidth bill), and the Cranelift runtime path is generic over the scalar the same way. The device backend is written against a backend-agnostic trait, so the CUDA and HIP (AMD, experimental) paths share one kernel definition and diverge only in the tiny token-map at the very bottom.
 
-On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave at 256^3 sustains ~38 million zone-cycles per second on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, AthenaK reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
+On speed (one machine, one problem class, double precision): the 3D Newtonian linear wave at 256^3 sustains ~38 million zone-cycles per second on an 8-performance-core Apple M4 Pro laptop, and a 2D Kelvin-Helmholtz with HLLE runs around 70. For a sense of scale, [AthenaK](https://github.com/IAS-Astrophysics/athenak) reports 34 Mzc/s for the same class of test on an M1 Pro. Your problems will have their own numbers — `SYMBI_PROFILE=1` will happily show you where every nanosecond goes.
 
 ---
 
@@ -655,15 +657,17 @@ SIMBI has been used in the following papers:
 ## Citation
 
 ```bibtex
-@article{simbi2023,
-  title={SIMBI: A high-performance 3D relativistic magneto-gas dynamic
-         code for astrophysical fluid simulations},
-  author={DuPont, M. and others},
-  journal={Journal of Computational Physics},
-  volume={456},
-  pages={111-123},
-  year={2023},
-  publisher={Elsevier}
+@software{2023ascl.soft08003D,
+       author = {{DuPont}, Marcus},
+        title = "{SIMBI: 3D relativistic gas dynamics code}",
+ howpublished = {Astrophysics Source Code Library, record ascl:2308.003},
+         year = 2023,
+        month = aug,
+          eid = {ascl:2308.003},
+archivePrefix = {ascl},
+       eprint = {2308.003},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2023ascl.soft08003D},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
 ```
 
